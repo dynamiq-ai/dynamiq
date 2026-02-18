@@ -998,7 +998,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     data = json.loads(content.decode("utf-8"))
                     self.state.update_todos(data.get("todos", []))
             except Exception as e:
-                logger.error(f"Failed to get todo state: {e}")
+                logger.debug("Failed to load todo state (none or invalid): %s", e)
 
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""

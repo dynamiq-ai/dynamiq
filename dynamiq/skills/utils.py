@@ -1,4 +1,5 @@
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from typing import TYPE_CHECKING
 
@@ -7,7 +8,7 @@ from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
     from dynamiq.sandboxes.base import Sandbox
-    from dynamiq.skills.registries.dynamiq import Dynamiq
+    from dynamiq.skills.registries.dynamiq import Dynamiq, DynamiqSkillEntry
 
 
 def extract_skill_content_slice(
@@ -65,15 +66,43 @@ def extract_skill_content_slice(
     return instructions, section_used
 
 
+def _ingest_one_skill(
+    sandbox: "Sandbox",
+    registry: "Dynamiq",
+    base: str,
+    entry: "DynamiqSkillEntry",
+) -> str:
+    """Download one skill archive and upload it to the sandbox. Returns skill name or raises."""
+    try:
+        zip_bytes = registry.download_skill_archive(entry.id, entry.version_id)
+    except Exception as e:
+        logger.warning("Failed to download skill archive %s: %s", entry.name, e)
+        raise SkillRegistryError(
+            f"Failed to download skill '{entry.name}': {e}",
+            details={"skill_id": entry.id, "version_id": entry.version_id},
+        ) from e
+    try:
+        _upload_zip_to_sandbox(sandbox, zip_bytes, base, entry.name)
+    except Exception as e:
+        logger.warning("Failed to upload skill %s to sandbox: %s", entry.name, e)
+        raise SkillRegistryError(
+            f"Failed to upload skill '{entry.name}' to sandbox: {e}",
+            details={"skill_name": entry.name},
+        ) from e
+    return entry.name
+
+
 def ingest_skills_into_sandbox(
     sandbox: "Sandbox",
     registry: "Dynamiq",
     skill_names: list[str] | None = None,
     sandbox_skills_base_path: str | None = None,
+    max_workers: int | None = None,
 ) -> list[str]:
     """Download skill archives from the Dynamiq registry, unzip, and upload into the sandbox.
 
-    For each skill (all configured skills, or only those in skill_names), calls
+    Skills are ingested in parallel (download + upload per skill). For each skill
+    (all configured skills, or only those in skill_names), calls
     registry.download_skill_archive(skill_id, version_id), unzips the zip, and
     uploads every file to sandbox at {base}/{skill_name}/{relative_path}.
     Default base is sandbox.base_path + "/skills" (e.g. /home/user/skills).
@@ -83,42 +112,44 @@ def ingest_skills_into_sandbox(
         registry: Dynamiq registry (must have download_skill_archive).
         skill_names: If set, only ingest these skill names; otherwise all registry skills.
         sandbox_skills_base_path: Base path in sandbox for skills (default: {sandbox.base_path}/skills).
+        max_workers: Max concurrent skills to ingest (default: number of skills, capped at 8).
 
     Returns:
-        List of skill names that were ingested.
+        List of skill names that were ingested (order may differ from registry).
 
     Raises:
-        SkillRegistryError: If download or registry fails.
+        SkillRegistryError: If download or upload fails for any skill.
     """
     base = (sandbox_skills_base_path or f"{sandbox.base_path.rstrip('/')}/skills").rstrip("/")
     skills_to_ingest = skill_names if skill_names is not None else [e.name for e in registry.skills]
+    entries = [e for e in registry.skills if e.name in skills_to_ingest]
+    if not entries:
+        return []
+
+    workers = max_workers
+    if workers is None:
+        workers = min(len(entries), 8)
+
     ingested: list[str] = []
+    first_exception: BaseException | None = None
 
-    for entry in registry.skills:
-        if entry.name not in skills_to_ingest:
-            continue
-        try:
-            zip_bytes = registry.download_skill_archive(entry.id, entry.version_id)
-        except Exception as e:
-            logger.warning("Failed to download skill archive %s: %s", entry.name, e)
-            raise SkillRegistryError(
-                f"Failed to download skill '{entry.name}': {e}",
-                details={"skill_id": entry.id, "version_id": entry.version_id},
-            ) from e
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future_to_entry = {
+            executor.submit(_ingest_one_skill, sandbox, registry, base, entry): entry for entry in entries
+        }
+        for future in as_completed(future_to_entry):
+            try:
+                name = future.result()
+                ingested.append(name)
+                logger.info("Ingested skill '%s' into sandbox under %s/%s", name, base, name)
+            except BaseException as e:
+                if first_exception is None:
+                    first_exception = e
 
-        try:
-            _upload_zip_to_sandbox(sandbox, zip_bytes, base, entry.name)
-        except Exception as e:
-            logger.warning("Failed to upload skill %s to sandbox: %s", entry.name, e)
-            raise SkillRegistryError(
-                f"Failed to upload skill '{entry.name}' to sandbox: {e}",
-                details={"skill_name": entry.name},
-            ) from e
+    if first_exception is not None:
+        raise first_exception
 
-        ingested.append(entry.name)
-        logger.info("Ingested skill '%s' into sandbox under %s/%s", entry.name, base, entry.name)
-
-    return ingested
+    return sorted(ingested)
 
 
 def _upload_zip_to_sandbox(
