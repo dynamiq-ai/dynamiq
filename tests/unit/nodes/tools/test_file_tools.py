@@ -77,7 +77,7 @@ def test_file_read_input_schema_rejects_dangerous_paths(path):
 def test_file_write_input_schema_rejects_dangerous_paths(path):
     """FileWriteInputSchema should reject path traversal and absolute paths."""
     with pytest.raises(ValueError):
-        FileWriteInputSchema(file_path=path, content="content")
+        FileWriteInputSchema(file_path=path, content="content", action="write", brief="Write content")
 
 
 def test_file_read_input_schema_valid_path_is_accepted():
@@ -88,7 +88,7 @@ def test_file_read_input_schema_valid_path_is_accepted():
 
 def test_file_write_input_schema_valid_path_is_accepted():
     """Valid relative paths should be accepted."""
-    schema = FileWriteInputSchema(file_path="output/result.json", content="test")
+    schema = FileWriteInputSchema(file_path="output/result.json", content="test", action="write", brief="Write test")
     assert schema.file_path == "output/result.json"
 
 
@@ -141,7 +141,12 @@ def test_file_write_tool(file_store):
     assert tool.file_store == file_store
 
     # Test successful text write
-    input_data = {"file_path": "test/output.txt", "content": "Hello, World!"}
+    input_data = {
+        "file_path": "test/output.txt",
+        "content": "Hello, World!",
+        "action": "write",
+        "brief": "Write a test file",
+    }
     result = tool.run(input_data)
 
     assert result.status == RunnableStatus.SUCCESS
@@ -153,7 +158,13 @@ def test_file_write_tool(file_store):
     assert stored_content == b"Hello, World!"
 
     # Test custom content type
-    input_data = {"file_path": "test/data.csv", "content": "name,age\nJohn,30", "content_type": "text/csv"}
+    input_data = {
+        "file_path": "test/data.csv",
+        "content": "name,age\nJohn,30",
+        "content_type": "text/csv",
+        "action": "write",
+        "brief": "Write CSV data",
+    }
 
     result = tool.run(input_data)
     assert result.status == RunnableStatus.SUCCESS
@@ -212,7 +223,12 @@ def test_file_tools_integration(file_store, llm_model):
     read_tool = FileReadTool(file_store=file_store, llm=llm_model)
 
     # Write file
-    write_input = {"file_path": "test/integration.txt", "content": "Integration test content"}
+    write_input = {
+        "file_path": "test/integration.txt",
+        "content": "Integration test content",
+        "action": "write",
+        "brief": "Write integration test file",
+    }
     write_result = write_tool.run(write_input)
     assert write_result.status == RunnableStatus.SUCCESS
 

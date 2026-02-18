@@ -310,8 +310,8 @@ class ExaInputSchema(BaseModel):
             "Use this when include_full_content is insufficient."
         ),
     )
-    brief: str | None = Field(
-        default=None,
+    brief: str = Field(
+        default="Searching the web for information.",
         description="Very brief description of the action being performed. Example: 'Search for AI research papers'.",
     )
 
