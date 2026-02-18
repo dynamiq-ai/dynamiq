@@ -872,10 +872,15 @@ class Agent(Node):
         base_config = ensure_config(config)
         try:
             tool_copy = self._regenerate_node_ids(tool.clone())
-            self._isolate_child_agent_sandbox(tool_copy)
         except Exception as e:
             logger.warning(f"Agent {self.name} - {self.id}: failed to clone tool {tool.name}: {e}")
             return tool, base_config
+        try:
+            self._isolate_child_agent_sandbox(tool_copy)
+        except Exception as e:
+            raise ToolExecutionException(
+                f"Failed to isolate child agent sandbox for cloned tool {tool.name}: {e}", recoverable=True
+            )
 
         local_config = base_config
         try:
@@ -1182,8 +1187,6 @@ class Agent(Node):
         tool_result_output_content = tool_result.output.get("content")
 
         saved_file_paths = self._handle_tool_generated_files(tool, tool_result)
-        logger.info(f"Saved file paths: {saved_file_paths}")
-        logger.info(f"Tool result output content: {tool_result}")
         tool_result_content_processed = process_tool_output_for_agent(
             content=tool_result_output_content,
             max_tokens=self.tool_output_max_length,

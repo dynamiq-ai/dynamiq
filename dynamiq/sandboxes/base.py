@@ -285,7 +285,7 @@ class Sandbox(abc.ABC, BaseModel):
             "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
         )
 
-    def close(self) -> None:
+    def close(self, kill: bool = False) -> None:
         """Close the sandbox."""
         raise NotImplementedError(f"Implementation of close() is not implemented for {self.__class__.__name__}")
 
