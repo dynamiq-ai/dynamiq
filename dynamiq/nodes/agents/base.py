@@ -1,5 +1,6 @@
 import io
 import re
+import threading
 from copy import deepcopy
 from enum import Enum
 from typing import Any, Callable, ClassVar, Union
@@ -871,6 +872,7 @@ class Agent(Node):
         base_config = ensure_config(config)
         try:
             tool_copy = self._regenerate_node_ids(tool.clone())
+            self._isolate_child_agent_sandbox(tool_copy)
         except Exception as e:
             logger.warning(f"Agent {self.name} - {self.id}: failed to clone tool {tool.name}: {e}")
             return tool, base_config
@@ -888,6 +890,62 @@ class Agent(Node):
             local_config = base_config
 
         return tool_copy, local_config
+
+    def _isolate_child_agent_sandbox(self, tool_copy: Node) -> None:
+        """Ensure cloned child agents do not share sandbox sessions."""
+        if not isinstance(tool_copy, Agent):
+            return
+        if not tool_copy.sandbox or not tool_copy.sandbox.enabled or not tool_copy.sandbox.backend:
+            return
+
+        try:
+            original_sandbox_cfg = tool_copy.sandbox
+            original_backend = original_sandbox_cfg.backend
+            backend_copy = original_backend.__class__.model_validate(original_backend.model_dump(exclude={"type"}))
+            sandbox_cfg_data = original_sandbox_cfg.model_dump(exclude={"backend"})
+            sandbox_cfg_copy = original_sandbox_cfg.__class__.model_validate(
+                {**sandbox_cfg_data, "backend": backend_copy}
+            )
+
+            # Force cloned backend to initialize a separate sandbox session.
+            if hasattr(backend_copy, "sandbox_id"):
+                setattr(backend_copy, "sandbox_id", None)
+            if hasattr(backend_copy, "_sandbox"):
+                setattr(backend_copy, "_sandbox", None)
+            if hasattr(backend_copy, "_sandbox_lock"):
+                setattr(backend_copy, "_sandbox_lock", threading.Lock())
+
+            sandbox_cfg_copy.backend = backend_copy
+            tool_copy.sandbox = sandbox_cfg_copy
+
+            # Rebind sandbox-backed tools to the cloned backend.
+            rebound_tools = 0
+            rebound_file_stores = 0
+            for child_tool in tool_copy.tools:
+                if getattr(child_tool, "sandbox", None) is original_backend:
+                    setattr(child_tool, "sandbox", backend_copy)
+                    rebound_tools += 1
+                if getattr(child_tool, "file_store", None) is original_backend:
+                    setattr(child_tool, "file_store", backend_copy)
+                    rebound_file_stores += 1
+
+            logger.info(
+                "Agent %s - %s: isolated sandbox for cloned child agent %s, "
+                "rebound sandbox refs=%s, file_store refs=%s",
+                self.name,
+                self.id,
+                getattr(tool_copy, "name", "unknown"),
+                rebound_tools,
+                rebound_file_stores,
+            )
+        except Exception as e:
+            logger.warning(
+                "Agent %s - %s: failed to isolate child agent sandbox for cloned tool %s: %s",
+                self.name,
+                self.id,
+                getattr(tool_copy, "name", "unknown"),
+                e,
+            )
 
     @staticmethod
     def _extract_file_paths_from_input(tool: Node, merged_input: dict[str, Any]) -> list[str] | None:
@@ -1073,7 +1131,7 @@ class Agent(Node):
 
         tool_to_run = tool
         tool_config = ensure_config(config)
-        if is_parallel:
+        if is_parallel or is_child_agent:
             tool_to_run, tool_config = self._clone_tool_for_execution(tool, tool_config)
 
         tool_result = tool_to_run.run(
@@ -1082,6 +1140,34 @@ class Agent(Node):
             run_depends=deepcopy(self._run_depends),
             **child_kwargs,
         )
+
+        if (
+            is_child_agent
+            and isinstance(tool_to_run, Agent)
+            and tool_to_run.sandbox
+            and tool_to_run.sandbox.enabled
+            and tool_to_run.sandbox.backend
+        ):
+            child_backend = getattr(getattr(tool_to_run, "sandbox", None), "backend", None)
+            try:
+                child_backend.close(kill=True)
+                logger.info(
+                    "Agent %s - %s: closed child sandbox with kill=True for tool '%s' (instance=%s, sandbox_id=%s)",
+                    self.name,
+                    self.id,
+                    tool.name,
+                    hex(id(child_backend)),
+                    getattr(child_backend, "sandbox_id", None),
+                )
+            except Exception as e:
+                logger.warning(
+                    "Agent %s - %s: failed to close child sandbox for tool '%s': %s",
+                    self.name,
+                    self.id,
+                    tool.name,
+                    e,
+                )
+
         dependency_node = tool_to_run if tool_to_run is not tool else tool
         dependency_dict = NodeDependency(node=dependency_node).to_dict(for_tracing=True)
         if update_run_depends:
@@ -1092,15 +1178,23 @@ class Agent(Node):
                 raise ToolExecutionException({error_message})
             else:
                 raise ValueError({error_message})
+
         tool_result_output_content = tool_result.output.get("content")
 
-        self._handle_tool_generated_files(tool, tool_result)
-
+        saved_file_paths = self._handle_tool_generated_files(tool, tool_result)
+        logger.info(f"Saved file paths: {saved_file_paths}")
+        logger.info(f"Tool result output content: {tool_result}")
         tool_result_content_processed = process_tool_output_for_agent(
             content=tool_result_output_content,
             max_tokens=self.tool_output_max_length,
             truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
         )
+        if saved_file_paths:
+            saved_paths_lines = "\n".join(f"- {path}" for path in saved_file_paths)
+            tool_result_content_processed = (
+                f"{tool_result_content_processed}\n\nSaved files in sandbox:\n{saved_paths_lines}"
+            )
+            logger.info(f"Tool '{tool.name}' generated {len(saved_file_paths)} file(s): {saved_file_paths}")
 
         if not isinstance(tool, ContextManagerTool):
             self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
@@ -1130,7 +1224,7 @@ class Agent(Node):
                 named.append(f)
         return named
 
-    def _handle_tool_generated_files(self, tool: Node, tool_result: RunnableResult) -> None:
+    def _handle_tool_generated_files(self, tool: Node, tool_result: RunnableResult) -> list[str]:
         """
         Handle files generated by tools and store them in the file store and/or sandbox.
 
@@ -1139,16 +1233,17 @@ class Agent(Node):
             tool_result: The result from the tool execution
         """
         if not self.file_store_backend and not self.sandbox_backend:
-            return
+            return []
 
         if not (isinstance(tool_result.output, dict) and "files" in tool_result.output):
-            return
+            return []
 
         tool_files = tool_result.output.get("files", [])
         if not tool_files:
-            return
+            return []
 
-        stored_files = []
+        stored_files: list[str] = []
+        saved_sandbox_paths: list[str] = []
         for file in tool_files:
             if isinstance(file, io.BytesIO):
                 file_name = getattr(file, "name", f"file_{id(file)}.bin")
@@ -1163,6 +1258,7 @@ class Agent(Node):
                         dest = f"{self.sandbox_backend.base_path}/{file_name}"
                         self.sandbox_backend.upload_file(file_name, content, destination_path=dest)
                         stored_files.append(file_name)
+                        saved_sandbox_paths.append(dest)
                     except Exception as e:
                         logger.warning(f"Failed to upload tool file '{file_name}' to sandbox: {e}")
                 elif self.file_store_backend:
@@ -1185,6 +1281,7 @@ class Agent(Node):
                         dest = f"{self.sandbox_backend.base_path}/{file_name}"
                         self.sandbox_backend.upload_file(file_name, file, destination_path=dest)
                         stored_files.append(file_name)
+                        saved_sandbox_paths.append(dest)
                     except Exception as e:
                         logger.warning(f"Failed to upload tool file '{file_name}' to sandbox: {e}")
                 elif self.file_store_backend:
@@ -1201,6 +1298,8 @@ class Agent(Node):
 
         if stored_files:
             logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
+
+        return saved_sandbox_paths
 
     INTERNAL_CACHE_SUFFIXES: ClassVar[tuple[str, ...]] = (EXTRACTED_TEXT_SUFFIX,)
 

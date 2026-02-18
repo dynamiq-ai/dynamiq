@@ -22,8 +22,19 @@ from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.sandboxes.base import Sandbox, SandboxConfig
+from dynamiq.sandboxes.tools.shell import SandboxShellTool
 from dynamiq.storages.file.base import FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
+
+
+class DummySandbox(Sandbox):
+    """Minimal sandbox backend used to validate clone isolation behavior."""
+
+    sandbox_id: str | None = "shared-sandbox-id"
+
+    def get_tools(self, llm=None):
+        return []
 
 
 @pytest.fixture
@@ -685,6 +696,42 @@ class TestParallelToolCloning:
         parallel_agent._run_tool(calculator_tool, {"expression": "1+1"}, config, is_parallel=True)
 
         assert clone_spy.call_count == 1, "_clone_tool_for_execution must be called for parallel execution"
+
+    def test_run_tool_appends_saved_sandbox_paths_to_observation_content(self, parallel_agent, calculator_tool, mocker):
+        """_run_tool should include sandbox save paths in observation content when files were persisted."""
+        config = RunnableConfig()
+        mock_result = RunnableResult(status=RunnableStatus.SUCCESS, output={"content": "42", "files": []})
+        mocker.patch.object(Python, "run", return_value=mock_result)
+        mocker.patch.object(
+            parallel_agent,
+            "_handle_tool_generated_files",
+            return_value=["/home/user/output/report.json", "/home/user/output/chart.png"],
+        )
+
+        tool_result_content, _ = parallel_agent._run_tool(calculator_tool, {"expression": "1+1"}, config)
+
+        assert "Saved files in sandbox:" in tool_result_content
+        assert "- /home/user/output/report.json" in tool_result_content
+        assert "- /home/user/output/chart.png" in tool_result_content
+
+    def test_clone_tool_for_execution_copies_child_sandbox(self, parallel_agent, openai_node):
+        """Child-agent clones should get isolated sandbox backend instances."""
+        shared_backend = DummySandbox()
+        child_shell_tool = SandboxShellTool(sandbox=shared_backend)
+        child_agent = Agent(
+            name="Child Agent Tool",
+            llm=openai_node,
+            tools=[child_shell_tool],
+            sandbox=SandboxConfig(enabled=True, backend=shared_backend),
+            inference_mode=InferenceMode.XML,
+        )
+
+        cloned_tool, _ = parallel_agent._clone_tool_for_execution(child_agent, RunnableConfig())
+
+        assert isinstance(cloned_tool, Agent)
+        assert cloned_tool.sandbox is not None
+        assert cloned_tool.sandbox.backend is not shared_backend
+        assert cloned_tool.tools[0].sandbox is cloned_tool.sandbox.backend
 
     def test_execute_tools_single_tool_does_not_pass_is_parallel(self, parallel_agent, mocker):
         """When _execute_tools dispatches a single tool it must NOT set

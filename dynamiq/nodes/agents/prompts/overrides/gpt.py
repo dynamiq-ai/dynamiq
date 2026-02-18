@@ -1,7 +1,6 @@
 """Model-specific prompts for OpenAI GPT models.
 """
 
-# Define prompts optimized for GPT-5.1
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 
 Thought: [Your detailed reasoning about what to do next - include progress status (what's done, what remains) and brief summaries for clarity]

@@ -113,7 +113,16 @@ class SandboxShellTool(Node):
         Returns:
             Dictionary with stdout, stderr, and exit_code from command execution.
         """
-        logger.info(f"Tool {self.name} - {self.id}: executing command: {input_data.command[:100]}...")
+        sandbox_instance = hex(id(self.sandbox)) if self.sandbox else None
+        sandbox_id = getattr(self.sandbox, "sandbox_id", None) if self.sandbox else None
+        logger.info(
+            "Tool %s - %s: executing command in sandbox instance=%s sandbox_id=%s: %s...",
+            self.name,
+            self.id,
+            sandbox_instance,
+            sandbox_id,
+            input_data.command[:100],
+        )
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -146,7 +155,14 @@ class SandboxShellTool(Node):
                     f"stderr: {result.stderr}"
                 )
 
-            logger.info(f"Tool {self.name} - {self.id}: command completed with exit code {result.exit_code}")
+            logger.info(
+                "Tool %s - %s: command completed with exit code %s in sandbox instance=%s sandbox_id=%s",
+                self.name,
+                self.id,
+                result.exit_code,
+                sandbox_instance,
+                sandbox_id,
+            )
             return output
 
         except ToolExecutionException:

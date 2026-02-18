@@ -80,6 +80,13 @@ class E2BSandbox(Sandbox):
             self._sandbox = self._create_with_retry()
             self.sandbox_id = self._sandbox.sandbox_id
             logger.debug(f"E2B sandbox created: {self.sandbox_id}")
+            logger.info(
+                "E2B sandbox created (instance=%s, sandbox_id=%s, base_path=%s, output_dir=%s)",
+                hex(id(self)),
+                self.sandbox_id,
+                self.base_path,
+                self.output_dir,
+            )
             self._ensure_directories()
             return self._sandbox
 
@@ -164,7 +171,12 @@ class E2BSandbox(Sandbox):
             ShellCommandResult with stdout, stderr, and exit_code.
         """
         sandbox = self._ensure_sandbox()
-        logger.debug(f"E2BSandbox running command: {command[:100]}...")
+        logger.info(
+            "E2BSandbox running command (instance=%s, sandbox_id=%s): %s...",
+            hex(id(self)),
+            self.sandbox_id,
+            command[:100],
+        )
 
         try:
             if run_in_background_enabled:
@@ -302,10 +314,20 @@ class E2BSandbox(Sandbox):
         if self._sandbox:
             try:
                 if kill:
+                    logger.info(
+                        "Closing E2B sandbox with kill=True (instance=%s, sandbox_id=%s)",
+                        hex(id(self)),
+                        self.sandbox_id,
+                    )
                     self._sandbox.kill()
                     logger.debug(f"E2B sandbox killed: {self.sandbox_id}")
                     self.sandbox_id = None
                 else:
+                    logger.info(
+                        "Closing E2B sandbox with kill=False (instance=%s, sandbox_id=%s)",
+                        hex(id(self)),
+                        self.sandbox_id,
+                    )
                     logger.debug(f"E2B sandbox disconnected (kept alive): {self.sandbox_id}")
             except Exception as e:
                 logger.warning(f"E2BSandbox close() failed: {e}")
