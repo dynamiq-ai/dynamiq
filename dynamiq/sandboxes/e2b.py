@@ -247,12 +247,6 @@ class E2BSandbox(Sandbox):
             logger.warning(f"E2BSandbox list_files failed for {target_dir}: {e}")
             return []
 
-    def _resolve_path(self, file_path: str) -> str:
-        """Resolve relative file paths against sandbox base path."""
-        if file_path.startswith("/"):
-            return file_path
-        return f"{self.base_path.rstrip('/')}/{file_path.lstrip('/')}"
-
     def exists(self, file_path: str) -> bool:
         """Return True when file exists in sandbox filesystem."""
         try:
@@ -287,12 +281,16 @@ class E2BSandbox(Sandbox):
         from dynamiq.nodes.tools.todo_tools import TodoWriteTool
         from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
-        return [
+        tools = [
             SandboxShellTool(sandbox=self),
-            FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, absolute_file_paths_allowed=True),
             FileWriteTool(name="sandbox_file_write", file_store=self, absolute_file_paths_allowed=True),
             TodoWriteTool(file_store=self),
         ]
+        if llm is not None:
+            tools.append(
+                FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, absolute_file_paths_allowed=True)
+            )
+        return tools
 
     def close(self, kill: bool = False) -> None:
         """Close the E2B sandbox connection.

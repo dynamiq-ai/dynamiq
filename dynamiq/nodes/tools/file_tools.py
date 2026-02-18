@@ -945,7 +945,8 @@ class FileWriteTool(Node):
         "Writes or edits files in storage.\n\n"
         "Actions:\n"
         "- write: Create or overwrite a file. Requires 'content'. Set 'append: true' to append.\n"
-        "- edit: Atomic find-and-replace on an existing file. Requires 'edits' list with 'find'/'replace' pairs.\n"
+        "- edit: Atomic find-and-replace on an existing file. Requires 'edits' list with 'find'/'replace' pairs. "
+        "Edits are applied sequentially; a prior replacement may remove a later find string.\n"
         "Example:\n"
         "- Write text: {action: 'write', 'file_path': 'readme.txt', 'content': 'Hello World', "
         "'brief': 'Create a new file called readme.txt'}\n"
@@ -958,6 +959,15 @@ class FileWriteTool(Node):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileWriteInputSchema]] = FileWriteInputSchema
+
+    @property
+    def to_dict_exclude_params(self):
+        return super().to_dict_exclude_params | {"file_store": True}
+
+    def to_dict(self, **kwargs) -> dict:
+        data = super().to_dict(**kwargs)
+        data["file_store"] = self.file_store.to_dict(**kwargs)
+        return data
 
     def get_context_for_input_schema(self) -> dict:
         return {"absolute_file_paths_allowed": self.absolute_file_paths_allowed}
@@ -973,45 +983,46 @@ class FileWriteTool(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        if input_data.action == FileWriteAction.EDIT:
-            return self._execute_edit(input_data)
-        return self._execute_write(input_data)
-
-    def _execute_write(self, input_data: FileWriteInputSchema) -> dict[str, Any]:
         try:
-            payload, inferred_type = self._prepare_content_payload(input_data)
-            content_type = input_data.content_type or inferred_type
-
-            overwrite_flag = input_data.overwrite or input_data.append
-            if input_data.append and self.file_store.exists(input_data.file_path):
-                existing = self.file_store.retrieve(input_data.file_path)
-                payload = existing + payload
-
-            file_info = self.file_store.store(
-                input_data.file_path,
-                payload,
-                content_type=content_type,
-                metadata=input_data.metadata,
-                overwrite=overwrite_flag,
-            )
-
-            message = f"File '{input_data.file_path}' written successfully"
-            logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(file_info)[:200]}...")
-
-            print(f"File brief: {file_info}")
-            return {
-                "content": message,
-                "file_info": file_info.model_dump(),
-                "brief": input_data.brief,
-            }
-
+            if input_data.action == FileWriteAction.EDIT:
+                return self._execute_edit(input_data)
+            return self._execute_write(input_data)
         except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: failed to write file. Error: {str(e)}")
+            if isinstance(e, ToolExecutionException):
+                raise
+            action = input_data.action.value
+            logger.error(f"Tool {self.name} - {self.id}: failed to {action} file. Error: {str(e)}")
             raise ToolExecutionException(
-                f"Tool '{self.name}' failed to write file. Error: {str(e)}. "
+                f"Tool '{self.name}' failed to {action} file. Error: {str(e)}. "
                 f"Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
+
+    def _execute_write(self, input_data: FileWriteInputSchema) -> dict[str, Any]:
+        payload, inferred_type = self._prepare_content_payload(input_data)
+        content_type = input_data.content_type or inferred_type
+
+        overwrite_flag = input_data.overwrite or input_data.append
+        if input_data.append and self.file_store.exists(input_data.file_path):
+            existing = self.file_store.retrieve(input_data.file_path)
+            payload = existing + payload
+
+        file_info = self.file_store.store(
+            input_data.file_path,
+            payload,
+            content_type=content_type,
+            metadata=input_data.metadata,
+            overwrite=overwrite_flag,
+        )
+
+        message = f"File '{input_data.file_path}' written successfully"
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(file_info)[:200]}...")
+
+        return {
+            "content": message,
+            "file_info": file_info.model_dump(),
+            "brief": input_data.brief,
+        }
 
     def _execute_edit(self, input_data: FileWriteInputSchema) -> dict[str, Any]:
         edits = input_data.edits
@@ -1030,13 +1041,15 @@ class FileWriteTool(Node):
 
         total = 0
         for edit in edits:
-            count = content.count(edit.find) if edit.all else 1
+            occurrences = content.count(edit.find)
+            if occurrences == 0:
+                continue
+            count = occurrences if edit.all else min(1, occurrences)
             content = content.replace(edit.find, edit.replace, -1 if edit.all else 1)
             total += count
 
         payload = content.encode(encoding)
         file_info = self.file_store.store(path, payload, content_type="text/plain", overwrite=True)
-        print(f"File info: {file_info}")
         summary = f"Applied {len(edits)} edit(s) with {total} replacement(s) to {path}."
         logger.info(f"Tool {self.name} - {self.id}: {summary}")
 

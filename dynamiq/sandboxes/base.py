@@ -62,6 +62,12 @@ class Sandbox(abc.ABC, BaseModel):
         """Define parameters to exclude during serialization."""
         return {"connection": True}
 
+    def _resolve_path(self, file_path: str) -> str:
+        """Resolve relative file paths against sandbox base path."""
+        if file_path.startswith("/"):
+            return file_path
+        return f"{self.base_path.rstrip('/')}/{file_path.lstrip('/')}"
+
     def to_dict(self, **kwargs) -> dict[str, Any]:
         """Convert the Sandbox instance to a dictionary.
 
@@ -310,17 +316,17 @@ class Sandbox(abc.ABC, BaseModel):
         Returns:
             FileInfo with details about the stored file.
         """
-        path_str = str(file_path)
+        resolved_path = self._resolve_path(str(file_path))
 
         if isinstance(content, str):
             raw = content.encode("utf-8")
-        elif isinstance(content, (io.RawIOBase, io.BufferedIOBase, BinaryIO)):
+        elif hasattr(content, "read"):
             raw = content.read()
         else:
             raw = content
 
-        file_name = path_str.rsplit("/", 1)[-1] if "/" in path_str else path_str
-        dest = self.upload_file(file_name, raw, destination_path=path_str)
+        file_name = resolved_path.rsplit("/", 1)[-1] if "/" in resolved_path else resolved_path
+        dest = self.upload_file(file_name, raw, destination_path=resolved_path)
 
         return FileInfo(
             name=file_name,
