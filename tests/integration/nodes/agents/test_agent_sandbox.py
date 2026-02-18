@@ -11,7 +11,9 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes import Node
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.nodes.llms.openai import OpenAI
+from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.file_tools import FileReadTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -177,6 +179,7 @@ def test_agent_e2b_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
             connection=openai_conn,
             model="gpt-4o",
         ),
+        summarization_config=SummarizationConfig(enabled=True),
         role="a helpful assistant that can execute shell commands in a sandbox.",
         sandbox=sandbox_config,
         max_loops=15,
@@ -204,6 +207,10 @@ def test_agent_e2b_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
 
     file_read_tools_first = [t for t in loaded_agent.tools if isinstance(t, FileReadTool)]
     assert len(file_read_tools_first) == 1, "First load should have exactly one FileReadTool"
+
+    context_management_tools_first = [t for t in loaded_agent.tools if isinstance(t, ContextManagerTool)]
+    assert len(context_management_tools_first) == 1, "First load should have exactly one ContextManagerTool"
+
     assert (
         file_read_tools_first[0].absolute_file_paths_allowed is True
     ), "Sandbox-backed FileReadTool must have absolute_file_paths_allowed=True"
@@ -224,6 +231,12 @@ def test_agent_e2b_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
     file_read_tools_roundtrip = [t for t in roundtrip_agent.tools if isinstance(t, FileReadTool)]
     assert len(file_read_tools_roundtrip) == 1, (
         "After roundtrip, FileReadTool must not be duplicated: "
+        "sandbox tools are excluded from serialization and recreated from sandbox config on load."
+    )
+
+    context_management_tools_roundtrip = [t for t in roundtrip_agent.tools if isinstance(t, ContextManagerTool)]
+    assert len(context_management_tools_roundtrip) == 1, (
+        "After roundtrip, ContextManagerTool must not be duplicated: "
         "sandbox tools are excluded from serialization and recreated from sandbox config on load."
     )
     assert file_read_tools_roundtrip[0].absolute_file_paths_allowed is True
