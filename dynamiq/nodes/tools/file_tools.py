@@ -6,7 +6,7 @@ import re
 from io import BytesIO
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationInfo, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationInfo, field_validator, model_validator
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import Node, NodeGroup
@@ -187,7 +187,7 @@ class FileWriteInputSchema(BaseModel):
     """
 
     action: FileWriteAction = Field(
-        default=FileWriteAction.WRITE,
+        default=...,
         description="Operation mode: 'write' to create/overwrite/append a file, "
         "'edit' to perform atomic find-and-replace on an existing file.",
     )
@@ -217,8 +217,8 @@ class FileWriteInputSchema(BaseModel):
             "and 'binary' writes raw bytes."
         ),
     )
-    brief: str | None = Field(
-        default=None,
+    brief: str = Field(
+        ...,
         description="Very brief description of the action being performed. "
         "Example: 'Create a new file called report.txt', 'Update the data in report.txt.",
     )
@@ -231,9 +231,18 @@ class FileWriteInputSchema(BaseModel):
 
     @field_validator("file_path")
     @classmethod
-    def validate_path(cls, v: str) -> str:
+    def validate_path(cls, v: str, info: ValidationInfo) -> str:
         """Validate file_path to prevent path traversal attacks."""
-        return validate_file_path(v)
+        allow_absolute = bool((info.context or {}).get("absolute_file_paths_allowed"))
+        return validate_file_path(v, allow_absolute=allow_absolute)
+
+    @model_validator(mode="after")
+    def validate_action_fields(self) -> "FileWriteInputSchema":
+        if self.action == FileWriteAction.WRITE and self.content is None:
+            raise ValueError("'content' is required when action is 'write'")
+        if self.action == FileWriteAction.EDIT and not self.edits:
+            raise ValueError("'edits' is required when action is 'edit'")
+        return self
 
 
 class FileReadTool(Node):
@@ -934,25 +943,24 @@ class FileWriteTool(Node):
     name: str = "FileWriteTool"
     description: str = (
         "Writes or edits files in storage.\n\n"
-        "Write mode (provide 'content'):\n"
-        '- Write text: {"file_path": "readme.txt", "content": "Hello World"}\n'
-        '- Write JSON: {"file_path": "config.json", "content": {"key": "value"}}\n'
-        '- Append: {"file_path": "log.txt", "content": "\\nline", "append": true}\n\n'
-        "Edit mode (provide 'edits'):\n"
-        "Performs atomic find-and-replace on an existing file. Edits are applied\n"
-        "sequentially with literal matching (no regex). If ANY find string is not\n"
-        "found, the operation fails and no changes are written.\n"
-        '- {"file_path": "app.py", "edits": [{"find": "old_func()", "replace": "new_func()"}], '
-        '"brief": "rename function"}\n'
-        '- {"file_path": "config.yaml", "edits": [{"find": "debug: true", '
-        '"replace": "debug: false", "all": true}], "brief": "disable debug"}\n\n'
-        "Edit output includes the full updated file content with line numbers."
+        "Actions:\n"
+        "- write: Create or overwrite a file. Requires 'content'. Set 'append: true' to append.\n"
+        "- edit: Atomic find-and-replace on an existing file. Requires 'edits' list with 'find'/'replace' pairs.\n"
+        "Example:\n"
+        "- Write text: {action: 'write', 'file_path': 'readme.txt', 'content': 'Hello World', "
+        "'brief': 'Create a new file called readme.txt'}\n"
+        "- Edit file: {action: 'edit', 'file_path': 'app.py', 'edits': [{'find': 'old_func()', "
+        "'replace': 'new_func()'}], 'brief': 'Rename function old_func to new_func'}\n"
     )
 
     file_store: FileStore | Sandbox = Field(..., description="File storage to write to.")
+    absolute_file_paths_allowed: bool = Field(default=False, description="Whether to allow absolute paths.")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileWriteInputSchema]] = FileWriteInputSchema
+
+    def get_context_for_input_schema(self) -> dict:
+        return {"absolute_file_paths_allowed": self.absolute_file_paths_allowed}
 
     def execute(
         self,

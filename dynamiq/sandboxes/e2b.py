@@ -290,7 +290,7 @@ class E2BSandbox(Sandbox):
         return [
             SandboxShellTool(sandbox=self),
             FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, absolute_file_paths_allowed=True),
-            FileWriteTool(name="sandbox_file_write", file_store=self),
+            FileWriteTool(name="sandbox_file_write", file_store=self, absolute_file_paths_allowed=True),
             TodoWriteTool(file_store=self),
         ]
 

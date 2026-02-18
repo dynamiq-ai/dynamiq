@@ -31,8 +31,9 @@ You are a helpful assistant that can execute shell commands in a remote sandbox 
 
 EXAMPLE_QUERY = """
 1. Create a file called 'hello.py' with a Python script that prints "Hello from E2B!"
-2. Run the script: python hello.py
-3. Show the output
+2. Edit it with edit action, by changing it to 'Hello from E2B!!!'
+3. Run the script: python hello.py
+4. Show the output
 """
 
 
