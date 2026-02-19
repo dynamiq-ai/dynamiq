@@ -535,12 +535,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     **tool_kwargs,
                 )
                 if collect_dependency:
-                    tool_result, tool_files, dependency = run_tool_result
+                    tool_result, tool_files, tool_output_meta, dependency = run_tool_result
                 else:
-                    tool_result, tool_files = run_tool_result
+                    tool_result, tool_files, tool_output_meta = run_tool_result
 
             else:
                 logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
+                tool_result, tool_output_meta = tool_result
                 tool_files = []
 
             if delegate_final:
@@ -555,6 +556,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         result=tool_result,
                         files=tool_files,
                         loop_num=loop_num,
+                        output=tool_output_meta,
                     ),
                     "tool",
                     config,
@@ -583,6 +585,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     result=tool_result,
                     files=tool_files,
                     loop_num=loop_num,
+                    output=tool_output_meta,
                 ),
                 "tool",
                 config,
@@ -603,6 +606,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     result=error_message,
                     files=[],
                     loop_num=loop_num,
+                    output={},
                 ),
                 "tool",
                 config,
