@@ -82,16 +82,16 @@ class E2BSandbox(Sandbox):
         info: dict[str, Any] = {
             "base_path": self.base_path,
             "output_dir": self.output_dir,
-            "sandbox_id": self.sandbox_id,
         }
         if port is not None:
             try:
-                host = self.get_public_host(port)
+                host = self.get_public_host(port)  # may trigger _ensure_sandbox() and set self.sandbox_id
                 info["public_host"] = host
                 info["public_url"] = f"https://{host}"
             except Exception as e:
                 logger.debug("get_public_host failed: %s", e)
                 info["public_url_error"] = str(e)
+        info["sandbox_id"] = self.sandbox_id  # capture after get_public_host so lazy-created sandbox is reflected
         return info
 
     def _ensure_sandbox(self) -> E2BDesktopSandbox:

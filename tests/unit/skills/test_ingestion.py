@@ -147,7 +147,7 @@ class TestIngestSkillsIntoSandbox:
             "dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive",
             side_effect=ConnectionError("network error"),
         ):
-            with pytest.raises(SkillRegistryError, match="Failed to download skill 'fail-skill'"):
+            with pytest.raises(SkillRegistryError, match="Failed to ingest skill 'fail-skill'"):
                 ingest_skills_into_sandbox(sandbox, registry)
 
     def test_upload_failure_raises_skill_registry_error(self):
@@ -163,7 +163,7 @@ class TestIngestSkillsIntoSandbox:
             ],
         )
         with patch("dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive", return_value=zip_bytes):
-            with pytest.raises(SkillRegistryError, match="Failed to upload skill 'upload-fail' to sandbox"):
+            with pytest.raises(SkillRegistryError, match="Failed to ingest skill 'upload-fail'"):
                 ingest_skills_into_sandbox(sandbox, registry)
 
     def test_batch_unzip_failure_raises_skill_registry_error(self):
