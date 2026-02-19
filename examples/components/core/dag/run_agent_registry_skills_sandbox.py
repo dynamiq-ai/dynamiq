@@ -73,6 +73,51 @@ PROMPT_FULL_REPORT = (
     "that combines the narrative and ties in the dashboard and presentation."
 )
 
+
+PROMPT_FRONTEND_DESIGN = (
+    "Using the frontend-design skill, create a distinctive, production-grade frontend. "
+    "Build a single landing page or small web app "
+    "(e.g. for a product, event, or portfolio) with a bold, non-generic aesthetic. "
+    "Use HTML/CSS/JS or a minimal framework; focus on typography, "
+    "color, motion, and spatial composition. "
+    "Avoid generic AI aesthetics (no Inter, purple gradients, or centered-only layouts). "
+    "Save the main artifact (e.g. index.html and assets) to "
+    "/home/user/output so it can be collected."
+)
+
+PROMPT_WEB_ARTIFACTS_BUILDER = (
+    "Using the web-artifacts-builder skill, create an elaborate multi-component web artifact. "
+    "Initialize a React + TypeScript + Vite project with the skill's "
+    "init script, then build something that uses state, "
+    "routing, or several shadcn/ui components (e.g. a dashboard, "
+    "configurator, or multi-step form). "
+    "Follow the skill's steps: init-artifact.sh, develop, then"
+    " bundle-artifact.sh to produce a single bundle.html. "
+    "Save bundle.html (and any key assets) to /home/user/output. "
+    "If you start a dev server (e.g. 'npm run dev') in the background, use the SandboxInfoTool "
+    "with that port (e.g. 5173) to get the public URL and report it to the user so the app can be viewed live; "
+    "otherwise deliver the bundled HTML for local viewing."
+)
+
+PROMPT_RECREATE_GETDYNAMIQ_WEBSITE = (
+    "Visit https://getdynamiq.ai (or use your knowledge of it) and recreate a simplified version of the Dynamiq "
+    "marketing website in the sandbox. Use the frontend-design and web-artifacts-builder skill. "
+    "Include: (1) Hero section with the tagline "
+    "'Build agentic applications in a matter of hours' and a short subtitle; "
+    "(2) Value propositions (e.g. ROI: save $600k, reduce dev time from 6 months to hours, 30–50% compliance savings); "
+    "(3) A short feature grid (Workflows, Knowledge & RAG, Deployments, Guardrails, Observability, Fine-tuning); "
+    "(4) A 'Bank-grade security' section (SOC 2, GDPR, HIPAA); "
+    "(5) Footer with links (Home, Book a demo, Documentation, Contact). "
+    "Match the professional, enterprise tone and layout. Save the main artifact (e.g. index.html or bundle.html) to "
+    "/home/user/output. "
+    "For a live preview: start the dev server "
+    "in the background (sandbox shell with run_in_background_enabled=true, e.g. "
+    "npm run dev or npx vite). Then call SandboxInfoTool with that port (e.g. 5173) to get the public URL. "
+    "Report that URL to the user (e.g. 'Preview: https://...') so the recreated site can be opened in a browser. "
+    "If you do not start a dev server, deliver the static bundle for local viewing."
+)
+
+
 DEFAULT_PROMPT = PROMPT_DOCX
 
 
@@ -172,6 +217,9 @@ PROMPTS = {
     "pptx": PROMPT_PPTX,
     "xlsx": PROMPT_XLSX,
     "full_report": PROMPT_FULL_REPORT,
+    "frontend_design": PROMPT_FRONTEND_DESIGN,
+    "web_artifacts_builder": PROMPT_WEB_ARTIFACTS_BUILDER,
+    "recreate_getdynamiq_website": PROMPT_RECREATE_GETDYNAMIQ_WEBSITE,
 }
 
 
@@ -181,8 +229,8 @@ if __name__ == "__main__":
         "--task",
         choices=list(PROMPTS),
         default="docx",
-        help="Task: docx, pdf, pptx, xlsx, or full_report "
-        "(30-page PDF + Excel + presentation + Word on one topic). Default: docx.",
+        help="Task: docx, pdf, pptx, xlsx, full_report; "
+        "frontend_design, web_artifacts_builder, recreate_getdynamiq_website. Default: docx.",
     )
     args = parser.parse_args()
     prompt = PROMPTS[args.task]
