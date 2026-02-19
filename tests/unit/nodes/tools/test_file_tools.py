@@ -348,7 +348,7 @@ def test_edit_sequential_and_replace_all(file_store):
             "file_path": "cfg.ini",
             "edits": [
                 {"find": "localhost", "replace": "0.0.0.0"},
-                {"find": "foo", "replace": "bar", "all": True},
+                {"find": "foo", "replace": "bar", "replace_all": True},
             ],
             "brief": "Update host and replace foo",
         }

@@ -174,7 +174,7 @@ class EditOperation(BaseModel):
 
     find: str = Field(..., min_length=1, description="Exact string to locate in the file (literal match, no regex).")
     replace: str = Field(..., description="Replacement string.")
-    all: bool = Field(
+    replace_all: bool = Field(
         default=False,
         description="If true, replace all occurrences. Otherwise only the first.",
     )
@@ -200,7 +200,7 @@ class FileWriteInputSchema(BaseModel):
     edits: list[EditOperation] | None = Field(
         default=None,
         description="Ordered list of find/replace operations for 'edit' action. "
-        "Each entry has 'find', 'replace', and optional 'all' (default false). "
+        "Each entry has 'find', 'replace', and optional 'replace_all' (default false). "
         "Edits are applied sequentially with literal matching. "
         "Atomic: if any find string is not found, the operation fails with no changes.",
     )
@@ -979,6 +979,24 @@ class FileWriteTool(Node):
         config: RunnableConfig | None = None,
         **kwargs,
     ) -> dict[str, Any]:
+        """Execute a file write or edit operation.
+
+        Dispatches to ``_execute_write`` or ``_execute_edit`` based on
+        ``input_data.action``.  Any non-tool exception is wrapped in a
+        recoverable ``ToolExecutionException``.
+
+        Args:
+            input_data: Validated input containing action, file path, and
+                either content (write) or edits (edit).
+            config: Optional runnable configuration with callbacks.
+            **kwargs: Additional keyword arguments forwarded to callbacks.
+
+        Returns:
+            Dict with ``content`` (result message), ``file_info``, and ``brief``.
+
+        Raises:
+            ToolExecutionException: On file I/O errors or failed edit pre-checks.
+        """
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
@@ -1000,6 +1018,15 @@ class FileWriteTool(Node):
             )
 
     def _execute_write(self, input_data: FileWriteInputSchema) -> dict[str, Any]:
+        """Create, overwrite, or append to a file.
+
+        Content is serialised via ``_prepare_content_payload`` (handles str, bytes,
+        JSON-serialisable objects, and format overrides).  When ``append=True`` the
+        existing file bytes are prepended to the new payload before storing.
+
+        Returns:
+            Dict with ``content`` (success message), ``file_info``, and ``brief``.
+        """
         payload, inferred_type = self._prepare_content_payload(input_data)
         content_type = input_data.content_type or inferred_type
 
@@ -1026,6 +1053,27 @@ class FileWriteTool(Node):
         }
 
     def _execute_edit(self, input_data: FileWriteInputSchema) -> dict[str, Any]:
+        """Perform atomic sequential find-and-replace edits on an existing file.
+
+        Semantics:
+        1. **Pre-check**: all ``find`` strings are verified against the *original*
+           file content.  If any are missing the operation is aborted with a
+           ``ToolExecutionException`` and the file is left untouched.
+        2. **Application**: edits are applied sequentially in the order given.
+           Each edit does a literal string replacement (first occurrence only,
+           or all occurrences when ``edit.replace_all`` is set).
+        3. **Conflict handling**: if an earlier edit removes text that a later
+           edit targets, the later edit is skipped and a warning is included in
+           the returned summary so the caller can take corrective action.
+
+        Returns:
+            Dict with ``content`` (summary with counts and any warnings),
+            ``file_info``, and ``brief``.
+
+        Raises:
+            ToolExecutionException: when one or more find strings are absent
+                from the original file content (no changes written).
+        """
         edits = input_data.edits
         encoding = input_data.encoding or "utf-8"
         path = input_data.file_path
@@ -1047,8 +1095,8 @@ class FileWriteTool(Node):
             if occurrences == 0:
                 skipped.append(edit.find)
                 continue
-            count = occurrences if edit.all else min(1, occurrences)
-            if edit.all:
+            count = occurrences if edit.replace_all else min(1, occurrences)
+            if edit.replace_all:
                 content = content.replace(edit.find, edit.replace)
             else:
                 content = content.replace(edit.find, edit.replace, 1)
