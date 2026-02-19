@@ -8,7 +8,7 @@ import pytest
 
 from dynamiq.skills.registries.dynamiq import Dynamiq, DynamiqSkillEntry
 from dynamiq.skills.types import SkillRegistryError
-from dynamiq.skills.utils import _upload_zip_to_sandbox, ingest_skills_into_sandbox
+from dynamiq.skills.utils import ingest_skills_into_sandbox
 
 
 def _make_zip(files: dict[str, bytes]) -> bytes:
@@ -47,7 +47,9 @@ class TestIngestSkillsIntoSandbox:
         mock_download.assert_called_once_with("id1", "v1")
         upload_calls = sandbox.upload_file.call_args_list
         assert len(upload_calls) == 1
-        assert upload_calls[0][1]["destination_path"] == "/opt/custom/skills/my-skill/scripts/run.py"
+        assert upload_calls[0][1]["destination_path"] == "/opt/custom/skills/my-skill/skill.zip"
+        assert sandbox.run_command_shell.called
+        assert "unzip" in sandbox.run_command_shell.call_args[0][0]
 
     def test_uses_default_base_when_sandbox_skills_base_path_none(self):
         """When sandbox_skills_base_path is None, base is {sandbox.base_path}/skills."""
@@ -65,7 +67,28 @@ class TestIngestSkillsIntoSandbox:
 
         assert result == ["default-skill"]
         upload_calls = sandbox.upload_file.call_args_list
-        assert upload_calls[0][1]["destination_path"] == "/home/agent/skills/default-skill/SKILL.md"
+        assert upload_calls[0][1]["destination_path"] == "/home/agent/skills/default-skill/skill.zip"
+        assert "unzip" in sandbox.run_command_shell.call_args[0][0]
+
+    def test_batch_unzip_once_for_all_skills(self):
+        """Multiple skills get one batch unzip shell call (no separate mkdir)."""
+        zip_bytes = _make_zip({"f": b"x"})
+        sandbox = MagicMock()
+        sandbox.base_path = "/home/user"
+        registry = Dynamiq.model_construct(
+            connection=MagicMock(),
+            skills=[
+                DynamiqSkillEntry(id="i1", version_id="v1", name="skill-a", description=None),
+                DynamiqSkillEntry(id="i2", version_id="v2", name="skill-b", description=None),
+            ],
+        )
+        with patch("dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive", return_value=zip_bytes):
+            ingest_skills_into_sandbox(sandbox, registry)
+
+        shell_calls = sandbox.run_command_shell.call_args_list
+        unzip_calls = [c[0][0] for c in shell_calls if "unzip" in c[0][0]]
+        assert len(unzip_calls) == 1
+        assert "skill-a" in unzip_calls[0] and "skill-b" in unzip_calls[0]
 
     def test_returns_list_of_ingested_skill_names(self):
         """Returns the list of skill names that were successfully ingested."""
@@ -124,7 +147,7 @@ class TestIngestSkillsIntoSandbox:
             "dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive",
             side_effect=ConnectionError("network error"),
         ):
-            with pytest.raises(SkillRegistryError, match="Failed to download skill 'fail-skill'"):
+            with pytest.raises(SkillRegistryError, match="Failed to ingest skill 'fail-skill'"):
                 ingest_skills_into_sandbox(sandbox, registry)
 
     def test_upload_failure_raises_skill_registry_error(self):
@@ -140,45 +163,47 @@ class TestIngestSkillsIntoSandbox:
             ],
         )
         with patch("dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive", return_value=zip_bytes):
-            with pytest.raises(SkillRegistryError, match="Failed to upload skill 'upload-fail' to sandbox"):
+            with pytest.raises(SkillRegistryError, match="Failed to ingest skill 'upload-fail'"):
                 ingest_skills_into_sandbox(sandbox, registry)
 
-
-class TestUploadZipToSandbox:
-    """Tests for _upload_zip_to_sandbox (path handling and zip extraction)."""
-
-    def test_uploads_files_under_base_skill_name(self):
-        """Files are uploaded to base_path/skill_name/relative_path."""
-        zip_bytes = _make_zip(
-            {
-                "scripts/run.py": b"#!/usr/bin/env python",
-                "scripts/utils/helper.py": b"def help(): pass",
-            }
-        )
+    def test_batch_unzip_failure_raises_skill_registry_error(self):
+        """When batch unzip returns non-zero exit_code, raises SkillRegistryError."""
+        zip_bytes = _make_zip({"f": b"x"})
         sandbox = MagicMock()
-        _upload_zip_to_sandbox(sandbox, zip_bytes, "/home/user/skills", "my-skill")
-
-        # upload_file(file_name, content, destination_path=...)
-        upload_calls = {c[1]["destination_path"]: c[0][1] for c in sandbox.upload_file.call_args_list}
-        assert "/home/user/skills/my-skill/scripts/run.py" in upload_calls
-        assert upload_calls["/home/user/skills/my-skill/scripts/run.py"] == b"#!/usr/bin/env python"
-        assert "/home/user/skills/my-skill/scripts/utils/helper.py" in upload_calls
-        assert upload_calls["/home/user/skills/my-skill/scripts/utils/helper.py"] == b"def help(): pass"
+        sandbox.base_path = "/home/user"
+        sandbox.run_command_shell.return_value = MagicMock(stdout="", stderr="unzip: command not found", exit_code=1)
+        registry = Dynamiq.model_construct(
+            connection=MagicMock(),
+            skills=[
+                DynamiqSkillEntry(id="i1", version_id="v1", name="skill-a", description=None),
+            ],
+        )
+        with patch("dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive", return_value=zip_bytes):
+            with pytest.raises(SkillRegistryError, match="Failed to unzip skills in sandbox"):
+                ingest_skills_into_sandbox(sandbox, registry)
 
     def test_skips_directories_in_zip(self):
-        """Zip directory entries are skipped (no upload_file for dirs)."""
+        """Zip directory entries are excluded from uploaded skill.zip (_upload_zip_only sanitization)."""
         buf = BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("scripts/", b"")  # directory
             zf.writestr("scripts/run.py", b"code")
         zip_bytes = buf.getvalue()
         sandbox = MagicMock()
-        _upload_zip_to_sandbox(sandbox, zip_bytes, "/base", "s1")
+        sandbox.base_path = "/home/user"
+        registry = Dynamiq.model_construct(
+            connection=MagicMock(),
+            skills=[DynamiqSkillEntry(id="id1", version_id="v1", name="s1", description=None)],
+        )
+        with patch("dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive", return_value=zip_bytes):
+            ingest_skills_into_sandbox(sandbox, registry)
         assert sandbox.upload_file.call_count == 1
-        assert "run.py" in sandbox.upload_file.call_args[0]
+        uploaded_content = sandbox.upload_file.call_args[0][1]
+        with zipfile.ZipFile(BytesIO(uploaded_content), "r") as zf:
+            assert zf.namelist() == ["scripts/run.py"]
 
-    def test_skips_path_traversal_and_absolute_names(self):
-        """Entries with '..' or leading '/' are skipped for security."""
+    def test_skips_path_traversal_and_absolute_names_in_zip(self):
+        """Uploaded skill.zip contains only safe entries (no .. or leading /)."""
         zip_bytes = _make_zip(
             {
                 "normal.txt": b"ok",
@@ -188,20 +213,13 @@ class TestUploadZipToSandbox:
             }
         )
         sandbox = MagicMock()
-        _upload_zip_to_sandbox(sandbox, zip_bytes, "/base", "s1")
-        upload_paths = [c[1]["destination_path"] for c in sandbox.upload_file.call_args_list]
-        assert "/base/s1/normal.txt" in upload_paths
-        assert len(upload_paths) == 1
-        assert "/base/s1/../escape.txt" not in upload_paths
-        assert "/base/s1/absolute.txt" not in upload_paths
-        assert "/base/s1/sub/../other.txt" not in upload_paths
-
-    def test_calls_mkdir_for_skill_dir(self):
-        """run_command_shell mkdir -p is called for the skill directory."""
-        zip_bytes = _make_zip({"f": b"x"})
-        sandbox = MagicMock()
-        _upload_zip_to_sandbox(sandbox, zip_bytes, "/home/skills", "my-skill")
-        sandbox.run_command_shell.assert_called_once()
-        call_arg = sandbox.run_command_shell.call_args[0][0]
-        assert "mkdir" in call_arg
-        assert "/home/skills/my-skill" in call_arg
+        sandbox.base_path = "/home/user"
+        registry = Dynamiq.model_construct(
+            connection=MagicMock(),
+            skills=[DynamiqSkillEntry(id="id1", version_id="v1", name="s1", description=None)],
+        )
+        with patch("dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive", return_value=zip_bytes):
+            ingest_skills_into_sandbox(sandbox, registry)
+        uploaded_content = sandbox.upload_file.call_args[0][1]
+        with zipfile.ZipFile(BytesIO(uploaded_content), "r") as zf:
+            assert zf.namelist() == ["normal.txt"]
