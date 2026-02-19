@@ -6,12 +6,14 @@ import logging
 import mimetypes
 from enum import Enum
 from functools import cached_property
-from typing import Any, ClassVar
+from pathlib import Path
+from typing import Any, BinaryIO, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from dynamiq.connections.connections import BaseConnection
 from dynamiq.nodes.node import Node
+from dynamiq.storages.file.base import FileInfo
 
 
 class SandboxTool(str, Enum):
@@ -72,6 +74,12 @@ class Sandbox(abc.ABC, BaseModel):
     def to_dict_exclude_params(self) -> dict[str, bool]:
         """Define parameters to exclude during serialization."""
         return {"connection": True}
+
+    def _resolve_path(self, file_path: str) -> str:
+        """Resolve relative file paths against sandbox base path."""
+        if file_path.startswith("/"):
+            return file_path
+        return f"{self.base_path.rstrip('/')}/{file_path.lstrip('/')}"
 
     def to_dict(self, **kwargs) -> dict[str, Any]:
         """Convert the Sandbox instance to a dictionary.
@@ -315,6 +323,52 @@ class Sandbox(abc.ABC, BaseModel):
         return SandboxInfo(
             base_path=self.base_path,
             output_dir=self.output_dir,
+        )
+
+    def store(
+        self,
+        file_path: str | Path,
+        content: str | bytes | BinaryIO,
+        content_type: str = None,
+        metadata: dict[str, Any] = None,
+        overwrite: bool = False,
+    ) -> FileInfo:
+        """Store a file in the sandbox filesystem.
+
+        Provides FileStore-compatible write interface so tools like
+        FileWriteTool work transparently with both backends.
+
+        Args:
+            file_path: Destination path (relative paths resolved against base_path).
+            content: File content as string, bytes, or file-like object.
+            content_type: MIME type of the file content.
+            metadata: Additional metadata to attach to the returned FileInfo.
+            overwrite: Ignored for sandbox (always overwrites).
+
+        Returns:
+            FileInfo with details about the stored file.
+        """
+        resolved_path = self._resolve_path(str(file_path))
+
+        if isinstance(content, str):
+            raw = content.encode("utf-8")
+        elif hasattr(content, "read"):
+            raw = content.read()
+            if isinstance(raw, str):
+                raw = raw.encode("utf-8")
+        else:
+            raw = content
+
+        file_name = resolved_path.rsplit("/", 1)[-1] if "/" in resolved_path else resolved_path
+        dest = self.upload_file(file_name, raw, destination_path=resolved_path)
+
+        return FileInfo(
+            name=file_name,
+            path=dest,
+            size=len(raw),
+            content_type=content_type or mimetypes.guess_type(file_name)[0] or "application/octet-stream",
+            metadata=metadata or {},
+            content=raw,
         )
 
     def close(self) -> None:

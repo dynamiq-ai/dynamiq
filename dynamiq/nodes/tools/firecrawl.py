@@ -165,6 +165,10 @@ class FirecrawlInputSchema(BaseModel):
         alias="zeroDataRetention",
         description="Opt-in compliance flag; True enables Firecrawl's zero data retention mode (requires approval).",
     )
+    brief: str = Field(
+        default="Scraping the web for information.",
+        description="Very brief description of the action being performed. Example: 'Scrape the web for information.'.",
+    )
 
 
 class FirecrawlTool(ConnectionNode):
