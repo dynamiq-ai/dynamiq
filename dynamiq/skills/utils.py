@@ -226,6 +226,9 @@ def _batch_unzip_in_sandbox(
 
     uploaded: list of (skill_name, skill_dir, zip_path, file_count).
     Requires `unzip` in the sandbox.
+
+    Raises:
+        SkillRegistryError: If the unzip shell command fails (e.g. exit_code != 0).
     """
     import shlex
 
@@ -237,7 +240,17 @@ def _batch_unzip_in_sandbox(
         parts.append(
             f"unzip -o -q {shlex.quote(zip_path)} -d {shlex.quote(skill_dir)} && rm -f {shlex.quote(zip_path)}"
         )
-    sandbox.run_command_shell(" && ".join(parts))
+    result = sandbox.run_command_shell(" && ".join(parts))
+    exit_code = getattr(result, "exit_code", None)
+    if isinstance(exit_code, int) and exit_code != 0:
+        stderr = getattr(result, "stderr", "") or ""
+        stdout = getattr(result, "stdout", "") or ""
+        msg = f"Batch unzip failed (exit_code={exit_code})"
+        if stderr:
+            msg += f". stderr: {stderr.strip()!r}"
+        if stdout and not stderr:
+            msg += f". stdout: {stdout.strip()!r}"
+        raise SkillRegistryError(msg, details={"uploaded_skills": [u[0] for u in uploaded]})
 
 
 def _upload_zip_to_sandbox(
@@ -249,17 +262,16 @@ def _upload_zip_to_sandbox(
     """Upload zip as one file to sandbox, then unzip there (1 round-trip per skill instead of N).
 
     Returns the number of files in the zip (directory entries and path-traversal names excluded).
-    Requires `unzip` in the sandbox; falls back to per-file upload if unzip fails.
+    Requires `unzip` in the sandbox; falls back to per-file upload if unzip returns non-zero exit code.
     """
     import shlex
 
     file_count, skill_dir, zip_path = _upload_zip_only(sandbox, zip_bytes, base_path, skill_name)
     t_start = time.perf_counter()
-    try:
-        unzip_cmd = (
-            f"unzip -o -q {shlex.quote(zip_path)} -d {shlex.quote(skill_dir)} " f"&& rm -f {shlex.quote(zip_path)}"
-        )
-        sandbox.run_command_shell(unzip_cmd)
+    unzip_cmd = f"unzip -o -q {shlex.quote(zip_path)} -d {shlex.quote(skill_dir)} && rm -f {shlex.quote(zip_path)}"
+    result = sandbox.run_command_shell(unzip_cmd)
+    exit_code = getattr(result, "exit_code", None)
+    if not (isinstance(exit_code, int) and exit_code != 0):
         duration = time.perf_counter() - t_start
         logger.info(
             "Ingestion: upload+unzip skill '%s' — 1 zip, %d files, duration=%.2fs",
@@ -268,17 +280,17 @@ def _upload_zip_to_sandbox(
             duration,
         )
         return file_count
-    except Exception as e:
-        logger.warning(
-            "Ingestion: upload+unzip failed for '%s' (%s), falling back to per-file upload",
-            skill_name,
-            e,
-        )
-        try:
-            sandbox.run_command_shell(f"rm -f {shlex.quote(zip_path)}")
-        except Exception as cleanup_err:
-            logger.debug("Cleanup of leftover zip %s failed: %s", zip_path, cleanup_err)
-        return _upload_zip_to_sandbox_per_file(sandbox, zip_bytes, base_path, skill_name, t_start)
+    # Unzip failed (e.g. unzip not installed, corrupt zip); fall back to per-file upload.
+    logger.warning(
+        "Ingestion: upload+unzip failed for '%s' (exit_code=%s), falling back to per-file upload",
+        skill_name,
+        exit_code,
+    )
+    try:
+        sandbox.run_command_shell(f"rm -f {shlex.quote(zip_path)}")
+    except Exception as cleanup_err:
+        logger.debug("Cleanup of leftover zip %s failed: %s", zip_path, cleanup_err)
+    return _upload_zip_to_sandbox_per_file(sandbox, zip_bytes, base_path, skill_name, t_start)
 
 
 def _upload_zip_to_sandbox_per_file(

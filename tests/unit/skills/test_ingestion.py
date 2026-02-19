@@ -166,6 +166,22 @@ class TestIngestSkillsIntoSandbox:
             with pytest.raises(SkillRegistryError, match="Failed to upload skill 'upload-fail' to sandbox"):
                 ingest_skills_into_sandbox(sandbox, registry)
 
+    def test_batch_unzip_failure_raises_skill_registry_error(self):
+        """When batch unzip returns non-zero exit_code, raises SkillRegistryError."""
+        zip_bytes = _make_zip({"f": b"x"})
+        sandbox = MagicMock()
+        sandbox.base_path = "/home/user"
+        sandbox.run_command_shell.return_value = MagicMock(stdout="", stderr="unzip: command not found", exit_code=1)
+        registry = Dynamiq.model_construct(
+            connection=MagicMock(),
+            skills=[
+                DynamiqSkillEntry(id="i1", version_id="v1", name="skill-a", description=None),
+            ],
+        )
+        with patch("dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive", return_value=zip_bytes):
+            with pytest.raises(SkillRegistryError, match="Failed to unzip skills in sandbox"):
+                ingest_skills_into_sandbox(sandbox, registry)
+
 
 class TestUploadZipToSandbox:
     """Tests for _upload_zip_to_sandbox (path handling and zip extraction)."""
@@ -234,14 +250,16 @@ class TestUploadZipToSandbox:
         assert "unzip" in sandbox.run_command_shell.call_args[0][0]
 
     def test_fallback_to_per_file_when_unzip_fails(self):
-        """When run_command_shell (unzip) fails, fall back to per-file upload."""
+        """When unzip returns non-zero exit_code, fall back to per-file upload."""
         zip_bytes = _make_zip({"scripts/run.py": b"code", "SKILL.md": b"# Skill"})
         sandbox = MagicMock()
-        # First run_command_shell is unzip (raise); second is rm in except (succeed).
-        sandbox.run_command_shell.side_effect = [OSError("unzip not found"), None]
+        # First call: unzip (exit_code=1); second: rm cleanup. Use simple objects to avoid pulling in e2b_desktop.
+        fail_result = MagicMock(stdout="", stderr="unzip: command not found", exit_code=1)
+        ok_result = MagicMock(stdout="", stderr="", exit_code=0)
+        sandbox.run_command_shell.side_effect = [fail_result, ok_result]
         count = _upload_zip_to_sandbox(sandbox, zip_bytes, "/base", "s1")
         assert count == 2
-        # One zip upload, then unzip failed, then per-file: 1 + 2 = 3 upload_file calls.
+        # One zip upload, then per-file fallback: 1 + 2 = 3 upload_file calls.
         assert sandbox.upload_file.call_count == 3
         paths = [c[1]["destination_path"] for c in sandbox.upload_file.call_args_list]
         assert "/base/s1/skill.zip" in paths
