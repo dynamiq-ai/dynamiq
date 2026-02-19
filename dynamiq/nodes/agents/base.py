@@ -911,8 +911,6 @@ class Agent(Node):
         if not files:
             return
 
-        print(f"files_map: {files_map}")
-
         for field_name, field in tool.input_schema.model_fields.items():
             if not (field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False)):
                 continue
@@ -1291,7 +1289,8 @@ class Agent(Node):
                     has_tools=True,
                     delegation_allowed=self.delegation_allowed,
                     context_compaction_enabled=self.summarization_config.enabled,
-                    todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
+                    todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
+                    or bool(self.sandbox_backend),
                 )
 
     def _inject_attached_files_into_message(
