@@ -38,9 +38,7 @@ from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionM
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox, SandboxConfig
 from dynamiq.skills.config import SkillsConfig
-from dynamiq.skills.registries.dynamiq import Dynamiq
 from dynamiq.skills.types import SkillMetadata
-from dynamiq.skills.utils import ingest_skills_into_sandbox
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
@@ -236,7 +234,9 @@ class Agent(Node):
     )
     description: str | None = Field(default=None, description="Short human-readable description of the agent.")
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
-    _excluded_tool_ids: set[str] = PrivateAttr(default_factory=set)
+    _mcp_server_tool_ids: list[str] = PrivateAttr(default_factory=list)
+    _skills_tool_ids: list[str] = PrivateAttr(default_factory=list)
+    _sandbox_tool_ids: list[str] = PrivateAttr(default_factory=list)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
     _history_offset: int = PrivateAttr(
         default=2,  # Offset to the first message (default: 2 — system and initial user messages).
@@ -299,18 +299,16 @@ class Agent(Node):
                 self._mcp_servers.append(tool)
                 subtools = tool.get_mcp_tools()
                 expanded_tools.extend(subtools)
-                self._excluded_tool_ids.update(subtool.id for subtool in subtools)
+                self._mcp_server_tool_ids.extend([subtool.id for subtool in subtools])
             else:
                 expanded_tools.append(tool)
 
         self.tools = expanded_tools
-        if self.file_store_backend and self.sandbox_backend:
-            raise ValueError("file_store and sandbox cannot both be enabled for an Agent at the same time")
 
         if self.sandbox_backend:
             # Add sandbox tools when sandbox is enabled (not serialized; recreated from sandbox config on load)
             sandbox_tools = self.sandbox_backend.get_tools(llm=self.llm)
-            self._excluded_tool_ids.update(t.id for t in sandbox_tools)
+            self._sandbox_tool_ids = [t.id for t in sandbox_tools]
             self.tools.extend(sandbox_tools)
 
         elif self.file_store_backend:
@@ -366,12 +364,22 @@ class Agent(Node):
             "system_prompt_manager": True,  # Runtime state container, not serializable
         }
 
+    def _is_tool_excluded_from_serialization(self, tool: Node) -> bool:
+        """Return True if this tool should not be serialized (recreated from config on load)."""
+        if tool.id in self._mcp_server_tool_ids:
+            return True
+        if tool.id in self._sandbox_tool_ids:
+            return True
+        if tool.id in self._skills_tool_ids:
+            return True
+        return False
+
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
 
-        tools_to_serialize = [t for t in self.tools if t.id not in self._excluded_tool_ids]
+        tools_to_serialize = [t for t in self.tools if not self._is_tool_excluded_from_serialization(t)]
         data["tools"] = [tool.to_dict(**kwargs) for tool in tools_to_serialize]
         data["tools"] = data["tools"] + [mcp_server.to_dict(**kwargs) for mcp_server in self._mcp_servers]
 
@@ -404,30 +412,6 @@ class Agent(Node):
                 tool.init_components(connection_manager)
             tool.is_optimized_for_agents = True
 
-        self._ensure_skills_ingested_for_sandbox()
-
-    def _ensure_skills_ingested_for_sandbox(self) -> None:
-        """When skills source is Dynamiq with sandbox_skills_base_path and sandbox is enabled, ingest skills at init."""
-        if not self.sandbox_backend or not self._skills_should_init():
-            return
-        source = self.skills.source
-        if source is None:
-            return
-
-        if not isinstance(source, Dynamiq) or not source.sandbox_skills_base_path:
-            return
-        try:
-            if hasattr(self.sandbox_backend, "_ensure_sandbox"):
-                self.sandbox_backend._ensure_sandbox()
-            ingest_skills_into_sandbox(
-                self.sandbox_backend,
-                source,
-                sandbox_skills_base_path=source.sandbox_skills_base_path,
-            )
-            logger.info("Agent %s: skills ingested into sandbox at init", self.name)
-        except Exception as e:
-            logger.warning("Agent %s: skills ingestion into sandbox failed: %s", self.name, e)
-
     def sanitize_tool_name(self, s: str):
         """Sanitize tool name to follow [^a-zA-Z0-9_-]."""
         s = s.replace(" ", "-")
@@ -454,7 +438,7 @@ class Agent(Node):
             return
         skills_tool = SkillsTool(skill_registry=source)
         self.tools.append(skills_tool)
-        self._excluded_tool_ids.add(skills_tool.id)
+        self._skills_tool_ids.append(skills_tool.id)
 
     def _apply_skills_to_prompt(self) -> None:
         """Set skills block and tool_description on the prompt manager after _init_prompt_blocks()."""
@@ -939,6 +923,8 @@ class Agent(Node):
         if not files:
             return
 
+        print(f"files_map: {files_map}")
+
         for field_name, field in tool.input_schema.model_fields.items():
             if not (field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False)):
                 continue
@@ -952,6 +938,10 @@ class Agent(Node):
             elif isinstance(value, (list, tuple)):
                 merged_input[field_name] = [files_map.get(v, v) if isinstance(v, str) else v for v in value]
             elif isinstance(value, str):
+
+                print(f"value: {value}")
+
+                print(files_map.get(value, value))
                 merged_input[field_name] = files_map.get(value, value)
 
         if isinstance(tool, Python):
@@ -1002,6 +992,7 @@ class Agent(Node):
 
         self._inject_files_into_tool(tool, merged_input)
 
+        print(f"merged_input: {merged_input}")
         if tool_params:
             debug_info = []
             if self.verbose:
@@ -1106,10 +1097,11 @@ class Agent(Node):
             self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
 
         output_files = tool_result.output.get("files", [])
+        tool_output_meta = {k: v for k, v in tool_result.output.items() if k not in ("content", "files")}
         if collect_dependency:
-            return tool_result_content_processed, output_files, dependency_dict
+            return tool_result_content_processed, output_files, tool_output_meta, dependency_dict
 
-        return tool_result_content_processed, output_files
+        return tool_result_content_processed, output_files, tool_output_meta
 
     def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> list[io.BytesIO | bytes]:
         """Ensure all uploaded files have name and description attributes and store them in storage backend."""
@@ -1311,8 +1303,7 @@ class Agent(Node):
                     has_tools=True,
                     delegation_allowed=self.delegation_allowed,
                     context_compaction_enabled=self.summarization_config.enabled,
-                    todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
-                    or bool(self.sandbox_backend),
+                    todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
                 )
 
     def _inject_attached_files_into_message(
