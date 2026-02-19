@@ -39,8 +39,6 @@ nodes:
         type: dynamiq.skills.registries.Dynamiq
         connection: dynamiq-api-conn
         sandbox_skills_base_path: "/home/user/skills"
-        # Skill and version IDs from scripts/local_skill_upload_download_test.py (--local-skill-dir .skills/<dir>).
-        # canvas-design: skill id a4943152-5e66-4f38-8415-e69543f9712c created but version upload failed (400 Limit 1048576). Add entry when a version is uploaded.
         skills:
           - id: "afc2c23a-5cc0-481f-b449-c272848b4f08"
             version_id: "ed5a7f9a-4a6c-44cd-92d5-6e59a6c1aea7"
