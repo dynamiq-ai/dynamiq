@@ -49,7 +49,9 @@ class SandboxShellTool(Node):
         "- timeout (int, default 60): Max seconds to wait for completion.\n"
         "- run_in_background_enabled (bool, default false): Run without waiting for output.\n\n"
         "Paths: Input files are under /home/user/input. Write outputs to /home/user/output; "
-        "files there are automatically collected and returned after the run.\n\n"
+        "files there are automatically collected and returned after the run. "
+        "If you start a dev server (e.g. npm run dev), "
+        "use SandboxInfoTool with the server port to get the public URL to share with the user.\n\n"
         "Examples:\n"
         '- {"command": "ls -la /home/user/input"}\n'
         '- {"command": "python3 /home/user/input/script.py /home/user/input/data.txt /home/user/output"}\n'
