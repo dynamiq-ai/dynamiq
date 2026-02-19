@@ -116,6 +116,7 @@ class AgentToolResultEventMessageData(BaseModel):
     result: Any
     files: list = Field(default_factory=list)
     loop_num: int
+    output: dict[str, Any] | None = None
 
 
 class StreamingConfig(BaseModel):
