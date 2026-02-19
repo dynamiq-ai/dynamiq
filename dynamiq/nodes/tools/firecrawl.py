@@ -349,9 +349,10 @@ class FirecrawlTool(ConnectionNode):
 
         if self.is_optimized_for_agents:
             result = self._format_agent_response(url, scrape_result)
+            output = {"content": result, "urls": [url]}
         else:
             result = {"success": scrape_result.get("success", False), "url": url, **(scrape_result.get("data") or {})}
+            output = {"content": result}
 
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
-
-        return {"content": result}
+        return output

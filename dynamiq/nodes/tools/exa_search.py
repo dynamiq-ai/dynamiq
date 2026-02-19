@@ -592,14 +592,16 @@ class ExaTool(ConnectionNode):
         sources_with_url = self._format_sources(results)
         formatted_context = self._format_context_section(search_result.get("context"))
 
+        urls = [r.get("url") for r in results]
         if self.is_optimized_for_agents:
             result_parts = ["## Sources", "\n".join(sources_with_url)]
             result_parts.extend(["## Search Results", formatted_results])
             if formatted_context:
                 result_parts.extend(["## Context", formatted_context])
             result = "\n\n".join(result_parts)
+
+            output = {"content": result, "urls": urls}
         else:
-            urls = [result.get("url") for result in results]
             result = {
                 "result": formatted_results,
                 "sources_with_url": sources_with_url,
@@ -608,6 +610,7 @@ class ExaTool(ConnectionNode):
                 "raw_response": search_result,
             }
 
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
+            output = {"content": result}
 
-        return {"content": result}
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
+        return output
