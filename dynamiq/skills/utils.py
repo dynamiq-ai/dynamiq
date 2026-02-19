@@ -2,7 +2,7 @@ import shlex
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from dynamiq.skills.types import SkillRegistryError
 from dynamiq.utils.logger import logger
@@ -11,7 +11,7 @@ MAX_INGEST_WORKERS = 8
 
 if TYPE_CHECKING:
     from dynamiq.sandboxes.base import Sandbox
-    from dynamiq.skills.registries.dynamiq import Dynamiq
+    from dynamiq.skills.registries.dynamiq import Dynamiq, DynamiqSkillEntry
 
 
 def extract_skill_content_slice(
@@ -73,7 +73,7 @@ def _download_and_upload_one(
     registry: "Dynamiq",
     sandbox: "Sandbox",
     base: str,
-    entry: Any,
+    entry: "DynamiqSkillEntry",
 ) -> tuple[str, str, str, int]:
     """Download one skill archive and upload its zip to the sandbox.
     Returns (skill_name, skill_dir, zip_path, file_count)."""
