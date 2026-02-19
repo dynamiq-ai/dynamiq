@@ -28,6 +28,19 @@ class ShellCommandResult(BaseModel):
     exit_code: int | None
 
 
+class SandboxInfo(BaseModel):
+    """Schema for sandbox metadata returned by get_sandbox_info()."""
+
+    base_path: str
+    output_dir: str
+    sandbox_id: str | None = None
+    public_host: str | None = None
+    public_url: str | None = None
+    public_url_error: str | None = None
+
+    model_config = ConfigDict(extra="allow")
+
+
 class Sandbox(abc.ABC, BaseModel):
     """Abstract base class for sandbox implementations.
 
@@ -285,7 +298,7 @@ class Sandbox(abc.ABC, BaseModel):
             "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
         )
 
-    def get_sandbox_info(self, port: int | None = None) -> dict[str, Any]:
+    def get_sandbox_info(self, port: int | None = None) -> SandboxInfo:
         """Return sandbox metadata for the agent (e.g. base_path, optional public URL for a port).
 
         Subclasses that support a public URL (e.g. E2B) may override and include
@@ -293,16 +306,16 @@ class Sandbox(abc.ABC, BaseModel):
 
         Args:
             port: Optional port number; if provided and the backend supports it,
-                the returned dict may include public_host and public_url.
+                the returned schema may include public_host and public_url.
 
         Returns:
-            Dict with at least base_path and output_dir; backends may add
+            SandboxInfo with at least base_path and output_dir; backends may add
             sandbox_id, public_host, public_url (when port is given), etc.
         """
-        return {
-            "base_path": self.base_path,
-            "output_dir": self.output_dir,
-        }
+        return SandboxInfo(
+            base_path=self.base_path,
+            output_dir=self.output_dir,
+        )
 
     def close(self) -> None:
         """Close the sandbox."""

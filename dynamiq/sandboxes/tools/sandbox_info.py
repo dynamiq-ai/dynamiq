@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig
-from dynamiq.sandboxes.base import Sandbox
+from dynamiq.sandboxes.base import Sandbox, SandboxInfo
 
 logger = logging.getLogger(__name__)
 
@@ -69,41 +69,41 @@ class SandboxInfoTool(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        info = self.sandbox.get_sandbox_info(port=input_data.port)
+        info: SandboxInfo = self.sandbox.get_sandbox_info(port=input_data.port)
 
         if input_data.port is not None:
-            if info.get("public_url"):
+            if info.public_url:
                 logger.info(
                     "SandboxInfoTool: port=%s -> public_url=%s "
                     "(ensure the server is running on this port in the sandbox)",
                     input_data.port,
-                    info["public_url"],
+                    info.public_url,
                 )
-            elif info.get("public_url_error"):
+            elif info.public_url_error:
                 logger.warning(
                     "SandboxInfoTool: port=%s -> error: %s",
                     input_data.port,
-                    info["public_url_error"],
+                    info.public_url_error,
                 )
         else:
             logger.info(
                 "SandboxInfoTool: sandbox_id=%s base_path=%s",
-                info.get("sandbox_id"),
-                info.get("base_path", ""),
+                info.sandbox_id,
+                info.base_path,
             )
 
         lines = [
-            f"base_path: {info.get('base_path', '')}",
-            f"output_dir: {info.get('output_dir', '')}",
+            f"base_path: {info.base_path}",
+            f"output_dir: {info.output_dir}",
         ]
-        if info.get("sandbox_id"):
-            lines.append(f"sandbox_id: {info['sandbox_id']}")
+        if info.sandbox_id:
+            lines.append(f"sandbox_id: {info.sandbox_id}")
         if input_data.port is not None:
-            if info.get("public_url"):
-                lines.append(f"public_url: {info['public_url']}")
+            if info.public_url:
+                lines.append(f"public_url: {info.public_url}")
                 lines.append("Share this URL with the user to open the app in a browser.")
-            elif info.get("public_url_error"):
-                lines.append(f"public_url_error: {info['public_url_error']}")
+            elif info.public_url_error:
+                lines.append(f"public_url_error: {info.public_url_error}")
 
         content = "\n".join(lines)
-        return {"content": content, "sandbox_info": info}
+        return {"content": content, "sandbox_info": info.model_dump()}

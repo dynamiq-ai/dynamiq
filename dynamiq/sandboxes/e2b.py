@@ -12,7 +12,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from dynamiq.connections import E2B
 from dynamiq.nodes import Node
 from dynamiq.nodes.tools.e2b_sandbox import SandboxCreationErrorHandling
-from dynamiq.sandboxes.base import Sandbox, ShellCommandResult
+from dynamiq.sandboxes.base import Sandbox, SandboxInfo, ShellCommandResult
 from dynamiq.sandboxes.exceptions import SandboxConnectionError
 from dynamiq.utils.logger import logger
 
@@ -77,22 +77,26 @@ class E2BSandbox(Sandbox):
         domain = getattr(self.connection, "domain", None) or "e2b.app"
         return f"{port}-{self.sandbox_id}.{domain}"
 
-    def get_sandbox_info(self, port: int | None = None) -> dict[str, Any]:
+    def get_sandbox_info(self, port: int | None = None) -> SandboxInfo:
         """Return sandbox metadata including optional public URL for a port."""
-        info: dict[str, Any] = {
-            "base_path": self.base_path,
-            "output_dir": self.output_dir,
-        }
+        public_host: str | None = None
+        public_url: str | None = None
+        public_url_error: str | None = None
         if port is not None:
             try:
-                host = self.get_public_host(port)  # may trigger _ensure_sandbox() and set self.sandbox_id
-                info["public_host"] = host
-                info["public_url"] = f"https://{host}"
+                public_host = self.get_public_host(port)  # may trigger _ensure_sandbox() and set self.sandbox_id
+                public_url = f"https://{public_host}"
             except Exception as e:
                 logger.debug("get_public_host failed: %s", e)
-                info["public_url_error"] = str(e)
-        info["sandbox_id"] = self.sandbox_id  # capture after get_public_host so lazy-created sandbox is reflected
-        return info
+                public_url_error = str(e)
+        return SandboxInfo(
+            base_path=self.base_path,
+            output_dir=self.output_dir,
+            sandbox_id=self.sandbox_id,
+            public_host=public_host,
+            public_url=public_url,
+            public_url_error=public_url_error,
+        )
 
     def _ensure_sandbox(self) -> E2BDesktopSandbox:
         """Lazily initialize or reconnect to E2B sandbox, with retries on rate-limit and transient errors.
