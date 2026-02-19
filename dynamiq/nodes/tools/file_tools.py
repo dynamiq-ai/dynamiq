@@ -1,11 +1,13 @@
+import enum
 import json
 import logging
+import mimetypes
 import os
 import re
 from io import BytesIO
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationInfo, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationInfo, field_validator, model_validator
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import Node, NodeGroup
@@ -151,6 +153,11 @@ class FileReadInputSchema(BaseModel):
         default="file",
         description="For PDF-like documents, 'page' keeps content separated per page (with metadata).",
     )
+    brief: str = Field(
+        default="Reading a file",
+        description="Very brief description of the action being performed. "
+        "Example: 'Read the file report.txt', 'Read the PDF report.pdf.",
+    )
 
     @field_validator("file_path")
     @classmethod
@@ -160,11 +167,48 @@ class FileReadInputSchema(BaseModel):
         return validate_file_path(v, allow_absolute=allow_absolute)
 
 
-class FileWriteInputSchema(BaseModel):
-    """Schema for file write input parameters."""
+class FileWriteAction(str, enum.Enum):
+    """Determines the operation mode for FileWriteTool."""
 
-    file_path: str = Field(..., description="Path where the file should be written")
-    content: Any = Field(..., description="File content (string, bytes, or structured data for JSON)")
+    WRITE = "write"
+    EDIT = "edit"
+
+
+class EditOperation(BaseModel):
+    """A single find-and-replace operation."""
+
+    find: str = Field(..., min_length=1, description="Exact string to locate in the file (literal match, no regex).")
+    replace: str = Field(..., description="Replacement string.")
+    replace_all: bool = Field(
+        default=False,
+        description="If true, replace all occurrences. Otherwise only the first.",
+    )
+
+
+class FileWriteInputSchema(BaseModel):
+    """Schema for file write input parameters.
+
+    * **write** (default): provide ``content`` to create, overwrite, or append.
+    * **edit**: provide ``edits`` (find/replace list) for atomic in-place edits.
+    """
+
+    action: FileWriteAction = Field(
+        default=FileWriteAction.WRITE,
+        description="Operation mode: 'write' to create/overwrite/append a file, "
+        "'edit' to perform atomic find-and-replace on an existing file.",
+    )
+    file_path: str = Field(..., description="Path where the file should be written or edited")
+    content: Any = Field(
+        default=None,
+        description="File content (string, bytes, or structured data for JSON). " "Required for 'write' action.",
+    )
+    edits: list[EditOperation] | None = Field(
+        default=None,
+        description="Ordered list of find/replace operations for 'edit' action. "
+        "Each entry has 'find', 'replace', and optional 'replace_all' (default false). "
+        "Edits are applied sequentially with literal matching. "
+        "Atomic: if any find string is not found, the operation fails with no changes.",
+    )
     content_type: str | None = Field(default=None, description="MIME type (auto-detected if not provided)")
     metadata: dict[str, Any] | None = Field(default=None, description="Additional metadata for the file")
     overwrite: bool = Field(
@@ -179,6 +223,11 @@ class FileWriteInputSchema(BaseModel):
             "and 'binary' writes raw bytes."
         ),
     )
+    brief: str = Field(
+        default="Writing a file",
+        description="Very brief description of the action being performed. "
+        "Example: 'Create a new file called report.txt', 'Update the data in report.txt.",
+    )
     encoding: str = Field(default="utf-8", description="Encoding to use when writing textual content.")
     append: bool = Field(
         default=False,
@@ -188,9 +237,18 @@ class FileWriteInputSchema(BaseModel):
 
     @field_validator("file_path")
     @classmethod
-    def validate_path(cls, v: str) -> str:
+    def validate_path(cls, v: str, info: ValidationInfo) -> str:
         """Validate file_path to prevent path traversal attacks."""
-        return validate_file_path(v)
+        allow_absolute = bool((info.context or {}).get("absolute_file_paths_allowed"))
+        return validate_file_path(v, allow_absolute=allow_absolute)
+
+    @model_validator(mode="after")
+    def validate_action_fields(self) -> "FileWriteInputSchema":
+        if self.action == FileWriteAction.WRITE and self.content is None:
+            raise ValueError("'content' is required when action is 'write'")
+        if self.action == FileWriteAction.EDIT and not self.edits:
+            raise ValueError("'edits' is required when action is 'edit'")
+        return self
 
 
 class FileReadTool(Node):
@@ -869,10 +927,15 @@ class FileReadTool(Node):
 
 class FileWriteTool(Node):
     """
-    A tool for writing files to storage.
+    A tool for writing and editing files in storage.
 
-    This tool can be passed to Agents to write files
-    to the configured storage backend.
+    Supports two modes:
+
+    * **Write mode**: provide ``content`` to create, overwrite, or append to a file.
+    * **Edit mode**: provide ``edits`` (a list of find/replace operations) to perform
+      atomic in-place edits.  Edits are applied sequentially with literal string
+      matching.  If any ``find`` string is missing, the entire operation is aborted
+      and no changes are written.
 
     Attributes:
         group (Literal[NodeGroup.TOOLS]): The group to which this tool belongs.
@@ -884,19 +947,36 @@ class FileWriteTool(Node):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.FILE_OPERATION
     name: str = "FileWriteTool"
-    description: str = """Writes files to storage based on the provided file path and content.
+    description: str = (
+        "Writes or edits files in storage.\n\n"
+        "Actions:\n"
+        "- write: Create or overwrite a file. Requires 'content'. Set 'append: true' to append.\n"
+        "- edit: Atomic find-and-replace on an existing file. Requires 'edits' list with 'find'/'replace' pairs. "
+        "Edits are applied sequentially; a prior replacement may remove a later find string.\n"
+        "Example:\n"
+        "- Write text: {action: 'write', 'file_path': 'readme.txt', 'content': 'Hello World', "
+        "'brief': 'Create a new file called readme.txt'}\n"
+        "- Edit file: {action: 'edit', 'file_path': 'app.py', 'edits': [{'find': 'old_func()', "
+        "'replace': 'new_func()'}], 'brief': 'Rename function old_func to new_func'}\n"
+    )
 
-    Usage Examples:
-    - Write text: {"file_path": "readme.txt", "content": "Hello World"}
-    - Write JSON: {"file_path": "config.json", "content": {"key": "value"}}
-    - Overwrite file: {"file_path": "existing.txt", "content": "new content"}
-    - Append: {"file_path": "log.txt", "content": "\\nline", "append": true}
-    - Force JSON encoding: {"file_path": "data.json", "content": {...}, "content_format": "json"}"""
-
-    file_store: FileStore = Field(..., description="File storage to write to.")
+    file_store: FileStore | Sandbox = Field(..., description="File storage to write to.")
+    absolute_file_paths_allowed: bool = Field(default=False, description="Whether to allow absolute paths.")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileWriteInputSchema]] = FileWriteInputSchema
+
+    @property
+    def to_dict_exclude_params(self):
+        return super().to_dict_exclude_params | {"file_store": True}
+
+    def to_dict(self, **kwargs) -> dict:
+        data = super().to_dict(**kwargs)
+        data["file_store"] = self.file_store.to_dict(**kwargs)
+        return data
+
+    def get_context_for_input_schema(self) -> dict:
+        return {"absolute_file_paths_allowed": self.absolute_file_paths_allowed}
 
     def execute(
         self,
@@ -904,8 +984,23 @@ class FileWriteTool(Node):
         config: RunnableConfig | None = None,
         **kwargs,
     ) -> dict[str, Any]:
-        """
-        Executes the file write operation and returns the file information.
+        """Execute a file write or edit operation.
+
+        Dispatches to ``_execute_write`` or ``_execute_edit`` based on
+        ``input_data.action``.  Any non-tool exception is wrapped in a
+        recoverable ``ToolExecutionException``.
+
+        Args:
+            input_data: Validated input containing action, file path, and
+                either content (write) or edits (edit).
+            config: Optional runnable configuration with callbacks.
+            **kwargs: Additional keyword arguments forwarded to callbacks.
+
+        Returns:
+            Dict with ``content`` (result message) and ``file_info``.
+
+        Raises:
+            ToolExecutionException: On file I/O errors or failed edit pre-checks.
         """
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
@@ -913,43 +1008,123 @@ class FileWriteTool(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         try:
-            payload, inferred_type = self._prepare_content_payload(input_data)
-            content_type = input_data.content_type or inferred_type
-
-            overwrite_flag = input_data.overwrite or input_data.append
-            if input_data.append and self.file_store.exists(input_data.file_path):
-                existing = self.file_store.retrieve(input_data.file_path)
-                payload = existing + payload
-
-            file_info = self.file_store.store(
-                input_data.file_path,
-                payload,
-                content_type=content_type,
-                metadata=input_data.metadata,
-                overwrite=overwrite_flag,
-            )
-
-            file_buffer = BytesIO(payload)
-            file_buffer.name = input_data.file_path
-            file_buffer.description = (input_data.metadata or {}).get("description", "FileWriteTool output")
-            file_buffer.content_type = content_type
-            file_buffer.seek(0)
-
-            message = f"File '{input_data.file_path}' written successfully"
-            logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(file_info)[:200]}...")
-            return {
-                "content": message,
-                "file_info": file_info.model_dump(),
-                "files": [file_buffer],
-            }
-
+            if input_data.action == FileWriteAction.EDIT:
+                return self._execute_edit(input_data)
+            return self._execute_write(input_data)
         except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: failed to write file. Error: {str(e)}")
+            if isinstance(e, ToolExecutionException):
+                raise
+            action = input_data.action.value
+            logger.error(f"Tool {self.name} - {self.id}: failed to {action} file. Error: {str(e)}")
             raise ToolExecutionException(
-                f"Tool '{self.name}' failed to write file. Error: {str(e)}. "
+                f"Tool '{self.name}' failed to {action} file. Error: {str(e)}. "
                 f"Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
+
+    def _execute_write(self, input_data: FileWriteInputSchema) -> dict[str, Any]:
+        """Create, overwrite, or append to a file.
+
+        Content is serialised via ``_prepare_content_payload`` (handles str, bytes,
+        JSON-serialisable objects, and format overrides).  When ``append=True`` the
+        existing file bytes are prepended to the new payload before storing.
+
+        Returns:
+            Dict with ``content`` (success message) and ``file_info``.
+        """
+        payload, inferred_type = self._prepare_content_payload(input_data)
+        content_type = input_data.content_type or inferred_type
+
+        overwrite_flag = input_data.overwrite or input_data.append
+        if input_data.append and self.file_store.exists(input_data.file_path):
+            existing = self.file_store.retrieve(input_data.file_path)
+            payload = existing + payload
+
+        file_info = self.file_store.store(
+            input_data.file_path,
+            payload,
+            content_type=content_type,
+            metadata=input_data.metadata,
+            overwrite=overwrite_flag,
+        )
+
+        message = f"File '{input_data.file_path}' written successfully"
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(file_info)[:200]}...")
+
+        return {
+            "content": message,
+            "file_info": file_info.model_dump(),
+        }
+
+    def _execute_edit(self, input_data: FileWriteInputSchema) -> dict[str, Any]:
+        """Perform atomic sequential find-and-replace edits on an existing file.
+
+        Semantics:
+        1. **Pre-check**: all ``find`` strings are verified against the *original*
+           file content.  If any are missing the operation is aborted with a
+           ``ToolExecutionException`` and the file is left untouched.
+        2. **Application**: edits are applied sequentially in the order given.
+           Each edit does a literal string replacement (first occurrence only,
+           or all occurrences when ``edit.replace_all`` is set).
+        3. **Conflict handling**: if an earlier edit removes text that a later
+           edit targets, the later edit is skipped and a warning is included in
+           the returned summary so the caller can take corrective action.
+
+        Returns:
+            Dict with ``content`` (summary with counts and any warnings) and
+            ``file_info``.
+
+        Raises:
+            ToolExecutionException: when one or more find strings are absent
+                from the original file content (no changes written).
+        """
+        edits = input_data.edits
+        encoding = input_data.encoding or "utf-8"
+        path = input_data.file_path
+
+        content = self.file_store.retrieve(path).decode(encoding)
+
+        missing = [e.find for e in edits if e.find not in content]
+        if missing:
+            raise ToolExecutionException(
+                f"Aborting edit: find string(s) not found in '{path}': "
+                f"{[repr(s[:80]) for s in missing]}. No changes were made.",
+                recoverable=True,
+            )
+
+        total = 0
+        skipped: list[str] = []
+        for edit in edits:
+            occurrences = content.count(edit.find)
+            if occurrences == 0:
+                skipped.append(edit.find)
+                continue
+            count = occurrences if edit.replace_all else min(1, occurrences)
+            if edit.replace_all:
+                content = content.replace(edit.find, edit.replace)
+            else:
+                content = content.replace(edit.find, edit.replace, 1)
+            total += count
+
+        payload = content.encode(encoding)
+        content_type = input_data.content_type or mimetypes.guess_type(path)[0] or "text/plain"
+        file_info = self.file_store.store(
+            path, payload, content_type=content_type, metadata=input_data.metadata, overwrite=True
+        )
+        applied = len(edits) - len(skipped)
+        summary = f"Applied {applied} of {len(edits)} edit(s) with {total} replacement(s) to {path}."
+        if skipped:
+            summary += (
+                f" Warning: {len(skipped)} find string(s) were present in the original file "
+                f"but disappeared after a prior edit and were skipped: "
+                f"{[repr(s[:80]) for s in skipped]}."
+            )
+        logger.info(f"Tool {self.name} - {self.id}: {summary}")
+
+        return {
+            "content": f"{summary} Use FileReadTool to view the updated file.",
+            "file_info": file_info.model_dump(),
+        }
 
     def _prepare_content_payload(self, input_data: FileWriteInputSchema) -> tuple[bytes, str]:
         """Serialize the incoming payload based on the requested format."""

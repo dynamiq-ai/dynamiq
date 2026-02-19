@@ -8,6 +8,7 @@ from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.node import Node
 from dynamiq.nodes.tools.file_tools import (
     EXTRACTED_TEXT_SUFFIX,
+    EditOperation,
     FileListTool,
     FileReadInputSchema,
     FileReadTool,
@@ -63,7 +64,7 @@ def test_validate_file_path_rejects_dangerous_paths(path, error_match):
 def test_file_read_input_schema_rejects_dangerous_paths(path):
     """FileReadInputSchema should reject path traversal and absolute paths."""
     with pytest.raises(ValueError):
-        FileReadInputSchema(file_path=path)
+        FileReadInputSchema(file_path=path, brief="Read file")
 
 
 @pytest.mark.parametrize(
@@ -77,18 +78,18 @@ def test_file_read_input_schema_rejects_dangerous_paths(path):
 def test_file_write_input_schema_rejects_dangerous_paths(path):
     """FileWriteInputSchema should reject path traversal and absolute paths."""
     with pytest.raises(ValueError):
-        FileWriteInputSchema(file_path=path, content="content")
+        FileWriteInputSchema(file_path=path, content="content", action="write", brief="Write content")
 
 
 def test_file_read_input_schema_valid_path_is_accepted():
     """Valid relative paths should be accepted."""
-    schema = FileReadInputSchema(file_path="documents/report.pdf")
+    schema = FileReadInputSchema(file_path="documents/report.pdf", brief="Read report")
     assert schema.file_path == "documents/report.pdf"
 
 
 def test_file_write_input_schema_valid_path_is_accepted():
     """Valid relative paths should be accepted."""
-    schema = FileWriteInputSchema(file_path="output/result.json", content="test")
+    schema = FileWriteInputSchema(file_path="output/result.json", content="test", action="write", brief="Write test")
     assert schema.file_path == "output/result.json"
 
 
@@ -123,7 +124,7 @@ def test_file_read_tool(file_store, sample_file_path, llm_model):
     file_store.store(sample_file_path, test_content)
 
     # Test successful read
-    input_data = {"file_path": sample_file_path}
+    input_data = {"file_path": sample_file_path, "brief": "Read test file"}
     result = tool.run(input_data)
 
     assert isinstance(result, RunnableResult)
@@ -141,7 +142,12 @@ def test_file_write_tool(file_store):
     assert tool.file_store == file_store
 
     # Test successful text write
-    input_data = {"file_path": "test/output.txt", "content": "Hello, World!"}
+    input_data = {
+        "file_path": "test/output.txt",
+        "content": "Hello, World!",
+        "action": "write",
+        "brief": "Write a test file",
+    }
     result = tool.run(input_data)
 
     assert result.status == RunnableStatus.SUCCESS
@@ -153,7 +159,13 @@ def test_file_write_tool(file_store):
     assert stored_content == b"Hello, World!"
 
     # Test custom content type
-    input_data = {"file_path": "test/data.csv", "content": "name,age\nJohn,30", "content_type": "text/csv"}
+    input_data = {
+        "file_path": "test/data.csv",
+        "content": "name,age\nJohn,30",
+        "content_type": "text/csv",
+        "action": "write",
+        "brief": "Write CSV data",
+    }
 
     result = tool.run(input_data)
     assert result.status == RunnableStatus.SUCCESS
@@ -212,12 +224,17 @@ def test_file_tools_integration(file_store, llm_model):
     read_tool = FileReadTool(file_store=file_store, llm=llm_model)
 
     # Write file
-    write_input = {"file_path": "test/integration.txt", "content": "Integration test content"}
+    write_input = {
+        "file_path": "test/integration.txt",
+        "content": "Integration test content",
+        "action": "write",
+        "brief": "Write integration test file",
+    }
     write_result = write_tool.run(write_input)
     assert write_result.status == RunnableStatus.SUCCESS
 
     # Read file
-    read_input = {"file_path": "test/integration.txt"}
+    read_input = {"file_path": "test/integration.txt", "brief": "Read integration file"}
     read_result = read_tool.run(read_input)
     assert read_result.status == RunnableStatus.SUCCESS
     assert read_result.output["content"] == "Integration test content"
@@ -227,7 +244,7 @@ def test_file_tools_integration(file_store, llm_model):
     storage2.store("test.txt", "Content from storage 2")
 
     read_tool2 = FileReadTool(file_store=storage2, llm=llm_model)
-    input_data = {"file_path": "test.txt"}
+    input_data = {"file_path": "test.txt", "brief": "Read from storage 2"}
 
     result2 = read_tool2.run(input_data)
     assert result2.output["content"] == "Content from storage 2"
@@ -244,7 +261,7 @@ def test_file_read_tool_appends_hint_for_non_text(monkeypatch, file_store, llm_m
     monkeypatch.setattr(tool, "_process_file_with_converter", lambda *args, **kwargs: ("Converted PDF text", None))
     monkeypatch.setattr(tool, "_persist_extracted_text", lambda *args, **kwargs: cache_path)
 
-    result = tool.run({"file_path": file_path})
+    result = tool.run({"file_path": file_path, "brief": "Read PDF"})
 
     assert result.status == RunnableStatus.SUCCESS
     assert result.output["cached_text_path"] == cache_path
@@ -274,7 +291,7 @@ def test_file_read_tool_limits_spreadsheet_preview(file_store, llm_model):
     buffer.seek(0)
     file_store.store("data/transactions.xlsx", buffer.getvalue())
 
-    result = tool.run({"file_path": "data/transactions.xlsx"})
+    result = tool.run({"file_path": "data/transactions.xlsx", "brief": "Read spreadsheet"})
 
     assert result.status == RunnableStatus.SUCCESS
     content = result.output["content"]
@@ -305,11 +322,91 @@ def test_file_read_tool_with_sandbox_like_backend(llm_model):
     tool = FileReadTool(file_store=sandbox, llm=llm_model, absolute_file_paths_allowed=True)
 
     # Relative path
-    result = tool.run({"file_path": "notes/readme.txt"})
+    result = tool.run({"file_path": "notes/readme.txt", "brief": "Read readme"})
     assert result.status == RunnableStatus.SUCCESS
     assert result.output["content"] == "sandbox text content"
 
     # Absolute path — allowed via absolute_file_paths_allowed=True
-    result = tool.run({"file_path": "/home/user/scores.csv"})
+    result = tool.run({"file_path": "/home/user/scores.csv", "brief": "Read scores"})
     assert result.status == RunnableStatus.SUCCESS
     assert "Alice" in result.output["content"]
+
+
+# ---------------------------------------------------------------------------
+# FileWriteTool – edit mode tests
+# ---------------------------------------------------------------------------
+
+
+def test_edit_sequential_and_replace_all(file_store):
+    """Multiple edits applied in order; all=True replaces every occurrence."""
+    file_store.store("cfg.ini", b"host=localhost\nport=foo\nlog=foo\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "cfg.ini",
+            "edits": [
+                {"find": "localhost", "replace": "0.0.0.0"},
+                {"find": "foo", "replace": "bar", "replace_all": True},
+            ],
+            "brief": "Update host and replace foo",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("cfg.ini") == b"host=0.0.0.0\nport=bar\nlog=bar\n"
+    assert "2 of 2 edit(s)" in result.output["content"]
+
+
+def test_edit_find_not_found_aborts(file_store):
+    """If a find string doesn't exist in the original file, abort with no changes."""
+    file_store.store("readme.md", b"# Title\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "readme.md",
+            "edits": [{"find": "NONEXISTENT", "replace": "X"}],
+            "brief": "Try to edit missing text",
+        }
+    )
+
+    assert result.status == RunnableStatus.FAILURE
+    assert file_store.retrieve("readme.md") == b"# Title\n"
+
+
+def test_edit_prior_edit_removes_later_find_skips_with_warning(file_store):
+    """When an earlier edit consumes text a later edit targets, it is skipped with a warning."""
+    file_store.store("code.py", b"old_func()\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "code.py",
+            "edits": [
+                {"find": "old_func()", "replace": "new_func()"},
+                {"find": "old_func()", "replace": "another_func()"},
+            ],
+            "brief": "Rename with conflict",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("code.py") == b"new_func()\n"
+    assert "1 of 2 edit(s)" in result.output["content"]
+    assert "Warning" in result.output["content"]
+
+
+def test_edit_validation_rejects_invalid_inputs():
+    """Empty find string, edit without edits list, and write without content are rejected."""
+    with pytest.raises(ValueError):
+        EditOperation(find="", replace="x")
+
+    with pytest.raises(ValueError):
+        FileWriteInputSchema(action="edit", file_path="t.txt", brief="no edits")
+
+    with pytest.raises(ValueError):
+        FileWriteInputSchema(action="write", file_path="t.txt", brief="no content")

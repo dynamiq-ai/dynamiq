@@ -72,7 +72,7 @@ def mock_llm_sandbox_shell_response(mocker):
     xml_tool_call = """<output>
   <thought>I will run a shell command in the sandbox.</thought>
   <action>SandboxShellTool</action>
-  <action_input>{"command": "echo hello from sandbox"}</action_input>
+  <action_input>{"command": "echo hello from sandbox", "brief": "Echo hello message"}</action_input>
 </output>"""
 
     xml_final_answer = """<output>

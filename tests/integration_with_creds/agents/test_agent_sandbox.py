@@ -6,6 +6,8 @@ import pytest
 from pydantic import Field
 
 from dynamiq import Workflow
+from dynamiq.callbacks.tracing import TracingCallbackHandler
+from dynamiq.connections import E2B as E2BConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes import Node
@@ -55,22 +57,14 @@ def openai_llm():
 
 @pytest.fixture(scope="module")
 def e2b_connection():
-    """E2B connection from E2B_API_KEY; skip if not set."""
+    """E2B connection from E2B_API_KEY."""
     pytest.importorskip("e2b_desktop")
-    from dynamiq.connections import E2B
-
-    api_key = os.environ.get("E2B_API_KEY")
-    if not api_key:
-        pytest.skip("E2B_API_KEY is not set; skipping E2B sandbox test.")
-    return E2B(api_key=api_key)
+    return E2BConnection()
 
 
 @pytest.mark.integration
 def test_agent_with_sandbox_executes_shell(openai_llm):
     """Agent with sandbox runs a simple shell command via sandbox tools; LLM required."""
-    if not os.getenv("OPENAI_API_KEY"):
-        pytest.skip("OPENAI_API_KEY is not set; skipping credentials-required test.")
-
     sandbox = TestSandbox(timeout=300)
 
     agent = Agent(
@@ -97,16 +91,19 @@ def test_agent_with_sandbox_executes_shell(openai_llm):
     assert "hello" in str(content), f"Expected 'hello' in output, got: {content[:500]}"
 
 
+@pytest.mark.flaky(reruns=3)
 @pytest.mark.integration
 def test_agent_with_e2b_sandbox_executes_shell(openai_llm, e2b_connection):
     """Agent with E2B sandbox runs a simple shell command via sandbox tools; OPENAI_API_KEY and E2B_API_KEY required."""
-    if not os.getenv("OPENAI_API_KEY"):
-        pytest.skip("OPENAI_API_KEY is not set; skipping credentials-required test.")
+    if not os.getenv("E2B_API_KEY"):
+        pytest.skip("E2B_API_KEY is not set; skipping credentials-required test.")
 
     from dynamiq.sandboxes.e2b import E2BSandbox
 
     sandbox = E2BSandbox(connection=e2b_connection, timeout=300)
     try:
+        tracing_callback = TracingCallbackHandler()
+        config = RunnableConfig(callbacks=[tracing_callback])
         agent = Agent(
             name="E2B Sandbox Agent",
             llm=openai_llm,
@@ -120,11 +117,33 @@ def test_agent_with_e2b_sandbox_executes_shell(openai_llm, e2b_connection):
 
         result = wf.run(
             input_data={"input": "Run this command in the sandbox and tell me the output: echo hello"},
-            config=RunnableConfig(),
+            config=config,
         )
         assert result.status == RunnableStatus.SUCCESS
         content = result.output.get(agent.id, {}).get("output", {}).get("content", "")
         assert content is not None
         assert "hello" in str(content), f"Expected 'hello' in E2B output, got: {content[:500]}"
+
+        result = wf.run(
+            input_data={
+                "input": (
+                    "Use the file write tool to create a file called 'report.txt' "
+                    "with the content 'Hello from FileWriteTool'. "
+                    "Then read the file back with FileReadTool and tell me its content."
+                )
+            },
+            config=config,
+        )
+        assert result.status == RunnableStatus.SUCCESS
+        content = result.output.get(agent.id, {}).get("output", {}).get("content", "")
+        assert "Hello from FileWriteTool" in str(content), f"Expected written content in output, got: {content[:500]}"
+        stored = sandbox.retrieve("report.txt")
+        assert b"Hello from FileWriteTool" in stored, f"Expected file on sandbox, got: {stored[:200]}"
+
+        executed_tool_names = {run.name for run in tracing_callback.runs.values()}
+        assert (
+            "FileWriteTool" in executed_tool_names
+        ), f"Expected 'filewritetool' in traced runs, got: {executed_tool_names}"
+
     finally:
         sandbox.close(kill=True)
