@@ -663,8 +663,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             else:
                 logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
+                tool_result, tool_output_meta = tool_result
                 tool_files = []
-                tool_output_meta = {}
 
             if delegate_final:
                 self.log_final_output(thought, tool_result, loop_num)
@@ -728,6 +728,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     result=error_message,
                     files=[],
                     loop_num=loop_num,
+                    output={},
                 ),
                 "tool",
                 config,

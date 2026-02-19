@@ -952,7 +952,6 @@ class Agent(Node):
             elif isinstance(value, (list, tuple)):
                 merged_input[field_name] = [files_map.get(v, v) if isinstance(v, str) else v for v in value]
             elif isinstance(value, str):
-
                 merged_input[field_name] = files_map.get(value, value)
 
         if isinstance(tool, Python):
@@ -1103,11 +1102,14 @@ class Agent(Node):
             truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
         )
 
-        if not isinstance(tool, ContextManagerTool):
-            self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
-
         output_files = tool_result.output.get("files", [])
         tool_output_meta = {k: v for k, v in tool_result.output.items() if k not in ("content", "files")}
+
+        if not isinstance(tool, ContextManagerTool):
+            self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = (
+                tool_result_content_processed,
+                tool_output_meta,
+            )
         if collect_dependency:
             return tool_result_content_processed, output_files, tool_output_meta, dependency_dict
 
