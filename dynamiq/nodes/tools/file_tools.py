@@ -154,7 +154,7 @@ class FileReadInputSchema(BaseModel):
         description="For PDF-like documents, 'page' keeps content separated per page (with metadata).",
     )
     brief: str = Field(
-        ...,
+        default="Reading a file",
         description="Very brief description of the action being performed. "
         "Example: 'Read the file report.txt', 'Read the PDF report.pdf.",
     )
@@ -188,12 +188,12 @@ class EditOperation(BaseModel):
 class FileWriteInputSchema(BaseModel):
     """Schema for file write input parameters.
 
-    * **write**: provide ``content`` to create, overwrite, or append.
+    * **write** (default): provide ``content`` to create, overwrite, or append.
     * **edit**: provide ``edits`` (find/replace list) for atomic in-place edits.
     """
 
     action: FileWriteAction = Field(
-        ...,
+        default=FileWriteAction.WRITE,
         description="Operation mode: 'write' to create/overwrite/append a file, "
         "'edit' to perform atomic find-and-replace on an existing file.",
     )
@@ -224,7 +224,7 @@ class FileWriteInputSchema(BaseModel):
         ),
     )
     brief: str = Field(
-        ...,
+        default="Writing a file",
         description="Very brief description of the action being performed. "
         "Example: 'Create a new file called report.txt', 'Update the data in report.txt.",
     )

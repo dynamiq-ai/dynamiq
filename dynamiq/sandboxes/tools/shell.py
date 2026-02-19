@@ -27,7 +27,7 @@ class SandboxShellInputSchema(BaseModel):
         description="If True, run the command in background without waiting for output.",
     )
     brief: str = Field(
-        ...,
+        default="Executing a shell command",
         description="Very brief description of the action being performed. "
         "Example: 'List all files in the current directory'.",
     )
