@@ -71,11 +71,11 @@ class SandboxInfoTool(Node):
 
         info = self.sandbox.get_sandbox_info(port=input_data.port)
 
-        # Log so operators see the URL in logs (and which port was requested)
         if input_data.port is not None:
             if info.get("public_url"):
                 logger.info(
-                    "SandboxInfoTool: port=%s -> public_url=%s (ensure the server is running on this port in the sandbox)",
+                    "SandboxInfoTool: port=%s -> public_url=%s "
+                    "(ensure the server is running on this port in the sandbox)",
                     input_data.port,
                     info["public_url"],
                 )

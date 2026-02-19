@@ -50,8 +50,8 @@ nodes:
             version_id: "d6ae58d9-87ed-4106-8e74-850f073a031e"
             name: pdf
             description: PDF creation, form filling, extraction, conversion, and validation; Markdown/HTML to PDF via pandoc or docx→PDF.
-          - id: "aec58f89-c457-4c9d-94bb-ade851303824"
-            version_id: "cde7e1ed-abd6-4a9f-845e-2de7c3562a63"
+          - id: "e6c22972-392d-471b-9371-72b4ac0fb75d"
+            version_id: "ea3b5c75-2689-4c56-92a2-82db7120844a"
             name: pptx
             description: Create, edit, and manipulate PowerPoint presentations (.pptx); design and QA rules, scripts for thumbnail, pack, soffice.
           - id: "d5dbb2be-880f-491c-8673-6cbe9416bc88"
