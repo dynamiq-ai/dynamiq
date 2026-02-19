@@ -56,22 +56,17 @@ def openai_llm():
 
 @pytest.fixture(scope="module")
 def e2b_connection():
-    """E2B connection from E2B_API_KEY; skip if not set."""
+    """E2B connection from E2B_API_KEY"""
     pytest.importorskip("e2b_desktop")
     from dynamiq.connections import E2B
 
     api_key = os.environ.get("E2B_API_KEY")
-    if not api_key:
-        pytest.skip("E2B_API_KEY is not set; skipping E2B sandbox test.")
     return E2B(api_key=api_key)
 
 
 @pytest.mark.integration
 def test_agent_with_sandbox_executes_shell(openai_llm):
     """Agent with sandbox runs a simple shell command via sandbox tools; LLM required."""
-    if not os.getenv("OPENAI_API_KEY"):
-        pytest.skip("OPENAI_API_KEY is not set; skipping credentials-required test.")
-
     sandbox = TestSandbox(timeout=300)
 
     agent = Agent(
@@ -101,9 +96,6 @@ def test_agent_with_sandbox_executes_shell(openai_llm):
 @pytest.mark.integration
 def test_agent_with_e2b_sandbox_executes_shell(openai_llm, e2b_connection):
     """Agent with E2B sandbox runs a simple shell command via sandbox tools; OPENAI_API_KEY and E2B_API_KEY required."""
-    if not os.getenv("OPENAI_API_KEY"):
-        pytest.skip("OPENAI_API_KEY is not set; skipping credentials-required test.")
-
     from dynamiq.sandboxes.e2b import E2BSandbox
 
     sandbox = E2BSandbox(connection=e2b_connection, timeout=300)
@@ -149,8 +141,8 @@ def test_agent_with_e2b_sandbox_executes_shell(openai_llm, e2b_connection):
 
         executed_tool_names = {run.name for run in tracing_callback.runs.values()}
         assert (
-            "sandbox_file_write" in executed_tool_names
-        ), f"Expected 'sandbox_file_write' in traced runs, got: {executed_tool_names}"
+            "FileWriteTool" in executed_tool_names
+        ), f"Expected 'filewritetool' in traced runs, got: {executed_tool_names}"
 
     finally:
         sandbox.close(kill=True)

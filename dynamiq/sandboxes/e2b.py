@@ -334,12 +334,9 @@ class E2BSandbox(Sandbox):
             SandboxInfoTool(sandbox=self),
         ]
         if llm is not None:
-            return [
-                SandboxShellTool(sandbox=self),
-                FileReadTool(file_store=self, llm=llm, absolute_file_paths_allowed=True),
-            ]
-        else:
-            return tools
+            tools.append(FileReadTool(file_store=self, llm=llm, absolute_file_paths_allowed=True))
+
+        return tools
 
     def close(self, kill: bool = False) -> None:
         """Close the E2B sandbox connection.
