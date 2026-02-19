@@ -12,7 +12,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from dynamiq.connections import E2B
 from dynamiq.nodes import Node
 from dynamiq.nodes.tools.e2b_sandbox import SandboxCreationErrorHandling
-from dynamiq.sandboxes.base import Sandbox, ShellCommandResult
+from dynamiq.sandboxes.base import Sandbox, SandboxInfo, ShellCommandResult
 from dynamiq.sandboxes.exceptions import SandboxConnectionError
 from dynamiq.utils.logger import logger
 
@@ -52,6 +52,51 @@ class E2BSandbox(Sandbox):
     def current_sandbox_id(self) -> str | None:
         """Get the current sandbox ID (for saving/reconnecting later)."""
         return self.sandbox_id
+
+    def get_public_host(self, port: int) -> str:
+        """Return the public host for a given port so the sandbox can be reached at https://{host}.
+
+        E2B exposes each sandbox at a URL like https://{port}-{sandbox_id}.e2b.app.
+        Use this when the agent starts a server in the sandbox (e.g. dev server on port 5173)
+        so it can report the URL to the user.
+
+        Args:
+            port: Port number the service listens on inside the sandbox (e.g. 3000, 5173).
+
+        Returns:
+            Host string (e.g. 3000-abc123.e2b.app). Full URL is https://{host}.
+        """
+        self._ensure_sandbox()
+        raw = self._sandbox
+        get_host = getattr(raw, "get_host", None)
+        if callable(get_host):
+            try:
+                return get_host(port)
+            except Exception as e:
+                logger.debug("E2B get_host(port) failed, using URL pattern: %s", e)
+        domain = getattr(self.connection, "domain", None) or "e2b.app"
+        return f"{port}-{self.sandbox_id}.{domain}"
+
+    def get_sandbox_info(self, port: int | None = None) -> SandboxInfo:
+        """Return sandbox metadata including optional public URL for a port."""
+        public_host: str | None = None
+        public_url: str | None = None
+        public_url_error: str | None = None
+        if port is not None:
+            try:
+                public_host = self.get_public_host(port)  # may trigger _ensure_sandbox() and set self.sandbox_id
+                public_url = f"https://{public_host}"
+            except Exception as e:
+                logger.debug("get_public_host failed: %s", e)
+                public_url_error = str(e)
+        return SandboxInfo(
+            base_path=self.base_path,
+            output_dir=self.output_dir,
+            sandbox_id=self.sandbox_id,
+            public_host=public_host,
+            public_url=public_url,
+            public_url_error=public_url_error,
+        )
 
     def _ensure_sandbox(self) -> E2BDesktopSandbox:
         """Lazily initialize or reconnect to E2B sandbox, with retries on rate-limit and transient errors.
@@ -279,18 +324,22 @@ class E2BSandbox(Sandbox):
         """
         from dynamiq.nodes.tools.file_tools import FileReadTool, FileWriteTool
         from dynamiq.nodes.tools.todo_tools import TodoWriteTool
+        from dynamiq.sandboxes.tools.sandbox_info import SandboxInfoTool
         from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
         tools = [
             SandboxShellTool(sandbox=self),
-            FileWriteTool(name="sandbox_file_write", file_store=self, absolute_file_paths_allowed=True),
+            FileWriteTool(file_store=self, absolute_file_paths_allowed=True),
             TodoWriteTool(file_store=self),
+            SandboxInfoTool(sandbox=self),
         ]
         if llm is not None:
-            tools.append(
-                FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, absolute_file_paths_allowed=True)
-            )
-        return tools
+            return [
+                SandboxShellTool(sandbox=self),
+                FileReadTool(file_store=self, llm=llm, absolute_file_paths_allowed=True),
+            ]
+        else:
+            return tools
 
     def close(self, kill: bool = False) -> None:
         """Close the E2B sandbox connection.

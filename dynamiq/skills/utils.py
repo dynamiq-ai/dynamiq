@@ -1,3 +1,4 @@
+import shlex
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
@@ -5,6 +6,8 @@ from typing import TYPE_CHECKING
 
 from dynamiq.skills.types import SkillRegistryError
 from dynamiq.utils.logger import logger
+
+MAX_INGEST_WORKERS = 8
 
 if TYPE_CHECKING:
     from dynamiq.sandboxes.base import Sandbox
@@ -66,30 +69,18 @@ def extract_skill_content_slice(
     return instructions, section_used
 
 
-def _ingest_one_skill(
-    sandbox: "Sandbox",
+def _download_and_upload_one(
     registry: "Dynamiq",
+    sandbox: "Sandbox",
     base: str,
     entry: "DynamiqSkillEntry",
-) -> str:
-    """Download one skill archive and upload it to the sandbox. Returns skill name or raises."""
-    try:
-        zip_bytes = registry.download_skill_archive(entry.id, entry.version_id)
-    except Exception as e:
-        logger.warning("Failed to download skill archive %s: %s", entry.name, e)
-        raise SkillRegistryError(
-            f"Failed to download skill '{entry.name}': {e}",
-            details={"skill_id": entry.id, "version_id": entry.version_id},
-        ) from e
-    try:
-        _upload_zip_to_sandbox(sandbox, zip_bytes, base, entry.name)
-    except Exception as e:
-        logger.warning("Failed to upload skill %s to sandbox: %s", entry.name, e)
-        raise SkillRegistryError(
-            f"Failed to upload skill '{entry.name}' to sandbox: {e}",
-            details={"skill_name": entry.name},
-        ) from e
-    return entry.name
+) -> tuple[str, str, str, int]:
+    """Download one skill archive and upload its zip to the sandbox.
+    Returns (skill_name, skill_dir, zip_path, file_count)."""
+    zip_bytes = registry.download_skill_archive(entry.id, entry.version_id)
+    logger.debug(f"Ingestion: downloaded {entry.name} ({len(zip_bytes)} bytes), uploading to sandbox")
+    file_count, skill_dir, zip_path = _upload_zip_only(sandbox, zip_bytes, base, entry.name)
+    return (entry.name, skill_dir, zip_path, file_count)
 
 
 def ingest_skills_into_sandbox(
@@ -97,84 +88,135 @@ def ingest_skills_into_sandbox(
     registry: "Dynamiq",
     skill_names: list[str] | None = None,
     sandbox_skills_base_path: str | None = None,
-    max_workers: int | None = None,
 ) -> list[str]:
-    """Download skill archives from the Dynamiq registry, unzip, and upload into the sandbox.
+    """Download skill archives from the Dynamiq registry and ingest into the sandbox.
 
-    Skills are ingested in parallel (download + upload per skill). For each skill
-    (all configured skills, or only those in skill_names), calls
-    registry.download_skill_archive(skill_id, version_id), unzips the zip, and
-    uploads every file to sandbox at {base}/{skill_name}/{relative_path}.
+    Each worker thread downloads one skill and uploads its zip to the sandbox (no need to wait
+    for all downloads before starting uploads). Then a single batch unzip runs in the sandbox.
     Default base is sandbox.base_path + "/skills" (e.g. /home/user/skills).
+    Requires `unzip` in the sandbox.
 
     Args:
-        sandbox: Sandbox with upload_file(file_name, content, destination_path).
+        sandbox: Sandbox with upload_file(file_name, content, destination_path) and run_command_shell.
         registry: Dynamiq registry (must have download_skill_archive).
         skill_names: If set, only ingest these skill names; otherwise all registry skills.
         sandbox_skills_base_path: Base path in sandbox for skills (default: {sandbox.base_path}/skills).
-        max_workers: Max concurrent skills to ingest (default: number of skills, capped at 8).
 
     Returns:
-        List of skill names that were ingested (order may differ from registry).
+        List of skill names that were ingested.
 
     Raises:
-        SkillRegistryError: If download or upload fails for any skill.
+        SkillRegistryError: If download, upload, or unzip fails.
     """
     base = (sandbox_skills_base_path or f"{sandbox.base_path.rstrip('/')}/skills").rstrip("/")
     skills_to_ingest = skill_names if skill_names is not None else [e.name for e in registry.skills]
-    entries = [e for e in registry.skills if e.name in skills_to_ingest]
-    if not entries:
+    entries_to_ingest = [e for e in registry.skills if e.name in skills_to_ingest]
+    if not entries_to_ingest:
         return []
 
-    workers = max_workers
-    if workers is None:
-        workers = min(len(entries), 8)
-
+    workers = min(MAX_INGEST_WORKERS, len(entries_to_ingest))
+    logger.debug(f"Ingestion: download+upload {len(entries_to_ingest)} skills with {workers} workers")
+    uploaded: list[tuple[str, str, str, int]] = []
     ingested: list[str] = []
-    first_exception: BaseException | None = None
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         future_to_entry = {
-            executor.submit(_ingest_one_skill, sandbox, registry, base, entry): entry for entry in entries
+            executor.submit(_download_and_upload_one, registry, sandbox, base, e): e for e in entries_to_ingest
         }
         for future in as_completed(future_to_entry):
+            entry = future_to_entry[future]
             try:
-                name = future.result()
-                ingested.append(name)
-                logger.info("Ingested skill '%s' into sandbox under %s/%s", name, base, name)
-            except BaseException as e:
-                if first_exception is None:
-                    first_exception = e
+                uploaded.append(future.result())
+                ingested.append(entry.name)
+            except Exception as e:
+                logger.warning(f"Failed to ingest skill {entry.name}: {e}")
+                raise SkillRegistryError(
+                    f"Failed to ingest skill '{entry.name}': {e}",
+                    details={"skill_id": entry.id, "version_id": entry.version_id, "skill_name": entry.name},
+                ) from e
 
-    if first_exception is not None:
-        raise first_exception
+    if uploaded:
+        try:
+            _batch_unzip_in_sandbox(sandbox, uploaded)
+        except Exception as e:
+            logger.warning(f"Batch unzip failed: {e}")
+            raise SkillRegistryError(
+                "Failed to unzip skills in sandbox: " + str(e),
+                details={"uploaded_skills": [u[0] for u in uploaded]},
+            ) from e
 
-    return sorted(ingested)
+    # Return in same order as entries_to_ingest for deterministic behavior.
+    order = {name: i for i, e in enumerate(entries_to_ingest) for name in [e.name]}
+    return sorted(ingested, key=order.__getitem__)
 
 
-def _upload_zip_to_sandbox(
+def _upload_zip_only(
     sandbox: "Sandbox",
     zip_bytes: bytes,
     base_path: str,
     skill_name: str,
-) -> None:
-    """Unzip zip_bytes and upload each file to sandbox under base_path/skill_name/."""
-    import shlex
+) -> tuple[int, str, str]:
+    """Upload skill zip to sandbox as a single file; do not unzip.
 
+    Sandbox must create parent dirs for destination_path if needed.
+    Returns (file_count, skill_dir, zip_path). Caller should run unzip in sandbox (e.g. via _batch_unzip_in_sandbox).
+    """
     prefix = f"{base_path}/{skill_name}/"
     skill_dir = prefix.rstrip("/")
-    try:
-        sandbox.run_command_shell(f"mkdir -p {shlex.quote(skill_dir)}")
-    except Exception as e:
-        logger.warning("mkdir -p for skill dir %s failed: %s", skill_dir, e)
-    with zipfile.ZipFile(BytesIO(zip_bytes), "r") as zf:
-        for info in zf.infolist():
-            if info.is_dir():
-                continue
-            name = info.filename
-            if ".." in name or name.startswith("/"):
-                continue
-            relative = name.lstrip("/")
-            destination = f"{prefix}{relative}"
-            content = zf.read(info)
-            sandbox.upload_file(relative.split("/")[-1], content, destination_path=destination)
+    zip_path = f"{prefix}skill.zip"
+
+    with zipfile.ZipFile(BytesIO(zip_bytes), "r") as zf_read:
+        all_infos = zf_read.infolist()
+        to_include = [
+            info
+            for info in all_infos
+            if not info.is_dir() and ".." not in info.filename and not info.filename.startswith("/")
+        ]
+        file_count = len(to_include)
+        num_dirs = sum(1 for info in all_infos if info.is_dir())
+        logger.debug(
+            f"Ingestion: skill {skill_name!r} — archive_size={len(zip_bytes)} bytes, files={file_count}, "
+            f"total_entries={len(all_infos)}, dirs_skipped={num_dirs}"
+        )
+        buf_out = BytesIO()
+        with zipfile.ZipFile(buf_out, "w", zipfile.ZIP_DEFLATED) as zf_write:
+            for info in to_include:
+                zf_write.writestr(info.filename, zf_read.read(info))
+        zip_to_upload = buf_out.getvalue()
+
+    sandbox.upload_file("skill.zip", zip_to_upload, destination_path=zip_path)
+    return file_count, skill_dir, zip_path
+
+
+def _batch_unzip_in_sandbox(
+    sandbox: "Sandbox",
+    uploaded: list[tuple[str, str, str, int]],
+) -> None:
+    """Run a single shell in the sandbox to unzip all uploaded skill zips and remove the zip files.
+
+    uploaded: list of (skill_name, skill_dir, zip_path, file_count).
+    Requires `unzip` in the sandbox.
+
+    Raises:
+        SkillRegistryError: If the unzip shell command fails (e.g. exit_code != 0).
+    """
+
+    if not uploaded:
+        return
+    # One shell: for each (skill_dir, zip_path), unzip into skill_dir and rm zip.
+    parts = []
+    for _name, skill_dir, zip_path, _count in uploaded:
+        parts.append(
+            f"unzip -o -q {shlex.quote(zip_path)} -d {shlex.quote(skill_dir)} && rm -f {shlex.quote(zip_path)}"
+        )
+    result = sandbox.run_command_shell(" && ".join(parts))
+    exit_code = getattr(result, "exit_code", None)
+    if isinstance(exit_code, int) and exit_code != 0:
+        stderr = getattr(result, "stderr", "") or ""
+        stdout = getattr(result, "stdout", "") or ""
+        msg = f"Batch unzip failed (exit_code={exit_code})"
+        if stderr:
+            msg += f". stderr: {stderr.strip()!r}"
+        if stdout and not stderr:
+            msg += f". stdout: {stdout.strip()!r}"
+        raise SkillRegistryError(msg, details={"uploaded_skills": [u[0] for u in uploaded]})

@@ -119,12 +119,12 @@ class Dynamiq(BaseSkillRegistry):
         """Download skill version as a zip archive from the API.
 
         API is assumed to expose GET /v1/skills/{skill_id}/versions/{version_id}/download
-        returning the zip (SKILL.md + scripts/ etc.). Caller should unzip and upload to sandbox.
+        returning the zip (SKILL.md + scripts/ etc.). Full response body is loaded into
+        memory (no streaming). Caller should unzip and upload to sandbox.
         """
-        response = self._request_bytes(
-            "GET",
-            f"/v1/skills/{skill_id}/versions/{version_id}/download",
-        )
+        path = f"/v1/skills/{skill_id}/versions/{version_id}/download"
+        response = self._request_bytes("GET", path)
+        logger.debug(f"Skill archive API: GET {path} -> {len(response)} bytes")
         return response
 
     def _execute_request(
