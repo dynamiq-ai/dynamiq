@@ -90,6 +90,17 @@ RULES:
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[TodoWriteInputSchema]] = TodoWriteInputSchema
 
+    def clone_for_subagent(self, sandbox_backend=None) -> "TodoWriteTool":
+        """Clone for use inside a child agent.
+
+        If *sandbox_backend* is given and ``file_store`` is a ``Sandbox``,
+        the clone is rebound to the new backend.
+        """
+        cloned: TodoWriteTool = self.clone()  # type: ignore[assignment]
+        if sandbox_backend is not None and isinstance(self.file_store, Sandbox):
+            cloned.file_store = sandbox_backend
+        return cloned
+
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)

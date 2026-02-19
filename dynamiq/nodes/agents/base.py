@@ -1,6 +1,5 @@
 import io
 import re
-import threading
 from copy import deepcopy
 from enum import Enum
 from typing import Any, Callable, ClassVar, Union
@@ -11,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
+from dynamiq.nodes.node import ConnectionNode
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
@@ -875,12 +875,6 @@ class Agent(Node):
         except Exception as e:
             logger.warning(f"Agent {self.name} - {self.id}: failed to clone tool {tool.name}: {e}")
             return tool, base_config
-        try:
-            self._isolate_child_agent_sandbox(tool_copy)
-        except Exception as e:
-            raise ToolExecutionException(
-                f"Failed to isolate child agent sandbox for cloned tool {tool.name}: {e}", recoverable=True
-            )
 
         local_config = base_config
         try:
@@ -895,62 +889,6 @@ class Agent(Node):
             local_config = base_config
 
         return tool_copy, local_config
-
-    def _isolate_child_agent_sandbox(self, tool_copy: Node) -> None:
-        """Ensure cloned child agents do not share sandbox sessions."""
-        if not isinstance(tool_copy, Agent):
-            return
-        if not tool_copy.sandbox or not tool_copy.sandbox.enabled or not tool_copy.sandbox.backend:
-            return
-
-        try:
-            original_sandbox_cfg = tool_copy.sandbox
-            original_backend = original_sandbox_cfg.backend
-            backend_copy = original_backend.__class__.model_validate(original_backend.model_dump(exclude={"type"}))
-            sandbox_cfg_data = original_sandbox_cfg.model_dump(exclude={"backend"})
-            sandbox_cfg_copy = original_sandbox_cfg.__class__.model_validate(
-                {**sandbox_cfg_data, "backend": backend_copy}
-            )
-
-            # Force cloned backend to initialize a separate sandbox session.
-            if hasattr(backend_copy, "sandbox_id"):
-                setattr(backend_copy, "sandbox_id", None)
-            if hasattr(backend_copy, "_sandbox"):
-                setattr(backend_copy, "_sandbox", None)
-            if hasattr(backend_copy, "_sandbox_lock"):
-                setattr(backend_copy, "_sandbox_lock", threading.Lock())
-
-            sandbox_cfg_copy.backend = backend_copy
-            tool_copy.sandbox = sandbox_cfg_copy
-
-            # Rebind sandbox-backed tools to the cloned backend.
-            rebound_tools = 0
-            rebound_file_stores = 0
-            for child_tool in tool_copy.tools:
-                if getattr(child_tool, "sandbox", None) is original_backend:
-                    setattr(child_tool, "sandbox", backend_copy)
-                    rebound_tools += 1
-                if getattr(child_tool, "file_store", None) is original_backend:
-                    setattr(child_tool, "file_store", backend_copy)
-                    rebound_file_stores += 1
-
-            logger.info(
-                "Agent %s - %s: isolated sandbox for cloned child agent %s, "
-                "rebound sandbox refs=%s, file_store refs=%s",
-                self.name,
-                self.id,
-                getattr(tool_copy, "name", "unknown"),
-                rebound_tools,
-                rebound_file_stores,
-            )
-        except Exception as e:
-            logger.warning(
-                "Agent %s - %s: failed to isolate child agent sandbox for cloned tool %s: %s",
-                self.name,
-                self.id,
-                getattr(tool_copy, "name", "unknown"),
-                e,
-            )
 
     @staticmethod
     def _extract_file_paths_from_input(tool: Node, merged_input: dict[str, Any]) -> list[str] | None:
@@ -1542,6 +1480,26 @@ class Agent(Node):
         self._run_depends = []
         self._tool_cache: dict[ToolCacheEntry, Any] = {}
         self.system_prompt_manager.reset()
+
+    def clone(self) -> "Agent":
+        """Clone with sandbox and connection-tool isolation.
+
+        After the standard ``Node.clone()`` pass, creates a fresh sandbox
+        backend (if enabled) and re-clones every child tool via
+        ``clone_for_subagent`` so each tool can rebind sandbox / reset
+        live client handles as appropriate.
+        """
+        cloned: Agent = super().clone()  # type: ignore[assignment]
+
+        new_backend: Sandbox | None = None
+        if cloned.sandbox and cloned.sandbox.enabled and cloned.sandbox.backend:
+            cloned.sandbox, new_backend = cloned.sandbox.clone_isolated()
+
+        cloned.tools = [
+            tool.clone_for_subagent(sandbox_backend=new_backend)
+            for tool in self.tools
+        ]
+        return cloned
 
     def generate_prompt(self, block_names: list[str] | None = None, **kwargs) -> str:
         """Generates the prompt using specified blocks and variables."""

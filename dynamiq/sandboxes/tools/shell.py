@@ -71,6 +71,17 @@ class SandboxShellTool(Node):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[SandboxShellInputSchema]] = SandboxShellInputSchema
 
+    def clone_for_subagent(self, sandbox_backend: "Sandbox | None" = None) -> "SandboxShellTool":
+        """Clone this tool for use inside a child agent.
+
+        If *sandbox_backend* is provided the clone is rebound to it;
+        otherwise the clone keeps the shared reference (``_clone_shared``).
+        """
+        cloned: SandboxShellTool = self.clone()  # type: ignore[assignment]
+        if sandbox_backend is not None:
+            cloned.sandbox = sandbox_backend
+        return cloned
+
     @property
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"sandbox": True}

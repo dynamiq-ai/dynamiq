@@ -714,8 +714,8 @@ class TestParallelToolCloning:
         assert "- /home/user/output/report.json" in tool_result_content
         assert "- /home/user/output/chart.png" in tool_result_content
 
-    def test_clone_tool_for_execution_copies_child_sandbox(self, parallel_agent, openai_node):
-        """Child-agent clones should get isolated sandbox backend instances."""
+    def test_agent_clone_isolates_sandbox_backend(self, openai_node):
+        """Agent.clone() should give the clone its own sandbox backend instance."""
         shared_backend = DummySandbox()
         child_shell_tool = SandboxShellTool(sandbox=shared_backend)
         child_agent = Agent(
@@ -726,12 +726,15 @@ class TestParallelToolCloning:
             inference_mode=InferenceMode.XML,
         )
 
-        cloned_tool, _ = parallel_agent._clone_tool_for_execution(child_agent, RunnableConfig())
+        cloned = child_agent.clone()
 
-        assert isinstance(cloned_tool, Agent)
-        assert cloned_tool.sandbox is not None
-        assert cloned_tool.sandbox.backend is not shared_backend
-        assert cloned_tool.tools[0].sandbox is cloned_tool.sandbox.backend
+        assert isinstance(cloned, Agent)
+        assert cloned.sandbox is not None
+        assert cloned.sandbox.backend is not shared_backend
+        # Shell tool inside the clone should be rebound to the new backend.
+        shell_tools = [t for t in cloned.tools if isinstance(t, SandboxShellTool)]
+        assert shell_tools, "cloned agent should still have a SandboxShellTool"
+        assert shell_tools[0].sandbox is cloned.sandbox.backend
 
     def test_execute_tools_single_tool_does_not_pass_is_parallel(self, parallel_agent, mocker):
         """When _execute_tools dispatches a single tool it must NOT set

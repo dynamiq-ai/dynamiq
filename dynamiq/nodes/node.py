@@ -642,6 +642,15 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
         return cloned_node
 
+    def clone_for_subagent(self, sandbox_backend=None) -> "Node":
+        """Clone this node for use inside a child agent.
+
+        Subclasses that hold sandbox or connection state override this to
+        rebind references (e.g. point to a new sandbox backend, reset live
+        client handles).  The default implementation delegates to ``clone()``.
+        """
+        return self.clone()
+
     @property
     def to_dict_exclude_params(self):
         return {

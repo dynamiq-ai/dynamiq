@@ -321,6 +321,18 @@ class E2BInterpreterTool(ConnectionNode):
         else:
             logger.debug(f"Tool {self.name} - {self.id}: Will initialize sandbox on each execute")
 
+    def clone_for_subagent(self, sandbox_backend=None) -> "E2BInterpreterTool":
+        """Clone with a fresh sandbox session.
+
+        ``_sandbox`` is a PrivateAttr holding a live E2B session that must
+        not be shared across clones.  Resetting it (and ``client``) to
+        None lets the clone lazily spin up its own sandbox on first use.
+        """
+        cloned: E2BInterpreterTool = self.clone()  # type: ignore[assignment]
+        cloned._sandbox = None
+        cloned.client = None
+        return cloned
+
     @property
     def to_dict_exclude_params(self) -> set:
         """

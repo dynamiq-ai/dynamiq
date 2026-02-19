@@ -263,6 +263,17 @@ class FileReadTool(Node):
     _connection_manager: ConnectionManager | None = PrivateAttr(default=None)
     _page_converter_cache: dict[FileType, Node] = PrivateAttr(default_factory=dict)
 
+    def clone_for_subagent(self, sandbox_backend=None) -> "FileReadTool":
+        """Clone for use inside a child agent.
+
+        If *sandbox_backend* is given and ``file_store`` is a ``Sandbox``,
+        the clone is rebound to the new backend.
+        """
+        cloned: FileReadTool = self.clone()  # type: ignore[assignment]
+        if sandbox_backend is not None and isinstance(self.file_store, Sandbox):
+            cloned.file_store = sandbox_backend
+        return cloned
+
     def get_context_for_input_schema(self) -> dict:
         return {"absolute_file_paths_allowed": self.absolute_file_paths_allowed}
 

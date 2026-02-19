@@ -4,6 +4,7 @@ import abc
 import io
 import logging
 import mimetypes
+import threading
 from enum import Enum
 from functools import cached_property
 from typing import Any, ClassVar
@@ -285,6 +286,25 @@ class Sandbox(abc.ABC, BaseModel):
             "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
         )
 
+    def clone_isolated(self) -> "Sandbox":
+        """Create a fresh copy that will start its own sandbox session.
+
+        Serialises this backend's config via ``model_dump`` / ``model_validate``
+        and resets any live-session state so the copy lazily provisions a new
+        sandbox on first use.  Subclasses may override to handle additional
+        private attributes.
+        """
+        copy = self.__class__.model_validate(self.model_dump(exclude={"type"}))
+
+        if hasattr(copy, "sandbox_id"):
+            copy.sandbox_id = None
+        if hasattr(copy, "_sandbox"):
+            copy._sandbox = None
+        if hasattr(copy, "_sandbox_lock"):
+            copy._sandbox_lock = threading.Lock()
+
+        return copy
+
     def close(self, kill: bool = False) -> None:
         """Close the sandbox."""
         raise NotImplementedError(f"Implementation of close() is not implemented for {self.__class__.__name__}")
@@ -309,6 +329,18 @@ class SandboxConfig(BaseModel):
     def to_dict_exclude_params(self) -> dict[str, bool]:
         """Define parameters to exclude during serialization."""
         return {"backend": True}
+
+    def clone_isolated(self) -> tuple["SandboxConfig", "Sandbox"]:
+        """Return a new config + fresh backend that will start its own session.
+
+        Returns:
+            (new_config, new_backend) — the caller can pass *new_backend* to
+            ``tool.clone_for_subagent(sandbox_backend=new_backend)``.
+        """
+        backend_copy = self.backend.clone_isolated()
+        cfg_data = self.model_dump(exclude={"backend"})
+        cfg_copy = self.__class__.model_validate({**cfg_data, "backend": backend_copy})
+        return cfg_copy, backend_copy
 
     def to_dict(self, **kwargs) -> dict[str, Any]:
         """Convert the SandboxConfig instance to a dictionary."""
