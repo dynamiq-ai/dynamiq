@@ -285,6 +285,25 @@ class Sandbox(abc.ABC, BaseModel):
             "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
         )
 
+    def get_sandbox_info(self, port: int | None = None) -> dict[str, Any]:
+        """Return sandbox metadata for the agent (e.g. base_path, optional public URL for a port).
+
+        Subclasses that support a public URL (e.g. E2B) may override and include
+        sandbox_id, public_host, and public_url when port is provided.
+
+        Args:
+            port: Optional port number; if provided and the backend supports it,
+                the returned dict may include public_host and public_url.
+
+        Returns:
+            Dict with at least base_path and output_dir; backends may add
+            sandbox_id, public_host, public_url (when port is given), etc.
+        """
+        return {
+            "base_path": self.base_path,
+            "output_dir": self.output_dir,
+        }
+
     def close(self) -> None:
         """Close the sandbox."""
         raise NotImplementedError(f"Implementation of close() is not implemented for {self.__class__.__name__}")

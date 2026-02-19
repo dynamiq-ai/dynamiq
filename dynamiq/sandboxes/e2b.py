@@ -53,6 +53,48 @@ class E2BSandbox(Sandbox):
         """Get the current sandbox ID (for saving/reconnecting later)."""
         return self.sandbox_id
 
+    def get_public_host(self, port: int) -> str:
+        """Return the public host for a given port so the sandbox can be reached at https://{host}.
+
+        E2B exposes each sandbox at a URL like https://{port}-{sandbox_id}.e2b.app.
+        Use this when the agent starts a server in the sandbox (e.g. dev server on port 5173)
+        so it can report the URL to the user.
+
+        Args:
+            port: Port number the service listens on inside the sandbox (e.g. 3000, 5173).
+
+        Returns:
+            Host string (e.g. 3000-abc123.e2b.app). Full URL is https://{host}.
+        """
+        self._ensure_sandbox()
+        raw = self._sandbox
+        get_host = getattr(raw, "get_host", None)
+        if callable(get_host):
+            try:
+                return get_host(port)
+            except Exception as e:
+                logger.debug("E2B get_host(port) failed, using URL pattern: %s", e)
+        # Fallback: E2B public URL pattern is https://{port}-{sandbox_id}.{domain}
+        domain = getattr(self.connection, "domain", None) or "e2b.app"
+        return f"{port}-{self.sandbox_id}.{domain}"
+
+    def get_sandbox_info(self, port: int | None = None) -> dict[str, Any]:
+        """Return sandbox metadata including optional public URL for a port."""
+        info: dict[str, Any] = {
+            "base_path": self.base_path,
+            "output_dir": self.output_dir,
+            "sandbox_id": self.sandbox_id,
+        }
+        if port is not None:
+            try:
+                host = self.get_public_host(port)
+                info["public_host"] = host
+                info["public_url"] = f"https://{host}"
+            except Exception as e:
+                logger.debug("get_public_host failed: %s", e)
+                info["public_url_error"] = str(e)
+        return info
+
     def _ensure_sandbox(self) -> E2BDesktopSandbox:
         """Lazily initialize or reconnect to E2B sandbox, with retries on rate-limit and transient errors.
 
@@ -285,16 +327,21 @@ class E2BSandbox(Sandbox):
         """
         from dynamiq.nodes.tools.file_tools import FileReadTool
         from dynamiq.nodes.tools.todo_tools import TodoWriteTool
+        from dynamiq.sandboxes.tools.sandbox_info import SandboxInfoTool
         from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
+        tools: list[Node] = [
+            SandboxShellTool(sandbox=self),
+            SandboxInfoTool(sandbox=self),
+        ]
         if llm is not None:
-            return [
-                SandboxShellTool(sandbox=self),
-                FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, absolute_file_paths_allowed=True),
-                TodoWriteTool(file_store=self),
-            ]
-        else:
-            return [SandboxShellTool(sandbox=self)]
+            tools.extend(
+                [
+                    FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, absolute_file_paths_allowed=True),
+                    TodoWriteTool(file_store=self),
+                ]
+            )
+        return tools
 
     def close(self, kill: bool = False) -> None:
         """Close the E2B sandbox connection.

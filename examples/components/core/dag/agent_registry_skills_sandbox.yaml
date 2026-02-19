@@ -23,10 +23,11 @@ nodes:
     role: |
       You have access to skills (SkillsTool) and a sandbox. For every task you must:
       1. Use SkillsTool with action="list" to see available skills, then action="get" with skill_name="..." to load the skill(s) needed for the deliverable.
-      2. Map deliverables to skills: Word document / .docx → docx; PDF → pdf; PowerPoint / .pptx → pptx; Excel / .xlsx → xlsx; Markdown/HTML conversion or md/html as source or target → md. For a task that produces multiple types, get each relevant skill (e.g. docx, pdf, pptx, xlsx for a full report).
-      3. When get returns "scripts_path", run scripts in the sandbox at that path (e.g. /home/user/skills/docx/scripts/, /home/user/skills/pdf/scripts/, /home/user/skills/pptx/scripts/, /home/user/skills/xlsx/scripts/). Use the sandbox tool for shell or Python. The md skill has no scripts; use pandoc/markitdown from the environment.
+      2. Map deliverables to skills: Word / .docx → docx; PDF → pdf; PowerPoint / .pptx → pptx; Excel / .xlsx → xlsx; Markdown/HTML → md; landing page / web UI / frontend → frontend-design; React/shadcn multi-component artifact → web-artifacts-builder; poster / visual art / canvas → canvas-design. For multiple types, get each relevant skill.
+      3. When get returns "scripts_path", run scripts in the sandbox at that path (e.g. /home/user/skills/docx/scripts/, .../web-artifacts-builder/scripts/). Use the sandbox tool for shell or Python. For web-artifacts-builder use init-artifact.sh and bundle-artifact.sh. The md and frontend-design skills may have no scripts; follow skill instructions.
       4. Write all output files to /home/user/output so they are collected. Uploaded files from the user go to /home/user/input.
-      Skills available: docx (Word), pdf, pptx (PowerPoint), xlsx (Excel), md (Markdown/HTML conversion). Do not mention skills or paths in the user-facing reply; just accomplish the task and save outputs to the output directory.
+      5. Web app / website tasks (e.g. recreate a marketing site like getdynamiq.ai): Use frontend-design for a single-page HTML/CSS/JS site, or web-artifacts-builder for a React/shadcn multi-component app. Include hero, value propositions, feature sections, and footer as appropriate. Output must have a proper structure: use folders and subfolders as needed (e.g. index.html, css/, js/, assets/, images/)—not only a single file. Save the full artifact tree to /home/user/output (all files and folders so they are collected). Optionally also create a zip archive of the artifact (e.g. zip -r artifact.zip . from the project root) and place the zip in /home/user/output for a single downloadable bundle. If the task asks for a "live" or "viewable" link: start the dev server in the background (sandbox shell with run_in_background_enabled=true, e.g. npm run dev or npx vite), then call SandboxInfoTool with that port (e.g. 5173) to get the public URL, and include that URL clearly in your final answer (e.g. "Preview URL: https://..."). Otherwise deliver the static files (and zip if created) for local viewing.
+      Skills available (when registered): docx, pdf, pptx, xlsx, md, frontend-design, web-artifacts-builder, canvas-design. Do not mention skills or paths in the user-facing reply; just accomplish the task and save outputs to the output directory.
     sandbox:
       enabled: true
       backend:
@@ -38,27 +39,37 @@ nodes:
         type: dynamiq.skills.registries.Dynamiq
         connection: dynamiq-api-conn
         sandbox_skills_base_path: "/home/user/skills"
+        # Skill and version IDs from scripts/local_skill_upload_download_test.py (--local-skill-dir .skills/<dir>).
+        # canvas-design: skill id a4943152-5e66-4f38-8415-e69543f9712c created but version upload failed (400 Limit 1048576). Add entry when a version is uploaded.
         skills:
-          - id: "c5463564-52bd-46e7-acf3-2e85e756c369"
-            version_id: "ebbcc5b8-ef09-44ef-9aca-b6b6dd92f02c"
+          - id: "afc2c23a-5cc0-481f-b449-c272848b4f08"
+            version_id: "ed5a7f9a-4a6c-44cd-92d5-6e59a6c1aea7"
             name: docx
             description: Create, read, edit, and manipulate Word documents (.docx); reports, memos, letters, templates; Markdown/HTML to docx via pandoc.
-          - id: "c15156b5-db94-478c-8d86-daf7d4e9be9a"
-            version_id: "b6fc86e4-1088-40ba-9dd4-29c7ed5df266"
+          - id: "edad02ad-4e5b-45b6-b19d-7fcabcdef0f1"
+            version_id: "d6ae58d9-87ed-4106-8e74-850f073a031e"
             name: pdf
             description: PDF creation, form filling, extraction, conversion, and validation; Markdown/HTML to PDF via pandoc or docx→PDF.
-          - id: "c3bd7381-b5c9-4044-b266-a43cf307a3e4"
-            version_id: "a50b2409-c554-4654-b297-4249b4e19570"
+          - id: "aec58f89-c457-4c9d-94bb-ade851303824"
+            version_id: "cde7e1ed-abd6-4a9f-845e-2de7c3562a63"
             name: pptx
             description: Create, edit, and manipulate PowerPoint presentations (.pptx); design and QA rules, scripts for thumbnail, pack, soffice.
-          - id: "ff7deb28-b9bd-4c71-ae2d-30363133493a"
-            version_id: "fa037099-1b8c-4250-9fc4-af839f2d8b4a"
+          - id: "d5dbb2be-880f-491c-8673-6cbe9416bc88"
+            version_id: "a019dd3c-a2c7-49bf-a9ae-cda37bf02d2f"
             name: xlsx
             description: Create, edit, and manipulate Excel spreadsheets (.xlsx); formulas, recalc, dashboard and R-ready rules.
-          - id: "a427c44d-9810-494a-9d53-169c5d35e9ec"
-            version_id: "d69b1436-631d-4c8b-9854-0896b7639820"
+          - id: "b42f4bf0-9ceb-48ad-a76b-47ad00887ab9"
+            version_id: "b073d1a2-e47a-42bc-b268-6ad4a750d152"
             name: md
             description: Markdown and HTML as source or target; convert md/html to or from docx, pdf, pptx using pandoc and markitdown.
+          - id: "d3760c62-85f4-445b-a9d1-233950439cb2"
+            version_id: "c8524465-7f03-4a90-8e53-7fa94e99b289"
+            name: frontend-design
+            description: Create distinctive, production-grade frontend interfaces; web components, pages, dashboards, HTML/CSS/JS or React; avoid generic AI aesthetics.
+          - id: "dbb65cfd-4b28-4a9c-b104-7227bcec2883"
+            version_id: "f141a783-e24c-42a1-a778-091d3ee21d4d"
+            name: web-artifacts-builder
+            description: React + TypeScript + Vite + Tailwind + shadcn/ui artifacts; init-artifact.sh, bundle-artifact.sh for single HTML artifact.
     max_loops: 100
     inference_mode: XML
 

@@ -1,5 +1,6 @@
 """Dynamiq API skill registry."""
 
+import time
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -119,11 +120,18 @@ class Dynamiq(BaseSkillRegistry):
         """Download skill version as a zip archive from the API.
 
         API is assumed to expose GET /v1/skills/{skill_id}/versions/{version_id}/download
-        returning the zip (SKILL.md + scripts/ etc.). Caller should unzip and upload to sandbox.
+        returning the zip (SKILL.md + scripts/ etc.). Full response body is loaded into
+        memory (no streaming). Caller should unzip and upload to sandbox.
         """
-        response = self._request_bytes(
-            "GET",
-            f"/v1/skills/{skill_id}/versions/{version_id}/download",
+        path = f"/v1/skills/{skill_id}/versions/{version_id}/download"
+        t0 = time.perf_counter()
+        response = self._request_bytes("GET", path)
+        duration = time.perf_counter() - t0
+        logger.info(
+            "Skill archive API: GET %s -> response_size=%d bytes, duration=%.2fs",
+            path,
+            len(response),
+            duration,
         )
         return response
 
