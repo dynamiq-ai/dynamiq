@@ -997,7 +997,7 @@ class FileWriteTool(Node):
             **kwargs: Additional keyword arguments forwarded to callbacks.
 
         Returns:
-            Dict with ``content`` (result message), ``file_info``, and ``brief``.
+            Dict with ``content`` (result message) and ``file_info``.
 
         Raises:
             ToolExecutionException: On file I/O errors or failed edit pre-checks.
