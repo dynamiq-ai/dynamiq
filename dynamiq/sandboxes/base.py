@@ -322,6 +322,8 @@ class Sandbox(abc.ABC, BaseModel):
             raw = content.encode("utf-8")
         elif hasattr(content, "read"):
             raw = content.read()
+            if isinstance(raw, str):
+                raw = raw.encode("utf-8")
         else:
             raw = content
 

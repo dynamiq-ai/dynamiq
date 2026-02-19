@@ -1,6 +1,7 @@
 import enum
 import json
 import logging
+import mimetypes
 import os
 import re
 from io import BytesIO
@@ -171,7 +172,7 @@ class FileWriteAction(str, enum.Enum):
 class EditOperation(BaseModel):
     """A single find-and-replace operation."""
 
-    find: str = Field(..., description="Exact string to locate in the file (literal match, no regex).")
+    find: str = Field(..., min_length=1, description="Exact string to locate in the file (literal match, no regex).")
     replace: str = Field(..., description="Replacement string.")
     all: bool = Field(
         default=False,
@@ -182,12 +183,12 @@ class EditOperation(BaseModel):
 class FileWriteInputSchema(BaseModel):
     """Schema for file write input parameters.
 
-    * **write** (default): provide ``content`` to create, overwrite, or append.
+    * **write**: provide ``content`` to create, overwrite, or append.
     * **edit**: provide ``edits`` (find/replace list) for atomic in-place edits.
     """
 
     action: FileWriteAction = Field(
-        default=...,
+        ...,
         description="Operation mode: 'write' to create/overwrite/append a file, "
         "'edit' to perform atomic find-and-replace on an existing file.",
     )
@@ -1040,17 +1041,31 @@ class FileWriteTool(Node):
             )
 
         total = 0
+        skipped: list[str] = []
         for edit in edits:
             occurrences = content.count(edit.find)
             if occurrences == 0:
+                skipped.append(edit.find)
                 continue
             count = occurrences if edit.all else min(1, occurrences)
-            content = content.replace(edit.find, edit.replace, -1 if edit.all else 1)
+            if edit.all:
+                content = content.replace(edit.find, edit.replace)
+            else:
+                content = content.replace(edit.find, edit.replace, 1)
             total += count
 
         payload = content.encode(encoding)
-        file_info = self.file_store.store(path, payload, content_type="text/plain", overwrite=True)
+        content_type = input_data.content_type or mimetypes.guess_type(path)[0] or "text/plain"
+        file_info = self.file_store.store(
+            path, payload, content_type=content_type, metadata=input_data.metadata, overwrite=True
+        )
         summary = f"Applied {len(edits)} edit(s) with {total} replacement(s) to {path}."
+        if skipped:
+            summary += (
+                f" Warning: {len(skipped)} find string(s) were present in the original file "
+                f"but disappeared after a prior edit and were skipped: "
+                f"{[repr(s[:80]) for s in skipped]}."
+            )
         logger.info(f"Tool {self.name} - {self.id}: {summary}")
 
         return {
