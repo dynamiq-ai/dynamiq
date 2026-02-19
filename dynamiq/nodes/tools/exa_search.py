@@ -610,4 +610,4 @@ class ExaTool(ConnectionNode):
 
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
 
-        return {"content": result, "brief": input_data.brief}
+        return {"content": result}

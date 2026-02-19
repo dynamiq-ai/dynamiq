@@ -153,6 +153,11 @@ class FileReadInputSchema(BaseModel):
         default="file",
         description="For PDF-like documents, 'page' keeps content separated per page (with metadata).",
     )
+    brief: str = Field(
+        ...,
+        description="Very brief description of the action being performed. "
+        "Example: 'Read the file report.txt', 'Read the PDF report.pdf.",
+    )
 
     @field_validator("file_path")
     @classmethod
@@ -1049,7 +1054,6 @@ class FileWriteTool(Node):
         return {
             "content": message,
             "file_info": file_info.model_dump(),
-            "brief": input_data.brief,
         }
 
     def _execute_edit(self, input_data: FileWriteInputSchema) -> dict[str, Any]:
@@ -1120,7 +1124,6 @@ class FileWriteTool(Node):
         return {
             "content": f"{summary} Use FileReadTool to view the updated file.",
             "file_info": file_info.model_dump(),
-            "brief": input_data.brief,
         }
 
     def _prepare_content_payload(self, input_data: FileWriteInputSchema) -> tuple[bytes, str]:

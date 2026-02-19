@@ -142,7 +142,6 @@ class SandboxShellTool(Node):
                 "stderr": result.stderr,
                 "exit_code": result.exit_code,
                 "success": is_success,
-                "brief": input_data.brief,
             }
 
             if not is_success:
