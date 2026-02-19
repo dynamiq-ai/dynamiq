@@ -93,6 +93,7 @@ def test_agent_with_sandbox_executes_shell(openai_llm):
     assert "hello" in str(content), f"Expected 'hello' in output, got: {content[:500]}"
 
 
+@pytest.mark.flaky(reruns=3)
 @pytest.mark.integration
 def test_agent_with_e2b_sandbox_executes_shell(openai_llm, e2b_connection):
     """Agent with E2B sandbox runs a simple shell command via sandbox tools; OPENAI_API_KEY and E2B_API_KEY required."""
