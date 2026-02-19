@@ -74,7 +74,6 @@ class E2BSandbox(Sandbox):
                 return get_host(port)
             except Exception as e:
                 logger.debug("E2B get_host(port) failed, using URL pattern: %s", e)
-        # Fallback: E2B public URL pattern is https://{port}-{sandbox_id}.{domain}
         domain = getattr(self.connection, "domain", None) or "e2b.app"
         return f"{port}-{self.sandbox_id}.{domain}"
 

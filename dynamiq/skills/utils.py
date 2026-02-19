@@ -102,7 +102,6 @@ def ingest_skills_into_sandbox(
 
     t_ingestion_start = time.perf_counter()
 
-    # Phase 1a: download all skill zips in parallel.
     logger.info("Ingestion: downloading %d skills in parallel", len(entries_to_ingest))
     download_results: dict[str, tuple[Any, bytes]] = {}  # name -> (entry, zip_bytes)
     max_workers = min(8, len(entries_to_ingest))
@@ -131,7 +130,6 @@ def ingest_skills_into_sandbox(
         download_duration,
     )
 
-    # Phase 1b: upload each zip to sandbox (order preserved for deterministic logs).
     uploaded: list[tuple[str, str, str, int]] = []  # (skill_name, skill_dir, zip_path, file_count)
     for entry in entries_to_ingest:
         _e, zip_bytes = download_results[entry.name]
@@ -156,7 +154,6 @@ def ingest_skills_into_sandbox(
             upload_duration,
         )
 
-    # Phase 2: single shell to unzip all uploaded zips in sandbox (saves N-1 round-trips).
     if uploaded:
         t_unzip_start = time.perf_counter()
         try:
