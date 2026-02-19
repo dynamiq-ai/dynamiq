@@ -1030,7 +1030,7 @@ class FileWriteTool(Node):
         existing file bytes are prepended to the new payload before storing.
 
         Returns:
-            Dict with ``content`` (success message), ``file_info``, and ``brief``.
+            Dict with ``content`` (success message) and ``file_info``.
         """
         payload, inferred_type = self._prepare_content_payload(input_data)
         content_type = input_data.content_type or inferred_type
@@ -1071,8 +1071,8 @@ class FileWriteTool(Node):
            the returned summary so the caller can take corrective action.
 
         Returns:
-            Dict with ``content`` (summary with counts and any warnings),
-            ``file_info``, and ``brief``.
+            Dict with ``content`` (summary with counts and any warnings) and
+            ``file_info``.
 
         Raises:
             ToolExecutionException: when one or more find strings are absent

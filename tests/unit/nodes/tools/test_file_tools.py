@@ -64,7 +64,7 @@ def test_validate_file_path_rejects_dangerous_paths(path, error_match):
 def test_file_read_input_schema_rejects_dangerous_paths(path):
     """FileReadInputSchema should reject path traversal and absolute paths."""
     with pytest.raises(ValueError):
-        FileReadInputSchema(file_path=path)
+        FileReadInputSchema(file_path=path, brief="Read file")
 
 
 @pytest.mark.parametrize(
@@ -83,7 +83,7 @@ def test_file_write_input_schema_rejects_dangerous_paths(path):
 
 def test_file_read_input_schema_valid_path_is_accepted():
     """Valid relative paths should be accepted."""
-    schema = FileReadInputSchema(file_path="documents/report.pdf")
+    schema = FileReadInputSchema(file_path="documents/report.pdf", brief="Read report")
     assert schema.file_path == "documents/report.pdf"
 
 
@@ -124,7 +124,7 @@ def test_file_read_tool(file_store, sample_file_path, llm_model):
     file_store.store(sample_file_path, test_content)
 
     # Test successful read
-    input_data = {"file_path": sample_file_path}
+    input_data = {"file_path": sample_file_path, "brief": "Read test file"}
     result = tool.run(input_data)
 
     assert isinstance(result, RunnableResult)
@@ -234,7 +234,7 @@ def test_file_tools_integration(file_store, llm_model):
     assert write_result.status == RunnableStatus.SUCCESS
 
     # Read file
-    read_input = {"file_path": "test/integration.txt"}
+    read_input = {"file_path": "test/integration.txt", "brief": "Read integration file"}
     read_result = read_tool.run(read_input)
     assert read_result.status == RunnableStatus.SUCCESS
     assert read_result.output["content"] == "Integration test content"
@@ -244,7 +244,7 @@ def test_file_tools_integration(file_store, llm_model):
     storage2.store("test.txt", "Content from storage 2")
 
     read_tool2 = FileReadTool(file_store=storage2, llm=llm_model)
-    input_data = {"file_path": "test.txt"}
+    input_data = {"file_path": "test.txt", "brief": "Read from storage 2"}
 
     result2 = read_tool2.run(input_data)
     assert result2.output["content"] == "Content from storage 2"
@@ -261,7 +261,7 @@ def test_file_read_tool_appends_hint_for_non_text(monkeypatch, file_store, llm_m
     monkeypatch.setattr(tool, "_process_file_with_converter", lambda *args, **kwargs: ("Converted PDF text", None))
     monkeypatch.setattr(tool, "_persist_extracted_text", lambda *args, **kwargs: cache_path)
 
-    result = tool.run({"file_path": file_path})
+    result = tool.run({"file_path": file_path, "brief": "Read PDF"})
 
     assert result.status == RunnableStatus.SUCCESS
     assert result.output["cached_text_path"] == cache_path
@@ -291,7 +291,7 @@ def test_file_read_tool_limits_spreadsheet_preview(file_store, llm_model):
     buffer.seek(0)
     file_store.store("data/transactions.xlsx", buffer.getvalue())
 
-    result = tool.run({"file_path": "data/transactions.xlsx"})
+    result = tool.run({"file_path": "data/transactions.xlsx", "brief": "Read spreadsheet"})
 
     assert result.status == RunnableStatus.SUCCESS
     content = result.output["content"]
@@ -322,12 +322,12 @@ def test_file_read_tool_with_sandbox_like_backend(llm_model):
     tool = FileReadTool(file_store=sandbox, llm=llm_model, absolute_file_paths_allowed=True)
 
     # Relative path
-    result = tool.run({"file_path": "notes/readme.txt"})
+    result = tool.run({"file_path": "notes/readme.txt", "brief": "Read readme"})
     assert result.status == RunnableStatus.SUCCESS
     assert result.output["content"] == "sandbox text content"
 
     # Absolute path — allowed via absolute_file_paths_allowed=True
-    result = tool.run({"file_path": "/home/user/scores.csv"})
+    result = tool.run({"file_path": "/home/user/scores.csv", "brief": "Read scores"})
     assert result.status == RunnableStatus.SUCCESS
     assert "Alice" in result.output["content"]
 
@@ -357,7 +357,6 @@ def test_edit_sequential_and_replace_all(file_store):
     assert result.status == RunnableStatus.SUCCESS
     assert file_store.retrieve("cfg.ini") == b"host=0.0.0.0\nport=bar\nlog=bar\n"
     assert "2 of 2 edit(s)" in result.output["content"]
-    assert result.output["brief"] == "Update host and replace foo"
 
 
 def test_edit_find_not_found_aborts(file_store):
