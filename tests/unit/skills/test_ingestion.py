@@ -8,7 +8,7 @@ import pytest
 
 from dynamiq.skills.registries.dynamiq import Dynamiq, DynamiqSkillEntry
 from dynamiq.skills.types import SkillRegistryError
-from dynamiq.skills.utils import _upload_zip_to_sandbox, ingest_skills_into_sandbox
+from dynamiq.skills.utils import ingest_skills_into_sandbox
 
 
 def _make_zip(files: dict[str, bytes]) -> bytes:
@@ -182,45 +182,28 @@ class TestIngestSkillsIntoSandbox:
             with pytest.raises(SkillRegistryError, match="Failed to unzip skills in sandbox"):
                 ingest_skills_into_sandbox(sandbox, registry)
 
-
-class TestUploadZipToSandbox:
-    """Tests for _upload_zip_to_sandbox (path handling and zip extraction)."""
-
-    def test_uploads_zip_and_runs_unzip_in_sandbox(self):
-        """One zip is uploaded, then unzip is run in sandbox (fast path)."""
-        zip_bytes = _make_zip(
-            {
-                "scripts/run.py": b"#!/usr/bin/env python",
-                "scripts/utils/helper.py": b"def help(): pass",
-            }
-        )
-        sandbox = MagicMock()
-        count = _upload_zip_to_sandbox(sandbox, zip_bytes, "/home/user/skills", "my-skill")
-
-        assert count == 2
-        assert sandbox.upload_file.call_count == 1
-        assert sandbox.upload_file.call_args[1]["destination_path"] == "/home/user/skills/my-skill/skill.zip"
-        unzip_cmd = sandbox.run_command_shell.call_args[0][0]
-        assert "unzip" in unzip_cmd
-        assert "/home/user/skills/my-skill/skill.zip" in unzip_cmd
-        assert "/home/user/skills/my-skill" in unzip_cmd
-
     def test_skips_directories_in_zip(self):
-        """Zip directory entries are excluded from sanitized zip; one zip uploaded."""
+        """Zip directory entries are excluded from uploaded skill.zip (_upload_zip_only sanitization)."""
         buf = BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("scripts/", b"")  # directory
             zf.writestr("scripts/run.py", b"code")
         zip_bytes = buf.getvalue()
         sandbox = MagicMock()
-        count = _upload_zip_to_sandbox(sandbox, zip_bytes, "/base", "s1")
-        assert count == 1
+        sandbox.base_path = "/home/user"
+        registry = Dynamiq.model_construct(
+            connection=MagicMock(),
+            skills=[DynamiqSkillEntry(id="id1", version_id="v1", name="s1", description=None)],
+        )
+        with patch("dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive", return_value=zip_bytes):
+            ingest_skills_into_sandbox(sandbox, registry)
         assert sandbox.upload_file.call_count == 1
-        assert sandbox.upload_file.call_args[1]["destination_path"] == "/base/s1/skill.zip"
-        assert "unzip" in sandbox.run_command_shell.call_args[0][0]
+        uploaded_content = sandbox.upload_file.call_args[0][1]
+        with zipfile.ZipFile(BytesIO(uploaded_content), "r") as zf:
+            assert zf.namelist() == ["scripts/run.py"]
 
-    def test_skips_path_traversal_and_absolute_names(self):
-        """Sanitized zip contains only safe entries (no .. or leading /)."""
+    def test_skips_path_traversal_and_absolute_names_in_zip(self):
+        """Uploaded skill.zip contains only safe entries (no .. or leading /)."""
         zip_bytes = _make_zip(
             {
                 "normal.txt": b"ok",
@@ -230,38 +213,13 @@ class TestUploadZipToSandbox:
             }
         )
         sandbox = MagicMock()
-        count = _upload_zip_to_sandbox(sandbox, zip_bytes, "/base", "s1")
-        assert count == 1
-        assert sandbox.upload_file.call_count == 1
-        # Uploaded zip must contain only normal.txt (sanitized).
+        sandbox.base_path = "/home/user"
+        registry = Dynamiq.model_construct(
+            connection=MagicMock(),
+            skills=[DynamiqSkillEntry(id="id1", version_id="v1", name="s1", description=None)],
+        )
+        with patch("dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive", return_value=zip_bytes):
+            ingest_skills_into_sandbox(sandbox, registry)
         uploaded_content = sandbox.upload_file.call_args[0][1]
         with zipfile.ZipFile(BytesIO(uploaded_content), "r") as zf:
-            names = zf.namelist()
-        assert names == ["normal.txt"]
-        assert "unzip" in sandbox.run_command_shell.call_args[0][0]
-
-    def test_returns_file_count(self):
-        """_upload_zip_to_sandbox returns the number of files in the zip; uploads one zip and runs unzip."""
-        zip_bytes = _make_zip({"a": b"1", "b/c": b"2"})
-        sandbox = MagicMock()
-        count = _upload_zip_to_sandbox(sandbox, zip_bytes, "/home/skills", "my-skill")
-        assert count == 2
-        assert sandbox.upload_file.call_count == 1
-        assert "unzip" in sandbox.run_command_shell.call_args[0][0]
-
-    def test_fallback_to_per_file_when_unzip_fails(self):
-        """When unzip returns non-zero exit_code, fall back to per-file upload."""
-        zip_bytes = _make_zip({"scripts/run.py": b"code", "SKILL.md": b"# Skill"})
-        sandbox = MagicMock()
-        # First call: unzip (exit_code=1); second: rm cleanup. Use simple objects to avoid pulling in e2b_desktop.
-        fail_result = MagicMock(stdout="", stderr="unzip: command not found", exit_code=1)
-        ok_result = MagicMock(stdout="", stderr="", exit_code=0)
-        sandbox.run_command_shell.side_effect = [fail_result, ok_result]
-        count = _upload_zip_to_sandbox(sandbox, zip_bytes, "/base", "s1")
-        assert count == 2
-        # One zip upload, then per-file fallback: 1 + 2 = 3 upload_file calls.
-        assert sandbox.upload_file.call_count == 3
-        paths = [c[1]["destination_path"] for c in sandbox.upload_file.call_args_list]
-        assert "/base/s1/skill.zip" in paths
-        assert "/base/s1/scripts/run.py" in paths
-        assert "/base/s1/SKILL.md" in paths
+            assert zf.namelist() == ["normal.txt"]
