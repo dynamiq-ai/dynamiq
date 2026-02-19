@@ -8,6 +8,7 @@ from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.node import Node
 from dynamiq.nodes.tools.file_tools import (
     EXTRACTED_TEXT_SUFFIX,
+    EditOperation,
     FileListTool,
     FileReadInputSchema,
     FileReadTool,
@@ -329,3 +330,84 @@ def test_file_read_tool_with_sandbox_like_backend(llm_model):
     result = tool.run({"file_path": "/home/user/scores.csv"})
     assert result.status == RunnableStatus.SUCCESS
     assert "Alice" in result.output["content"]
+
+
+# ---------------------------------------------------------------------------
+# FileWriteTool – edit mode tests
+# ---------------------------------------------------------------------------
+
+
+def test_edit_sequential_and_replace_all(file_store):
+    """Multiple edits applied in order; all=True replaces every occurrence."""
+    file_store.store("cfg.ini", b"host=localhost\nport=foo\nlog=foo\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "cfg.ini",
+            "edits": [
+                {"find": "localhost", "replace": "0.0.0.0"},
+                {"find": "foo", "replace": "bar", "all": True},
+            ],
+            "brief": "Update host and replace foo",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("cfg.ini") == b"host=0.0.0.0\nport=bar\nlog=bar\n"
+    assert "2 of 2 edit(s)" in result.output["content"]
+    assert result.output["brief"] == "Update host and replace foo"
+
+
+def test_edit_find_not_found_aborts(file_store):
+    """If a find string doesn't exist in the original file, abort with no changes."""
+    file_store.store("readme.md", b"# Title\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "readme.md",
+            "edits": [{"find": "NONEXISTENT", "replace": "X"}],
+            "brief": "Try to edit missing text",
+        }
+    )
+
+    assert result.status == RunnableStatus.FAILURE
+    assert file_store.retrieve("readme.md") == b"# Title\n"
+
+
+def test_edit_prior_edit_removes_later_find_skips_with_warning(file_store):
+    """When an earlier edit consumes text a later edit targets, it is skipped with a warning."""
+    file_store.store("code.py", b"old_func()\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "code.py",
+            "edits": [
+                {"find": "old_func()", "replace": "new_func()"},
+                {"find": "old_func()", "replace": "another_func()"},
+            ],
+            "brief": "Rename with conflict",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("code.py") == b"new_func()\n"
+    assert "1 of 2 edit(s)" in result.output["content"]
+    assert "Warning" in result.output["content"]
+
+
+def test_edit_validation_rejects_invalid_inputs():
+    """Empty find string, edit without edits list, and write without content are rejected."""
+    with pytest.raises(ValueError):
+        EditOperation(find="", replace="x")
+
+    with pytest.raises(ValueError):
+        FileWriteInputSchema(action="edit", file_path="t.txt", brief="no edits")
+
+    with pytest.raises(ValueError):
+        FileWriteInputSchema(action="write", file_path="t.txt", brief="no content")

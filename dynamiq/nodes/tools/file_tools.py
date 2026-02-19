@@ -1059,7 +1059,8 @@ class FileWriteTool(Node):
         file_info = self.file_store.store(
             path, payload, content_type=content_type, metadata=input_data.metadata, overwrite=True
         )
-        summary = f"Applied {len(edits)} edit(s) with {total} replacement(s) to {path}."
+        applied = len(edits) - len(skipped)
+        summary = f"Applied {applied} of {len(edits)} edit(s) with {total} replacement(s) to {path}."
         if skipped:
             summary += (
                 f" Warning: {len(skipped)} find string(s) were present in the original file "
