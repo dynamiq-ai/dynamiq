@@ -7,6 +7,7 @@ from pydantic import Field
 
 from dynamiq import Workflow
 from dynamiq.callbacks.tracing import TracingCallbackHandler
+from dynamiq.connections import E2B as E2BConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes import Node
@@ -56,12 +57,9 @@ def openai_llm():
 
 @pytest.fixture(scope="module")
 def e2b_connection():
-    """E2B connection from E2B_API_KEY"""
+    """E2B connection from E2B_API_KEY."""
     pytest.importorskip("e2b_desktop")
-    from dynamiq.connections import E2B
-
-    api_key = os.environ.get("E2B_API_KEY")
-    return E2B(api_key=api_key)
+    return E2BConnection()
 
 
 @pytest.mark.integration
@@ -97,11 +95,13 @@ def test_agent_with_sandbox_executes_shell(openai_llm):
 @pytest.mark.integration
 def test_agent_with_e2b_sandbox_executes_shell(openai_llm, e2b_connection):
     """Agent with E2B sandbox runs a simple shell command via sandbox tools; OPENAI_API_KEY and E2B_API_KEY required."""
+    if not os.getenv("E2B_API_KEY"):
+        pytest.skip("E2B_API_KEY is not set; skipping credentials-required test.")
+
     from dynamiq.sandboxes.e2b import E2BSandbox
 
     sandbox = E2BSandbox(connection=e2b_connection, timeout=300)
     try:
-
         tracing_callback = TracingCallbackHandler()
         config = RunnableConfig(callbacks=[tracing_callback])
         agent = Agent(
