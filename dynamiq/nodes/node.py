@@ -18,7 +18,7 @@ from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingCallbackHandler
 from dynamiq.connections import BaseConnection
 from dynamiq.connections.managers import ConnectionManager, ConnectionManagerException
-from dynamiq.executors.pool import ContextAwareThreadPoolExecutor
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.nodes.exceptions import (
     NodeConditionFailedException,

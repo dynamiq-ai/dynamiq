@@ -13,7 +13,7 @@ from mcp import ClientSession
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from dynamiq.connections import MCPSse, MCPStdio, MCPStreamableHTTP
-from dynamiq.executors.pool import ContextAwareThreadPoolExecutor
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config

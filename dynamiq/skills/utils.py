@@ -4,7 +4,7 @@ from concurrent.futures import as_completed
 from io import BytesIO
 from typing import TYPE_CHECKING
 
-from dynamiq.executors.pool import ContextAwareThreadPoolExecutor
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.skills.types import SkillRegistryError
 from dynamiq.utils.logger import logger
 

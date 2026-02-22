@@ -6,7 +6,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 import dynamiq.utils.jsonpath as jsonpath
-from dynamiq.executors.pool import ContextAwareThreadPoolExecutor
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes import Behavior, Node, NodeGroup
 from dynamiq.nodes.node import Transformer, ensure_config
 from dynamiq.nodes.types import ChoiceCondition, ConditionOperator

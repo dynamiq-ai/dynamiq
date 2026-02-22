@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from dynamiq.components.converters.utils import get_filename_for_bytesio
-from dynamiq.executors.pool import ContextAwareThreadPoolExecutor
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 
 if TYPE_CHECKING:
     from PIL import Image

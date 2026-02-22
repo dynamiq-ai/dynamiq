@@ -3,7 +3,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, Field
 
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.executors.pool import ContextAwareThreadPoolExecutor
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.node import Node, NodeDependency, NodeGroup, ensure_config
 from dynamiq.prompts import prompts
 from dynamiq.runnables import RunnableConfig, RunnableStatus
