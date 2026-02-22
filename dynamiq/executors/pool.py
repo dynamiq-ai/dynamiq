@@ -1,5 +1,7 @@
+import contextvars
 import os
 from concurrent import futures
+from concurrent.futures import ThreadPoolExecutor
 
 import jsonpickle
 
@@ -11,6 +13,23 @@ from dynamiq.utils.logger import logger
 
 MAX_WORKERS_THREAD_POOL_EXECUTOR = 8
 MAX_WORKERS_PROCESS_POOL_EXECUTOR = os.cpu_count()
+
+
+class ContextAwareThreadPoolExecutor(ThreadPoolExecutor):
+    """ThreadPoolExecutor that automatically propagates contextvars to worker threads.
+
+    Standard ThreadPoolExecutor does not copy the calling thread's contextvars
+    into worker threads, causing context (e.g. request_id, tracing metadata)
+    to be lost. This subclass captures a snapshot via copy_context() before
+    each submit and runs the callable inside that snapshot.
+
+    Since ThreadPoolExecutor.map() delegates to submit(), both submit() and
+    map() are covered automatically.
+    """
+
+    def submit(self, fn, /, *args, **kwargs):
+        ctx = contextvars.copy_context()
+        return super().submit(ctx.run, fn, *args, **kwargs)
 
 
 class PoolExecutor(BaseExecutor):
@@ -148,9 +167,7 @@ class ThreadExecutor(PoolExecutor):
 
     def __init__(self, max_workers: int | None = None):
         max_workers = max_workers or MAX_WORKERS_THREAD_POOL_EXECUTOR
-        super().__init__(
-            pool_executor=futures.ThreadPoolExecutor, max_workers=max_workers
-        )
+        super().__init__(pool_executor=ContextAwareThreadPoolExecutor, max_workers=max_workers)
 
 
 class ProcessExecutor(PoolExecutor):

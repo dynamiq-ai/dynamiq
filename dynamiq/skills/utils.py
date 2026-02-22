@@ -1,9 +1,10 @@
 import shlex
 import zipfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from io import BytesIO
 from typing import TYPE_CHECKING
 
+from dynamiq.executors.pool import ContextAwareThreadPoolExecutor
 from dynamiq.skills.types import SkillRegistryError
 from dynamiq.utils.logger import logger
 
@@ -119,7 +120,7 @@ def ingest_skills_into_sandbox(
     uploaded: list[tuple[str, str, str, int]] = []
     ingested: list[str] = []
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+    with ContextAwareThreadPoolExecutor(max_workers=workers) as executor:
         future_to_entry = {
             executor.submit(_download_and_upload_one, registry, sandbox, base, e): e for e in entries_to_ingest
         }

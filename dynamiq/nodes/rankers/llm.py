@@ -1,9 +1,9 @@
-import concurrent.futures
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
 from dynamiq.connections.managers import ConnectionManager
+from dynamiq.executors.pool import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.node import Node, NodeDependency, NodeGroup, ensure_config
 from dynamiq.prompts import prompts
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -197,12 +197,10 @@ class LLMDocumentRanker(Node):
             messages=[prompts.Message(role="user", content=self.prompt_template)]
         )
 
-        with concurrent.futures.ThreadPoolExecutor() as executor:
+        with ContextAwareThreadPoolExecutor() as executor:
             llm_results = list(
                 executor.map(
-                    lambda input_data: self.call_llm(
-                        input_data, prompt, config, **run_kwargs
-                    ),
+                    lambda input_data: self.call_llm(input_data, prompt, config, **run_kwargs),
                     inputs,
                 )
             )

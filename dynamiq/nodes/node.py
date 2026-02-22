@@ -3,7 +3,7 @@ import copy
 import inspect
 import time
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from concurrent.futures import TimeoutError
 from datetime import datetime
 from functools import cached_property
 from queue import Empty
@@ -18,6 +18,7 @@ from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingCallbackHandler
 from dynamiq.connections import BaseConnection
 from dynamiq.connections.managers import ConnectionManager, ConnectionManagerException
+from dynamiq.executors.pool import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.nodes.exceptions import (
     NodeConditionFailedException,
@@ -984,7 +985,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
         try:
             if timeout is not None:
-                executor = ThreadPoolExecutor()
+                executor = ContextAwareThreadPoolExecutor()
 
             for attempt in range(n_attempt):
                 merged_kwargs = merge(kwargs, {"execution_run_id": uuid4()})
@@ -1048,7 +1049,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
     def execute_with_timeout(
         self,
-        executor: ThreadPoolExecutor,
+        executor: ContextAwareThreadPoolExecutor,
         timeout: float | None,
         input_data: dict[str, Any] | BaseModel,
         config: RunnableConfig = None,
@@ -1058,7 +1059,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         Execute the node with a timeout.
 
         Args:
-            executor (ThreadPoolExecutor): Thread pool executor to use.
+            executor (ContextAwareThreadPoolExecutor): Thread pool executor to use.
             timeout (float | None): Timeout duration in seconds.
             input_data (dict[str, Any]): Input data for the node.
             config (RunnableConfig, optional): Configuration for the runnable.

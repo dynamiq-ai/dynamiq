@@ -1,5 +1,4 @@
 import base64
-import concurrent.futures
 import copy
 import enum
 from io import BytesIO
@@ -9,6 +8,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from dynamiq.components.converters.utils import get_filename_for_bytesio
+from dynamiq.executors.pool import ContextAwareThreadPoolExecutor
 
 if TYPE_CHECKING:
     from PIL import Image
@@ -344,12 +344,10 @@ class LLMImageConverter(Node):
 
         prompt = self.vision_prompt
 
-        with concurrent.futures.ThreadPoolExecutor() as executor:
+        with ContextAwareThreadPoolExecutor() as executor:
             llm_results = list(
                 executor.map(
-                    lambda input_data: self.call_llm(
-                        input_data, prompt, config, **run_kwargs
-                    ),
+                    lambda input_data: self.call_llm(input_data, prompt, config, **run_kwargs),
                     inputs,
                 )
             )
