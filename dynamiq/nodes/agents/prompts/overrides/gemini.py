@@ -11,13 +11,13 @@ Action Input: [JSON input for the tool]
 After each action, you'll receive:
 Observation: [Result from the tool]
 
-When you have enough information to provide a final answer:
+When you have enough information to provide a final answer, use the message tool:
 Thought: [Your reasoning for the final answer]
-Answer: [Your complete answer to the user's question]
+Action: message
+Action Input: {"type": "answer", "answer": "[Your complete answer to the user's question]"}
 
-For questions that don't require tools:
-Thought: [Your reasoning about the question]
-Answer: [Your direct response]
+If files were generated and should be returned, include their paths:
+Action Input: {"type": "answer", "answer": "[Your answer]", "files": ["/path/to/file1", "/path/to/file2"]}
 
 ADVANCED REASONING:
 Before acting, reason through:
@@ -39,7 +39,7 @@ IMPORTANT RULES:
 - Never use markdown code blocks (```) around your JSON
 - JSON must be properly formatted with correct commas and brackets
 - Only use tools from the provided list
-- If you can answer directly, use only Thought followed by Answer
+- Always use the message tool to deliver your final answer — never output a bare Answer
 - Some tools are other agents. When calling an agent tool, provide JSON matching that agent's inputs; at minimum include {"input": "your subtask"}. Keep action_input to inputs only (no reasoning).
 - Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
@@ -47,7 +47,7 @@ IMPORTANT RULES:
 
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
-- Files are automatically collected and will be returned with your final answer
+- To return files, list their paths in the message tool's "files" parameter
 - Mention created files in your final answer so users know what was generated
 """  # noqa: E501
 
@@ -68,24 +68,30 @@ REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in you
 After each action, you'll receive:
 Observation: [Result from the tool]
 
-When you have enough information to provide a final answer:
+When you have enough information to provide a final answer, use the message tool:
 <output>
     <thought>
         [Your reasoning for the final answer]
     </thought>
-    <answer>
-        [Your complete answer to the user's question]
-    </answer>
+    <action>
+        message
+    </action>
+    <action_input>
+        {"type": "answer", "answer": "[Your complete answer to the user's question]"}
+    </action_input>
 </output>
 
-For questions that don't require tools:
+If files were generated and should be returned, include their paths:
 <output>
     <thought>
-        [Your reasoning about the question]
+        [Your reasoning for the final answer]
     </thought>
-    <answer>
-        [Your direct response]
-    </answer>
+    <action>
+        message
+    </action>
+    <action_input>
+        {"type": "answer", "answer": "[Your answer]", "files": ["/path/to/file1", "/path/to/file2"]}
+    </action_input>
 </output>
 
 ADVANCED REASONING:
@@ -102,17 +108,17 @@ CRITICAL XML FORMAT RULES:
 - Start the text immediately after each opening tag; do not add leading newlines or indentation inside the tags
 - Write thoughts in the first person (e.g., "I will...", "I should...")
 - Explain why this specific tool is the right choice
-- For tool use, include action and action_input tags
-- For direct answers, only include thought and answer tags
+- Always use action and action_input tags — including for your final answer via the message tool
+- Always use the message tool to deliver your final answer — never output bare <answer> tags
 - Tool names go as PLAIN TEXT inside <action> tags, NOT as XML tags.
 - JSON in <action_input> MUST be on single line with proper escaping
 - NO line breaks or control characters inside JSON strings
 - Use double quotes for JSON strings
 - Escape special characters in JSON (\\n for newlines, \\" for quotes)
 - Properly close all XML tags
-- For all tags other than <answer>, text content should ideally be XML-escaped
-- Special characters like & should be escaped as &amp; in <thought> and other tags, but can be used directly in <answer>
-- Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
+- For all tags, text content should ideally be XML-escaped
+- Special characters like & should be escaped as &amp; in <thought> and other tags
+- Do not use markdown formatting (like ```) inside XML tags
 - You may receive "Observation (shortened)" indicating that tool output was truncated
 - Some tools are other agents. When you choose an agent tool, the <action_input> must match the agent's inputs; minimally include {"input": "your subtask"}. Keep only inputs inside <action_input>.
 - Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.
@@ -127,7 +133,7 @@ JSON FORMATTING REQUIREMENTS:
 
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
-- Generated files are automatically collected and returned with your final answer
-- File operations are handled transparently - focus on the task, not file management
+- To return files, list their paths in the message tool's "files" parameter
+- Mention created files in your final answer so users know what was generated
 
 """  # noqa: E501

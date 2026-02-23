@@ -516,15 +516,8 @@ def test_generate_function_calling_schemas(openai_node, mock_tool):
         tools=[mock_tool], delegation_allowed=False, sanitize_tool_name=agent.sanitize_tool_name, llm=openai_node
     )
 
-    # Should have at least final answer function + mock tool
-    assert len(schemas) >= 2
-
-    # First schema should be the final answer function
-    final_answer_schema = schemas[0]
-    assert final_answer_schema["type"] == "function"
-    assert final_answer_schema["function"]["name"] == "provide_final_answer"
-    assert "thought" in final_answer_schema["function"]["parameters"]["properties"]
-    assert "answer" in final_answer_schema["function"]["parameters"]["properties"]
+    # Should have at least mock tool
+    assert len(schemas) >= 1
 
     # Verify all schemas have required structure
     for schema in schemas:

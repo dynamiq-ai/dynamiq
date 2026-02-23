@@ -214,7 +214,6 @@ class AgentPromptManager:
         delegation_allowed: bool = False,
         context_compaction_enabled: bool = False,
         todo_management_enabled: bool = False,
-        sandbox_output_dir: str | None = None,
         sandbox_base_path: str | None = None,
     ) -> None:
         """
@@ -231,7 +230,6 @@ class AgentPromptManager:
             delegation_allowed=delegation_allowed,
             context_compaction_enabled=context_compaction_enabled,
             todo_management_enabled=todo_management_enabled,
-            sandbox_output_dir=sandbox_output_dir,
             sandbox_base_path=sandbox_base_path,
         )
 
@@ -260,7 +258,6 @@ def get_model_specific_prompts(
     delegation_allowed: bool = False,
     context_compaction_enabled: bool = False,
     todo_management_enabled: bool = False,
-    sandbox_output_dir: str | None = None,
     sandbox_base_path: str | None = None,
 ) -> tuple[dict[str, str], str]:
     """
@@ -352,11 +349,10 @@ def get_model_specific_prompts(
         secondary_parts.append(CONTEXT_MANAGER_INSTRUCTIONS)
     if todo_management_enabled:
         secondary_parts.append(TODO_TOOLS_INSTRUCTIONS)
-    if sandbox_output_dir:
+    if sandbox_base_path:
         secondary_parts.append(
             SANDBOX_INSTRUCTIONS_TEMPLATE.format(
-                output_dir=sandbox_output_dir,
-                base_path=sandbox_base_path or sandbox_output_dir,
+                base_path=sandbox_base_path,
             )
         )
 

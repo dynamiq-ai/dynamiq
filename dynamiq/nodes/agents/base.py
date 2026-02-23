@@ -30,6 +30,7 @@ from dynamiq.nodes.tools.file_tools import (
     FileWriteTool,
 )
 from dynamiq.nodes.tools.mcp import MCPServer
+from dynamiq.nodes.tools.message_tool import MessageTool, MessageToolOutput
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
@@ -330,6 +331,10 @@ class Agent(Node):
             self.tools = [t for t in self.tools if t.name != PARALLEL_TOOL_NAME]
             self.tools.append(ParallelToolCallsTool())
 
+        # Always add MessageTool for unified final answer delivery
+        self.tools = [t for t in self.tools if not isinstance(t, MessageTool)]
+        self.tools.append(MessageTool())
+
         if self._skills_should_init():
             self._init_skills()
         self._init_prompt_blocks()
@@ -617,11 +622,18 @@ class Agent(Node):
         finally:
             self._current_call_context = None
 
+        if isinstance(result, MessageToolOutput):
+            answer = result.answer
+            file_paths = result.files
+        else:
+            answer = result
+            file_paths = []
+
         if use_memory:
-            self.memory.add(role=MessageRole.ASSISTANT, content=result, metadata=custom_metadata)
+            self.memory.add(role=MessageRole.ASSISTANT, content=answer, metadata=custom_metadata)
 
         execution_result = {
-            "content": result,
+            "content": answer,
         }
 
         if self.file_store_backend and not self.file_store_backend.is_empty():
@@ -633,8 +645,8 @@ class Agent(Node):
                     f"Agent {self.name} - {self.id}: returning {len(filtered_files)} generated file(s) in file store"
                 )
 
-        if self.sandbox_backend:
-            sandbox_files = self._collect_files_from_sandbox()
+        if self.sandbox_backend and file_paths:
+            sandbox_files = self.sandbox_backend.collect_files(file_paths=file_paths)
             if sandbox_files:
                 existing_files = execution_result.get("files", [])
                 execution_result["files"] = existing_files + sandbox_files
@@ -642,7 +654,7 @@ class Agent(Node):
                     f"Agent {self.name} - {self.id}: returning {len(sandbox_files)} generated file(s) from sandbox"
                 )
 
-        logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
+        logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(answer)[:200]}...")
 
         return execution_result
 
@@ -872,8 +884,9 @@ class Agent(Node):
         try:
             tool_copy = self._regenerate_node_ids(tool.clone())
         except Exception as e:
-            logger.warning(f"Agent {self.name} - {self.id}: failed to clone tool {tool.name}: {e}")
-            return tool, base_config
+            error_message = f"Failed to clone tool '{tool.name}': {e}"
+            logger.warning(f"Agent {self.name} - {self.id}: {error_message}")
+            raise ToolExecutionException({error_message}, recoverable=True)
 
         local_config = base_config
         try:
@@ -1237,23 +1250,6 @@ class Agent(Node):
             if (not uploaded_names) or (base_name in uploaded_names):
                 return True
         return False
-
-    def _collect_files_from_sandbox(self) -> list[io.BytesIO]:
-        """Collect output files from the sandbox backend.
-
-        Downloads all files from the sandbox output directory.
-
-        Returns:
-            List of BytesIO objects with name, description, and content_type attributes.
-        """
-        if not self.sandbox_backend:
-            return []
-
-        try:
-            return self.sandbox_backend.collect_output_files()
-        except Exception as e:
-            logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from sandbox: {e}")
-            return []
 
     def _upload_files_to_sandbox(self, normalized_files: list) -> None:
         """Upload file-like objects to the sandbox backend."""

@@ -8,7 +8,7 @@ from pydantic import Field, create_model
 from dynamiq import connections
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools import FileListTool, FileReadTool
+from dynamiq.nodes.tools import FileListTool, FileReadTool, MessageTool
 from dynamiq.nodes.tools.mcp import MCPServer, MCPSse, MCPTool
 
 
@@ -201,7 +201,7 @@ def test_agent_integration_with_mcp_tools(sse_server_connection, mock_mcp_tools,
 
     agent = Agent(llm=llm_model, tools=[mcp_server, mcp_tool])
 
-    agent_tools = [tool for tool in agent.tools if not isinstance(tool, (FileReadTool, FileListTool))]
+    agent_tools = [tool for tool in agent.tools if not isinstance(tool, (FileReadTool, FileListTool, MessageTool))]
     expected_tools = [
         {"name": "add", "description": "Add two numbers", "schema": {("a", "int"), ("b", "int")}},
         {"name": "multiply", "description": "Multiply two numbers", "schema": {("a", "float"), ("b", "float")}},
@@ -216,7 +216,12 @@ def test_agent_integration_with_mcp_tools(sse_server_connection, mock_mcp_tools,
     dict_tools = [
         tool
         for tool in agent.to_dict()["tools"]
-        if tool["type"] not in ["dynamiq.nodes.tools.FileReadTool", "dynamiq.nodes.tools.FileListTool"]
+        if tool["type"]
+        not in [
+            "dynamiq.nodes.tools.FileReadTool",
+            "dynamiq.nodes.tools.FileListTool",
+            "dynamiq.nodes.tools.MessageTool",
+        ]
     ]
     assert len(dict_tools) == 2
     assert dict_tools[0]["name"] == "subtract"

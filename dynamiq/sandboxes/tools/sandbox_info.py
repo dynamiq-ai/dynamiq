@@ -42,7 +42,7 @@ class SandboxInfoTool(Node):
         "public_host and public_url (https) so the user can open the app in a browser.\n\n"
         "Examples:\n"
         '- {"port": 5173}  → get sandbox info and public URL for port 5173 (Vite default)\n'
-        "- {}  → get base_path, output_dir, sandbox_id only"
+        "- {}  → get base_path, sandbox_id only"
     )
 
     sandbox: Sandbox = Field(..., description="Sandbox backend to query.")
@@ -94,7 +94,6 @@ class SandboxInfoTool(Node):
 
         lines = [
             f"base_path: {info.base_path}",
-            f"output_dir: {info.output_dir}",
         ]
         if info.sandbox_id:
             lines.append(f"sandbox_id: {info.sandbox_id}")

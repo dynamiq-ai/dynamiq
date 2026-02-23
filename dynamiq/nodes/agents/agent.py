@@ -15,12 +15,12 @@ from dynamiq.nodes.agents.exceptions import (
     MaxLoopsExceededException,
     ParsingError,
     RecoverableAgentException,
-    TagNotFoundError,
 )
 from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CONTEXT
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
+from dynamiq.nodes.tools.message_tool import MessageTool, MessageToolOutput
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsInputSchema
 from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
 from dynamiq.nodes.types import Behavior, InferenceMode
@@ -167,6 +167,31 @@ class Agent(HistoryManagerMixin, BaseAgent):
             f"Final answer: {final_output}"
             "\n------------------------------------------\n"
         )
+
+    def _handle_message_tool(
+        self, action_input: Any, thought: str, loop_num: int, config: RunnableConfig, **kwargs
+    ) -> MessageToolOutput | None:
+        """Handle a MessageTool call: extract answer and file paths, stream and return."""
+        parsed = action_input
+        if isinstance(parsed, str):
+            try:
+                parsed = json.loads(parsed)
+            except json.JSONDecodeError:
+                parsed = {"answer": parsed}
+        if not isinstance(parsed, dict):
+            parsed = {"answer": str(parsed) if parsed else ""}
+
+        if parsed.get("type") and parsed["type"] != "answer":
+            return None
+
+        answer = parsed.get("answer", "")
+        files = parsed.get("files") or []
+
+        self.log_final_output(thought, answer, loop_num)
+        if self.streaming.enabled:
+            self.stream_content(content=answer, source=self.name, step="answer", config=config, **kwargs)
+
+        return MessageToolOutput(answer=answer, files=files if isinstance(files, list) else [])
 
     def _should_delegate_final(
         self,
@@ -340,16 +365,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 error_detail="The model returned an empty reply while using the Thought/Action format.",
                 llm_generated_output=llm_generated_output,
                 extra_guidance=(
-                    "Re-evaluate the latest observation and respond with 'Thought:' followed by either "
-                    "an 'Action:' plus JSON 'Action Input:' or a final 'Answer:' section."
+                    "Re-evaluate the latest observation and respond with 'Thought:' followed by "
+                    "an 'Action:' plus JSON 'Action Input:'."
                 ),
             )
             return None, None, None
-
-        if "Answer:" in llm_generated_output:
-            thought, final_answer = parser.extract_default_final_answer(llm_generated_output)
-            self.log_final_output(thought, final_answer, loop_num)
-            return thought, "final_answer", final_answer
 
         thought, action, action_input = parser.parse_default_action(llm_generated_output)
         self.log_reasoning(thought, action, action_input, loop_num)
@@ -361,8 +381,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """Handle FUNCTION_CALLING inference mode parsing.
 
         Returns:
-            tuple: (thought, action, action_input) for normal actions
-                   (thought, "final_answer", final_answer) for final answers
+            tuple: (thought, action, action_input) - all function calls are tool actions
         """
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: using function calling inference mode")
@@ -374,13 +393,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
         action = list(llm_result.output["tool_calls"].values())[0]["function"]["name"].strip()
         llm_generated_output_json = list(llm_result.output["tool_calls"].values())[0]["function"]["arguments"]
 
-        thought = llm_generated_output_json["thought"]
-        if action == "provide_final_answer":
-            final_answer = llm_generated_output_json["answer"]
-            self.log_final_output(thought, final_answer, loop_num)
-            return thought, "final_answer", final_answer
-
-        action_input = llm_generated_output_json["action_input"]
+        thought = llm_generated_output_json.get("thought", "")
+        action_input = llm_generated_output_json.get("action_input", llm_generated_output_json)
 
         if isinstance(action_input, str):
             try:
@@ -397,8 +411,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """Handle STRUCTURED_OUTPUT inference mode parsing.
 
         Returns:
-            tuple: (thought, action, action_input) for normal actions
-                   (thought, "final_answer", final_answer) for final answers
+            tuple: (thought, action, action_input) - all actions are tool calls
         """
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: using structured output inference mode")
@@ -417,10 +430,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         thought = llm_generated_output_json["thought"]
         action = llm_generated_output_json["action"]
         action_input = llm_generated_output_json["action_input"]
-
-        if action == "finish":
-            self.log_final_output(thought, action_input, loop_num)
-            return thought, "final_answer", action_input
 
         try:
             if isinstance(action_input, str):
@@ -445,7 +454,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 llm_generated_output=llm_generated_output,
                 extra_guidance=(
                     "Respond with <thought>...</thought> and "
-                    "either <action>/<action_input> or <answer> tags, "
+                    "either <action>/<action_input> tags, "
                     "making sure to address the latest observation."
                 ),
             )
@@ -453,47 +462,28 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         try:
             parsed_data = XMLParser.parse(
-                llm_generated_output, required_tags=["thought", "answer"], optional_tags=["output"]
+                llm_generated_output,
+                required_tags=["thought", "action", "action_input"],
+                optional_tags=["output"],
+                json_fields=["action_input"],
             )
             thought = parsed_data.get("thought")
-            final_answer = parsed_data.get("answer")
-            self.log_final_output(thought, final_answer, loop_num)
-            return thought, "final_answer", final_answer
-
-        except TagNotFoundError:
-            logger.debug("XMLParser: Not a final answer structure, trying action structure.")
-            try:
-                parsed_data = XMLParser.parse(
-                    llm_generated_output,
-                    required_tags=["thought", "action", "action_input"],
-                    optional_tags=["output"],
-                    json_fields=["action_input"],
-                )
-                thought = parsed_data.get("thought")
-                action = parsed_data.get("action")
-                action_input = parsed_data.get("action_input")
-                self.log_reasoning(thought, action, action_input, loop_num)
-                return thought, action, action_input
-            except JSONParsingError as e:
-                logger.error(f"XMLParser: Invalid JSON in action_input: {e}")
-                raise ActionParsingException(
-                    "The <action_input> value must be valid JSON. Put the whole JSON on one line; "
-                    'use \\n for newlines inside strings and \\" for quotes. '
-                    "Provide <thought> with <action> and <action_input> again.",
-                    recoverable=True,
-                )
-            except ParsingError as e:
-                logger.error(f"XMLParser: Empty or invalid XML response for action parsing: {e}")
-                raise ActionParsingException(
-                    "The previous response was empty or invalid. "
-                    "Provide <thought> with either <action>/<action_input> or <answer>.",
-                    recoverable=True,
-                )
-
+            action = parsed_data.get("action")
+            action_input = parsed_data.get("action_input")
+            self.log_reasoning(thought, action, action_input, loop_num)
+            return thought, action, action_input
+        except JSONParsingError as e:
+            logger.error(f"XMLParser: Invalid JSON in action_input: {e}")
+            raise ActionParsingException(
+                "The <action_input> value must be valid JSON. Put the whole JSON on one line; "
+                'use \\n for newlines inside strings and \\" for quotes. '
+                "Provide <thought> with <action> and <action_input> again.",
+                recoverable=True,
+            )
         except ParsingError as e:
             logger.error(f"XMLParser: Empty or invalid XML response: {e}")
             raise ActionParsingException(
-                "The previous response was empty or invalid. " "Please provide the required XML tags.",
+                "The previous response was empty or invalid. " "Provide <thought> with <action>/<action_input>.",
                 recoverable=True,
             )
 
@@ -996,16 +986,17 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     case InferenceMode.XML:
                         result = self._handle_xml_mode(llm_generated_output, loop_num, config, **kwargs)
 
-                # Handle final answer
-                if result[1] == "final_answer":
-                    return result[2]
-
                 # Handle recovery (for modes that support it)
-                # Check if action is None, which indicates (None, None, None) recovery
                 if result[1] is None:
                     continue
 
                 thought, action, action_input = result
+
+                # Check if agent called the message tool (unified final answer)
+                if action and isinstance(self.tool_by_names.get(self.sanitize_tool_name(action)), MessageTool):
+                    msg_output = self._handle_message_tool(action_input, thought, loop_num, config, **kwargs)
+                    if msg_output is not None:
+                        return msg_output
 
                 final_answer = self._execute_tools_and_update_prompt(
                     action, action_input, thought, loop_num, config, **kwargs
@@ -1017,16 +1008,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
             except ActionParsingException as e:
                 extra_guidance = None
                 if self.inference_mode == InferenceMode.XML:
-                    extra_guidance = (
-                        "Ensure the reply contains <thought> along "
-                        "with either <action>/<action_input> or a final "
-                        "<answer> tag."
-                    )
+                    extra_guidance = "Ensure the reply contains <thought> along " "with <action>/<action_input> tags"
                 elif self.inference_mode == InferenceMode.DEFAULT:
-                    extra_guidance = (
-                        "Provide 'Thought:' and either 'Action:' "
-                        "with a JSON 'Action Input:' or a final 'Answer:' section."
-                    )
+                    extra_guidance = "Provide 'Thought:' and 'Action:' " "with a JSON 'Action Input:'"
 
                 self._append_recovery_instruction(
                     error_label=type(e).__name__,
@@ -1050,16 +1034,16 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
             raise MaxLoopsExceededException(message=error_message)
         else:
-            max_loop_final_answer = self._handle_max_loops_exceeded(input_message, config, **kwargs)
+            max_loop_result = self._handle_max_loops_exceeded(input_message, config, **kwargs)
             if self.streaming.enabled:
                 self.stream_content(
-                    content=max_loop_final_answer,
+                    content=max_loop_result.answer,
                     source=self.name,
                     step="answer",
                     config=config,
                     **kwargs,
                 )
-            return max_loop_final_answer
+            return max_loop_result
 
     def _try_summarize_history(
         self,
@@ -1109,7 +1093,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
     ) -> str:
         """
         Handle the case where max loops are exceeded by crafting a thoughtful response.
-        Uses XMLParser to extract the final answer from the LLM's last attempt.
 
         Args:
             input_message (Message | VisionMessage): Initial user message.
@@ -1119,7 +1102,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         Returns:
             str: Final answer provided by the agent.
         """
-        # Use model-specific max loops prompt from prompt manager
         max_loops_prompt = self.system_prompt_manager.max_loops_prompt
 
         system_message = Message(content=max_loops_prompt, role=MessageRole.SYSTEM, static=True)
@@ -1133,22 +1115,23 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self._run_depends = [NodeDependency(node=self.llm).to_dict()]
 
         try:
-            final_answer = XMLParser.extract_first_tag_lxml(llm_final_attempt, ["answer"])
-            if final_answer is None:
-                logger.warning("Max loops handler: lxml failed to extract <answer>, falling back to regex.")
-                final_answer = XMLParser.extract_first_tag_regex(llm_final_attempt, ["answer"])
+            if self.inference_mode == InferenceMode.XML:
+                result = self._handle_xml_mode(llm_final_attempt, self.max_loops, config, **kwargs)
+            else:
+                result = self._handle_default_mode(llm_final_attempt, self.max_loops)
 
-            if final_answer is None:
-                logger.error(
-                    "Max loops handler: Failed to extract <answer> tag even with fallbacks. Returning raw output."
-                )
-                final_answer = llm_final_attempt
-
+            if result:
+                thought, action, action_input = result
+                if action and isinstance(self.tool_by_names.get(self.sanitize_tool_name(action)), MessageTool):
+                    msg_output = self._handle_message_tool(
+                        action_input, thought or "", self.max_loops, config, **kwargs
+                    )
+                    if msg_output is not None:
+                        return msg_output
         except Exception as e:
-            logger.error(f"Max loops handler: Error during final answer extraction: {e}. Returning raw output.")
-            final_answer = llm_final_attempt
+            logger.warning(f"Max loops handler: failed to parse message tool from LLM output: {e}")
 
-        return f"{final_answer}"
+        return MessageToolOutput(answer=llm_final_attempt)
 
     def _refresh_agent_state(self, loop_num: int) -> None:
         """
@@ -1200,7 +1183,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             context_compaction_enabled=self.summarization_config.enabled,
             todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
             or bool(self.sandbox_backend),
-            sandbox_output_dir=self.sandbox_backend.output_dir if self.sandbox_backend else None,
             sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
         )
 

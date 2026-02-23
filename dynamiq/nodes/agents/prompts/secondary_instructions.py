@@ -9,8 +9,8 @@ DELEGATION_INSTRUCTIONS = (
 
 DELEGATION_INSTRUCTIONS_XML = (
     '- To return an agent tool\'s response as the final output, include "delegate_final": true inside that '
-    "tool's <input> or <action_input>. Use this only for a single agent tool call and do not provide an "
-    "<answer> yourself; the system will return the agent's result directly."
+    "tool's <input> or <action_input>. Use this only for a single agent tool call and do not call the "
+    "message tool yourself; the system will return the agent's result directly."
 )
 
 CONTEXT_MANAGER_INSTRUCTIONS = """CONTEXT MANAGEMENT:
@@ -27,13 +27,10 @@ TODO_TOOLS_INSTRUCTIONS = """TODO MANAGEMENT:
 
 
 SANDBOX_INSTRUCTIONS_TEMPLATE = """SANDBOX EXECUTION ENVIRONMENT:
-Output Files:
-- Save any files for the user to {output_dir}/ (already created).
-  Files in this directory are automatically collected and returned.
-- Ensure that this folder contains only the files you want to return to the user.
 - Use {base_path}/ for scripts, intermediate data, and working files.
   Uploaded files are also placed here. Other tools can only access files under {base_path}/.
 - Files returned from other tools are placed in {base_path}/ and can be accessed by other tools.
+- To return files to the user, list their paths in the "files" parameter of the message tool.
 
 Rules:
 1. Use 'python3' instead of 'python'.

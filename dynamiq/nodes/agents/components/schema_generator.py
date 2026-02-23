@@ -17,28 +17,6 @@ TYPE_MAPPING = {
     dict: "object",
 }
 
-# Final answer function schema for function calling mode
-FINAL_ANSWER_FUNCTION_SCHEMA = {
-    "type": "function",
-    "strict": True,
-    "function": {
-        "name": "provide_final_answer",
-        "description": "Function should be called when if you can answer the initial request"
-        " or if there is not request at all.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "thought": {
-                    "type": "string",
-                    "description": "Your reasoning about why you can answer original question.",
-                },
-                "answer": {"type": "string", "description": "Answer on initial request."},
-            },
-            "required": ["thought", "answer"],
-        },
-    },
-}
-
 
 def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str], str]) -> str:
     """
@@ -172,7 +150,7 @@ def generate_property_schema(properties: dict, name: str, field: Any) -> None:
             elif param_type := TYPE_MAPPING.get(param):
                 types.append(param_type)
 
-            elif issubclass(param, Enum):
+            elif isinstance(param, type) and issubclass(param, Enum):
                 element_type = TYPE_MAPPING.get(filter_format_type(type(list(param.__members__.values())[0].value))[0])
                 types.append(element_type)
                 properties[name]["enum"] = [field.value for field in param.__members__.values()]
@@ -207,7 +185,7 @@ def generate_function_calling_schemas(
     Returns:
         List of function calling schemas for all tools
     """
-    schemas = [FINAL_ANSWER_FUNCTION_SCHEMA]
+    schemas = []
 
     for tool in tools:
         # Agent tools: accept action_input as a JSON string to avoid nested schema issues.

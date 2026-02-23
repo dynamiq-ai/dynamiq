@@ -91,7 +91,6 @@ class E2BSandbox(Sandbox):
                 public_url_error = str(e)
         return SandboxInfo(
             base_path=self.base_path,
-            output_dir=self.output_dir,
             sandbox_id=self.sandbox_id,
             public_host=public_host,
             public_url=public_url,
@@ -129,12 +128,12 @@ class E2BSandbox(Sandbox):
             return self._sandbox
 
     def _ensure_directories(self) -> None:
-        """Create the base and output directories inside the sandbox if they do not exist."""
+        """Create the base directoriy inside the sandbox if it does not exist."""
         if self._sandbox is None:
             return
         try:
-            self._sandbox.commands.run(f"mkdir -p {shlex.quote(self.base_path)} {shlex.quote(self.output_dir)}")
-            logger.debug(f"E2BSandbox ensured directories exist: {self.base_path}, {self.output_dir}")
+            self._sandbox.commands.run(f"mkdir -p {shlex.quote(self.base_path)}")
+            logger.debug(f"E2BSandbox ensured directories exist: {self.base_path}")
         except Exception as e:
             logger.warning(f"E2BSandbox failed to create directories: {e}")
 
@@ -263,9 +262,6 @@ class E2BSandbox(Sandbox):
     def list_files(self, target_dir: str | None = None) -> list[str]:
         """List files in the E2B sandbox directory.
 
-        Searches for files in the given directory (defaults to output directory),
-        returning at most ``max_output_files`` file paths.
-
         Returns:
             List of absolute file paths found in the directory.
         """
@@ -281,7 +277,7 @@ class E2BSandbox(Sandbox):
                 return []
 
             # List files recursively (configurable limit)
-            cmd = f"find {shlex.quote(target_dir)} -type f 2>/dev/null | head -{self.max_output_files}"
+            cmd = f"find {shlex.quote(target_dir)} -type f 2>/dev/null"
             result = sandbox.commands.run(cmd)
             if result.exit_code != 0 or not (result.stdout or "").strip():
                 return []
