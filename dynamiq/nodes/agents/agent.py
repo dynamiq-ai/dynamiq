@@ -1,4 +1,5 @@
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Mapping
 
@@ -107,6 +108,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
+    _requested_output_files: list[str] = []
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
@@ -457,6 +459,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
             thought = parsed_data.get("thought")
             final_answer = parsed_data.get("answer")
+
+            output_files_match = re.search(r"<output_files>\s*(.*?)\s*</output_files>", final_answer or "", re.DOTALL)
+            if output_files_match:
+                raw = output_files_match.group(1).strip()
+                self._requested_output_files = [p.strip() for p in raw.split(",") if p.strip()]
+                final_answer = re.sub(
+                    r"\s*<output_files>.*?</output_files>\s*", "", final_answer, flags=re.DOTALL
+                ).strip()
+
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
 
@@ -935,6 +946,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
 
         self.state.max_loops = self.max_loops
+        self._requested_output_files = []
         self._refresh_agent_state(1)
 
         self._setup_prompt_and_stop_sequences(input_message, history_messages)
@@ -998,6 +1010,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 # Handle final answer
                 if result[1] == "final_answer":
+                    if self._requested_output_files:
+                        file_not_found = [f for f in self._requested_output_files if not self.sandbox_backend.exists(f)]
+                        if len(file_not_found) > 0:
+                            raise ActionParsingException(f"File not found: {file_not_found}", recoverable=True)
                     return result[2]
 
                 # Handle recovery (for modes that support it)
@@ -1200,7 +1216,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             context_compaction_enabled=self.summarization_config.enabled,
             todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
             or bool(self.sandbox_backend),
-            sandbox_output_dir=self.sandbox_backend.output_dir if self.sandbox_backend else None,
             sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
         )
 

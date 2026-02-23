@@ -34,7 +34,6 @@ class SandboxInfo(BaseModel):
     """Schema for sandbox metadata returned by get_sandbox_info()."""
 
     base_path: str
-    output_dir: str
     sandbox_id: str | None = None
     public_host: str | None = None
     public_url: str | None = None
@@ -58,11 +57,6 @@ class Sandbox(abc.ABC, BaseModel):
         default=50, description="Maximum number of files to collect from the output directory."
     )
     _clone_shared: ClassVar[bool] = True
-
-    @property
-    def output_dir(self) -> str:
-        """Absolute path to the output directory inside the sandbox."""
-        return f"{self.base_path}/output"
 
     @computed_field
     @cached_property
@@ -164,17 +158,6 @@ class Sandbox(abc.ABC, BaseModel):
             "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
         )
 
-    def list_output_files(self) -> list[str]:
-        """List files in the sandbox output directory.
-
-        Args:
-            target_dir: Directory to list. Defaults to the output directory.
-
-        Returns:
-            List of absolute file paths found in the output directory.
-        """
-        return self.list_files(target_dir=self.output_dir)
-
     def list_files(self, target_dir: str | None = None) -> list[str]:
         """List files in the sandbox directory.
 
@@ -258,16 +241,6 @@ class Sandbox(abc.ABC, BaseModel):
 
         return result_files
 
-    def collect_output_files(self) -> list[io.BytesIO]:
-        """Collect output files from the sandbox output directory as BytesIO objects.
-
-        Only files placed in the dedicated output directory are collected.
-
-        Returns:
-            List of BytesIO objects with name, description, and content_type attributes.
-        """
-        return self.collect_files(target_dir=self.output_dir)
-
     def exists(self, file_path: str) -> bool:
         """Check whether a file exists in the sandbox filesystem.
 
@@ -317,12 +290,11 @@ class Sandbox(abc.ABC, BaseModel):
                 the returned schema may include public_host and public_url.
 
         Returns:
-            SandboxInfo with at least base_path and output_dir; backends may add
+            SandboxInfo with at least base_path; backends may add
             sandbox_id, public_host, public_url (when port is given), etc.
         """
         return SandboxInfo(
             base_path=self.base_path,
-            output_dir=self.output_dir,
         )
 
     def store(

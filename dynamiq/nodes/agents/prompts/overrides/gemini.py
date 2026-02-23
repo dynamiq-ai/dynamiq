@@ -75,6 +75,7 @@ When you have enough information to provide a final answer:
     </thought>
     <answer>
         [Your complete answer to the user's question]
+        <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
     </answer>
 </output>
 
@@ -85,6 +86,7 @@ For questions that don't require tools:
     </thought>
     <answer>
         [Your direct response]
+        <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
     </answer>
 </output>
 
@@ -127,7 +129,5 @@ JSON FORMATTING REQUIREMENTS:
 
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
-- Generated files are automatically collected and returned with your final answer
-- File operations are handled transparently - focus on the task, not file management
-
+- If you want to return files, include an <output_files> tag inside your <answer> listing absolute file paths (comma-separated). This tag is optional — omit it if there are no files to return.
 """  # noqa: E501

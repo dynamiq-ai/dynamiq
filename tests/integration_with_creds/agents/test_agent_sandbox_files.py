@@ -216,7 +216,7 @@ def test_agent_sandbox_with_input_files_returns_output(openai_llm, e2b_connectio
             "input": (
                 "I've uploaded scores.csv. Read it from /home/user/scores.csv, "
                 "calculate the average score using Python, "
-                "and save the result to /home/user/output/average.txt. "
+                "and save the result to /home/user/average.txt. "
                 "Write a Python script file and run it rather than using a one-liner."
             ),
             "files": [input_file],
