@@ -11,6 +11,7 @@ from dynamiq.nodes.agents.components import schema_generator
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
+    JSONParsingError,
     MaxLoopsExceededException,
     RecoverableAgentException,
 )
