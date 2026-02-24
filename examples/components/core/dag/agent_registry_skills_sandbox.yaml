@@ -21,13 +21,10 @@ nodes:
       max_tokens: 32000
     tools: []
     role: |
-      You have access to skills (SkillsTool) and a sandbox. For every task you must:
-      1. Use SkillsTool with action="list" to see available skills, then action="get" with skill_name="..." to load the skill(s) needed for the deliverable.
-      2. Map deliverables to skills: Word / .docx → docx; PDF → pdf; PowerPoint / .pptx → pptx; Excel / .xlsx → xlsx; Markdown/HTML → md; landing page / web UI / frontend → frontend-design; React/shadcn multi-component artifact → web-artifacts-builder; poster / visual art / canvas → canvas-design. For multiple types, get each relevant skill.
-      3. When get returns "scripts_path", run scripts in the sandbox at that path (e.g. /home/user/skills/docx/scripts/, .../web-artifacts-builder/scripts/). Use the sandbox tool for shell or Python. For web-artifacts-builder use init-artifact.sh and bundle-artifact.sh. The md and frontend-design skills may have no scripts; follow skill instructions.
-      4. Write all output files to /home/user/output so they are collected. Uploaded files from the user go to /home/user/input.
-      5. Web app / website tasks (e.g. recreate a marketing site like getdynamiq.ai): Use frontend-design for a single-page HTML/CSS/JS site, or web-artifacts-builder for a React/shadcn multi-component app. Include hero, value propositions, feature sections, and footer as appropriate. Output must have a proper structure: use folders and subfolders as needed (e.g. index.html, css/, js/, assets/, images/)—not only a single file. Save the full artifact tree to /home/user/output (all files and folders so they are collected). Optionally also create a zip archive of the artifact (e.g. zip -r artifact.zip . from the project root) and place the zip in /home/user/output for a single downloadable bundle. If the task asks for a "live" or "viewable" link: start the dev server in the background (sandbox shell with run_in_background_enabled=true, e.g. npm run dev or npx vite), then call SandboxInfoTool with that port (e.g. 5173) to get the public URL, and include that URL clearly in your final answer (e.g. "Preview URL: https://..."). Otherwise deliver the static files (and zip if created) for local viewing.
-      Skills available (when registered): docx, pdf, pptx, xlsx, md, frontend-design, web-artifacts-builder, canvas-design. Do not mention skills or paths in the user-facing reply; just accomplish the task and save outputs to the output directory.
+      Map deliverables to skills: Word / .docx → docx; PDF → pdf; PowerPoint / .pptx → pptx; Excel / .xlsx → xlsx; Markdown/HTML → md; landing page / web UI / frontend → frontend-design; React/shadcn multi-component artifact → web-artifacts-builder; poster / visual art / canvas → canvas-design.
+      Write all output files to /home/user/output so they are collected. Uploaded files from the user go to /home/user/input.
+      Web app / website tasks (e.g. recreate a marketing site like getdynamiq.ai): Use frontend-design for a single-page HTML/CSS/JS site, or web-artifacts-builder for a React/shadcn multi-component app. Include hero, value propositions, feature sections, and footer as appropriate. Output must have a proper structure: use folders and subfolders as needed (e.g. index.html, css/, js/, assets/, images/)—not only a single file. Save the full artifact tree to /home/user/output (all files and folders so they are collected). Optionally also create a zip archive of the artifact (e.g. zip -r artifact.zip . from the project root) and place the zip in /home/user/output for a single downloadable bundle. If the task asks for a "live" or "viewable" link: start the dev server in the background (sandbox shell with run_in_background_enabled=true, e.g. npm run dev or npx vite), then call SandboxInfoTool with that port (e.g. 5173) to get the public URL, and include that URL clearly in your final answer (e.g. "Preview URL: https://..."). Otherwise deliver the static files (and zip if created) for local viewing.
+      Do not mention skills or paths in the user-facing reply; just accomplish the task and save outputs to the output directory.
     sandbox:
       enabled: true
       backend:
@@ -48,8 +45,8 @@ nodes:
             version_id: "d6ae58d9-87ed-4106-8e74-850f073a031e"
             name: pdf
             description: PDF creation, form filling, extraction, conversion, and validation; Markdown/HTML to PDF via pandoc or docx→PDF.
-          - id: "e6c22972-392d-471b-9371-72b4ac0fb75d"
-            version_id: "ea3b5c75-2689-4c56-92a2-82db7120844a"
+          - id: "b3ce8c13-9299-493c-bd68-f1658b0ea408"
+            version_id: "latest"
             name: pptx
             description: Create, edit, and manipulate PowerPoint presentations (.pptx); design and QA rules, scripts for thumbnail, pack, soffice.
           - id: "d5dbb2be-880f-491c-8673-6cbe9416bc88"
