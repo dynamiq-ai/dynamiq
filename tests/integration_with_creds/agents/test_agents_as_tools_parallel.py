@@ -68,7 +68,7 @@ def _child_writer(llm: OpenAI) -> Agent:
 
 @pytest.mark.integration
 def test_manager_with_subagents_parallel_calls():
-    """Manager agent uses two sub-agents as tools with XML + parallel enabled.
+    """Manager agent uses two sub-agents as tools with function calling + parallel enabled.
 
     Asserts successful run and traces/streams indicate agent-tool activity.
     """
@@ -142,7 +142,8 @@ def test_manager_with_subagents_parallel_calls():
 
 @pytest.mark.integration
 def test_agents_as_tools_with_map_parallel_streaming_tracing_memory():
-    """End-to-end: agents-as-tools under XML mode with Map parallelism, streaming, tracing, memory continuity."""
+    """End-to-end: agents-as-tools under function calling
+    with Map parallelism, streaming, tracing, memory continuity."""
     if not os.getenv("OPENAI_API_KEY"):
         pytest.skip("OPENAI_API_KEY is not set; skipping credentials-required test.")
 

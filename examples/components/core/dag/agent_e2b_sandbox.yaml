@@ -20,7 +20,7 @@ nodes:
         type: dynamiq.sandboxes.E2BSandbox
         connection: e2b-conn
     max_loops: 15
-    inference_mode: XML
+    inference_mode: FUNCTION_CALLING
     summarization_config:
       enabled: true
 

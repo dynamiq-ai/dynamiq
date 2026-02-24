@@ -1,18 +1,4 @@
-# Common blocks
-REACT_BLOCK_TOOLS = """
-You have access to a variety of tools,
-and you are responsible for using
-them in any order you choose to complete the task:\n
-{{ tool_description }}
-
-Input formats for tools:
-{{ input_formats }}
-
-Note: For tools not listed in the input formats section,
-refer to their descriptions in the
-AVAILABLE TOOLS section for usage instructions.
-"""
-
+# Common blocks (function calling: tool schema is source of truth; no input_formats in prompt)
 REACT_BLOCK_TOOLS_NO_FORMATS = """
 You have access to a variety of tools,
 and you are responsible for using
@@ -67,10 +53,6 @@ IMPORTANT RULES:
 - Do not mention tools or actions as you don't have access to any
 
 """  # noqa: E501
-
-REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
-- Avoid phrases like 'based on the information gathered or provided.'
-"""
 
 REACT_MAX_LOOPS_PROMPT = """
 You are tasked with providing a final answer for the initial user question based on information gathered during a process that has reached its maximum number of loops.

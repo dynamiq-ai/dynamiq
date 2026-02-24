@@ -45,7 +45,11 @@ def setup_agent() -> Agent:
 
     # Create and return the agent
     return Agent(
-        name="React Agent", llm=llm, tools=[tool_search, tool_tavily], role=AGENT_ROLE, inference_mode=InferenceMode.FUNCTION_CALLING
+        name="React Agent",
+        llm=llm,
+        tools=[tool_search, tool_tavily],
+        role=AGENT_ROLE,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
 
 

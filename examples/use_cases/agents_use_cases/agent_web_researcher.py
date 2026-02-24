@@ -46,12 +46,14 @@ Open Questions, and References.
 
 
 def _create_agent() -> Agent:
-    llm = setup_llm(model_provider="claude",
-                    model="claude-haiku-4-5-20251001",
+    llm = setup_llm(
+        model_provider="claude",
+        model="claude-haiku-4-5-20251001",
         temperature=1,
         max_tokens=32000,
         thinking_enabled=True,
-        budget_tokens=4000,)
+        budget_tokens=4000,
+    )
     file_store_backend = InMemoryFileStore()
     file_store_config = FileStoreConfig(enabled=True, backend=file_store_backend, agent_file_write_enabled=True)
 

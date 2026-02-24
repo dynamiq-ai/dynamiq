@@ -16,8 +16,6 @@ from dynamiq.prompts import (
     VisionMessage,
     VisionMessageFileContent,
     VisionMessageFileData,
-    VisionMessageImageContent,
-    VisionMessageImageURL,
     VisionMessageTextContent,
 )
 from dynamiq.runnables import RunnableConfig, RunnableStatus

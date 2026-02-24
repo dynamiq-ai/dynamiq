@@ -5,7 +5,6 @@ import pytest
 from dynamiq import connections, prompts
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.exceptions import (
-    ActionParsingException,
     JSONParsingError,
     ParsingError,
     TagNotFoundError,
@@ -180,19 +179,6 @@ def test_xmlparser_parse_json_invalid_after_repair_raises():
     text = "<output><thought>Run</thought><action_input>{'python': 'print(1)'}</action_input></output>"
     with pytest.raises(JSONParsingError, match="Failed to parse JSON content for field 'action_input'"):
         XMLParser.parse(text, required_tags=["thought", "action_input"], json_fields=["action_input"])
-
-
-def test_agent_xml_mode_invalid_action_input_json_is_recoverable(xml_react_agent):
-    """Malformed action_input JSON should surface as recoverable ActionParsingException in XML mode."""
-    llm_generated_output = (
-        "<output><thought>Run code</thought><action>code-executor</action>"
-        '<action_input>{"python": "print(1)"</action_input></output>'
-    )
-
-    with pytest.raises(ActionParsingException, match="must be valid JSON") as excinfo:
-        xml_react_agent._handle_xml_mode(llm_generated_output=llm_generated_output, loop_num=1, config=RunnableConfig())
-
-    assert excinfo.value.recoverable is True
 
 
 def test_xmlparser_parse_missing_required_tag():
@@ -575,7 +561,7 @@ class TestParallelToolCloning:
             name="Parallel Clone Agent",
             llm=openai_node,
             tools=[calculator_tool, formatter_tool],
-            inference_mode=InferenceMode.XML,
+            inference_mode=InferenceMode.FUNCTION_CALLING,
             parallel_tool_calls_enabled=True,
         )
 

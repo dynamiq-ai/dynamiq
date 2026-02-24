@@ -36,7 +36,7 @@ nodes:
       or explicit relationship patterns.
       Use the XML protocol exactly with <action>cypher_executor</action>.
       action_input MUST be valid JSON using double quotes only (never single quotes or Python dict syntax).
-    inference_mode: XML
+    inference_mode: FUNCTION_CALLING
     max_loops: 8
 
   neo4j-ingest-agent:
@@ -65,7 +65,7 @@ nodes:
       Use routing='r' for read queries when supported.
       Avoid comma-separated MATCH patterns (cartesian products).
       Prefer MATCH ... WITH ... MATCH or single MATCH with relationship patterns.
-    inference_mode: XML
+    inference_mode: FUNCTION_CALLING
     max_loops: 8
 
 flows:

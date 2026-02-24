@@ -23,8 +23,7 @@ FINAL_ANSWER_FUNCTION_SCHEMA = {
     "strict": True,
     "function": {
         "name": "provide_final_answer",
-        "description": "Function should be called when if you can answer the initial request"
-        " or if there is not request at all.",
+        "description": "Function to call when you can answer the initial request" " or if there is not request at all.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -42,7 +41,8 @@ FINAL_ANSWER_FUNCTION_SCHEMA = {
 
 def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str], str]) -> str:
     """
-    Generate formatted input descriptions for each tool.
+    Generate formatted input descriptions for each tool (legacy; agent uses function calling only;
+    tool schema is the source of truth; this is not used in the current agent path).
 
     Args:
         tools: List of tools to generate input formats for
@@ -81,7 +81,7 @@ def generate_structured_output_schemas(
     tools: list[Node], sanitize_tool_name: Callable[[str], str], delegation_allowed: bool
 ) -> dict:
     """
-    Generate schema for structured output mode (legacy; agent uses function calling only).
+    Generate schema for structured output mode (legacy; not used; agent uses function calling only).
 
     Args:
         tools: List of tools to generate schema for

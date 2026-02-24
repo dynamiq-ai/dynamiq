@@ -272,6 +272,7 @@ def get_model_specific_prompts(
     Returns:
         Tuple of (prompt_blocks dict, agent_prompt_template string)
     """
+    # Agent uses function calling only; inference_mode is kept for API consistency.
     # Get model-specific agent template
     agent_template = get_prompt_constant(model_name, "AGENT_PROMPT_TEMPLATE", AGENT_PROMPT_TEMPLATE)
     if agent_template != AGENT_PROMPT_TEMPLATE:

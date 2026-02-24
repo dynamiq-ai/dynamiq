@@ -12,11 +12,9 @@ from dynamiq.nodes.agents.components import schema_generator
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
-    JSONParsingError,
     MaxLoopsExceededException,
     RecoverableAgentException,
 )
-from dynamiq.nodes.agents.exceptions import ActionParsingException, MaxLoopsExceededException, RecoverableAgentException
 from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CONTEXT
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry
 from dynamiq.nodes.node import Node, NodeDependency
@@ -727,7 +725,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             # Check if ContextManagerTool is in the action - if so, skip parallel mode
             skip_parallel, action, action_input, skipped_tools = self._should_skip_parallel_mode(action, action_input)
 
-            # Handle XML parallel mode (only for multiple tools, not for ContextManagerTool)
+            # Handle parallel tool calls (only for multiple tools, not for ContextManagerTool)
             tools_data = action_input if isinstance(action_input, list) else [action_input]
             if (
                 self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME
