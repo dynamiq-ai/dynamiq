@@ -1,12 +1,12 @@
 import re
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, ClassVar, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
 import dynamiq.utils.jsonpath as jsonpath
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes import Behavior, Node, NodeGroup
 from dynamiq.nodes.node import Transformer, ensure_config
 from dynamiq.nodes.types import ChoiceCondition, ConditionOperator
@@ -266,7 +266,7 @@ class Map(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         try:
-            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            with ContextAwareThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 results = executor.map(
                     lambda args: self.execute_workflow(args[0], args[1], config, merged_kwargs),
                     enumerate(input_data),

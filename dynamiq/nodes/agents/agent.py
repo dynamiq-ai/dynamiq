@@ -1,11 +1,12 @@
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from typing import Any, Callable, Mapping
 
 from litellm import supports_function_calling
 from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.agents.base import Agent as BaseAgent
 from dynamiq.nodes.agents.components import schema_generator
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
@@ -1160,7 +1161,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 all_results.append(res)
             else:
                 max_workers = len(prepared_tools)
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                with ContextAwareThreadPoolExecutor(max_workers=max_workers) as executor:
                     future_map = {}
                     for tool_payload in prepared_tools:
                         future = executor.submit(

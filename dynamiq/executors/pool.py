@@ -4,6 +4,7 @@ from concurrent import futures
 import jsonpickle
 
 from dynamiq.executors.base import BaseExecutor
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.node import Node, NodeReadyToRun
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
@@ -148,9 +149,7 @@ class ThreadExecutor(PoolExecutor):
 
     def __init__(self, max_workers: int | None = None):
         max_workers = max_workers or MAX_WORKERS_THREAD_POOL_EXECUTOR
-        super().__init__(
-            pool_executor=futures.ThreadPoolExecutor, max_workers=max_workers
-        )
+        super().__init__(pool_executor=ContextAwareThreadPoolExecutor, max_workers=max_workers)
 
 
 class ProcessExecutor(PoolExecutor):
