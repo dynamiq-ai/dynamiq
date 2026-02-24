@@ -102,6 +102,7 @@ class FirecrawlSearchTool(ConnectionNode):
     action_type: ActionType = ActionType.WEB_SEARCH
     name: str = "Firecrawl Search Tool"
     description: str = DESCRIPTION_FIRECRAWL_SEARCH
+    is_parallel_execution_allowed: bool = True
     connection: Firecrawl
     query: str | None = None
 

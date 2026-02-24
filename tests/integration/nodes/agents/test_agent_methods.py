@@ -566,6 +566,7 @@ class TestParallelToolCloning:
             name="Calculator",
             description="A simple calculator tool for performing arithmetic operations",
             code="",
+            is_parallel_execution_allowed=True,
         )
 
     @pytest.fixture
@@ -574,6 +575,7 @@ class TestParallelToolCloning:
             name="Formatter",
             description="A text formatting tool",
             code="",
+            is_parallel_execution_allowed=True,
         )
 
     @pytest.fixture

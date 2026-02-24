@@ -346,6 +346,7 @@ class ExaTool(ConnectionNode):
     name: str = "Exa Search Tool"
     description: str = DESCRIPTION_EXA
     action_type: ActionType = ActionType.WEB_SEARCH
+    is_parallel_execution_allowed: bool = True
     connection: Exa
 
     include_full_content: bool = Field(
