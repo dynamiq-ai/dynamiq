@@ -233,7 +233,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         is_postponed_component_init (bool): Whether component initialization is postponed.
         is_optimized_for_agents (bool): Whether to optimize output for agents. By default is set to False.
         is_files_allowed (bool): Whether the node is permitted to access files. By default is set to False.
-        is_parallel_execution_allowed (bool): Whether this node can be executed in parallel. Default True.
+        is_parallel_execution_allowed (bool): Whether this node can be executed in parallel. Default False.
         _json_schema_fields (list[str]): List of parameter names that will be used when generating json schema
           with _generate_json_schema.
 
