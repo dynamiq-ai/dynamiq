@@ -911,7 +911,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         return messages[:-1] + [
             Message(
                 role=last_msg.role,
-                content=f"{last_msg.content}{state_suffix}",
+                content=f"{last_msg.content or ''}{state_suffix}",
                 metadata=last_msg.metadata,
                 static=last_msg.static,
             )
@@ -1048,7 +1048,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 f"Agent {self.name} (ID: {self.id}) "
                 f"has reached the maximum loop limit of {self.max_loops} "
                 f"without finding a final answer. "
-                f"Last response: {self._prompt.messages[-1].content}\n"
+                f"Last response: {self._prompt.messages[-1].content or ''}\n"
                 f"Consider increasing the maximum number of loops or "
                 f"reviewing the task complexity to ensure completion."
             )
@@ -1073,7 +1073,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         Check if summarization is needed and inject it automatically if token limit is exceeded.
 
-        Works like an automatic Context Manager Tool invocation.
+        Applies a two-phase approach:
+        1. Compaction (cheap, reversible) -- replace stale tool outputs with refs
+        2. LLM summarization (expensive, lossy) -- only if still over limit after compaction
 
         Args:
             config: Configuration for the agent run
@@ -1082,27 +1084,35 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if not self.summarization_config.enabled:
             return
 
-        if self.is_token_limit_exceeded():
-            logger.info(
-                f"Agent {self.name} - {self.id}: Token limit exceeded. Automatically invoking Context Manager Tool."
-            )
+        if not self.is_token_limit_exceeded():
+            return
 
-            context_tool = next((t for t in self.tools if isinstance(t, ContextManagerTool)), None)
-
-            if context_tool is None:
-                logger.error(f"Agent {self.name} - {self.id}: Context Manager Tool not found.")
+        if self.summarization_config.compaction_enabled:
+            self._compact_tool_outputs()
+            if not self.is_token_limit_exceeded():
+                logger.info(f"Agent {self.name} - {self.id}: Compaction was sufficient, skipping LLM summarization.")
                 return
 
-            action = self.sanitize_tool_name(context_tool.name)
+        logger.info(
+            f"Agent {self.name} - {self.id}: Token limit exceeded. Automatically invoking Context Manager Tool."
+        )
 
-            self._execute_tools_and_update_prompt(
-                action=action,
-                action_input={},
-                thought=None,
-                loop_num=0,  # Use 0 for automatic invocation
-                config=config,
-                **kwargs,
-            )
+        context_tool = next((t for t in self.tools if isinstance(t, ContextManagerTool)), None)
+
+        if context_tool is None:
+            logger.error(f"Agent {self.name} - {self.id}: Context Manager Tool not found.")
+            return
+
+        action = self.sanitize_tool_name(context_tool.name)
+
+        self._execute_tools_and_update_prompt(
+            action=action,
+            action_input={},
+            thought=None,
+            loop_num=0,
+            config=config,
+            **kwargs,
+        )
 
     def _handle_max_loops_exceeded(
         self, input_message: Message | VisionMessage, config: RunnableConfig | None = None, **kwargs

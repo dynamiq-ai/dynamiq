@@ -319,7 +319,7 @@ class DynamoDB(MemoryBackend):
             if query:
                 original_count = len(valid_messages)
                 query_lower = query.lower()
-                valid_messages = [msg for msg in valid_messages if query_lower in msg.content.lower()]
+                valid_messages = [msg for msg in valid_messages if msg.content and query_lower in msg.content.lower()]
                 logger.debug(
                     f"Applied client-side text query ('{query}')."
                     f" Count changed from {original_count} to {len(valid_messages)}."

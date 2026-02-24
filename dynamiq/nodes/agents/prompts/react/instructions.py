@@ -263,11 +263,64 @@ Your response should be clear, concise, and professional.
 """  # noqa: E501
 
 
-HISTORY_SUMMARIZATION_PROMPT_REPLACE = """Provide a concise summary of the conversation history above.
- Focus on key decisions, important information, and tool outputs. The purpose of this summary is to provide continuity
- so you can continue to make progress towards solving the task in a
- future context, where the raw history above may not be accessible and will be replaced with this summary.
- Write down anything that would be helpful, including the state, next steps, learnings etc.
+HISTORY_SUMMARIZATION_PROMPT_REPLACE = """Produce a structured summary of the conversation above.
+The raw history will be replaced with this summary, so capture everything needed to continue.
+
+Your summary MUST include ALL of the following sections:
+
+## User Intent
+What the user originally asked for and any refinements or follow-up requests.
+
+## Progress
+What has been accomplished so far, including successful tool calls and their key results.
+
+## Key Decisions & Findings
+Important technical decisions made, discovered facts, constraints, and relevant details
+(e.g. file paths, IDs, configuration values).
+
+## Errors & Resolutions
+Any errors encountered and how they were resolved, or if they remain unresolved.
+
+## Current State
+The exact state of the work right now -- what has been modified, created, or is in progress.
+
+## Next Steps
+What remains to be done to complete the task. Be specific and actionable.
+
+Be concise but preserve all information needed to continue the task without access to the raw history.
+"""
+
+HISTORY_SUMMARIZATION_PROMPT_INCREMENTAL = """You are updating a running summary of a conversation.
+
+EXISTING SUMMARY:
+{running_summary}
+
+NEW MESSAGES TO INCORPORATE:
+(See the messages above)
+
+Produce an updated summary that incorporates the new messages into the existing summary.
+Your summary MUST include ALL of the following sections (update each as needed):
+
+## User Intent
+What the user originally asked for and any refinements.
+
+## Progress
+What has been accomplished, including the latest actions.
+
+## Key Decisions & Findings
+Important decisions, facts, and details (file paths, IDs, config values).
+
+## Errors & Resolutions
+Errors encountered and their resolution status.
+
+## Current State
+Exact state of the work right now.
+
+## Next Steps
+What remains to be done.
+
+Merge the new information into each section. Remove details that are no longer relevant.
+Be concise but preserve all information needed to continue without access to the raw history.
 """
 
 PROMPT_AUTO_CLEAN_CONTEXT = "Automatically cleaning the context with Context Manager Tool..."

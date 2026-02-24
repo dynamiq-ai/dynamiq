@@ -128,6 +128,16 @@ class ToolParams(BaseModel):
 
 class AgentInputSchema(BaseModel):
     input: str = Field(default="", description="Text input for the agent.")
+    messages: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "Optional pre-built conversation history as a list of message dicts "
+            "(with keys: role, content, and optionally tool_calls, tool_call_id, name). "
+            "When provided, the last user message is used as the current query "
+            "and preceding messages are used as history (bypassing memory retrieval)."
+        ),
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
     images: list[str | bytes | io.BytesIO] | None = Field(
         default=None, description="Image inputs (URLs, bytes, or file objects)."
     )
@@ -158,6 +168,11 @@ class AgentInputSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_input_fields(self, context):
+        if self.messages:
+            if not any(m.get("role") == "user" for m in self.messages):
+                raise ValueError("When 'messages' is provided, at least one message must have role='user'.")
+            return self
+
         ctx_msg = context.context.get("role") or ""
         messages = [Message(role=MessageRole.USER, content=ctx_msg)]
         if message := context.context.get("input_message"):
@@ -556,16 +571,26 @@ class Agent(Node):
             "metadata": custom_metadata,
         }
 
-        input_message = input_message or self.input_message or Message(role=MessageRole.USER, content=input_data.input)
         # Convert to dict for format_message, excluding fields that are unsafe for templates
         # (binary data like files/images, complex objects like tool_params, and input which is already handled)
         standard_fields = set(AgentInputSchema.model_fields.keys())
         extra_fields = input_data.model_dump(exclude=standard_fields)
-        input_message = input_message.format_message(**extra_fields)
+
+        if input_data.messages:
+            history_messages, input_message = self._build_history_from_messages(input_data.messages)
+        else:
+            input_message = (
+                input_message or self.input_message or Message(role=MessageRole.USER, content=input_data.input)
+            )
+            input_message = input_message.format_message(**extra_fields)
 
         use_memory = self.memory and (input_data.user_id or input_data.session_id)
 
-        if use_memory:
+        if input_data.messages:
+            if use_memory:
+                memory_content = input_message.content or ""
+                self.memory.add(role=MessageRole.USER, content=memory_content, metadata=custom_metadata)
+        elif use_memory:
             history_messages = self._retrieve_memory(input_data)
             if len(history_messages) > 0:
                 history_messages.insert(
@@ -577,7 +602,7 @@ class Agent(Node):
                     ),
                 )
             if isinstance(input_message, Message):
-                memory_content = input_message.content
+                memory_content = input_message.content or ""
             else:
                 text_parts = [
                     content.text for content in input_message.content if isinstance(content, VisionMessageTextContent)
@@ -707,6 +732,39 @@ class Agent(Node):
         )
         logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
         return history_messages
+
+    @staticmethod
+    def _build_history_from_messages(
+        messages: list[dict[str, Any]],
+    ) -> tuple[list[Message], Message]:
+        """Convert a list of message dicts into history messages and a current input message.
+
+        The last message with ``role='user'`` (searching from the end) is used as the
+        current input.  All other messages become the history.
+
+        Returns:
+            Tuple of (history_messages, input_message).
+
+        Raises:
+            ValueError: If no user message is found.
+        """
+        input_idx: int | None = None
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "user":
+                input_idx = i
+                break
+
+        if input_idx is None:
+            raise ValueError("'messages' must contain at least one message with role='user'.")
+
+        history: list[Message] = []
+        for i, m in enumerate(messages):
+            if i == input_idx:
+                continue
+            history.append(Message(**m))
+
+        input_message = Message(**messages[input_idx])
+        return history, input_message
 
     def _run_llm(
         self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs
@@ -996,9 +1054,20 @@ class Agent(Node):
             all_history = self._prompt.messages[self._history_offset :]
             preserve_n = self.summarization_config.preserve_last_messages
             if preserve_n > 0 and len(all_history) > preserve_n:
-                merged_input["messages"] = all_history[:-preserve_n]
+                msgs_to_summarize = all_history[:-preserve_n]
             else:
-                merged_input["messages"] = all_history
+                msgs_to_summarize = all_history
+
+            running_summary = getattr(self, "_running_summary", None)
+            if self.summarization_config.incremental and running_summary:
+                summary_content = f"\nObservation: {running_summary}\n"
+                filtered = [
+                    m for m in msgs_to_summarize if not (m.static and m.content and m.content == summary_content)
+                ]
+                merged_input["messages"] = filtered if filtered else msgs_to_summarize
+                merged_input["running_summary"] = running_summary
+            else:
+                merged_input["messages"] = msgs_to_summarize
 
         raw_tool_params = kwargs.get("tool_params", ToolParams())
         tool_params = (
@@ -1352,8 +1421,8 @@ class Agent(Node):
         if preview_section:
             file_section = f"{file_section}{preview_section}"
 
-        if isinstance(input_message.content, str):
-            input_message.content = f"{input_message.content.rstrip()}{file_section}"
+        if isinstance(input_message, Message):
+            input_message.content = f"{(input_message.content or '').rstrip()}{file_section}"
         else:
             input_message.content = input_message.content + file_section
 

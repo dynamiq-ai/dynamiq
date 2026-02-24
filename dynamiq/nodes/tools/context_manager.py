@@ -5,7 +5,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
-from dynamiq.nodes.agents.prompts.react.instructions import HISTORY_SUMMARIZATION_PROMPT_REPLACE
+from dynamiq.nodes.agents.prompts.react.instructions import (
+    HISTORY_SUMMARIZATION_PROMPT_INCREMENTAL,
+    HISTORY_SUMMARIZATION_PROMPT_REPLACE,
+)
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.prompts.prompts import Prompt, VisionMessage
@@ -26,6 +29,7 @@ class ContextManagerInputSchema(BaseModel):
 
     - notes: Verbatim content that must be preserved as-is and prepended to the summary.
     - messages: List of messages to summarize.
+    - running_summary: Previous summary to build upon (for incremental mode).
     """
 
     notes: str | None = Field(
@@ -39,6 +43,12 @@ class ContextManagerInputSchema(BaseModel):
     messages: list[Message | VisionMessage] = Field(
         default=[],
         description="List of messages to summarize (conversation history).",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
+
+    running_summary: str | None = Field(
+        default=None,
+        description="Existing running summary from a previous summarization pass (for incremental mode).",
         json_schema_extra={"is_accessible_to_agent": False},
     )
 
@@ -287,16 +297,84 @@ class ContextManagerTool(Node):
         logger.info(f"Context Manager Tool: Chunked summary generated. Length: {len(summary)}")
         return summary
 
+    def _summarize_incremental(
+        self,
+        messages: list[Message | VisionMessage],
+        running_summary: str,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> str:
+        """Generate an updated summary by incorporating new messages into an existing summary.
+
+        Instead of re-summarizing everything from scratch, this method passes the
+        existing running summary as context and asks the LLM to incorporate only the
+        new messages.  This bounds information loss across multiple passes.
+
+        Falls back to full replace-mode if ``running_summary`` is empty.
+
+        Args:
+            messages: New messages to incorporate (NOT including the old summary message).
+            running_summary: The existing running summary from the previous pass.
+            config: Configuration for the run.
+            **kwargs: Additional parameters.
+
+        Returns:
+            str: The updated summary.
+        """
+        if not running_summary or not running_summary.strip():
+            logger.info("Context Manager Tool: Empty running_summary, falling back to replace mode.")
+            return self._summarize_replace_history(messages, config, **kwargs)
+
+        budget = self._get_token_budget()
+
+        incremental_prompt = HISTORY_SUMMARIZATION_PROMPT_INCREMENTAL.format(
+            running_summary=running_summary,
+        )
+        prompt_msg = Message(content=incremental_prompt, role=MessageRole.USER, static=True)
+        prompt_tokens = self._count_message_tokens([prompt_msg])
+
+        effective_budget = max(budget - prompt_tokens, budget // 4)
+        message_tokens = self._count_message_tokens(messages)
+
+        if message_tokens <= effective_budget:
+            logger.info("Context Manager Tool: Incremental summary - new messages fit in context.")
+            summary_messages = messages + [prompt_msg]
+            summary = self._call_llm_for_summary(summary_messages, config, **kwargs)
+            logger.info(f"Context Manager Tool: Incremental summary generated. Length: {len(summary)}")
+            return summary
+
+        chunks = self._split_messages_into_chunks(messages, effective_budget)
+        logger.info(
+            f"Context Manager Tool: Incremental summary - new messages ({message_tokens} tokens) "
+            f"exceed budget ({effective_budget} tokens). Splitting into {len(chunks)} chunks."
+        )
+
+        current_summary = running_summary
+        for idx, chunk in enumerate(chunks):
+            logger.info(f"Context Manager Tool: Incremental chunk {idx + 1}/{len(chunks)}.")
+            chunk_prompt = HISTORY_SUMMARIZATION_PROMPT_INCREMENTAL.format(
+                running_summary=current_summary,
+            )
+            chunk_messages = chunk + [
+                Message(content=chunk_prompt, role=MessageRole.USER, static=True),
+            ]
+            current_summary = self._call_llm_for_summary(chunk_messages, config, **kwargs)
+
+        logger.info(f"Context Manager Tool: Incremental summary complete. Length: {len(current_summary)}")
+        return current_summary
+
     def execute(
         self, input_data: ContextManagerInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """
         Generate conversation summary from provided messages.
 
+        When ``running_summary`` is provided, produces an incremental update that
+        builds on the existing summary.  Otherwise falls back to full replacement.
+
         Returns:
             dict[str, Any]:
                 - content: The generated summary
-                - notes: Optional notes to preserve
         """
         config = ensure_config(config)
         self.reset_run_state()
@@ -310,13 +388,20 @@ class ContextManagerTool(Node):
 
         logger.info(f"Context Manager Tool: Generating summary for {len(input_data.messages)} messages.")
 
-        summary_result = self._summarize_replace_history(
-            input_data.messages,
-            config,
-            **kwargs,
-        )
+        if input_data.running_summary:
+            summary_result = self._summarize_incremental(
+                input_data.messages,
+                input_data.running_summary,
+                config,
+                **kwargs,
+            )
+        else:
+            summary_result = self._summarize_replace_history(
+                input_data.messages,
+                config,
+                **kwargs,
+            )
 
-        # Return summary with optional notes
         result_content = summary_result
         if input_data.notes:
             result_content = f"Notes: {input_data.notes}\n\n{summary_result}"

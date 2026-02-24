@@ -970,9 +970,19 @@ class SummarizationConfig(BaseModel):
         preserve_last_messages (int): Number of most recent messages to keep verbatim
           (not summarized). These are excluded from summarization and re-appended after
           the older history is replaced with a summary. 0 means all messages are summarized.
+        incremental (bool): When True, subsequent summarization passes build on the
+          previous running summary instead of re-summarizing from scratch. This bounds
+          information loss across multiple passes.
+        compaction_enabled (bool): When True, stale tool outputs are replaced with
+          compact references before resorting to lossy LLM summarization.
+        compaction_token_threshold (int): Minimum token count for a tool output
+          message to be eligible for compaction.
     """
 
     enabled: bool = False
     max_token_context_length: int | None = None
     context_usage_ratio: float = Field(default=0.8, gt=0, le=1)
     preserve_last_messages: int = Field(default=2, ge=0)
+    incremental: bool = Field(default=True)
+    compaction_enabled: bool = Field(default=True)
+    compaction_token_threshold: int = Field(default=500, ge=0)

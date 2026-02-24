@@ -8,7 +8,7 @@ from typing import Any
 import filetype
 from jinja2 import Environment, meta
 from litellm import token_counter
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from dynamiq.types.llm_tool import Tool
 from dynamiq.utils import generate_uuid
@@ -18,6 +18,7 @@ class MessageRole(str, enum.Enum):
     USER = "user"
     SYSTEM = "system"
     ASSISTANT = "assistant"
+    TOOL = "tool"
 
 
 class VisionMessageType(str, enum.Enum):
@@ -55,30 +56,59 @@ def get_parameters_for_template(template: str, env: Environment | None = None) -
 class Message(BaseModel):
     """
     Represents a message in a conversation.
+
+    Supports the standard OpenAI/Anthropic chat message format including tool calls.
+    At least one of ``content`` or ``tool_calls`` must be provided.
+
     Attributes:
-        content (str): The content of the message.
-        role (MessageRole): The role of the message sender.
-        metadata (dict | None): Additional metadata for the message, default is None.
-        static (bool): Determines whether it is possible to pass parameters via this message.
+        content: The text content of the message (None for tool-call-only assistant messages).
+        role: The role of the message sender.
+        metadata: Additional metadata for the message, default is None.
+        static: Determines whether it is possible to pass parameters via this message.
+        tool_calls: Tool/function calls requested by the assistant.
+        tool_call_id: ID of the tool call this message is a response to (role=tool).
+        name: Optional name of the message author (e.g. tool name).
     """
-    content: str
+
+    content: str | None = None
     role: MessageRole = MessageRole.USER
     metadata: dict | None = None
     static: bool = Field(default=False, exclude=True)
+    tool_calls: list[dict] | None = Field(default=None)
+    tool_call_id: str | None = Field(default=None)
+    name: str | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def _validate_content_or_tool_calls(self):
+        if self.content is None and not self.tool_calls:
+            raise ValueError("Message must have at least 'content' or 'tool_calls'.")
+        return self
 
     def __init__(self, **data):
         super().__init__(**data)
-        # Import and initialize Jinja2 Template here
         from jinja2 import Template
 
         self._Template = Template
 
     def format_message(self, **kwargs) -> "Message":
-        "Returns formated copy of message"
+        """Returns a formatted copy of the message with templates rendered."""
+        if self.content is None:
+            return self.model_copy()
         return Message(
             role=self.role,
             content=self._Template(self.content).render(**kwargs),
+            tool_calls=self.tool_calls,
+            tool_call_id=self.tool_call_id,
+            name=self.name,
         )
+
+    def to_api_dict(self) -> dict:
+        """Produce a dict suitable for LLM API calls.
+
+        Excludes ``metadata``, ``static``, and any optional field that is ``None``.
+        """
+        data = self.model_dump(exclude={"metadata"}, exclude_none=True)
+        return data
 
 
 class VisionMessageTextContent(BaseModel):
@@ -347,7 +377,8 @@ class Prompt(BasePrompt):
             int: Number of tokens.
         """
         return token_counter(
-            model=model, messages=[message.model_dump(exclude={"metadata"}) for message in self.messages]
+            model=model,
+            messages=[message.model_dump(exclude={"metadata"}, exclude_none=True) for message in self.messages],
         )
 
     def get_required_parameters(self) -> set[str]:
@@ -361,7 +392,7 @@ class Prompt(BasePrompt):
         env = Environment(autoescape=True)
         for msg in self.messages:
             if isinstance(msg, Message):
-                if not msg.static:
+                if not msg.static and msg.content is not None:
                     parameters |= get_parameters_for_template(msg.content, env=env)
             elif isinstance(msg, VisionMessage):
                 for content in msg.content:
@@ -394,7 +425,7 @@ class Prompt(BasePrompt):
             if isinstance(msg, Message):
                 if not msg.static:
                     msg = msg.format_message(**kwargs)
-                out.append(msg.model_dump(exclude={"metadata"}))
+                out.append(msg.to_api_dict())
             elif isinstance(msg, VisionMessage):
                 out.append(msg.format_message(**kwargs).model_dump(exclude={"metadata"}))
             else:
