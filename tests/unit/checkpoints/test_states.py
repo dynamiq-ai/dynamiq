@@ -3,7 +3,14 @@
 import pytest
 
 from dynamiq import connections
-from dynamiq.checkpoints.checkpoint import CheckpointContext, CheckpointMixin, CheckpointStatus, FlowCheckpoint
+from dynamiq.checkpoints.checkpoint import (
+    CheckpointContext,
+    CheckpointMixin,
+    CheckpointStatus,
+    FlowCheckpoint,
+    IterationState,
+    IterativeCheckpointMixin,
+)
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.base import AgentCheckpointState
@@ -348,3 +355,70 @@ class TestNodeApprovalCheckpoint:
         node = Python(id="n", name="N", code="def run(input_data): return {}")
         state = node.to_checkpoint_state().model_dump()
         assert "approval_response" not in state or state.get("approval_response") is None
+
+
+class TestIterativeCheckpointMixin:
+    """Unit tests for the IterativeCheckpointMixin protocol."""
+
+    def test_iteration_state_defaults(self):
+        state = IterationState()
+        assert state.completed_iterations == 0
+        assert state.iteration_data == {}
+
+    def test_iteration_state_with_data(self):
+        state = IterationState(completed_iterations=5, iteration_data={"key": [1, 2, 3]})
+        assert state.completed_iterations == 5
+        dumped = state.model_dump()
+        assert dumped["iteration_data"]["key"] == [1, 2, 3]
+
+    def test_agent_is_iterative_checkpoint_mixin(self):
+        agent = Agent(id="a", name="A", llm=create_test_llm(), role="Test")
+        assert isinstance(agent, IterativeCheckpointMixin)
+
+    def test_get_start_iteration_fresh(self):
+        agent = Agent(id="a", name="A", llm=create_test_llm(), role="Test")
+        assert agent.get_start_iteration() == 0
+
+    def test_get_start_iteration_after_restore(self):
+        agent = Agent(id="a", name="A", llm=create_test_llm(), role="Test")
+        agent._iteration_state = IterationState(completed_iterations=3)
+        agent._has_restored_iteration = True
+        assert agent.get_start_iteration() == 3
+        assert agent.get_start_iteration() == 0
+
+    def test_agent_checkpoint_includes_iteration(self):
+        agent = Agent(id="a", name="A", llm=create_test_llm(), role="Test", max_loops=10)
+        agent._completed_loops = 7
+        state = agent.to_checkpoint_state()
+        dumped = state.model_dump()
+        assert dumped["iteration"] is not None
+        assert dumped["iteration"]["completed_iterations"] == 7
+
+    def test_agent_from_checkpoint_restores_iteration(self):
+        agent = Agent(id="a", name="A", llm=create_test_llm(), role="Test")
+        agent.from_checkpoint_state(
+            {
+                "history_offset": 2,
+                "llm_state": {},
+                "iteration": {
+                    "completed_iterations": 4,
+                    "iteration_data": {"prompt_messages": [{"content": "hi", "role": "user", "static": False}]},
+                },
+            }
+        )
+        assert agent.get_start_iteration() == 4
+
+    def test_agent_from_checkpoint_without_iteration_is_backward_compatible(self):
+        agent = Agent(id="a", name="A", llm=create_test_llm(), role="Test")
+        agent.from_checkpoint_state({"history_offset": 2, "llm_state": {}})
+        assert agent.get_start_iteration() == 0
+
+    def test_save_iteration_roundtrip(self):
+        agent = Agent(id="rt", name="RT", llm=create_test_llm(), role="Test", max_loops=10)
+        agent._completed_loops = 6
+
+        state_dict = agent.to_checkpoint_state().model_dump()
+
+        new_agent = Agent(id="rt2", name="RT2", llm=create_test_llm(), role="Test", max_loops=10)
+        new_agent.from_checkpoint_state(state_dict)
+        assert new_agent.get_start_iteration() == 6

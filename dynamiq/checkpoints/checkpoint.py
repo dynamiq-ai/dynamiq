@@ -29,6 +29,8 @@ class BaseCheckpointState(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+    iteration: dict | None = Field(default=None, description="IterativeCheckpointMixin state for loop-level resume")
+
 
 class CheckpointMixin:
     """
@@ -56,6 +58,71 @@ class CheckpointMixin:
     def reset_resumed_flag(self) -> None:
         """Reset the resumed flag after handling resume logic."""
         self._is_resumed = False
+
+
+class IterationState(BaseModel):
+    """Snapshot of iterative progress within a long-running node.
+
+    Used by nodes that perform iterative work (ReAct loops, orchestrator
+    state transitions, etc.) to persist per-iteration progress so the node
+    can resume from the last completed iteration instead of restarting.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    completed_iterations: int = Field(default=0, description="Number of fully completed iterations")
+    iteration_data: dict = Field(default_factory=dict, description="Node-specific iteration state")
+
+
+class IterativeCheckpointMixin:
+    """Mixin for nodes that perform iterative work and support per-iteration resume.
+
+    Provides a standardised save/restore contract so any long-running node
+    (Agent, GraphOrchestrator, AdaptiveOrchestrator, …) can skip already-completed
+    iterations on resume without duplicating the staging-field pattern.
+
+    Subclasses must implement:
+        get_iteration_state()     – serialize current iteration progress
+        restore_iteration_state() – restore from a previously saved IterationState
+    """
+
+    _iteration_state: IterationState | None = None
+    _has_restored_iteration: bool = False
+
+    def get_iteration_state(self) -> IterationState:
+        """Serialize current iteration progress for checkpointing."""
+        raise NotImplementedError
+
+    def restore_iteration_state(self, state: IterationState) -> None:
+        """Restore node to the state after the last completed iteration."""
+        raise NotImplementedError
+
+    def get_start_iteration(self) -> int:
+        """Return the number of completed iterations (0 = fresh start).
+
+        Consumers call this at the top of their loop to decide whether to
+        skip iterations.  After returning > 0 the restored state is cleared
+        so subsequent calls return 0.
+        """
+        if not self._has_restored_iteration or not self._iteration_state:
+            return 0
+        completed = self._iteration_state.completed_iterations
+        self._has_restored_iteration = False
+        self._iteration_state = None
+        return completed
+
+    def _save_iteration_to_checkpoint(self, checkpoint_state: "BaseCheckpointState") -> None:
+        """Attach current iteration data to an outgoing checkpoint state."""
+        iteration = self.get_iteration_state()
+        checkpoint_state.iteration = iteration.model_dump()
+
+    def _restore_iteration_from_checkpoint(self, state_dict: dict) -> None:
+        """Extract iteration data from an incoming checkpoint state dict."""
+        if iteration_data := state_dict.get("iteration"):
+            self._iteration_state = (
+                IterationState(**iteration_data) if isinstance(iteration_data, dict) else iteration_data
+            )
+            self._has_restored_iteration = True
 
 
 class CheckpointContext:

@@ -131,9 +131,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
         return base
 
     def reset_run_state(self):
-        """Resets the agent's run state including AgentState."""
+        """Resets the agent's run state including AgentState.
+
+        When resuming from a checkpoint, AgentState is not wiped — it will be
+        restored from the checkpoint data inside _run_agent().
+        """
         super().reset_run_state()
-        self.state.reset()
+        if not self.is_resumed:
+            self.state.reset()
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -514,6 +519,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 recoverable=True,
             )
 
+    def _setup_stop_sequences(self) -> None:
+        """Configure LLM stop sequences based on the current inference mode."""
+        stop_sequences = []
+        if self.inference_mode == InferenceMode.DEFAULT:
+            stop_sequences.extend(["Observation: ", "\nObservation:"])
+        elif self.inference_mode == InferenceMode.XML:
+            stop_sequences.extend(["\nObservation:", "Observation:", "</output>\n<", "</output><"])
+        self.llm.stop = stop_sequences
+
     def _setup_prompt_and_stop_sequences(
         self,
         input_message: Message | VisionMessage,
@@ -540,21 +554,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self._prompt.messages = [system_message, input_message]
 
         self._history_offset = len(self._prompt.messages)
-
-        # Configure stop sequences based on inference mode
-        stop_sequences = []
-        if self.inference_mode == InferenceMode.DEFAULT:
-            stop_sequences.extend(["Observation: ", "\nObservation:"])
-        elif self.inference_mode == InferenceMode.XML:
-            stop_sequences.extend(
-                [
-                    "\nObservation:",
-                    "Observation:",
-                    "</output>\n<",
-                    "</output><",
-                ]
-            )
-        self.llm.stop = stop_sequences
+        self._setup_stop_sequences()
 
     def _setup_streaming_callback(
         self, config: RunnableConfig, loop_num: int, **kwargs
@@ -950,13 +950,28 @@ class Agent(HistoryManagerMixin, BaseAgent):
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
 
         self.state.max_loops = self.max_loops
-        self._requested_output_files = []
-        self._refresh_agent_state(1)
 
-        self._setup_prompt_and_stop_sequences(input_message, history_messages)
+        completed = self.get_start_iteration()
+        start_loop = completed + 1 if completed > 0 else 1
 
-        for loop_num in range(1, self.max_loops + 1):
-            if loop_num > 1:
+        if start_loop > 1:
+            logger.info(
+                f"Agent {self.name} - {self.id}: resuming from loop {start_loop}, "
+                f"skipping {completed} completed loops"
+            )
+            if not self._prompt.messages:
+                self._setup_prompt_and_stop_sequences(input_message, history_messages)
+            self._setup_stop_sequences()
+            self.state.max_loops = self.max_loops
+            self._refresh_agent_state(start_loop)
+            self.reset_resumed_flag()
+        else:
+            self._refresh_agent_state(1)
+            self._requested_output_files = []
+            self._setup_prompt_and_stop_sequences(input_message, history_messages)
+
+        for loop_num in range(start_loop, self.max_loops + 1):
+            if loop_num > start_loop:
                 self._refresh_agent_state(loop_num)
 
             try:
@@ -964,7 +979,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     config, loop_num, **kwargs
                 )
 
-                # Append state to the last user message before LLM call
                 messages = self._inject_state_into_messages(self._prompt.messages)
 
                 try:
@@ -995,7 +1009,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     if llm_generated_output
                     else str(llm_result.output.get("tool_calls", ""))[:200]
                 )
-                logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num}, " f"reasoning:\n{llm_reasoning}...")
+                logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num}, reasoning:\n{llm_reasoning}...")
 
                 # Append assistant message to conversation history BEFORE parsing
                 # This ensures the LLM can see its own output during error recovery
@@ -1012,13 +1026,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     case InferenceMode.XML:
                         result = self._handle_xml_mode(llm_generated_output, loop_num, config, **kwargs)
 
-                # Handle final answer
                 if result[1] == "final_answer":
                     self._resolve_requested_output_files(strict=True)
                     return result[2]
 
-                # Handle recovery (for modes that support it)
-                # Check if action is None, which indicates (None, None, None) recovery
                 if result[1] is None:
                     continue
 
@@ -1027,6 +1038,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 final_answer = self._execute_tools_and_update_prompt(
                     action, action_input, thought, loop_num, config, **kwargs
                 )
+
+                self._completed_loops = loop_num
 
                 if config and config.checkpoint and config.checkpoint.context:
                     config.checkpoint.context.save_mid_run(self.id)
