@@ -1248,7 +1248,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
     def _is_tool_parallel_eligible(self, tool_name: str) -> bool:
         """Check if a tool is eligible for parallel execution based on its is_parallel_execution_allowed flag."""
         tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
-        return tool.is_parallel_execution_allowed if tool else True
+        return tool.is_parallel_execution_allowed if tool else False
 
     def _execute_tools(
         self,
@@ -1300,28 +1300,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 continue
             prepared_tools.append({"order": idx, "name": tool_name, "input": tool_input})
 
-        def _execute_and_convert(tool_name: str, tool_input: Any, order: int) -> dict[str, Any]:
-            """Execute tool and convert tuple result to dict for parallel execution."""
-            tool_result, tool_files, _, success, dependency = self._execute_single_tool(
-                tool_name,
-                tool_input,
-                thought or "",
-                loop_num,
-                config,
-                update_run_depends=False,
-                collect_dependency=True,
-                is_parallel=True,
-                **kwargs,
-            )
-            return {
-                "order": order,
-                "tool_name": tool_name,
-                "success": success,
-                "result": tool_result,
-                "files": tool_files,
-                "dependency": dependency,
-            }
-
         def _execute_single_tool_to_result(tool_payload: dict[str, Any], **extra) -> dict[str, Any]:
             """Execute a single tool and wrap the result as a dict."""
             tool_result, tool_files, _, success, dependency = self._execute_single_tool(
@@ -1364,10 +1342,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         future_map = {}
                         for tool_payload in parallel_group:
                             future = executor.submit(
-                                _execute_and_convert,
-                                tool_payload["name"],
-                                tool_payload["input"],
-                                tool_payload["order"],
+                                _execute_single_tool_to_result,
+                                tool_payload,
+                                is_parallel=True,
+                                update_run_depends=False,
                             )
                             future_map[future] = tool_payload
 
