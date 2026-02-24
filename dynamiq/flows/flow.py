@@ -401,13 +401,20 @@ class Flow(BaseFlow):
 
         try:
             if self.nodes:
-                max_workers = config.max_node_workers if config else self.max_node_workers
+                max_workers = (
+                    config.max_node_workers if config and config.max_node_workers is not None else self.max_node_workers
+                )
                 run_executor = self.executor(max_workers=max_workers)
 
                 while self._ts.is_active():
                     ready_nodes = self._get_nodes_ready_to_run(input_data=input_data)
 
                     if self._checkpoint:
+                        already_completed = [
+                            n.node.id for n in ready_nodes if n.node.id in self._checkpoint.completed_node_ids
+                        ]
+                        if already_completed:
+                            self._ts.done(*already_completed)
                         ready_nodes = [n for n in ready_nodes if n.node.id not in self._checkpoint.completed_node_ids]
 
                     if not ready_nodes:
@@ -433,7 +440,7 @@ class Flow(BaseFlow):
             failed_nodes = self._get_failed_nodes_with_raise_behavior()
 
             if failed_nodes:
-                if self._should_checkpoint_on_failure():
+                if self._checkpoint and self._should_checkpoint_on_failure():
                     self._update_checkpoint({}, CheckpointStatus.FAILED)
                     logger.info(f"Flow {self.id}: checkpoint saved on failure, checkpoint_id={self._checkpoint.id}")
 
@@ -457,7 +464,7 @@ class Flow(BaseFlow):
             logger.info(f"Flow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
             return RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=output)
         except Exception as e:
-            if self._should_checkpoint_on_failure():
+            if self._checkpoint and self._should_checkpoint_on_failure():
                 self._update_checkpoint({}, CheckpointStatus.FAILED)
                 logger.info(f"Flow {self.id}: checkpoint saved on failure, checkpoint_id={self._checkpoint.id}")
 
@@ -555,6 +562,11 @@ class Flow(BaseFlow):
                     ready_nodes = self._get_nodes_ready_to_run(input_data=input_data)
 
                     if self._checkpoint:
+                        already_completed = [
+                            n.node.id for n in ready_nodes if n.node.id in self._checkpoint.completed_node_ids
+                        ]
+                        if already_completed:
+                            self._ts.done(*already_completed)
                         ready_nodes = [n for n in ready_nodes if n.node.id not in self._checkpoint.completed_node_ids]
 
                     nodes_to_run = [node for node in ready_nodes if node.is_ready]
@@ -587,7 +599,7 @@ class Flow(BaseFlow):
             failed_nodes = self._get_failed_nodes_with_raise_behavior()
 
             if failed_nodes:
-                if self._should_checkpoint_on_failure():
+                if self._checkpoint and self._should_checkpoint_on_failure():
                     self._update_checkpoint({}, CheckpointStatus.FAILED)
 
                 failed_names = [node.name or node.id for node in failed_nodes]
@@ -610,7 +622,7 @@ class Flow(BaseFlow):
             logger.info(f"Flow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
             return RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=output)
         except Exception as e:
-            if self._should_checkpoint_on_failure():
+            if self._checkpoint and self._should_checkpoint_on_failure():
                 self._update_checkpoint({}, CheckpointStatus.FAILED)
 
             failed_nodes = self._get_failed_nodes_with_raise_behavior()
@@ -715,13 +727,6 @@ class Flow(BaseFlow):
                 logger.debug(f"Flow {self.id}: restored internal state for node {node_id}")
 
         self._ts = self.init_node_topological_sorter(nodes=self.nodes)
-
-        for node_id in checkpoint.completed_node_ids:
-            if node_id in [n.id for n in self.nodes]:
-                try:
-                    self._ts.done(node_id)
-                except ValueError:
-                    pass
 
         if checkpoint.has_pending_inputs():
             pending_node_ids = list(checkpoint.pending_inputs.keys())
