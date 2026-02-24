@@ -30,31 +30,40 @@ class HistoryManagerMixin:
             and prompt_tokens > self.summarization_config.max_token_context_length
         ) or (prompt_tokens / self.llm.get_token_limit() > self.summarization_config.context_usage_ratio)
 
-    def _compact_history(self) -> None:
+    def _compact_history(self, summary: str | None = None) -> None:
+        """Compact history, optionally inserting a summary before preserved messages.
+
+        Replaces the conversation history with::
+
+            [prefix] [summary] [preserved msg 1] [preserved msg 2]
+
+        The last ``preserve_last_messages`` messages are kept verbatim.
+        If *summary* is provided it is inserted as a user message between the
+        prefix and the preserved messages.
+
+        Args:
+            summary: Optional summary text to insert after prefix.
         """
-        Compact conversation history.
-        """
-        try:
-            logger.info(f"Agent {self.name} - {self.id}: Compacting history.")
+        preserve_n = self.summarization_config.preserve_last_messages
+        all_history = self._prompt.messages[self._history_offset :]
 
-            # Keep messages up to history offset (system messages, initial user message)
-            new_messages = self._prompt.messages[: self._history_offset]
+        if preserve_n > 0 and len(all_history) >= preserve_n:
+            preserved = [m.copy() for m in all_history[-preserve_n:]]
+        else:
+            preserved = [m.copy() for m in all_history]
 
-            # Append copy of the last message before cleanup
-            if new_messages and len(self._prompt.messages) > self._history_offset:
-                new_messages.append(self._prompt.messages[-1].copy())
+        self._prompt.messages = self._prompt.messages[: self._history_offset]
 
-            # Replace the entire message list
-            self._prompt.messages = new_messages
-
-            logger.info(
-                f"Agent {self.name} - {self.id}: Context cleaned. "
-                f"Kept {self._history_offset} prefix messages. New count: {len(self._prompt.messages)}"
+        if summary:
+            self._prompt.messages.append(
+                Message(role=MessageRole.USER, content=f"\nObservation: {summary}\n", static=True)
             )
 
-        except Exception as e:
-            logger.error(f"Agent {self.name} - {self.id}: Error during history compaction: {e}")
-            raise e
+        self._prompt.messages.extend(preserved)
+        logger.info(
+            f"Agent {self.name} - {self.id}: History compacted. "
+            f"Summary: {'yes' if summary else 'no'}, preserved: {len(preserved)} messages."
+        )
 
     @staticmethod
     def aggregate_history(messages: list[Message | VisionMessage]) -> str:

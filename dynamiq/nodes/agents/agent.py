@@ -17,7 +17,6 @@ from dynamiq.nodes.agents.exceptions import (
     RecoverableAgentException,
     TagNotFoundError,
 )
-from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CONTEXT
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
@@ -107,6 +106,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
+    _skip_next_observation: bool = False
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
@@ -695,7 +695,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 return tool_result, tool_files, True, True, dependency
 
             if isinstance(tool, ContextManagerTool):
-                self._compact_history()
+                self._compact_history(summary=tool_result)
+                self._skip_next_observation = True
 
             # Stream the result
             self._stream_agent_event(
@@ -871,8 +872,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
                 tool_result = f"{tool_result}{skipped_notice}" if tool_result else skipped_notice
 
-            # Add observation (streaming already done in _execute_single_tool)
-            self._add_observation(tool_result)
+            if self._skip_next_observation:
+                self._skip_next_observation = False
+            else:
+                self._add_observation(tool_result)
 
         # else: No action or no tools available - no reasoning to stream
 
@@ -1090,10 +1093,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 return
 
             action = self.sanitize_tool_name(context_tool.name)
-
-            self._prompt.messages.append(
-                Message(role=MessageRole.ASSISTANT, content=PROMPT_AUTO_CLEAN_CONTEXT, static=True)
-            )
 
             self._execute_tools_and_update_prompt(
                 action=action,

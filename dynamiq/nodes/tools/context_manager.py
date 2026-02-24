@@ -1,5 +1,6 @@
 from typing import Any, ClassVar, Literal
 
+from litellm import token_counter
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections.managers import ConnectionManager
@@ -10,6 +11,14 @@ from dynamiq.prompts import Message, MessageRole
 from dynamiq.prompts.prompts import Prompt, VisionMessage
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
+
+MERGE_SUMMARIES_PROMPT = (
+    "The following are summaries of consecutive parts of a conversation. "
+    "Merge them into a single cohesive summary, preserving all key decisions, "
+    "important information, tool outputs, and unresolved tasks."
+)
+
+TOKEN_BUDGET_RATIO = 0.65
 
 
 class ContextManagerInputSchema(BaseModel):
@@ -99,42 +108,96 @@ class ContextManagerTool(Node):
         data["llm"] = self.llm.to_dict(**kwargs)
         return data
 
-    def _summarize_replace_history(
+    def _get_token_budget(self) -> int:
+        """Return the max input tokens available for summarization content.
+
+        Reserves space for the summarization prompt itself and the LLM output.
+        """
+        return int(self.llm.get_token_limit() * TOKEN_BUDGET_RATIO)
+
+    def _count_message_tokens(self, messages: list[Message | VisionMessage]) -> int:
+        """Count tokens for a list of messages using the summarization LLM's tokenizer."""
+        return token_counter(
+            model=self.llm.model,
+            messages=[m.model_dump(exclude={"metadata"}) for m in messages],
+        )
+
+    def _truncate_message(self, msg: Message | VisionMessage, budget: int) -> Message | VisionMessage:
+        """Truncate a single message so it fits within *budget* tokens.
+
+        Keeps a prefix of the content and appends a truncation marker.
+        VisionMessages are returned as-is (image content can't be meaningfully truncated).
+        """
+        if isinstance(msg, VisionMessage):
+            return msg
+
+        msg_tokens = self._count_message_tokens([msg])
+        if msg_tokens <= budget:
+            return msg
+
+        content = msg.content
+        ratio = budget / msg_tokens
+        # Conservative cut — leave room for the truncation marker
+        cut_point = max(1, int(len(content) * ratio * 0.9))
+        truncated_content = content[:cut_point] + "\n\n[... truncated due to context limit ...]"
+        logger.warning(
+            f"Context Manager Tool: Truncating oversized message "
+            f"({msg_tokens} tokens > {budget} budget). Kept ~{cut_point}/{len(content)} chars."
+        )
+        return msg.model_copy(update={"content": truncated_content})
+
+    def _split_messages_into_chunks(
+        self,
+        messages: list[Message | VisionMessage],
+        budget: int,
+    ) -> list[list[Message | VisionMessage]]:
+        """Split messages into chunks that each fit within *budget* tokens.
+
+        Messages are kept in order. A single message that exceeds the budget
+        is truncated to fit.
+        """
+        chunks: list[list[Message | VisionMessage]] = []
+        current_chunk: list[Message | VisionMessage] = []
+        current_tokens = 0
+
+        for msg in messages:
+            msg_tokens = self._count_message_tokens([msg])
+
+            if msg_tokens > budget:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                    current_chunk = []
+                    current_tokens = 0
+                truncated = self._truncate_message(msg, budget)
+                chunks.append([truncated])
+                continue
+
+            if current_chunk and current_tokens + msg_tokens > budget:
+                chunks.append(current_chunk)
+                current_chunk = [msg]
+                current_tokens = msg_tokens
+            else:
+                current_chunk.append(msg)
+                current_tokens += msg_tokens
+
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        return chunks
+
+    def _call_llm_for_summary(
         self,
         messages: list[Message | VisionMessage],
         config: RunnableConfig | None = None,
         **kwargs,
     ) -> str:
-        """
-        Generate a complete summary of the conversation (replace mode).
-
-        Args:
-            messages: List of messages to summarize
-            config: Configuration for the run
-            **kwargs: Additional parameters
-
-        Returns:
-            str: The generated summary
-        """
-        logger.info("Context Manager Tool: Generating summary (replace mode).")
-
-        # Build summary request messages
-        summary_messages = messages + [
-            Message(
-                content=HISTORY_SUMMARIZATION_PROMPT_REPLACE,
-                role=MessageRole.USER,
-                static=True,
-            ),
-        ]
-
+        """Send *messages* to the LLM and return the generated text."""
         llm_result = self.llm.run(
             input_data={},
-            prompt=Prompt(messages=summary_messages),
+            prompt=Prompt(messages=messages),
             config=config,
             **(kwargs | {"parent_run_id": kwargs.get("run_id"), "run_depends": []}),
         )
-
-        # Track LLM dependency for tracing
         self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
 
         if llm_result.status != RunnableStatus.SUCCESS:
@@ -144,8 +207,84 @@ class ContextManagerTool(Node):
         summary = llm_result.output.get("content", "")
         if not summary:
             raise ValueError("Context Manager Tool: LLM returned empty summary.")
+        return summary
 
-        logger.info(f"Context Manager Tool: Summary generated successfully. Length: {len(summary)}")
+    def _summarize_replace_history(
+        self,
+        messages: list[Message | VisionMessage],
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> str:
+        """Generate a complete summary of the conversation (replace mode).
+
+        When the conversation history exceeds the LLM's context window, the
+        messages are split into chunks that fit, each chunk is summarised
+        independently, and the per-chunk summaries are merged into one final
+        summary.  If the merged text is still too large, a second merge pass
+        is applied.
+
+        Args:
+            messages: List of messages to summarize.
+            config: Configuration for the run.
+            **kwargs: Additional parameters.
+
+        Returns:
+            str: The generated summary.
+        """
+        budget = self._get_token_budget()
+        message_tokens = self._count_message_tokens(messages)
+
+        if message_tokens <= budget:
+            logger.info("Context Manager Tool: History fits in context, single-pass summary.")
+            summary_messages = messages + [
+                Message(content=HISTORY_SUMMARIZATION_PROMPT_REPLACE, role=MessageRole.USER, static=True),
+            ]
+            summary = self._call_llm_for_summary(summary_messages, config, **kwargs)
+            logger.info(f"Context Manager Tool: Summary generated. Length: {len(summary)}")
+            return summary
+
+        chunks = self._split_messages_into_chunks(messages, budget)
+        logger.info(
+            f"Context Manager Tool: History ({message_tokens} tokens) exceeds budget "
+            f"({budget} tokens). Splitting into {len(chunks)} chunks."
+        )
+
+        chunk_summaries: list[str] = []
+        for idx, chunk in enumerate(chunks):
+            logger.info(f"Context Manager Tool: Summarizing chunk {idx + 1}/{len(chunks)}.")
+            chunk_messages = chunk + [
+                Message(content=HISTORY_SUMMARIZATION_PROMPT_REPLACE, role=MessageRole.USER, static=True),
+            ]
+            chunk_summaries.append(self._call_llm_for_summary(chunk_messages, config, **kwargs))
+
+        combined = "\n\n---\n\n".join(chunk_summaries)
+        combined_messages = [
+            Message(content=combined, role=MessageRole.USER, static=True),
+            Message(content=MERGE_SUMMARIES_PROMPT, role=MessageRole.USER, static=True),
+        ]
+
+        combined_tokens = self._count_message_tokens(combined_messages)
+        if combined_tokens > budget:
+            logger.info(
+                "Context Manager Tool: Merged summaries still exceed budget "
+                f"({combined_tokens} > {budget}). Running additional merge pass."
+            )
+            merge_chunks = self._split_messages_into_chunks(
+                [Message(content=s, role=MessageRole.USER, static=True) for s in chunk_summaries],
+                budget,
+            )
+            re_summaries: list[str] = []
+            for merge_chunk in merge_chunks:
+                merge_chunk.append(Message(content=MERGE_SUMMARIES_PROMPT, role=MessageRole.USER, static=True))
+                re_summaries.append(self._call_llm_for_summary(merge_chunk, config, **kwargs))
+            combined = "\n\n".join(re_summaries)
+            combined_messages = [
+                Message(content=combined, role=MessageRole.USER, static=True),
+                Message(content=MERGE_SUMMARIES_PROMPT, role=MessageRole.USER, static=True),
+            ]
+
+        summary = self._call_llm_for_summary(combined_messages, config, **kwargs)
+        logger.info(f"Context Manager Tool: Chunked summary generated. Length: {len(summary)}")
         return summary
 
     def execute(
@@ -169,11 +308,8 @@ class ContextManagerTool(Node):
         if not input_data.messages:
             raise ValueError("Context Manager Tool: No messages provided to summarize.")
 
-        logger.info(
-            f"Context Manager Tool: Generating summary for {len(input_data.messages)} messages "
-        )
+        logger.info(f"Context Manager Tool: Generating summary for {len(input_data.messages)} messages.")
 
-        # Generate summary (let exceptions propagate to prevent history wipe on failure)
         summary_result = self._summarize_replace_history(
             input_data.messages,
             config,
