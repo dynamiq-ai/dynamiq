@@ -47,10 +47,10 @@ class HistoryManagerMixin:
         preserve_n = self.summarization_config.preserve_last_messages
         all_history = self._prompt.messages[self._history_offset :]
 
-        if preserve_n > 0 and len(all_history) >= preserve_n:
+        if preserve_n > 0 and len(all_history) > preserve_n:
             preserved = [m.copy() for m in all_history[-preserve_n:]]
         else:
-            preserved = [m.copy() for m in all_history]
+            preserved = []
 
         self._prompt.messages = self._prompt.messages[: self._history_offset]
 
