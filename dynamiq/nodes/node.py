@@ -233,6 +233,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         is_postponed_component_init (bool): Whether component initialization is postponed.
         is_optimized_for_agents (bool): Whether to optimize output for agents. By default is set to False.
         is_files_allowed (bool): Whether the node is permitted to access files. By default is set to False.
+        is_parallel_execution_allowed (bool): Whether this node can be executed in parallel. Default True.
         _json_schema_fields (list[str]): List of parameter names that will be used when generating json schema
           with _generate_json_schema.
 
@@ -254,6 +255,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
     is_postponed_component_init: bool = False
     is_optimized_for_agents: bool = False
     is_files_allowed: bool = Field(default=False, description="Whether the node is permitted to access files.")
+    is_parallel_execution_allowed: bool = Field(
+        default=False,
+        description="Whether this node can be executed in parallel with other nodes inside an agent.",
+    )
     action_type: ActionType | None = Field(default=None, description="Action type classification for streaming.")
 
     _output_references: NodeOutputReferences = PrivateAttr()
