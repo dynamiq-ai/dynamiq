@@ -34,7 +34,7 @@ class TodoItem(BaseModel):
     """A single todo item."""
 
     id: str
-    content: str
+    content: str = ""
     status: TodoStatus = TodoStatus.PENDING
 
     model_config = ConfigDict(extra="allow")
@@ -55,13 +55,15 @@ class TodoWriteInputSchema(BaseModel):
     todos: list[TodoItem] = Field(
         ...,
         description=(
-            "List of todo items. Each item MUST have: "
-            "'id' (required string), 'content' (string), 'status' (TodoStatus enum: pending/in_progress/completed)."
+            "List of todo items. Each item MUST have 'id' and 'status'. "
+            "'content' is required only when creating (merge=false). "
+            "When updating (merge=true), only 'id' and 'status' are needed — content is preserved."
         ),
     )
     merge: bool = Field(
         default=True,
-        description="If true, merge with existing todos (update by id). If false, replace all.",
+        description="If true, update status of existing todos by id (content is preserved). "
+        "If false, replace all todos (content is required).",
     )
 
 
@@ -76,13 +78,19 @@ class TodoWriteTool(Node):
     name: str = "todo-write"
     description: str = """Save or update the todo list.
 
-Each todo item needs: 'id', 'content', 'status' (pending/in_progress/completed).
+Two modes:
+
+CREATE (merge=false): Build the full todo list. Each item needs 'id', 'content', 'status'.
+  {"todos": [{"id": "1", "content": "Implement auth", "status": "in_progress"},
+             {"id": "2", "content": "Add tests", "status": "pending"}], "merge": false}
+
+UPDATE (merge=true, default): Change status only. Content is preserved automatically — do NOT send content.
+  {"todos": [{"id": "1", "status": "completed"}, {"id": "2", "status": "in_progress"}], "merge": true}
 
 RULES:
-- When creating initial list: first task "in_progress", rest "pending"
-- After initial creation, ONLY update status via merge=true - do not restructure the plan
-- Use merge=true to update existing todos by id
-- Only use merge=false for initial list creation
+- Use merge=false ONLY for initial list creation. First task should be "in_progress", rest "pending".
+- Use merge=true for ALL subsequent updates. Only send 'id' and 'status' — content stays unchanged.
+- Do NOT restructure, reword, or reorder todos when updating status.
 """
 
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=30))
@@ -95,16 +103,11 @@ RULES:
         connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
 
-    _todos_cache: list[dict] | None = None
-
     def reset_run_state(self):
         self._run_depends = []
 
     def _load_todos(self) -> list[dict]:
-        """Load todos from cache or file store on first access."""
-        if self._todos_cache is not None:
-            return self._todos_cache
-
+        """Load todos from file store."""
         try:
             if self.file_store.exists(TODOS_FILE_PATH):
                 content = self.file_store.retrieve(TODOS_FILE_PATH)
@@ -112,25 +115,20 @@ RULES:
                 todos = data.get("todos")
                 if not isinstance(todos, list):
                     logger.warning(f"TodoWriteTool: Invalid todos format (expected list, got {type(todos).__name__})")
-                    self._todos_cache = []
-                    return self._todos_cache
+                    return []
                 validated = []
                 for t in todos:
                     try:
                         validated.append(TodoItem.model_validate(t).model_dump())
                     except Exception as e:
                         logger.warning(f"TodoWriteTool: Skipping invalid todo item: {e}")
-                self._todos_cache = validated
-                return self._todos_cache
+                return validated
         except Exception as e:
             logger.warning(f"TodoWriteTool: Failed to load todos: {e}")
-
-        self._todos_cache = []
-        return self._todos_cache
+        return []
 
     def _save_todos(self, todos: list[dict]) -> None:
-        """Persist todos to file store and update in-memory cache."""
-        self._todos_cache = todos
+        """Save todos to file store or sandbox."""
         content = json.dumps({"todos": todos}, indent=2)
         if isinstance(self.file_store, Sandbox):
             self.file_store.upload_file(

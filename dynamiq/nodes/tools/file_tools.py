@@ -662,7 +662,7 @@ class FileReadTool(Node):
                     file_path=input_data.file_path,
                 )
                 processed = self._append_cache_hint(processed, cached_path, hint_enabled=False)
-                return {"content": processed, "file_info": file_info, "cached_text_path": cached_path}
+                return {"content": processed, "file_info": file_info.model_dump(), "cached_text_path": cached_path}
 
             try:
                 file_io = BytesIO(content)
@@ -701,7 +701,7 @@ class FileReadTool(Node):
                             file_path=input_data.file_path,
                         )
                         processed = self._append_cache_hint(processed, cached_path, hint_enabled)
-                        result_payload = {"content": processed, "file_info": file_info}
+                        result_payload = {"content": processed, "file_info": file_info.model_dump()}
                         if page_entries:
                             result_payload["pages"] = page_entries
                         if cached_path:
@@ -731,7 +731,7 @@ class FileReadTool(Node):
                 file_path=input_data.file_path,
             )
 
-            return {"content": rendered_content, "file_info": file_info}
+            return {"content": rendered_content, "file_info": file_info.model_dump()}
 
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to read file. Error: {str(e)}")
