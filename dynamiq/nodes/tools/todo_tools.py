@@ -10,7 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.tools.file_tools import RESERVED_AGENT_PATH_PREFIX
 from dynamiq.runnables import RunnableConfig
 from dynamiq.sandboxes.base import Sandbox
 from dynamiq.storages.file.base import FileStore
@@ -25,8 +27,7 @@ class TodoStatus(str, Enum):
     COMPLETED = "completed"
 
 
-# Path where todos are stored within the file store
-TODOS_FILE_PATH = "._agent/todos.json"
+TODOS_FILE_PATH = f"{RESERVED_AGENT_PATH_PREFIX}todos.json"
 
 
 class TodoItem(BaseModel):
@@ -94,11 +95,16 @@ RULES:
         connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
 
+    _todos_cache: list[dict] | None = None
+
     def reset_run_state(self):
         self._run_depends = []
 
     def _load_todos(self) -> list[dict]:
-        """Load todos from file store."""
+        """Load todos from cache or file store on first access."""
+        if self._todos_cache is not None:
+            return self._todos_cache
+
         try:
             if self.file_store.exists(TODOS_FILE_PATH):
                 content = self.file_store.retrieve(TODOS_FILE_PATH)
@@ -106,21 +112,25 @@ RULES:
                 todos = data.get("todos")
                 if not isinstance(todos, list):
                     logger.warning(f"TodoWriteTool: Invalid todos format (expected list, got {type(todos).__name__})")
-                    return []
-                # Validate each item is a valid TodoItem
+                    self._todos_cache = []
+                    return self._todos_cache
                 validated = []
                 for t in todos:
                     try:
                         validated.append(TodoItem.model_validate(t).model_dump())
                     except Exception as e:
                         logger.warning(f"TodoWriteTool: Skipping invalid todo item: {e}")
-                return validated
+                self._todos_cache = validated
+                return self._todos_cache
         except Exception as e:
             logger.warning(f"TodoWriteTool: Failed to load todos: {e}")
-        return []
+
+        self._todos_cache = []
+        return self._todos_cache
 
     def _save_todos(self, todos: list[dict]) -> None:
-        """Save todos to file store or sandbox."""
+        """Persist todos to file store and update in-memory cache."""
+        self._todos_cache = todos
         content = json.dumps({"todos": todos}, indent=2)
         if isinstance(self.file_store, Sandbox):
             self.file_store.upload_file(
@@ -146,13 +156,18 @@ RULES:
         new_todos = [todo.model_dump() for todo in input_data.todos]
 
         if input_data.merge:
-            # Merge with existing todos
             existing = self._load_todos()
             existing_by_id = {t.get("id"): t for t in existing if t.get("id")}
 
-            # id is guaranteed by TodoItem validation
+            unknown_ids = [t["id"] for t in new_todos if t["id"] not in existing_by_id]
+            if unknown_ids:
+                raise ToolExecutionException(
+                    f"Todo ids not found: {unknown_ids}. Existing ids: {list(existing_by_id.keys())}",
+                    recoverable=True,
+                )
+
             for todo in new_todos:
-                existing_by_id[todo["id"]] = todo
+                existing_by_id[todo["id"]]["status"] = todo["status"]
 
             final_todos = list(existing_by_id.values())
         else:
