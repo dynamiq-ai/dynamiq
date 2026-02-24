@@ -44,14 +44,23 @@ class SkillsTool(Node):
     name: str = "SkillsTool"
     description: str = (
         "Manages skills (instructions and optional scripts). Use this tool to:\n"
-        "- List available skills: action='list'\n"
-        "- Get skill content: action='get', skill_name='...'. "
-        "For large skills use section='Section title' or line_start/line_end to read only a part.\n\n"
-        "When get returns a 'scripts_path', the skill has bundled scripts: run commands from that "
-        "directory (e.g. cd <scripts_path> then run scripts) or pass it to your execution environment.\n\n"
-        "After get, apply the skill's instructions yourself in your reasoning and provide the result "
-        "in your final answer. Do not call the tool again with user content to transform; "
-        "the tool only provides instructions; you produce the output."
+        "- List available skills: action='list' (use this to discover skill names and descriptions).\n"
+        "- Get skill content: action='get', skill_name='...' "
+        "— use only when skills are NOT available in the sandbox. "
+        "When a sandbox is available and skills have been "
+        "ingested (e.g. under /home/user/skills/), prefer reading "
+        "skill content from the sandbox via SandboxShellTool "
+        "(e.g. cat /home/user/skills/<name>/SKILL.md or grep for a section) "
+        "instead of calling get. For large skills use "
+        "section='Section title' or line_start/line_end to read only a part.\n\n"
+        "When get returns a 'scripts_path', or when using the "
+        "sandbox, scripts are under <skill_dir>/scripts/: "
+        "run them via the sandbox (cd <path> then run scripts).\n\n"
+        "After reading skill content (from sandbox or get), apply"
+        " the instructions yourself and provide the result "
+        "in your final answer. Do not call the tool again with"
+        " user content to transform; the tool only provides "
+        "instructions; you produce the output."
     )
 
     skill_registry: BaseSkillRegistry = Field(
@@ -87,7 +96,14 @@ class SkillsTool(Node):
 
     def _list_skills(self) -> dict[str, Any]:
         metadata_list = self.skill_registry.get_skills_metadata()
-        skills_info = [{"name": m.name, "description": m.description} for m in metadata_list]
+        base = (getattr(self.skill_registry, "sandbox_skills_base_path", None) or "").rstrip("/")
+        skills_info = []
+        for m in metadata_list:
+            entry: dict[str, Any] = {"name": m.name, "description": m.description}
+            if base:
+                entry["sandbox_path"] = f"{base}/{m.name}/SKILL.md"
+                entry["scripts_path"] = f"{base}/{m.name}/scripts"
+            skills_info.append(entry)
         names = [m.name for m in metadata_list]
         logger.info("SkillsTool - list: %d skill(s) %s", len(metadata_list), names)
         return {

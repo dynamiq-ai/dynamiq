@@ -462,29 +462,34 @@ class Agent(Node):
         if source is None:
             return
         metadata = self.skills.get_skills_metadata()
-        skills_summary = self._format_skills_summary(metadata)
+        sandbox_base = (getattr(source, "sandbox_skills_base_path", None) or "").rstrip("/")
+        skills_summary = self._format_skills_summary(metadata, sandbox_skills_base_path=sandbox_base or None)
         self.system_prompt_manager.set_block("skills", skills_summary)
         self.system_prompt_manager.set_initial_variable("tool_description", self.tool_description)
+        if sandbox_base:
+            self.system_prompt_manager.set_initial_variable("sandbox_skills_base_path", sandbox_base)
         logger.info(
             f"Agent {self.name} - {self.id}: initialized with {len(metadata)} skills "
             f"(source={source.__class__.__name__})"
         )
 
-    def _format_skills_summary(self, metadata: list[SkillMetadata]) -> str:
+    def _format_skills_summary(self, metadata: list[SkillMetadata], sandbox_skills_base_path: str | None = None) -> str:
         """Format skills summary for prompt.
 
-        Args:
-            metadata: List of SkillMetadata objects.
-
-        Returns:
-            Formatted string with skill information.
+        When sandbox_skills_base_path is set, each line includes the path to read the skill
+        in the sandbox so the agent can go straight to SandboxShellTool without calling SkillsTool list.
         """
         if not metadata:
             return ""
 
+        base = (sandbox_skills_base_path or "").rstrip("/")
         lines = []
         for skill in metadata:
-            lines.append(f"- **{skill.name}**: {skill.description}")
+            if base:
+                skill_path = f"{base}/{skill.name}/SKILL.md"
+                lines.append(f"- **{skill.name}**: {skill.description} — read: `{skill_path}`")
+            else:
+                lines.append(f"- **{skill.name}**: {skill.description}")
         return "\n".join(lines)
 
     def set_block(self, block_name: str, content: str):
