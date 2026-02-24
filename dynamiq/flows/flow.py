@@ -377,7 +377,7 @@ class Flow(BaseFlow):
             "parent_run_id": kwargs.get("parent_run_id", None),
         }
 
-        if self._should_checkpoint():
+        if self._is_checkpoint_enabled():
             if self._checkpoint:
                 self._checkpoint.run_id = str(run_id)
                 self._checkpoint.wf_run_id = wf_run_id
@@ -417,10 +417,6 @@ class Flow(BaseFlow):
                             self._ts.done(*already_completed)
                         ready_nodes = [n for n in ready_nodes if n.node.id not in self._checkpoint.completed_node_ids]
 
-                    if not ready_nodes:
-                        time.sleep(0.003)
-                        continue
-
                     results = run_executor.execute(
                         ready_nodes=ready_nodes,
                         config=config,
@@ -429,10 +425,10 @@ class Flow(BaseFlow):
                     self._results.update(results)
                     self._ts.done(*results.keys())
 
-                    if self._should_checkpoint():
+                    if self._is_checkpoint_enabled():
                         self._update_checkpoint(results, CheckpointStatus.ACTIVE)
 
-                    time.sleep(0.003)
+                    time.sleep(0.001)
 
                 run_executor.shutdown()
 
@@ -440,7 +436,7 @@ class Flow(BaseFlow):
             failed_nodes = self._get_failed_nodes_with_raise_behavior()
 
             if failed_nodes:
-                if self._checkpoint and self._should_checkpoint_on_failure():
+                if self._checkpoint and self._is_checkpoint_on_failure_enabled():
                     self._update_checkpoint({}, CheckpointStatus.FAILED)
                     logger.info(f"Flow {self.id}: checkpoint saved on failure, checkpoint_id={self._checkpoint.id}")
 
@@ -456,7 +452,7 @@ class Flow(BaseFlow):
                     error=RunnableResultError.from_exception(error, failed_nodes=failed_nodes),
                 )
 
-            if self._should_checkpoint():
+            if self._is_checkpoint_enabled():
                 self._update_checkpoint({}, CheckpointStatus.COMPLETED)
                 self._cleanup_old_checkpoints()
 
@@ -464,7 +460,7 @@ class Flow(BaseFlow):
             logger.info(f"Flow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
             return RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=output)
         except Exception as e:
-            if self._checkpoint and self._should_checkpoint_on_failure():
+            if self._checkpoint and self._is_checkpoint_on_failure_enabled():
                 self._update_checkpoint({}, CheckpointStatus.FAILED)
                 logger.info(f"Flow {self.id}: checkpoint saved on failure, checkpoint_id={self._checkpoint.id}")
 
@@ -534,7 +530,7 @@ class Flow(BaseFlow):
             "parent_run_id": kwargs.get("parent_run_id", run_id),
         }
 
-        if self._should_checkpoint():
+        if self._is_checkpoint_enabled():
             if self._checkpoint:
                 self._checkpoint.run_id = str(run_id)
                 self._checkpoint.wf_run_id = wf_run_id
@@ -589,7 +585,7 @@ class Flow(BaseFlow):
                         self._results.update(results)
                         self._ts.done(*results.keys())
 
-                        if self._should_checkpoint():
+                        if self._is_checkpoint_enabled():
                             self._update_checkpoint(results, CheckpointStatus.ACTIVE)
 
                     # Wait for ready nodes to be processed and reduce CPU usage by yielding control to the event loop
@@ -599,7 +595,7 @@ class Flow(BaseFlow):
             failed_nodes = self._get_failed_nodes_with_raise_behavior()
 
             if failed_nodes:
-                if self._checkpoint and self._should_checkpoint_on_failure():
+                if self._checkpoint and self._is_checkpoint_on_failure_enabled():
                     self._update_checkpoint({}, CheckpointStatus.FAILED)
 
                 failed_names = [node.name or node.id for node in failed_nodes]
@@ -614,7 +610,7 @@ class Flow(BaseFlow):
                     error=RunnableResultError.from_exception(error, failed_nodes=failed_nodes),
                 )
 
-            if self._should_checkpoint():
+            if self._is_checkpoint_enabled():
                 self._update_checkpoint({}, CheckpointStatus.COMPLETED)
                 self._cleanup_old_checkpoints()
 
@@ -622,7 +618,7 @@ class Flow(BaseFlow):
             logger.info(f"Flow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
             return RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=output)
         except Exception as e:
-            if self._checkpoint and self._should_checkpoint_on_failure():
+            if self._checkpoint and self._is_checkpoint_on_failure_enabled():
                 self._update_checkpoint({}, CheckpointStatus.FAILED)
 
             failed_nodes = self._get_failed_nodes_with_raise_behavior()
@@ -745,7 +741,7 @@ class Flow(BaseFlow):
 
     def _setup_checkpoint_context(self, config: RunnableConfig | None) -> RunnableConfig | None:
         """Setup checkpoint context for HITL and mid-agent-loop checkpointing."""
-        if not self._should_checkpoint():
+        if not self._is_checkpoint_enabled():
             return config
 
         def on_pending_input(node_id: str, prompt: str, metadata: dict | None) -> None:
@@ -818,13 +814,13 @@ class Flow(BaseFlow):
 
         return CheckpointConfig(**merged_values)
 
-    def _should_checkpoint(self) -> bool:
-        """Check if checkpointing is enabled and configured."""
+    def _is_checkpoint_enabled(self) -> bool:
+        """Check if checkpointing after each node is enabled and configured."""
         cfg = self._effective_checkpoint_config or self.checkpoint
         return cfg.enabled and cfg.backend is not None and cfg.checkpoint_after_node
 
-    def _should_checkpoint_on_failure(self) -> bool:
-        """Check if should checkpoint on failure."""
+    def _is_checkpoint_on_failure_enabled(self) -> bool:
+        """Check if checkpointing on failure is enabled and configured."""
         cfg = self._effective_checkpoint_config or self.checkpoint
         return cfg.enabled and cfg.backend is not None and cfg.checkpoint_on_failure
 
