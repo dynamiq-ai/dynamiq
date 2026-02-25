@@ -83,3 +83,9 @@ class JSONParsingError(ParsingError):
     """Exception raised when expected JSON content within XML is invalid."""
 
     pass
+
+
+class OutputFileNotFoundError(RecoverableAgentException):
+    """Exception raised when files listed in <output_files> do not exist on the backend."""
+
+    pass

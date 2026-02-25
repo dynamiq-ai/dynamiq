@@ -13,6 +13,7 @@ from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     JSONParsingError,
     MaxLoopsExceededException,
+    OutputFileNotFoundError,
     ParsingError,
     RecoverableAgentException,
     TagNotFoundError,
@@ -1026,6 +1027,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 if final_answer is not None:
                     return final_answer
 
+            except OutputFileNotFoundError as e:
+                self._append_recovery_instruction(
+                    error_label=type(e).__name__,
+                    error_detail=str(e),
+                    llm_generated_output=llm_generated_output,
+                    extra_guidance=(
+                        "The response format is correct, but some files could not be found. "
+                        "Please create the missing files or correct the file paths, "
+                        "then provide your final answer again."
+                    ),
+                )
+                continue
+
             except ActionParsingException as e:
                 extra_guidance = None
                 if self.inference_mode == InferenceMode.XML:
@@ -1047,6 +1061,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     extra_guidance=extra_guidance,
                 )
                 continue
+            except Exception as e:
+                logger.error(f"Agent {self.name} - {self.id}: Error during agent execution: {e}")
+                raise e
 
             # Inject automatic summarization if token limit exceeded (like Context Manager Tool)
             self._try_summarize_history(config=config, **kwargs)
@@ -1122,7 +1139,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         Each requested path is checked as-is first, then by basename.
         When *strict* is ``True`` (inside the normal loop), missing files
-        raise :class:`ActionParsingException` so the agent can retry.
+        raise :class:`OutputFileNotFoundError` so the agent can retry.
         When *strict* is ``False`` (max-loops path), missing files are
         silently dropped because there are no retries left.
         """
@@ -1145,7 +1162,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 file_not_found.append(f)
 
         if file_not_found and strict:
-            raise ActionParsingException(f"File not found: {file_not_found}.", recoverable=True)
+            raise OutputFileNotFoundError(f"File not found: {file_not_found}.", recoverable=True)
 
         if file_not_found and not strict:
             logger.warning(
