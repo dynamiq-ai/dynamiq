@@ -33,6 +33,7 @@ def run_config():
     """Standard runnable configuration."""
     return RunnableConfig(request_timeout=120)
 
+
 @pytest.mark.flaky(reruns=3)
 @pytest.mark.integration
 @pytest.mark.parametrize(
