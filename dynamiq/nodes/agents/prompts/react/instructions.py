@@ -235,7 +235,8 @@ IMPORTANT RULES:
 - Properly close all XML tags
 - Do not use markdown formatting inside XML
 - Do not mention tools or actions since you don't have access to any
-- If you want to return files, include an <output_files> tag after </answer> (but still inside <output>) listing absolute file paths (comma-separated). This tag is optional — omit it if there are no files to return.
+- If you want to return files, include an <output_files> tag after </answer> (but still inside <output>)
+listing absolute file paths (comma-separated). This tag is optional — omit it if there are no files to return.
 """
 
 
