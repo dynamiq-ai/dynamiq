@@ -40,7 +40,7 @@ from dynamiq.sandboxes.base import Sandbox, SandboxConfig
 from dynamiq.skills.config import SkillsConfig
 from dynamiq.skills.registries.dynamiq import Dynamiq
 from dynamiq.skills.types import SkillMetadata
-from dynamiq.skills.utils import ingest_skills_into_sandbox
+from dynamiq.skills.utils import ingest_skills_into_sandbox, normalize_sandbox_skills_base_path
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
@@ -462,8 +462,10 @@ class Agent(Node):
         if source is None:
             return
         metadata = self.skills.get_skills_metadata()
-        sandbox_base = (getattr(source, "sandbox_skills_base_path", None) or "").rstrip("/")
-        skills_summary = self._format_skills_summary(metadata, sandbox_skills_base_path=sandbox_base or None)
+        sandbox_base = normalize_sandbox_skills_base_path(getattr(source, "sandbox_skills_base_path", None))
+        skills_summary = self._format_skills_summary(
+            metadata, sandbox_skills_base_path=sandbox_base if sandbox_base else None
+        )
         self.system_prompt_manager.set_block("skills", skills_summary)
         self.system_prompt_manager.set_initial_variable("tool_description", self.tool_description)
         if sandbox_base:
@@ -482,7 +484,7 @@ class Agent(Node):
         if not metadata:
             return ""
 
-        base = (sandbox_skills_base_path or "").rstrip("/")
+        base = normalize_sandbox_skills_base_path(sandbox_skills_base_path)
         lines = []
         for skill in metadata:
             if base:

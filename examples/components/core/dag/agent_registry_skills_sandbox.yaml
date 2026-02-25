@@ -37,32 +37,32 @@ nodes:
         connection: dynamiq-api-conn
         sandbox_skills_base_path: "/home/user/skills"
         skills:
-          - id: "afc2c23a-5cc0-481f-b449-c272848b4f08"
-            version_id: "ed5a7f9a-4a6c-44cd-92d5-6e59a6c1aea7"
+          - id: "a8b8785d-e5fb-4076-8cb8-804b4017d840"
+            version_id: "latest"
             name: docx
             description: Create, read, edit, and manipulate Word documents (.docx); reports, memos, letters, templates; Markdown/HTML to docx via pandoc.
-          - id: "edad02ad-4e5b-45b6-b19d-7fcabcdef0f1"
-            version_id: "d6ae58d9-87ed-4106-8e74-850f073a031e"
+          - id: "afde47e6-98af-421d-81f9-e1b7800013e9"
+            version_id: "latest"
             name: pdf
             description: PDF creation, form filling, extraction, conversion, and validation; Markdown/HTML to PDF via pandoc or docx→PDF.
-          - id: "b3ce8c13-9299-493c-bd68-f1658b0ea408"
+          - id: "ec8afb35-b38e-464a-b4be-883512437a3e"
             version_id: "latest"
             name: pptx
             description: Create, edit, and manipulate PowerPoint presentations (.pptx); design and QA rules, scripts for thumbnail, pack, soffice.
-          - id: "d5dbb2be-880f-491c-8673-6cbe9416bc88"
-            version_id: "a019dd3c-a2c7-49bf-a9ae-cda37bf02d2f"
+          - id: "c5aa8832-739c-4366-ad58-e3dce7378b05"
+            version_id: "latest"
             name: xlsx
             description: Create, edit, and manipulate Excel spreadsheets (.xlsx); formulas, recalc, dashboard and R-ready rules.
-          - id: "b42f4bf0-9ceb-48ad-a76b-47ad00887ab9"
-            version_id: "b073d1a2-e47a-42bc-b268-6ad4a750d152"
+          - id: "d3e56ec7-62e0-4706-896c-4ffe98a82225"
+            version_id: "latest"
             name: md
             description: Markdown and HTML as source or target; convert md/html to or from docx, pdf, pptx using pandoc and markitdown.
-          - id: "d3760c62-85f4-445b-a9d1-233950439cb2"
-            version_id: "c8524465-7f03-4a90-8e53-7fa94e99b289"
+          - id: "b4d320e2-c722-43c6-b9d9-d57c75757d6f"
+            version_id: "latest"
             name: frontend-design
             description: Create distinctive, production-grade frontend interfaces; web components, pages, dashboards, HTML/CSS/JS or React; avoid generic AI aesthetics.
-          - id: "dbb65cfd-4b28-4a9c-b104-7227bcec2883"
-            version_id: "f141a783-e24c-42a1-a778-091d3ee21d4d"
+          - id: "f1665145-5a21-4524-a162-675f4fed81bc"
+            version_id: "latest"
             name: web-artifacts-builder
             description: React + TypeScript + Vite + Tailwind + shadcn/ui artifacts; init-artifact.sh, bundle-artifact.sh for single HTML artifact.
     max_loops: 100

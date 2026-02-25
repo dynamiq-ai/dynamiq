@@ -7,7 +7,7 @@ from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.runnables import RunnableConfig
 from dynamiq.skills import BaseSkillRegistry
-from dynamiq.skills.utils import extract_skill_content_slice
+from dynamiq.skills.utils import extract_skill_content_slice, normalize_sandbox_skills_base_path
 from dynamiq.utils.logger import logger
 
 
@@ -96,13 +96,15 @@ class SkillsTool(Node):
 
     def _list_skills(self) -> dict[str, Any]:
         metadata_list = self.skill_registry.get_skills_metadata()
-        base = (getattr(self.skill_registry, "sandbox_skills_base_path", None) or "").rstrip("/")
+        base = normalize_sandbox_skills_base_path(getattr(self.skill_registry, "sandbox_skills_base_path", None))
         skills_info = []
         for m in metadata_list:
             entry: dict[str, Any] = {"name": m.name, "description": m.description}
             if base:
                 entry["sandbox_path"] = f"{base}/{m.name}/SKILL.md"
-                entry["scripts_path"] = f"{base}/{m.name}/scripts"
+            scripts_path = self.skill_registry.get_skill_scripts_path(m.name)
+            if scripts_path:
+                entry["scripts_path"] = scripts_path
             skills_info.append(entry)
         names = [m.name for m in metadata_list]
         logger.info("SkillsTool - list: %d skill(s) %s", len(metadata_list), names)

@@ -18,7 +18,7 @@ You are AI powered assistant.
 {%- if skills %}
 # AVAILABLE SKILLS (SkillsTool)
 The list below is for orientation only.
-You must read full skill content before applying it; 
+You must read full skill content before applying it;
 do not rely on the short descriptions.
 
 {{skills}}
