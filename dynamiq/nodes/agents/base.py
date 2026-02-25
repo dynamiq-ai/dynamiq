@@ -478,13 +478,14 @@ class Agent(Node):
     def _format_skills_summary(self, metadata: list[SkillMetadata], sandbox_skills_base_path: str | None = None) -> str:
         """Format skills summary for prompt.
 
-        When sandbox_skills_base_path is set, each line includes the path to read the skill
-        in the sandbox so the agent can go straight to SandboxShellTool without calling SkillsTool list.
+        When sandbox_skills_base_path is set (caller must pass an already-normalized path or None),
+        each line includes the path to read the skill in the sandbox so the agent can go straight
+        to SandboxShellTool without calling SkillsTool list.
         """
         if not metadata:
             return ""
 
-        base = normalize_sandbox_skills_base_path(sandbox_skills_base_path)
+        base = sandbox_skills_base_path or ""
         lines = []
         for skill in metadata:
             if base:
