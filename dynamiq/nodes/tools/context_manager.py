@@ -108,11 +108,19 @@ class ContextManagerTool(Node):
         return data
 
     def _get_token_budget(self) -> int:
-        """Return the max input tokens available for summarization content.
+        """Return the max input tokens available for conversation messages per chunk.
 
-        Reserves space for the summarization prompt itself and the LLM output.
+        Subtracts estimated prompt overhead (summarization/merge instructions)
+        from the ratio-based budget so that chunk + prompt always fits within
+        the LLM context window.
         """
-        return int(self.llm.get_token_limit() * self.token_budget_ratio)
+        raw_budget = int(self.llm.get_token_limit() * self.token_budget_ratio)
+        prompt_overhead = self._count_message_tokens(
+            [
+                Message(content=HISTORY_SUMMARIZATION_PROMPT_REPLACE, role=MessageRole.USER),
+            ]
+        )
+        return max(raw_budget - prompt_overhead, 1)
 
     def _count_message_tokens(self, messages: list[Message | VisionMessage]) -> int:
         """Count tokens for a list of messages using the summarization LLM's tokenizer."""
@@ -135,13 +143,11 @@ class ContextManagerTool(Node):
             return msg
 
         content = msg.content
-        ratio = max_tokens / msg_tokens
-
-        cut_point = max(1, int(len(content) * ratio * 0.9))
+        cut_point = max(1, max_tokens)
         truncated_content = content[:cut_point] + "\n\n[... truncated due to context limit ...]"
         logger.warning(
             f"Context Manager Tool: Truncating oversized message "
-            f"({msg_tokens} tokens > {max_tokens} token limit). Kept ~{cut_point}/{len(content)} chars."
+            f"({msg_tokens} tokens > {max_tokens} token limit). Kept {cut_point}/{len(content)} chars."
         )
         return msg.model_copy(update={"content": truncated_content})
 
