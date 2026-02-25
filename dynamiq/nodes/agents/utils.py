@@ -967,8 +967,16 @@ class SummarizationConfig(BaseModel):
         max_token_context_length (int | None): Maximum number of tokens in prompt after
           which summarization will be applied. Defaults to None.
         context_usage_ratio (float): Relative percentage of tokens in prompt after which summarization will be applied.
+        preserve_last_messages (int): Number of most recent messages to keep verbatim
+          (not summarized). These are excluded from summarization and re-appended after
+          the older history is replaced with a summary. 0 means all messages are summarized.
+        token_budget_ratio (float): Fraction of the LLM context window used for input
+          messages during summarization. The remainder is reserved for the summarization
+          prompt and generated output. Defaults to 0.75.
     """
 
     enabled: bool = False
     max_token_context_length: int | None = None
     context_usage_ratio: float = Field(default=0.8, gt=0, le=1)
+    preserve_last_messages: int = Field(default=4, ge=0)
+    token_budget_ratio: float = Field(default=0.75, gt=0, lt=1)

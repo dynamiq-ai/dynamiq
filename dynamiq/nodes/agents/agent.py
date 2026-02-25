@@ -18,7 +18,6 @@ from dynamiq.nodes.agents.exceptions import (
     RecoverableAgentException,
     TagNotFoundError,
 )
-from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CONTEXT
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
@@ -217,6 +216,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     context_tool = ContextManagerTool(
                         llm=self.llm,
                         name="context-manager",
+                        token_budget_ratio=self.summarization_config.token_budget_ratio,
                     )
                     self.tools.append(context_tool)
                     self._excluded_tool_ids.add(context_tool.id)
@@ -632,14 +632,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
         )
 
         try:
-            # Don't cache ContextManagerTool results - they should always be regenerated
-            # (messages are injected in _run_tool in base.py)
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
+                to_summarize, _ = self._split_history()
+                tool_input = {**(action_input if isinstance(action_input, dict) else {}), "messages": to_summarize}
             else:
-                # For other tools, check cache for previously computed results
                 tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
                 tool_result = self._tool_cache.get(tool_cache_entry, None)
+                tool_input = action_input
 
             delegate_final = self._should_delegate_final(tool, action_input)
 
@@ -649,7 +649,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 run_tool_result = self._run_tool(
                     tool,
-                    action_input,
+                    tool_input,
                     config,
                     delegate_final=delegate_final,
                     update_run_depends=update_run_depends,
@@ -696,7 +696,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 return tool_result, tool_files, True, True, dependency
 
             if isinstance(tool, ContextManagerTool):
-                self._compact_history()
+                self._compact_history(summary=tool_output_meta.get("summary", tool_result))
 
             # Stream the result
             self._stream_agent_event(
@@ -863,7 +863,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 if is_delegated:
                     return tool_result
 
-            # Add feedback about skipped tools if any were filtered out
             if skipped_tools:
                 skipped_notice = (
                     f"\n\n[Note: The following tools were NOT executed because context-manager "
@@ -872,7 +871,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
                 tool_result = f"{tool_result}{skipped_notice}" if tool_result else skipped_notice
 
-            # Add observation (streaming already done in _execute_single_tool)
             self._add_observation(tool_result)
 
         # else: No action or no tools available - no reasoning to stream
@@ -1091,10 +1089,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 return
 
             action = self.sanitize_tool_name(context_tool.name)
-
-            self._prompt.messages.append(
-                Message(role=MessageRole.ASSISTANT, content=PROMPT_AUTO_CLEAN_CONTEXT, static=True)
-            )
 
             self._execute_tools_and_update_prompt(
                 action=action,

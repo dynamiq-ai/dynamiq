@@ -9,7 +9,6 @@ import pytest
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CONTEXT
 from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.python import Python
@@ -76,6 +75,7 @@ def test_automatic_context_manager_invocation(llm_instance, python_tool, run_con
             enabled=True,
             max_token_context_length=5000,  # Low limit to trigger automatic summarization
             context_usage_ratio=0.5,
+            preserve_last_messages=2,
         ),
     )
 
@@ -106,7 +106,7 @@ def test_automatic_context_manager_invocation(llm_instance, python_tool, run_con
 
     logger.info(result.output)
     assert "apple" in result.output["content"], "Result is not correct"
-    assert final_message_count == 5, "Final message count is not correct. Maybe context manager tool was not invoked."
+    assert final_message_count == 7, "Final message count is not correct. Maybe context manager tool was not invoked."
     assert (
         agent.sanitize_tool_name(agent.tools[1].name) in agent._prompt.messages[-3].content.lower()
     ), "Context message not found"
@@ -136,6 +136,7 @@ def test_automatic_context_manager_auto_clean(llm_instance, python_tool, run_con
             enabled=True,
             max_token_context_length=1000,  # Low limit to trigger automatic summarization
             context_usage_ratio=0.5,
+            preserve_last_messages=0,
         ),
     )
 
@@ -144,7 +145,7 @@ def test_automatic_context_manager_auto_clean(llm_instance, python_tool, run_con
         "input": (
             "Results is exactly what word-generator tool. Please do the following:\n"
             "1. Use the word-generator tool to generate one random word.\n"
-            "2. Finish execution right after summarization with result of what word was returned."
+            "2. Finish execution with result of what word was returned."
         )
     }
 
@@ -163,6 +164,3 @@ def test_automatic_context_manager_auto_clean(llm_instance, python_tool, run_con
 
     logger.info(result.output)
     assert "apple" in result.output["content"], "Result is not correct"
-    assert any(
-        msg.content == PROMPT_AUTO_CLEAN_CONTEXT for msg in agent._prompt.messages
-    ), "Auto clean context message not found in any message"

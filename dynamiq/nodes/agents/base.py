@@ -1000,9 +1000,6 @@ class Agent(Node):
                     )
                 merged_input.pop("delegate_final", None)
 
-        if isinstance(tool, ContextManagerTool):
-            merged_input["messages"] = self._prompt.messages[self._history_offset :]
-
         raw_tool_params = kwargs.get("tool_params", ToolParams())
         tool_params = (
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
