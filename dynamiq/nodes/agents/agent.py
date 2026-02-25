@@ -464,6 +464,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             raw_output_files = (parsed_data.get("output_files") or "").strip()
             if raw_output_files:
                 self._requested_output_files = [p.strip() for p in raw_output_files.split(",") if p.strip()]
+            else:
+                self._requested_output_files = []
 
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer

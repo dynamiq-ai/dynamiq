@@ -178,17 +178,6 @@ class Sandbox(abc.ABC, BaseModel):
             "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
         )
 
-    def is_output_empty(self) -> bool:
-        """Check whether the sandbox output directory contains any files.
-
-        Returns:
-            True if the output directory is empty or does not exist, False otherwise.
-        """
-        try:
-            return len(self.list_output_files()) == 0
-        except NotImplementedError:
-            return True
-
     def collect_files(self, target_dir: str | None = None, file_paths: list[str] | None = None) -> list[io.BytesIO]:
         """Collect files from the sandbox directory as BytesIO objects.
 
