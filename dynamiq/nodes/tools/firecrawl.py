@@ -177,6 +177,7 @@ class FirecrawlTool(ConnectionNode):
     action_type: ActionType = ActionType.WEB_SCRAPE
     name: str = "Firecrawl Tool"
     description: str = DESCRIPTION_FIRECRAWL
+    is_parallel_execution_allowed: bool = True
     connection: Firecrawl
     url: str | None = None
     input_schema: ClassVar[type[FirecrawlInputSchema]] = FirecrawlInputSchema

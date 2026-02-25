@@ -139,13 +139,21 @@ class Sandbox(abc.ABC, BaseModel):
         """
         ...
 
-    def upload_file(self, file_name: str, content: bytes, destination_path: str | None = None) -> str:
+    def upload_file(
+        self,
+        file_name: str,
+        content: bytes,
+        destination_path: str | None = None,
+        ensure_parent_dirs: bool = True,
+    ) -> str:
         """Upload a file to the sandbox.
 
         Args:
             file_name: Name of the file.
             content: File content as bytes.
             destination_path: Optional destination path in sandbox. If None, uses base_path/file_name.
+            ensure_parent_dirs: When True, create parent directories with mkdir -p before upload
+                so existing directories do not cause errors (e.g. re-ingesting skills).
 
         Returns:
             The path where the file was uploaded in the sandbox.

@@ -3,7 +3,6 @@ import importlib.util
 import inspect
 import json
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import field
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -14,6 +13,7 @@ from mcp import ClientSession
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from dynamiq.connections import MCPSse, MCPStdio, MCPStreamableHTTP
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
@@ -253,7 +253,7 @@ Usage Strategy:
             list[MCPTool]: A list of initialized MCPTool instances.
         """
         if is_called_from_async_context():
-            with ThreadPoolExecutor() as executor:
+            with ContextAwareThreadPoolExecutor() as executor:
                 future = executor.submit(lambda: asyncio.run(self.get_mcp_tools_async(select_all=select_all)))
                 return future.result()
         return asyncio.run(self.get_mcp_tools_async(select_all=select_all))

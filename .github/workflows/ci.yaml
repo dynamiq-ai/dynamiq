@@ -100,12 +100,12 @@ jobs:
             *.cache-to=type=gha,mode=max
           targets: dynamiq-app-test
 
-      - name: Run tests on push or internal PR
-        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
+      - name: Run tests on push to main
+        if: ${{ github.event_name == 'push' }}
         run: docker compose up dynamiq-app-test-cov --exit-code-from dynamiq-app-test-cov
 
-      - name: Run tests on fork PR
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+      - name: Run tests on PR
+        if: ${{ github.event_name == 'pull_request' }}
         run: docker compose up dynamiq-app-test-cov-exclude-integration-with-creds --exit-code-from dynamiq-app-test-cov-exclude-integration-with-creds
 
       - uses: actions/upload-artifact@v4
@@ -134,6 +134,8 @@ jobs:
           pytest-xml-coverage-path: ./reports/coverage.xml
           junitxml-path: ./reports/test-results.xml
           report-only-changed-files: true
+          xml-skip-covered: true
+          remove-links-to-lines: true
 
   build-mkdocs:
     runs-on: ubuntu-latest
