@@ -274,6 +274,7 @@ class FileReadTool(Node):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.FILE_OPERATION
     name: str = "FileReadTool"
+    is_parallel_execution_allowed: bool = True
     description: str = """
         Reads files from storage based on the provided file path with intelligent file processing.
         Automatically detects file types (PDF, DOCX, PPTX, HTML, TXT, IMAGE, etc.) and extracts text content.
