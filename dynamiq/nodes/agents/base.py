@@ -17,7 +17,7 @@ from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     ToolCacheEntry,
     convert_bytesio_to_file_info,
-    process_tool_output_for_agent,
+    process_tool_output_with_sandbox_persistence,
 )
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
@@ -1096,8 +1096,11 @@ class Agent(Node):
 
         self._handle_tool_generated_files(tool, tool_result)
 
-        tool_result_content_processed = process_tool_output_for_agent(
+        tool_result_content_processed = process_tool_output_with_sandbox_persistence(
             content=tool_result_output_content,
+            tool_name=tool.name,
+            tool_input=tool_input,
+            sandbox=self.sandbox_backend,
             max_tokens=self.tool_output_max_length,
             truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
         )
