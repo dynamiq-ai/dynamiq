@@ -269,5 +269,3 @@ HISTORY_SUMMARIZATION_PROMPT_REPLACE = """Provide a concise summary of the conve
  future context, where the raw history above may not be accessible and will be replaced with this summary.
  Write down anything that would be helpful, including the state, next steps, learnings etc.
 """
-
-PROMPT_AUTO_CLEAN_CONTEXT = "Automatically cleaning the context with Context Manager Tool..."

@@ -137,7 +137,7 @@ class ContextManagerTool(Node):
 
         content = msg.content
         ratio = budget / msg_tokens
-        # Conservative cut — leave room for the truncation marker
+
         cut_point = max(1, int(len(content) * ratio * 0.9))
         truncated_content = content[:cut_point] + "\n\n[... truncated due to context limit ...]"
         logger.warning(
@@ -295,8 +295,8 @@ class ContextManagerTool(Node):
 
         Returns:
             dict[str, Any]:
-                - content: The generated summary
-                - notes: Optional notes to preserve
+                - content: Short acknowledgment for the agent observation.
+                - summary: The full generated summary used by ``_compact_history``.
         """
         config = ensure_config(config)
         self.reset_run_state()
@@ -316,11 +316,11 @@ class ContextManagerTool(Node):
             **kwargs,
         )
 
-        # Return summary with optional notes
-        result_content = summary_result
         if input_data.notes:
-            result_content = f"Notes: {input_data.notes}\n\n{summary_result}"
+            summary_result = f"Notes: {input_data.notes}\n\n{summary_result}"
 
         return {
-            "content": result_content,
+            "content": f"Conversation history was summarized successfully ({len(input_data.messages)} "
+            "messages compressed).",
+            "summary": summary_result,
         }

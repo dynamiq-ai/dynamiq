@@ -107,7 +107,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
-    _skip_next_observation: bool = False
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
@@ -696,8 +695,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 return tool_result, tool_files, True, True, dependency
 
             if isinstance(tool, ContextManagerTool):
-                self._compact_history(summary=tool_result)
-                self._skip_next_observation = True
+                self._compact_history(summary=tool_output_meta.get("summary", tool_result))
 
             # Stream the result
             self._stream_agent_event(
@@ -864,7 +862,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 if is_delegated:
                     return tool_result
 
-            # Add feedback about skipped tools if any were filtered out
             if skipped_tools:
                 skipped_notice = (
                     f"\n\n[Note: The following tools were NOT executed because context-manager "
@@ -873,10 +870,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
                 tool_result = f"{tool_result}{skipped_notice}" if tool_result else skipped_notice
 
-            if self._skip_next_observation:
-                self._skip_next_observation = False
-            else:
-                self._add_observation(tool_result)
+            self._add_observation(tool_result)
 
         # else: No action or no tools available - no reasoning to stream
 
