@@ -349,7 +349,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return None, None, None
 
         if "Answer:" in llm_generated_output:
-            thought, final_answer = parser.extract_default_final_answer(llm_generated_output)
+            thought, final_answer, output_files_raw = parser.extract_default_final_answer(llm_generated_output)
+            self._requested_output_files = self._parse_output_files_csv(output_files_raw)
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
 
@@ -379,6 +380,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
         thought = llm_generated_output_json["thought"]
         if action == "provide_final_answer":
             final_answer = llm_generated_output_json["answer"]
+            self._requested_output_files = self._parse_output_files_csv(
+                llm_generated_output_json.get("output_files") or ""
+            )
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
 
@@ -421,6 +425,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
         action_input = llm_generated_output_json["action_input"]
 
         if action == "finish":
+            self._requested_output_files = self._parse_output_files_csv(
+                llm_generated_output_json.get("output_files") or ""
+            )
             self.log_final_output(thought, action_input, loop_num)
             return thought, "final_answer", action_input
 
@@ -462,11 +469,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
             thought = parsed_data.get("thought")
             final_answer = parsed_data.get("answer")
 
-            raw_output_files = (parsed_data.get("output_files") or "").strip()
-            if raw_output_files:
-                self._requested_output_files = [p.strip() for p in raw_output_files.split(",") if p.strip()]
-            else:
-                self._requested_output_files = []
+            self._requested_output_files = self._parse_output_files_csv(
+                parsed_data.get("output_files") or ""
+            )
 
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
@@ -1134,6 +1139,16 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 **kwargs,
             )
 
+    @staticmethod
+    def _parse_output_files_csv(raw: str) -> list[str]:
+        """Parse a comma-separated string of file paths into a list.
+
+        Strips whitespace from each entry and drops empty entries.
+        """
+        if not raw or not raw.strip():
+            return []
+        return [p.strip() for p in raw.split(",") if p.strip()]
+
     def _resolve_requested_output_files(self, *, strict: bool = True) -> None:
         """Resolve ``_requested_output_files`` against the file backend.
 
@@ -1214,11 +1229,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             raw_output_files = XMLParser.extract_first_tag_lxml(llm_final_attempt, ["output_files"])
             if raw_output_files is None:
                 raw_output_files = XMLParser.extract_first_tag_regex(llm_final_attempt, ["output_files"])
-            if raw_output_files:
-                raw_output_files = raw_output_files.strip()
-                self._requested_output_files = [p.strip() for p in raw_output_files.split(",") if p.strip()]
-            else:
-                self._requested_output_files = []
+            self._requested_output_files = self._parse_output_files_csv(raw_output_files or "")
 
         except Exception as e:
             logger.error(f"Max loops handler: Error during final answer extraction: {e}. Returning raw output.")

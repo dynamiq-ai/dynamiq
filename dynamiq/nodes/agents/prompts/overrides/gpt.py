@@ -13,10 +13,12 @@ Observation: [Result from the tool]
 
 When you have enough information to provide a final answer:
 Thought: [Your reasoning for the final answer]
+Output Files: [Optional: comma-separated file paths to return, omit this line if there are no files]
 Answer: [Your complete answer to the user's question]
 
 For questions that don't require tools:
 Thought: [Your reasoning about the question]
+Output Files: [Optional: comma-separated file paths to return, omit this line if there are no files]
 Answer: [Your direct response]
 
 IMPORTANT RULES:
@@ -44,8 +46,7 @@ PERSISTENCE & PROGRESS:
 
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
-- Files are automatically collected and will be returned with your final answer
-- Mention created files in your final answer so users know what was generated
+- If you want to return files, include an "Output Files:" line before "Answer:" listing file paths (comma-separated). This line is optional — omit it if there are no files to return.
 """  # noqa: E501
 
 

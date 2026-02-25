@@ -136,7 +136,16 @@ def _run_and_assert_sandbox_agent(
 
 
 @pytest.mark.integration
-def test_agent_sandbox_creates_and_returns_file(openai_llm, image_bytes, e2b_connection, run_config):
+@pytest.mark.parametrize(
+    "inference_mode",
+    [
+        InferenceMode.XML,
+        InferenceMode.DEFAULT,
+        # InferenceMode.FUNCTION_CALLING,
+        InferenceMode.STRUCTURED_OUTPUT,
+    ],
+)
+def test_agent_sandbox_creates_and_returns_file(openai_llm, image_bytes, e2b_connection, run_config, inference_mode):
     """Test Agent with E2B sandbox can return a file in output and process vision data."""
     if not os.getenv("OPENAI_API_KEY"):
         pytest.skip("OPENAI_API_KEY is not set; skipping credentials-required test.")
@@ -148,11 +157,11 @@ def test_agent_sandbox_creates_and_returns_file(openai_llm, image_bytes, e2b_con
         sandbox_config = SandboxConfig(enabled=True, backend=sandbox_backend)
 
         agent = Agent(
-            name="SandboxFileAgent",
-            id="sandbox_file_agent",
+            name=f"SandboxFileAgent_{inference_mode.value}",
+            id=f"sandbox_file_agent_{inference_mode.value}",
             llm=openai_llm,
-            role=("You are a helpful assistant that can execute commands in the sandbox. "),
-            inference_mode=InferenceMode.XML,
+            role="You are a helpful assistant that can execute commands in the sandbox.",
+            inference_mode=inference_mode,
             sandbox=sandbox_config,
             max_loops=10,
             verbose=True,
@@ -174,7 +183,7 @@ def test_agent_sandbox_creates_and_returns_file(openai_llm, image_bytes, e2b_con
             expected_file_name=["summary.txt"],
         )
 
-        logger.info("--- Test Passed for Sandbox File Creation ---")
+        logger.info(f"--- Test Passed for Sandbox File Creation ({inference_mode.value}) ---")
     finally:
         sandbox_backend.close()
 

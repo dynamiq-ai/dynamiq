@@ -33,8 +33,12 @@ FINAL_ANSWER_FUNCTION_SCHEMA = {
                     "description": "Your reasoning about why you can answer original question.",
                 },
                 "answer": {"type": "string", "description": "Answer on initial request."},
+                "output_files": {
+                    "type": "string",
+                    "description": "Optional comma-separated file paths to return. Empty string if none.",
+                },
             },
-            "required": ["thought", "answer"],
+            "required": ["thought", "answer", "output_files"],
         },
     },
 }
@@ -108,7 +112,7 @@ def generate_structured_output_schemas(
             "strict": True,
             "schema": {
                 "type": "object",
-                "required": ["thought", "action", "action_input"],
+                "required": ["thought", "action", "action_input", "output_files"],
                 "properties": {
                     "thought": {
                         "type": "string",
@@ -121,6 +125,10 @@ def generate_structured_output_schemas(
                     "action_input": {
                         "type": "string",
                         "description": action_input_description,
+                    },
+                    "output_files": {
+                        "type": "string",
+                        "description": "Comma-separated file paths to return when action is finish. Empty string otherwise.",
                     },
                 },
                 "additionalProperties": False,
@@ -172,14 +180,33 @@ def generate_property_schema(properties: dict, name: str, field: Any) -> None:
             elif param_type := TYPE_MAPPING.get(param):
                 types.append(param_type)
 
-            elif issubclass(param, Enum):
+            elif isinstance(param, type) and issubclass(param, Enum):
                 element_type = TYPE_MAPPING.get(filter_format_type(type(list(param.__members__.values())[0].value))[0])
                 types.append(element_type)
                 properties[name]["enum"] = [field.value for field in param.__members__.values()]
 
             elif getattr(param, "__origin__", None) is list:
                 types.append("array")
-                properties[name]["items"] = {"type": TYPE_MAPPING.get(param.__args__[0])}
+                inner_type = param.__args__[0]
+                mapped = TYPE_MAPPING.get(inner_type)
+                if mapped:
+                    properties[name]["items"] = {"type": mapped}
+                elif isinstance(inner_type, type) and hasattr(inner_type, "model_fields"):
+                    nested_props = {}
+                    nested_required = []
+                    for fn, fi in inner_type.model_fields.items():
+                        fi_type = TYPE_MAPPING.get(fi.annotation, "string")
+                        nested_props[fn] = {"type": fi_type, "description": fi.description or "No description."}
+                        if fi.is_required():
+                            nested_required.append(fn)
+                    properties[name]["items"] = {
+                        "type": "object",
+                        "properties": nested_props,
+                        "required": nested_required,
+                        "additionalProperties": False,
+                    }
+                else:
+                    properties[name]["items"] = {"type": "string"}
 
             elif getattr(param, "__origin__", None) is dict:
                 types.append("object")
@@ -250,6 +277,9 @@ def generate_function_calling_schemas(
         if list(input_params) and not isinstance(llm, Gemini):
             for name, field in tool.input_schema.model_fields.items():
                 generate_property_schema(properties, name, field)
+
+            import json as _json, sys as _sys
+            print(f"DEBUG SCHEMA [{sanitize_tool_name(tool.name)}]: {_json.dumps(properties, indent=2)}", file=_sys.stderr)
 
             schema = {
                 "type": "function",

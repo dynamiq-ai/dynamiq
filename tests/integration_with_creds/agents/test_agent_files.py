@@ -186,13 +186,24 @@ def _run_and_assert_agent(agent, input_data, expected_keywords, run_config, expe
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    "llm_fixture",
+    "llm_fixture, inference_mode",
     [
-        "openai_llm",
+        ("openai_llm", InferenceMode.XML),
+        ("openai_llm", InferenceMode.DEFAULT),
+        # ("openai_llm", InferenceMode.FUNCTION_CALLING),
+        ("openai_llm", InferenceMode.STRUCTURED_OUTPUT),
     ],
 )
 def test_agent_filestore_multiple_files(
-    llm_fixture, image_bytes, image_bytes_2, agent_role, run_config, camera_query, expected_camera_keywords, request
+    llm_fixture,
+    inference_mode,
+    image_bytes,
+    image_bytes_2,
+    agent_role,
+    run_config,
+    camera_query,
+    expected_camera_keywords,
+    request,
 ):
     """Test Agent can create multiple files in FileStore and return them in output."""
     llm = request.getfixturevalue(llm_fixture)
@@ -205,11 +216,11 @@ def test_agent_filestore_multiple_files(
     )
 
     agent = Agent(
-        name=f"MultiFileAgent_{llm_fixture}",
-        id=f"multi_file_agent_{llm_fixture}",
+        name=f"MultiFileAgent_{llm_fixture}_{inference_mode.value}",
+        id=f"multi_file_agent_{llm_fixture}_{inference_mode.value}",
         llm=llm,
         role=agent_role,
-        inference_mode=InferenceMode.XML,
+        inference_mode=inference_mode,
         file_store=file_store_config,
         tools=[],
         verbose=True,
@@ -225,4 +236,4 @@ def test_agent_filestore_multiple_files(
         expected_file_names=["summary1.txt", "summary2.txt"],
     )
 
-    logger.info(f"--- Test Passed for Multiple File Creation with {llm_fixture} ---")
+    logger.info(f"--- Test Passed for Multiple File Creation with {llm_fixture} ({inference_mode.value}) ---")
