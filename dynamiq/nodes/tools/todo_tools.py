@@ -27,7 +27,7 @@ class TodoStatus(str, Enum):
     COMPLETED = "completed"
 
 
-TODOS_FILE_PATH = f"{RESERVED_AGENT_PATH_PREFIX}todos.json"
+TODOS_FILE_PATH = f"{RESERVED_AGENT_PATH_PREFIX}/todos.json"
 
 
 class TodoItem(BaseModel):

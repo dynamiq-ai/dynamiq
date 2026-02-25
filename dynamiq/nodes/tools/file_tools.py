@@ -32,7 +32,7 @@ from dynamiq.utils.file_types import EXTENSION_MAP, FileType
 logger = logging.getLogger(__name__)
 
 EXTRACTED_TEXT_SUFFIX = ".extracted.txt"
-RESERVED_AGENT_PATH_PREFIX = "._agent/"
+RESERVED_AGENT_PATH_PREFIX = "._agent"
 
 
 def validate_file_path(file_path: str, allow_absolute: bool = False) -> str:
@@ -1021,10 +1021,10 @@ class FileWriteTool(Node):
         """
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
-        if input_data.file_path.startswith(RESERVED_AGENT_PATH_PREFIX):
+        if input_data.file_path.startswith(f"{RESERVED_AGENT_PATH_PREFIX}/"):
             raise ToolExecutionException(
                 f"Path '{input_data.file_path}' is reserved for internal agent use. "
-                f"Use the dedicated tool to manage files under '{RESERVED_AGENT_PATH_PREFIX}'.",
+                f"Use the dedicated tool to manage files under '{RESERVED_AGENT_PATH_PREFIX}/'.",
                 recoverable=True,
             )
 
