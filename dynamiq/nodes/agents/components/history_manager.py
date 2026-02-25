@@ -30,6 +30,30 @@ class HistoryManagerMixin:
             and prompt_tokens > self.summarization_config.max_token_context_length
         ) or (prompt_tokens / self.llm.get_token_limit() > self.summarization_config.context_usage_ratio)
 
+    def _split_history(
+        self,
+    ) -> tuple[list[Message | VisionMessage], list[Message | VisionMessage]]:
+        """Split conversation history into messages to summarize and messages to preserve.
+
+        Uses ``preserve_last_messages`` from summarization config to determine
+        the split point.  When the history is too short to split, all messages
+        go to the summarize bucket and nothing is preserved.
+
+        Returns:
+            Tuple of (to_summarize, to_preserve).
+        """
+        preserve_n = self.summarization_config.preserve_last_messages
+        all_history = self._prompt.messages[self._history_offset :]
+
+        if preserve_n > 0 and len(all_history) > preserve_n:
+            to_summarize = all_history[:-preserve_n]
+            to_preserve = [m.copy() for m in all_history[-preserve_n:]]
+        else:
+            to_summarize = all_history
+            to_preserve = []
+
+        return to_summarize, to_preserve
+
     def _compact_history(self, summary: str | None = None) -> None:
         """Compact history, optionally inserting a summary before preserved messages.
 
@@ -44,13 +68,7 @@ class HistoryManagerMixin:
         Args:
             summary: Optional summary text to insert after prefix.
         """
-        preserve_n = self.summarization_config.preserve_last_messages
-        all_history = self._prompt.messages[self._history_offset :]
-
-        if preserve_n > 0 and len(all_history) > preserve_n:
-            preserved = [m.copy() for m in all_history[-preserve_n:]]
-        else:
-            preserved = []
+        _, preserved = self._split_history()
 
         self._prompt.messages = self._prompt.messages[: self._history_offset]
 

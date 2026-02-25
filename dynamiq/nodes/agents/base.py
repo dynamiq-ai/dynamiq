@@ -993,12 +993,8 @@ class Agent(Node):
                 merged_input.pop("delegate_final", None)
 
         if isinstance(tool, ContextManagerTool):
-            all_history = self._prompt.messages[self._history_offset :]
-            preserve_n = self.summarization_config.preserve_last_messages
-            if preserve_n > 0 and len(all_history) > preserve_n:
-                merged_input["messages"] = all_history[:-preserve_n]
-            else:
-                merged_input["messages"] = all_history
+            to_summarize, _ = self._split_history()
+            merged_input["messages"] = to_summarize
 
         raw_tool_params = kwargs.get("tool_params", ToolParams())
         tool_params = (
