@@ -1200,6 +1200,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             if raw_output_files:
                 raw_output_files = raw_output_files.strip()
                 self._requested_output_files = [p.strip() for p in raw_output_files.split(",") if p.strip()]
+            else:
+                self._requested_output_files = []
 
         except Exception as e:
             logger.error(f"Max loops handler: Error during final answer extraction: {e}. Returning raw output.")
