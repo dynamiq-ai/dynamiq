@@ -15,6 +15,7 @@ from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.base import AgentCheckpointState
 from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools.llm_summarizer import SummarizerTool
 from dynamiq.nodes.tools.thinking_tool import ThinkingTool
 from dynamiq.types.feedback import ApprovalInputData
 
@@ -422,3 +423,168 @@ class TestIterativeCheckpointMixin:
         new_agent = Agent(id="rt2", name="RT2", llm=create_test_llm(), role="Test", max_loops=10)
         new_agent.from_checkpoint_state(state_dict)
         assert new_agent.get_start_iteration() == 6
+
+
+class TestSummarizerToolCheckpointState:
+    """Tests for SummarizerTool checkpoint state roundtrip."""
+
+    @pytest.fixture
+    def summarizer_tool(self):
+        return SummarizerTool(
+            id="summarizer",
+            name="Summarizer",
+            llm=create_test_llm("summarizer-llm"),
+        )
+
+    def test_saves_llm_state(self, summarizer_tool):
+        summarizer_tool.llm._is_fallback_run = True
+        state = summarizer_tool.to_checkpoint_state()
+        assert state.llm_state["is_fallback_run"] is True
+
+    def test_restores_llm_state(self, summarizer_tool):
+        summarizer_tool.from_checkpoint_state({"llm_state": {"is_fallback_run": True}})
+        assert summarizer_tool.llm._is_fallback_run is True
+        assert summarizer_tool.is_resumed is True
+
+    def test_roundtrip(self, summarizer_tool):
+        summarizer_tool.llm._is_fallback_run = True
+        state_dict = summarizer_tool.to_checkpoint_state().model_dump()
+
+        new_tool = SummarizerTool(id="summarizer", name="Summarizer", llm=create_test_llm("new-llm"))
+        new_tool.from_checkpoint_state(state_dict)
+        assert new_tool.llm._is_fallback_run is True
+
+    def test_empty_state_uses_defaults(self, summarizer_tool):
+        summarizer_tool.from_checkpoint_state({})
+        assert summarizer_tool.is_resumed is True
+        assert summarizer_tool.llm._is_fallback_run is False
+
+
+class TestIterativeCheckpointMixinProtocol:
+    """Verify the IterativeCheckpointMixin interface contract."""
+
+    def test_agent_implements_iterative_mixin(self):
+        agent = Agent(id="test", name="Test", llm=create_test_llm(), role="Test")
+        assert isinstance(agent, IterativeCheckpointMixin)
+
+    def test_get_start_iteration_returns_zero_for_fresh_agent(self):
+        agent = Agent(id="test", name="Test", llm=create_test_llm(), role="Test")
+        assert agent.get_start_iteration() == 0
+
+    def test_get_start_iteration_is_one_shot(self):
+        """get_start_iteration() returns the value once, then 0 — ensures consumed state is cleared."""
+        agent = Agent(id="test", name="Test", llm=create_test_llm(), role="Test")
+        agent._iteration_state = IterationState(completed_iterations=5)
+        agent._has_restored_iteration = True
+        assert agent.get_start_iteration() == 5
+        assert agent.get_start_iteration() == 0
+
+    def test_save_and_restore_iteration_via_checkpoint_state(self):
+        """Full round-trip through to_checkpoint_state → model_dump → from_checkpoint_state."""
+        agent = Agent(id="roundtrip", name="Agent", llm=create_test_llm(), role="Test", max_loops=10)
+        agent._completed_loops = 5
+
+        new_agent = Agent(id="new", name="New", llm=create_test_llm(), role="Test", max_loops=10)
+        new_agent.from_checkpoint_state(agent.to_checkpoint_state().model_dump())
+        assert new_agent.get_start_iteration() == 5
+
+
+class TestBackwardCompatibility:
+    """Old checkpoints without iteration field work correctly."""
+
+    def test_checkpoint_state_without_iteration_starts_fresh(self):
+        state = AgentCheckpointState(history_offset=3, llm_state={"is_fallback_run": False}, tool_states={})
+        agent = Agent(id="test", name="Test", llm=create_test_llm(), role="Test")
+        agent.from_checkpoint_state(state)
+        assert agent._history_offset == 3
+        assert agent.is_resumed is True
+        assert agent.get_start_iteration() == 0
+
+    def test_old_dict_checkpoint_with_extra_fields_ignored(self):
+        """Simulates a checkpoint dict from an older version with unknown keys — must not break loading."""
+        old_dict = {"history_offset": 2, "llm_state": {}, "tool_states": {}, "some_future_field": "value"}
+        agent = Agent(id="test", name="Test", llm=create_test_llm(), role="Test")
+        agent.from_checkpoint_state(old_dict)
+        assert agent.is_resumed is True
+
+
+class TestOrchestratorCheckpointImplementation:
+    """Verify Orchestrator subclasses implement checkpoint interface correctly."""
+
+    def test_adaptive_orchestrator_implements_mixin(self):
+        from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
+        from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
+
+        manager = AdaptiveAgentManager(llm=create_test_llm("mgr-llm"))
+        orch = AdaptiveOrchestrator(id="ao", manager=manager, agents=[])
+        assert isinstance(orch, IterativeCheckpointMixin)
+
+    def test_adaptive_orchestrator_checkpoint_roundtrip(self):
+        from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
+        from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
+
+        orch = AdaptiveOrchestrator(id="ao", manager=AdaptiveAgentManager(llm=create_test_llm()), agents=[])
+        orch._chat_history = [{"role": "user", "content": "task 1"}]
+        orch._completed_iterations = 3
+
+        state_dict = orch.to_checkpoint_state().model_dump()
+        assert state_dict["iteration"]["completed_iterations"] == 3
+
+        new_orch = AdaptiveOrchestrator(id="ao2", manager=AdaptiveAgentManager(llm=create_test_llm()), agents=[])
+        new_orch.from_checkpoint_state(state_dict)
+        assert new_orch._chat_history == orch._chat_history
+        assert new_orch.get_start_iteration() == 3
+
+    def test_graph_orchestrator_checkpoint_roundtrip(self):
+        from dynamiq.nodes.agents.orchestrators.graph import GraphOrchestrator
+        from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
+
+        orch = GraphOrchestrator(id="go", manager=GraphAgentManager(llm=create_test_llm()))
+        orch._chat_history = [{"role": "user", "content": "navigate"}]
+        orch.context = {"key": "ctx_value"}
+        orch._current_state_id = "state_3"
+        orch._completed_iterations = 5
+
+        state_dict = orch.to_checkpoint_state().model_dump()
+        iter_data = state_dict["iteration"]["iteration_data"]
+        assert iter_data["context"] == {"key": "ctx_value"}
+        assert iter_data["current_state_id"] == "state_3"
+
+        new_orch = GraphOrchestrator(id="go2", manager=GraphAgentManager(llm=create_test_llm()))
+        new_orch.from_checkpoint_state(state_dict)
+        assert new_orch.get_start_iteration() == 5
+
+    def test_graph_orchestrator_restore_iteration_state_directly(self):
+        from dynamiq.nodes.agents.orchestrators.graph import GraphOrchestrator
+        from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
+
+        orch = GraphOrchestrator(id="go", manager=GraphAgentManager(llm=create_test_llm()))
+        state = IterationState(
+            completed_iterations=4,
+            iteration_data={
+                "chat_history": [{"role": "user", "content": "hi"}],
+                "context": {"k": "v"},
+                "current_state_id": "s2",
+            },
+        )
+        orch.restore_iteration_state(state)
+        assert orch._chat_history == [{"role": "user", "content": "hi"}]
+        assert orch.context == {"k": "v"}
+        assert orch._current_state_id == "s2"
+
+    def test_linear_orchestrator_checkpoint_roundtrip(self):
+        from dynamiq.nodes.agents.orchestrators.linear import LinearOrchestrator
+        from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
+
+        orch = LinearOrchestrator(id="lo", manager=LinearAgentManager(llm=create_test_llm()), agents=[])
+        orch._chat_history = [{"role": "user", "content": "plan tasks"}]
+        orch._results = {1: {"name": "Task1", "result": "done"}}
+        orch._completed_iterations = 2
+
+        state_dict = orch.to_checkpoint_state().model_dump()
+        assert state_dict["iteration"]["completed_iterations"] == 2
+
+        new_orch = LinearOrchestrator(id="lo2", manager=LinearAgentManager(llm=create_test_llm()), agents=[])
+        new_orch.from_checkpoint_state(state_dict)
+        assert new_orch._chat_history == [{"role": "user", "content": "plan tasks"}]
+        assert new_orch.get_start_iteration() == 2

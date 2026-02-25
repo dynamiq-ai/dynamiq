@@ -7,12 +7,26 @@ from typing import Any, ClassVar
 from lxml import etree as LET  # nosec B410
 from pydantic import BaseModel, Field
 
+from dynamiq.checkpoints.checkpoint import BaseCheckpointState, IterationState, IterativeCheckpointMixin
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.base import AgentManager
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
+
+
+class OrchestratorIterationData(BaseModel):
+    """Typed iteration data for orchestrator loop-level checkpoints."""
+
+    chat_history: list[dict] = Field(default_factory=list)
+
+
+class OrchestratorCheckpointState(BaseCheckpointState):
+    """Checkpoint state for Orchestrator nodes."""
+
+    chat_history: list[dict] = Field(default_factory=list, description="Conversation history")
+    manager_state: dict = Field(default_factory=dict, description="Manager agent checkpoint state")
 
 
 class OrchestratorError(Exception):
@@ -49,7 +63,7 @@ class DecisionResult(BaseModel):
     message: str
 
 
-class Orchestrator(Node, ABC):
+class Orchestrator(IterativeCheckpointMixin, Node, ABC):
     """
     Orchestrates the execution of complex tasks using multiple specialized agents.
 
@@ -83,6 +97,7 @@ class Orchestrator(Node, ABC):
         super().__init__(**kwargs)
         self._run_depends = []
         self._chat_history = []
+        self._completed_iterations = 0
 
     def _clean_output(self, text: str) -> str:
         """Remove Markdown code fences and extra whitespace from a text."""
@@ -228,8 +243,45 @@ class Orchestrator(Node, ABC):
     def reset_run_state(self):
         self._run_depends = []
         self._chat_history = []
+        self._completed_iterations = 0
         if self.manager:
             self.manager.reset_run_state()
+
+    def to_checkpoint_state(self) -> OrchestratorCheckpointState:
+        """Extract orchestrator state for checkpointing."""
+        manager_state = {}
+        if self.manager:
+            cp = self.manager.to_checkpoint_state()
+            manager_state = cp.model_dump() if hasattr(cp, "model_dump") else cp
+
+        state = OrchestratorCheckpointState(
+            chat_history=list(self._chat_history),
+            manager_state=manager_state,
+        )
+        self._save_iteration_to_checkpoint(state)
+        return state
+
+    def from_checkpoint_state(self, state: OrchestratorCheckpointState | dict[str, Any]) -> None:
+        """Restore orchestrator state from checkpoint."""
+        super().from_checkpoint_state(state)
+        state_dict = state if isinstance(state, dict) else state.model_dump()
+
+        if chat_history := state_dict.get("chat_history"):
+            self._chat_history = list(chat_history)
+        if manager_state := state_dict.get("manager_state"):
+            self.manager.from_checkpoint_state(manager_state)
+
+        self._restore_iteration_from_checkpoint(state_dict)
+
+    def get_iteration_state(self) -> IterationState:
+        """Serialize orchestrator loop progress for checkpoint persistence."""
+        data = OrchestratorIterationData(chat_history=list(self._chat_history))
+        return IterationState(completed_iterations=self._completed_iterations, iteration_data=data.model_dump())
+
+    def restore_iteration_state(self, state: IterationState) -> None:
+        """Restore orchestrator state from a checkpoint IterationState."""
+        data = OrchestratorIterationData(**state.iteration_data)
+        self._chat_history = list(data.chat_history)
 
     @abstractmethod
     def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:

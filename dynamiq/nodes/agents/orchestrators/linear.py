@@ -5,16 +5,29 @@ from typing import Any
 
 from pydantic import BaseModel, Field, TypeAdapter
 
+from dynamiq.checkpoints.checkpoint import IterationState
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
-from dynamiq.nodes.agents.orchestrators.orchestrator import ActionParseError, Decision, Orchestrator, OrchestratorError
+from dynamiq.nodes.agents.orchestrators.orchestrator import (
+    ActionParseError,
+    Decision,
+    Orchestrator,
+    OrchestratorError,
+    OrchestratorIterationData,
+)
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.feedback import PlanApprovalConfig
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
+
+
+class LinearOrchestratorIterationData(OrchestratorIterationData):
+    """Typed iteration data for LinearOrchestrator loop-level checkpoints."""
+
+    results: dict[int, dict[str, Any]] = Field(default_factory=dict)
 
 
 class Task(BaseModel):
@@ -86,6 +99,15 @@ class LinearOrchestrator(Orchestrator):
     def reset_run_state(self):
         super().reset_run_state()
         self._results = {}
+
+    def get_iteration_state(self) -> IterationState:
+        data = LinearOrchestratorIterationData(chat_history=list(self._chat_history), results=dict(self._results))
+        return IterationState(completed_iterations=self._completed_iterations, iteration_data=data.model_dump())
+
+    def restore_iteration_state(self, state: IterationState) -> None:
+        data = LinearOrchestratorIterationData(**state.iteration_data)
+        self._chat_history = list(data.chat_history)
+        self._results = dict(data.results)
 
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """

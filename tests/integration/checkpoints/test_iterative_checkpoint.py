@@ -2,13 +2,15 @@
 
 Tests cover:
 - IterativeCheckpointMixin protocol
-- Agent mid-loop checkpoint saves iteration state (completed_loops, prompt_messages, agent_state)
+- Agent mid-loop checkpoint saves iteration state
 - Agent resume skips completed loops
-- Simulated crash-and-resume flow (interrupt mid-loop, restore, continue)
-- Backward compatibility with old checkpoints (no iteration field)
+- Simulated crash-and-resume flow
+- Backward compatibility with old checkpoints
 - Round-trip serialization through InMemory and FileSystem backends
 - Dependent node skip and failure propagation with checkpoints
 - Agent timeout mid-loop with checkpoint state
+- Orchestrator checkpoint state save/restore
+- SummarizerTool checkpoint in flow context
 - Multiple backend types via parametrize
 """
 
@@ -18,18 +20,12 @@ from litellm import ModelResponse
 from dynamiq import connections, flows
 from dynamiq.checkpoints.backends.filesystem import FileSystem
 from dynamiq.checkpoints.backends.in_memory import InMemory
-from dynamiq.checkpoints.checkpoint import (
-    BaseCheckpointState,
-    CheckpointConfig,
-    CheckpointStatus,
-    IterationState,
-    IterativeCheckpointMixin,
-)
+from dynamiq.checkpoints.checkpoint import CheckpointConfig, CheckpointStatus
 from dynamiq.nodes import ErrorHandling, llms
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.agents.base import AgentCheckpointState
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools.llm_summarizer import SummarizerTool
 from dynamiq.nodes.types import Behavior
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.runnables import RunnableStatus
@@ -129,63 +125,6 @@ def backend_factory(tmp_path):
         return FileSystem(base_path=str(tmp_path / ".dynamiq" / "checkpoints"))
 
     return _create
-
-
-class TestIterativeCheckpointMixinProtocol:
-    """Verify the IterativeCheckpointMixin interface contract."""
-
-    def test_iteration_state_model_defaults(self):
-        state = IterationState()
-        assert state.completed_iterations == 0
-        assert state.iteration_data == {}
-
-    def test_iteration_state_round_trip(self):
-        state = IterationState(completed_iterations=5, iteration_data={"key": "value", "nested": {"a": 1}})
-        dumped = state.model_dump()
-        restored = IterationState(**dumped)
-        assert restored.completed_iterations == 5
-        assert restored.iteration_data == {"key": "value", "nested": {"a": 1}}
-
-    def test_base_checkpoint_state_has_iteration_field(self):
-        state = BaseCheckpointState()
-        assert state.iteration is None
-
-    def test_base_checkpoint_state_with_iteration(self):
-        state = BaseCheckpointState(iteration={"completed_iterations": 3, "iteration_data": {"foo": "bar"}})
-        assert state.iteration["completed_iterations"] == 3
-
-    def test_agent_implements_iterative_mixin(self):
-        agent = Agent(id="test", name="Test", llm=make_agent_llm(), role="Test")
-        assert isinstance(agent, IterativeCheckpointMixin)
-        assert hasattr(agent, "get_iteration_state")
-        assert hasattr(agent, "restore_iteration_state")
-        assert hasattr(agent, "get_start_iteration")
-
-    def test_get_start_iteration_returns_zero_for_fresh_agent(self):
-        agent = Agent(id="test", name="Test", llm=make_agent_llm(), role="Test")
-        assert agent.get_start_iteration() == 0
-
-    def test_get_start_iteration_returns_completed_after_restore(self):
-        agent = Agent(id="test", name="Test", llm=make_agent_llm(), role="Test")
-        agent._iteration_state = IterationState(completed_iterations=7)
-        agent._has_restored_iteration = True
-        assert agent.get_start_iteration() == 7
-        assert agent.get_start_iteration() == 0
-
-    def test_save_and_restore_iteration_via_checkpoint_state(self):
-        """Full round-trip: to_checkpoint_state → dict → from_checkpoint_state."""
-        agent = Agent(id="roundtrip", name="Agent", llm=make_agent_llm(), role="Test", max_loops=10)
-        agent._completed_loops = 5
-
-        state = agent.to_checkpoint_state()
-        state_dict = state.model_dump()
-
-        assert state_dict.get("iteration") is not None
-        assert state_dict["iteration"]["completed_iterations"] == 5
-
-        new_agent = Agent(id="new", name="New", llm=make_agent_llm(), role="Test", max_loops=10)
-        new_agent.from_checkpoint_state(state_dict)
-        assert new_agent.get_start_iteration() == 5
 
 
 class TestAgentMidLoopIterationCheckpoint:
@@ -340,42 +279,6 @@ class TestAgentCrashAndResume:
         assert resume_count["value"] >= 2
 
 
-class TestBackwardCompatibility:
-    """Old checkpoints without iteration field work correctly."""
-
-    def test_old_checkpoint_state_without_iteration_field(self):
-        """AgentCheckpointState from old format (no iteration) loads fine."""
-        old_state = {
-            "history_offset": 3,
-            "llm_state": {"is_fallback_run": False},
-            "tool_states": {},
-        }
-        agent = Agent(id="test", name="Test", llm=make_agent_llm(), role="Test")
-        agent.from_checkpoint_state(old_state)
-
-        assert agent._history_offset == 3
-        assert agent.is_resumed is True
-        assert agent.get_start_iteration() == 0
-
-    def test_old_checkpoint_state_with_extra_fields_ignored(self):
-        """Old checkpoints with unknown extra fields don't break loading."""
-        state_with_extras = {
-            "history_offset": 2,
-            "llm_state": {},
-            "tool_states": {},
-            "some_future_field": "value",
-        }
-        agent = Agent(id="test", name="Test", llm=make_agent_llm(), role="Test")
-        agent.from_checkpoint_state(state_with_extras)
-        assert agent.is_resumed is True
-
-    def test_new_checkpoint_state_has_iteration_field_in_model_dump(self):
-        """New AgentCheckpointState includes iteration in model_dump output."""
-        state = AgentCheckpointState(history_offset=5, llm_state={}, tool_states={})
-        dumped = state.model_dump()
-        assert "iteration" in dumped
-
-
 class TestIterationStateSerialization:
     """Verify IterationState survives JSON/backend round-trips."""
 
@@ -425,16 +328,6 @@ class TestEdgeCases:
 
         result = flow.run_sync(input_data={"input": "Simple question"})
         assert result.status == RunnableStatus.SUCCESS
-
-    def test_get_start_iteration_is_one_shot(self):
-        """get_start_iteration() returns the value once, then 0 on subsequent calls."""
-        agent = Agent(id="test", name="Test", llm=make_agent_llm(), role="Test")
-        agent._iteration_state = IterationState(completed_iterations=5)
-        agent._has_restored_iteration = True
-
-        assert agent.get_start_iteration() == 5
-        assert agent.get_start_iteration() == 0
-        assert agent.get_start_iteration() == 0
 
     def test_multiple_resume_cycles(self, mocker):
         """Agent can be checkpointed and resumed multiple times via simulated crash."""
@@ -847,3 +740,39 @@ class TestAgentTimeoutWithCheckpoint:
         internal = cp.node_states["agent"].internal_state
         iteration = internal.get("iteration", {})
         assert iteration.get("completed_iterations", 0) >= 1
+
+
+class TestSummarizerToolCheckpointInFlow:
+    """SummarizerTool checkpoint state in a flow context."""
+
+    @pytest.mark.parametrize("backend_type", ["in_memory", "file"])
+    def test_summarizer_in_flow_captures_llm_state(self, mocker, backend_factory, backend_type):
+        backend = backend_factory(backend_type)
+
+        def mock_completion(stream: bool, *args, **kwargs):
+            r = ModelResponse()
+            r["choices"][0]["message"]["content"] = "Summarized content"
+            return r
+
+        mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=mock_completion)
+
+        summarizer_llm = llms.OpenAI(
+            id="sum-llm",
+            model=LLM_MODEL,
+            connection=connections.OpenAI(api_key=TEST_API_KEY),
+            is_postponed_component_init=True,
+        )
+        summarizer = SummarizerTool(id="summarizer", name="Summarizer", llm=summarizer_llm)
+
+        flow = flows.Flow(
+            nodes=[summarizer],
+            checkpoint=CheckpointConfig(enabled=True, backend=backend),
+        )
+        result = flow.run_sync(input_data={"input": "Some long text to summarize"})
+        assert result.status == RunnableStatus.SUCCESS
+
+        cp = backend.get_latest_by_flow(flow.id)
+        assert cp.status == CheckpointStatus.COMPLETED
+        assert "summarizer" in cp.node_states
+        internal = cp.node_states["summarizer"].internal_state
+        assert "llm_state" in internal

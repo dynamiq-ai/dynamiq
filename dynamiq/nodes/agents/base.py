@@ -196,6 +196,14 @@ class AgentInputSchema(BaseModel):
 DEFAULT_HISTORY_OFFSET = 2
 
 
+class AgentIterationData(BaseModel):
+    """Typed iteration data for Agent loop-level checkpoints."""
+
+    prompt_messages: list[dict] | None = None
+    agent_state: dict | None = None
+    history_offset: int = DEFAULT_HISTORY_OFFSET
+
+
 class AgentCheckpointState(BaseCheckpointState):
     """Checkpoint state for Agent nodes.
 
@@ -389,30 +397,28 @@ class Agent(IterativeCheckpointMixin, Node):
 
     def get_iteration_state(self) -> IterationState:
         """Serialize ReAct loop progress for checkpoint persistence."""
-        prompt_messages = self._serialize_prompt_messages()
-        agent_state = self.state.model_dump() if hasattr(self, "state") and hasattr(self.state, "model_dump") else None
-
-        return IterationState(
-            completed_iterations=self._completed_loops,
-            iteration_data={
-                "prompt_messages": prompt_messages,
-                "agent_state": agent_state,
-                "history_offset": self._history_offset,
-            },
+        data = AgentIterationData(
+            prompt_messages=self._serialize_prompt_messages(),
+            agent_state=(
+                self.state.model_dump() if hasattr(self, "state") and hasattr(self.state, "model_dump") else None
+            ),
+            history_offset=self._history_offset,
         )
+        return IterationState(completed_iterations=self._completed_loops, iteration_data=data.model_dump())
 
     def restore_iteration_state(self, state: IterationState) -> None:
         """Restore prompt messages and AgentState from a checkpoint IterationState."""
-        data = state.iteration_data
-        if msgs := data.get("prompt_messages"):
+        data = AgentIterationData(**state.iteration_data)
+        if data.prompt_messages:
             self._prompt.messages = [
-                Message(content=m["content"], role=MessageRole(m["role"]), static=m.get("static", False)) for m in msgs
+                Message(content=m["content"], role=MessageRole(m["role"]), static=m.get("static", False))
+                for m in data.prompt_messages
             ]
-        if agent_state_data := data.get("agent_state"):
+        if data.agent_state:
             from dynamiq.nodes.agents.agent import AgentState
 
-            self.state = AgentState(**agent_state_data)
-        self._history_offset = data.get("history_offset", self._history_offset)
+            self.state = AgentState(**data.agent_state)
+        self._history_offset = data.history_offset
 
     def _serialize_prompt_messages(self) -> list[dict] | None:
         """Serialize current prompt messages for checkpoint persistence."""
