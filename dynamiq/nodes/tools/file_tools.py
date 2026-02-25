@@ -26,12 +26,13 @@ from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox
-from dynamiq.storages.file.base import FileStore
+from dynamiq.storages.file.base import FileInfo, FileStore
 from dynamiq.utils.file_types import EXTENSION_MAP, FileType
 
 logger = logging.getLogger(__name__)
 
 EXTRACTED_TEXT_SUFFIX = ".extracted.txt"
+RESERVED_AGENT_PATH_PREFIX = "._agent"
 
 
 def validate_file_path(file_path: str, allow_absolute: bool = False) -> str:
@@ -603,6 +604,17 @@ class FileReadTool(Node):
             }
         return data
 
+    def _build_file_info(self, file_path: str, content: bytes) -> FileInfo:
+        """Build a FileInfo instance from a read file path and its raw content."""
+        filename = os.path.basename(file_path)
+        return FileInfo(
+            name=filename,
+            path=file_path,
+            size=len(content),
+            content_type=mimetypes.guess_type(filename)[0] or "application/octet-stream",
+            content=content,
+        )
+
     def execute(
         self,
         input_data: FileReadInputSchema,
@@ -635,6 +647,7 @@ class FileReadTool(Node):
 
             content = self.file_store.retrieve(input_data.file_path)
             content_size = len(content)
+            file_info = self._build_file_info(input_data.file_path, content)
 
             cached_text, cached_path = (None, None)
             if allow_cache and not isinstance(self.file_store, Sandbox):
@@ -650,7 +663,11 @@ class FileReadTool(Node):
                     file_path=input_data.file_path,
                 )
                 processed = self._append_cache_hint(processed, cached_path, hint_enabled=False)
-                return {"content": processed, "cached_text_path": cached_path}
+                return {
+                    "content": processed,
+                    "file_info": file_info.model_dump(mode="json"),
+                    "cached_text_path": cached_path,
+                }
 
             try:
                 file_io = BytesIO(content)
@@ -689,7 +706,7 @@ class FileReadTool(Node):
                             file_path=input_data.file_path,
                         )
                         processed = self._append_cache_hint(processed, cached_path, hint_enabled)
-                        result_payload = {"content": processed}
+                        result_payload = {"content": processed, "file_info": file_info.model_dump(mode="json")}
                         if page_entries:
                             result_payload["pages"] = page_entries
                         if cached_path:
@@ -719,7 +736,7 @@ class FileReadTool(Node):
                 file_path=input_data.file_path,
             )
 
-            return {"content": rendered_content}
+            return {"content": rendered_content, "file_info": file_info.model_dump(mode="json")}
 
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to read file. Error: {str(e)}")
@@ -1005,6 +1022,13 @@ class FileWriteTool(Node):
         """
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
+        if input_data.file_path.startswith(f"{RESERVED_AGENT_PATH_PREFIX}/"):
+            raise ToolExecutionException(
+                f"Path '{input_data.file_path}' is reserved for internal agent use. "
+                f"Use the dedicated tool to manage files under '{RESERVED_AGENT_PATH_PREFIX}/'.",
+                recoverable=True,
+            )
+
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
@@ -1054,7 +1078,7 @@ class FileWriteTool(Node):
 
         return {
             "content": message,
-            "file_info": file_info.model_dump(),
+            "file_info": file_info.model_dump(mode="json"),
         }
 
     def _execute_edit(self, input_data: FileWriteInputSchema) -> dict[str, Any]:
@@ -1124,7 +1148,7 @@ class FileWriteTool(Node):
 
         return {
             "content": f"{summary} Use FileReadTool to view the updated file.",
-            "file_info": file_info.model_dump(),
+            "file_info": file_info.model_dump(mode="json"),
         }
 
     def _prepare_content_payload(self, input_data: FileWriteInputSchema) -> tuple[bytes, str]:
