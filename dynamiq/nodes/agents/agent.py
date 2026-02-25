@@ -1245,6 +1245,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
             unique_key = self._build_unique_file_key(aggregated, sanitized_name)
             aggregated[unique_key] = files
 
+    def _is_tool_parallel_eligible(self, tool_name: str) -> bool:
+        """Check if a tool is eligible for parallel execution based on its is_parallel_execution_allowed flag."""
+        tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
+        return tool.is_parallel_execution_allowed if tool else False
+
     def _execute_tools(
         self,
         tools_data: list[dict[str, Any]],
@@ -1255,6 +1260,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
     ) -> tuple[str, dict[str, Any]]:
         """
         Execute one or more tools and gather their results.
+
+        Tools are split into two groups based on their ``is_parallel_execution_allowed`` flag:
+        parallel-eligible tools run concurrently first, then sequential-only
+        tools run one-by-one.
 
         Args:
             tools_data (list): List of dictionaries containing name and input for each tool
@@ -1291,22 +1300,21 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 continue
             prepared_tools.append({"order": idx, "name": tool_name, "input": tool_input})
 
-        def execute_and_convert(tool_name: str, tool_input: Any, order: int) -> dict[str, Any]:
-            """Execute tool and convert tuple result to dict for parallel execution."""
+        def _execute_single_tool_to_result(tool_payload: dict[str, Any], **extra) -> dict[str, Any]:
+            """Execute a single tool and wrap the result as a dict."""
             tool_result, tool_files, _, success, dependency = self._execute_single_tool(
-                tool_name,
-                tool_input,
+                tool_payload["name"],
+                tool_payload["input"],
                 thought or "",
                 loop_num,
                 config,
-                update_run_depends=False,
                 collect_dependency=True,
-                is_parallel=True,
+                **extra,
                 **kwargs,
             )
             return {
-                "order": order,
-                "tool_name": tool_name,
+                "order": tool_payload["order"],
+                "tool_name": tool_payload["name"],
                 "success": success,
                 "result": tool_result,
                 "files": tool_files,
@@ -1315,42 +1323,40 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         if prepared_tools:
             if len(prepared_tools) == 1:
-                tool_payload = prepared_tools[0]
-                tool_result, tool_files, _, success, dependency = self._execute_single_tool(
-                    tool_payload["name"],
-                    tool_payload["input"],
-                    thought or "",
-                    loop_num,
-                    config,
-                    update_run_depends=True,
-                    collect_dependency=True,
-                    **kwargs,
-                )
-                res = {
-                    "order": tool_payload["order"],
-                    "tool_name": tool_payload["name"],
-                    "success": success,
-                    "result": tool_result,
-                    "files": tool_files,
-                    "dependency": dependency,
-                }
-                all_results.append(res)
+                all_results.append(_execute_single_tool_to_result(prepared_tools[0], update_run_depends=True))
             else:
-                max_workers = len(prepared_tools)
-                with ContextAwareThreadPoolExecutor(max_workers=max_workers) as executor:
-                    future_map = {}
-                    for tool_payload in prepared_tools:
-                        future = executor.submit(
-                            execute_and_convert,
-                            tool_payload["name"],
-                            tool_payload["input"],
-                            tool_payload["order"],
-                        )
-                        future_map[future] = tool_payload
+                parallel_group = [tp for tp in prepared_tools if self._is_tool_parallel_eligible(tp["name"])]
+                sequential_group = [tp for tp in prepared_tools if not self._is_tool_parallel_eligible(tp["name"])]
 
-                    for future in as_completed(future_map.keys()):
-                        res = future.result()
-                        all_results.append(res)
+                if sequential_group:
+                    seq_names = [tp["name"] for tp in sequential_group]
+                    logger.info(
+                        f"Agent {self.name} - {self.id}: tools excluded from parallel execution "
+                        f"(is_parallel_execution_allowed=False): {seq_names}"
+                    )
+
+                # Phase 1: run parallel-eligible tools concurrently
+                if len(parallel_group) > 1:
+                    max_workers = len(parallel_group)
+                    with ContextAwareThreadPoolExecutor(max_workers=max_workers) as executor:
+                        future_map = {}
+                        for tool_payload in parallel_group:
+                            future = executor.submit(
+                                _execute_single_tool_to_result,
+                                tool_payload,
+                                is_parallel=True,
+                                update_run_depends=False,
+                            )
+                            future_map[future] = tool_payload
+
+                        for future in as_completed(future_map.keys()):
+                            all_results.append(future.result())
+                elif len(parallel_group) == 1:
+                    all_results.append(_execute_single_tool_to_result(parallel_group[0], update_run_depends=False))
+
+                # Phase 2: run sequential-only tools one-by-one
+                for tool_payload in sequential_group:
+                    all_results.append(_execute_single_tool_to_result(tool_payload, update_run_depends=False))
 
         observation_parts: list[str] = []
         aggregated_files: dict[str, Any] = {}
