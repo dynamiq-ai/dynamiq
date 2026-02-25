@@ -18,8 +18,6 @@ MERGE_SUMMARIES_PROMPT = (
     "important information, tool outputs, and unresolved tasks."
 )
 
-TOKEN_BUDGET_RATIO = 0.65
-
 
 class ContextManagerInputSchema(BaseModel):
     """Input for ContextManagerTool.
@@ -71,6 +69,7 @@ class ContextManagerTool(Node):
     )
 
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=60))
+    token_budget_ratio: float = Field(default=0.75, gt=0, le=1)
     llm: Node = Field(..., description="LLM instance for generating summaries")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -113,7 +112,7 @@ class ContextManagerTool(Node):
 
         Reserves space for the summarization prompt itself and the LLM output.
         """
-        return int(self.llm.get_token_limit() * TOKEN_BUDGET_RATIO)
+        return int(self.llm.get_token_limit() * self.token_budget_ratio)
 
     def _count_message_tokens(self, messages: list[Message | VisionMessage]) -> int:
         """Count tokens for a list of messages using the summarization LLM's tokenizer."""

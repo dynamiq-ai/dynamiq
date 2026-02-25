@@ -216,6 +216,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     context_tool = ContextManagerTool(
                         llm=self.llm,
                         name="context-manager",
+                        token_budget_ratio=self.summarization_config.token_budget_ratio,
                     )
                     self.tools.append(context_tool)
                     self._excluded_tool_ids.add(context_tool.id)
