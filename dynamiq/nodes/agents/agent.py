@@ -1,5 +1,4 @@
 import json
-import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Mapping
 
@@ -455,18 +454,16 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         try:
             parsed_data = XMLParser.parse(
-                llm_generated_output, required_tags=["thought", "answer"], optional_tags=["output"]
+                llm_generated_output,
+                required_tags=["thought", "answer"],
+                optional_tags=["output", "output_files"],
             )
             thought = parsed_data.get("thought")
             final_answer = parsed_data.get("answer")
 
-            output_files_match = re.search(r"<output_files>\s*(.*?)\s*</output_files>", final_answer or "", re.DOTALL)
-            if output_files_match:
-                raw = output_files_match.group(1).strip()
-                self._requested_output_files = [p.strip() for p in raw.split(",") if p.strip()]
-                final_answer = re.sub(
-                    r"\s*<output_files>.*?</output_files>\s*", "", final_answer, flags=re.DOTALL
-                ).strip()
+            raw_output_files = (parsed_data.get("output_files") or "").strip()
+            if raw_output_files:
+                self._requested_output_files = [p.strip() for p in raw_output_files.split(",") if p.strip()]
 
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
@@ -1011,9 +1008,23 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 # Handle final answer
                 if result[1] == "final_answer":
                     if self._requested_output_files:
-                        file_not_found = [f for f in self._requested_output_files if not self.sandbox_backend.exists(f)]
-                        if len(file_not_found) > 0:
-                            raise ActionParsingException(f"File not found: {file_not_found}", recoverable=True)
+                        file_backend = self.sandbox_backend or self.file_store_backend
+                        if file_backend:
+                            resolved = []
+                            file_not_found = []
+                            for f in self._requested_output_files:
+                                basename = f.rsplit("/", 1)[-1]
+                                if file_backend.exists(f):
+                                    resolved.append(f)
+                                elif f != basename and file_backend.exists(basename):
+                                    resolved.append(basename)
+                                else:
+                                    file_not_found.append(f)
+                            if file_not_found:
+                                raise ActionParsingException(
+                                    f"File not found: {file_not_found}.", recoverable=True
+                                )
+                            self._requested_output_files = resolved
                     return result[2]
 
                 # Handle recovery (for modes that support it)

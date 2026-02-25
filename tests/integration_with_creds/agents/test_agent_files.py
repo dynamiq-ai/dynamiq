@@ -38,32 +38,41 @@ def image_bytes(image_file_path):
     with open(image_file_path, "rb") as f:
         image_data = f.read()
 
-    # Create BytesIO object with the image data
     image_file = BytesIO(image_data)
     image_file.name = "img.jpeg"
-    image_file.seek(0)  # Reset position to beginning
+    image_file.seek(0)
+    return image_file
+
+
+@pytest.fixture(scope="function")
+def image_bytes_2(image_file_path):
+    """Load the same image as a second file with a different name."""
+    with open(image_file_path, "rb") as f:
+        image_data = f.read()
+
+    image_file = BytesIO(image_data)
+    image_file.name = "img2.jpeg"
+    image_file.seek(0)
     return image_file
 
 
 # Test configuration fixtures
 @pytest.fixture(scope="module")
 def agent_role():
-    return (
-        "helpful assistant that accurately analyzes images and provides technical details." " Make sure to save file."
-    )
+    return "helpful assistant that describes images and saves the description to a file when asked."
 
 
 @pytest.fixture(scope="module")
 def camera_query():
     return (
-        "Look at this image that depicts camera and tell its manufacturer."
-        " Please save name of the camera to the summary.txt"
+        "I gave you two photos. Save a short description of the first photo to summary1.txt"
+        " and a short description of the second photo to summary2.txt. Return both files."
     )
 
 
 @pytest.fixture(scope="module")
 def expected_camera_keywords():
-    return ["canon", "camera", "manufacturer", "dslr", "photography", "equipment"]
+    return ["image", "photo", "camera", "description", "summary"]
 
 
 @pytest.fixture(scope="module")
@@ -103,7 +112,7 @@ def gemini_llm(gemini_connection):
     )
 
 
-def _run_and_assert_agent(agent, input_data, expected_keywords, run_config, expected_file_name=None):
+def _run_and_assert_agent(agent, input_data, expected_keywords, run_config, expected_file_names=None):
     """Generic helper function to run an agent and check results.
 
     Args:
@@ -111,14 +120,13 @@ def _run_and_assert_agent(agent, input_data, expected_keywords, run_config, expe
         input_data: Input data for the agent
         expected_keywords: Keywords expected in the agent output
         run_config: Runnable configuration
-        expected_file_name: Optional expected file name to validate in agent_output_files
+        expected_file_names: Optional list of file names expected in agent output files
     """
     logger.info(f"\n--- Running Agent: {agent.name} ---")
 
     workflow = Workflow(flow=Flow(nodes=[agent]))
     tracing = TracingCallbackHandler()
 
-    # Create config with tracing callback attached
     config = run_config.model_copy(update={"callbacks": [tracing]})
 
     try:
@@ -144,20 +152,25 @@ def _run_and_assert_agent(agent, input_data, expected_keywords, run_config, expe
     assert agent_output_files is not None, "Agent output files should not be None"
     assert isinstance(agent_output_files, list), f"Agent output files should be a list, got {type(agent_output_files)}"
 
-    if expected_file_name:
-        assert len(agent_output_files) > 0, "Agent should return at least one file in output"
-        returned_file = agent_output_files[0]
-        assert isinstance(returned_file, BytesIO), f"Agent should return file as BytesIO, got {type(returned_file)}"
-        assert (
-            returned_file.name == expected_file_name
-        ), f"Expected file name '{expected_file_name}', got '{returned_file.name}'"
+    if expected_file_names:
+        assert len(agent_output_files) >= len(expected_file_names), (
+            f"Expected at least {len(expected_file_names)} file(s), got {len(agent_output_files)}"
+        )
+        returned_names = {f.name for f in agent_output_files}
+        for name in expected_file_names:
+            assert name in returned_names, (
+                f"Expected file '{name}' not found in returned files: {returned_names}"
+            )
 
-        file_content = returned_file.read()
-        assert file_content is not None, "File content should not be None"
-        assert len(file_content) > 0, "File content should not be empty"
-        returned_file.seek(0)
-
-        logger.info(f"Validated file: {returned_file.name} ({len(file_content)} bytes)")
+        for returned_file in agent_output_files:
+            assert isinstance(returned_file, BytesIO), (
+                f"Agent should return file as BytesIO, got {type(returned_file)}"
+            )
+            file_content = returned_file.read()
+            assert file_content is not None, "File content should not be None"
+            assert len(file_content) > 0, "File content should not be empty"
+            returned_file.seek(0)
+            logger.info(f"Validated file: {returned_file.name} ({len(file_content)} bytes)")
 
     if expected_keywords:
         matches = [keyword for keyword in expected_keywords if keyword.lower() in agent_output.lower()]
@@ -171,7 +184,6 @@ def _run_and_assert_agent(agent, input_data, expected_keywords, run_config, expe
     return agent_output
 
 
-@pytest.mark.flaky(reruns=3)
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "llm_fixture",
@@ -180,10 +192,9 @@ def _run_and_assert_agent(agent, input_data, expected_keywords, run_config, expe
     ],
 )
 def test_agent_filestore_multiple_files(
-    llm_fixture, image_bytes, agent_role, run_config, camera_query, expected_camera_keywords, request
+    llm_fixture, image_bytes, image_bytes_2, agent_role, run_config, camera_query, expected_camera_keywords, request
 ):
-    """Test Agent can create files in FileStore and return them in output."""
-    # Get the LLM instance from the fixture name
+    """Test Agent can create multiple files in FileStore and return them in output."""
     llm = request.getfixturevalue(llm_fixture)
 
     file_store_backend = InMemoryFileStore()
@@ -205,10 +216,13 @@ def test_agent_filestore_multiple_files(
     )
 
     input_data = {
-        "input": (camera_query),
-        "files": [image_bytes],
+        "input": camera_query,
+        "files": [image_bytes, image_bytes_2],
     }
 
-    _run_and_assert_agent(agent, input_data, expected_camera_keywords, run_config, expected_file_name="summary.txt")
+    _run_and_assert_agent(
+        agent, input_data, expected_camera_keywords, run_config,
+        expected_file_names=["summary1.txt", "summary2.txt"],
+    )
 
     logger.info(f"--- Test Passed for Multiple File Creation with {llm_fixture} ---")

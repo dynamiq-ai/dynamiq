@@ -82,11 +82,14 @@ class FileStore(abc.ABC, BaseModel):
         return data
 
     @abc.abstractmethod
-    def list_files_bytes(self) -> list[BytesIO]:
-        """List files in storage and return the content as bytes in BytesIO objects.
+    def list_files_bytes(self, file_paths: list[str] | None = None) -> list[BytesIO]:
+        """Return stored files as BytesIO objects.
+
+        Args:
+            file_paths: If provided, return only these files. Otherwise return all files.
 
         Returns:
-            List of BytesIO objects
+            List of BytesIO objects with name, description, and content_type attributes.
         """
         pass
 

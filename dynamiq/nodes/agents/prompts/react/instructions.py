@@ -61,8 +61,8 @@ When you have enough information to provide a final answer:
     </thought>
     <answer>
         [Your complete answer to the user's question]
-        <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
     </answer>
+    <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 </output>
 
 For questions that don't require tools:
@@ -72,8 +72,8 @@ For questions that don't require tools:
     </thought>
     <answer>
         [Your direct response]
-         <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
     </answer>
+    <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 </output>
 
 CRITICAL XML FORMAT RULES:
@@ -108,7 +108,7 @@ JSON FORMATTING REQUIREMENTS:
 
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
-- If you want to return files, include an <output_files> tag inside your <answer> listing absolute file paths (comma-separated). This tag is optional — omit it if there are no files to return.
+- If you want to return files, include an <output_files> tag after </answer> (but still inside <output>) listing absolute file paths (comma-separated). This tag is optional — omit it if there are no files to return.
 """  # noqa: E501
 
 
@@ -224,8 +224,8 @@ REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS = """Always use this exact XML format in y
     </thought>
     <answer>
         [Your direct response to the user's question]
-        <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
     </answer>
+    <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 </output>
 
 IMPORTANT RULES:
@@ -235,8 +235,7 @@ IMPORTANT RULES:
 - Properly close all XML tags
 - Do not use markdown formatting inside XML
 - Do not mention tools or actions since you don't have access to any
-- If you want to return files, include an <output_files> tag inside your <answer>
-listing absolute file paths (comma-separated). This tag is optional — omit it if there are no files to return.
+- If you want to return files, include an <output_files> tag after </answer> (but still inside <output>) listing absolute file paths (comma-separated). This tag is optional — omit it if there are no files to return.
 """
 
 
@@ -263,8 +262,8 @@ Provide your final answer or explanation within <answer> tags.
 Your response should be clear, concise, and professional.
 <answer>
 [Your final answer or explanation goes here]
-<output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 </answer>
+<output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 """  # noqa: E501
 
 

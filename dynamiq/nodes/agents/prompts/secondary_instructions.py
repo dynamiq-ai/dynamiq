@@ -30,7 +30,6 @@ SANDBOX_INSTRUCTIONS_TEMPLATE = """SANDBOX EXECUTION ENVIRONMENT:
 - Use {base_path}/ for all files: scripts, data, and generated output.
   Uploaded files are also placed here. Other tools can only access files under {base_path}/.
 - Files returned from other tools are placed in {base_path}/ and can be accessed by other tools.
-- In your final answer, list the absolute paths of any files you want to return using the <output_files> tag.
 
 Rules:
 1. Use 'python3' instead of 'python'.

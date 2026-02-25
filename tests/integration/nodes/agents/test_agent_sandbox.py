@@ -268,9 +268,8 @@ def test_agent_with_sandbox_returns_files(mocker):
 
     xml_final_answer = """<output>
   <thought>Command executed successfully.</thought>
-  <answer>Shell command completed. Output: hello from sandbox
-    <output_files>/home/user/result.txt, /home/user/data.csv</output_files>
-  </answer>
+  <answer>Shell command completed. Output: hello from sandbox</answer>
+  <output_files>/home/user/result.txt, /home/user/data.csv</output_files>
 </output>"""
 
     call_count = [0]
