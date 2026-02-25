@@ -69,7 +69,7 @@ class ContextManagerTool(Node):
     )
 
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=60))
-    token_budget_ratio: float = Field(default=0.75, gt=0, le=1)
+    token_budget_ratio: float = Field(default=0.75, gt=0, lt=1)
     llm: Node = Field(..., description="LLM instance for generating summaries")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

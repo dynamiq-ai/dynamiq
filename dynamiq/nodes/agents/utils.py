@@ -979,4 +979,4 @@ class SummarizationConfig(BaseModel):
     max_token_context_length: int | None = None
     context_usage_ratio: float = Field(default=0.8, gt=0, le=1)
     preserve_last_messages: int = Field(default=2, ge=0)
-    token_budget_ratio: float = Field(default=0.75, gt=0, le=1)
+    token_budget_ratio: float = Field(default=0.75, gt=0, lt=1)
