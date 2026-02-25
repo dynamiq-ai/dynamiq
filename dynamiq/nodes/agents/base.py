@@ -1000,10 +1000,6 @@ class Agent(Node):
                     )
                 merged_input.pop("delegate_final", None)
 
-        if isinstance(tool, ContextManagerTool):
-            to_summarize, _ = self._split_history()
-            merged_input["messages"] = to_summarize
-
         raw_tool_params = kwargs.get("tool_params", ToolParams())
         tool_params = (
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params

@@ -632,12 +632,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
         )
 
         try:
-            # Don't cache ContextManagerTool results - they should always be regenerated
-            # (messages are injected in _run_tool in base.py)
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
+                to_summarize, _ = self._split_history()
+                if not isinstance(action_input, dict):
+                    action_input = {}
+                action_input["messages"] = to_summarize
             else:
-                # For other tools, check cache for previously computed results
                 tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
                 tool_result = self._tool_cache.get(tool_cache_entry, None)
 
