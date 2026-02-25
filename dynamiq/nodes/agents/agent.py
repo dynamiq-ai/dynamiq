@@ -1009,24 +1009,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 # Handle final answer
                 if result[1] == "final_answer":
-                    if self._requested_output_files:
-                        file_backend = self.sandbox_backend or self.file_store_backend
-                        if file_backend:
-                            resolved = []
-                            file_not_found = []
-                            for f in self._requested_output_files:
-                                basename = f.rsplit("/", 1)[-1]
-                                if file_backend.exists(f):
-                                    resolved.append(f)
-                                elif f != basename and file_backend.exists(basename):
-                                    resolved.append(basename)
-                                else:
-                                    file_not_found.append(f)
-                            if file_not_found:
-                                raise ActionParsingException(
-                                    f"File not found: {file_not_found}.", recoverable=True
-                                )
-                            self._requested_output_files = resolved
+                    self._resolve_requested_output_files(strict=True)
                     return result[2]
 
                 # Handle recovery (for modes that support it)
@@ -1080,6 +1063,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             raise MaxLoopsExceededException(message=error_message)
         else:
             max_loop_final_answer = self._handle_max_loops_exceeded(input_message, config, **kwargs)
+            self._resolve_requested_output_files(strict=False)
             if self.streaming.enabled:
                 self.stream_content(
                     content=max_loop_final_answer,
@@ -1133,6 +1117,46 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 **kwargs,
             )
 
+    def _resolve_requested_output_files(self, *, strict: bool = True) -> None:
+        """Resolve ``_requested_output_files`` against the file backend.
+
+        Each requested path is checked as-is first, then by basename.
+        When *strict* is ``True`` (inside the normal loop), missing files
+        raise :class:`ActionParsingException` so the agent can retry.
+        When *strict* is ``False`` (max-loops path), missing files are
+        silently dropped because there are no retries left.
+        """
+        if not self._requested_output_files:
+            return
+
+        file_backend = self.sandbox_backend or self.file_store_backend
+        if not file_backend:
+            return
+
+        resolved: list[str] = []
+        file_not_found: list[str] = []
+        for f in self._requested_output_files:
+            basename = f.rsplit("/", 1)[-1]
+            if file_backend.exists(f):
+                resolved.append(f)
+            elif f != basename and file_backend.exists(basename):
+                resolved.append(basename)
+            else:
+                file_not_found.append(f)
+
+        if file_not_found and strict:
+            raise ActionParsingException(
+                f"File not found: {file_not_found}.", recoverable=True
+            )
+
+        if file_not_found and not strict:
+            logger.warning(
+                f"Agent {self.name} - {self.id}: "
+                f"max-loops output_files not found (skipped): {file_not_found}"
+            )
+
+        self._requested_output_files = resolved
+
     def _handle_max_loops_exceeded(
         self, input_message: Message | VisionMessage, config: RunnableConfig | None = None, **kwargs
     ) -> str:
@@ -1172,6 +1196,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     "Max loops handler: Failed to extract <answer> tag even with fallbacks. Returning raw output."
                 )
                 final_answer = llm_final_attempt
+
+            raw_output_files = XMLParser.extract_first_tag_lxml(llm_final_attempt, ["output_files"])
+            if raw_output_files is None:
+                raw_output_files = XMLParser.extract_first_tag_regex(llm_final_attempt, ["output_files"])
+            if raw_output_files:
+                raw_output_files = raw_output_files.strip()
+                self._requested_output_files = [p.strip() for p in raw_output_files.split(",") if p.strip()]
 
         except Exception as e:
             logger.error(f"Max loops handler: Error during final answer extraction: {e}. Returning raw output.")
