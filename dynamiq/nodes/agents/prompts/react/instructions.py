@@ -275,7 +275,8 @@ Your response should be clear, concise, and professional.
 
 
 HISTORY_SUMMARIZATION_PROMPT_REPLACE = """Provide a concise summary of the conversation history above.
- Focus on key decisions, important information, and tool outputs."""
-
-
-PROMPT_AUTO_CLEAN_CONTEXT = "Automatically cleaning the context with Context Manager Tool..."
+ Focus on key decisions, important information, and tool outputs. The purpose of this summary is to provide continuity
+ so you can continue to make progress towards solving the task in a
+ future context, where the raw history above may not be accessible and will be replaced with this summary.
+ Write down anything that would be helpful, including the state, next steps, learnings etc.
+"""

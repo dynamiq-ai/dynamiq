@@ -182,7 +182,7 @@ def test_agent_e2b_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
             connection=openai_conn,
             model="gpt-4o",
         ),
-        summarization_config=SummarizationConfig(enabled=True),
+        summarization_config=SummarizationConfig(enabled=True, preserve_last_messages=4, token_budget_ratio=0.65),
         role="a helpful assistant that can execute shell commands in a sandbox.",
         sandbox=sandbox_config,
         max_loops=15,
