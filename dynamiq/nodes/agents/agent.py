@@ -1034,6 +1034,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     return final_answer
 
             except OutputFileNotFoundError as e:
+                self._requested_output_files = []
                 self._append_recovery_instruction(
                     error_label=type(e).__name__,
                     error_detail=str(e),
