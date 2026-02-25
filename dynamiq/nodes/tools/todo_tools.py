@@ -34,7 +34,7 @@ class TodoItem(BaseModel):
     """A single todo item."""
 
     id: str
-    content: str = ""
+    content: str
     status: TodoStatus = TodoStatus.PENDING
 
     model_config = ConfigDict(extra="allow")
@@ -55,15 +55,15 @@ class TodoWriteInputSchema(BaseModel):
     todos: list[TodoItem] = Field(
         ...,
         description=(
-            "List of todo items. Each item MUST have 'id' and 'status'. "
-            "'content' is required only when creating (merge=false). "
-            "When updating (merge=true), only 'id' and 'status' are needed — content is preserved."
+            "List of todo items. Each item MUST have 'id', 'content', and 'status'. "
+            "When updating (merge=true), content is required but ignored — the original content is preserved."
         ),
     )
     merge: bool = Field(
         default=True,
-        description="If true, update status of existing todos by id (content is preserved). "
-        "If false, replace all todos (content is required).",
+        description="If true, update status of existing todos by id (content you send is ignored, "
+        "original is preserved). "
+        "If false, replace all todos with the provided list.",
     )
 
 
@@ -76,20 +76,21 @@ class TodoWriteTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "todo-write"
-    description: str = """Save or update the todo list.
+    description: str = """Save or update the todo list. Every item requires 'id', 'content', and 'status'.
 
 Two modes:
 
-CREATE (merge=false): Build the full todo list. Each item needs 'id', 'content', 'status'.
+CREATE (merge=false): Build the full todo list.
   {"todos": [{"id": "1", "content": "Implement auth", "status": "in_progress"},
-             {"id": "2", "content": "Add tests", "status": "pending"}], "merge": false}
+  {"id": "2", "content": "Add tests", "status": "pending"}], "merge": false}
 
-UPDATE (merge=true, default): Change status only. Content is preserved automatically — do NOT send content.
-  {"todos": [{"id": "1", "status": "completed"}, {"id": "2", "status": "in_progress"}], "merge": true}
+UPDATE (merge=true, default): Change status only. Content is required but ignored — the original content is preserved.
+  {"todos": [{"id": "1", "content": "ignored", "status": "completed"},
+  {"id": "2", "content": "ignored", "status": "in_progress"}], "merge": true}
 
 RULES:
 - Use merge=false ONLY for initial list creation. First task should be "in_progress", rest "pending".
-- Use merge=true for ALL subsequent updates. Only send 'id' and 'status' — content stays unchanged.
+- Use merge=true for ALL subsequent updates — only status is applied, content stays unchanged.
 - Do NOT restructure, reword, or reorder todos when updating status.
 """
 
