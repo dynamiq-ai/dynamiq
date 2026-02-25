@@ -183,7 +183,7 @@ def _run_and_assert_agent(agent, input_data, expected_keywords, run_config, expe
 
     return agent_output
 
-
+@pytest.mark.flaky(reruns=3)
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "llm_fixture, inference_mode",

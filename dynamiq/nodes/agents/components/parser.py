@@ -173,15 +173,19 @@ def extract_default_final_answer(output: str) -> tuple[str, str, str]:
                (empty strings if not found). *output_files_raw* is the raw
                comma-separated value, or "" when the field is absent.
     """
-    match = re.search(
-        r"Thought:\s*(.*?)\s*(?:Output Files:\s*(.*?)\s*)?Answer:\s*(.*)",
-        output,
-        re.DOTALL,
-    )
-    if match:
-        thought = match.group(1).strip()
-        output_files_raw = (match.group(2) or "").strip()
-        answer = match.group(3).strip()
-        return thought, answer, output_files_raw
-    else:
+    match = re.search(r"Thought:\s*(.*?)\s*Answer:\s*(.*)", output, re.DOTALL)
+    if not match:
         return "", "", ""
+
+    raw_thought = match.group(1).strip()
+    answer = match.group(2).strip()
+
+    files_match = re.search(r"^(.*)\nOutput Files:\s*(.*)$", raw_thought, re.DOTALL)
+    if files_match:
+        thought = files_match.group(1).strip()
+        output_files_raw = files_match.group(2).strip()
+    else:
+        thought = raw_thought
+        output_files_raw = ""
+
+    return thought, answer, output_files_raw

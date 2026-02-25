@@ -196,3 +196,30 @@ Answer: The answer is 42."""
     assert thought == "No files needed."
     assert answer == "The answer is 42."
     assert output_files == ""
+
+
+def test_extract_default_final_answer_output_files_phrase_in_thought():
+    """'Output Files:' embedded in thought text must not be treated as the output-files field."""
+    output = (
+        "Thought: I checked the Output Files: section and found nothing relevant.\n"
+        "Answer: No files found."
+    )
+
+    thought, answer, output_files = parser.extract_default_final_answer(output)
+    assert thought == "I checked the Output Files: section and found nothing relevant."
+    assert answer == "No files found."
+    assert output_files == ""
+
+
+def test_extract_default_final_answer_output_files_in_thought_and_real_field():
+    """When 'Output Files:' appears both in the thought and as a real field, the real field wins."""
+    output = (
+        "Thought: I noted the Output Files: field is important.\n"
+        "Output Files: /tmp/result.csv\n"
+        "Answer: Done."
+    )
+
+    thought, answer, output_files = parser.extract_default_final_answer(output)
+    assert thought == "I noted the Output Files: field is important."
+    assert answer == "Done."
+    assert output_files == "/tmp/result.csv"
