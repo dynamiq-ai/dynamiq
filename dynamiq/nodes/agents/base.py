@@ -40,7 +40,7 @@ from dynamiq.sandboxes.base import Sandbox, SandboxConfig
 from dynamiq.skills.config import SkillsConfig
 from dynamiq.skills.registries.dynamiq import Dynamiq
 from dynamiq.skills.types import SkillMetadata
-from dynamiq.skills.utils import ingest_skills_into_sandbox
+from dynamiq.skills.utils import ingest_skills_into_sandbox, normalize_sandbox_skills_base_path
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
@@ -462,29 +462,37 @@ class Agent(Node):
         if source is None:
             return
         metadata = self.skills.get_skills_metadata()
-        skills_summary = self._format_skills_summary(metadata)
+        sandbox_base = normalize_sandbox_skills_base_path(getattr(source, "sandbox_skills_base_path", None))
+        skills_summary = self._format_skills_summary(
+            metadata, sandbox_skills_base_path=sandbox_base if sandbox_base else None
+        )
         self.system_prompt_manager.set_block("skills", skills_summary)
         self.system_prompt_manager.set_initial_variable("tool_description", self.tool_description)
+        if sandbox_base:
+            self.system_prompt_manager.set_initial_variable("sandbox_skills_base_path", sandbox_base)
         logger.info(
             f"Agent {self.name} - {self.id}: initialized with {len(metadata)} skills "
             f"(source={source.__class__.__name__})"
         )
 
-    def _format_skills_summary(self, metadata: list[SkillMetadata]) -> str:
+    def _format_skills_summary(self, metadata: list[SkillMetadata], sandbox_skills_base_path: str | None = None) -> str:
         """Format skills summary for prompt.
 
-        Args:
-            metadata: List of SkillMetadata objects.
-
-        Returns:
-            Formatted string with skill information.
+        When sandbox_skills_base_path is set (caller must pass an already-normalized path or None),
+        each line includes the path to read the skill in the sandbox so the agent can go straight
+        to SandboxShellTool without calling SkillsTool list.
         """
         if not metadata:
             return ""
 
+        base = sandbox_skills_base_path or ""
         lines = []
         for skill in metadata:
-            lines.append(f"- **{skill.name}**: {skill.description}")
+            if base:
+                skill_path = f"{base}/{skill.name}/SKILL.md"
+                lines.append(f"- **{skill.name}**: {skill.description} — read: `{skill_path}`")
+            else:
+                lines.append(f"- **{skill.name}**: {skill.description}")
         return "\n".join(lines)
 
     def set_block(self, block_name: str, content: str):
