@@ -1145,14 +1145,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 file_not_found.append(f)
 
         if file_not_found and strict:
-            raise ActionParsingException(
-                f"File not found: {file_not_found}.", recoverable=True
-            )
+            raise ActionParsingException(f"File not found: {file_not_found}.", recoverable=True)
 
         if file_not_found and not strict:
             logger.warning(
-                f"Agent {self.name} - {self.id}: "
-                f"max-loops output_files not found (skipped): {file_not_found}"
+                f"Agent {self.name} - {self.id}: " f"max-loops output_files not found (skipped): {file_not_found}"
             )
 
         self._requested_output_files = resolved
