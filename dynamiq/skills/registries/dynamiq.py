@@ -8,6 +8,7 @@ from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections import HTTPMethod
 from dynamiq.skills.registries.base import BaseSkillRegistry
 from dynamiq.skills.types import SkillInstructions, SkillMetadata, SkillRegistryError
+from dynamiq.skills.utils import normalize_sandbox_skills_base_path
 from dynamiq.utils.logger import logger
 
 
@@ -112,7 +113,9 @@ class Dynamiq(BaseSkillRegistry):
             return None
         if ".." in name or "/" in name:
             return None
-        base = self.sandbox_skills_base_path.rstrip("/")
+        base = normalize_sandbox_skills_base_path(self.sandbox_skills_base_path)
+        if not base:
+            return None
         return f"{base}/{name}/scripts"
 
     def download_skill_archive(self, skill_id: str, version_id: str) -> bytes:
