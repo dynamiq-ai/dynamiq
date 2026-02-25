@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import ConfigDict, Field, PrivateAttr
 
-from dynamiq.checkpoints.backends.base import DEFAULT_LIST_LIMIT, CheckpointBackend
+from dynamiq.checkpoints.backends.base import CheckpointBackend
 from dynamiq.checkpoints.checkpoint import CheckpointStatus, FlowCheckpoint
 from dynamiq.utils import decode_reversible, encode_reversible
 
@@ -112,7 +112,7 @@ class FileSystem(CheckpointBackend):
         flow_id: str,
         *,
         status: CheckpointStatus | None = None,
-        limit: int | None = DEFAULT_LIST_LIMIT,
+        limit: int | None = None,
         before: datetime | None = None,
     ) -> list[FlowCheckpoint]:
         """List checkpoints for a flow, newest first. Use limit=None to get all."""
@@ -174,7 +174,7 @@ class FileSystem(CheckpointBackend):
         with open(index_path, "w") as f:
             json.dump(index_data, f)
 
-    def get_list_by_run(self, run_id: str, *, limit: int | None = DEFAULT_LIST_LIMIT) -> list[FlowCheckpoint]:
+    def get_list_by_run(self, run_id: str, *, limit: int | None = None) -> list[FlowCheckpoint]:
         """List checkpoints for a specific run. Use limit=None to get all."""
         checkpoints = [
             cp for path in self._data_dir.glob("*.json") if (cp := self.load(path.stem)) and cp.run_id == run_id

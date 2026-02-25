@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 from dynamiq.checkpoints.checkpoint import CheckpointStatus, FlowCheckpoint
 from dynamiq.utils import generate_uuid
 
-CLEANUP_FETCH_LIMIT = 1000
+DEFAULT_CLEANUP_FETCH_LIMIT = 1000
 DEFAULT_LIST_LIMIT = 10
 
 
@@ -20,6 +20,10 @@ class CheckpointBackend(ABC, BaseModel):
 
     name: str = Field(default="CheckpointBackend", description="Backend name")
     id: str = Field(default_factory=generate_uuid, description="Unique backend instance ID")
+    max_list_results: int = Field(default=DEFAULT_LIST_LIMIT, description="Max checkpoints returned by list queries")
+    max_cleanup_results: int = Field(
+        default=DEFAULT_CLEANUP_FETCH_LIMIT, description="Max checkpoints fetched during cleanup"
+    )
 
     @property
     def to_dict_exclude_params(self) -> dict[str, bool]:
@@ -61,7 +65,7 @@ class CheckpointBackend(ABC, BaseModel):
         flow_id: str,
         *,
         status: CheckpointStatus | None = None,
-        limit: int | None = DEFAULT_LIST_LIMIT,
+        limit: int | None = None,
         before: datetime | None = None,
     ) -> list[FlowCheckpoint]:
         """List checkpoints for a flow, newest first. Use limit=None to get all."""
@@ -74,7 +78,7 @@ class CheckpointBackend(ABC, BaseModel):
 
     def cleanup_by_flow(self, flow_id: str, *, keep_count: int = 10, older_than_hours: int | None = None) -> int:
         """Remove old checkpoints for a flow, returns count deleted."""
-        checkpoints = self.get_list_by_flow(flow_id, limit=CLEANUP_FETCH_LIMIT)
+        checkpoints = self.get_list_by_flow(flow_id, limit=self.max_cleanup_results)
         deleted = 0
 
         for i, cp in enumerate(checkpoints):
@@ -88,7 +92,7 @@ class CheckpointBackend(ABC, BaseModel):
 
         return deleted
 
-    def get_list_by_run(self, run_id: str, *, limit: int | None = DEFAULT_LIST_LIMIT) -> list[FlowCheckpoint]:
+    def get_list_by_run(self, run_id: str, *, limit: int | None = None) -> list[FlowCheckpoint]:
         """List checkpoints for a specific run. Use limit=None to get all."""
         raise NotImplementedError("get_list_by_run not implemented for this backend")
 

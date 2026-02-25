@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import ConfigDict, Field, PrivateAttr
 
-from dynamiq.checkpoints.backends.base import DEFAULT_LIST_LIMIT, CheckpointBackend
+from dynamiq.checkpoints.backends.base import CheckpointBackend
 from dynamiq.checkpoints.checkpoint import CheckpointStatus, FlowCheckpoint
 
 
@@ -60,7 +60,7 @@ class InMemory(CheckpointBackend):
         flow_id: str,
         *,
         status: CheckpointStatus | None = None,
-        limit: int | None = DEFAULT_LIST_LIMIT,
+        limit: int | None = None,
         before: datetime | None = None,
     ) -> list[FlowCheckpoint]:
         """List checkpoints for a flow, newest first. Use limit=None to get all."""
@@ -80,7 +80,7 @@ class InMemory(CheckpointBackend):
         results = self.get_list_by_flow(flow_id, status=status, limit=1)
         return results[0] if results else None
 
-    def get_list_by_run(self, run_id: str, *, limit: int | None = DEFAULT_LIST_LIMIT) -> list[FlowCheckpoint]:
+    def get_list_by_run(self, run_id: str, *, limit: int | None = None) -> list[FlowCheckpoint]:
         """List checkpoints for a specific run. Use limit=None to get all."""
         with self._lock:
             result = [cp.model_copy(deep=True) for cp in self._checkpoints.values() if cp.run_id == run_id]
