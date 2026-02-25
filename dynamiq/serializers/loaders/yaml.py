@@ -1,10 +1,11 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from os import PathLike
 from typing import Any
 
 from dynamiq import Workflow
 from dynamiq.connections import BaseConnection
 from dynamiq.connections.managers import ConnectionManager
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.flows import Flow
 from dynamiq.nodes import Node
 from dynamiq.nodes.managers import NodeManager
@@ -734,7 +735,7 @@ class WorkflowYAMLLoader:
 
             return new_nodes
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        with ContextAwareThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_node_id = {
                 executor.submit(
                     cls.get_node_without_depends,

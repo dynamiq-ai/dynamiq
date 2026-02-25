@@ -1,13 +1,14 @@
 """Base file storage interface and common data structures."""
 
 import abc
+import base64
 from datetime import datetime
 from functools import cached_property
 from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_serializer
 
 
 class FileInfo(BaseModel):
@@ -19,7 +20,11 @@ class FileInfo(BaseModel):
     content_type: str = "text/plain"
     created_at: datetime = Field(default_factory=datetime.now)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    content: bytes = Field(default=None)
+    content: bytes | None = Field(default=None)
+
+    @field_serializer("content", when_used="json-unless-none")
+    def bytes_as_base64(self, b: bytes) -> str:
+        return base64.b64encode(b).decode("ascii")
 
 
 class StorageError(Exception):

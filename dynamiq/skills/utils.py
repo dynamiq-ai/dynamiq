@@ -1,9 +1,10 @@
 import shlex
 import zipfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from io import BytesIO
 from typing import TYPE_CHECKING
 
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.skills.types import SkillRegistryError
 from dynamiq.utils.logger import logger
 
@@ -12,6 +13,20 @@ MAX_INGEST_WORKERS = 8
 if TYPE_CHECKING:
     from dynamiq.sandboxes.base import Sandbox
     from dynamiq.skills.registries.dynamiq import Dynamiq, DynamiqSkillEntry
+
+
+def normalize_sandbox_skills_base_path(path: str | None) -> str:
+    """Normalize sandbox skills base path so root '/' is preserved.
+
+    .rstrip('/') turns '/' into '', which drops root paths from prompts and paths.
+    Returns: '' when path is empty/None, '/' when path is exactly '/', else path with trailing slash removed.
+    """
+    raw = (path or "").strip()
+    if not raw:
+        return ""
+    if raw == "/":
+        return "/"
+    return raw.rstrip("/")
 
 
 def extract_skill_content_slice(
@@ -96,6 +111,11 @@ def ingest_skills_into_sandbox(
     Default base is sandbox.base_path + "/skills" (e.g. /home/user/skills).
     Requires `unzip` in the sandbox.
 
+    The base path is created with ``mkdir -p`` before any uploads so that existing directories
+    (e.g. from a previous run or another skill) do not cause "mkdir: file exists" errors from
+    backends that use non-idempotent mkdir. The sandbox's upload_file is called with
+    ensure_parent_dirs=True so each skill's parent dir is also ensured idempotently.
+
     Args:
         sandbox: Sandbox with upload_file(file_name, content, destination_path) and run_command_shell.
         registry: Dynamiq registry (must have download_skill_archive).
@@ -108,18 +128,25 @@ def ingest_skills_into_sandbox(
     Raises:
         SkillRegistryError: If download, upload, or unzip fails.
     """
-    base = (sandbox_skills_base_path or f"{sandbox.base_path.rstrip('/')}/skills").rstrip("/")
+    base = normalize_sandbox_skills_base_path(sandbox_skills_base_path or f"{sandbox.base_path.rstrip('/')}/skills")
     skills_to_ingest = skill_names if skill_names is not None else [e.name for e in registry.skills]
     entries_to_ingest = [e for e in registry.skills if e.name in skills_to_ingest]
     if not entries_to_ingest:
         return []
+
+    if base:
+        try:
+            sandbox.run_command_shell(f"mkdir -p {shlex.quote(base)}")
+            logger.debug(f"Ingestion: ensured base path exists: {base}")
+        except Exception as e:
+            logger.warning(f"Ingestion: mkdir -p {base!r} failed (continuing): {e}")
 
     workers = min(MAX_INGEST_WORKERS, len(entries_to_ingest))
     logger.debug(f"Ingestion: download+upload {len(entries_to_ingest)} skills with {workers} workers")
     uploaded: list[tuple[str, str, str, int]] = []
     ingested: list[str] = []
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+    with ContextAwareThreadPoolExecutor(max_workers=workers) as executor:
         future_to_entry = {
             executor.submit(_download_and_upload_one, registry, sandbox, base, e): e for e in entries_to_ingest
         }
@@ -145,7 +172,6 @@ def ingest_skills_into_sandbox(
                 details={"uploaded_skills": [u[0] for u in uploaded]},
             ) from e
 
-    # Return in same order as entries_to_ingest for deterministic behavior.
     order = {name: i for i, e in enumerate(entries_to_ingest) for name in [e.name]}
     return sorted(ingested, key=order.__getitem__)
 
@@ -203,7 +229,6 @@ def _batch_unzip_in_sandbox(
 
     if not uploaded:
         return
-    # One shell: for each (skill_dir, zip_path), unzip into skill_dir and rm zip.
     parts = []
     for _name, skill_dir, zip_path, _count in uploaded:
         parts.append(

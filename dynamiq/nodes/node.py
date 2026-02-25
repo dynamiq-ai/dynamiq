@@ -3,7 +3,7 @@ import copy
 import inspect
 import time
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from concurrent.futures import TimeoutError
 from datetime import datetime
 from functools import cached_property
 from queue import Empty
@@ -18,6 +18,7 @@ from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingCallbackHandler
 from dynamiq.connections import BaseConnection
 from dynamiq.connections.managers import ConnectionManager, ConnectionManagerException
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.nodes.exceptions import (
     NodeConditionFailedException,
@@ -232,6 +233,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         is_postponed_component_init (bool): Whether component initialization is postponed.
         is_optimized_for_agents (bool): Whether to optimize output for agents. By default is set to False.
         is_files_allowed (bool): Whether the node is permitted to access files. By default is set to False.
+        is_parallel_execution_allowed (bool): Whether this node can be executed in parallel. Default False.
         _json_schema_fields (list[str]): List of parameter names that will be used when generating json schema
           with _generate_json_schema.
 
@@ -253,6 +255,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
     is_postponed_component_init: bool = False
     is_optimized_for_agents: bool = False
     is_files_allowed: bool = Field(default=False, description="Whether the node is permitted to access files.")
+    is_parallel_execution_allowed: bool = Field(
+        default=False,
+        description="Whether this node can be executed in parallel with other nodes inside an agent.",
+    )
     action_type: ActionType | None = Field(default=None, description="Action type classification for streaming.")
 
     _output_references: NodeOutputReferences = PrivateAttr()
@@ -984,7 +990,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
         try:
             if timeout is not None:
-                executor = ThreadPoolExecutor()
+                executor = ContextAwareThreadPoolExecutor()
 
             for attempt in range(n_attempt):
                 merged_kwargs = merge(kwargs, {"execution_run_id": uuid4()})
@@ -1048,7 +1054,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
     def execute_with_timeout(
         self,
-        executor: ThreadPoolExecutor,
+        executor: ContextAwareThreadPoolExecutor,
         timeout: float | None,
         input_data: dict[str, Any] | BaseModel,
         config: RunnableConfig = None,
@@ -1058,7 +1064,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         Execute the node with a timeout.
 
         Args:
-            executor (ThreadPoolExecutor): Thread pool executor to use.
+            executor (ContextAwareThreadPoolExecutor): Thread pool executor to use.
             timeout (float | None): Timeout duration in seconds.
             input_data (dict[str, Any]): Input data for the node.
             config (RunnableConfig, optional): Configuration for the runnable.
