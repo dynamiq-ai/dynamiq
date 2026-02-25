@@ -122,8 +122,8 @@ class ContextManagerTool(Node):
             messages=[m.model_dump(exclude={"metadata"}) for m in messages],
         )
 
-    def _truncate_message(self, msg: Message | VisionMessage, budget: int) -> Message | VisionMessage:
-        """Truncate a single message so it fits within *budget* tokens.
+    def _truncate_message(self, msg: Message | VisionMessage, max_tokens: int) -> Message | VisionMessage:
+        """Truncate a single message so it fits within *max_tokens*.
 
         Keeps a prefix of the content and appends a truncation marker.
         VisionMessages are returned as-is (image content can't be meaningfully truncated).
@@ -132,17 +132,17 @@ class ContextManagerTool(Node):
             return msg
 
         msg_tokens = self._count_message_tokens([msg])
-        if msg_tokens <= budget:
+        if msg_tokens <= max_tokens:
             return msg
 
         content = msg.content
-        ratio = budget / msg_tokens
+        ratio = max_tokens / msg_tokens
 
         cut_point = max(1, int(len(content) * ratio * 0.9))
         truncated_content = content[:cut_point] + "\n\n[... truncated due to context limit ...]"
         logger.warning(
             f"Context Manager Tool: Truncating oversized message "
-            f"({msg_tokens} tokens > {budget} budget). Kept ~{cut_point}/{len(content)} chars."
+            f"({msg_tokens} tokens > {max_tokens} token limit). Kept ~{cut_point}/{len(content)} chars."
         )
         return msg.model_copy(update={"content": truncated_content})
 

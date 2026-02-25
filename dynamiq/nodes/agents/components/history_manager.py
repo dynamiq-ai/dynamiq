@@ -42,14 +42,14 @@ class HistoryManagerMixin:
         Returns:
             Tuple of (to_summarize, to_preserve).
         """
-        preserve_n = self.summarization_config.preserve_last_messages
-        all_history = self._prompt.messages[self._history_offset :]
+        preserve_count = self.summarization_config.preserve_last_messages
+        conversation_history = self._prompt.messages[self._history_offset :]
 
-        if preserve_n > 0 and len(all_history) > preserve_n:
-            to_summarize = all_history[:-preserve_n]
-            to_preserve = [m.copy() for m in all_history[-preserve_n:]]
+        if preserve_count > 0 and len(conversation_history) > preserve_count:
+            to_summarize = conversation_history[:-preserve_count]
+            to_preserve = [m.copy() for m in conversation_history[-preserve_count:]]
         else:
-            to_summarize = all_history
+            to_summarize = conversation_history
             to_preserve = []
 
         return to_summarize, to_preserve
