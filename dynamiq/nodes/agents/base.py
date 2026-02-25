@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
-from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
@@ -186,7 +185,7 @@ class AgentInputSchema(BaseModel):
         return self
 
 
-class Agent(HistoryManagerMixin, Node):
+class Agent(Node):
     """Base class for an AI Agent that interacts with a Language Model and tools."""
 
     AGENT_PROMPT_TEMPLATE: ClassVar[str] = AGENT_PROMPT_TEMPLATE
@@ -1000,10 +999,6 @@ class Agent(HistoryManagerMixin, Node):
                         self.id,
                     )
                 merged_input.pop("delegate_final", None)
-
-        if isinstance(tool, ContextManagerTool):
-            to_summarize, _ = self._split_history()
-            merged_input["messages"] = to_summarize
 
         raw_tool_params = kwargs.get("tool_params", ToolParams())
         tool_params = (

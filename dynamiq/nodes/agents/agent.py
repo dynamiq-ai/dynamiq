@@ -9,6 +9,7 @@ from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallba
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.agents.base import Agent as BaseAgent
 from dynamiq.nodes.agents.components import parser, schema_generator
+from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     JSONParsingError,
@@ -84,7 +85,7 @@ class AgentState(BaseModel):
 UNKNOWN_TOOL_NAME = "unknown_tool"
 
 
-class Agent(BaseAgent):
+class Agent(HistoryManagerMixin, BaseAgent):
     """Unified Agent that uses a ReAct-style strategy for processing tasks by interacting with tools in a loop."""
 
     name: str = "Agent"
@@ -633,9 +634,12 @@ class Agent(BaseAgent):
         try:
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
+                to_summarize, _ = self._split_history()
+                tool_input = {**(action_input if isinstance(action_input, dict) else {}), "messages": to_summarize}
             else:
                 tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
                 tool_result = self._tool_cache.get(tool_cache_entry, None)
+                tool_input = action_input
 
             delegate_final = self._should_delegate_final(tool, action_input)
 
@@ -645,7 +649,7 @@ class Agent(BaseAgent):
 
                 run_tool_result = self._run_tool(
                     tool,
-                    action_input,
+                    tool_input,
                     config,
                     delegate_final=delegate_final,
                     update_run_depends=update_run_depends,
