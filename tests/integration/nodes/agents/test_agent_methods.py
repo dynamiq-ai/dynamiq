@@ -497,13 +497,14 @@ def test_generate_structured_output_schemas(openai_node, mock_tool):
     assert json_schema["strict"] is True
 
     # Verify required fields
-    assert set(json_schema["schema"]["required"]) == {"thought", "action", "action_input"}
+    assert set(json_schema["schema"]["required"]) == {"thought", "action", "action_input", "output_files"}
 
     # Verify properties
     properties = json_schema["schema"]["properties"]
     assert "thought" in properties
     assert "action" in properties
     assert "action_input" in properties
+    assert "output_files" in properties
 
 
 def test_generate_function_calling_schemas(openai_node, mock_tool):

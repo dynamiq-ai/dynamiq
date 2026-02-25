@@ -128,7 +128,9 @@ def generate_structured_output_schemas(
                     },
                     "output_files": {
                         "type": "string",
-                        "description": "Comma-separated file paths to return when action is finish. Empty string otherwise.",
+                        "description": (
+                            "Comma-separated file paths to return when action is finish." " Empty string otherwise."
+                        ),
                     },
                 },
                 "additionalProperties": False,
@@ -187,26 +189,7 @@ def generate_property_schema(properties: dict, name: str, field: Any) -> None:
 
             elif getattr(param, "__origin__", None) is list:
                 types.append("array")
-                inner_type = param.__args__[0]
-                mapped = TYPE_MAPPING.get(inner_type)
-                if mapped:
-                    properties[name]["items"] = {"type": mapped}
-                elif isinstance(inner_type, type) and hasattr(inner_type, "model_fields"):
-                    nested_props = {}
-                    nested_required = []
-                    for fn, fi in inner_type.model_fields.items():
-                        fi_type = TYPE_MAPPING.get(fi.annotation, "string")
-                        nested_props[fn] = {"type": fi_type, "description": fi.description or "No description."}
-                        if fi.is_required():
-                            nested_required.append(fn)
-                    properties[name]["items"] = {
-                        "type": "object",
-                        "properties": nested_props,
-                        "required": nested_required,
-                        "additionalProperties": False,
-                    }
-                else:
-                    properties[name]["items"] = {"type": "string"}
+                properties[name]["items"] = {"type": TYPE_MAPPING.get(param.__args__[0])}
 
             elif getattr(param, "__origin__", None) is dict:
                 types.append("object")
@@ -277,9 +260,6 @@ def generate_function_calling_schemas(
         if list(input_params) and not isinstance(llm, Gemini):
             for name, field in tool.input_schema.model_fields.items():
                 generate_property_schema(properties, name, field)
-
-            import json as _json, sys as _sys
-            print(f"DEBUG SCHEMA [{sanitize_tool_name(tool.name)}]: {_json.dumps(properties, indent=2)}", file=_sys.stderr)
 
             schema = {
                 "type": "function",
