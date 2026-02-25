@@ -23,7 +23,6 @@ from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.file_tools import (
-    EXTRACTED_TEXT_SUFFIX,
     FileListTool,
     FileReadTool,
     FileSearchTool,
@@ -596,14 +595,8 @@ class Agent(Node):
             history_messages = None
 
         files = input_data.files
-        uploaded_file_names: set[str] = set()
         if files:
             normalized_files = self._ensure_named_files(files)
-            uploaded_file_names = {
-                getattr(f, "name", None)
-                for f in normalized_files
-                if hasattr(f, "name") and getattr(f, "name") is not None
-            }
             if self.sandbox_backend:
                 self._upload_files_to_sandbox(normalized_files)
             else:
@@ -632,22 +625,33 @@ class Agent(Node):
             "content": result,
         }
 
-        if self.file_store_backend and not self.file_store_backend.is_empty():
-            stored_files = self.file_store_backend.list_files_bytes()
-            filtered_files = self._filter_generated_files(stored_files, uploaded_file_names)
-            if filtered_files:
-                execution_result["files"] = filtered_files
+        requested_paths = getattr(self, "_requested_output_files", None)
+
+        if self.file_store_backend and requested_paths:
+            try:
+                stored_files = self.file_store_backend.list_files_bytes(requested_paths)
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from file store: {e}")
+                stored_files = []
+            if stored_files:
+                execution_result["files"] = stored_files
                 logger.info(
-                    f"Agent {self.name} - {self.id}: returning {len(filtered_files)} generated file(s) in file store"
+                    f"Agent {self.name} - {self.id}: "
+                    f"returning {len(stored_files)} requested file(s) from file store"
                 )
 
-        if self.sandbox_backend:
-            sandbox_files = self._collect_files_from_sandbox()
+        if self.sandbox_backend and requested_paths:
+            try:
+                sandbox_files = self.sandbox_backend.collect_files(file_paths=requested_paths)
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from sandbox: {e}")
+                sandbox_files = []
             if sandbox_files:
                 existing_files = execution_result.get("files", [])
                 execution_result["files"] = existing_files + sandbox_files
                 logger.info(
-                    f"Agent {self.name} - {self.id}: returning {len(sandbox_files)} generated file(s) from sandbox"
+                    f"Agent {self.name} - {self.id}: "
+                    f"returning {len(sandbox_files)} requested file(s) from sandbox"
                 )
 
         logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
@@ -1210,55 +1214,6 @@ class Agent(Node):
 
         if stored_files:
             logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
-
-    INTERNAL_CACHE_SUFFIXES: ClassVar[tuple[str, ...]] = (EXTRACTED_TEXT_SUFFIX,)
-
-    @classmethod
-    def _filter_generated_files(cls, files: list[io.BytesIO], uploaded_names: set[str]) -> list[io.BytesIO]:
-        if not files:
-            return []
-
-        filtered: list[io.BytesIO] = []
-        for file in files:
-            name = getattr(file, "name", None)
-            if not name:
-                filtered.append(file)
-                continue
-            if name in uploaded_names:
-                continue
-            if cls._is_internal_cache_file(name, uploaded_names):
-                continue
-            filtered.append(file)
-        return filtered
-
-    @classmethod
-    def _is_internal_cache_file(cls, name: str, uploaded_names: set[str]) -> bool:
-        for suffix in cls.INTERNAL_CACHE_SUFFIXES:
-            if not name.endswith(suffix):
-                continue
-            base_name = name[: -len(suffix)]
-            if not base_name:
-                return True
-            if (not uploaded_names) or (base_name in uploaded_names):
-                return True
-        return False
-
-    def _collect_files_from_sandbox(self) -> list[io.BytesIO]:
-        """Collect output files from the sandbox backend.
-
-        Downloads all files from the sandbox output directory.
-
-        Returns:
-            List of BytesIO objects with name, description, and content_type attributes.
-        """
-        if not self.sandbox_backend:
-            return []
-
-        try:
-            return self.sandbox_backend.collect_output_files()
-        except Exception as e:
-            logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from sandbox: {e}")
-            return []
 
     def _upload_files_to_sandbox(self, normalized_files: list) -> None:
         """Upload file-like objects to the sandbox backend."""

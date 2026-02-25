@@ -154,20 +154,38 @@ def parse_default_action(output: str) -> tuple[str | None, str | None, dict | li
         )
 
 
-def extract_default_final_answer(output: str) -> tuple[str, str]:
+def extract_default_final_answer(output: str) -> tuple[str, str, str]:
     """
-    Extracts the final thought and answer from the output string in default inference mode format.
+    Extracts the final thought, optional output files, and answer from
+    the output string in default inference mode format.
+
+    The expected format is::
+
+        Thought: <reasoning>
+        Output Files: <comma-separated paths>   (optional)
+        Answer: <response>
 
     Args:
         output: The LLM output string containing Thought and Answer
 
     Returns:
-        tuple: (thought, answer) where both are strings (empty strings if not found)
+        tuple: (thought, answer, output_files_raw) where all are strings
+               (empty strings if not found). *output_files_raw* is the raw
+               comma-separated value, or "" when the field is absent.
     """
     match = re.search(r"Thought:\s*(.*?)\s*Answer:\s*(.*)", output, re.DOTALL)
-    if match:
-        thought = match.group(1).strip()
-        answer = match.group(2).strip()
-        return thought, answer
+    if not match:
+        return "", "", ""
+
+    raw_thought = match.group(1).strip()
+    answer = match.group(2).strip()
+
+    files_match = re.search(r"^(.*)\nOutput Files:\s*(.*)$", raw_thought, re.DOTALL)
+    if files_match:
+        thought = files_match.group(1).strip()
+        output_files_raw = files_match.group(2).strip()
     else:
-        return "", ""
+        thought = raw_thought
+        output_files_raw = ""
+
+    return thought, answer, output_files_raw

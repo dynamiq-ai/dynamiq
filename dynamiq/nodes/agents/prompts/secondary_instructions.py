@@ -27,11 +27,7 @@ TODO_TOOLS_INSTRUCTIONS = """TODO MANAGEMENT:
 
 
 SANDBOX_INSTRUCTIONS_TEMPLATE = """SANDBOX EXECUTION ENVIRONMENT:
-Output Files:
-- Save any files for the user to {output_dir}/ (already created).
-  Files in this directory are automatically collected and returned.
-- Ensure that this folder contains only the files you want to return to the user.
-- Use {base_path}/ for scripts, intermediate data, and working files.
+- Use {base_path}/ for all files: scripts, data, and generated output.
   Uploaded files are also placed here. Other tools can only access files under {base_path}/.
 - Files returned from other tools are placed in {base_path}/ and can be accessed by other tools.
 

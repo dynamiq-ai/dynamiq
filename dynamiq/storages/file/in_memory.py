@@ -33,21 +33,26 @@ class InMemoryFileStore(FileStore):
         super().__init__(**kwargs)
         self._files: dict[str, dict[str, Any]] = {}
 
-    def list_files_bytes(self) -> list[BytesIO]:
-        """List files in storage and return the content as bytes in BytesIO objects.
+    def list_files_bytes(self, file_paths: list[str] | None = None) -> list[BytesIO]:
+        """Return stored files as BytesIO objects.
+
+        Args:
+            file_paths: If provided, return only these files. Otherwise return all files.
 
         Returns:
-            List of BytesIO objects
+            List of BytesIO objects with name, description, and content_type attributes.
         """
+        keys = file_paths if file_paths else list(self._files.keys())
         files = []
-
-        for file_path in self._files.keys():
-            file = BytesIO(self._files[file_path]["content"])
+        for file_path in keys:
+            if file_path not in self._files:
+                continue
+            data = self._files[file_path]
+            file = BytesIO(data["content"])
             file.name = file_path
-            file.description = self._files[file_path]["metadata"].get("description", "")
-            file.content_type = self._files[file_path]["content_type"]
+            file.description = data["metadata"].get("description", "")
+            file.content_type = data["content_type"]
             files.append(file)
-
         return files
 
     def is_empty(self) -> bool:

@@ -9,10 +9,12 @@ Observation: [Result from the tool]
 
 When you have enough information to provide a final answer:
 Thought: [Your reasoning for the final answer]
+Output Files: [Optional: comma-separated file paths to return, omit this line if there are no files]
 Answer: [Your complete answer to the user's question]
 
 For questions that don't require tools:
 Thought: [Your reasoning about the question]
+Output Files: [Optional: comma-separated file paths to return, omit this line if there are no files]
 Answer: [Your direct response]
 
 IMPORTANT RULES:
@@ -33,8 +35,7 @@ IMPORTANT RULES:
 
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
-- Files are automatically collected and will be returned with your final answer
-- Mention created files in your final answer so users know what was generated
+- If you want to return files, include an "Output Files:" line before "Answer:" listing file paths (comma-separated). This line is optional — omit it if there are no files to return.
 """  # noqa: E501
 
 REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
@@ -62,6 +63,7 @@ When you have enough information to provide a final answer:
     <answer>
         [Your complete answer to the user's question]
     </answer>
+    <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 </output>
 
 For questions that don't require tools:
@@ -72,6 +74,7 @@ For questions that don't require tools:
     <answer>
         [Your direct response]
     </answer>
+    <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 </output>
 
 CRITICAL XML FORMAT RULES:
@@ -106,8 +109,7 @@ JSON FORMATTING REQUIREMENTS:
 
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
-- Generated files are automatically collected and returned with your final answer
-- File operations are handled transparently - focus on the task, not file management
+- If you want to return files, include an <output_files> tag after </answer> (but still inside <output>) listing absolute file paths (comma-separated). This tag is optional — omit it if there are no files to return.
 """  # noqa: E501
 
 
@@ -143,20 +145,23 @@ REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """Always structure your responses 
 
 {thought: [Your reasoning about the next step],
 action: [The tool you choose to use, if any from ONLY [{{ tools_name }}]],
-action_input: [JSON input in correct format you provide to the tool]}
+action_input: [JSON input in correct format you provide to the tool],
+output_files: ""}
 
 After each action, you'll receive:
 Observation: [Result from the tool]
 
 When you have enough information to provide a final answer:
 {thought: [Your reasoning for the final answer],
-action: finish
-action_input: [Response for initial request]}
+action: finish,
+action_input: [Response for initial request],
+output_files: [comma-separated file paths to return, or empty string if none]}
 
 For questions that don't require tools:
 {thought: [Your reasoning for the final answer],
-action: finish
-action_input: [Your direct response]}
+action: finish,
+action_input: [Your direct response],
+output_files: [comma-separated file paths to return, or empty string if none]}
 
 IMPORTANT RULES:
 - You MUST ALWAYS include "thought" as the FIRST field in your JSON
@@ -169,8 +174,8 @@ IMPORTANT RULES:
 - To return an agent tool's response as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call finish yourself afterward; the system will return the agent's result directly.
 
 FILE HANDLING:
-- Tools may generate files that are automatically collected
-- Generated files will be included in the final response
+- Tools may generate or process files (images, CSVs, PDFs, etc.)
+- When using action "finish", include an "output_files" field with comma-separated file paths to return. Use an empty string if there are no files to return.
 - Never return empty response.
 """  # noqa: E501
 
@@ -194,14 +199,15 @@ FUNCTION CALLING GUIDELINES:
 - If you want an agent tool's response returned verbatim as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.
 
 FILE HANDLING:
-- Tools may generate files that will be included in the final response
-- Files created by tools are automatically collected and returned
+- Tools may generate or process files (images, CSVs, PDFs, etc.)
+- When calling `provide_final_answer`, include an `output_files` argument with comma-separated file paths to return. Pass an empty string if there are no files to return.
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_NO_TOOLS = """
 Always structure your responses in this exact format:
 
 Thought: [Your detailed reasoning about the user's question]
+Output Files: [Optional: comma-separated file paths to return, omit this line if there are no files]
 Answer: [Your complete response to the user's question]
 
 IMPORTANT RULES:
@@ -213,6 +219,7 @@ IMPORTANT RULES:
 - If you cannot fully answer, explain why in your thinking
 - Be thorough and helpful in your response
 - Do not mention tools or actions as you don't have access to any
+- If you want to return files, include an "Output Files:" line before "Answer:" listing file paths (comma-separated). This line is optional — omit it if there are no files to return.
 
 """  # noqa: E501
 
@@ -224,6 +231,7 @@ REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS = """Always use this exact XML format in y
     <answer>
         [Your direct response to the user's question]
     </answer>
+    <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 </output>
 
 IMPORTANT RULES:
@@ -233,6 +241,8 @@ IMPORTANT RULES:
 - Properly close all XML tags
 - Do not use markdown formatting inside XML
 - Do not mention tools or actions since you don't have access to any
+- If you want to return files, include an <output_files> tag after </answer> (but still inside <output>)
+listing absolute file paths (comma-separated). This tag is optional — omit it if there are no files to return.
 """
 
 
@@ -260,6 +270,7 @@ Your response should be clear, concise, and professional.
 <answer>
 [Your final answer or explanation goes here]
 </answer>
+<output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 """  # noqa: E501
 
 

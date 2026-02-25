@@ -14,6 +14,7 @@ from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     JSONParsingError,
     MaxLoopsExceededException,
+    OutputFileNotFoundError,
     ParsingError,
     RecoverableAgentException,
     TagNotFoundError,
@@ -107,6 +108,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
+    _requested_output_files: list[str] = []
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
@@ -348,7 +350,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return None, None, None
 
         if "Answer:" in llm_generated_output:
-            thought, final_answer = parser.extract_default_final_answer(llm_generated_output)
+            thought, final_answer, output_files_raw = parser.extract_default_final_answer(llm_generated_output)
+            self._requested_output_files = self._parse_output_files_csv(output_files_raw)
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
 
@@ -378,6 +381,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
         thought = llm_generated_output_json["thought"]
         if action == "provide_final_answer":
             final_answer = llm_generated_output_json["answer"]
+            self._requested_output_files = self._parse_output_files_csv(
+                llm_generated_output_json.get("output_files") or ""
+            )
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
 
@@ -420,6 +426,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
         action_input = llm_generated_output_json["action_input"]
 
         if action == "finish":
+            self._requested_output_files = self._parse_output_files_csv(
+                llm_generated_output_json.get("output_files") or ""
+            )
             self.log_final_output(thought, action_input, loop_num)
             return thought, "final_answer", action_input
 
@@ -454,10 +463,17 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         try:
             parsed_data = XMLParser.parse(
-                llm_generated_output, required_tags=["thought", "answer"], optional_tags=["output"]
+                llm_generated_output,
+                required_tags=["thought", "answer"],
+                optional_tags=["output", "output_files"],
             )
             thought = parsed_data.get("thought")
             final_answer = parsed_data.get("answer")
+
+            self._requested_output_files = self._parse_output_files_csv(
+                parsed_data.get("output_files") or ""
+            )
+
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
 
@@ -934,6 +950,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
 
         self.state.max_loops = self.max_loops
+        self._requested_output_files = []
         self._refresh_agent_state(1)
 
         self._setup_prompt_and_stop_sequences(input_message, history_messages)
@@ -997,6 +1014,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 # Handle final answer
                 if result[1] == "final_answer":
+                    self._resolve_requested_output_files(strict=True)
                     return result[2]
 
                 # Handle recovery (for modes that support it)
@@ -1012,6 +1030,20 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 if final_answer is not None:
                     return final_answer
+
+            except OutputFileNotFoundError as e:
+                self._requested_output_files = []
+                self._append_recovery_instruction(
+                    error_label=type(e).__name__,
+                    error_detail=str(e),
+                    llm_generated_output=llm_generated_output,
+                    extra_guidance=(
+                        "The response format is correct, but some files could not be found. "
+                        "Please create the missing files or correct the file paths, "
+                        "then provide your final answer again."
+                    ),
+                )
+                continue
 
             except ActionParsingException as e:
                 extra_guidance = None
@@ -1034,6 +1066,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     extra_guidance=extra_guidance,
                 )
                 continue
+            except Exception as e:
+                logger.error(f"Agent {self.name} - {self.id}: Error during agent execution: {e}")
+                raise e
 
             # Inject automatic summarization if token limit exceeded (like Context Manager Tool)
             self._try_summarize_history(config=config, **kwargs)
@@ -1050,6 +1085,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             raise MaxLoopsExceededException(message=error_message)
         else:
             max_loop_final_answer = self._handle_max_loops_exceeded(input_message, config, **kwargs)
+            self._resolve_requested_output_files(strict=False)
             if self.streaming.enabled:
                 self.stream_content(
                     content=max_loop_final_answer,
@@ -1099,6 +1135,53 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 **kwargs,
             )
 
+    @staticmethod
+    def _parse_output_files_csv(raw: str) -> list[str]:
+        """Parse a comma-separated string of file paths into a list.
+
+        Strips whitespace from each entry and drops empty entries.
+        """
+        if not raw or not raw.strip():
+            return []
+        return [p.strip() for p in raw.split(",") if p.strip()]
+
+    def _resolve_requested_output_files(self, *, strict: bool = True) -> None:
+        """Resolve ``_requested_output_files`` against the file backend.
+
+        Each requested path is checked as-is first, then by basename.
+        When *strict* is ``True`` (inside the normal loop), missing files
+        raise :class:`OutputFileNotFoundError` so the agent can retry.
+        When *strict* is ``False`` (max-loops path), missing files are
+        silently dropped because there are no retries left.
+        """
+        if not self._requested_output_files:
+            return
+
+        file_backend = self.sandbox_backend or self.file_store_backend
+        if not file_backend:
+            return
+
+        resolved: list[str] = []
+        file_not_found: list[str] = []
+        for f in self._requested_output_files:
+            basename = f.rsplit("/", 1)[-1]
+            if file_backend.exists(f):
+                resolved.append(f)
+            elif f != basename and file_backend.exists(basename):
+                resolved.append(basename)
+            else:
+                file_not_found.append(f)
+
+        if file_not_found and strict:
+            raise OutputFileNotFoundError(f"File not found: {file_not_found}.", recoverable=True)
+
+        if file_not_found and not strict:
+            logger.warning(
+                f"Agent {self.name} - {self.id}: " f"max-loops output_files not found (skipped): {file_not_found}"
+            )
+
+        self._requested_output_files = resolved
+
     def _handle_max_loops_exceeded(
         self, input_message: Message | VisionMessage, config: RunnableConfig | None = None, **kwargs
     ) -> str:
@@ -1139,9 +1222,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
                 final_answer = llm_final_attempt
 
+            raw_output_files = XMLParser.extract_first_tag_lxml(llm_final_attempt, ["output_files"])
+            if raw_output_files is None:
+                raw_output_files = XMLParser.extract_first_tag_regex(llm_final_attempt, ["output_files"])
+            self._requested_output_files = self._parse_output_files_csv(raw_output_files or "")
+
         except Exception as e:
             logger.error(f"Max loops handler: Error during final answer extraction: {e}. Returning raw output.")
             final_answer = llm_final_attempt
+            self._requested_output_files = []
 
         return f"{final_answer}"
 
@@ -1195,7 +1284,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             context_compaction_enabled=self.summarization_config.enabled,
             todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
             or bool(self.sandbox_backend),
-            sandbox_output_dir=self.sandbox_backend.output_dir if self.sandbox_backend else None,
             sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
         )
 

@@ -34,6 +34,7 @@ def run_config():
     return RunnableConfig(request_timeout=120)
 
 
+@pytest.mark.flaky(reruns=3)
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "inference_mode",

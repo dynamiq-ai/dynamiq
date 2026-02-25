@@ -55,6 +55,9 @@ class MockSandbox(Sandbox):
     def list_files(self, target_dir=None) -> list[str]:
         return list(self.mock_files.keys())
 
+    def exists(self, file_path: str) -> bool:
+        return file_path in self.mock_files
+
     def retrieve(self, file_path: str) -> bytes:
         if file_path in self.mock_files:
             return self.mock_files[file_path]
@@ -246,14 +249,39 @@ def test_agent_e2b_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
     assert isinstance(roundtrip_agent.sandbox.backend, E2BSandbox)
 
 
-def test_agent_with_sandbox_returns_files(mock_llm_sandbox_shell_response):
-    """Agent with sandbox collects and returns files from the output directory."""
+def test_agent_with_sandbox_returns_files(mocker):
+    """Agent with sandbox collects files explicitly listed in <output_files>."""
+    from litellm import ModelResponse
+
     sandbox = MockSandbox(
         mock_files={
-            "/home/user/output/result.txt": b"Hello, this is the result.",
-            "/home/user/output/data.csv": b"col1,col2\n1,2\n3,4\n",
+            "/home/user/result.txt": b"Hello, this is the result.",
+            "/home/user/data.csv": b"col1,col2\n1,2\n3,4\n",
         }
     )
+
+    xml_tool_call = """<output>
+  <thought>I will run a shell command in the sandbox.</thought>
+  <action>SandboxShellTool</action>
+  <action_input>{"command": "echo hello from sandbox", "brief": "Echo hello message"}</action_input>
+</output>"""
+
+    xml_final_answer = """<output>
+  <thought>Command executed successfully.</thought>
+  <answer>Shell command completed. Output: hello from sandbox</answer>
+  <output_files>/home/user/result.txt, /home/user/data.csv</output_files>
+</output>"""
+
+    call_count = [0]
+
+    def response(stream: bool, *args, **kwargs):
+        call_count[0] += 1
+        content = xml_tool_call if call_count[0] == 1 else xml_final_answer
+        model_r = ModelResponse()
+        model_r["choices"][0]["message"]["content"] = content
+        return model_r
+
+    mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=response)
 
     agent = Agent(
         name="Sandbox Agent",
@@ -277,14 +305,12 @@ def test_agent_with_sandbox_returns_files(mock_llm_sandbox_shell_response):
     output = result.output[agent.id]["output"]
     assert "hello from sandbox" in output["content"]
 
-    # Verify files from sandbox output directory are returned
     files = output.get("files", [])
     assert len(files) == 2
 
     file_names = {f.name for f in files}
     assert file_names == {"result.txt", "data.csv"}
 
-    # Verify file content is correct
     for f in files:
         f.seek(0)
         if f.name == "result.txt":

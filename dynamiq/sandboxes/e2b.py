@@ -91,7 +91,6 @@ class E2BSandbox(Sandbox):
                 public_url_error = str(e)
         return SandboxInfo(
             base_path=self.base_path,
-            output_dir=self.output_dir,
             sandbox_id=self.sandbox_id,
             public_host=public_host,
             public_url=public_url,
@@ -129,14 +128,14 @@ class E2BSandbox(Sandbox):
             return self._sandbox
 
     def _ensure_directories(self) -> None:
-        """Create the base and output directories inside the sandbox if they do not exist."""
+        """Create the base directory inside the sandbox if it does not exist."""
         if self._sandbox is None:
             return
         try:
-            self._sandbox.commands.run(f"mkdir -p {shlex.quote(self.base_path)} {shlex.quote(self.output_dir)}")
-            logger.debug(f"E2BSandbox ensured directories exist: {self.base_path}, {self.output_dir}")
+            self._sandbox.commands.run(f"mkdir -p {shlex.quote(self.base_path)}")
+            logger.debug(f"E2BSandbox ensured directory exists: {self.base_path}")
         except Exception as e:
-            logger.warning(f"E2BSandbox failed to create directories: {e}")
+            logger.warning(f"E2BSandbox failed to create directory: {e}")
 
     def _reconnect_with_retry(self) -> E2BDesktopSandbox:
         """Reconnect to existing sandbox with exponential backoff on rate-limit."""
