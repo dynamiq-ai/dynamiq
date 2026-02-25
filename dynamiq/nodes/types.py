@@ -33,7 +33,6 @@ class InferenceMode(str, Enum):
     Enumeration of inference types.
     """
 
-    DEFAULT = "DEFAULT"
     XML = "XML"
     FUNCTION_CALLING = "FUNCTION_CALLING"
     STRUCTURED_OUTPUT = "STRUCTURED_OUTPUT"

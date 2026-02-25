@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.agents.base import Agent as BaseAgent
-from dynamiq.nodes.agents.components import parser, schema_generator
+from dynamiq.nodes.agents.components import schema_generator
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
@@ -91,7 +91,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     name: str = "Agent"
     max_loops: int = Field(default=15, ge=2)
-    inference_mode: InferenceMode = Field(default=InferenceMode.DEFAULT)
+    inference_mode: InferenceMode = Field(default=InferenceMode.XML)
     behaviour_on_max_loops: Behavior = Field(
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
@@ -331,31 +331,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             # For other modes, use the generated text output
             self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output, static=True))
 
-    def _handle_default_mode(
-        self, llm_generated_output: str, loop_num: int
-    ) -> tuple[str | None, str | None, dict | list | None]:
-        """Handle DEFAULT inference mode parsing."""
-        if not llm_generated_output or not llm_generated_output.strip():
-            self._append_recovery_instruction(
-                error_label="EmptyResponse",
-                error_detail="The model returned an empty reply while using the Thought/Action format.",
-                llm_generated_output=llm_generated_output,
-                extra_guidance=(
-                    "Re-evaluate the latest observation and respond with 'Thought:' followed by either "
-                    "an 'Action:' plus JSON 'Action Input:' or a final 'Answer:' section."
-                ),
-            )
-            return None, None, None
-
-        if "Answer:" in llm_generated_output:
-            thought, final_answer = parser.extract_default_final_answer(llm_generated_output)
-            self.log_final_output(thought, final_answer, loop_num)
-            return thought, "final_answer", final_answer
-
-        thought, action, action_input = parser.parse_default_action(llm_generated_output)
-        self.log_reasoning(thought, action, action_input, loop_num)
-        return thought, action, action_input
-
     def _handle_function_calling_mode(
         self, llm_result: Any, loop_num: int
     ) -> tuple[str | None, str | None, dict | list | None] | tuple[str, str, str]:
@@ -527,9 +502,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         # Configure stop sequences based on inference mode
         stop_sequences = []
-        if self.inference_mode == InferenceMode.DEFAULT:
-            stop_sequences.extend(["Observation: ", "\nObservation:"])
-        elif self.inference_mode == InferenceMode.XML:
+        if self.inference_mode == InferenceMode.XML:
             stop_sequences.extend(
                 [
                     "\nObservation:",
@@ -988,8 +961,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 # Parse LLM output based on inference mode
                 match self.inference_mode:
-                    case InferenceMode.DEFAULT:
-                        result = self._handle_default_mode(llm_generated_output, loop_num)
                     case InferenceMode.FUNCTION_CALLING:
                         result = self._handle_function_calling_mode(llm_result, loop_num)
                     case InferenceMode.STRUCTURED_OUTPUT:
@@ -1022,11 +993,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         "Ensure the reply contains <thought> along "
                         "with either <action>/<action_input> or a final "
                         "<answer> tag."
-                    )
-                elif self.inference_mode == InferenceMode.DEFAULT:
-                    extra_guidance = (
-                        "Provide 'Thought:' and either 'Action:' "
-                        "with a JSON 'Action Input:' or a final 'Answer:' section."
                     )
 
                 self._append_recovery_instruction(

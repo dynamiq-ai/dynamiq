@@ -46,7 +46,7 @@ GOOGLE_MODELS = [
     "gemini-2.5-pro",
 ]
 
-INFERENCE_MODES = [InferenceMode.DEFAULT, InferenceMode.XML]
+INFERENCE_MODES = [InferenceMode.XML]
 
 
 def create_openai_llm(model):

@@ -38,12 +38,11 @@ def run_config():
 @pytest.mark.parametrize(
     "inference_mode",
     [
-        InferenceMode.DEFAULT,
         InferenceMode.XML,
         InferenceMode.FUNCTION_CALLING,
         InferenceMode.STRUCTURED_OUTPUT,
     ],
-    ids=["default", "xml", "function_calling", "structured_output"],
+    ids=["xml", "function_calling", "structured_output"],
 )
 def test_delegation_flag_verified_in_traces(llm_instance, run_config, inference_mode):
     """Test that verifies delegation actually occurred and is properly traced across inference modes."""

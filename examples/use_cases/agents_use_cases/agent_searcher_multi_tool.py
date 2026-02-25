@@ -2,7 +2,6 @@ from dynamiq.connections import E2B, Exa
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.exa_search import ExaTool
-from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
@@ -38,7 +37,6 @@ if __name__ == "__main__":
         llm=llm,
         tools=[tool_search, tool_code],
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.DEFAULT,
         parallel_tool_calls_enabled=True,
     )
 

@@ -6,7 +6,6 @@ from dynamiq.memory.backends import Pinecone
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
 from dynamiq.nodes.tools.exa_search import ExaTool
-from dynamiq.nodes.types import InferenceMode
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from examples.llm_setup import setup_llm
 
@@ -39,7 +38,6 @@ def setup_agent():
         id="agent",
         tools=[tool_search],
         memory=memory_pinecone,
-        inference_mode=InferenceMode.DEFAULT,
     )
     return agent
 

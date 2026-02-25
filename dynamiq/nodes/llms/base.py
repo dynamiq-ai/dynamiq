@@ -184,7 +184,7 @@ class BaseLLM(ConnectionNode):
     tools: list[Tool | dict] | None = None
     input_schema: ClassVar[type[BaseLLMInputSchema]] = BaseLLMInputSchema
     inference_mode: InferenceMode = Field(
-        default=InferenceMode.DEFAULT,
+        default=InferenceMode.XML,
         deprecated="Please use `tools` and `response_format` parameters "
         "for selecting between function calling and structured output.",
     )
@@ -449,7 +449,7 @@ class BaseLLM(ConnectionNode):
         # Suppress DeprecationWarning if deprecated parameters are not set
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=DeprecationWarning)
-            use_inference_mode = (not response_format or not tools) and self.inference_mode != InferenceMode.DEFAULT
+            use_inference_mode = (not response_format or not tools) and self.inference_mode != InferenceMode.XML
 
         if use_inference_mode:
             schema = self.schema_

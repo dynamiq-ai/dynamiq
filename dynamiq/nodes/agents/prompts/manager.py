@@ -9,8 +9,6 @@ from jinja2 import Template
 
 from dynamiq.nodes.agents.prompts.react import (
     REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING,
-    REACT_BLOCK_INSTRUCTIONS_NO_TOOLS,
-    REACT_BLOCK_INSTRUCTIONS_SINGLE,
     REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT,
     REACT_BLOCK_OUTPUT_FORMAT,
     REACT_BLOCK_TOOLS,
@@ -283,35 +281,29 @@ def get_model_specific_prompts(
     if agent_template != AGENT_PROMPT_TEMPLATE:
         logger.debug(f"Using model-specific AGENT_PROMPT_TEMPLATE for '{model_name}'")
 
-    instructions_default = get_prompt_constant(
-        model_name, "REACT_BLOCK_INSTRUCTIONS_SINGLE", REACT_BLOCK_INSTRUCTIONS_SINGLE
-    )
-    if instructions_default != REACT_BLOCK_INSTRUCTIONS_SINGLE:
-        logger.debug(f"Using model-specific REACT_BLOCK_INSTRUCTIONS_SINGLE for '{model_name}'")
-
-    # Get other model-specific prompts
+    # Get model-specific prompts
     react_block_tools = get_prompt_constant(model_name, "REACT_BLOCK_TOOLS", REACT_BLOCK_TOOLS)
     if react_block_tools != REACT_BLOCK_TOOLS:
         logger.debug(f"Using model-specific REACT_BLOCK_TOOLS for '{model_name}'")
-
-    react_block_instructions_no_tools = get_prompt_constant(
-        model_name, "REACT_BLOCK_INSTRUCTIONS_NO_TOOLS", REACT_BLOCK_INSTRUCTIONS_NO_TOOLS
-    )
-    if react_block_instructions_no_tools != REACT_BLOCK_INSTRUCTIONS_NO_TOOLS:
-        logger.debug(f"Using model-specific REACT_BLOCK_INSTRUCTIONS_NO_TOOLS for '{model_name}'")
 
     react_block_output_format = get_prompt_constant(model_name, "REACT_BLOCK_OUTPUT_FORMAT", REACT_BLOCK_OUTPUT_FORMAT)
     if react_block_output_format != REACT_BLOCK_OUTPUT_FORMAT:
         logger.debug(f"Using model-specific REACT_BLOCK_OUTPUT_FORMAT for '{model_name}'")
 
-    # Build initial prompt blocks
+    # Build initial prompt blocks (XML instructions used as default fallback)
+    instructions_xml = get_prompt_constant(
+        model_name, "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE", REACT_BLOCK_XML_INSTRUCTIONS_SINGLE
+    )
+    xml_instructions_no_tools = get_prompt_constant(
+        model_name, "REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS", REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS
+    )
     prompt_blocks = {
         "tools": "" if not has_tools else react_block_tools,
-        "instructions": react_block_instructions_no_tools if not has_tools else instructions_default,
+        "instructions": xml_instructions_no_tools if not has_tools else instructions_xml,
         "output_format": react_block_output_format,
     }
 
-    # Override based on inference mode
+    # Override instructions for non-XML inference modes
     match inference_mode:
         case InferenceMode.FUNCTION_CALLING:
             prompt_blocks["instructions"] = get_prompt_constant(
@@ -326,18 +318,6 @@ def get_model_specific_prompts(
             prompt_blocks["instructions"] = get_prompt_constant(
                 model_name, "REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT", REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT
             )
-
-        case InferenceMode.XML:
-            xml_instructions_no_tools = get_prompt_constant(
-                model_name, "REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS", REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS
-            )
-            # XML mode instructions
-            instructions_xml = get_prompt_constant(
-                model_name, "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE", REACT_BLOCK_XML_INSTRUCTIONS_SINGLE
-            )
-            if instructions_xml != REACT_BLOCK_XML_INSTRUCTIONS_SINGLE:
-                logger.debug(f"Using model-specific REACT_BLOCK_XML_INSTRUCTIONS_SINGLE for '{model_name}'")
-            prompt_blocks["instructions"] = xml_instructions_no_tools if not has_tools else instructions_xml
 
     # Build secondary_instructions from enabled features
     secondary_parts = []

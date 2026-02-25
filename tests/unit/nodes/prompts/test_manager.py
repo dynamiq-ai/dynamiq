@@ -25,9 +25,6 @@ from dynamiq.nodes.agents.prompts.orchestrators.linear import (
     PROMPT_TEMPLATE_LINEAR_PLAN,
 )
 from dynamiq.nodes.agents.prompts.overrides.gpt import (
-    REACT_BLOCK_INSTRUCTIONS_SINGLE as GPT_REACT_BLOCK_INSTRUCTIONS_SINGLE,
-)
-from dynamiq.nodes.agents.prompts.overrides.gpt import (
     REACT_BLOCK_XML_INSTRUCTIONS_SINGLE as GPT_REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
 )
 from dynamiq.nodes.agents.prompts.secondary_instructions import DELEGATION_INSTRUCTIONS, DELEGATION_INSTRUCTIONS_XML
@@ -62,7 +59,6 @@ def test_variables_refreshed_on_reset():
 @pytest.mark.parametrize(
     "inference_mode,expected_delegation_text",
     [
-        (InferenceMode.DEFAULT, DELEGATION_INSTRUCTIONS),
         (InferenceMode.XML, DELEGATION_INSTRUCTIONS_XML),
         (InferenceMode.FUNCTION_CALLING, DELEGATION_INSTRUCTIONS),
         (InferenceMode.STRUCTURED_OUTPUT, DELEGATION_INSTRUCTIONS),
@@ -108,10 +104,6 @@ def test_agent_initialization_with_model_specific_prompts(test_llm, inference_mo
     if inference_mode == InferenceMode.XML:
         assert GPT_REACT_BLOCK_XML_INSTRUCTIONS_SINGLE == get_prompt_constant(
             "gpt-5.1", "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE", None
-        )
-    if inference_mode == InferenceMode.DEFAULT:
-        assert GPT_REACT_BLOCK_INSTRUCTIONS_SINGLE == get_prompt_constant(
-            "gpt-5.1", "REACT_BLOCK_INSTRUCTIONS_SINGLE", None
         )
 
 

@@ -106,12 +106,11 @@ def run_and_assert_agent(agent: Agent, agent_input, expected_length, run_config)
 @pytest.mark.parametrize(
     "inference_mode",
     [
-        InferenceMode.DEFAULT,
         InferenceMode.XML,
         pytest.param(InferenceMode.STRUCTURED_OUTPUT, marks=pytest.mark.skip(reason="Skipping test for JSON")),
         pytest.param(InferenceMode.FUNCTION_CALLING, marks=pytest.mark.skip(reason="Skipping test for FC")),
     ],
-    ids=["default", "xml", "structured_output", "function_calling"],
+    ids=["xml", "structured_output", "function_calling"],
 )
 def test_react_agent_inference_modes(
     llm_instance, string_length_tool_instance, agent_role, agent_input, expected_length, run_config, inference_mode

@@ -3,7 +3,6 @@ from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
 
@@ -39,7 +38,6 @@ def run_workflow_with_streaming():
             mode=StreamingMode.ALL,
         ),
         max_loops=5,
-        inference_mode=InferenceMode.DEFAULT,
     )
 
     # Set up streaming callback handler

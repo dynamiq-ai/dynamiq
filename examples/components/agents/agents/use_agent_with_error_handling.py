@@ -4,7 +4,7 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.node import ErrorHandling
-from dynamiq.nodes.types import Behavior, InferenceMode
+from dynamiq.nodes.types import Behavior
 from dynamiq.runnables import RunnableConfig
 
 INPUT_PROMPT = "What is the capital of France and why is it important?"
@@ -61,7 +61,6 @@ def create_react_agent_no_tools() -> Agent:
         role="You are a helpful AI assistant that provides "
         "thoughtful and accurate responses to user questions. "
         "You think step by step and provide clear, concise answers.",
-        inference_mode=InferenceMode.DEFAULT,
         max_loops=3,
         verbose=True,
         error_handling=agent_error_handling

@@ -4,11 +4,6 @@ import pytest
 
 from dynamiq import connections, prompts
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.agents.components.parser import (
-    extract_default_final_answer,
-    parse_default_action,
-    parse_default_thought,
-)
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     JSONParsingError,
@@ -52,12 +47,6 @@ def openai_node(openai_connection):
 
 
 @pytest.fixture
-def default_react_agent(openai_node, mock_llm_executor):
-    """Agent with DEFAULT inference mode."""
-    return Agent(name="Test Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
-
-
-@pytest.fixture
 def xml_react_agent(openai_node, mock_llm_executor):
     """Agent with XML inference mode."""
     return Agent(name="Test XML Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.XML)
@@ -79,36 +68,41 @@ def run(input_data):
     )
 
 
-def test_parse_default_thought(default_react_agent):
-    """Test extracting thought from agent output."""
+def test_parse_xml_thought(xml_react_agent):
+    """Test extracting thought from XML agent output."""
     output = """
-    Thought: I need to search for information about the weather.
-    Action: search
-    Action Input: {"query": "weather in San Francisco"}
+    <output>
+        <thought>I need to search for information about the weather.</thought>
+        <action>search</action>
+        <action_input>{"query": "weather in San Francisco"}</action_input>
+    </output>
     """
-    thought = parse_default_thought(output)
-    assert thought == "I need to search for information about the weather."
+    parsed = XMLParser.parse(output, required_tags=["thought", "action", "action_input"])
+    assert parsed["thought"] == "I need to search for information about the weather."
 
 
-def test_parse_default_action_missing_action_input(default_react_agent):
-    """Test parsing with missing action input raises an exception."""
+def test_parse_xml_action_missing_tags(xml_react_agent):
+    """Test parsing XML with missing required tags raises an exception."""
     output = """
-    Thought: I need to search for information about the weather.
-    Action: search
+    <output>
+        <thought>I need to search for information about the weather.</thought>
+    </output>
     """
-    with pytest.raises(ActionParsingException):
-        parse_default_action(output)
+    with pytest.raises(TagNotFoundError):
+        XMLParser.parse(output, required_tags=["thought", "action", "action_input"])
 
 
-def test_extract_default_final_answer(default_react_agent):
-    """Test extracting the final answer from the output."""
+def test_extract_xml_final_answer(xml_react_agent):
+    """Test extracting the final answer from XML output."""
     output = """
-    Thought: I found all the information needed.
-    Answer: The weather in San Francisco is foggy with a high of 65°F.
+    <output>
+        <thought>I found all the information needed.</thought>
+        <answer>The weather in San Francisco is foggy with a high of 65°F.</answer>
+    </output>
     """
-    answer = extract_default_final_answer(output)
-    assert answer[0] == "I found all the information needed."
-    assert answer[1] == "The weather in San Francisco is foggy with a high of 65°F."
+    parsed = XMLParser.parse(output, required_tags=["thought", "answer"])
+    assert parsed["thought"] == "I found all the information needed."
+    assert parsed["answer"] == "The weather in San Francisco is foggy with a high of 65°F."
 
 
 @pytest.mark.parametrize(
@@ -119,9 +113,15 @@ def test_extract_default_final_answer(default_react_agent):
         ("data analysis (2023)", "data-analysis-2023"),
     ],
 )
-def test_sanitize_tool_name(default_react_agent, input_name, expected_output):
+def test_sanitize_tool_name(xml_react_agent, input_name, expected_output):
     """Test that tool names are sanitized correctly."""
-    assert default_react_agent.sanitize_tool_name(input_name) == expected_output
+    assert xml_react_agent.sanitize_tool_name(input_name) == expected_output
+
+
+def test_default_inference_mode_removed():
+    """Test that InferenceMode.DEFAULT no longer exists as an enum member."""
+    with pytest.raises(AttributeError):
+        _ = InferenceMode.DEFAULT
 
 
 def test_generate_prompt_xml_mode(openai_node, mock_llm_executor):
@@ -138,7 +138,7 @@ def test_generate_prompt_xml_mode(openai_node, mock_llm_executor):
 
 def test_set_prompt_block(openai_node, mock_llm_executor):
     """Test modifying prompt blocks."""
-    agent = Agent(name="PromptBlockTestAgent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    agent = Agent(name="PromptBlockTestAgent", llm=openai_node, tools=[], inference_mode=InferenceMode.XML)
 
     custom_instructions = "Your goal is to analyze the given text and identify key points."
     agent.set_block("instructions", custom_instructions)
@@ -481,7 +481,7 @@ def test_generate_structured_output_schemas(openai_node, mock_tool):
     """Test structured output schema generation."""
     from dynamiq.nodes.agents.components.schema_generator import generate_structured_output_schemas
 
-    agent = Agent(name="Test Agent", llm=openai_node, tools=[mock_tool], inference_mode=InferenceMode.DEFAULT)
+    agent = Agent(name="Test Agent", llm=openai_node, tools=[mock_tool], inference_mode=InferenceMode.XML)
 
     schema = generate_structured_output_schemas(
         tools=[mock_tool], sanitize_tool_name=agent.sanitize_tool_name, delegation_allowed=False
@@ -573,7 +573,7 @@ def test_todo_tools_added_when_enabled(openai_node, mock_llm_executor):
         llm=openai_node,
         tools=[],
         file_store=file_store_config,
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.XML,
     )
 
     # Check that TodoWriteTool was automatically added

@@ -3,7 +3,6 @@ from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file.base import FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
@@ -40,7 +39,6 @@ def setup_agent() -> Agent:
         llm=llm,
         file_store=file_store,
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.DEFAULT,
         max_loops=5,
     )
 

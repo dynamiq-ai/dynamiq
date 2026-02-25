@@ -21,16 +21,6 @@ FIND_JSON_FIELD_MAX_OFFSET = 64
 WHITESPACE_PATTERNS = (" ", "\n", "\r", "\t")
 
 
-class DefaultModeTag(str, Enum):
-    """
-    Enumeration of default mode tags.
-    """
-
-    THOUGHT = "Thought:"
-    ACTION = "Action:"
-    ANSWER = "Answer:"
-
-
 class XMLModeTag(str, Enum):
     """
     Enumeration of XML mode tags.
@@ -68,7 +58,6 @@ class InferenceMode(str, Enum):
     Enumeration of inference types.
     """
 
-    DEFAULT = "DEFAULT"
     XML = "XML"
     FUNCTION_CALLING = "FUNCTION_CALLING"
     STRUCTURED_OUTPUT = "STRUCTURED_OUTPUT"
@@ -365,9 +354,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
         final_answer_only = self.agent.streaming.mode == StreamingMode.FINAL
 
-        if self.mode_name == InferenceMode.DEFAULT.value:
-            self._process_default_mode(final_answer_only)
-        elif self.mode_name == InferenceMode.XML.value:
+        if self.mode_name == InferenceMode.XML.value:
             self._process_xml_mode(final_answer_only)
         elif self.mode_name == InferenceMode.STRUCTURED_OUTPUT.value:
             self._process_structured_output_mode(final_answer_only)
@@ -484,65 +471,6 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         )
         if step in self._state_has_emitted:
             self._state_has_emitted[step] = True
-
-    def _process_default_mode(self, final_answer_only: bool) -> None:
-        if self._current_state is None:
-            start = self._state_last_emit_index
-            idx_thought = self._buffer.find(DefaultModeTag.THOUGHT, start) if not final_answer_only else -1
-            idx_answer = self._buffer.find(DefaultModeTag.ANSWER, start)
-
-            if not final_answer_only and idx_thought != -1 and (idx_answer == -1 or idx_thought < idx_answer):
-                self._current_state = StreamingState.REASONING
-                self._state_start_index = idx_thought + len(DefaultModeTag.THOUGHT)
-                self._state_last_emit_index = self._state_start_index
-            elif idx_answer != -1:
-                self._current_state = StreamingState.ANSWER
-                self._answer_started = True
-                self._state_start_index = idx_answer + len(DefaultModeTag.ANSWER)
-                self._state_last_emit_index = self._state_start_index
-
-        # If the state was not detected, nothing to emit yet
-        if self._current_state is None:
-            return
-
-        search_start = self._state_last_emit_index
-
-        if self._current_state == StreamingState.REASONING:
-            # Check if there is a transition to Action or Answer
-            next_tag_pos = -1
-            next_tag_name = None
-            for tag_text, name in ((DefaultModeTag.ACTION, "action"), (DefaultModeTag.ANSWER, "answer")):
-                pos = self._buffer.find(tag_text, search_start)
-                if pos != -1 and (next_tag_pos == -1 or pos < next_tag_pos):
-                    next_tag_pos, next_tag_name = pos, name
-
-            if next_tag_pos != -1:
-                # If a complete next tag is found, emit everything up to it
-                if next_tag_pos > self._state_last_emit_index:
-                    self._emit(self._buffer[self._state_last_emit_index : next_tag_pos], step=StreamingState.REASONING)
-                if next_tag_name == "answer":
-                    self._current_state = StreamingState.ANSWER
-                    self._answer_started = True
-                    self._state_start_index = next_tag_pos + len(DefaultModeTag.ANSWER)
-                    self._state_last_emit_index = self._state_start_index
-                else:
-                    # Wait for the next state after `action`
-                    self._current_state = None
-                    self._state_last_emit_index = next_tag_pos + len(DefaultModeTag.ACTION)
-                return
-
-            # If there is no next tag yet, emit incrementally using a tail guard
-            safe_end = max(self._state_last_emit_index, len(self._buffer) - self._tail_guard)
-            if safe_end > self._state_last_emit_index:
-                self._emit(self._buffer[self._state_last_emit_index : safe_end], step=StreamingState.REASONING)
-                self._state_last_emit_index = safe_end
-            return
-
-        # If the current state is 'answer', stream up to the end
-        safe_end = max(self._state_last_emit_index, len(self._buffer) - self._tail_guard)
-        if safe_end > self._state_last_emit_index:
-            self._emit(self._buffer[self._state_last_emit_index : safe_end], step=StreamingState.ANSWER)
-            self._state_last_emit_index = safe_end
 
     def _process_xml_mode(self, final_answer_only: bool) -> None:
         if self._current_state is None:

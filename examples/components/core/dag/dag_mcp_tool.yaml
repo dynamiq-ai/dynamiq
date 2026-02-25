@@ -19,7 +19,7 @@ nodes:
     description: null
     group: agents
     role: ''
-    inference_mode: DEFAULT
+    inference_mode: XML
     behaviour_on_max_loops: raise
     format_schema: []
     type: dynamiq.nodes.agents.Agent

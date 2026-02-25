@@ -57,7 +57,6 @@ def create_reflection_agent(llm, inference_mode, input_message=None, role=None):
 @pytest.mark.parametrize(
     ("inference_mode"),
     [
-        (InferenceMode.DEFAULT),
         (InferenceMode.XML),
         (InferenceMode.STRUCTURED_OUTPUT),
         (InferenceMode.FUNCTION_CALLING),
@@ -88,7 +87,6 @@ def test_simple_agent_workflow(model, inference_mode):
 @pytest.mark.parametrize(
     ("inference_mode"),
     [
-        (InferenceMode.DEFAULT),
         (InferenceMode.XML),
         (InferenceMode.STRUCTURED_OUTPUT),
         (InferenceMode.FUNCTION_CALLING),
@@ -124,7 +122,6 @@ def test_custom_agent_workflow(model, inference_mode):
 @pytest.mark.parametrize(
     ("inference_mode"),
     [
-        (InferenceMode.DEFAULT),
         (InferenceMode.XML),
         (InferenceMode.STRUCTURED_OUTPUT),
         (InferenceMode.FUNCTION_CALLING),

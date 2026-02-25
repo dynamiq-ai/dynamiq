@@ -1,42 +1,3 @@
-REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
-
-Thought: [Your detailed reasoning about what to do next]
-Action: [Tool name from ONLY [{{ tools_name }}]]
-Action Input: [JSON input for the tool]
-
-After each action, you'll receive:
-Observation: [Result from the tool]
-
-When you have enough information to provide a final answer:
-Thought: [Your reasoning for the final answer]
-Answer: [Your complete answer to the user's question]
-
-For questions that don't require tools:
-Thought: [Your reasoning about the question]
-Answer: [Your direct response]
-
-IMPORTANT RULES:
-- ALWAYS start with "Thought:" even for simple responses
-- Keep the explanation on the same line as the label (e.g., Thought: I should...), without leading spaces or blank lines
-- Avoid starting the thought with phrases like "The user..." or "The model..."; refer to yourself in the first person (e.g., "I should...")
-- Explain why this specific tool is the right choice
-- Ensure Action Input is valid JSON without markdown formatting
-- Use proper JSON syntax with double quotes for keys and string values
-- Never use markdown code blocks (```) around your JSON
-- JSON must be properly formatted with correct commas and brackets
-- Only use tools from the provided list
-- If you can answer directly, use only Thought followed by Answer
-- Some tools are other agents. When calling an agent tool, provide JSON matching that agent's inputs; at minimum include {"input": "your subtask"}. Keep action_input to inputs only (no reasoning).
-- Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.
-- Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
-- Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
-
-FILE HANDLING:
-- Tools may generate or process files (images, CSVs, PDFs, etc.)
-- Files are automatically collected and will be returned with your final answer
-- Mention created files in your final answer so users know what was generated
-"""  # noqa: E501
-
 REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
 
 <output>
@@ -196,24 +157,6 @@ FUNCTION CALLING GUIDELINES:
 FILE HANDLING:
 - Tools may generate files that will be included in the final response
 - Files created by tools are automatically collected and returned
-"""  # noqa: E501
-
-REACT_BLOCK_INSTRUCTIONS_NO_TOOLS = """
-Always structure your responses in this exact format:
-
-Thought: [Your detailed reasoning about the user's question]
-Answer: [Your complete response to the user's question]
-
-IMPORTANT RULES:
-- ALWAYS begin with "Thought:" to show your reasoning process
-- Keep the explanation on the same line as the label, avoiding leading spaces or blank lines
-- Write your reasoning in first person (e.g., "I should...", "I know...")
-- Use the "Thought" section to analyze the question and plan your response
-- Only after thinking through the problem, provide your answer
-- If you cannot fully answer, explain why in your thinking
-- Be thorough and helpful in your response
-- Do not mention tools or actions as you don't have access to any
-
 """  # noqa: E501
 
 REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS = """Always use this exact XML format in your responses:

@@ -1,7 +1,6 @@
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.http_api_call import HttpApiCall, ResponseType
-from dynamiq.nodes.types import InferenceMode
 from examples.llm_setup import setup_llm
 
 
@@ -51,7 +50,6 @@ def setup_react_agent_with_apis() -> Agent:
         llm=llm,
         tools=[cat_api, dog_api],
         role="is to help users retrieve interesting animal facts",
-        inference_mode=InferenceMode.DEFAULT,
     )
 
     return agent
