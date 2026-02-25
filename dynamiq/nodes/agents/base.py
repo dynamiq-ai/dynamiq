@@ -620,7 +620,11 @@ class Agent(Node):
         requested_paths = getattr(self, "_requested_output_files", None)
 
         if self.file_store_backend and requested_paths:
-            stored_files = self.file_store_backend.list_files_bytes(requested_paths)
+            try:
+                stored_files = self.file_store_backend.list_files_bytes(requested_paths)
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from file store: {e}")
+                stored_files = []
             if stored_files:
                 execution_result["files"] = stored_files
                 logger.info(
@@ -629,7 +633,11 @@ class Agent(Node):
                 )
 
         if self.sandbox_backend and requested_paths:
-            sandbox_files = self.sandbox_backend.collect_files(file_paths=requested_paths)
+            try:
+                sandbox_files = self.sandbox_backend.collect_files(file_paths=requested_paths)
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from sandbox: {e}")
+                sandbox_files = []
             if sandbox_files:
                 existing_files = execution_result.get("files", [])
                 execution_result["files"] = existing_files + sandbox_files

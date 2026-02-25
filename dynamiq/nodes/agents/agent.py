@@ -1206,6 +1206,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         except Exception as e:
             logger.error(f"Max loops handler: Error during final answer extraction: {e}. Returning raw output.")
             final_answer = llm_final_attempt
+            self._requested_output_files = []
 
         return f"{final_answer}"
 
