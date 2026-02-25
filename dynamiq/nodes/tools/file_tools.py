@@ -603,8 +603,8 @@ class FileReadTool(Node):
             }
         return data
 
-    def _build_file_info(self, file_path: str, content: bytes) -> dict[str, Any]:
-        """Build a serialized FileInfo dict from a read file path and its raw content."""
+    def _build_file_info(self, file_path: str, content: bytes) -> FileInfo:
+        """Build a FileInfo instance from a read file path and its raw content."""
         filename = os.path.basename(file_path)
         return FileInfo(
             name=filename,
@@ -662,7 +662,11 @@ class FileReadTool(Node):
                     file_path=input_data.file_path,
                 )
                 processed = self._append_cache_hint(processed, cached_path, hint_enabled=False)
-                return {"content": processed, "file_info": file_info.model_dump_safe(), "cached_text_path": cached_path}
+                return {
+                    "content": processed,
+                    "file_info": file_info.model_dump(mode="json"),
+                    "cached_text_path": cached_path,
+                }
 
             try:
                 file_io = BytesIO(content)
@@ -701,7 +705,7 @@ class FileReadTool(Node):
                             file_path=input_data.file_path,
                         )
                         processed = self._append_cache_hint(processed, cached_path, hint_enabled)
-                        result_payload = {"content": processed, "file_info": file_info.model_dump_safe()}
+                        result_payload = {"content": processed, "file_info": file_info.model_dump(mode="json")}
                         if page_entries:
                             result_payload["pages"] = page_entries
                         if cached_path:
@@ -731,7 +735,7 @@ class FileReadTool(Node):
                 file_path=input_data.file_path,
             )
 
-            return {"content": rendered_content, "file_info": file_info.model_dump_safe()}
+            return {"content": rendered_content, "file_info": file_info.model_dump(mode="json")}
 
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to read file. Error: {str(e)}")
@@ -1073,7 +1077,7 @@ class FileWriteTool(Node):
 
         return {
             "content": message,
-            "file_info": file_info.model_dump_safe(),
+            "file_info": file_info.model_dump(mode="json"),
         }
 
     def _execute_edit(self, input_data: FileWriteInputSchema) -> dict[str, Any]:
@@ -1143,7 +1147,7 @@ class FileWriteTool(Node):
 
         return {
             "content": f"{summary} Use FileReadTool to view the updated file.",
-            "file_info": file_info.model_dump_safe(),
+            "file_info": file_info.model_dump(mode="json"),
         }
 
     def _prepare_content_payload(self, input_data: FileWriteInputSchema) -> tuple[bytes, str]:

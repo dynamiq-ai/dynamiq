@@ -1,7 +1,6 @@
 """Base file storage interface and common data structures."""
 
 import abc
-import base64
 from datetime import datetime
 from functools import cached_property
 from io import BytesIO
@@ -21,13 +20,6 @@ class FileInfo(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     metadata: dict[str, Any] = Field(default_factory=dict)
     content: bytes = Field(default=None)
-
-    def model_dump_safe(self) -> dict[str, Any]:
-        """Return a JSON-serializable dict with content encoded as base64."""
-        data = self.model_dump()
-        if self.content is not None:
-            data["content"] = base64.b64encode(self.content).decode("utf-8")
-        return data
 
 
 class StorageError(Exception):
