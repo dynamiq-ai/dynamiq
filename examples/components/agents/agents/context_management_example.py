@@ -65,7 +65,7 @@ def create_enhanced_context_agent() -> Agent:
         llm=llm,
         tools=[search_tool, code_tool],
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         parallel_tool_calls_enabled=True,
         delegation_allowed=True,
         summarization_config=context_config,

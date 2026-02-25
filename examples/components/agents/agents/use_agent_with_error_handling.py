@@ -61,7 +61,7 @@ def create_react_agent_no_tools() -> Agent:
         role="You are a helpful AI assistant that provides "
         "thoughtful and accurate responses to user questions. "
         "You think step by step and provide clear, concise answers.",
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=3,
         verbose=True,
         error_handling=agent_error_handling

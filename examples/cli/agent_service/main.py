@@ -32,7 +32,7 @@ agent = Agent(
     id="Agent",
     llm=llm,
     tools=[tool_search],
-    inference_mode=InferenceMode.XML,
+    inference_mode=InferenceMode.FUNCTION_CALLING,
 )
 
 app = FastAPI()

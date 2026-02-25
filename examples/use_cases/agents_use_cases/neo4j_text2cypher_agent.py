@@ -42,7 +42,7 @@ def build_readonly_agent() -> Agent:
             "Use the XML protocol exactly with <action>cypher_executor</action> and <action_input> JSON. "
             "Do not use self-closing tool tags like <cypher_executor/>."
         ),
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=10,
     )
 
@@ -74,7 +74,7 @@ def build_ingest_agent() -> Agent:
             "If duplicates exist, prefer matching by stable ids if available and avoid creating new nodes by name. "
             "For write-then-read flows, you may send a list of queries in one call."
         ),
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=10,
     )
 

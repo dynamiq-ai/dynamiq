@@ -26,7 +26,7 @@ if __name__ == "__main__":
         llm=llm,
         tools=[tool_code],
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
 
     result = agent.run(input_data={"input": "What is the current price of Bitcoin?", "files": None})

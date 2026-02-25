@@ -40,7 +40,7 @@ def setup_agent() -> Agent:
         llm=llm,
         file_store=file_store,
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=5,
     )
 

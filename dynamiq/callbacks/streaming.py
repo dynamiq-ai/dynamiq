@@ -21,28 +21,6 @@ FIND_JSON_FIELD_MAX_OFFSET = 64
 WHITESPACE_PATTERNS = (" ", "\n", "\r", "\t")
 
 
-class DefaultModeTag(str, Enum):
-    """
-    Enumeration of default mode tags.
-    """
-
-    THOUGHT = "Thought:"
-    ACTION = "Action:"
-    ANSWER = "Answer:"
-
-
-class XMLModeTag(str, Enum):
-    """
-    Enumeration of XML mode tags.
-    """
-
-    OPEN_THOUGHT = "<thought>"
-    CLOSE_THOUGHT = "</thought>"
-    OPEN_ACTION = "<action>"
-    OPEN_ANSWER = "<answer>"
-    CLOSE_ANSWER = "</answer>"
-
-
 class JSONStreamingField(str, Enum):
     """
     Enumeration of JSON streaming fields in FUNCTION_CALLING mode.
@@ -64,14 +42,9 @@ class StreamingState(str, Enum):
 
 
 class InferenceMode(str, Enum):
-    """
-    Enumeration of inference types.
-    """
+    """Inference type for agent streaming (function calling only)."""
 
-    DEFAULT = "DEFAULT"
-    XML = "XML"
     FUNCTION_CALLING = "FUNCTION_CALLING"
-    STRUCTURED_OUTPUT = "STRUCTURED_OUTPUT"
 
 
 class BaseStreamingCallbackHandler(BaseCallbackHandler):
@@ -349,13 +322,9 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         if agent_run_id and serialized.get("id") != getattr(self.agent, "llm", object()).id:
             return
 
-        if self.mode_name == InferenceMode.FUNCTION_CALLING.value:
-            text_delta, function_name = self._extract_function_calling_text(chunk)
-
-            if function_name and function_name == FINAL_ANSWER_FUNCTION_NAME:
-                self._answer_started = True
-        else:
-            text_delta = self._extract_text_delta(chunk)
+        text_delta, function_name = self._extract_function_calling_text(chunk)
+        if function_name and function_name == FINAL_ANSWER_FUNCTION_NAME:
+            self._answer_started = True
 
         if not text_delta:
             return
@@ -364,15 +333,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._buffer += text_delta
 
         final_answer_only = self.agent.streaming.mode == StreamingMode.FINAL
-
-        if self.mode_name == InferenceMode.DEFAULT.value:
-            self._process_default_mode(final_answer_only)
-        elif self.mode_name == InferenceMode.XML.value:
-            self._process_xml_mode(final_answer_only)
-        elif self.mode_name == InferenceMode.STRUCTURED_OUTPUT.value:
-            self._process_structured_output_mode(final_answer_only)
-        elif self.mode_name == InferenceMode.FUNCTION_CALLING.value:
-            self._process_function_calling_mode(final_answer_only)
+        self._process_function_calling_mode(final_answer_only)
 
         self._trim_buffer()
 
@@ -485,140 +446,9 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         if step in self._state_has_emitted:
             self._state_has_emitted[step] = True
 
-    def _process_default_mode(self, final_answer_only: bool) -> None:
-        if self._current_state is None:
-            start = self._state_last_emit_index
-            idx_thought = self._buffer.find(DefaultModeTag.THOUGHT, start) if not final_answer_only else -1
-            idx_answer = self._buffer.find(DefaultModeTag.ANSWER, start)
-
-            if not final_answer_only and idx_thought != -1 and (idx_answer == -1 or idx_thought < idx_answer):
-                self._current_state = StreamingState.REASONING
-                self._state_start_index = idx_thought + len(DefaultModeTag.THOUGHT)
-                self._state_last_emit_index = self._state_start_index
-            elif idx_answer != -1:
-                self._current_state = StreamingState.ANSWER
-                self._answer_started = True
-                self._state_start_index = idx_answer + len(DefaultModeTag.ANSWER)
-                self._state_last_emit_index = self._state_start_index
-
-        # If the state was not detected, nothing to emit yet
-        if self._current_state is None:
-            return
-
-        search_start = self._state_last_emit_index
-
-        if self._current_state == StreamingState.REASONING:
-            # Check if there is a transition to Action or Answer
-            next_tag_pos = -1
-            next_tag_name = None
-            for tag_text, name in ((DefaultModeTag.ACTION, "action"), (DefaultModeTag.ANSWER, "answer")):
-                pos = self._buffer.find(tag_text, search_start)
-                if pos != -1 and (next_tag_pos == -1 or pos < next_tag_pos):
-                    next_tag_pos, next_tag_name = pos, name
-
-            if next_tag_pos != -1:
-                # If a complete next tag is found, emit everything up to it
-                if next_tag_pos > self._state_last_emit_index:
-                    self._emit(self._buffer[self._state_last_emit_index : next_tag_pos], step=StreamingState.REASONING)
-                if next_tag_name == "answer":
-                    self._current_state = StreamingState.ANSWER
-                    self._answer_started = True
-                    self._state_start_index = next_tag_pos + len(DefaultModeTag.ANSWER)
-                    self._state_last_emit_index = self._state_start_index
-                else:
-                    # Wait for the next state after `action`
-                    self._current_state = None
-                    self._state_last_emit_index = next_tag_pos + len(DefaultModeTag.ACTION)
-                return
-
-            # If there is no next tag yet, emit incrementally using a tail guard
-            safe_end = max(self._state_last_emit_index, len(self._buffer) - self._tail_guard)
-            if safe_end > self._state_last_emit_index:
-                self._emit(self._buffer[self._state_last_emit_index : safe_end], step=StreamingState.REASONING)
-                self._state_last_emit_index = safe_end
-            return
-
-        # If the current state is 'answer', stream up to the end
-        safe_end = max(self._state_last_emit_index, len(self._buffer) - self._tail_guard)
-        if safe_end > self._state_last_emit_index:
-            self._emit(self._buffer[self._state_last_emit_index : safe_end], step=StreamingState.ANSWER)
-            self._state_last_emit_index = safe_end
-
-    def _process_xml_mode(self, final_answer_only: bool) -> None:
-        if self._current_state is None:
-            start = self._state_last_emit_index
-            idx_thought = self._buffer.find(XMLModeTag.OPEN_THOUGHT, start) if not final_answer_only else -1
-            idx_answer = self._buffer.find(XMLModeTag.OPEN_ANSWER, start)
-
-            if not final_answer_only and idx_thought != -1 and (idx_answer == -1 or idx_thought < idx_answer):
-                self._current_state = StreamingState.REASONING
-                self._state_start_index = idx_thought + len(XMLModeTag.OPEN_THOUGHT)
-                self._state_last_emit_index = self._state_start_index
-            elif idx_answer != -1:
-                self._current_state = StreamingState.ANSWER
-                self._answer_started = True
-                self._state_start_index = idx_answer + len(XMLModeTag.OPEN_ANSWER)
-                self._state_last_emit_index = self._state_start_index
-
-        if self._current_state is None:
-            return
-
-        search_start = self._state_last_emit_index
-
-        if self._current_state == StreamingState.REASONING:
-            # Check for the next boundary: either </thought>, <action>, or <answer>
-            next_pos = -1
-            next_tag = None
-            for tag in (XMLModeTag.CLOSE_THOUGHT, XMLModeTag.OPEN_ACTION, XMLModeTag.OPEN_ANSWER):
-                pos = self._buffer.find(tag, search_start)
-                if pos != -1 and (next_pos == -1 or pos < next_pos):
-                    next_pos, next_tag = pos, tag
-
-            if next_pos != -1:
-                # Emit everything up to the next tag
-                if next_pos > self._state_last_emit_index:
-                    self._emit(self._buffer[self._state_last_emit_index : next_pos], step=StreamingState.REASONING)
-
-                if next_tag == XMLModeTag.OPEN_ANSWER:
-                    self._current_state = StreamingState.ANSWER
-                    self._answer_started = True
-                    self._state_start_index = next_pos + len(XMLModeTag.OPEN_ANSWER)
-                    self._state_last_emit_index = self._state_start_index
-                else:
-                    # Stop reasoning stream due to either </thought> or <action>
-                    self._current_state = None
-                    self._state_last_emit_index = next_pos + len(next_tag)
-                return
-
-            # If there is no next tag yet, emit incrementally using a tail guard
-            safe_end = max(self._state_last_emit_index, len(self._buffer) - self._tail_guard)
-            if safe_end > self._state_last_emit_index:
-                self._emit(self._buffer[self._state_last_emit_index : safe_end], step=StreamingState.REASONING)
-                self._state_last_emit_index = safe_end
-            return
-
-        # If the current state is 'answer', stream up to the </answer> tag
-        end_pos = self._buffer.find(XMLModeTag.CLOSE_ANSWER, search_start)
-        if end_pos != -1:
-            if end_pos > self._state_last_emit_index:
-                self._emit(self._buffer[self._state_last_emit_index : end_pos], step=StreamingState.ANSWER)
-            # Close the answer
-            self._current_state = None
-            self._state_last_emit_index = end_pos + len(XMLModeTag.CLOSE_ANSWER)
-            return
-
-        safe_end = max(self._state_last_emit_index, len(self._buffer) - self._tail_guard)
-        if safe_end > self._state_last_emit_index:
-            self._emit(self._buffer[self._state_last_emit_index : safe_end], step=StreamingState.ANSWER)
-            self._state_last_emit_index = safe_end
-
-    def _process_structured_output_mode(self, final_answer_only: bool) -> None:
-        """Process structured output mode."""
-        self._process_json_mode(final_answer_only, is_function_calling=False)
-
     def _process_function_calling_mode(self, final_answer_only: bool) -> None:
-        """Process function calling mode."""
-        self._process_json_mode(final_answer_only, is_function_calling=True)
+        """Process function calling mode (tool call arguments streamed as reasoning/answer)."""
+        self._process_json_mode(final_answer_only)
 
     def _find_unescaped_quote_end(self, input_string: str, start_quote_index: int) -> int:
         """
@@ -710,49 +540,18 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             return True
         return False
 
-    def _process_json_mode(self, final_answer_only: bool, is_function_calling: bool = False) -> None:
+    def _process_json_mode(self, final_answer_only: bool) -> None:
         """
-        Unified processing for JSON-like modes (structured output and function calling).
-
-        Args:
-            final_answer_only: Whether to stream only final answers
-            is_function_calling: Whether this is function calling mode (vs structured output)
+        Process function-calling stream: emit thought and answer from tool call arguments.
         """
         buf = self._buffer
-
-        if not is_function_calling and not self._answer_started:
-            # If there is a "finish" action, enable answer streaming
-            action_key_pos = buf.find(
-                f'"{JSONStreamingField.ACTION.value}"', max(0, self._state_last_emit_index - FIND_JSON_FIELD_MAX_OFFSET)
-            )
-            if action_key_pos != -1:
-                colon_pos = buf.find(":", action_key_pos)
-                if colon_pos != -1:
-                    v_start = self._skip_whitespace(buf, colon_pos + 1)
-                    if v_start < len(buf) and buf[v_start] == '"':
-                        end_quote = self._find_unescaped_quote_end(buf, v_start)
-                        if end_quote != -1:
-                            action_value = buf[v_start + 1 : end_quote]
-                            if action_value.strip().lower() == "finish":
-                                self._answer_started = True
-                                # Try to find the action_input field
-                                action_input_start = self._find_field_string_value_start(
-                                    buf, JSONStreamingField.ACTION_INPUT.value, end_quote + 1
-                                )
-                                if action_input_start != -1:
-                                    self._current_state = StreamingState.ANSWER
-                                    self._state_start_index = action_input_start
-                                    self._state_last_emit_index = max(self._state_last_emit_index, action_input_start)
 
         self._initialize_json_field_state(
             buf, JSONStreamingField.THOUGHT.value, StreamingState.REASONING, final_answer_only
         )
 
         if self._answer_started:
-            answer_field = (
-                JSONStreamingField.ANSWER.value if is_function_calling else JSONStreamingField.ACTION_INPUT.value
-            )
-            self._initialize_json_field_state(buf, answer_field, StreamingState.ANSWER)
+            self._initialize_json_field_state(buf, JSONStreamingField.ANSWER.value, StreamingState.ANSWER)
 
         if self._current_state == StreamingState.REASONING:
             self._emit_json_field_content(buf, StreamingState.REASONING)
@@ -805,9 +604,6 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
     def _trim_buffer(self, force: bool = False) -> None:
         """Trim already-emitted prefix of buffer to prevent re-detection."""
         if not self._buffer:
-            return
-
-        if self.mode_name == InferenceMode.STRUCTURED_OUTPUT.value:
             return
 
         if force:

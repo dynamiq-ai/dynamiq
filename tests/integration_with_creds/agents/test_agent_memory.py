@@ -138,7 +138,7 @@ def test_react_agent_with_pinecone_memory(
         llm=openai_llm,
         tools=[],
         role=agent_role,
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         memory=memory,
         verbose=True,
     )
@@ -209,7 +209,7 @@ def test_react_agent_with_qdrant_memory(
         llm=openai_llm,
         tools=[],
         role=agent_role,
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         memory=memory,
         verbose=True,
     )
@@ -307,7 +307,7 @@ def test_react_agent_with_dynamodb_memory(
         llm=openai_llm,
         tools=[],
         role=agent_role,
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         memory=memory,
     )
 

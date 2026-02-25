@@ -8,7 +8,7 @@ import shutil
 import tempfile
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from RestrictedPython.Guards import guarded_unpack_sequence
 from RestrictedPython.PrintCollector import PrintCollector
 
@@ -235,6 +235,16 @@ class PythonCodeExecutorInputSchema(BaseModel):
         default_factory=dict,
         description="Optional parameters forwarded to the executed code.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_params(cls, data: Any) -> Any:
+        """Coerce empty string or None params to empty dict (LLM often sends '')."""
+        if isinstance(data, dict) and "params" in data:
+            p = data["params"]
+            if p is None or p == "":
+                data = {**data, "params": {}}
+        return data
     files: list[Any] | FileMappedInput | None = Field(
         default=None,
         description="Files available to the executed code.",

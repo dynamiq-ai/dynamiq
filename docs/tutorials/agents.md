@@ -119,7 +119,7 @@ research_agent = Agent(
     role="Find recent market news and provide referenced highlights.",
     llm=llm,
     tools=[search_tool],
-    inference_mode=InferenceMode.XML,
+    inference_mode=InferenceMode.FUNCTION_CALLING,
     max_loops=6,
     behaviour_on_max_loops=Behavior.RETURN,
 )
@@ -128,7 +128,7 @@ writer_agent = Agent(
     name="Brief Writer",
     role="Turn research highlights into a concise executive brief.",
     llm=llm,
-    inference_mode=InferenceMode.XML,
+    inference_mode=InferenceMode.FUNCTION_CALLING,
     max_loops=4,
     behaviour_on_max_loops=Behavior.RETURN,
 )
@@ -147,7 +147,7 @@ manager_agent = Agent(
     ),
     llm=llm,
     tools=[research_agent, writer_agent],
-    inference_mode=InferenceMode.XML,
+    inference_mode=InferenceMode.FUNCTION_CALLING,
     parallel_tool_calls_enabled=True,
     max_loops=8,
     behaviour_on_max_loops=Behavior.RETURN,

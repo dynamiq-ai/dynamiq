@@ -38,7 +38,7 @@ if __name__ == "__main__":
         llm=llm,
         tools=[tool_search, tool_code],
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         parallel_tool_calls_enabled=True,
     )
 

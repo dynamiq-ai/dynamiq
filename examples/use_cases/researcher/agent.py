@@ -66,7 +66,7 @@ def create_agent():
         tools=[tool_code, tool_scrape, tool_search],
         role=AGENT_ROLE,
         max_loops=30,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         behaviour_on_max_loops=Behavior.RETURN,
         file_store=FileStoreConfig(enabled=True, backend=InMemoryFileStore(), todo_enabled=True),
     )

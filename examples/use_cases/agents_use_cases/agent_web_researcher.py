@@ -46,7 +46,14 @@ Open Questions, and References.
 
 
 def _create_agent() -> Agent:
-    llm = setup_llm(model_provider="gpt", model_name="o4-mini", temperature=0.4)
+    llm = setup_llm(
+        model_provider="claude",
+        model="claude-haiku-4-5-20251001",
+        temperature=1,
+        max_tokens=32000,
+        thinking_enabled=True,
+        budget_tokens=4000,
+    )
     file_store_backend = InMemoryFileStore()
     file_store_config = FileStoreConfig(enabled=True, backend=file_store_backend, agent_file_write_enabled=True)
 
@@ -58,7 +65,7 @@ def _create_agent() -> Agent:
         llm=llm,
         tools=[exa_tool, code_tool],
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=15,
         file_store=file_store_config,
     )

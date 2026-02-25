@@ -39,7 +39,7 @@ def run_workflow_with_streaming():
             mode=StreamingMode.ALL,
         ),
         max_loops=5,
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
 
     # Set up streaming callback handler

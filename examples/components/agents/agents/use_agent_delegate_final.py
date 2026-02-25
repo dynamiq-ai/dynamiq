@@ -45,7 +45,7 @@ def make_researcher_agent(llm):
         llm=llm,
         tools=[search_tool],
         max_loops=2,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
 
 
@@ -58,7 +58,7 @@ def make_manager_agent(llm, researcher):
         tools=[researcher],
         max_loops=3,
         delegation_allowed=True,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
 
 

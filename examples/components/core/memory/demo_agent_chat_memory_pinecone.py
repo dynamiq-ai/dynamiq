@@ -39,7 +39,7 @@ def setup_agent():
         id="agent",
         tools=[tool_search],
         memory=memory_pinecone,
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
     return agent
 

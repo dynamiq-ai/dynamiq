@@ -4,13 +4,7 @@ import pytest
 
 from dynamiq import connections, prompts
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.agents.components.parser import (
-    extract_default_final_answer,
-    parse_default_action,
-    parse_default_thought,
-)
 from dynamiq.nodes.agents.exceptions import (
-    ActionParsingException,
     JSONParsingError,
     ParsingError,
     TagNotFoundError,
@@ -52,15 +46,9 @@ def openai_node(openai_connection):
 
 
 @pytest.fixture
-def default_react_agent(openai_node, mock_llm_executor):
-    """Agent with DEFAULT inference mode."""
-    return Agent(name="Test Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
-
-
-@pytest.fixture
-def xml_react_agent(openai_node, mock_llm_executor):
-    """Agent with XML inference mode."""
-    return Agent(name="Test XML Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.XML)
+def react_agent(openai_node, mock_llm_executor):
+    """Agent with function calling (only supported mode)."""
+    return Agent(name="Test Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.FUNCTION_CALLING)
 
 
 @pytest.fixture
@@ -79,38 +67,6 @@ def run(input_data):
     )
 
 
-def test_parse_default_thought(default_react_agent):
-    """Test extracting thought from agent output."""
-    output = """
-    Thought: I need to search for information about the weather.
-    Action: search
-    Action Input: {"query": "weather in San Francisco"}
-    """
-    thought = parse_default_thought(output)
-    assert thought == "I need to search for information about the weather."
-
-
-def test_parse_default_action_missing_action_input(default_react_agent):
-    """Test parsing with missing action input raises an exception."""
-    output = """
-    Thought: I need to search for information about the weather.
-    Action: search
-    """
-    with pytest.raises(ActionParsingException):
-        parse_default_action(output)
-
-
-def test_extract_default_final_answer(default_react_agent):
-    """Test extracting the final answer from the output."""
-    output = """
-    Thought: I found all the information needed.
-    Answer: The weather in San Francisco is foggy with a high of 65°F.
-    """
-    answer = extract_default_final_answer(output)
-    assert answer[0] == "I found all the information needed."
-    assert answer[1] == "The weather in San Francisco is foggy with a high of 65°F."
-
-
 @pytest.mark.parametrize(
     "input_name,expected_output",
     [
@@ -119,26 +75,24 @@ def test_extract_default_final_answer(default_react_agent):
         ("data analysis (2023)", "data-analysis-2023"),
     ],
 )
-def test_sanitize_tool_name(default_react_agent, input_name, expected_output):
+def test_sanitize_tool_name(react_agent, input_name, expected_output):
     """Test that tool names are sanitized correctly."""
-    assert default_react_agent.sanitize_tool_name(input_name) == expected_output
+    assert react_agent.sanitize_tool_name(input_name) == expected_output
 
 
-def test_generate_prompt_xml_mode(openai_node, mock_llm_executor):
-    """Test prompt generation in XML inference mode."""
-    agent = Agent(name="XMLPromptAgent", llm=openai_node, tools=[], inference_mode=InferenceMode.XML)
+def test_generate_prompt_function_calling(openai_node, mock_llm_executor):
+    """Test prompt generation uses function-calling instructions."""
+    agent = Agent(name="FCPromptAgent", llm=openai_node, tools=[], inference_mode=InferenceMode.FUNCTION_CALLING)
 
     prompt = agent.generate_prompt()
 
-    assert "<output>" in prompt
-    assert "<thought>" in prompt
-    assert "<answer>" in prompt
-    assert "Always use this exact XML format" in prompt
+    assert "provide_final_answer" in prompt or "function" in prompt.lower()
+    assert "tools" in prompt.lower() or "function" in prompt.lower()
 
 
 def test_set_prompt_block(openai_node, mock_llm_executor):
     """Test modifying prompt blocks."""
-    agent = Agent(name="PromptBlockTestAgent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    agent = Agent(name="PromptBlockTestAgent", llm=openai_node, tools=[], inference_mode=InferenceMode.FUNCTION_CALLING)
 
     custom_instructions = "Your goal is to analyze the given text and identify key points."
     agent.set_block("instructions", custom_instructions)
@@ -225,19 +179,6 @@ def test_xmlparser_parse_json_invalid_after_repair_raises():
     text = "<output><thought>Run</thought><action_input>{'python': 'print(1)'}</action_input></output>"
     with pytest.raises(JSONParsingError, match="Failed to parse JSON content for field 'action_input'"):
         XMLParser.parse(text, required_tags=["thought", "action_input"], json_fields=["action_input"])
-
-
-def test_agent_xml_mode_invalid_action_input_json_is_recoverable(xml_react_agent):
-    """Malformed action_input JSON should surface as recoverable ActionParsingException in XML mode."""
-    llm_generated_output = (
-        "<output><thought>Run code</thought><action>code-executor</action>"
-        '<action_input>{"python": "print(1)"</action_input></output>'
-    )
-
-    with pytest.raises(ActionParsingException, match="must be valid JSON") as excinfo:
-        xml_react_agent._handle_xml_mode(llm_generated_output=llm_generated_output, loop_num=1, config=RunnableConfig())
-
-    assert excinfo.value.recoverable is True
 
 
 def test_xmlparser_parse_missing_required_tag():
@@ -477,35 +418,6 @@ def test_xmlparser_parse_with_only_opening_answer_tag():
     assert "3.2 trillion USD" in result["answer"]
 
 
-def test_generate_structured_output_schemas(openai_node, mock_tool):
-    """Test structured output schema generation."""
-    from dynamiq.nodes.agents.components.schema_generator import generate_structured_output_schemas
-
-    agent = Agent(name="Test Agent", llm=openai_node, tools=[mock_tool], inference_mode=InferenceMode.DEFAULT)
-
-    schema = generate_structured_output_schemas(
-        tools=[mock_tool], sanitize_tool_name=agent.sanitize_tool_name, delegation_allowed=False
-    )
-
-    # Verify schema structure
-    assert "type" in schema
-    assert schema["type"] == "json_schema"
-    assert "json_schema" in schema
-
-    json_schema = schema["json_schema"]
-    assert json_schema["name"] == "plan_next_action"
-    assert json_schema["strict"] is True
-
-    # Verify required fields
-    assert set(json_schema["schema"]["required"]) == {"thought", "action", "action_input"}
-
-    # Verify properties
-    properties = json_schema["schema"]["properties"]
-    assert "thought" in properties
-    assert "action" in properties
-    assert "action_input" in properties
-
-
 def test_generate_function_calling_schemas(openai_node, mock_tool):
     """Test function calling schema generation."""
     from dynamiq.nodes.agents.components.schema_generator import generate_function_calling_schemas
@@ -573,7 +485,7 @@ def test_todo_tools_added_when_enabled(openai_node, mock_llm_executor):
         llm=openai_node,
         tools=[],
         file_store=file_store_config,
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
 
     # Check that TodoWriteTool was automatically added
@@ -651,7 +563,7 @@ class TestParallelToolCloning:
             name="Parallel Clone Agent",
             llm=openai_node,
             tools=[calculator_tool, formatter_tool],
-            inference_mode=InferenceMode.XML,
+            inference_mode=InferenceMode.FUNCTION_CALLING,
             parallel_tool_calls_enabled=True,
         )
 

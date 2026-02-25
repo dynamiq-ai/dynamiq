@@ -124,7 +124,7 @@ def setup_react_agent_http_python() -> Agent:
         llm=llm,
         tools=[web_request_tool, api_call],
         role="is to help user with various tasks",
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
     return agent
 

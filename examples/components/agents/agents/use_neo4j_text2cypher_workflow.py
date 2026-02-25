@@ -38,7 +38,7 @@ def build_ingest_agent() -> Agent:
         role=INGEST_ROLE,
         llm=llm,
         tools=[cypher_executor],
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=8,
     )
 

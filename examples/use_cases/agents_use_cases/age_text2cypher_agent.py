@@ -57,7 +57,7 @@ def build_readonly_agent() -> Agent:
             "Use the XML protocol exactly with <action>cypher_executor</action> and <action_input> JSON. "
             "Do not use self-closing tool tags like <cypher_executor/>."
         ),
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=10,
     )
 

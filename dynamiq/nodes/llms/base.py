@@ -1,6 +1,5 @@
 import copy
 import json
-import warnings
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
 
@@ -184,16 +183,15 @@ class BaseLLM(ConnectionNode):
     tools: list[Tool | dict] | None = None
     input_schema: ClassVar[type[BaseLLMInputSchema]] = BaseLLMInputSchema
     inference_mode: InferenceMode = Field(
-        default=InferenceMode.DEFAULT,
-        deprecated="Please use `tools` and `response_format` parameters "
-        "for selecting between function calling and structured output.",
+        default=InferenceMode.FUNCTION_CALLING,
+        description="Inference mode (function calling only when used with agents).",
     )
     schema_: dict[str, Any] | type[BaseModel] | None = Field(
         None,
-        description="Schema for structured output or function calling.",
+        description="Schema for function calling (tools).",
         alias="schema",
         deprecated="Please use `tools` and `response_format` parameters "
-        "for function calling and structured output respectively.",
+        "for function calling.",
     )
     fallback: FallbackConfig | None = Field(
         default=None,
@@ -441,27 +439,14 @@ class BaseLLM(ConnectionNode):
         Returns:
             tuple[dict[str, Any] | None, dict[str, Any] | None]: Response format and tools.
         Raises:
-            ValueError: If schema is None when using STRUCTURED_OUTPUT or FUNCTION_CALLING modes.
+            ValueError: If schema is None when tools are required.
         """
         response_format = response_format or self.response_format or prompt.response_format
         tools = tools or self.tools or prompt.tools
 
-        # Suppress DeprecationWarning if deprecated parameters are not set
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=DeprecationWarning)
-            use_inference_mode = (not response_format or not tools) and self.inference_mode != InferenceMode.DEFAULT
-
-        if use_inference_mode:
-            schema = self.schema_
-            match self.inference_mode:
-                case InferenceMode.STRUCTURED_OUTPUT:
-                    if schema is None:
-                        raise ValueError("Schema must be provided when using STRUCTURED_OUTPUT inference mode")
-                    response_format = response_format or schema
-                case InferenceMode.FUNCTION_CALLING:
-                    if schema is None:
-                        raise ValueError("Schema must be provided when using FUNCTION_CALLING inference mode")
-                    tools = tools or schema
+        # When agent provides schema (tools), use it if no tools passed explicitly
+        if not tools and self.schema_ is not None:
+            tools = self.schema_
 
         if tools:
             tools = [tool.model_dump() if isinstance(tool, Tool) else tool for tool in tools]

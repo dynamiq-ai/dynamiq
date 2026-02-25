@@ -109,7 +109,7 @@ def test_agent_with_sandbox_executes_shell_tool(mock_llm_sandbox_shell_response,
             model="gpt-4o-mini",
             connection=connections.OpenAI(api_key="test-api-key"),
         ),
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         sandbox=SandboxConfig(enabled=True, backend=sandbox),
         max_loops=5,
     )
@@ -143,7 +143,7 @@ def test_map_agent_with_sandbox_executes_shell_tool(mock_llm_sandbox_shell_respo
             model="gpt-4o-mini",
             connection=connections.OpenAI(api_key="test-api-key"),
         ),
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         sandbox=SandboxConfig(enabled=True, backend=sandbox),
         max_loops=5,
     )
@@ -261,7 +261,7 @@ def test_agent_with_sandbox_returns_files(mock_llm_sandbox_shell_response):
             model="gpt-4o-mini",
             connection=connections.OpenAI(api_key="test-api-key"),
         ),
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         sandbox=SandboxConfig(enabled=True, backend=sandbox),
         max_loops=5,
     )

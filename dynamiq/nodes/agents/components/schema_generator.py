@@ -1,4 +1,4 @@
-"""Schema generation for Agent function calling and structured output modes."""
+"""Schema generation for Agent function calling (tools)."""
 
 import types
 from enum import Enum
@@ -23,8 +23,7 @@ FINAL_ANSWER_FUNCTION_SCHEMA = {
     "strict": True,
     "function": {
         "name": "provide_final_answer",
-        "description": "Function should be called when if you can answer the initial request"
-        " or if there is not request at all.",
+        "description": "Function to call when you can answer the initial request" " or if there is not request at all.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -42,7 +41,8 @@ FINAL_ANSWER_FUNCTION_SCHEMA = {
 
 def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str], str]) -> str:
     """
-    Generate formatted input descriptions for each tool.
+    Generate formatted input descriptions for each tool (legacy; agent uses function calling only;
+    tool schema is the source of truth; this is not used in the current agent path).
 
     Args:
         tools: List of tools to generate input formats for
@@ -81,7 +81,7 @@ def generate_structured_output_schemas(
     tools: list[Node], sanitize_tool_name: Callable[[str], str], delegation_allowed: bool
 ) -> dict:
     """
-    Generate schema for structured output mode.
+    Generate schema for structured output mode (legacy; not used; agent uses function calling only).
 
     Args:
         tools: List of tools to generate schema for
@@ -172,16 +172,16 @@ def generate_property_schema(properties: dict, name: str, field: Any) -> None:
             elif param_type := TYPE_MAPPING.get(param):
                 types.append(param_type)
 
-            elif issubclass(param, Enum):
+            elif isinstance(param, type) and issubclass(param, Enum):
                 element_type = TYPE_MAPPING.get(filter_format_type(type(list(param.__members__.values())[0].value))[0])
                 types.append(element_type)
-                properties[name]["enum"] = [field.value for field in param.__members__.values()]
+                properties[name]["enum"] = [e.value for e in param.__members__.values()]
 
-            elif getattr(param, "__origin__", None) is list:
+            elif isinstance(param, type) and getattr(param, "__origin__", None) is list:
                 types.append("array")
                 properties[name]["items"] = {"type": TYPE_MAPPING.get(param.__args__[0])}
 
-            elif getattr(param, "__origin__", None) is dict:
+            elif isinstance(param, type) and getattr(param, "__origin__", None) is dict:
                 types.append("object")
 
         if len(types) == 1:

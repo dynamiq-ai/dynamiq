@@ -33,7 +33,7 @@ def setup_agent() -> Agent:
         name="React Agent",
         llm=llm,
         tools=[tool_vector_store_writer],
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         role="AI assistant with deep knowledge about various travel destinations. Your goal is to provide well explained answers and write them to the vector store using the Travel Data Vector Store Writer tool",  # noqa: E501
         max_loops=7,
     )

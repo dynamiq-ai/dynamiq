@@ -56,12 +56,7 @@ def create_reflection_agent(llm, inference_mode, input_message=None, role=None):
 
 @pytest.mark.parametrize(
     ("inference_mode"),
-    [
-        (InferenceMode.DEFAULT),
-        (InferenceMode.XML),
-        (InferenceMode.STRUCTURED_OUTPUT),
-        (InferenceMode.FUNCTION_CALLING),
-    ],
+    [InferenceMode.FUNCTION_CALLING],
 )
 def test_simple_agent_workflow(model, inference_mode):
     react_agent = create_react_agent(model, inference_mode)
@@ -87,12 +82,7 @@ def test_simple_agent_workflow(model, inference_mode):
 
 @pytest.mark.parametrize(
     ("inference_mode"),
-    [
-        (InferenceMode.DEFAULT),
-        (InferenceMode.XML),
-        (InferenceMode.STRUCTURED_OUTPUT),
-        (InferenceMode.FUNCTION_CALLING),
-    ],
+    [InferenceMode.FUNCTION_CALLING],
 )
 def test_custom_agent_workflow(model, inference_mode):
     input_message = Message(content=REQUEST_TEMPLATE, role=MessageRole.USER)
@@ -123,12 +113,7 @@ def test_custom_agent_workflow(model, inference_mode):
 
 @pytest.mark.parametrize(
     ("inference_mode"),
-    [
-        (InferenceMode.DEFAULT),
-        (InferenceMode.XML),
-        (InferenceMode.STRUCTURED_OUTPUT),
-        (InferenceMode.FUNCTION_CALLING),
-    ],
+    [InferenceMode.FUNCTION_CALLING],
 )
 def test_custom_vision_agent_workflow(model, inference_mode):
     input_message = VisionMessage(

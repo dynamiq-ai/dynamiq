@@ -71,7 +71,7 @@ def test_automatic_context_manager_invocation(llm_instance, python_tool, run_con
         role="You are a helpful assistant that generates random words.",
         tools=[python_tool],
         max_loops=3,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         summarization_config=SummarizationConfig(
             enabled=True,
             max_token_context_length=5000,  # Low limit to trigger automatic summarization
@@ -131,7 +131,7 @@ def test_automatic_context_manager_auto_clean(llm_instance, python_tool, run_con
         role="You are a helpful assistant that generates random words.",
         tools=[python_tool],
         max_loops=3,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         summarization_config=SummarizationConfig(
             enabled=True,
             max_token_context_length=1000,  # Low limit to trigger automatic summarization

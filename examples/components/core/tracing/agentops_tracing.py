@@ -105,7 +105,7 @@ def get_react_agent():
         id="Agent",
         llm=llm,
         tools=[tool_search],
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
     return agent
 

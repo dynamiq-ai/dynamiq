@@ -705,7 +705,7 @@ def create_agent(streaming_enabled: bool = False):
         tools=[tool],
         role=AGENT_ROLE,
         max_loops=20,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         streaming=streaming_config,
     )
 

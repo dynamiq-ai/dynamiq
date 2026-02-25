@@ -51,7 +51,7 @@ def setup_react_agent_with_apis() -> Agent:
         llm=llm,
         tools=[cat_api, dog_api],
         role="is to help users retrieve interesting animal facts",
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
 
     return agent

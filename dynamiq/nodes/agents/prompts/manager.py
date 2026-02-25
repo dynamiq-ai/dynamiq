@@ -10,20 +10,14 @@ from jinja2 import Template
 from dynamiq.nodes.agents.prompts.react import (
     REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING,
     REACT_BLOCK_INSTRUCTIONS_NO_TOOLS,
-    REACT_BLOCK_INSTRUCTIONS_SINGLE,
-    REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT,
     REACT_BLOCK_OUTPUT_FORMAT,
-    REACT_BLOCK_TOOLS,
     REACT_BLOCK_TOOLS_NO_FORMATS,
-    REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS,
-    REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
     REACT_MAX_LOOPS_PROMPT,
 )
 from dynamiq.nodes.agents.prompts.registry import get_prompt_constant
 from dynamiq.nodes.agents.prompts.secondary_instructions import (
     CONTEXT_MANAGER_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS,
-    DELEGATION_INSTRUCTIONS_XML,
     REACT_BLOCK_MULTI_TOOL_PLANNING,
     SANDBOX_INSTRUCTIONS_TEMPLATE,
     TODO_TOOLS_INSTRUCTIONS,
@@ -278,21 +272,11 @@ def get_model_specific_prompts(
     Returns:
         Tuple of (prompt_blocks dict, agent_prompt_template string)
     """
+    # Agent uses function calling only; inference_mode is kept for API consistency.
     # Get model-specific agent template
     agent_template = get_prompt_constant(model_name, "AGENT_PROMPT_TEMPLATE", AGENT_PROMPT_TEMPLATE)
     if agent_template != AGENT_PROMPT_TEMPLATE:
         logger.debug(f"Using model-specific AGENT_PROMPT_TEMPLATE for '{model_name}'")
-
-    instructions_default = get_prompt_constant(
-        model_name, "REACT_BLOCK_INSTRUCTIONS_SINGLE", REACT_BLOCK_INSTRUCTIONS_SINGLE
-    )
-    if instructions_default != REACT_BLOCK_INSTRUCTIONS_SINGLE:
-        logger.debug(f"Using model-specific REACT_BLOCK_INSTRUCTIONS_SINGLE for '{model_name}'")
-
-    # Get other model-specific prompts
-    react_block_tools = get_prompt_constant(model_name, "REACT_BLOCK_TOOLS", REACT_BLOCK_TOOLS)
-    if react_block_tools != REACT_BLOCK_TOOLS:
-        logger.debug(f"Using model-specific REACT_BLOCK_TOOLS for '{model_name}'")
 
     react_block_instructions_no_tools = get_prompt_constant(
         model_name, "REACT_BLOCK_INSTRUCTIONS_NO_TOOLS", REACT_BLOCK_INSTRUCTIONS_NO_TOOLS
@@ -304,50 +288,27 @@ def get_model_specific_prompts(
     if react_block_output_format != REACT_BLOCK_OUTPUT_FORMAT:
         logger.debug(f"Using model-specific REACT_BLOCK_OUTPUT_FORMAT for '{model_name}'")
 
-    # Build initial prompt blocks
+    # Single path: function calling. Tool schema is the source of truth; no input_formats in prompt.
+    instructions_fc = get_prompt_constant(
+        model_name, "REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING", REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING
+    )
+    tools_block = (
+        get_prompt_constant(model_name, "REACT_BLOCK_TOOLS_NO_FORMATS", REACT_BLOCK_TOOLS_NO_FORMATS)
+        if has_tools
+        else ""
+    )
     prompt_blocks = {
-        "tools": "" if not has_tools else react_block_tools,
-        "instructions": react_block_instructions_no_tools if not has_tools else instructions_default,
+        "tools": tools_block,
+        "instructions": react_block_instructions_no_tools if not has_tools else instructions_fc,
         "output_format": react_block_output_format,
     }
-
-    # Override based on inference mode
-    match inference_mode:
-        case InferenceMode.FUNCTION_CALLING:
-            prompt_blocks["instructions"] = get_prompt_constant(
-                model_name, "REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING", REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING
-            )
-            if has_tools:
-                prompt_blocks["tools"] = get_prompt_constant(
-                    model_name, "REACT_BLOCK_TOOLS_NO_FORMATS", REACT_BLOCK_TOOLS_NO_FORMATS
-                )
-
-        case InferenceMode.STRUCTURED_OUTPUT:
-            prompt_blocks["instructions"] = get_prompt_constant(
-                model_name, "REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT", REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT
-            )
-
-        case InferenceMode.XML:
-            xml_instructions_no_tools = get_prompt_constant(
-                model_name, "REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS", REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS
-            )
-            # XML mode instructions
-            instructions_xml = get_prompt_constant(
-                model_name, "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE", REACT_BLOCK_XML_INSTRUCTIONS_SINGLE
-            )
-            if instructions_xml != REACT_BLOCK_XML_INSTRUCTIONS_SINGLE:
-                logger.debug(f"Using model-specific REACT_BLOCK_XML_INSTRUCTIONS_SINGLE for '{model_name}'")
-            prompt_blocks["instructions"] = xml_instructions_no_tools if not has_tools else instructions_xml
 
     # Build secondary_instructions from enabled features
     secondary_parts = []
     if parallel_tool_calls_enabled:
         secondary_parts.append(REACT_BLOCK_MULTI_TOOL_PLANNING)
     if delegation_allowed:
-        if inference_mode == InferenceMode.XML:
-            secondary_parts.append(DELEGATION_INSTRUCTIONS_XML)
-        else:
-            secondary_parts.append(DELEGATION_INSTRUCTIONS)
+        secondary_parts.append(DELEGATION_INSTRUCTIONS)
     if context_compaction_enabled:
         secondary_parts.append(CONTEXT_MANAGER_INSTRUCTIONS)
     if todo_management_enabled:

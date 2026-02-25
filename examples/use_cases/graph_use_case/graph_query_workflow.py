@@ -50,7 +50,7 @@ def build_reader_agent() -> Agent:
         role=QUERY_ROLE,
         llm=llm,
         tools=tools,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=8,
         behaviour_on_max_loops=Behavior.RETURN,
     )
