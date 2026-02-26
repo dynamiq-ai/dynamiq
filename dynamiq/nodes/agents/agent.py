@@ -953,6 +953,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         completed = self.get_start_iteration()
         start_loop = completed + 1 if completed > 0 else 1
+        self._requested_output_files = []
 
         if start_loop > 1:
             logger.info(
@@ -967,7 +968,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self.reset_resumed_flag()
         else:
             self._refresh_agent_state(1)
-            self._requested_output_files = []
             self._setup_prompt_and_stop_sequences(input_message, history_messages)
 
         for loop_num in range(start_loop, self.max_loops + 1):

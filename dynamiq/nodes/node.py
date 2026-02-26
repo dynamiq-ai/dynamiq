@@ -785,7 +785,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointMixin, ABC):
         if self._pending_approval_response is not None:
             logger.info(f"Node {self.name} - {self.id}: using stored approval response from checkpoint")
             approval_result = self._pending_approval_response
-            self._pending_approval_response = None
         else:
             message = Template(approval_config.msg_template).render(self.to_dict(), input_data=input_data)
 
@@ -818,6 +817,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointMixin, ABC):
             if feature_name in approval_result.data
         }
         approval_result.data = {**input_data, **update_params}
+        self._pending_approval_response = None
 
         if approval_result.is_approved is None:
             if approval_result.feedback == approval_config.accept_pattern:
