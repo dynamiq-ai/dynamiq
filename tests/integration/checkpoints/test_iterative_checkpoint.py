@@ -1,16 +1,15 @@
 """Integration tests for loop-level (iterative) checkpoint/resume.
 
 Tests cover:
-- IterativeCheckpointMixin protocol
 - Agent mid-loop checkpoint saves iteration state
 - Agent resume skips completed loops
 - Simulated crash-and-resume flow
-- Backward compatibility with old checkpoints
 - Round-trip serialization through InMemory and FileSystem backends
 - Dependent node skip and failure propagation with checkpoints
 - Agent timeout mid-loop with checkpoint state
-- Orchestrator checkpoint state save/restore
 - SummarizerTool checkpoint in flow context
+- Orchestrator resume skips completed iterations
+- Stale _is_resumed flag cleared on fresh runs
 - Multiple backend types via parametrize
 """
 
@@ -776,3 +775,194 @@ class TestSummarizerToolCheckpointInFlow:
         assert "summarizer" in cp.node_states
         internal = cp.node_states["summarizer"].internal_state
         assert "llm_state" in internal
+
+
+class TestOrchestratorResumeSkipsIterations:
+    """Orchestrator checkpoint + resume: verify execute() consumes restored iteration state."""
+
+    def test_orchestrator_execute_sets_resumed_iterations(self):
+        """When orchestrator is resumed, execute() calls get_start_iteration() and sets _resumed_iterations."""
+        from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
+        from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
+
+        orch = AdaptiveOrchestrator(
+            id="ao",
+            manager=AdaptiveAgentManager(llm=make_agent_llm()),
+            agents=[],
+            max_loops=10,
+        )
+        orch._chat_history = [{"role": "user", "content": "task"}, {"role": "assistant", "content": "delegated"}]
+        orch._completed_iterations = 3
+
+        state_dict = orch.to_checkpoint_state().model_dump()
+
+        new_orch = AdaptiveOrchestrator(
+            id="ao",
+            manager=AdaptiveAgentManager(llm=make_agent_llm()),
+            agents=[],
+            max_loops=10,
+        )
+        new_orch.from_checkpoint_state(state_dict)
+        assert new_orch.is_resumed is True
+
+        resuming = new_orch.is_resumed
+        new_orch.reset_run_state()
+
+        assert new_orch._chat_history == []
+        assert new_orch._completed_iterations == 0
+
+        if resuming:
+            new_orch._resumed_iterations = new_orch.get_start_iteration()
+            new_orch.reset_resumed_flag()
+
+        assert new_orch._resumed_iterations == 3
+        assert new_orch._chat_history == [
+            {"role": "user", "content": "task"},
+            {"role": "assistant", "content": "delegated"},
+        ]
+        assert not new_orch.is_resumed
+
+    def test_graph_orchestrator_execute_restores_state_on_resume(self):
+        """GraphOrchestrator resume restores chat_history, context, and current_state_id."""
+        from dynamiq.nodes.agents.orchestrators.graph import GraphOrchestrator
+        from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
+
+        orch = GraphOrchestrator(id="go", manager=GraphAgentManager(llm=make_agent_llm()))
+        orch._chat_history = [{"role": "user", "content": "navigate"}]
+        orch.context = {"key": "restored_value"}
+        orch._current_state_id = "state_2"
+        orch._completed_iterations = 4
+
+        state_dict = orch.to_checkpoint_state().model_dump()
+
+        new_orch = GraphOrchestrator(id="go", manager=GraphAgentManager(llm=make_agent_llm()))
+        new_orch.from_checkpoint_state(state_dict)
+
+        resuming = new_orch.is_resumed
+        new_orch.reset_run_state()
+        if resuming:
+            new_orch._resumed_iterations = new_orch.get_start_iteration()
+            new_orch.reset_resumed_flag()
+
+        assert new_orch._resumed_iterations == 4
+        assert new_orch._chat_history == [{"role": "user", "content": "navigate"}]
+        assert new_orch.context == {"key": "restored_value"}
+        assert new_orch._current_state_id == "state_2"
+
+    def test_linear_orchestrator_execute_restores_results_on_resume(self):
+        """LinearOrchestrator resume restores _results and _chat_history."""
+        from dynamiq.nodes.agents.orchestrators.linear import LinearOrchestrator
+        from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
+
+        orch = LinearOrchestrator(id="lo", manager=LinearAgentManager(llm=make_agent_llm()), agents=[])
+        orch._chat_history = [{"role": "user", "content": "plan"}]
+        orch._results = {1: {"name": "Task1", "result": "done"}}
+        orch._completed_iterations = 1
+
+        state_dict = orch.to_checkpoint_state().model_dump()
+
+        new_orch = LinearOrchestrator(id="lo", manager=LinearAgentManager(llm=make_agent_llm()), agents=[])
+        new_orch.from_checkpoint_state(state_dict)
+
+        resuming = new_orch.is_resumed
+        new_orch.reset_run_state()
+        if resuming:
+            new_orch._resumed_iterations = new_orch.get_start_iteration()
+            new_orch.reset_resumed_flag()
+
+        assert new_orch._resumed_iterations == 1
+        assert new_orch._chat_history == [{"role": "user", "content": "plan"}]
+
+    @pytest.mark.parametrize("backend_type", ["in_memory", "file"])
+    def test_agent_checkpoint_captures_iteration_count(self, mocker, backend_factory, backend_type):
+        """Agent in flow with mid-loop checkpoint: iteration count is correctly captured."""
+        backend = backend_factory(backend_type)
+        flow, agent = make_agent_flow(backend, mid_loop=True, max_loops=10)
+        mock_react_loop(mocker, tool_calls=4)
+
+        result = flow.run_sync(input_data={"input": "Multi-step task"})
+        assert result.status == RunnableStatus.SUCCESS
+
+        cp = backend.get_latest_by_flow(flow.id)
+        internal = cp.node_states["agent"].internal_state
+        iteration = internal.get("iteration", {})
+        assert iteration.get("completed_iterations") >= 3
+
+
+class TestStaleResumedFlagCleanup:
+    """Verify _is_resumed flag doesn't leak between runs on the same Flow object."""
+
+    def test_fresh_run_after_resume_clears_is_resumed(self, mocker):
+        """Run 1: resume from checkpoint. Run 2: fresh run. Agent should not think it's resumed."""
+        backend = InMemory()
+
+        flow, agent = make_agent_flow(backend, mid_loop=True, max_loops=5)
+        mock_react_loop(mocker, tool_calls=2, final_answer="First run done")
+        flow.run_sync(input_data={"input": "First task"})
+        mocker.stopall()
+
+        cp = backend.get_latest_by_flow(flow.id)
+        cp.node_states["agent"].status = CheckpointStatus.ACTIVE.value
+        cp.node_states["agent"].output_data = None
+        cp.completed_node_ids = [nid for nid in cp.completed_node_ids if nid != "agent"]
+        cp.status = CheckpointStatus.ACTIVE
+        backend.save(cp)
+
+        flow2, agent2 = make_agent_flow(backend, mid_loop=True, max_loops=5, flow_id=flow.id)
+        mock_react_loop(mocker, tool_calls=0, final_answer="Resumed answer")
+        result2 = flow2.run_sync(input_data=None, resume_from=cp.id)
+        assert result2.status == RunnableStatus.SUCCESS
+        mocker.stopall()
+
+        assert not agent2.is_resumed
+
+        flow3, agent3 = make_agent_flow(backend, mid_loop=True, max_loops=5, flow_id=flow.id)
+        mock_react_loop(mocker, tool_calls=1, final_answer="Fresh answer")
+        result3 = flow3.run_sync(input_data={"input": "Fresh task"})
+        assert result3.status == RunnableStatus.SUCCESS
+
+        assert not agent3.is_resumed
+
+    def test_flow_reset_clears_all_node_resumed_flags(self, mocker):
+        """After a resumed run, calling reset_run_state on the flow clears all _is_resumed flags."""
+        backend = InMemory()
+
+        flow, agent = make_agent_flow(backend, mid_loop=True, max_loops=5)
+        mock_react_loop(mocker, tool_calls=1, final_answer="Done")
+        flow.run_sync(input_data={"input": "task"})
+        mocker.stopall()
+
+        cp = backend.get_latest_by_flow(flow.id)
+        cp.node_states["agent"].status = CheckpointStatus.ACTIVE.value
+        cp.node_states["agent"].output_data = None
+        cp.completed_node_ids = [nid for nid in cp.completed_node_ids if nid != "agent"]
+        cp.status = CheckpointStatus.ACTIVE
+        backend.save(cp)
+
+        flow2, agent2 = make_agent_flow(backend, mid_loop=True, max_loops=5, flow_id=flow.id)
+        flow2._restore_from_checkpoint(cp)
+
+        for node in flow2.nodes:
+            if hasattr(node, "is_resumed"):
+                assert node.is_resumed is True
+
+        flow2.reset_run_state()
+
+        for node in flow2.nodes:
+            if hasattr(node, "is_resumed"):
+                assert node.is_resumed is False
+
+    def test_multiple_runs_on_same_flow_no_state_leak(self, mocker):
+        """Three sequential runs on the same Flow: no checkpoint state leaks between them."""
+        backend = InMemory()
+        flow, agent = make_agent_flow(backend, mid_loop=True, max_loops=5)
+
+        for i in range(3):
+            mock_react_loop(mocker, tool_calls=1, final_answer=f"Answer {i}")
+            result = flow.run_sync(input_data={"input": f"Task {i}"})
+            assert result.status == RunnableStatus.SUCCESS
+            mocker.stopall()
+
+        checkpoints = backend.get_list_by_flow(flow.id, limit=10)
+        assert len(checkpoints) == 3
+        assert all(cp.status == CheckpointStatus.COMPLETED for cp in checkpoints)

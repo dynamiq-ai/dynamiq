@@ -1,4 +1,3 @@
-import fcntl
 import json
 import os
 import tempfile
@@ -53,14 +52,6 @@ class FileSystem(CheckpointBackend):
         safe_id = flow_id.replace("/", "_").replace("\\", "_").replace(":", "_")
         return self._flow_index_dir / f"{safe_id}.json"
 
-    def _lock_file(self, file_obj, exclusive: bool = True) -> None:
-        """Acquire file lock."""
-        fcntl.flock(file_obj.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
-
-    def _unlock_file(self, file_obj) -> None:
-        """Release file lock."""
-        fcntl.flock(file_obj.fileno(), fcntl.LOCK_UN)
-
     def save(self, checkpoint: FlowCheckpoint) -> str:
         """Save checkpoint to file via atomic write-then-rename."""
         checkpoint.updated_at = datetime.now(timezone.utc)
@@ -83,11 +74,7 @@ class FileSystem(CheckpointBackend):
         path = self._checkpoint_path(checkpoint_id)
         try:
             with open(path) as f:
-                self._lock_file(f, exclusive=False)
-                try:
-                    data = json.load(f, object_hook=decode_reversible)
-                finally:
-                    self._unlock_file(f)
+                data = json.load(f, object_hook=decode_reversible)
         except FileNotFoundError:
             return None
 

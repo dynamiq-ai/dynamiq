@@ -98,6 +98,7 @@ class Orchestrator(IterativeCheckpointMixin, Node, ABC):
         self._run_depends = []
         self._chat_history = []
         self._completed_iterations = 0
+        self._resumed_iterations = 0
 
     def _clean_output(self, text: str) -> str:
         """Remove Markdown code fences and extra whitespace from a text."""
@@ -244,6 +245,7 @@ class Orchestrator(IterativeCheckpointMixin, Node, ABC):
         self._run_depends = []
         self._chat_history = []
         self._completed_iterations = 0
+        self._resumed_iterations = 0
         if self.manager:
             self.manager.reset_run_state()
 
@@ -320,7 +322,11 @@ class Orchestrator(IterativeCheckpointMixin, Node, ABC):
             OrchestratorError: If the orchestration process fails.
         """
         logger.info(f"Orchestrator {self.name} - {self.id}: started with INPUT DATA:\n{input_data}")
+        resuming = self.is_resumed
         self.reset_run_state()
+        if resuming:
+            self._resumed_iterations = self.get_start_iteration()
+            self.reset_resumed_flag()
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 

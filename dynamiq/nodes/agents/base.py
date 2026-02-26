@@ -412,10 +412,7 @@ class Agent(IterativeCheckpointMixin, Node):
         """Restore prompt messages and AgentState from a checkpoint IterationState."""
         data = AgentIterationData(**state.iteration_data)
         if data.prompt_messages:
-            self._prompt.messages = [
-                Message(content=m["content"], role=MessageRole(m["role"]), static=m.get("static", False))
-                for m in data.prompt_messages
-            ]
+            self._prompt.messages = Prompt.deserialize_messages(data.prompt_messages)
         if data.agent_state:
             from dynamiq.nodes.agents.agent import AgentState
 
@@ -426,11 +423,7 @@ class Agent(IterativeCheckpointMixin, Node):
         """Serialize current prompt messages for checkpoint persistence."""
         if not hasattr(self, "_prompt") or not self._prompt or not self._prompt.messages:
             return None
-        serialized = []
-        for msg in self._prompt.messages:
-            if isinstance(msg, Message):
-                serialized.append({"content": msg.content, "role": msg.role.value, "static": msg.static})
-        return serialized or None
+        return self._prompt.serialize_messages() or None
 
     def from_checkpoint_state(self, state: AgentCheckpointState | dict[str, Any]) -> None:
         """Restore agent state from checkpoint, including LLM, tool, and loop-level states."""

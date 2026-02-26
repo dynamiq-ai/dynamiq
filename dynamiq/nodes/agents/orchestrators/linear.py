@@ -246,7 +246,7 @@ class LinearOrchestrator(Orchestrator):
     def run_tasks(self, tasks: list[Task], input_task: str, config: RunnableConfig = None, **kwargs) -> None:
         """Execute the tasks using appropriate agents."""
 
-        for count, task in enumerate(tasks, start=1):
+        for count, task in enumerate(tasks[self._resumed_iterations :], start=self._resumed_iterations + 1):
             task_per_llm = f"**{task.description}**\n**Required information for output**: {task.output}"
 
             dependency_outputs = self.get_dependency_outputs(task.dependencies)

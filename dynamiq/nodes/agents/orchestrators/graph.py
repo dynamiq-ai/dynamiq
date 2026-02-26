@@ -353,10 +353,19 @@ class GraphOrchestrator(Orchestrator):
         if decision == Decision.RESPOND:
             return {"content": message}
         else:
-            self._chat_history.append({"role": "user", "content": input_task})
-            state = self._state_by_id[self.initial_state]
+            if not self._chat_history:
+                self._chat_history.append({"role": "user", "content": input_task})
 
-            for i in range(self.max_loops):
+            if (
+                hasattr(self, "_current_state_id")
+                and self._current_state_id
+                and self._current_state_id in self._state_by_id
+            ):
+                state = self._state_by_id[self._current_state_id]
+            else:
+                state = self._state_by_id[self.initial_state]
+
+            for i in range(self._resumed_iterations, self.max_loops):
                 logger.info(f"GraphOrchestrator {self.id}: Next state: {state.id}")
                 self._current_state_id = state.id
 
