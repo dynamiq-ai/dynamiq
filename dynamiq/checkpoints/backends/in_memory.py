@@ -42,10 +42,11 @@ class InMemory(CheckpointBackend):
 
     def update(self, checkpoint: FlowCheckpoint) -> None:
         """Update existing checkpoint in memory."""
+        checkpoint.updated_at = datetime.now(timezone.utc)
         with self._lock:
             if checkpoint.id not in self._checkpoints:
                 raise FileNotFoundError(f"Checkpoint {checkpoint.id} not found")
-        self.save(checkpoint)
+            self._checkpoints[checkpoint.id] = checkpoint.model_copy(deep=True)
 
     def delete(self, checkpoint_id: str) -> bool:
         """Delete checkpoint from memory."""

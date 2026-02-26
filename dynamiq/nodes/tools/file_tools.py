@@ -951,8 +951,10 @@ class FileReadTool(Node):
 
     def to_checkpoint_state(self) -> FileReadToolCheckpointState:
         """Extract file read tool state for checkpointing, including LLM component state."""
+        base_fields = super().to_checkpoint_state().model_dump(exclude_none=True)
         return FileReadToolCheckpointState(
             llm_state=self.llm.to_checkpoint_state().model_dump(),
+            **base_fields,
         )
 
     def from_checkpoint_state(self, state: FileReadToolCheckpointState | dict[str, Any]) -> None:

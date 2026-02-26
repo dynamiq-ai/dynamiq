@@ -220,7 +220,7 @@ class TestAgentCrashAndResume:
         assert cp.node_states["agent"].internal_state.get("iteration") is not None
 
         # Simulate crash: revert agent to "active" status, remove from completed
-        cp.node_states["agent"].status = "active"
+        cp.node_states["agent"].status = CheckpointStatus.ACTIVE.value
         cp.node_states["agent"].output_data = None
         cp.completed_node_ids = [nid for nid in cp.completed_node_ids if nid != "agent"]
         cp.status = CheckpointStatus.ACTIVE
@@ -265,7 +265,7 @@ class TestAgentCrashAndResume:
         cp = backend.get_latest_by_flow(flow.id)
         if "agent" in cp.node_states:
             cp.node_states["agent"].internal_state.pop("iteration", None)
-            cp.node_states["agent"].status = "active"
+            cp.node_states["agent"].status = CheckpointStatus.ACTIVE.value
             cp.node_states["agent"].output_data = None
             cp.completed_node_ids = [nid for nid in cp.completed_node_ids if nid != "agent"]
             cp.status = CheckpointStatus.ACTIVE
@@ -340,7 +340,7 @@ class TestEdgeCases:
         mocker.stopall()
 
         cp1 = backend.get_latest_by_flow(flow1.id)
-        cp1.node_states["agent"].status = "active"
+        cp1.node_states["agent"].status = CheckpointStatus.ACTIVE.value
         cp1.node_states["agent"].output_data = None
         cp1.completed_node_ids = [nid for nid in cp1.completed_node_ids if nid != "agent"]
         cp1.status = CheckpointStatus.ACTIVE
@@ -353,7 +353,7 @@ class TestEdgeCases:
         mocker.stopall()
 
         cp2 = backend.get_latest_by_flow(flow2.id)
-        cp2.node_states["agent"].status = "active"
+        cp2.node_states["agent"].status = CheckpointStatus.ACTIVE.value
         cp2.node_states["agent"].output_data = None
         cp2.completed_node_ids = [nid for nid in cp2.completed_node_ids if nid != "agent"]
         cp2.status = CheckpointStatus.ACTIVE

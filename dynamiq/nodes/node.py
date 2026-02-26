@@ -782,37 +782,35 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointMixin, ABC):
         Returns:
             ApprovalInputData: Result of approval.
         """
-        # Check for stored response from checkpoint (skip re-prompting on resume)
         if self._pending_approval_response is not None:
             logger.info(f"Node {self.name} - {self.id}: using stored approval response from checkpoint")
             approval_result = self._pending_approval_response
-            self._pending_approval_response = None  # Clear after use
-            return approval_result
+            self._pending_approval_response = None
+        else:
+            message = Template(approval_config.msg_template).render(self.to_dict(), input_data=input_data)
 
-        message = Template(approval_config.msg_template).render(self.to_dict(), input_data=input_data)
-
-        checkpoint_ctx = config.checkpoint.context if config and config.checkpoint else None
-        if checkpoint_ctx:
-            checkpoint_ctx.mark_pending_input(
-                node_id=self.id,
-                prompt=message,
-                metadata={"event": approval_config.event, "node_name": self.name},
-            )
-
-        match approval_config.feedback_method:
-            case FeedbackMethod.STREAM:
-                approval_result = self.send_streaming_approval_message(
-                    message, input_data, approval_config, config=config, **kwargs
+            checkpoint_ctx = config.checkpoint.context if config and config.checkpoint else None
+            if checkpoint_ctx:
+                checkpoint_ctx.mark_pending_input(
+                    node_id=self.id,
+                    prompt=message,
+                    metadata={"event": approval_config.event, "node_name": self.name},
                 )
-            case FeedbackMethod.CONSOLE:
-                approval_result = self.send_console_approval_message(message)
-            case _:
-                raise ValueError(f"Error: Incorrect feedback method is chosen {approval_config.feedback_method}.")
 
-        self._pending_approval_response = approval_result
+            match approval_config.feedback_method:
+                case FeedbackMethod.STREAM:
+                    approval_result = self.send_streaming_approval_message(
+                        message, input_data, approval_config, config=config, **kwargs
+                    )
+                case FeedbackMethod.CONSOLE:
+                    approval_result = self.send_console_approval_message(message)
+                case _:
+                    raise ValueError(f"Error: Incorrect feedback method is chosen {approval_config.feedback_method}.")
 
-        if checkpoint_ctx:
-            checkpoint_ctx.mark_input_received(self.id)
+            self._pending_approval_response = approval_result
+
+            if checkpoint_ctx:
+                checkpoint_ctx.mark_input_received(self.id)
 
         update_params = {
             feature_name: approval_result.data[feature_name]
@@ -828,7 +826,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointMixin, ABC):
                     f"with provided feedback '{approval_result.feedback}'."
                 )
                 approval_result.is_approved = True
-
             else:
                 approval_result.is_approved = False
                 logger.info(

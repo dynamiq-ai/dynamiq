@@ -349,8 +349,10 @@ class ContextManagerTool(Node):
 
     def to_checkpoint_state(self) -> ContextManagerCheckpointState:
         """Extract context manager state for checkpointing, including LLM component state."""
+        base_fields = super().to_checkpoint_state().model_dump(exclude_none=True)
         return ContextManagerCheckpointState(
             llm_state=self.llm.to_checkpoint_state().model_dump(),
+            **base_fields,
         )
 
     def from_checkpoint_state(self, state: ContextManagerCheckpointState | dict[str, Any]) -> None:

@@ -150,8 +150,10 @@ Parameter Guide:
 
     def to_checkpoint_state(self) -> SummarizerCheckpointState:
         """Extract summarizer state for checkpointing, including LLM component state."""
+        base_fields = super().to_checkpoint_state().model_dump(exclude_none=True)
         return SummarizerCheckpointState(
             llm_state=self.llm.to_checkpoint_state().model_dump(),
+            **base_fields,
         )
 
     def from_checkpoint_state(self, state: SummarizerCheckpointState | dict[str, Any]) -> None:

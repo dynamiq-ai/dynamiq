@@ -18,6 +18,7 @@ from dynamiq.checkpoints.checkpoint import (
     FlowCheckpoint,
     NodeCheckpointState,
     PendingInputContext,
+    utc_now,
 )
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.executors.base import BaseExecutor
@@ -377,7 +378,7 @@ class Flow(BaseFlow):
             "parent_run_id": kwargs.get("parent_run_id", None),
         }
 
-        if self._is_checkpoint_enabled():
+        if self._is_checkpoint_active():
             if self._checkpoint:
                 self._checkpoint.run_id = str(run_id)
                 self._checkpoint.wf_run_id = wf_run_id
@@ -425,7 +426,7 @@ class Flow(BaseFlow):
                     self._results.update(results)
                     self._ts.done(*results.keys())
 
-                    if self._is_checkpoint_enabled():
+                    if self._is_checkpoint_after_node_enabled():
                         self._update_checkpoint(results, CheckpointStatus.ACTIVE)
 
                     time.sleep(0.001)
@@ -452,7 +453,7 @@ class Flow(BaseFlow):
                     error=RunnableResultError.from_exception(error, failed_nodes=failed_nodes),
                 )
 
-            if self._is_checkpoint_enabled():
+            if self._is_checkpoint_after_node_enabled():
                 self._update_checkpoint({}, CheckpointStatus.COMPLETED)
                 self._cleanup_old_checkpoints()
 
@@ -530,7 +531,7 @@ class Flow(BaseFlow):
             "parent_run_id": kwargs.get("parent_run_id", run_id),
         }
 
-        if self._is_checkpoint_enabled():
+        if self._is_checkpoint_active():
             if self._checkpoint:
                 self._checkpoint.run_id = str(run_id)
                 self._checkpoint.wf_run_id = wf_run_id
@@ -585,7 +586,7 @@ class Flow(BaseFlow):
                         self._results.update(results)
                         self._ts.done(*results.keys())
 
-                        if self._is_checkpoint_enabled():
+                        if self._is_checkpoint_after_node_enabled():
                             self._update_checkpoint(results, CheckpointStatus.ACTIVE)
 
                     # Wait for ready nodes to be processed and reduce CPU usage by yielding control to the event loop
@@ -610,7 +611,7 @@ class Flow(BaseFlow):
                     error=RunnableResultError.from_exception(error, failed_nodes=failed_nodes),
                 )
 
-            if self._is_checkpoint_enabled():
+            if self._is_checkpoint_after_node_enabled():
                 self._update_checkpoint({}, CheckpointStatus.COMPLETED)
                 self._cleanup_old_checkpoints()
 
@@ -701,7 +702,11 @@ class Flow(BaseFlow):
         self._results = {}
 
         for node_id, node_state in checkpoint.node_states.items():
-            if node_state.status in ("success", "failure", "skip"):
+            if node_state.status in (
+                RunnableStatus.SUCCESS.value,
+                RunnableStatus.FAILURE.value,
+                RunnableStatus.SKIP.value,
+            ):
                 error = None
                 if node_state.error:
                     error_data = dict(node_state.error)
@@ -741,7 +746,7 @@ class Flow(BaseFlow):
 
     def _setup_checkpoint_context(self, config: RunnableConfig | None) -> RunnableConfig | None:
         """Setup checkpoint context for HITL and mid-agent-loop checkpointing."""
-        if not self._is_checkpoint_enabled():
+        if not self._is_checkpoint_active():
             return config
 
         def on_pending_input(node_id: str, prompt: str, metadata: dict | None) -> None:
@@ -771,7 +776,7 @@ class Flow(BaseFlow):
                         self._checkpoint.node_states[node_id] = NodeCheckpointState(
                             node_id=node_id,
                             node_type=node.type,
-                            status="active",
+                            status=CheckpointStatus.ACTIVE.value,
                             internal_state=internal_state,
                         )
                 self._save_checkpoint()
@@ -814,13 +819,18 @@ class Flow(BaseFlow):
 
         return CheckpointConfig(**merged_values)
 
-    def _is_checkpoint_enabled(self) -> bool:
-        """Check if checkpointing after each node is enabled and configured."""
+    def _is_checkpoint_active(self) -> bool:
+        """Check if any checkpoint feature is enabled (init, failure, HITL, mid-loop)."""
+        cfg = self._effective_checkpoint_config or self.checkpoint
+        return cfg.enabled and cfg.backend is not None
+
+    def _is_checkpoint_after_node_enabled(self) -> bool:
+        """Check if checkpointing after each node completion is enabled."""
         cfg = self._effective_checkpoint_config or self.checkpoint
         return cfg.enabled and cfg.backend is not None and cfg.checkpoint_after_node
 
     def _is_checkpoint_on_failure_enabled(self) -> bool:
-        """Check if checkpointing on failure is enabled and configured."""
+        """Check if checkpointing on failure is enabled."""
         cfg = self._effective_checkpoint_config or self.checkpoint
         return cfg.enabled and cfg.backend is not None and cfg.checkpoint_on_failure
 
@@ -853,7 +863,7 @@ class Flow(BaseFlow):
                 output_data=result.output,
                 error=result.error.to_dict() if result.error else None,
                 internal_state=internal_state,
-                completed_at=datetime.now(),
+                completed_at=utc_now(),
             )
 
             self._checkpoint.mark_node_complete(node_id, node_state)

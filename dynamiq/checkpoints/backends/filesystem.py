@@ -1,5 +1,7 @@
 import fcntl
 import json
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -60,16 +62,18 @@ class FileSystem(CheckpointBackend):
         fcntl.flock(file_obj.fileno(), fcntl.LOCK_UN)
 
     def save(self, checkpoint: FlowCheckpoint) -> str:
-        """Save checkpoint to file."""
+        """Save checkpoint to file via atomic write-then-rename."""
         checkpoint.updated_at = datetime.now(timezone.utc)
         path = self._checkpoint_path(checkpoint.id)
 
-        with open(path, "w") as f:
-            self._lock_file(f, exclusive=True)
-            try:
+        fd, tmp_path = tempfile.mkstemp(dir=self._data_dir, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
                 json.dump(checkpoint.model_dump(), f, default=encode_reversible, ensure_ascii=False)
-            finally:
-                self._unlock_file(f)
+            os.replace(tmp_path, path)
+        except BaseException:
+            os.unlink(tmp_path)
+            raise
 
         self._update_flow_index(checkpoint.flow_id, checkpoint.id, checkpoint.created_at)
         return checkpoint.id
@@ -77,15 +81,15 @@ class FileSystem(CheckpointBackend):
     def load(self, checkpoint_id: str) -> FlowCheckpoint | None:
         """Load checkpoint from file."""
         path = self._checkpoint_path(checkpoint_id)
-        if not path.exists():
+        try:
+            with open(path) as f:
+                self._lock_file(f, exclusive=False)
+                try:
+                    data = json.load(f, object_hook=decode_reversible)
+                finally:
+                    self._unlock_file(f)
+        except FileNotFoundError:
             return None
-
-        with open(path) as f:
-            self._lock_file(f, exclusive=False)
-            try:
-                data = json.load(f, object_hook=decode_reversible)
-            finally:
-                self._unlock_file(f)
 
         return FlowCheckpoint(**data)
 

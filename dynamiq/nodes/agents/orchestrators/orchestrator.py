@@ -254,9 +254,11 @@ class Orchestrator(IterativeCheckpointMixin, Node, ABC):
             cp = self.manager.to_checkpoint_state()
             manager_state = cp.model_dump() if hasattr(cp, "model_dump") else cp
 
+        base_fields = super().to_checkpoint_state().model_dump(exclude_none=True)
         state = OrchestratorCheckpointState(
             chat_history=list(self._chat_history),
             manager_state=manager_state,
+            **base_fields,
         )
         self._save_iteration_to_checkpoint(state)
         return state

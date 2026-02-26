@@ -387,10 +387,12 @@ class Agent(IterativeCheckpointMixin, Node):
                 if tool_state:
                     tool_states[tool.id] = tool_state
 
+        base_fields = super().to_checkpoint_state().model_dump(exclude_none=True)
         state = AgentCheckpointState(
             history_offset=self._history_offset,
             llm_state=llm_checkpoint.model_dump() if hasattr(llm_checkpoint, "model_dump") else llm_checkpoint,
             tool_states=tool_states,
+            **base_fields,
         )
         self._save_iteration_to_checkpoint(state)
         return state

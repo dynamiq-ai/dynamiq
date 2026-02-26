@@ -356,12 +356,14 @@ class E2BInterpreterTool(ConnectionNode):
 
     def to_checkpoint_state(self) -> E2BInterpreterCheckpointState:
         """Extract E2B sandbox state for checkpointing."""
+        base_fields = super().to_checkpoint_state().model_dump(exclude_none=True)
         if self._sandbox and self.persistent_sandbox:
             return E2BInterpreterCheckpointState(
                 sandbox_id=self._sandbox.sandbox_id,
                 installed_packages=list(self.installed_packages),
+                **base_fields,
             )
-        return E2BInterpreterCheckpointState()
+        return E2BInterpreterCheckpointState(**base_fields)
 
     def from_checkpoint_state(self, state: E2BInterpreterCheckpointState | dict[str, Any]) -> None:
         """Restore E2B sandbox state from checkpoint, attempting to reconnect to existing sandbox."""

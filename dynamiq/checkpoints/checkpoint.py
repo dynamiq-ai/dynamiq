@@ -30,6 +30,7 @@ class BaseCheckpointState(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     iteration: dict | None = Field(default=None, description="IterativeCheckpointMixin state for loop-level resume")
+    approval_response: dict | None = Field(default=None, description="Stored HITL approval response for resume")
 
 
 class CheckpointMixin:

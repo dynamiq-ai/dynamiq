@@ -253,9 +253,11 @@ Examples:
 
     def to_checkpoint_state(self) -> ThinkingToolCheckpointState:
         """Extract thinking tool state for checkpointing, including LLM component state."""
+        base_fields = super().to_checkpoint_state().model_dump(exclude_none=True)
         return ThinkingToolCheckpointState(
             thought_history=deepcopy(self._thought_history) if self.memory_enabled else [],
             llm_state=self.llm.to_checkpoint_state().model_dump(),
+            **base_fields,
         )
 
     def from_checkpoint_state(self, state: ThinkingToolCheckpointState | dict[str, Any]) -> None:
