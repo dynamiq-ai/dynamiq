@@ -1066,9 +1066,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     extra_guidance=extra_guidance,
                 )
                 continue
-            except Exception as e:
-                logger.error(f"Agent {self.name} - {self.id}: Error during agent execution: {e}")
-                raise e
 
             # Inject automatic summarization if token limit exceeded (like Context Manager Tool)
             self._try_summarize_history(config=config, **kwargs)

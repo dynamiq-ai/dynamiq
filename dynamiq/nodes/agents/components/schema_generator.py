@@ -129,7 +129,7 @@ def generate_structured_output_schemas(
                     "output_files": {
                         "type": "string",
                         "description": (
-                            "Comma-separated file paths to return when action is finish." " Empty string otherwise."
+                            "Comma-separated file paths to return when action is finish. Empty string otherwise."
                         ),
                     },
                 },

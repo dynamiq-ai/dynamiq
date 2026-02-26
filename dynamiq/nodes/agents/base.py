@@ -208,6 +208,11 @@ class Agent(Node):
         description="Enable multi-tool execution in a single step. "
         "When True, the agent can call multiple tools in parallel.",
     )
+    stream_tool_input_names: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Mapping of tool names to lists of JSON field names to stream from their action_input. "
+        "An empty list means stream the entire action_input.",
+    )
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
