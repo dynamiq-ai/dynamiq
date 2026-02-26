@@ -306,7 +306,8 @@ class ExaInputSchema(BaseModel):
     contents: ContentsRequest | None = Field(
         default=None,
         description=(
-            "Full customization of tool's contents payload (text/highlights/summary/livecrawl/subpages/extras/context). "
+            "Full customization of tool's contents payload "
+            "(text/highlights/summary/livecrawl/subpages/extras/context). "
             "Use this when include_full_content is insufficient."
         ),
     )
