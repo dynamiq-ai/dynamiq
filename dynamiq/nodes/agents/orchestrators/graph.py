@@ -356,10 +356,12 @@ class GraphOrchestrator(Orchestrator):
             self._chat_history.append({"role": "user", "content": input_task})
             state = self._state_by_id[self.initial_state]
 
-            for _ in range(self.max_loops):
+            for i in range(self.max_loops):
                 logger.info(f"GraphOrchestrator {self.id}: Next state: {state.id}")
+                self._current_state_id = state.id
 
                 if state.id == END:
+                    self._completed_iterations = i + 1
                     final_output = self._chat_history[-1]["content"] if self._chat_history else ""
                     return {"content": final_output, "context": self.context | {"history": self._chat_history}}
 
@@ -379,6 +381,7 @@ class GraphOrchestrator(Orchestrator):
                     self._run_depends = [NodeDependency(node=state).to_dict(for_tracing=True)]
                     self._chat_history = self._chat_history + output["history_messages"]
 
+                self._completed_iterations = i + 1
                 state = self._get_next_state(state, config=config, **kwargs)
 
     def get_iteration_state(self) -> IterationState:

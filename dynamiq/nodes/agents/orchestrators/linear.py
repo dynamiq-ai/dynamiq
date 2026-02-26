@@ -311,8 +311,8 @@ class LinearOrchestrator(Orchestrator):
                 task_per_llm += f"Error occurred:{manager_result.error.to_dict()}"
 
             if success_flag:
+                self._completed_iterations = count
                 continue
-
             else:
                 raise ValueError(
                     f"Orchestrator {self.name} - {self.id}: "

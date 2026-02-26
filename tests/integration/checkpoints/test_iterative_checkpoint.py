@@ -63,7 +63,7 @@ def make_agent_flow(backend, *, mid_loop: bool = True, max_loops: int = 5, flow_
         kwargs["id"] = flow_id
     flow = flows.Flow(
         nodes=[agent],
-        checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop=mid_loop),
+        checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop_enabled=mid_loop),
         **kwargs,
     )
     return flow, agent
@@ -179,7 +179,7 @@ class TestAgentMidLoopIterationCheckpoint:
         assert "max_loops" in agent_state
 
     def test_no_iteration_data_without_mid_loop_flag(self, mocker):
-        """Without checkpoint_mid_agent_loop=True, no mid-run iteration saves occur."""
+        """Without checkpoint_mid_agent_loop_enabled=True, no mid-run iteration saves occur."""
         backend = InMemory()
         flow, agent = make_agent_flow(backend, mid_loop=False)
         mock_react_loop(mocker, tool_calls=2)
@@ -581,7 +581,7 @@ class TestAgentFailureMidLoop:
         )
         flow = flows.Flow(
             nodes=[agent],
-            checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop=True),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop_enabled=True),
         )
 
         # LLM always returns tool calls, never final answer → hits max_loops
@@ -615,7 +615,7 @@ class TestAgentFailureMidLoop:
         )
         flow = flows.Flow(
             nodes=[agent],
-            checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop=True),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop_enabled=True),
         )
 
         call_count = {"value": 0}
@@ -670,7 +670,7 @@ class TestAgentTimeoutWithCheckpoint:
         )
         flow = flows.Flow(
             nodes=[agent],
-            checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop=True),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop_enabled=True),
         )
 
         def hanging_llm(stream: bool, *args, **kwargs):
@@ -711,7 +711,7 @@ class TestAgentTimeoutWithCheckpoint:
         )
         flow = flows.Flow(
             nodes=[agent],
-            checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop=True),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop_enabled=True),
         )
 
         call_count = {"value": 0}

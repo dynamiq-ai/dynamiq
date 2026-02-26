@@ -50,7 +50,7 @@ def make_agent_flow(backend, *, mid_loop: bool = False, flow_id: str | None = No
 
     flow = flows.Flow(
         nodes=[agent],
-        checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop=mid_loop),
+        checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop_enabled=mid_loop),
         **kwargs,
     )
     return flow, agent
@@ -148,7 +148,7 @@ class TestAgentMidLoopCheckpoint:
 
     @pytest.mark.parametrize("backend_type", ["in_memory", "file"])
     def test_mid_loop_captures_agent_state_during_execution(self, mocker, backend_factory, backend_type):
-        """With checkpoint_mid_agent_loop=True, agent state is saved after each tool call."""
+        """With checkpoint_mid_agent_loop_enabled=True, agent state is saved after each tool call."""
         backend = backend_factory(backend_type)
         flow, agent = make_agent_flow(backend, mid_loop=True)
         mock_react_loop(mocker, tool_calls=2)
@@ -203,7 +203,7 @@ class TestAgentMidLoopCheckpoint:
         flow, _ = make_agent_flow(backend, mid_loop=False)
         mock_react_loop(mocker, tool_calls=1)
 
-        run_config = RunnableConfig(checkpoint=CheckpointConfig(checkpoint_mid_agent_loop=True))
+        run_config = RunnableConfig(checkpoint=CheckpointConfig(checkpoint_mid_agent_loop_enabled=True))
         result = flow.run_sync(input_data={"input": "test"}, config=run_config)
 
         assert result.status == RunnableStatus.SUCCESS

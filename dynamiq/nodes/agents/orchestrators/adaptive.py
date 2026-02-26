@@ -200,6 +200,8 @@ class AdaptiveOrchestrator(Orchestrator):
             for i in range(self.max_loops):
                 action = self.get_next_action(config=config, **kwargs)
                 logger.info(f"Orchestrator {self.name} - {self.id}: Loop {i + 1} - Action: {action.dict()}")
+                self._completed_iterations = i + 1
+
                 if action.command == ActionCommand.DELEGATE:
                     self._handle_delegation(action=action, config=config, **kwargs)
 

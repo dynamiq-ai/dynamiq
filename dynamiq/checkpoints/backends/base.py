@@ -76,17 +76,16 @@ class CheckpointBackend(ABC, BaseModel):
         """Get the most recent checkpoint for a flow."""
         raise NotImplementedError
 
-    def cleanup_by_flow(self, flow_id: str, *, keep_count: int = 10, older_than_hours: int | None = None) -> int:
+    def cleanup_by_flow(self, flow_id: str, *, keep_count: int = 10, max_ttl_minutes: int | None = None) -> int:
         """Remove old checkpoints for a flow, returns count deleted."""
         checkpoints = self.get_list_by_flow(flow_id, limit=self.max_cleanup_results)
         deleted = 0
 
         for i, cp in enumerate(checkpoints):
             should_delete = i >= keep_count
-            if older_than_hours and not should_delete:
-                age_seconds = (datetime.now(timezone.utc) - cp.created_at).total_seconds()
-                age_hours = age_seconds / 3600
-                should_delete = age_hours > older_than_hours
+            if max_ttl_minutes is not None and not should_delete:
+                age_minutes = (datetime.now(timezone.utc) - cp.created_at).total_seconds() / 60
+                should_delete = age_minutes > max_ttl_minutes
             if should_delete and self.delete(cp.id):
                 deleted += 1
 

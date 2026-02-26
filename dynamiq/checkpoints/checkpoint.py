@@ -1,12 +1,12 @@
-import json
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable
 
+import orjson
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.checkpoints.utils import decode_checkpoint_data, encode_checkpoint_data
-from dynamiq.utils import decode_reversible, encode_reversible, generate_uuid
+from dynamiq.utils import encode_reversible, generate_uuid
 
 
 def utc_now() -> datetime:
@@ -101,13 +101,15 @@ class IterativeCheckpointMixin:
     def get_start_iteration(self) -> int:
         """Return the number of completed iterations (0 = fresh start).
 
-        Consumers call this at the top of their loop to decide whether to
-        skip iterations.  After returning > 0 the restored state is cleared
-        so subsequent calls return 0.
+        When a restored iteration exists, calls ``restore_iteration_state()``
+        to apply the saved state (prompt messages, agent state, etc.) before
+        returning the loop offset.  After returning > 0 the restored data is
+        cleared so subsequent calls return 0.
         """
         if not self._has_restored_iteration or not self._iteration_state:
             return 0
         completed = self._iteration_state.completed_iterations
+        self.restore_iteration_state(self._iteration_state)
         self._has_restored_iteration = False
         self._iteration_state = None
         return completed
@@ -262,16 +264,11 @@ class FlowCheckpoint(BaseModel):
             return self.node_states[node_id].output_data
         return None
 
-    def to_dict(self, **kwargs) -> dict:
-        """Convert checkpoint to dictionary."""
-        return self.model_dump(**kwargs)
-
-    def _to_serializable_dict(self) -> dict:
+    def to_dict(self) -> dict:
         """Convert to a fully JSON-serializable dict, handling complex types in Any fields.
 
         Fields typed as Any (original_input, node input_data/output_data) can contain
-        BytesIO, bytes, datetime etc. These must be pre-encoded before json.dumps
-        to avoid Pydantic's SerializationIterator wrapping.
+        BytesIO, bytes, datetime etc. These are pre-encoded to avoid serialization issues.
         """
         any_fields = {"original_input"}
         data = self.model_dump(exclude=any_fields)
@@ -287,35 +284,23 @@ class FlowCheckpoint(BaseModel):
 
     def to_json(self) -> str:
         """Serialize checkpoint to JSON string."""
-        return json.dumps(self._to_serializable_dict(), default=encode_reversible, ensure_ascii=False)
+        return orjson.dumps(self.to_dict(), default=encode_reversible).decode("utf-8")
 
     def to_bytes(self) -> bytes:
-        """Serialize checkpoint to bytes (uses orjson if available)."""
-        data = self._to_serializable_dict()
-        try:
-            import orjson
-
-            return orjson.dumps(data, default=encode_reversible)
-        except ImportError:
-            return json.dumps(data, default=encode_reversible, ensure_ascii=False).encode("utf-8")
+        """Serialize checkpoint to bytes."""
+        return orjson.dumps(self.to_dict(), default=encode_reversible)
 
     @classmethod
     def from_json(cls, json_str: str) -> "FlowCheckpoint":
         """Deserialize checkpoint from JSON string."""
-        data = json.loads(json_str, object_hook=decode_reversible)
-        return cls(**data)
+        raw = orjson.loads(json_str)
+        return cls(**decode_checkpoint_data(raw))
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "FlowCheckpoint":
         """Deserialize checkpoint from bytes."""
-        try:
-            import orjson
-
-            raw = orjson.loads(data)
-            decoded = decode_checkpoint_data(raw)
-            return cls(**decoded)
-        except ImportError:
-            return cls.from_json(data.decode("utf-8"))
+        raw = orjson.loads(data)
+        return cls(**decode_checkpoint_data(raw))
 
 
 class CheckpointConfig(BaseModel):
@@ -334,15 +319,15 @@ class CheckpointConfig(BaseModel):
     backend: Any | None = Field(default=None, description="CheckpointBackend instance for storage")
     resume_from: str | None = Field(default=None, description="Checkpoint ID to resume from (per-run)")
 
-    checkpoint_after_node: bool = Field(default=True, description="Create checkpoint after each node")
-    checkpoint_on_failure: bool = Field(default=True, description="Create checkpoint when workflow fails")
-    checkpoint_mid_agent_loop: bool = Field(default=False, description="Checkpoint during long agent loops")
+    checkpoint_after_node_enabled: bool = Field(default=True, description="Create checkpoint after each node")
+    checkpoint_on_failure_enabled: bool = Field(default=True, description="Create checkpoint when workflow fails")
+    checkpoint_mid_agent_loop_enabled: bool = Field(default=False, description="Checkpoint during long agent loops")
 
     max_checkpoints: int = Field(
         default=10,
         description="Maximum checkpoints to keep per flow_id. When exceeded, oldest checkpoints are removed.",
     )
-    max_retention_hours: int | None = Field(default=None, description="Delete checkpoints older than this many hours")
+    max_ttl_minutes: int | None = Field(default=None, description="Delete checkpoints older than this many minutes")
     exclude_node_ids: list[str] = Field(default_factory=list, description="Node IDs to skip checkpointing")
 
     context: CheckpointContext | None = Field(default=None, description="Runtime checkpoint context (set by Flow)")

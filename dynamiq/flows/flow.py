@@ -259,12 +259,15 @@ class Flow(BaseFlow):
         return topological_sorter
 
     def reset_run_state(self):
-        """Resets the run state of the flow."""
+        """Resets the run state of the flow and clears stale resumed flags on all nodes."""
         self._results = {
             node.id: RunnableResult(status=RunnableStatus.UNDEFINED)
             for node in self.nodes
         }
         self._ts = self.init_node_topological_sorter(nodes=self.nodes)
+        for node in self.nodes:
+            if isinstance(node, CheckpointMixin) and node.is_resumed:
+                node.reset_resumed_flag()
 
     def _cleanup_dry_run(self, config: RunnableConfig = None):
         """
@@ -763,7 +766,7 @@ class Flow(BaseFlow):
 
         def on_save_mid_run(node_id: str) -> None:
             cfg = self._effective_checkpoint_config or self.checkpoint
-            if self._checkpoint and cfg.checkpoint_mid_agent_loop:
+            if self._checkpoint and cfg.checkpoint_mid_agent_loop_enabled:
                 node = self._node_by_id.get(node_id)
                 if node and isinstance(node, CheckpointMixin):
                     checkpoint_state = node.to_checkpoint_state()
@@ -827,12 +830,12 @@ class Flow(BaseFlow):
     def _is_checkpoint_after_node_enabled(self) -> bool:
         """Check if checkpointing after each node completion is enabled."""
         cfg = self._effective_checkpoint_config or self.checkpoint
-        return cfg.enabled and cfg.backend is not None and cfg.checkpoint_after_node
+        return cfg.enabled and cfg.backend is not None and cfg.checkpoint_after_node_enabled
 
     def _is_checkpoint_on_failure_enabled(self) -> bool:
         """Check if checkpointing on failure is enabled."""
         cfg = self._effective_checkpoint_config or self.checkpoint
-        return cfg.enabled and cfg.backend is not None and cfg.checkpoint_on_failure
+        return cfg.enabled and cfg.backend is not None and cfg.checkpoint_on_failure_enabled
 
     def _update_checkpoint(self, new_results: dict[str, RunnableResult], status: CheckpointStatus) -> None:
         """Update checkpoint with new node results."""
@@ -891,7 +894,7 @@ class Flow(BaseFlow):
             deleted = cfg.backend.cleanup_by_flow(
                 self.id,
                 keep_count=cfg.max_checkpoints,
-                older_than_hours=cfg.max_retention_hours,
+                max_ttl_minutes=cfg.max_ttl_minutes,
             )
             if deleted > 0:
                 logger.debug(f"Flow {self.id}: cleaned up {deleted} old checkpoints")

@@ -459,7 +459,7 @@ class TestAgentWithToolsCheckpoint:
 
         flow = flows.Flow(
             nodes=nodes,
-            checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop=True),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop_enabled=True),
         )
         result = flow.run_sync(input_data={"input": "Calculate 6*7"})
 
@@ -475,7 +475,7 @@ class TestAgentWithToolsCheckpoint:
         assert "tool_states" in agent_state.internal_state
 
     def test_mid_loop_checkpoint_produces_more_saves(self, mocker):
-        """With checkpoint_mid_agent_loop=True, more checkpoint saves occur during agent loop."""
+        """With checkpoint_mid_agent_loop_enabled=True, more checkpoint saves occur during agent loop."""
         backend_off = InMemory()
         nodes_off, _ = make_agent_pipeline()
         mock_agent_react(mocker, tool_calls=2)
@@ -491,7 +491,7 @@ class TestAgentWithToolsCheckpoint:
 
         flow_off = flows.Flow(
             nodes=nodes_off,
-            checkpoint=CheckpointConfig(enabled=True, backend=backend_off, checkpoint_mid_agent_loop=False),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend_off, checkpoint_mid_agent_loop_enabled=False),
         )
         flow_off.run_sync(input_data={"input": "test"})
         saves_disabled = save_count_off["value"]
@@ -512,24 +512,24 @@ class TestAgentWithToolsCheckpoint:
 
         flow_on = flows.Flow(
             nodes=nodes_on,
-            checkpoint=CheckpointConfig(enabled=True, backend=backend_on, checkpoint_mid_agent_loop=True),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend_on, checkpoint_mid_agent_loop_enabled=True),
         )
         flow_on.run_sync(input_data={"input": "test"})
 
         assert save_count_on["value"] > saves_disabled
 
     def test_mid_loop_enabled_via_runnable_config(self, mocker):
-        """checkpoint_mid_agent_loop can be enabled per-run via RunnableConfig."""
+        """checkpoint_mid_agent_loop_enabled can be enabled per-run via RunnableConfig."""
         backend = InMemory()
         nodes, _ = make_agent_pipeline()
         mock_agent_react(mocker, tool_calls=1)
 
         flow = flows.Flow(
             nodes=nodes,
-            checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop=False),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop_enabled=False),
         )
 
-        run_config = RunnableConfig(checkpoint=CheckpointConfig(checkpoint_mid_agent_loop=True))
+        run_config = RunnableConfig(checkpoint=CheckpointConfig(checkpoint_mid_agent_loop_enabled=True))
         result = flow.run_sync(input_data={"input": "test"}, config=run_config)
 
         assert result.status == RunnableStatus.SUCCESS
@@ -546,7 +546,7 @@ class TestAgentWithToolsCheckpoint:
 
         flow = flows.Flow(
             nodes=nodes,
-            checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop=True),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend, checkpoint_mid_agent_loop_enabled=True),
         )
         result = flow.run_sync(input_data={"input": "Do 3 calculations"})
 

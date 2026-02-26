@@ -69,7 +69,7 @@ class FileSystem(CheckpointBackend):
         fd, tmp_path = tempfile.mkstemp(dir=self._data_dir, suffix=".tmp")
         try:
             with os.fdopen(fd, "w") as f:
-                json.dump(checkpoint.model_dump(), f, default=encode_reversible, ensure_ascii=False)
+                json.dump(checkpoint.to_dict(), f, default=encode_reversible, ensure_ascii=False)
             os.replace(tmp_path, path)
         except BaseException:
             os.unlink(tmp_path)
@@ -159,7 +159,8 @@ class FileSystem(CheckpointBackend):
                 index_data = json.load(f)
 
         index_data = [e for e in index_data if e["id"] != checkpoint_id]
-        index_data.insert(0, {"id": checkpoint_id, "created_at": created_at.isoformat()})
+        index_data.append({"id": checkpoint_id, "created_at": created_at.isoformat()})
+        index_data.sort(key=lambda e: e["created_at"], reverse=True)
 
         with open(index_path, "w") as f:
             json.dump(index_data, f)
