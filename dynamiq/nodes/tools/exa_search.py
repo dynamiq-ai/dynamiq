@@ -12,7 +12,7 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_EXA = """Searches the web using Exa with semantic understanding and advanced filtering.
+DESCRIPTION_EXA = """Searches the web with semantic understanding and advanced filtering.
 
 Key capabilities:
 - Neural, keyword, auto, or fast modes to balance recall vs. precision
@@ -30,13 +30,13 @@ Parameter quick-reference (ExaInputSchema):
 - `query` (required): natural-language search string.
 - `query_type`: `keyword`, `neural`, or `auto` (auto chooses best fit).
 - `category`: focus on company/research paper/news/pdf/github/tweet/personal site/linkedin profile/financial report.
-- `limit`: 1-100 results, respecting Exa caps (keyword <=10).
+- `limit`: 1-100 results, respecting tool's caps (keyword <=10).
 - `include_domains` / `exclude_domains`: whitelist or blacklist hostnames.
-- `start_crawl_date` / `end_crawl_date`: filter by when Exa discovered each link (ISO 8601).
+- `start_crawl_date` / `end_crawl_date`: filter by when tool discovered each link (ISO 8601).
 - `start_published_date` / `end_published_date`: filter by published timestamp.
 - `include_text` / `exclude_text`: require or forbid phrases (<=5 words) within the first ~1000 words.
 - `context`: bool or ContextOptions controlling combined context string length; `include_full_content`: shorthand for default text/highlight/summary payloads.
-- `contents`: advanced retrieval object mirroring Exa's ContentsRequest:
+- `contents`: advanced retrieval object mirroring tool's ContentsRequest:
   - `text`: bool or ContentsTextOptions (`max_characters`, `include_html_tags`).
   - `highlights`: tune `num_sentences`, `highlights_per_url`, and `query`.
   - `summary`: provide a guiding `query` and optional JSON `schema` for structured output.
@@ -296,17 +296,18 @@ class ExaInputSchema(BaseModel):
         default=None,
         description=(
             "Return all page contents concatenated into a single context string. True uses defaults; provide "
-            "ContextOptions to set a maxCharacters budget (Exa recommends >=10000)."
+            "ContextOptions to set a maxCharacters budget (recommended: >=10000)."
         ),
     )
     moderation: bool | None = Field(
         default=None,
-        description="Enable Exa's content moderation filter for unsafe content.",
+        description="Enable content moderation filter for unsafe content.",
     )
     contents: ContentsRequest | None = Field(
         default=None,
         description=(
-            "Full customization of Exa's contents payload (text/highlights/summary/livecrawl/subpages/extras/context). "
+            "Full customization of tool's contents payload "
+            "(text/highlights/summary/livecrawl/subpages/extras/context). "
             "Use this when include_full_content is insufficient."
         ),
     )
@@ -382,7 +383,7 @@ class ExaTool(ConnectionNode):
         default=None,
         description="Return a combined context blob (True for defaults, ContextOptions to cap characters).",
     )
-    moderation: bool | None = Field(default=None, description="Enable Exa's content moderation filter.")
+    moderation: bool | None = Field(default=None, description="Enable content moderation filter.")
     contents: ContentsRequest | None = Field(
         default=None, description="Advanced contents configuration mirroring Exa's ContentsRequest schema."
     )
@@ -422,7 +423,7 @@ class ExaTool(ConnectionNode):
             str: A formatted string containing the search results.
         """
         if not results:
-            return "No results returned by Exa."
+            return "No results returned by web search."
 
         formatted_results = []
         for index, result in enumerate(results, start=1):
