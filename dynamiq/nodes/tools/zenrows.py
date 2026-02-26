@@ -10,7 +10,7 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_ZENROWS = """Scrapes web content from URLs using ZenRows with advanced anti-bot protection and JavaScript rendering. Handles complex websites with proxy rotation, CAPTCHA solving, and browser automation for reliable data extraction.
+DESCRIPTION_ZENROWS = """Scrapes web content from URLs with advanced anti-bot protection and JavaScript rendering. Handles complex websites with proxy rotation, CAPTCHA solving, and browser automation for reliable data extraction.
 
 Key Capabilities:
 - Bypass anti-bot protection and access blocked websites
@@ -36,9 +36,9 @@ class ZenRowsInputSchema(BaseModel):
 
 class ZenRowsTool(ConnectionNode):
     """
-    A tool for scraping web pages, powered by ZenRows.
+    A tool for scraping web pages.
 
-    This class is responsible for scraping the content of a web page using ZenRows.
+    This class is responsible for scraping the content of a web page.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS

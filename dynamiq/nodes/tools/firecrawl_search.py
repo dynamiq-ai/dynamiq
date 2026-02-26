@@ -12,7 +12,7 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_FIRECRAWL_SEARCH = """Search the web with Firecrawl across web, news, and image verticals.
+DESCRIPTION_FIRECRAWL_SEARCH = """Search the internet across web, news, and image verticals.
 
 What it does:
 - Returns SERP results with geo/time filters and category biasing (github/research/pdf)

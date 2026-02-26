@@ -266,7 +266,7 @@ class FirecrawlTool(ConnectionNode):
         """Format the response for agent consumption using Markdown."""
         data = response.get("data", {}) or {}
         sections = [
-            "## Firecrawl Scrape Result",
+            "## Web Scraping Result",
             f"- URL: {url}",
             f"- Success: {response.get('success', False)}",
         ]

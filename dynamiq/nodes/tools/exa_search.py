@@ -12,7 +12,7 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_EXA = """Searches the web using Exa with semantic understanding and advanced filtering.
+DESCRIPTION_EXA = """Searches the web with semantic understanding and advanced filtering.
 
 Key capabilities:
 - Neural, keyword, auto, or fast modes to balance recall vs. precision
@@ -296,12 +296,12 @@ class ExaInputSchema(BaseModel):
         default=None,
         description=(
             "Return all page contents concatenated into a single context string. True uses defaults; provide "
-            "ContextOptions to set a maxCharacters budget (Exa recommends >=10000)."
+            "ContextOptions to set a maxCharacters budget (recommended: >=10000)."
         ),
     )
     moderation: bool | None = Field(
         default=None,
-        description="Enable Exa's content moderation filter for unsafe content.",
+        description="Enable ontent moderation filter for unsafe content.",
     )
     contents: ContentsRequest | None = Field(
         default=None,
@@ -422,7 +422,7 @@ class ExaTool(ConnectionNode):
             str: A formatted string containing the search results.
         """
         if not results:
-            return "No results returned by Exa."
+            return "No results returned by web search."
 
         formatted_results = []
         for index, result in enumerate(results, start=1):

@@ -11,7 +11,7 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_SCRAPE = """Scrapes web content from URLs using Jina with CSS selector targeting and content filtering.
+DESCRIPTION_SCRAPE = """Scrapes web content from URLs with CSS selector targeting and content filtering.
 
 Key Capabilities:
 - Clean text extraction with CSS selector precision
@@ -36,7 +36,7 @@ Examples:
 - {"url": "https://news.com", "remove_selector": ".ads"}
 - {"url": "https://blog.com", "include_images": true}"""
 
-DESCRIPTION_SEARCH = """Searches the web with the Jina Search API and returns LLM-ready SERP data.
+DESCRIPTION_SEARCH = """Searches the web with the Search API and returns LLM-ready SERP data.
 
 Highlights:
 - Supports geo/language targeting plus per-domain searches for authoritative sources
