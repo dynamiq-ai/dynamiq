@@ -1,5 +1,6 @@
 import asyncio
 import builtins
+import threading
 import time
 from datetime import datetime
 from functools import cached_property
@@ -11,6 +12,7 @@ from uuid import uuid4
 from pydantic import Field, PrivateAttr, computed_field, field_validator
 
 from dynamiq.checkpoints.checkpoint import (
+    CheckpointBehavior,
     CheckpointConfig,
     CheckpointContext,
     CheckpointMixin,
@@ -85,10 +87,11 @@ class Flow(BaseFlow):
         default_factory=CheckpointConfig, description="Configuration for checkpoint/resume functionality"
     )
 
-    # Private attributes for checkpoint state
     _checkpoint: FlowCheckpoint | None = PrivateAttr(default=None)
     _effective_checkpoint_config: CheckpointConfig | None = PrivateAttr(default=None)
     _original_input: Any = PrivateAttr(default=None)
+    _checkpoint_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
+    _checkpoint_persisted: bool = PrivateAttr(default=False)
 
     def __init__(self, **kwargs):
         """
@@ -265,6 +268,7 @@ class Flow(BaseFlow):
             for node in self.nodes
         }
         self._ts = self.init_node_topological_sorter(nodes=self.nodes)
+        self._checkpoint_persisted = False
         for node in self.nodes:
             if isinstance(node, CheckpointMixin) and node.is_resumed:
                 node.reset_resumed_flag()
@@ -875,14 +879,33 @@ class Flow(BaseFlow):
         self._save_checkpoint()
 
     def _save_checkpoint(self) -> None:
-        """Save current checkpoint to backend."""
+        """Save current checkpoint to backend.
+
+        In APPEND mode every save after the initial one creates a new snapshot
+        with a fresh ID and a ``parent_checkpoint_id`` link to the previous one,
+        building a chain suitable for time-travel.  The very first save stores
+        the checkpoint as-is (the chain root with no parent).
+        In REPLACE mode the same checkpoint is overwritten in-place every time.
+        """
         cfg = self._effective_checkpoint_config or self.checkpoint
-        if self._checkpoint and cfg.backend:
-            try:
-                cfg.backend.save(self._checkpoint)
-                logger.debug(f"Flow {self.id}: checkpoint saved - {self._checkpoint.id}")
-            except Exception as e:
-                logger.warning(f"Flow {self.id}: failed to save checkpoint - {e}")
+        if not self._checkpoint or not cfg.backend:
+            return
+
+        try:
+            with self._checkpoint_lock:
+                if cfg.behavior == CheckpointBehavior.APPEND and self._checkpoint_persisted:
+                    old_id = self._checkpoint.id
+                    self._checkpoint = self._checkpoint.model_copy(
+                        update={"id": str(uuid4()), "parent_checkpoint_id": old_id, "created_at": utc_now()}
+                    )
+                    cfg.backend.save(self._checkpoint)
+                    logger.debug(f"Flow {self.id}: checkpoint appended - {self._checkpoint.id} (parent={old_id})")
+                else:
+                    cfg.backend.save(self._checkpoint)
+                    self._checkpoint_persisted = True
+                    logger.debug(f"Flow {self.id}: checkpoint saved - {self._checkpoint.id}")
+        except Exception as e:
+            logger.warning(f"Flow {self.id}: failed to save checkpoint - {e}")
 
     def _cleanup_old_checkpoints(self) -> None:
         """Remove old checkpoints beyond max_checkpoints."""

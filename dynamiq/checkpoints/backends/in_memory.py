@@ -81,11 +81,32 @@ class InMemory(CheckpointBackend):
         results = self.get_list_by_flow(flow_id, status=status, limit=1)
         return results[0] if results else None
 
+    def _matches_run(self, cp: FlowCheckpoint, run_id: str) -> bool:
+        return cp.run_id == run_id or cp.wf_run_id == run_id
+
     def get_list_by_run(self, run_id: str, *, limit: int | None = None) -> list[FlowCheckpoint]:
-        """List checkpoints for a specific run. Use limit=None to get all."""
+        """List checkpoints matching run_id or wf_run_id. Use limit=None to get all."""
         with self._lock:
-            result = [cp.model_copy(deep=True) for cp in self._checkpoints.values() if cp.run_id == run_id]
+            result = [cp.model_copy(deep=True) for cp in self._checkpoints.values() if self._matches_run(cp, run_id)]
             result.sort(key=lambda x: x.created_at, reverse=True)
+            return result[:limit] if limit is not None else result
+
+    def get_list_by_flow_and_run(
+        self,
+        flow_id: str,
+        run_id: str,
+        *,
+        status: CheckpointStatus | None = None,
+        limit: int | None = None,
+    ) -> list[FlowCheckpoint]:
+        """List checkpoints for a specific flow and run (matches run_id or wf_run_id), newest first."""
+        with self._lock:
+            result = [
+                cp.model_copy(deep=True)
+                for cp in self._checkpoints.values()
+                if cp.flow_id == flow_id and self._matches_run(cp, run_id) and (status is None or cp.status == status)
+            ]
+            result.sort(key=lambda x: x.updated_at, reverse=True)
             return result[:limit] if limit is not None else result
 
     def clear(self) -> None:

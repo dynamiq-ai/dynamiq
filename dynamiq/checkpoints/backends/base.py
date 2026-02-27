@@ -92,8 +92,44 @@ class CheckpointBackend(ABC, BaseModel):
         return deleted
 
     def get_list_by_run(self, run_id: str, *, limit: int | None = None) -> list[FlowCheckpoint]:
-        """List checkpoints for a specific run. Use limit=None to get all."""
+        """List checkpoints matching run_id or wf_run_id. Use limit=None to get all."""
         raise NotImplementedError("get_list_by_run not implemented for this backend")
+
+    def get_list_by_flow_and_run(
+        self,
+        flow_id: str,
+        run_id: str,
+        *,
+        status: CheckpointStatus | None = None,
+        limit: int | None = None,
+    ) -> list[FlowCheckpoint]:
+        """List checkpoints for a specific flow and run (matches run_id or wf_run_id), newest first."""
+        raise NotImplementedError("get_list_by_flow_and_run not implemented for this backend")
+
+    def get_latest_by_flow_and_run(
+        self,
+        flow_id: str,
+        run_id: str,
+        *,
+        status: CheckpointStatus | None = None,
+    ) -> FlowCheckpoint | None:
+        """Get the most recent checkpoint for a specific flow and run."""
+        results = self.get_list_by_flow_and_run(flow_id, run_id, status=status, limit=1)
+        return results[0] if results else None
+
+    def get_chain(self, checkpoint_id: str) -> list[FlowCheckpoint]:
+        """Walk parent_checkpoint_id links to build a checkpoint chain (newest first)."""
+        chain: list[FlowCheckpoint] = []
+        current_id: str | None = checkpoint_id
+        seen: set[str] = set()
+        while current_id and current_id not in seen:
+            seen.add(current_id)
+            cp = self.load(current_id)
+            if not cp:
+                break
+            chain.append(cp)
+            current_id = cp.parent_checkpoint_id
+        return chain
 
     async def save_async(self, checkpoint: FlowCheckpoint) -> str:
         """Async save - runs sync method in thread pool to avoid blocking event loop."""

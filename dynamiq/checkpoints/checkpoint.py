@@ -24,6 +24,13 @@ class CheckpointStatus(str, Enum):
     PENDING_INPUT = "pending_input"
 
 
+class CheckpointBehavior(str, Enum):
+    """How checkpoint saves are handled during execution."""
+
+    REPLACE = "replace"
+    APPEND = "append"
+
+
 class BaseCheckpointState(BaseModel):
     """Base checkpoint state model. All node checkpoint states inherit from this."""
 
@@ -318,6 +325,10 @@ class CheckpointConfig(BaseModel):
     enabled: bool = Field(default=False, description="Whether checkpointing is active")
     backend: Any | None = Field(default=None, description="CheckpointBackend instance for storage")
     resume_from: str | None = Field(default=None, description="Checkpoint ID to resume from (per-run)")
+    behavior: CheckpointBehavior = Field(
+        default=CheckpointBehavior.APPEND,
+        description="APPEND creates a new snapshot per save for time-travel; REPLACE overwrites the same checkpoint",
+    )
 
     checkpoint_after_node_enabled: bool = Field(default=True, description="Create checkpoint after each node")
     checkpoint_on_failure_enabled: bool = Field(default=True, description="Create checkpoint when workflow fails")

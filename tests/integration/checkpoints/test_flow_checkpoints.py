@@ -31,6 +31,10 @@ TEST_API_KEY = "test-api-key"
 LLM_MODEL = "gpt-4o-mini"
 MAX_CHECKPOINTS = 5
 
+AGENT_ID = "math-agent"
+AGENT_LLM_ID = "math-agent-llm"
+CALC_TOOL_ID = "calculator-tool"
+
 
 def make_llm(node_id: str = "llm", depends: list | None = None) -> llms.OpenAI:
     return llms.OpenAI(
@@ -69,19 +73,19 @@ def make_pipeline_with_python():
 def make_agent_pipeline():
     """Agent with calculator tool (standalone node, no Input/Output wrapper)."""
     agent_llm = llms.OpenAI(
-        id="agent-llm",
+        id=AGENT_LLM_ID,
         model=LLM_MODEL,
         connection=connections.OpenAI(api_key=TEST_API_KEY),
         is_postponed_component_init=True,
     )
     calc_tool = Python(
-        id="calc-tool",
+        id=CALC_TOOL_ID,
         name="calculator",
         description="Calculator tool for math operations",
         code='def run(input_data): return {"result": 42}',
     )
     agent = Agent(
-        id="agent",
+        id=AGENT_ID,
         name="ReAct Agent",
         llm=agent_llm,
         tools=[calc_tool],
@@ -281,21 +285,22 @@ class TestRunIsolation:
 
     @pytest.mark.parametrize("backend_type", ["in_memory", "file"])
     def test_separate_runs_create_separate_checkpoints(self, mocker, backend_factory, backend_type):
-        """Each run creates its own checkpoint, ordered newest-first."""
+        """Each run creates its own checkpoint chain, ordered newest-first."""
         backend = backend_factory(backend_type)
         mock_llm_success(mocker)
         run_count = 3
 
         flow = flows.Flow(
             nodes=make_pipeline(),
-            checkpoint=CheckpointConfig(enabled=True, backend=backend, max_checkpoints=10),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend, max_checkpoints=100),
         )
 
         for i in range(run_count):
             flow.run_sync(input_data={"query": f"Run {i}"})
 
-        checkpoints = backend.get_list_by_flow(flow.id, limit=10)
-        assert len(checkpoints) == run_count
+        checkpoints = backend.get_list_by_flow(flow.id, limit=100)
+        unique_run_ids = {cp.run_id for cp in checkpoints}
+        assert len(unique_run_ids) == run_count
 
         for i in range(len(checkpoints) - 1):
             assert checkpoints[i].created_at >= checkpoints[i + 1].created_at
@@ -467,8 +472,8 @@ class TestAgentWithToolsCheckpoint:
 
         cp = backend.get_latest_by_flow(flow.id)
         assert cp.status == CheckpointStatus.COMPLETED
-        assert "agent" in cp.node_states
-        agent_state = cp.node_states["agent"]
+        assert AGENT_ID in cp.node_states
+        agent_state = cp.node_states[AGENT_ID]
         assert agent_state.status == "success"
         assert "history_offset" in agent_state.internal_state
         assert "llm_state" in agent_state.internal_state
@@ -534,8 +539,8 @@ class TestAgentWithToolsCheckpoint:
 
         assert result.status == RunnableStatus.SUCCESS
         cp = backend.get_latest_by_flow(flow.id)
-        assert "agent" in cp.node_states
-        assert "history_offset" in cp.node_states["agent"].internal_state
+        assert AGENT_ID in cp.node_states
+        assert "history_offset" in cp.node_states[AGENT_ID].internal_state
 
     @pytest.mark.parametrize("backend_type", ["in_memory", "file"])
     def test_agent_multi_tool_calls_preserves_progress(self, mocker, backend_factory, backend_type):
@@ -553,8 +558,8 @@ class TestAgentWithToolsCheckpoint:
         assert result.status == RunnableStatus.SUCCESS
         cp = backend.get_latest_by_flow(flow.id)
         assert cp.status == CheckpointStatus.COMPLETED
-        assert cp.node_states["agent"].status == "success"
-        assert "tool_states" in cp.node_states["agent"].internal_state
+        assert cp.node_states[AGENT_ID].status == "success"
+        assert "tool_states" in cp.node_states[AGENT_ID].internal_state
 
 
 class TestWorkflowResumePassthrough:

@@ -229,6 +229,88 @@ class BackendTestMixin:
         assert loaded.metadata["tags"] == ["tag1", "tag2"]
         assert loaded.node_states["agent-1"].internal_state["tool_calls"] == 3
 
+    def test_get_list_by_run_matches_wf_run_id(self, backend: CheckpointBackend):
+        """get_list_by_run matches checkpoints by wf_run_id too."""
+        wf_run_id = "shared-workflow-run"
+        cp1 = FlowCheckpoint(flow_id="flow-1", run_id="run-a", wf_run_id=wf_run_id)
+        cp2 = FlowCheckpoint(flow_id="flow-1", run_id="run-b", wf_run_id=wf_run_id)
+        cp3 = FlowCheckpoint(flow_id="flow-1", run_id="run-c", wf_run_id="other-wf-run")
+
+        backend.save(cp1)
+        backend.save(cp2)
+        backend.save(cp3)
+
+        results = backend.get_list_by_run(wf_run_id)
+        assert len(results) == 2
+        assert {r.run_id for r in results} == {"run-a", "run-b"}
+
+    def test_get_list_by_flow_and_run(self, backend: CheckpointBackend):
+        """get_list_by_flow_and_run returns checkpoints matching both flow_id and run_id."""
+        flow_id = "target-flow"
+        wf_run_id = "target-wf-run"
+        cp1 = FlowCheckpoint(flow_id=flow_id, run_id="run-1", wf_run_id=wf_run_id)
+        cp2 = FlowCheckpoint(flow_id=flow_id, run_id="run-2", wf_run_id=wf_run_id)
+        cp3 = FlowCheckpoint(flow_id="other-flow", run_id="run-3", wf_run_id=wf_run_id)
+        cp4 = FlowCheckpoint(flow_id=flow_id, run_id="run-4", wf_run_id="other-wf-run")
+
+        for cp in [cp1, cp2, cp3, cp4]:
+            backend.save(cp)
+            time.sleep(0.01)
+
+        results = backend.get_list_by_flow_and_run(flow_id, wf_run_id)
+        assert len(results) == 2
+        assert {r.run_id for r in results} == {"run-1", "run-2"}
+
+    def test_get_list_by_flow_and_run_with_status(self, backend: CheckpointBackend):
+        """get_list_by_flow_and_run filters by status."""
+        flow_id = "status-flow"
+        wf_run_id = "status-wf-run"
+        cp1 = FlowCheckpoint(flow_id=flow_id, run_id="run-1", wf_run_id=wf_run_id, status=CheckpointStatus.COMPLETED)
+        cp2 = FlowCheckpoint(flow_id=flow_id, run_id="run-2", wf_run_id=wf_run_id, status=CheckpointStatus.ACTIVE)
+
+        backend.save(cp1)
+        backend.save(cp2)
+
+        completed = backend.get_list_by_flow_and_run(flow_id, wf_run_id, status=CheckpointStatus.COMPLETED)
+        assert len(completed) == 1
+        assert completed[0].status == CheckpointStatus.COMPLETED
+
+    def test_get_list_by_flow_and_run_with_limit(self, backend: CheckpointBackend):
+        """get_list_by_flow_and_run respects limit."""
+        flow_id = "limit-flow"
+        wf_run_id = "limit-wf-run"
+        for i in range(5):
+            cp = FlowCheckpoint(flow_id=flow_id, run_id=f"run-{i}", wf_run_id=wf_run_id)
+            backend.save(cp)
+            time.sleep(0.01)
+
+        results = backend.get_list_by_flow_and_run(flow_id, wf_run_id, limit=2)
+        assert len(results) == 2
+
+    def test_get_list_by_flow_and_run_empty(self, backend: CheckpointBackend):
+        """get_list_by_flow_and_run returns empty list when no match."""
+        results = backend.get_list_by_flow_and_run("nonexistent-flow", "nonexistent-run")
+        assert results == []
+
+    def test_get_latest_by_flow_and_run(self, backend: CheckpointBackend):
+        """get_latest_by_flow_and_run returns the most recent checkpoint."""
+        flow_id = "latest-flow"
+        wf_run_id = "latest-wf-run"
+        cp1 = FlowCheckpoint(flow_id=flow_id, run_id="run-1", wf_run_id=wf_run_id)
+        backend.save(cp1)
+        time.sleep(0.01)
+        cp2 = FlowCheckpoint(flow_id=flow_id, run_id="run-2", wf_run_id=wf_run_id)
+        backend.save(cp2)
+
+        latest = backend.get_latest_by_flow_and_run(flow_id, wf_run_id)
+        assert latest is not None
+        assert latest.run_id == "run-2"
+
+    def test_get_latest_by_flow_and_run_empty(self, backend: CheckpointBackend):
+        """get_latest_by_flow_and_run returns None when no match."""
+        result = backend.get_latest_by_flow_and_run("nonexistent-flow", "nonexistent-run")
+        assert result is None
+
 
 class TestInMemoryBackend(BackendTestMixin):
     """Tests for InMemory checkpoint backend."""
@@ -308,46 +390,46 @@ class TestFileSystemBackend(BackendTestMixin):
         """Create a filesystem backend in a temporary directory."""
         return FileSystem(base_path=str(tmp_path / ".dynamiq" / "checkpoints"))
 
-    def test_creates_directory_structure(self, tmp_path: Path):
-        """Test that backend creates necessary directories."""
+    def test_creates_base_directory(self, tmp_path: Path):
         base_dir = tmp_path / ".dynamiq" / "checkpoints"
         backend = FileSystem(base_path=str(base_dir))
+        assert backend._base_dir.exists()
 
-        assert backend._data_dir.exists()
-        assert backend._flow_index_dir.exists()
-
-    def test_checkpoint_files_exist(self, backend: FileSystem):
-        """Test that checkpoint files are created."""
+    def test_save_creates_flow_and_run_directories(self, backend: FileSystem):
         checkpoint = FlowCheckpoint(flow_id="test-flow", run_id="run-1")
         backend.save(checkpoint)
 
-        checkpoint_file = backend._data_dir / f"{checkpoint.id}.json"
-        assert checkpoint_file.exists()
+        flow_dir = backend._flow_dir("test-flow")
+        assert flow_dir.exists()
 
-    def test_index_file_created(self, backend: FileSystem):
-        """Test that flow index file is created."""
+        run_dirs = [d for d in flow_dir.iterdir() if d.is_dir()]
+        assert len(run_dirs) == 1
+        assert "run-1" in run_dirs[0].name
+
+    def test_checkpoint_file_has_timestamp_and_id(self, backend: FileSystem):
         checkpoint = FlowCheckpoint(flow_id="test-flow", run_id="run-1")
         backend.save(checkpoint)
 
-        index_file = backend._flow_index_dir / "test-flow.json"
-        assert index_file.exists()
+        flow_dir = backend._flow_dir("test-flow")
+        run_dir = next(d for d in flow_dir.iterdir() if d.is_dir())
+        cp_files = list(run_dir.glob("*.json"))
+        assert len(cp_files) == 1
+        assert checkpoint.id.replace("-", "_") in cp_files[0].stem or checkpoint.id[:8] in cp_files[0].stem
 
-    def test_sanitizes_flow_id_for_index(self, backend: FileSystem):
-        """Test that special characters in flow_id are sanitized."""
+    def test_sanitizes_flow_id_in_directory_name(self, backend: FileSystem):
         checkpoint = FlowCheckpoint(flow_id="test/flow:name", run_id="run-1")
         backend.save(checkpoint)
 
-        index_file = backend._flow_index_dir / "test_flow_name.json"
-        assert index_file.exists()
+        flow_dir = backend._flow_dir("test/flow:name")
+        assert flow_dir.exists()
+        assert "/" not in flow_dir.name
+        assert ":" not in flow_dir.name
 
     def test_get_list_by_run(self, backend: FileSystem):
-        """Test listing checkpoints by run_id."""
         run_id = "test-run-123"
-
         cp1 = FlowCheckpoint(flow_id="flow-1", run_id=run_id)
         cp2 = FlowCheckpoint(flow_id="flow-2", run_id=run_id)
         cp3 = FlowCheckpoint(flow_id="flow-3", run_id="other-run")
-
         backend.save(cp1)
         backend.save(cp2)
         backend.save(cp3)
@@ -355,13 +437,10 @@ class TestFileSystemBackend(BackendTestMixin):
         checkpoints = backend.get_list_by_run(run_id)
         assert len(checkpoints) == 2
 
-    def test_delete_updates_index(self, backend: FileSystem):
-        """Test that deleting a checkpoint updates the flow index."""
+    def test_delete_removes_file(self, backend: FileSystem):
         flow_id = "test-flow"
-
         cp1 = FlowCheckpoint(flow_id=flow_id, run_id="run-1")
         cp2 = FlowCheckpoint(flow_id=flow_id, run_id="run-2")
-
         backend.save(cp1)
         backend.save(cp2)
 
@@ -372,6 +451,107 @@ class TestFileSystemBackend(BackendTestMixin):
         checkpoints = backend.get_list_by_flow(flow_id)
         assert len(checkpoints) == 1
         assert checkpoints[0].id == cp2.id
+
+    def test_multiple_checkpoints_per_run_in_same_directory(self, backend: FileSystem):
+        flow_id = "test-flow"
+        run_id = "run-1"
+        cp1 = FlowCheckpoint(flow_id=flow_id, run_id=run_id)
+        cp2 = FlowCheckpoint(flow_id=flow_id, run_id=run_id)
+        backend.save(cp1)
+        backend.save(cp2)
+
+        flow_dir = backend._flow_dir(flow_id)
+        run_dirs = [d for d in flow_dir.iterdir() if d.is_dir()]
+        assert len(run_dirs) == 1
+
+        cp_files = list(run_dirs[0].glob("*.json"))
+        assert len(cp_files) == 2
+
+    def test_same_wf_run_id_reuses_directory(self, backend: FileSystem):
+        """Checkpoints with the same wf_run_id but different run_ids land in one directory."""
+        flow_id = "reuse-dir-flow"
+        wf_run_id = "shared-wf-run"
+
+        cp1 = FlowCheckpoint(flow_id=flow_id, run_id="run-1", wf_run_id=wf_run_id)
+        cp2 = FlowCheckpoint(flow_id=flow_id, run_id="run-2", wf_run_id=wf_run_id)
+        cp3 = FlowCheckpoint(flow_id=flow_id, run_id="run-3", wf_run_id=wf_run_id)
+
+        backend.save(cp1)
+        backend.save(cp2)
+        backend.save(cp3)
+
+        flow_dir = backend._flow_dir(flow_id)
+        run_dirs = [d for d in flow_dir.iterdir() if d.is_dir()]
+        assert len(run_dirs) == 1
+        assert run_dirs[0].name.endswith(f"__{wf_run_id}")
+
+        cp_files = list(run_dirs[0].glob("*.json"))
+        assert len(cp_files) == 3
+
+    def test_different_wf_run_ids_get_separate_directories(self, backend: FileSystem):
+        """Checkpoints with different wf_run_ids create separate directories."""
+        flow_id = "separate-dir-flow"
+
+        cp1 = FlowCheckpoint(flow_id=flow_id, run_id="run-1", wf_run_id="wf-run-a")
+        cp2 = FlowCheckpoint(flow_id=flow_id, run_id="run-2", wf_run_id="wf-run-b")
+
+        backend.save(cp1)
+        backend.save(cp2)
+
+        flow_dir = backend._flow_dir(flow_id)
+        run_dirs = sorted(d for d in flow_dir.iterdir() if d.is_dir())
+        assert len(run_dirs) == 2
+        assert run_dirs[0].name.endswith("__wf-run-a") or run_dirs[1].name.endswith("__wf-run-a")
+        assert run_dirs[0].name.endswith("__wf-run-b") or run_dirs[1].name.endswith("__wf-run-b")
+
+    def test_directory_uses_wf_run_id_over_run_id(self, backend: FileSystem):
+        """Run directory name uses wf_run_id when available, not run_id."""
+        flow_id = "wf-pref-flow"
+        cp = FlowCheckpoint(flow_id=flow_id, run_id="flow-run-id", wf_run_id="wf-run-id")
+        backend.save(cp)
+
+        flow_dir = backend._flow_dir(flow_id)
+        run_dir = next(d for d in flow_dir.iterdir() if d.is_dir())
+        assert run_dir.name.endswith("__wf-run-id")
+        assert "flow-run-id" not in run_dir.name
+
+    def test_directory_falls_back_to_run_id_without_wf_run_id(self, backend: FileSystem):
+        """Run directory name uses run_id when wf_run_id is None."""
+        flow_id = "fallback-flow"
+        cp = FlowCheckpoint(flow_id=flow_id, run_id="my-run-id", wf_run_id=None)
+        backend.save(cp)
+
+        flow_dir = backend._flow_dir(flow_id)
+        run_dir = next(d for d in flow_dir.iterdir() if d.is_dir())
+        assert run_dir.name.endswith("__my-run-id")
+
+    def test_get_list_by_run_uses_suffix_match(self, backend: FileSystem):
+        """get_list_by_run uses suffix match, not substring."""
+        cp1 = FlowCheckpoint(flow_id="flow-1", run_id="run-123")
+        cp2 = FlowCheckpoint(flow_id="flow-2", run_id="run-1234")
+        backend.save(cp1)
+        backend.save(cp2)
+
+        results = backend.get_list_by_run("run-123")
+        assert len(results) == 1
+        assert results[0].run_id == "run-123"
+
+    def test_get_list_by_flow_and_run_filesystem(self, backend: FileSystem):
+        """get_list_by_flow_and_run scopes to a specific flow's run directory."""
+        flow_id = "scoped-flow"
+        wf_run_id = "scoped-wf-run"
+
+        cp1 = FlowCheckpoint(flow_id=flow_id, run_id="run-1", wf_run_id=wf_run_id)
+        cp2 = FlowCheckpoint(flow_id=flow_id, run_id="run-2", wf_run_id=wf_run_id)
+        cp3 = FlowCheckpoint(flow_id="other-flow", run_id="run-3", wf_run_id=wf_run_id)
+
+        backend.save(cp1)
+        backend.save(cp2)
+        backend.save(cp3)
+
+        results = backend.get_list_by_flow_and_run(flow_id, wf_run_id)
+        assert len(results) == 2
+        assert all(r.flow_id == flow_id for r in results)
 
 
 class TestAsyncBackendMethods:

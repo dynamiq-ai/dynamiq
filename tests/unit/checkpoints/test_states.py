@@ -4,6 +4,8 @@ import pytest
 
 from dynamiq import connections
 from dynamiq.checkpoints.checkpoint import (
+    CheckpointBehavior,
+    CheckpointConfig,
     CheckpointContext,
     CheckpointMixin,
     CheckpointStatus,
@@ -588,3 +590,67 @@ class TestOrchestratorCheckpointImplementation:
         new_orch.from_checkpoint_state(state_dict)
         assert new_orch._chat_history == [{"role": "user", "content": "plan tasks"}]
         assert new_orch.get_start_iteration() == 2
+
+
+class TestCheckpointBehavior:
+    """Tests for CheckpointBehavior enum and CheckpointConfig behavior field."""
+
+    def test_behavior_enum_values(self):
+        assert CheckpointBehavior.REPLACE.value == "replace"
+        assert CheckpointBehavior.APPEND.value == "append"
+
+    def test_config_defaults_to_append(self):
+        config = CheckpointConfig()
+        assert config.behavior == CheckpointBehavior.APPEND
+
+    def test_config_accepts_append(self):
+        config = CheckpointConfig(behavior=CheckpointBehavior.APPEND)
+        assert config.behavior == CheckpointBehavior.APPEND
+
+    def test_config_accepts_string_value(self):
+        config = CheckpointConfig(behavior="append")
+        assert config.behavior == CheckpointBehavior.APPEND
+
+    def test_flow_checkpoint_parent_field_exists(self):
+        cp = FlowCheckpoint(flow_id="f1", run_id="r1")
+        assert cp.parent_checkpoint_id is None
+
+    def test_flow_checkpoint_parent_set(self):
+        cp = FlowCheckpoint(flow_id="f1", run_id="r1", parent_checkpoint_id="parent-123")
+        assert cp.parent_checkpoint_id == "parent-123"
+
+    def test_get_chain_single_checkpoint(self):
+        from dynamiq.checkpoints.backends.in_memory import InMemory
+
+        backend = InMemory()
+        cp = FlowCheckpoint(flow_id="f1", run_id="r1")
+        backend.save(cp)
+
+        chain = backend.get_chain(cp.id)
+        assert len(chain) == 1
+        assert chain[0].id == cp.id
+
+    def test_get_chain_linked_checkpoints(self):
+        from dynamiq.checkpoints.backends.in_memory import InMemory
+
+        backend = InMemory()
+        cp1 = FlowCheckpoint(id="cp1", flow_id="f1", run_id="r1")
+        cp2 = FlowCheckpoint(id="cp2", flow_id="f1", run_id="r1", parent_checkpoint_id="cp1")
+        cp3 = FlowCheckpoint(id="cp3", flow_id="f1", run_id="r1", parent_checkpoint_id="cp2")
+        backend.save(cp1)
+        backend.save(cp2)
+        backend.save(cp3)
+
+        chain = backend.get_chain("cp3")
+        assert len(chain) == 3
+        assert [c.id for c in chain] == ["cp3", "cp2", "cp1"]
+
+    def test_get_chain_handles_missing_parent(self):
+        from dynamiq.checkpoints.backends.in_memory import InMemory
+
+        backend = InMemory()
+        cp = FlowCheckpoint(id="cp1", flow_id="f1", run_id="r1", parent_checkpoint_id="nonexistent")
+        backend.save(cp)
+
+        chain = backend.get_chain("cp1")
+        assert len(chain) == 1
