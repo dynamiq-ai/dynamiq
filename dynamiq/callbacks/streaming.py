@@ -583,7 +583,6 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                 self._buffer.find(XMLModeTag.OPEN_ACTION_INPUT, start)
                 if not final_answer_only
                 and self._current_action_name
-                and self._current_action_name in self.agent.stream_tool_input_names
                 else -1
             )
 

@@ -646,7 +646,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             config,
             **kwargs,
         )
-
         try:
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
