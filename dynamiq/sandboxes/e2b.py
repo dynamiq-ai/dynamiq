@@ -115,6 +115,12 @@ class E2BSandbox(Sandbox):
                 try:
                     self._sandbox = self._reconnect_with_retry()
                     logger.debug(f"E2B sandbox reconnected: {self.sandbox_id}")
+                    # Call set_timeout explicitly to ensure the sandbox timeout
+                    # is set to the proper value after reconnect.
+                    try:
+                        self._sandbox.set_timeout(self.timeout)
+                    except Exception as e:
+                        logger.debug("set_timeout after reconnect failed: %s", e)
                     self._ensure_directories()
                     return self._sandbox
                 except Exception as e:
@@ -154,10 +160,14 @@ class E2BSandbox(Sandbox):
         )
         def connect() -> E2BDesktopSandbox:
             logger.debug(f"Reconnecting to E2B sandbox: {self.sandbox_id}")
+            # Always pass timeout explicitly to avoid resetting
+            # the sandbox timeout to the 5-minute default
+            # if connect() is called without a timeout value.
             return E2BDesktopSandbox.connect(
                 sandbox_id=self.sandbox_id,
                 api_key=self.connection.api_key,
                 domain=getattr(self.connection, "domain", None),
+                timeout=self.timeout,
             )
 
         return connect()
