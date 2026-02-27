@@ -390,8 +390,9 @@ class GraphOrchestrator(Orchestrator):
                     self._run_depends = [NodeDependency(node=state).to_dict(for_tracing=True)]
                     self._chat_history = self._chat_history + output["history_messages"]
 
-                self._completed_iterations = i + 1
                 state = self._get_next_state(state, config=config, **kwargs)
+                self._current_state_id = state.id
+                self._completed_iterations = i + 1
 
     def get_iteration_state(self) -> IterationState:
         data = GraphOrchestratorIterationData(

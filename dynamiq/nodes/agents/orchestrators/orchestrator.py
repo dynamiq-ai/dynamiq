@@ -246,7 +246,7 @@ class Orchestrator(IterativeCheckpointMixin, Node, ABC):
         self._chat_history = []
         self._completed_iterations = 0
         self._resumed_iterations = 0
-        if self.manager:
+        if self.manager and not self.is_resumed:
             self.manager.reset_run_state()
 
     def to_checkpoint_state(self) -> OrchestratorCheckpointState:

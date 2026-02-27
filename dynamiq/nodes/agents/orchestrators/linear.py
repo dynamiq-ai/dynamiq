@@ -28,6 +28,7 @@ class LinearOrchestratorIterationData(OrchestratorIterationData):
     """Typed iteration data for LinearOrchestrator loop-level checkpoints."""
 
     results: dict[int, dict[str, Any]] = Field(default_factory=dict)
+    tasks: list[dict] = Field(default_factory=list)
 
 
 class Task(BaseModel):
@@ -80,6 +81,7 @@ class LinearOrchestrator(Orchestrator):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._results = {}
+        self._saved_tasks: list[Task] = []
 
     @property
     def to_dict_exclude_params(self):
@@ -99,15 +101,21 @@ class LinearOrchestrator(Orchestrator):
     def reset_run_state(self):
         super().reset_run_state()
         self._results = {}
+        self._saved_tasks = []
 
     def get_iteration_state(self) -> IterationState:
-        data = LinearOrchestratorIterationData(chat_history=list(self._chat_history), results=dict(self._results))
+        data = LinearOrchestratorIterationData(
+            chat_history=list(self._chat_history),
+            results=dict(self._results),
+            tasks=[t.model_dump() for t in self._saved_tasks],
+        )
         return IterationState(completed_iterations=self._completed_iterations, iteration_data=data.model_dump())
 
     def restore_iteration_state(self, state: IterationState) -> None:
         data = LinearOrchestratorIterationData(**state.iteration_data)
         self._chat_history = list(data.chat_history)
         self._results = dict(data.results)
+        self._saved_tasks = [Task(**t) for t in data.tasks] if data.tasks else []
 
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
@@ -383,7 +391,11 @@ class LinearOrchestrator(Orchestrator):
         if decision == Decision.RESPOND:
             return {"content": message}
         else:
-            tasks = self.get_tasks(input_task, config=config, **kwargs)
+            if self._saved_tasks:
+                tasks = self._saved_tasks
+            else:
+                tasks = self.get_tasks(input_task, config=config, **kwargs)
+                self._saved_tasks = tasks
             self.run_tasks(tasks=tasks, input_task=input_task, config=config, **kwargs)
             return {"content": self.generate_final_answer(input_task, config, **kwargs)}
 
