@@ -1,11 +1,11 @@
-"""E2B sandbox implementation."""
+"""E2B Desktop sandbox implementation."""
 
 import shlex
 import threading
 from typing import Any
 
 from e2b.exceptions import RateLimitException as E2BRateLimitException
-from e2b_code_interpreter import Sandbox as E2BCodeInterpreterSandbox
+from e2b_desktop import Sandbox as _E2BDesktopSDK
 from pydantic import ConfigDict, Field, PrivateAttr
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
@@ -17,11 +17,11 @@ from dynamiq.sandboxes.exceptions import SandboxConnectionError
 from dynamiq.utils.logger import logger
 
 
-class E2BSandbox(Sandbox):
-    """E2B sandbox implementation.
+class E2BDesktopSandbox(Sandbox):
+    """E2B Desktop sandbox implementation.
 
-    This implementation stores files in E2B remote sandbox filesystem.
-    Files persist for the lifetime of the sandbox session.
+    This implementation uses the e2b_desktop SDK to provide a full desktop
+    environment. Files persist for the lifetime of the sandbox session.
 
     Supports reconnecting to existing sandboxes by providing sandbox_id.
     """
@@ -41,7 +41,7 @@ class E2BSandbox(Sandbox):
         default_factory=SandboxCreationErrorHandling,
         description="Retry and backoff config for sandbox creation and reconnection (rate-limit and transient errors).",
     )
-    _sandbox: E2BCodeInterpreterSandbox | None = PrivateAttr(default=None)
+    _sandbox: _E2BDesktopSDK | None = PrivateAttr(default=None)
     _sandbox_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
     def __init__(self, **kwargs):
@@ -97,7 +97,7 @@ class E2BSandbox(Sandbox):
             public_url_error=public_url_error,
         )
 
-    def _ensure_sandbox(self) -> E2BCodeInterpreterSandbox:
+    def _ensure_sandbox(self) -> _E2BDesktopSDK:
         """Lazily initialize or reconnect to E2B sandbox, with retries on rate-limit and transient errors.
 
         Uses double-checked locking so concurrent threads (e.g. parallel tool
@@ -137,7 +137,7 @@ class E2BSandbox(Sandbox):
         except Exception as e:
             logger.warning(f"E2BSandbox failed to create directory: {e}")
 
-    def _reconnect_with_retry(self) -> E2BCodeInterpreterSandbox:
+    def _reconnect_with_retry(self) -> _E2BDesktopSDK:
         """Reconnect to existing sandbox with exponential backoff on rate-limit."""
         cfg = self.creation_error_handling
 
@@ -152,9 +152,9 @@ class E2BSandbox(Sandbox):
             ),
             reraise=True,
         )
-        def connect() -> E2BCodeInterpreterSandbox:
+        def connect() -> _E2BDesktopSDK:
             logger.debug(f"Reconnecting to E2B sandbox: {self.sandbox_id}")
-            return E2BCodeInterpreterSandbox.connect(
+            return _E2BDesktopSDK.connect(
                 sandbox_id=self.sandbox_id,
                 api_key=self.connection.api_key,
                 domain=getattr(self.connection, "domain", None),
@@ -162,7 +162,7 @@ class E2BSandbox(Sandbox):
 
         return connect()
 
-    def _create_with_retry(self) -> E2BCodeInterpreterSandbox:
+    def _create_with_retry(self) -> _E2BDesktopSDK:
         """Create a new sandbox with exponential backoff on rate-limit."""
         cfg = self.creation_error_handling
 
@@ -177,9 +177,9 @@ class E2BSandbox(Sandbox):
             ),
             reraise=True,
         )
-        def create() -> E2BCodeInterpreterSandbox:
+        def create() -> _E2BDesktopSDK:
             try:
-                return E2BCodeInterpreterSandbox.create(
+                return _E2BDesktopSDK.create(
                     template=self.template,
                     api_key=self.connection.api_key,
                     timeout=self.timeout,
