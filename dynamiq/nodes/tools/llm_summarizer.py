@@ -2,12 +2,19 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
+
+
+class SummarizerCheckpointState(BaseCheckpointState):
+    """Checkpoint state for SummarizerTool."""
+
+    llm_state: dict = Field(default_factory=dict, description="LLM component checkpoint state")
 
 PROMPT_TEMPLATE_SUMMARIZER = """
 You are tasked with cleaning up and formatting extracted text from an HTML file. The text contains content from various HTML elements like paragraphs, headers, and tables, but without any HTML tags. Your goal is to produce a well-written, coherent piece of content by removing unnecessary information and formatting the remaining text.
@@ -140,6 +147,24 @@ Parameter Guide:
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
         return data
+
+    def to_checkpoint_state(self) -> SummarizerCheckpointState:
+        """Extract summarizer state for checkpointing, including LLM component state."""
+        base_fields = super().to_checkpoint_state().model_dump(exclude_none=True)
+        return SummarizerCheckpointState(
+            llm_state=self.llm.to_checkpoint_state().model_dump(),
+            **base_fields,
+        )
+
+    def from_checkpoint_state(self, state: SummarizerCheckpointState | dict[str, Any]) -> None:
+        """Restore summarizer state from checkpoint, including LLM component state."""
+        super().from_checkpoint_state(state)
+        if isinstance(state, dict):
+            if llm_state := state.get("llm_state"):
+                self.llm.from_checkpoint_state(llm_state)
+        else:
+            if state.llm_state:
+                self.llm.from_checkpoint_state(state.llm_state)
 
     def _process_chunk(self, chunk: str, config: RunnableConfig, **kwargs) -> str:
         """

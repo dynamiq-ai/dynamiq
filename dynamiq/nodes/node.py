@@ -8,7 +8,7 @@ from datetime import datetime
 from functools import cached_property
 from queue import Empty
 from types import FunctionType, ModuleType
-from typing import Any, Callable, ClassVar, Union
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Union
 from uuid import uuid4
 
 from jinja2 import Template
@@ -16,7 +16,12 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, 
 
 from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingCallbackHandler
+from dynamiq.checkpoints.checkpoint import CheckpointMixin
 from dynamiq.connections import BaseConnection
+
+if TYPE_CHECKING:
+    from dynamiq.checkpoints.checkpoint import BaseCheckpointState
+
 from dynamiq.connections.managers import ConnectionManager, ConnectionManagerException
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.dry_run import DryRunMixin
@@ -215,7 +220,7 @@ class NodeOutputReferences:
         return NodeOutputReference(node=self.node, output_key=key)
 
 
-class Node(BaseModel, Runnable, DryRunMixin, ABC):
+class Node(BaseModel, Runnable, DryRunMixin, CheckpointMixin, ABC):
     """
     Abstract base class for all nodes in the workflow.
 
@@ -237,6 +242,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         _json_schema_fields (list[str]): List of parameter names that will be used when generating json schema
           with _generate_json_schema.
 
+    Checkpoint Support:
+        Node inherits from CheckpointMixin which provides default checkpoint implementations.
+        Subclasses can override to_checkpoint_state() and from_checkpoint_state() to
+        save/restore node-specific internal state.
     """
     id: str = Field(default_factory=generate_uuid)
     name: str | None = None
@@ -262,6 +271,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
     action_type: ActionType | None = Field(default=None, description="Action type classification for streaming.")
 
     _output_references: NodeOutputReferences = PrivateAttr()
+    _pending_approval_response: ApprovalInputData | None = PrivateAttr(default=None)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: type[BaseModel] | None = None
@@ -760,6 +770,9 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         Sends approval message and determines if it was approved or disapproved (canceled).
 
+        If the node has a stored approval response from a previous checkpoint (e.g., after
+        a crash/restart), it will use that response instead of prompting the user again.
+
         Args:
             approval_config (ApprovalConfig): Configuration for the approval.
             input_data (dict): Data that will be sent.
@@ -769,17 +782,34 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         Returns:
             ApprovalInputData: Result of approval.
         """
+        if self._pending_approval_response is not None:
+            logger.info(f"Node {self.name} - {self.id}: using stored approval response from checkpoint")
+            approval_result = self._pending_approval_response
+        else:
+            message = Template(approval_config.msg_template).render(self.to_dict(), input_data=input_data)
 
-        message = Template(approval_config.msg_template).render(self.to_dict(), input_data=input_data)
-        match approval_config.feedback_method:
-            case FeedbackMethod.STREAM:
-                approval_result = self.send_streaming_approval_message(
-                    message, input_data, approval_config, config=config, **kwargs
+            checkpoint_ctx = config.checkpoint.context if config and config.checkpoint else None
+            if checkpoint_ctx:
+                checkpoint_ctx.mark_pending_input(
+                    node_id=self.id,
+                    prompt=message,
+                    metadata={"event": approval_config.event, "node_name": self.name},
                 )
-            case FeedbackMethod.CONSOLE:
-                approval_result = self.send_console_approval_message(message)
-            case _:
-                raise ValueError(f"Error: Incorrect feedback method is chosen {approval_config.feedback_method}.")
+
+            match approval_config.feedback_method:
+                case FeedbackMethod.STREAM:
+                    approval_result = self.send_streaming_approval_message(
+                        message, input_data, approval_config, config=config, **kwargs
+                    )
+                case FeedbackMethod.CONSOLE:
+                    approval_result = self.send_console_approval_message(message)
+                case _:
+                    raise ValueError(f"Error: Incorrect feedback method is chosen {approval_config.feedback_method}.")
+
+            self._pending_approval_response = approval_result
+
+            if checkpoint_ctx:
+                checkpoint_ctx.mark_input_received(self.id)
 
         update_params = {
             feature_name: approval_result.data[feature_name]
@@ -787,6 +817,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             if feature_name in approval_result.data
         }
         approval_result.data = {**input_data, **update_params}
+        self._pending_approval_response = None
 
         if approval_result.is_approved is None:
             if approval_result.feedback == approval_config.accept_pattern:
@@ -795,7 +826,6 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
                     f"with provided feedback '{approval_result.feedback}'."
                 )
                 approval_result.is_approved = True
-
             else:
                 approval_result.is_approved = False
                 logger.info(
@@ -837,6 +867,32 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
         return input_data
 
+    def to_checkpoint_state(self) -> "BaseCheckpointState":
+        """
+        Return node-specific state for checkpointing.
+
+        Includes pending approval response if the node was waiting for or received
+        human input before a checkpoint was taken.
+        """
+        from dynamiq.checkpoints.checkpoint import BaseCheckpointState
+
+        state = BaseCheckpointState()
+        if self._pending_approval_response:
+            state.approval_response = self._pending_approval_response.model_dump()
+        return state
+
+    def from_checkpoint_state(self, state: "BaseCheckpointState | dict[str, Any]") -> None:
+        """
+        Restore node state from checkpoint.
+
+        Restores pending approval response if present, allowing the node to skip
+        re-prompting the user on resume.
+        """
+        super().from_checkpoint_state(state)
+        state_dict = state if isinstance(state, dict) else state.model_dump()
+        if approval_response := state_dict.get("approval_response"):
+            self._pending_approval_response = ApprovalInputData(**approval_response)
+
     def run_sync(
         self,
         input_data: dict,
@@ -857,6 +913,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             RunnableResult: Result of the node execution.
         """
         from dynamiq.nodes.agents.exceptions import RecoverableAgentException
+
+        # Reset stored approval response for fresh runs (not resumed from checkpoint)
+        if not self.is_resumed:
+            self._pending_approval_response = None
 
         logger.info(f"Node {self.name} - {self.id}: execution started.")
         transformed_input = input_data
@@ -910,6 +970,9 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             transformed_output = self.transform_output(output, config=config, **kwargs)
 
             self.run_on_node_end(config.callbacks, transformed_output, **merged_kwargs)
+
+            # Clear stored approval response after successful completion
+            self._pending_approval_response = None
 
             logger.info(
                 f"Node {self.name} - {self.id}: execution succeeded in "

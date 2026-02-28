@@ -1,18 +1,33 @@
 import json
 from typing import Any, Callable
 
+from pydantic import Field
+
 from dynamiq.callbacks import NodeCallbackHandler
+from dynamiq.checkpoints.checkpoint import IterationState
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.agents.orchestrators.graph_state import GraphState
-from dynamiq.nodes.agents.orchestrators.orchestrator import Decision, Orchestrator, OrchestratorError
+from dynamiq.nodes.agents.orchestrators.orchestrator import (
+    Decision,
+    Orchestrator,
+    OrchestratorError,
+    OrchestratorIterationData,
+)
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools import Python
 from dynamiq.nodes.tools.function_tool import function_tool
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
+
+
+class GraphOrchestratorIterationData(OrchestratorIterationData):
+    """Typed iteration data for GraphOrchestrator loop-level checkpoints."""
+
+    context: dict[str, Any] = Field(default_factory=dict)
+    current_state_id: str | None = None
 
 
 class StateNotFoundError(OrchestratorError):
@@ -338,13 +353,24 @@ class GraphOrchestrator(Orchestrator):
         if decision == Decision.RESPOND:
             return {"content": message}
         else:
-            self._chat_history.append({"role": "user", "content": input_task})
-            state = self._state_by_id[self.initial_state]
+            if not self._chat_history:
+                self._chat_history.append({"role": "user", "content": input_task})
 
-            for _ in range(self.max_loops):
+            if (
+                hasattr(self, "_current_state_id")
+                and self._current_state_id
+                and self._current_state_id in self._state_by_id
+            ):
+                state = self._state_by_id[self._current_state_id]
+            else:
+                state = self._state_by_id[self.initial_state]
+
+            for i in range(self._resumed_iterations, self.max_loops):
                 logger.info(f"GraphOrchestrator {self.id}: Next state: {state.id}")
+                self._current_state_id = state.id
 
                 if state.id == END:
+                    self._completed_iterations = i + 1
                     final_output = self._chat_history[-1]["content"] if self._chat_history else ""
                     return {"content": final_output, "context": self.context | {"history": self._chat_history}}
 
@@ -365,6 +391,23 @@ class GraphOrchestrator(Orchestrator):
                     self._chat_history = self._chat_history + output["history_messages"]
 
                 state = self._get_next_state(state, config=config, **kwargs)
+                self._current_state_id = state.id
+                self._completed_iterations = i + 1
+
+    def get_iteration_state(self) -> IterationState:
+        data = GraphOrchestratorIterationData(
+            chat_history=list(self._chat_history),
+            context=dict(self.context),
+            current_state_id=getattr(self, "_current_state_id", None),
+        )
+        return IterationState(completed_iterations=self._completed_iterations, iteration_data=data.model_dump())
+
+    def restore_iteration_state(self, state: IterationState) -> None:
+        data = GraphOrchestratorIterationData(**state.iteration_data)
+        self._chat_history = list(data.chat_history)
+        self.context = dict(data.context)
+        if data.current_state_id:
+            self._current_state_id = data.current_state_id
 
     def setup_streaming(self) -> None:
         """Setups streaming for orchestrator."""

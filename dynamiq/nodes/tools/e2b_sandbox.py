@@ -9,6 +9,7 @@ from e2b_code_interpreter import Sandbox
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
+from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 from dynamiq.connections import E2B as E2BConnection
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -278,6 +279,13 @@ class E2BInterpreterInputSchema(BaseModel):
         return handle_file_upload(files)
 
 
+class E2BInterpreterCheckpointState(BaseCheckpointState):
+    """Checkpoint state for E2B Interpreter nodes."""
+
+    sandbox_id: str | None = Field(default=None, description="E2B sandbox ID for reconnection")
+    installed_packages: list[str] = Field(default_factory=list, description="List of installed packages")
+
+
 class E2BInterpreterTool(ConnectionNode):
     """
     A tool for executing code and managing files in an E2B sandbox environment.
@@ -345,6 +353,41 @@ class E2BInterpreterTool(ConnectionNode):
         if self.files:
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         return data
+
+    def to_checkpoint_state(self) -> E2BInterpreterCheckpointState:
+        """Extract E2B sandbox state for checkpointing."""
+        base_fields = super().to_checkpoint_state().model_dump(exclude_none=True)
+        if self._sandbox and self.persistent_sandbox:
+            return E2BInterpreterCheckpointState(
+                sandbox_id=self._sandbox.sandbox_id,
+                installed_packages=list(self.installed_packages),
+                **base_fields,
+            )
+        return E2BInterpreterCheckpointState(**base_fields)
+
+    def from_checkpoint_state(self, state: E2BInterpreterCheckpointState | dict[str, Any]) -> None:
+        """Restore E2B sandbox state from checkpoint, attempting to reconnect to existing sandbox."""
+        super().from_checkpoint_state(state)
+
+        if isinstance(state, dict):
+            sandbox_id = state.get("sandbox_id")
+        else:
+            sandbox_id = state.sandbox_id
+
+        if sandbox_id and self.persistent_sandbox and self.connection.api_key:
+            try:
+                self._sandbox = Sandbox.connect(
+                    sandbox_id,
+                    api_key=self.connection.api_key,
+                    domain=self.connection.domain,
+                )
+                logger.info(f"Tool {self.name} - {self.id}: Reconnected to existing sandbox {sandbox_id}")
+            except Exception as e:
+                logger.warning(
+                    f"Tool {self.name} - {self.id}: Failed to reconnect to sandbox {sandbox_id}: {e}. "
+                    f"Creating new sandbox."
+                )
+                self._initialize_persistent_sandbox()
 
     def _initialize_persistent_sandbox(self):
         """Initialize the persistent sandbox, install packages, and upload initial files."""

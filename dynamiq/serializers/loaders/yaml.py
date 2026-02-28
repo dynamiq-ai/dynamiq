@@ -251,6 +251,11 @@ class WorkflowYAMLLoader:
                 pass
 
         if not entity:
+            import pydoc
+
+            entity = pydoc.locate(entity_type)
+
+        if not entity:
             raise WorkflowYAMLLoaderException(f"Entity '{entity_type}' is not valid.")
 
         entity_registry[entity_type] = entity
@@ -1018,6 +1023,14 @@ class WorkflowYAMLLoader:
             }
             if connection_manager:
                 flow_init_data["connection_manager"] = connection_manager
+
+            checkpoint_data = flow_init_data.get("checkpoint")
+            if isinstance(checkpoint_data, dict):
+                backend_data = checkpoint_data.get("backend")
+                if isinstance(backend_data, dict) and "type" in backend_data:
+                    backend_data = backend_data.copy()
+                    backend_cls = cls.get_entity_by_type(backend_data.pop("type"))
+                    checkpoint_data["backend"] = backend_cls(**backend_data)
 
             try:
                 flow = Flow(**flow_init_data)
