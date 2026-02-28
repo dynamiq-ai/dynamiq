@@ -342,3 +342,9 @@ class CheckpointConfig(BaseModel):
     exclude_node_ids: list[str] = Field(default_factory=list, description="Node IDs to skip checkpointing")
 
     context: CheckpointContext | None = Field(default=None, description="Runtime checkpoint context (set by Flow)")
+
+    def to_dict(self) -> dict:
+        data = self.model_dump(mode="json", exclude={"backend", "context", "resume_from"})
+        if self.backend:
+            data["backend"] = self.backend.to_dict()
+        return data

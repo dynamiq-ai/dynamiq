@@ -127,6 +127,7 @@ class Flow(BaseFlow):
             node.to_dict(include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs)
             for node in self.nodes
         ]
+        data["checkpoint"] = self.checkpoint.to_dict()
         return data
 
     @field_validator("nodes")
