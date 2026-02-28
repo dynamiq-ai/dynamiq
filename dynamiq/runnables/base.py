@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.cache.config import CacheConfig
 from dynamiq.callbacks import BaseCallbackHandler
-from dynamiq.checkpoints.checkpoint import CheckpointConfig
+from dynamiq.checkpoints.config import CheckpointConfig
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.types.streaming import StreamingConfig
 from dynamiq.utils import format_value, generate_uuid, is_called_from_async_context
@@ -36,6 +36,10 @@ class RunnableConfig(BaseModel):
     checkpoint: CheckpointConfig | None = Field(default=None, description="Per-run checkpoint config overrides")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def to_checkpoint_dict(self) -> dict:
+        """Serialize config for checkpoint storage, excluding non-serializable runtime fields."""
+        return self.model_dump(mode="json", exclude={"callbacks", "checkpoint"})
 
 
 class RunnableStatus(str, Enum):

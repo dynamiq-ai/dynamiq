@@ -4,7 +4,7 @@ import pytest
 
 from dynamiq.checkpoints.backends.filesystem import FileSystem
 from dynamiq.checkpoints.backends.in_memory import InMemory
-from dynamiq.checkpoints.checkpoint import CheckpointConfig
+from dynamiq.checkpoints.config import CheckpointConfig
 
 DEFAULT_MAX_CHECKPOINTS = 10
 

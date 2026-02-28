@@ -18,7 +18,8 @@ from litellm import ModelResponse
 from dynamiq import Workflow, connections, flows
 from dynamiq.checkpoints.backends.filesystem import FileSystem
 from dynamiq.checkpoints.backends.in_memory import InMemory
-from dynamiq.checkpoints.checkpoint import CheckpointConfig, CheckpointStatus
+from dynamiq.checkpoints.checkpoint import CheckpointStatus
+from dynamiq.checkpoints.config import CheckpointConfig
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.node import NodeDependency

@@ -1,6 +1,16 @@
 from typing import Any
+from uuid import UUID
 
 from dynamiq.utils import decode_reversible, encode_reversible
+
+
+def _encode_dict_key(key: Any) -> str | int | float | bool | None:
+    """Ensure dict key is a JSON-compatible primitive."""
+    if isinstance(key, UUID):
+        return str(key)
+    if isinstance(key, (str, int, float, bool, type(None))):
+        return key
+    return str(key)
 
 
 def encode_checkpoint_data(obj: Any) -> Any:
@@ -8,11 +18,12 @@ def encode_checkpoint_data(obj: Any) -> Any:
 
     Operates on raw Python objects (before Pydantic model_dump) so types like
     BytesIO are properly detected and encoded via encode_reversible markers.
+    Dict keys are coerced to JSON-compatible primitives (e.g. UUID -> str).
     """
     if obj is None or isinstance(obj, (str, int, float, bool)):
         return obj
     if isinstance(obj, dict):
-        return {k: encode_checkpoint_data(v) for k, v in obj.items()}
+        return {_encode_dict_key(k): encode_checkpoint_data(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [encode_checkpoint_data(item) for item in obj]
     return encode_reversible(obj)

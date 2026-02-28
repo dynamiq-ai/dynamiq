@@ -12,9 +12,6 @@ from uuid import uuid4
 from pydantic import Field, PrivateAttr, computed_field, field_validator
 
 from dynamiq.checkpoints.checkpoint import (
-    CheckpointBehavior,
-    CheckpointConfig,
-    CheckpointContext,
     CheckpointMixin,
     CheckpointStatus,
     FlowCheckpoint,
@@ -22,6 +19,7 @@ from dynamiq.checkpoints.checkpoint import (
     PendingInputContext,
     utc_now,
 )
+from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig, CheckpointContext
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.executors.base import BaseExecutor
 from dynamiq.executors.pool import ThreadExecutor
@@ -398,7 +396,7 @@ class Flow(BaseFlow):
                     run_id=str(run_id),
                     wf_run_id=wf_run_id,
                     original_input=input_data,
-                    original_config=config.model_dump() if config else None,
+                    original_config=config.to_checkpoint_dict() if config else None,
                 )
                 self._save_checkpoint()
 
@@ -551,7 +549,7 @@ class Flow(BaseFlow):
                     run_id=str(run_id),
                     wf_run_id=wf_run_id,
                     original_input=input_data,
-                    original_config=config.model_dump() if config else None,
+                    original_config=config.to_checkpoint_dict() if config else None,
                 )
                 self._save_checkpoint()
 

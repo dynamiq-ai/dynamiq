@@ -4,15 +4,13 @@ import pytest
 
 from dynamiq import connections
 from dynamiq.checkpoints.checkpoint import (
-    CheckpointBehavior,
-    CheckpointConfig,
-    CheckpointContext,
     CheckpointMixin,
     CheckpointStatus,
     FlowCheckpoint,
     IterationState,
     IterativeCheckpointMixin,
 )
+from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig, CheckpointContext
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.base import AgentCheckpointState

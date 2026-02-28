@@ -32,6 +32,12 @@ flows:
     name: Memory Agent Flow
     nodes:
       - memory-agent
+    checkpoint:
+      enabled: true
+      checkpoint_after_node_enabled: true
+      checkpoint_mid_agent_loop_enabled: true
+      backend:
+        type: dynamiq.checkpoints.backends.FileSystem
 
 workflows:
   memory-agent-workflow:
