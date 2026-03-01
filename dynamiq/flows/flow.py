@@ -1,6 +1,5 @@
 import asyncio
 import builtins
-import threading
 import time
 from datetime import datetime
 from functools import cached_property
@@ -11,15 +10,7 @@ from uuid import uuid4
 
 from pydantic import Field, PrivateAttr, computed_field, field_validator
 
-from dynamiq.checkpoints.checkpoint import (
-    CheckpointMixin,
-    CheckpointStatus,
-    FlowCheckpoint,
-    NodeCheckpointState,
-    PendingInputContext,
-    utc_now,
-)
-from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig, CheckpointContext
+from dynamiq.checkpoints.checkpoint import CheckpointFlowMixin, CheckpointNodeMixin, CheckpointStatus, FlowCheckpoint
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.executors.base import BaseExecutor
 from dynamiq.executors.pool import ThreadExecutor
@@ -40,7 +31,7 @@ class FlowNodeFailureException(Exception):
         self.failed_nodes = failed_nodes or []
 
 
-class Flow(BaseFlow):
+class Flow(CheckpointFlowMixin, BaseFlow):
     """
     A class for managing and executing a graph-like structure of nodes.
 
@@ -50,6 +41,7 @@ class Flow(BaseFlow):
         max_node_workers (int | None): Maximum number of concurrent node workers. Defaults to None.
         connection_manager (ConnectionManager): Manager for handling connections. Defaults to ConnectionManager().
         checkpoint (CheckpointConfig): Flow-level checkpoint defaults (backend, retention, behavior).
+            Inherited from CheckpointFlowMixin.
 
     Checkpointing uses a two-layer config:
     - Flow-level (CheckpointConfig): structural defaults - backend, retention, default behavior.
@@ -81,15 +73,7 @@ class Flow(BaseFlow):
     max_node_workers: int | None = None
     connection_manager: ConnectionManager = Field(default_factory=ConnectionManager)
 
-    checkpoint: CheckpointConfig = Field(
-        default_factory=CheckpointConfig, description="Configuration for checkpoint/resume functionality"
-    )
-
-    _checkpoint: FlowCheckpoint | None = PrivateAttr(default=None)
-    _effective_checkpoint_config: CheckpointConfig | None = PrivateAttr(default=None)
     _original_input: Any = PrivateAttr(default=None)
-    _checkpoint_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
-    _checkpoint_persisted: bool = PrivateAttr(default=False)
 
     def __init__(self, **kwargs):
         """
@@ -260,6 +244,53 @@ class Flow(BaseFlow):
 
         return topological_sorter
 
+    def _restore_from_checkpoint(self, checkpoint: FlowCheckpoint) -> None:
+        """Restore flow execution state from a persisted checkpoint."""
+        self._results = {}
+
+        for node_id, node_state in checkpoint.node_states.items():
+            if node_state.status in (
+                RunnableStatus.SUCCESS.value,
+                RunnableStatus.FAILURE.value,
+                RunnableStatus.SKIP.value,
+            ):
+                error = None
+                if node_state.error:
+                    error_data = dict(node_state.error)
+                    error_type = error_data.get("type")
+                    if isinstance(error_type, str):
+                        error_data["type"] = getattr(builtins, error_type, Exception)
+                    error = RunnableResultError(**error_data)
+
+                self._results[node_id] = RunnableResult(
+                    status=RunnableStatus(node_state.status),
+                    input=node_state.input_data,
+                    output=node_state.output_data,
+                    error=error,
+                )
+
+            node = self._node_by_id.get(node_id)
+            if node and isinstance(node, CheckpointNodeMixin) and node_state.internal_state:
+                node.from_checkpoint_state(node_state.internal_state)
+                logger.debug(f"Flow {self.id}: restored internal state for node {node_id}")
+
+        self._ts = self.init_node_topological_sorter(nodes=self.nodes)
+
+        if checkpoint.has_pending_inputs():
+            pending_node_ids = list(checkpoint.pending_inputs.keys())
+            logger.info(
+                f"Flow {self.id}: checkpoint has {len(pending_node_ids)} nodes waiting for input: {pending_node_ids}. "
+                f"These nodes will re-request approval on resume."
+            )
+            for node_id in pending_node_ids:
+                checkpoint.clear_pending_input(node_id)
+
+        logger.info(
+            f"Flow {self.id}: restored from checkpoint - "
+            f"{len(checkpoint.completed_node_ids)} nodes completed, "
+            f"{len(checkpoint.pending_node_ids)} nodes pending"
+        )
+
     def reset_run_state(self):
         """Resets the run state of the flow and clears stale resumed flags on all nodes."""
         self._results = {
@@ -269,7 +300,7 @@ class Flow(BaseFlow):
         self._ts = self.init_node_topological_sorter(nodes=self.nodes)
         self._checkpoint_persisted = False
         for node in self.nodes:
-            if isinstance(node, CheckpointMixin) and node.is_resumed:
+            if isinstance(node, CheckpointNodeMixin) and node.is_resumed:
                 node.reset_resumed_flag()
 
     def _cleanup_dry_run(self, config: RunnableConfig = None):
@@ -412,6 +443,7 @@ class Flow(BaseFlow):
                     config.max_node_workers if config and config.max_node_workers is not None else self.max_node_workers
                 )
                 run_executor = self.executor(max_workers=max_workers)
+                node_run_kwargs = merged_kwargs | {"parent_run_id": run_id}
 
                 while self._ts.is_active():
                     ready_nodes = self._get_nodes_ready_to_run(input_data=input_data)
@@ -427,7 +459,7 @@ class Flow(BaseFlow):
                     results = run_executor.execute(
                         ready_nodes=ready_nodes,
                         config=config,
-                        **(merged_kwargs | {"parent_run_id": run_id}),
+                        **node_run_kwargs,
                     )
                     self._results.update(results)
                     self._ts.done(*results.keys())
@@ -508,7 +540,7 @@ class Flow(BaseFlow):
         effective_resume = resume_from or self._effective_checkpoint_config.resume_from
 
         if effective_resume:
-            self._checkpoint = self._load_checkpoint(effective_resume)
+            self._checkpoint = await self._load_checkpoint_async(effective_resume)
             if not self._checkpoint:
                 raise ValueError(f"Checkpoint not found: {effective_resume}")
 
@@ -542,7 +574,7 @@ class Flow(BaseFlow):
                 self._checkpoint.run_id = str(run_id)
                 self._checkpoint.wf_run_id = wf_run_id
                 self._checkpoint.status = CheckpointStatus.ACTIVE
-                self._save_checkpoint()
+                await self._save_checkpoint_async()
             else:
                 self._checkpoint = FlowCheckpoint(
                     flow_id=self.id,
@@ -551,7 +583,7 @@ class Flow(BaseFlow):
                     original_input=input_data,
                     original_config=config.to_checkpoint_dict() if config else None,
                 )
-                self._save_checkpoint()
+                await self._save_checkpoint_async()
 
         config = self._setup_checkpoint_context(config)
 
@@ -561,6 +593,8 @@ class Flow(BaseFlow):
 
         try:
             if self.nodes:
+                node_run_kwargs = merged_kwargs | {"parent_run_id": run_id}
+
                 while self._ts.is_active():
                     ready_nodes = self._get_nodes_ready_to_run(input_data=input_data)
 
@@ -580,7 +614,7 @@ class Flow(BaseFlow):
                                 input_data=node.input_data,
                                 depends_result=node.depends_result,
                                 config=config,
-                                **(merged_kwargs | {"parent_run_id": run_id}),
+                                **node_run_kwargs,
                             )
                             for node in nodes_to_run
                         ]
@@ -593,17 +627,18 @@ class Flow(BaseFlow):
                         self._ts.done(*results.keys())
 
                         if self._is_checkpoint_after_node_enabled():
-                            self._update_checkpoint(results, CheckpointStatus.ACTIVE)
+                            await self._update_checkpoint_async(results, CheckpointStatus.ACTIVE)
 
                     # Wait for ready nodes to be processed and reduce CPU usage by yielding control to the event loop
-                    await asyncio.sleep(0.003)
+                    await asyncio.sleep(0.001)
 
             output = self._get_output()
             failed_nodes = self._get_failed_nodes_with_raise_behavior()
 
             if failed_nodes:
                 if self._checkpoint and self._is_checkpoint_on_failure_enabled():
-                    self._update_checkpoint({}, CheckpointStatus.FAILED)
+                    await self._update_checkpoint_async({}, CheckpointStatus.FAILED)
+                    logger.info(f"Flow {self.id}: checkpoint saved on failure, checkpoint_id={self._checkpoint.id}")
 
                 failed_names = [node.name or node.id for node in failed_nodes]
                 error_msg = f"Flow execution failed due to node failures: {', '.join(failed_names)}"
@@ -618,15 +653,16 @@ class Flow(BaseFlow):
                 )
 
             if self._is_checkpoint_after_node_enabled():
-                self._update_checkpoint({}, CheckpointStatus.COMPLETED)
-                self._cleanup_old_checkpoints()
+                await self._update_checkpoint_async({}, CheckpointStatus.COMPLETED)
+                await self._cleanup_old_checkpoints_async()
 
             self.run_on_flow_end(output, config, **merged_kwargs)
             logger.info(f"Flow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
             return RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=output)
         except Exception as e:
             if self._checkpoint and self._is_checkpoint_on_failure_enabled():
-                self._update_checkpoint({}, CheckpointStatus.FAILED)
+                await self._update_checkpoint_async({}, CheckpointStatus.FAILED)
+                logger.info(f"Flow {self.id}: checkpoint saved on failure, checkpoint_id={self._checkpoint.id}")
 
             failed_nodes = self._get_failed_nodes_with_raise_behavior()
             self.run_on_flow_error(e, config, failed_nodes=failed_nodes, **merged_kwargs)
@@ -687,332 +723,6 @@ class Flow(BaseFlow):
             for node in self.nodes
             if node.type not in nodes_types_to_skip and node not in dependant_nodes
         ]
-
-    def _load_checkpoint(self, resume_from: str | FlowCheckpoint) -> FlowCheckpoint | None:
-        """Load checkpoint from ID or return if already a FlowCheckpoint instance."""
-        if isinstance(resume_from, FlowCheckpoint):
-            return resume_from
-
-        cfg = self._effective_checkpoint_config or self.checkpoint
-        if cfg.backend:
-            return cfg.backend.load(resume_from)
-
-        return None
-
-    def _restore_from_checkpoint(self, checkpoint: FlowCheckpoint) -> None:
-        """Restore flow state from checkpoint.
-
-        Args:
-            checkpoint: The checkpoint to restore from
-        """
-        self._results = {}
-
-        for node_id, node_state in checkpoint.node_states.items():
-            if node_state.status in (
-                RunnableStatus.SUCCESS.value,
-                RunnableStatus.FAILURE.value,
-                RunnableStatus.SKIP.value,
-            ):
-                error = None
-                if node_state.error:
-                    error_data = dict(node_state.error)
-                    error_type = error_data.get("type")
-                    if isinstance(error_type, str):
-                        error_data["type"] = getattr(builtins, error_type, Exception)
-                    error = RunnableResultError(**error_data)
-
-                self._results[node_id] = RunnableResult(
-                    status=RunnableStatus(node_state.status),
-                    input=node_state.input_data,
-                    output=node_state.output_data,
-                    error=error,
-                )
-
-            node = self._node_by_id.get(node_id)
-            if node and isinstance(node, CheckpointMixin) and node_state.internal_state:
-                node.from_checkpoint_state(node_state.internal_state)
-                logger.debug(f"Flow {self.id}: restored internal state for node {node_id}")
-
-        self._ts = self.init_node_topological_sorter(nodes=self.nodes)
-
-        if checkpoint.has_pending_inputs():
-            pending_node_ids = list(checkpoint.pending_inputs.keys())
-            logger.info(
-                f"Flow {self.id}: checkpoint has {len(pending_node_ids)} nodes waiting for input: {pending_node_ids}. "
-                f"These nodes will re-request approval on resume."
-            )
-            for node_id in pending_node_ids:
-                checkpoint.clear_pending_input(node_id)
-
-        logger.info(
-            f"Flow {self.id}: restored from checkpoint - "
-            f"{len(checkpoint.completed_node_ids)} nodes completed, "
-            f"{len(checkpoint.pending_node_ids)} nodes pending"
-        )
-
-    def _setup_checkpoint_context(self, config: RunnableConfig | None) -> RunnableConfig | None:
-        """Setup checkpoint context for HITL and mid-agent-loop checkpointing."""
-        if not self._is_checkpoint_active():
-            return config
-
-        def on_pending_input(node_id: str, prompt: str, metadata: dict | None) -> None:
-            if self._checkpoint:
-                self._checkpoint.mark_pending_input(node_id, prompt, metadata)
-                self._save_checkpoint()
-                logger.info(f"Flow {self.id}: checkpoint saved with PENDING_INPUT status for node {node_id}")
-
-        def on_input_received(node_id: str) -> None:
-            if self._checkpoint:
-                self._checkpoint.clear_pending_input(node_id)
-                self._save_checkpoint()
-                logger.debug(f"Flow {self.id}: cleared pending input for node {node_id}")
-
-        def on_save_mid_run(node_id: str) -> None:
-            cfg = self._effective_checkpoint_config or self.checkpoint
-            if self._checkpoint and cfg.checkpoint_mid_agent_loop_enabled:
-                node = self._node_by_id.get(node_id)
-                if node and isinstance(node, CheckpointMixin):
-                    checkpoint_state = node.to_checkpoint_state()
-                    internal_state = (
-                        checkpoint_state.model_dump() if hasattr(checkpoint_state, "model_dump") else checkpoint_state
-                    )
-                    if node_id in self._checkpoint.node_states:
-                        self._checkpoint.node_states[node_id].internal_state = internal_state
-                    else:
-                        self._checkpoint.node_states[node_id] = NodeCheckpointState(
-                            node_id=node_id,
-                            node_type=node.type,
-                            status=CheckpointStatus.ACTIVE.value,
-                            internal_state=internal_state,
-                        )
-                self._save_checkpoint()
-                logger.debug(f"Flow {self.id}: mid-run checkpoint saved for node {node_id}")
-
-        checkpoint_context = CheckpointContext(
-            on_pending_input=on_pending_input,
-            on_input_received=on_input_received,
-            on_save_mid_run=on_save_mid_run,
-        )
-
-        if config is None:
-            config = RunnableConfig(checkpoint=CheckpointConfig(context=checkpoint_context))
-        elif config.checkpoint:
-            config.checkpoint.context = checkpoint_context
-        else:
-            config.checkpoint = CheckpointConfig(context=checkpoint_context)
-
-        return config
-
-    def _get_effective_checkpoint_config(self, config: RunnableConfig | None) -> CheckpointConfig:
-        """Merge flow-level checkpoint defaults with per-run overrides from RunnableConfig.
-
-        Run-level values override flow-level defaults. Fields not explicitly set at run-level
-        (i.e. left at their default) fall back to the flow-level value.
-        """
-        base = self.checkpoint
-        if not config or not config.checkpoint:
-            return base
-
-        run_cfg = config.checkpoint
-        run_fields = run_cfg.model_fields_set
-
-        merged_values: dict = {}
-        for field_name in CheckpointConfig.model_fields:
-            if field_name in run_fields:
-                merged_values[field_name] = getattr(run_cfg, field_name)
-            else:
-                merged_values[field_name] = getattr(base, field_name)
-
-        return CheckpointConfig(**merged_values)
-
-    def _is_checkpoint_active(self) -> bool:
-        """Check if any checkpoint feature is enabled (init, failure, HITL, mid-loop)."""
-        cfg = self._effective_checkpoint_config or self.checkpoint
-        return cfg.enabled and cfg.backend is not None
-
-    def _is_checkpoint_after_node_enabled(self) -> bool:
-        """Check if checkpointing after each node completion is enabled."""
-        cfg = self._effective_checkpoint_config or self.checkpoint
-        return cfg.enabled and cfg.backend is not None and cfg.checkpoint_after_node_enabled
-
-    def _is_checkpoint_on_failure_enabled(self) -> bool:
-        """Check if checkpointing on failure is enabled."""
-        cfg = self._effective_checkpoint_config or self.checkpoint
-        return cfg.enabled and cfg.backend is not None and cfg.checkpoint_on_failure_enabled
-
-    def _update_checkpoint(self, new_results: dict[str, RunnableResult], status: CheckpointStatus) -> None:
-        """Update checkpoint with new node results."""
-        if not self._checkpoint:
-            return
-
-        for node_id, result in new_results.items():
-            node = self._node_by_id.get(node_id)
-            if not node:
-                continue
-
-            cfg = self._effective_checkpoint_config or self.checkpoint
-            if node_id in cfg.exclude_node_ids:
-                continue
-
-            internal_state = {}
-            if isinstance(node, CheckpointMixin):
-                checkpoint_state = node.to_checkpoint_state()
-                internal_state = (
-                    checkpoint_state.model_dump() if hasattr(checkpoint_state, "model_dump") else checkpoint_state
-                )
-
-            node_state = NodeCheckpointState(
-                node_id=node_id,
-                node_type=node.type,
-                status=result.status.value,
-                input_data=result.input,
-                output_data=result.output,
-                error=result.error.to_dict() if result.error else None,
-                internal_state=internal_state,
-                completed_at=utc_now(),
-            )
-
-            self._checkpoint.mark_node_complete(node_id, node_state)
-
-        self._checkpoint.status = status
-        self._save_checkpoint()
-
-    def _save_checkpoint(self) -> None:
-        """Save current checkpoint to backend.
-
-        In APPEND mode every save after the initial one creates a new snapshot
-        with a fresh ID and a ``parent_checkpoint_id`` link to the previous one,
-        building a chain suitable for time-travel.  The very first save stores
-        the checkpoint as-is (the chain root with no parent).
-        In REPLACE mode the same checkpoint is overwritten in-place every time.
-        """
-        cfg = self._effective_checkpoint_config or self.checkpoint
-        if not self._checkpoint or not cfg.backend:
-            return
-
-        try:
-            with self._checkpoint_lock:
-                if cfg.behavior == CheckpointBehavior.APPEND and self._checkpoint_persisted:
-                    old_id = self._checkpoint.id
-                    self._checkpoint = self._checkpoint.model_copy(
-                        update={"id": str(uuid4()), "parent_checkpoint_id": old_id, "created_at": utc_now()}
-                    )
-                    cfg.backend.save(self._checkpoint)
-                    logger.debug(f"Flow {self.id}: checkpoint appended - {self._checkpoint.id} (parent={old_id})")
-                else:
-                    cfg.backend.save(self._checkpoint)
-                    self._checkpoint_persisted = True
-                    logger.debug(f"Flow {self.id}: checkpoint saved - {self._checkpoint.id}")
-        except Exception as e:
-            logger.warning(f"Flow {self.id}: failed to save checkpoint - {e}")
-
-    def _cleanup_old_checkpoints(self) -> None:
-        """Remove old checkpoints beyond max_checkpoints."""
-        cfg = self._effective_checkpoint_config or self.checkpoint
-        if not cfg.backend:
-            return
-
-        try:
-            deleted = cfg.backend.cleanup_by_flow(
-                self.id,
-                keep_count=cfg.max_checkpoints,
-                max_ttl_minutes=cfg.max_ttl_minutes,
-            )
-            if deleted > 0:
-                logger.debug(f"Flow {self.id}: cleaned up {deleted} old checkpoints")
-        except Exception as e:
-            logger.warning(f"Flow {self.id}: failed to cleanup checkpoints - {e}")
-
-    def list_checkpoints(self, limit: int = 10) -> list[FlowCheckpoint]:
-        """
-        List checkpoints for this flow.
-
-        Args:
-            limit: Maximum number of checkpoints to return
-
-        Returns:
-            List of checkpoints, newest first
-
-        Example:
-            >>> checkpoints = flow.list_checkpoints(limit=5)
-            >>> for cp in checkpoints:
-            ...     print(f"{cp.id}: {cp.status}")
-        """
-        if not self.checkpoint.backend:
-            return []
-        return self.checkpoint.backend.get_list_by_flow(self.id, limit=limit)
-
-    def get_latest_checkpoint(self, status: CheckpointStatus | None = None) -> FlowCheckpoint | None:
-        """
-        Get the most recent checkpoint.
-
-        Args:
-            status: Optional status filter
-
-        Returns:
-            The latest checkpoint if found
-
-        Example:
-            >>> # Get latest successful checkpoint
-            >>> cp = flow.get_latest_checkpoint(status=CheckpointStatus.COMPLETED)
-        """
-        if not self.checkpoint.backend:
-            return None
-        return self.checkpoint.backend.get_latest_by_flow(self.id, status=status)
-
-    def get_pending_inputs(self, checkpoint_id: str | None = None) -> dict[str, PendingInputContext]:
-        """
-        Get pending input contexts (HITL) from a checkpoint.
-
-        Useful for UI to display what approvals are waiting.
-
-        Args:
-            checkpoint_id: Specific checkpoint ID, or None to use current/latest
-
-        Returns:
-            Dict of node_id -> PendingInputContext for nodes waiting for input
-
-        Example:
-            >>> pending = flow.get_pending_inputs()
-            >>> for node_id, ctx in pending.items():
-            ...     print(f"Node {node_id} asks: {ctx.prompt}")
-        """
-        checkpoint = None
-        if checkpoint_id:
-            checkpoint = self.checkpoint.backend.load(checkpoint_id) if self.checkpoint.backend else None
-        elif self._checkpoint:
-            checkpoint = self._checkpoint
-        elif self.checkpoint.backend:
-            checkpoint = self.checkpoint.backend.get_latest_by_flow(self.id)
-
-        if checkpoint:
-            return checkpoint.pending_inputs
-        return {}
-
-    def delete_checkpoint(self, checkpoint_id: str) -> bool:
-        """
-        Delete a specific checkpoint.
-
-        Args:
-            checkpoint_id: The checkpoint to delete
-
-        Returns:
-            True if deleted, False if not found
-        """
-        if not self.checkpoint.backend:
-            return False
-        return self.checkpoint.backend.delete(checkpoint_id)
-
-    def clear_all_checkpoints(self) -> int:
-        """
-        Delete all checkpoints for this flow.
-
-        Returns:
-            Number of checkpoints deleted
-        """
-        if not self.checkpoint.backend:
-            return 0
-        return self.checkpoint.backend.cleanup_by_flow(self.id, keep_count=0)
 
     def add_nodes(self, nodes: Node | list[Node]):
         """

@@ -3,14 +3,9 @@
 import pytest
 
 from dynamiq import connections
-from dynamiq.checkpoints.checkpoint import (
-    CheckpointMixin,
-    CheckpointStatus,
-    FlowCheckpoint,
-    IterationState,
-    IterativeCheckpointMixin,
-)
+from dynamiq.checkpoints.checkpoint import CheckpointNodeMixin, FlowCheckpoint, IterationState, IterativeCheckpointMixin
 from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig, CheckpointContext
+from dynamiq.checkpoints.types import CheckpointStatus
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.base import AgentCheckpointState
@@ -113,7 +108,7 @@ class TestAgentCheckpointMixin:
         )
 
     def test_agent_implements_checkpoint_mixin(self, agent_node):
-        assert isinstance(agent_node, CheckpointMixin)
+        assert isinstance(agent_node, CheckpointNodeMixin)
         assert hasattr(agent_node, "to_checkpoint_state")
         assert hasattr(agent_node, "from_checkpoint_state")
         assert hasattr(agent_node, "is_resumed")

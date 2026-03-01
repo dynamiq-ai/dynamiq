@@ -1,15 +1,3 @@
-"""Integration tests for checkpoint/resume with realistic workflows.
-
-Tests cover full end-to-end scenarios:
-- Workflow success with checkpoint creation and verification
-- Failure and recovery (LLM/tool failures -> resume from checkpoint)
-- Agent with tools: mid-loop checkpointing and state preservation
-- Run isolation: multiple runs produce independent checkpoints
-- Per-run config overrides via RunnableConfig
-- Workflow wrapper passthrough
-- Async execution
-"""
-
 from io import BytesIO
 
 import pytest
@@ -665,3 +653,379 @@ class TestBinaryDataCheckpoint:
         cp = backend.get_latest_by_flow(flow.id)
         assert cp.status == CheckpointStatus.COMPLETED
         assert cp.original_input is not None
+
+
+class TestAsyncSuccess:
+    """run_async creates a COMPLETED checkpoint with full node state."""
+
+    @pytest.mark.asyncio
+    async def test_pipeline_creates_completed_checkpoint(self, mocker):
+        """All nodes succeed: checkpoint is COMPLETED with original_input and all node states."""
+        backend = InMemory()
+        mock_llm_success(mocker)
+        input_data = {"query": "What is AI?"}
+
+        flow = flows.Flow(
+            nodes=make_pipeline(),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend),
+        )
+        result = await flow.run_async(input_data=input_data)
+
+        assert result.status == RunnableStatus.SUCCESS
+
+        cp = await backend.get_latest_by_flow_async(flow.id)
+        assert cp is not None
+        assert cp.status == CheckpointStatus.COMPLETED
+        assert cp.original_input == input_data
+        assert set(cp.completed_node_ids) == {"input", "llm", "output"}
+        assert all(cp.node_states[nid].status == "success" for nid in cp.completed_node_ids)
+
+    @pytest.mark.asyncio
+    async def test_wf_run_id_stored_from_config(self, mocker):
+        """run_id from RunnableConfig is stored as wf_run_id on the checkpoint."""
+        backend = InMemory()
+        mock_llm_success(mocker)
+
+        flow = flows.Flow(
+            nodes=make_pipeline(),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend),
+        )
+        wf_run_id = "async-wf-run-123"
+        await flow.run_async(input_data={"query": "test"}, config=RunnableConfig(run_id=wf_run_id))
+
+        cp = await backend.get_latest_by_flow_async(flow.id)
+        assert cp.wf_run_id == wf_run_id
+        assert cp.run_id != wf_run_id
+
+    @pytest.mark.asyncio
+    async def test_checkpoint_disabled_by_default(self, mocker):
+        """Without an explicit CheckpointConfig, no checkpoint is written."""
+        mock_llm_success(mocker)
+        flow = flows.Flow(nodes=make_pipeline())
+
+        result = await flow.run_async(input_data={"query": "test"})
+
+        assert result.status == RunnableStatus.SUCCESS
+        assert flow._checkpoint is None
+
+
+class TestAsyncFailure:
+    """run_async captures partial progress on failure."""
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_creates_failed_checkpoint(self, mocker):
+        """LLM raises: checkpoint status is FAILED, and nodes before it are captured."""
+        backend = InMemory()
+        mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=RuntimeError("API down"))
+
+        flow = flows.Flow(
+            nodes=make_pipeline(),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend),
+        )
+        result = await flow.run_async(input_data={"query": "test"})
+
+        assert result.status == RunnableStatus.FAILURE
+
+        cp = await backend.get_latest_by_flow_async(flow.id)
+        assert cp is not None
+        assert cp.status == CheckpointStatus.FAILED
+        assert "input" in cp.completed_node_ids
+        assert cp.node_states["input"].status == "success"
+
+    @pytest.mark.asyncio
+    async def test_on_failure_disabled_no_failed_checkpoint(self, mocker):
+        """checkpoint_on_failure_enabled=False: no FAILED checkpoint is written.
+
+        The run-start ACTIVE checkpoint is still created, but the status is never
+        updated to FAILED because that final save is suppressed.
+        """
+        backend = InMemory()
+        mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=RuntimeError("boom"))
+
+        flow = flows.Flow(
+            nodes=make_pipeline(),
+            checkpoint=CheckpointConfig(
+                enabled=True,
+                backend=backend,
+                checkpoint_on_failure_enabled=False,
+                checkpoint_after_node_enabled=False,
+            ),
+        )
+        result = await flow.run_async(input_data={"query": "test"})
+
+        assert result.status == RunnableStatus.FAILURE
+        assert await backend.get_latest_by_flow_async(flow.id, status=CheckpointStatus.FAILED) is None
+
+
+class TestAsyncResume:
+    """Resume from a checkpoint produced by run_async."""
+
+    @pytest.mark.asyncio
+    async def test_resume_reruns_all_nodes_from_failed_checkpoint(self, mocker):
+        """After a failure, resuming from a FAILED checkpoint re-runs the whole flow.
+
+        With checkpoint_after_node_enabled=False the per-node saves are suppressed, so
+        the FAILED checkpoint has an empty completed_node_ids. On resume every node
+        starts fresh, the LLM succeeds on the second attempt, and the run completes.
+        """
+        backend = InMemory()
+        call_count = {"value": 0}
+
+        def side_effect(stream: bool, *args, **kwargs):
+            call_count["value"] += 1
+            if call_count["value"] == 1:
+                raise RuntimeError("Transient failure")
+            r = ModelResponse()
+            r["choices"][0]["message"]["content"] = "Success on retry"
+            return r
+
+        mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=side_effect)
+
+        flow = flows.Flow(
+            nodes=make_pipeline(),
+            checkpoint=CheckpointConfig(
+                enabled=True,
+                backend=backend,
+                # Disable per-node saves so completed_node_ids stays empty on failure.
+                # This ensures the resume re-runs all nodes rather than skipping them.
+                checkpoint_after_node_enabled=False,
+            ),
+        )
+
+        # First run — fails at LLM
+        result1 = await flow.run_async(input_data={"query": "test"})
+        assert result1.status == RunnableStatus.FAILURE
+
+        cp = await backend.get_latest_by_flow_async(flow.id)
+        assert cp is not None
+        assert cp.status == CheckpointStatus.FAILED
+        assert cp.completed_node_ids == []
+
+        # Resume — all nodes run again; LLM succeeds on the second call
+        result2 = await flow.run_async(input_data={"query": "test"}, resume_from=cp.id)
+        assert result2.status == RunnableStatus.SUCCESS
+        assert call_count["value"] == 2
+
+    @pytest.mark.asyncio
+    async def test_resume_from_nonexistent_checkpoint_raises(self):
+        """Resuming with an unknown checkpoint ID raises ValueError."""
+        backend = InMemory()
+        flow = flows.Flow(
+            nodes=make_pipeline(),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend),
+        )
+        with pytest.raises(ValueError, match="Checkpoint not found"):
+            await flow.run_async(input_data={"query": "test"}, resume_from="nonexistent-id")
+
+
+class TestAsyncCheckpointBehaviour:
+    """APPEND creates a linked chain; REPLACE overwrites in place."""
+
+    @pytest.mark.asyncio
+    async def test_append_creates_parent_chain(self, mocker):
+        """APPEND mode: each async save links to the previous via parent_checkpoint_id."""
+        from dynamiq.checkpoints.config import CheckpointBehavior
+
+        backend = InMemory()
+        mock_llm_success(mocker)
+
+        flow = flows.Flow(
+            nodes=make_pipeline(),
+            checkpoint=CheckpointConfig(
+                enabled=True,
+                backend=backend,
+                behavior=CheckpointBehavior.APPEND,
+                max_checkpoints=100,
+            ),
+        )
+        await flow.run_async(input_data={"query": "test"})
+
+        checkpoints = await backend.get_list_by_flow_async(flow.id, limit=100)
+        # The final checkpoint should have a parent (ACTIVE -> COMPLETED chain)
+        assert len(checkpoints) >= 2
+        assert checkpoints[0].parent_checkpoint_id is not None
+
+    @pytest.mark.asyncio
+    async def test_replace_keeps_single_checkpoint(self, mocker):
+        """REPLACE mode: only one checkpoint per run exists at completion."""
+        from dynamiq.checkpoints.config import CheckpointBehavior
+
+        backend = InMemory()
+        mock_llm_success(mocker)
+
+        flow = flows.Flow(
+            nodes=make_pipeline(),
+            checkpoint=CheckpointConfig(
+                enabled=True,
+                backend=backend,
+                behavior=CheckpointBehavior.REPLACE,
+                max_checkpoints=100,
+            ),
+        )
+        await flow.run_async(input_data={"query": "test"})
+
+        checkpoints = await backend.get_list_by_flow_async(flow.id, limit=100)
+        run_id = checkpoints[0].run_id
+        same_run = [cp for cp in checkpoints if cp.run_id == run_id]
+        assert len(same_run) == 1
+        assert same_run[0].parent_checkpoint_id is None
+
+
+class TestAsyncPerRunConfig:
+    """RunnableConfig.checkpoint overrides work correctly in run_async."""
+
+    @pytest.mark.asyncio
+    async def test_enable_per_run(self, mocker):
+        """Flow has checkpointing disabled; per-run config enables it."""
+        backend = InMemory()
+        mock_llm_success(mocker)
+
+        flow = flows.Flow(
+            nodes=make_pipeline(),
+            checkpoint=CheckpointConfig(enabled=False, backend=backend),
+        )
+        result = await flow.run_async(
+            input_data={"query": "test"},
+            config=RunnableConfig(checkpoint=CheckpointConfig(enabled=True)),
+        )
+
+        assert result.status == RunnableStatus.SUCCESS
+        assert await backend.get_latest_by_flow_async(flow.id) is not None
+
+    @pytest.mark.asyncio
+    async def test_disable_per_run(self, mocker):
+        """Flow has checkpointing enabled; per-run config disables it."""
+        backend = InMemory()
+        mock_llm_success(mocker)
+
+        flow = flows.Flow(
+            nodes=make_pipeline(),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend),
+        )
+        result = await flow.run_async(
+            input_data={"query": "test"},
+            config=RunnableConfig(checkpoint=CheckpointConfig(enabled=False)),
+        )
+
+        assert result.status == RunnableStatus.SUCCESS
+        assert await backend.get_latest_by_flow_async(flow.id) is None
+
+    @pytest.mark.asyncio
+    async def test_exclude_nodes_per_run(self, mocker):
+        """Per-run exclude_node_ids keeps that node out of the checkpoint."""
+        backend = InMemory()
+        mock_llm_success(mocker)
+
+        flow = flows.Flow(
+            nodes=make_pipeline(),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend),
+        )
+        await flow.run_async(
+            input_data={"query": "test"},
+            config=RunnableConfig(checkpoint=CheckpointConfig(exclude_node_ids=["llm"])),
+        )
+
+        cp = await backend.get_latest_by_flow_async(flow.id)
+        assert "input" in cp.node_states
+        assert "output" in cp.node_states
+        assert "llm" not in cp.node_states
+
+
+class TestAsyncRunIsolation:
+    """Sequential async runs produce independent checkpoint chains."""
+
+    @pytest.mark.asyncio
+    async def test_sequential_runs_create_independent_checkpoints(self, mocker):
+        """Each run_async call generates a unique run_id on its checkpoint."""
+        backend = InMemory()
+        mock_llm_success(mocker)
+        run_count = 3
+
+        flow = flows.Flow(
+            nodes=make_pipeline(),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend, max_checkpoints=100),
+        )
+
+        for i in range(run_count):
+            await flow.run_async(input_data={"query": f"Run {i}"})
+
+        checkpoints = await backend.get_list_by_flow_async(flow.id, limit=100)
+        unique_run_ids = {cp.run_id for cp in checkpoints}
+        assert len(unique_run_ids) == run_count
+
+    @pytest.mark.asyncio
+    async def test_cleanup_respects_max_checkpoints(self, mocker):
+        """After N+2 async runs with max_checkpoints=N, at most N checkpoints remain."""
+        backend = InMemory()
+        mock_llm_success(mocker)
+        max_cp = 3
+
+        flow = flows.Flow(
+            nodes=make_pipeline(),
+            checkpoint=CheckpointConfig(enabled=True, backend=backend, max_checkpoints=max_cp),
+        )
+
+        for i in range(max_cp + 2):
+            await flow.run_async(input_data={"query": f"Run {i}"})
+
+        checkpoints = await backend.get_list_by_flow_async(flow.id, limit=100)
+        assert len(checkpoints) <= max_cp
+
+
+class TestAsyncAgent:
+    """Agent ReAct loop checkpointing via run_async."""
+
+    @pytest.mark.asyncio
+    async def test_agent_success_captures_internal_state(self, mocker):
+        """Async agent run: after-node save captures full agent internal state.
+
+        checkpoint_mid_agent_loop_enabled is intentionally left False here because
+        mid-loop callbacks use asyncio.create_task which requires the caller to be
+        in the event loop thread — a constraint that doesn't hold for all agent
+        execution paths. The after-node save (checkpoint_after_node_enabled=True by
+        default) captures history_offset, llm_state and tool_states on completion.
+        """
+        backend = InMemory()
+        nodes, _ = make_agent_pipeline()
+        mock_agent_react(mocker, tool_calls=1)
+
+        flow = flows.Flow(
+            nodes=nodes,
+            checkpoint=CheckpointConfig(enabled=True, backend=backend),
+        )
+        result = await flow.run_async(input_data={"input": "Calculate 6*7"})
+
+        assert result.status == RunnableStatus.SUCCESS
+
+        cp = await backend.get_latest_by_flow_async(flow.id)
+        assert cp.status == CheckpointStatus.COMPLETED
+        assert AGENT_ID in cp.node_states
+        agent_state = cp.node_states[AGENT_ID]
+        assert agent_state.status == "success"
+        assert "history_offset" in agent_state.internal_state
+        assert "tool_states" in agent_state.internal_state
+
+    @pytest.mark.asyncio
+    async def test_async_save_called_for_agent(self, mocker):
+        """save_async is invoked (not sync save) during an async agent run."""
+        backend = InMemory()
+        nodes, _ = make_agent_pipeline()
+        mock_agent_react(mocker, tool_calls=1)
+
+        async_save_calls = {"value": 0}
+        original_save_async = InMemory.save_async
+
+        async def counting_save_async(self_backend, cp):
+            async_save_calls["value"] += 1
+            return await original_save_async(self_backend, cp)
+
+        mocker.patch.object(InMemory, "save_async", counting_save_async)
+
+        flow = flows.Flow(
+            nodes=nodes,
+            checkpoint=CheckpointConfig(enabled=True, backend=backend),
+        )
+        result = await flow.run_async(input_data={"input": "test"})
+
+        assert result.status == RunnableStatus.SUCCESS
+        assert async_save_calls["value"] >= 1

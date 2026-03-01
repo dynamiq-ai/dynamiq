@@ -1,11 +1,16 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from threading import Lock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ConfigDict, Field, PrivateAttr
 
 from dynamiq.checkpoints.backends.base import CheckpointBackend
-from dynamiq.checkpoints.checkpoint import CheckpointStatus, FlowCheckpoint
+from dynamiq.checkpoints.types import CheckpointStatus
+
+if TYPE_CHECKING:
+    from dynamiq.checkpoints.checkpoint import FlowCheckpoint
 
 
 class InMemory(CheckpointBackend):

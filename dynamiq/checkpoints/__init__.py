@@ -1,21 +1,24 @@
 from dynamiq.checkpoints.checkpoint import (
     BaseCheckpointState,
-    CheckpointMixin,
-    CheckpointStatus,
+    CheckpointFlowMixin,
+    CheckpointNodeMixin,
     FlowCheckpoint,
     IterativeCheckpointMixin,
     NodeCheckpointState,
 )
 from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig, CheckpointContext
+from dynamiq.checkpoints.types import CheckpointStatus, utc_now
 
 __all__ = [
     "BaseCheckpointState",
     "CheckpointBehavior",
     "CheckpointConfig",
     "CheckpointContext",
-    "CheckpointMixin",
+    "CheckpointFlowMixin",
+    "CheckpointNodeMixin",
     "CheckpointStatus",
     "FlowCheckpoint",
     "IterativeCheckpointMixin",
     "NodeCheckpointState",
+    "utc_now",
 ]

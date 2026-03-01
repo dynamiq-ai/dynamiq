@@ -1,16 +1,21 @@
+from __future__ import annotations
+
 import json
 import os
 import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import ConfigDict, Field, PrivateAttr
 
 from dynamiq.checkpoints.backends.base import CheckpointBackend
-from dynamiq.checkpoints.checkpoint import CheckpointStatus, FlowCheckpoint
+from dynamiq.checkpoints.types import CheckpointStatus
 from dynamiq.utils import decode_reversible, encode_reversible
+
+if TYPE_CHECKING:
+    from dynamiq.checkpoints.checkpoint import FlowCheckpoint
 
 
 class FileSystem(CheckpointBackend):
@@ -129,6 +134,8 @@ class FileSystem(CheckpointBackend):
         return checkpoint.id
 
     def load(self, checkpoint_id: str) -> FlowCheckpoint | None:
+        from dynamiq.checkpoints.checkpoint import FlowCheckpoint  # deferred: avoids import cycle at package init
+
         path = self._find_checkpoint_path(checkpoint_id)
         if not path:
             return None
@@ -228,6 +235,8 @@ class FileSystem(CheckpointBackend):
         return checkpoints[:limit] if limit is not None else checkpoints
 
     def _load_file(self, path: Path) -> FlowCheckpoint | None:
+        from dynamiq.checkpoints.checkpoint import FlowCheckpoint  # deferred: avoids import cycle at package init
+
         try:
             with open(path) as f:
                 data = json.load(f, object_hook=decode_reversible)

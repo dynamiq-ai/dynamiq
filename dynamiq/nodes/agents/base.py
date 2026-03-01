@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 
 from dynamiq.checkpoints.checkpoint import (
     BaseCheckpointState,
-    CheckpointMixin,
+    CheckpointNodeMixin,
     IterationState,
     IterativeCheckpointMixin,
 )
@@ -28,12 +28,7 @@ from dynamiq.nodes.agents.utils import (
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
-from dynamiq.nodes.tools.file_tools import (
-    FileListTool,
-    FileReadTool,
-    FileSearchTool,
-    FileWriteTool,
-)
+from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileSearchTool, FileWriteTool
 from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsTool
 from dynamiq.nodes.tools.python import Python
@@ -381,7 +376,7 @@ class Agent(IterativeCheckpointMixin, Node):
 
         tool_states = {}
         for tool in self.tools:
-            if isinstance(tool, CheckpointMixin):
+            if isinstance(tool, CheckpointNodeMixin):
                 tool_checkpoint = tool.to_checkpoint_state()
                 tool_state = tool_checkpoint.model_dump() if hasattr(tool_checkpoint, "model_dump") else tool_checkpoint
                 if tool_state:
@@ -444,7 +439,7 @@ class Agent(IterativeCheckpointMixin, Node):
         tools_by_id = {tool.id: tool for tool in self.tools}
         for tool_id, tool_state in tool_states.items():
             tool = tools_by_id.get(tool_id)
-            if tool and isinstance(tool, CheckpointMixin):
+            if tool and isinstance(tool, CheckpointNodeMixin):
                 tool.from_checkpoint_state(tool_state)
 
     def get_context_for_input_schema(self) -> dict:

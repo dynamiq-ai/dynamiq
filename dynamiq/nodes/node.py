@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, 
 
 from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingCallbackHandler
-from dynamiq.checkpoints.checkpoint import CheckpointMixin
+from dynamiq.checkpoints.checkpoint import CheckpointNodeMixin
 from dynamiq.connections import BaseConnection
 
 if TYPE_CHECKING:
@@ -220,7 +220,7 @@ class NodeOutputReferences:
         return NodeOutputReference(node=self.node, output_key=key)
 
 
-class Node(BaseModel, Runnable, DryRunMixin, CheckpointMixin, ABC):
+class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
     """
     Abstract base class for all nodes in the workflow.
 
@@ -243,7 +243,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointMixin, ABC):
           with _generate_json_schema.
 
     Checkpoint Support:
-        Node inherits from CheckpointMixin which provides default checkpoint implementations.
+        Node inherits from CheckpointNodeMixin which provides default checkpoint implementations.
         Subclasses can override to_checkpoint_state() and from_checkpoint_state() to
         save/restore node-specific internal state.
     """

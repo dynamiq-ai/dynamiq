@@ -1,13 +1,18 @@
+from __future__ import annotations
+
 import asyncio
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from functools import cached_property
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from dynamiq.checkpoints.checkpoint import CheckpointStatus, FlowCheckpoint
+from dynamiq.checkpoints.types import CheckpointStatus
 from dynamiq.utils import generate_uuid
+
+if TYPE_CHECKING:
+    from dynamiq.checkpoints.checkpoint import FlowCheckpoint
 
 DEFAULT_CLEANUP_FETCH_LIMIT = 1000
 DEFAULT_LIST_LIMIT = 10
@@ -146,3 +151,57 @@ class CheckpointBackend(ABC, BaseModel):
     async def delete_async(self, checkpoint_id: str) -> bool:
         """Async delete - runs sync method in thread pool to avoid blocking event loop."""
         return await asyncio.to_thread(self.delete, checkpoint_id)
+
+    async def get_list_by_flow_async(
+        self,
+        flow_id: str,
+        *,
+        status: CheckpointStatus | None = None,
+        limit: int | None = None,
+        before: datetime | None = None,
+    ) -> list[FlowCheckpoint]:
+        """Async list checkpoints for a flow - runs sync method in thread pool."""
+        return await asyncio.to_thread(self.get_list_by_flow, flow_id, status=status, limit=limit, before=before)
+
+    async def get_latest_by_flow_async(
+        self, flow_id: str, *, status: CheckpointStatus | None = None
+    ) -> FlowCheckpoint | None:
+        """Async get most recent checkpoint for a flow - runs sync method in thread pool."""
+        return await asyncio.to_thread(self.get_latest_by_flow, flow_id, status=status)
+
+    async def get_list_by_run_async(self, run_id: str, *, limit: int | None = None) -> list[FlowCheckpoint]:
+        """Async list checkpoints by run ID - runs sync method in thread pool."""
+        return await asyncio.to_thread(self.get_list_by_run, run_id, limit=limit)
+
+    async def get_list_by_flow_and_run_async(
+        self,
+        flow_id: str,
+        run_id: str,
+        *,
+        status: CheckpointStatus | None = None,
+        limit: int | None = None,
+    ) -> list[FlowCheckpoint]:
+        """Async list checkpoints for a specific flow and run - runs sync method in thread pool."""
+        return await asyncio.to_thread(self.get_list_by_flow_and_run, flow_id, run_id, status=status, limit=limit)
+
+    async def get_latest_by_flow_and_run_async(
+        self,
+        flow_id: str,
+        run_id: str,
+        *,
+        status: CheckpointStatus | None = None,
+    ) -> FlowCheckpoint | None:
+        """Async get most recent checkpoint for a specific flow and run - runs sync method in thread pool."""
+        return await asyncio.to_thread(self.get_latest_by_flow_and_run, flow_id, run_id, status=status)
+
+    async def get_chain_async(self, checkpoint_id: str) -> list[FlowCheckpoint]:
+        """Async walk checkpoint chain - runs sync method in thread pool."""
+        return await asyncio.to_thread(self.get_chain, checkpoint_id)
+
+    async def cleanup_by_flow_async(
+        self, flow_id: str, *, keep_count: int = 10, max_ttl_minutes: int | None = None
+    ) -> int:
+        """Async cleanup - runs sync method in thread pool to avoid blocking event loop."""
+        return await asyncio.to_thread(
+            self.cleanup_by_flow, flow_id, keep_count=keep_count, max_ttl_minutes=max_ttl_minutes
+        )
