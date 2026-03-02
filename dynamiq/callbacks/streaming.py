@@ -7,11 +7,12 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Iterator
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.callbacks.base import get_run_id
 from dynamiq.types.streaming import (
+    AgentReasoningEventMessageData,
+    AgentToolData,
     StreamingEntitySource,
     StreamingEventMessage,
     StreamingMode,
     StreamingThought,
-    StreamingToolInput,
 )
 from dynamiq.utils import format_value, generate_uuid
 from dynamiq.utils.logger import logger
@@ -459,6 +460,19 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
         return arguments_text, function_name
 
+    def _resolve_tool_data(self) -> AgentToolData:
+        """Resolve the current action name to an AgentToolData instance."""
+        action_name = self._current_action_name or ""
+        sanitized = self.agent.sanitize_tool_name(action_name)
+        tool = self.agent.tool_by_names.get(sanitized)
+        if tool:
+            return AgentToolData(
+                name=tool.name,
+                type=tool.type,
+                action_type=tool.action_type.value if tool.action_type else None,
+            )
+        return AgentToolData(name=action_name, type="unknown")
+
     def _emit(self, content: str, step: str) -> None:
         """Emit the parsed content using the agent's stream_content method.
 
@@ -485,13 +499,16 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             thought_model = StreamingThought(thought=content, loop_num=self.loop_num)
             content_to_stream = thought_model.to_dict()
         elif step == StreamingState.TOOL_INPUT:
-            tool_input_model = StreamingToolInput(
+            tool_data = self._resolve_tool_data()
+            tool_input_model = AgentReasoningEventMessageData(
                 tool_run_id=self.agent._streaming_tool_run_id or "",
-                content=content,
-                tool_name=self._current_action_name or "",
+                thought="",
+                action=self._current_action_name or "",
+                tool=tool_data,
+                action_input=content,
                 loop_num=self.loop_num,
             )
-            content_to_stream = tool_input_model.to_dict()
+            content_to_stream = tool_input_model.model_dump()
         elif step == StreamingState.ANSWER:
             content_to_stream = content
 

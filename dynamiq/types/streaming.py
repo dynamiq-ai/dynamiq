@@ -88,20 +88,6 @@ class StreamingThought(BaseModel):
         return self.model_dump(**kwargs)
 
 
-class StreamingToolInput(BaseModel):
-    """Model for tool input streaming chunks."""
-
-    tool_run_id: str
-    content: str
-    tool_name: str
-    loop_num: int
-
-    model_config = ConfigDict(extra="forbid")
-
-    def to_dict(self, **kwargs) -> dict:
-        return self.model_dump(**kwargs)
-
-
 class AgentToolData(BaseModel):
     """Model for tool information in agent reasoning events."""
 
