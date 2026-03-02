@@ -270,9 +270,9 @@ class Orchestrator(IterativeCheckpointMixin, Node, ABC):
         super().from_checkpoint_state(state)
         state_dict = state if isinstance(state, dict) else state.model_dump()
 
-        if chat_history := state_dict.get("chat_history"):
+        if (chat_history := state_dict.get("chat_history")) is not None:
             self._chat_history = list(chat_history)
-        if manager_state := state_dict.get("manager_state"):
+        if (manager_state := state_dict.get("manager_state")) is not None:
             self.manager.from_checkpoint_state(manager_state)
 
         self._restore_iteration_from_checkpoint(state_dict)

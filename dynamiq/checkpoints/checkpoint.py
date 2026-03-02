@@ -111,7 +111,7 @@ class IterativeCheckpointMixin:
 
     def _restore_iteration_from_checkpoint(self, state_dict: dict) -> None:
         """Extract iteration data from an incoming checkpoint state dict."""
-        if iteration_data := state_dict.get("iteration"):
+        if (iteration_data := state_dict.get("iteration")) is not None:
             self._iteration_state = (
                 IterationState(**iteration_data) if isinstance(iteration_data, dict) else iteration_data
             )

@@ -427,9 +427,9 @@ class Agent(IterativeCheckpointMixin, Node):
 
         self._history_offset = state_dict.get("history_offset", DEFAULT_HISTORY_OFFSET)
 
-        if llm_state := state_dict.get("llm_state"):
+        if (llm_state := state_dict.get("llm_state")) is not None:
             self.llm.from_checkpoint_state(llm_state)
-        if tool_states := state_dict.get("tool_states"):
+        if (tool_states := state_dict.get("tool_states")) is not None:
             self._restore_tool_states(tool_states)
 
         self._restore_iteration_from_checkpoint(state_dict)

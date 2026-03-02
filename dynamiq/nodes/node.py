@@ -890,7 +890,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         """
         super().from_checkpoint_state(state)
         state_dict = state if isinstance(state, dict) else state.model_dump()
-        if approval_response := state_dict.get("approval_response"):
+        if (approval_response := state_dict.get("approval_response")) is not None:
             self._pending_approval_response = ApprovalInputData(**approval_response)
 
     def run_sync(
