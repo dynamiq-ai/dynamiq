@@ -193,7 +193,7 @@ class ContentsRequest(BaseModel):
         default=None,
         description=(
             "Livecrawl strategy: 'never' (disable), 'fallback' (crawl when cache missing), 'always', or 'preferred' "
-            "(try livecrawl but fall back to cache). Defaults align with tool'ssearch type."
+            "(try livecrawl but fall back to cache). Defaults align with tool's search type."
         ),
     )
     livecrawl_timeout: int | None = Field(

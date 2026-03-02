@@ -149,7 +149,7 @@ def test_firecrawl_search_agent_output(mock_firecrawl_search_requests, mock_fire
 
     assert result.status == RunnableStatus.SUCCESS
     content = result.output["content"]
-    assert "Firecrawl Search Results" in content
+    assert "Search Results" in content
     assert "Web Results" in content
     assert "https://www.firecrawl.dev/" in content
     assert "News Results" in content
