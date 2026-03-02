@@ -105,6 +105,7 @@ class CheckpointBackend(ABC, BaseModel):
         flow_id: str,
         run_id: str,
         *,
+        wf_run_id: str | None = None,
         status: CheckpointStatus | None = None,
         limit: int | None = None,
     ) -> list[FlowCheckpoint]:
@@ -116,10 +117,11 @@ class CheckpointBackend(ABC, BaseModel):
         flow_id: str,
         run_id: str,
         *,
+        wf_run_id: str | None = None,
         status: CheckpointStatus | None = None,
     ) -> FlowCheckpoint | None:
         """Get the most recent checkpoint for a specific flow and run."""
-        results = self.get_list_by_flow_and_run(flow_id, run_id, status=status, limit=1)
+        results = self.get_list_by_flow_and_run(flow_id, run_id, wf_run_id=wf_run_id, status=status, limit=1)
         return results[0] if results else None
 
     def get_chain(self, checkpoint_id: str) -> list[FlowCheckpoint]:
@@ -178,21 +180,27 @@ class CheckpointBackend(ABC, BaseModel):
         flow_id: str,
         run_id: str,
         *,
+        wf_run_id: str | None = None,
         status: CheckpointStatus | None = None,
         limit: int | None = None,
     ) -> list[FlowCheckpoint]:
         """Async list checkpoints for a specific flow and run - runs sync method in thread pool."""
-        return await asyncio.to_thread(self.get_list_by_flow_and_run, flow_id, run_id, status=status, limit=limit)
+        return await asyncio.to_thread(
+            self.get_list_by_flow_and_run, flow_id, run_id, wf_run_id=wf_run_id, status=status, limit=limit
+        )
 
     async def get_latest_by_flow_and_run_async(
         self,
         flow_id: str,
         run_id: str,
         *,
+        wf_run_id: str | None = None,
         status: CheckpointStatus | None = None,
     ) -> FlowCheckpoint | None:
         """Async get most recent checkpoint for a specific flow and run - runs sync method in thread pool."""
-        return await asyncio.to_thread(self.get_latest_by_flow_and_run, flow_id, run_id, status=status)
+        return await asyncio.to_thread(
+            self.get_latest_by_flow_and_run, flow_id, run_id, wf_run_id=wf_run_id, status=status
+        )
 
     async def get_chain_async(self, checkpoint_id: str) -> list[FlowCheckpoint]:
         """Async walk checkpoint chain - runs sync method in thread pool."""

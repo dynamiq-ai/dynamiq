@@ -251,11 +251,6 @@ class WorkflowYAMLLoader:
                 pass
 
         if not entity:
-            import pydoc
-
-            entity = pydoc.locate(entity_type)
-
-        if not entity:
             raise WorkflowYAMLLoaderException(f"Entity '{entity_type}' is not valid.")
 
         entity_registry[entity_type] = entity

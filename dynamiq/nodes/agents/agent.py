@@ -965,10 +965,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self._setup_stop_sequences()
             self.state.max_loops = self.max_loops
             self._refresh_agent_state(start_loop)
-            self.reset_resumed_flag()
         else:
             self._refresh_agent_state(1)
             self._setup_prompt_and_stop_sequences(input_message, history_messages)
+        self.reset_resumed_flag()
 
         for loop_num in range(start_loop, self.max_loops + 1):
             if loop_num > start_loop:

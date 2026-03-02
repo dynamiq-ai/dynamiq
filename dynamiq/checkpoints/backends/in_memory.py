@@ -101,15 +101,21 @@ class InMemory(CheckpointBackend):
         flow_id: str,
         run_id: str,
         *,
+        wf_run_id: str | None = None,
         status: CheckpointStatus | None = None,
         limit: int | None = None,
     ) -> list[FlowCheckpoint]:
         """List checkpoints for a specific flow and run (matches run_id or wf_run_id), newest first."""
+        ids_to_match = {run_id}
+        if wf_run_id:
+            ids_to_match.add(wf_run_id)
         with self._lock:
             result = [
                 cp.model_copy(deep=True)
                 for cp in self._checkpoints.values()
-                if cp.flow_id == flow_id and self._matches_run(cp, run_id) and (status is None or cp.status == status)
+                if cp.flow_id == flow_id
+                and (cp.run_id in ids_to_match or cp.wf_run_id in ids_to_match)
+                and (status is None or cp.status == status)
             ]
             result.sort(key=lambda x: x.created_at, reverse=True)
             return result[:limit] if limit is not None else result

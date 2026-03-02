@@ -277,7 +277,7 @@ class CheckpointFlowMixin(BaseModel):
         default_factory=CheckpointConfig, description="Configuration for checkpoint/resume functionality"
     )
 
-    _node_by_id: dict = PrivateAttr(default={})
+    _node_by_id: dict = PrivateAttr(default_factory=dict)
     _checkpoint: FlowCheckpoint | None = PrivateAttr(default=None)
     _effective_checkpoint_config: CheckpointConfig | None = PrivateAttr(default=None)
     _checkpoint_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
@@ -416,7 +416,7 @@ class CheckpointFlowMixin(BaseModel):
             now = utc_now()
             if cfg.behavior == CheckpointBehavior.APPEND and self._checkpoint_persisted:
                 old_id = self._checkpoint.id
-                self._checkpoint = self._checkpoint.model_copy(
+                new_checkpoint = self._checkpoint.model_copy(
                     update={
                         "id": str(uuid4()),
                         "parent_checkpoint_id": old_id,
@@ -424,7 +424,8 @@ class CheckpointFlowMixin(BaseModel):
                         "updated_at": now,
                     }
                 )
-                cfg.backend.save(self._checkpoint)
+                cfg.backend.save(new_checkpoint)
+                self._checkpoint = new_checkpoint
                 logger.debug(f"Flow {self.id}: checkpoint appended - {self._checkpoint.id} (parent={old_id})")
             else:
                 self._checkpoint.updated_at = now
@@ -526,7 +527,7 @@ class CheckpointFlowMixin(BaseModel):
             now = utc_now()
             if cfg.behavior == CheckpointBehavior.APPEND and self._checkpoint_persisted:
                 old_id = self._checkpoint.id
-                self._checkpoint = self._checkpoint.model_copy(
+                new_checkpoint = self._checkpoint.model_copy(
                     update={
                         "id": str(uuid4()),
                         "parent_checkpoint_id": old_id,
@@ -534,7 +535,8 @@ class CheckpointFlowMixin(BaseModel):
                         "updated_at": now,
                     }
                 )
-                await cfg.backend.save_async(self._checkpoint)
+                await cfg.backend.save_async(new_checkpoint)
+                self._checkpoint = new_checkpoint
                 logger.debug(f"Flow {self.id}: checkpoint appended - {self._checkpoint.id} (parent={old_id})")
             else:
                 self._checkpoint.updated_at = now

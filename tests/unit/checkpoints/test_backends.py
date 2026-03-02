@@ -324,6 +324,41 @@ class BackendTestMixin:
         result = backend.get_latest_by_flow_and_run("nonexistent-flow", "nonexistent-run")
         assert result is None
 
+    def test_get_list_by_flow_and_run_orders_by_created_at_not_updated_at(self, backend: CheckpointBackend):
+        """get_list_by_flow_and_run must sort by created_at DESC, not updated_at.
+
+        In REPLACE mode, update() bumps updated_at while created_at stays constant.
+        If the backend sorted by updated_at, updating an older checkpoint would
+        incorrectly make it the "latest", producing inconsistent results across backends.
+        """
+        flow_id = "ordering-regression-flow"
+        wf_run_id = "ordering-regression-run"
+
+        cp1 = FlowCheckpoint(flow_id=flow_id, run_id="run-1", wf_run_id=wf_run_id)
+        backend.save(cp1)
+        time.sleep(0.02)
+
+        cp2 = FlowCheckpoint(flow_id=flow_id, run_id="run-2", wf_run_id=wf_run_id)
+        backend.save(cp2)
+        time.sleep(0.02)
+
+        # Simulate a REPLACE-mode update on cp1: its updated_at becomes the newest
+        # timestamp, but created_at stays at T1. Ordering must still be cp2 first.
+        cp1_reloaded = backend.load(cp1.id)
+        cp1_reloaded.status = CheckpointStatus.COMPLETED
+        backend.update(cp1_reloaded)
+
+        results = backend.get_list_by_flow_and_run(flow_id, wf_run_id)
+        assert len(results) == 2
+        assert results[0].run_id == "run-2", "cp2 has a later created_at and must come first regardless of updated_at"
+        assert results[1].run_id == "run-1"
+
+        latest = backend.get_latest_by_flow_and_run(flow_id, wf_run_id)
+        assert latest is not None
+        assert (
+            latest.run_id == "run-2"
+        ), "get_latest_by_flow_and_run must return the checkpoint with the latest created_at"
+
 
 class TestInMemoryBackend(BackendTestMixin):
     """Tests for InMemory checkpoint backend."""

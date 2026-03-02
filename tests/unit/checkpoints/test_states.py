@@ -647,3 +647,41 @@ class TestCheckpointBehavior:
 
         chain = backend.get_chain("cp1")
         assert len(chain) == 1
+
+
+class TestResumedFlagResetRegression:
+    """Regression tests for _is_resumed flag not being cleared after a 0-iteration checkpoint resume.
+
+    Bug: In _run_agent(), reset_resumed_flag() was placed inside the `if start_loop > 1` block.
+    When a checkpoint was restored but had 0 completed iterations, get_start_iteration() returned 0,
+    making start_loop == 1 and taking the `else` branch — which never called reset_resumed_flag().
+    This left _is_resumed == True permanently, causing reset_run_state() to skip state.reset()
+    on every subsequent call to this agent instance (e.g., an agent used as a tool).
+    """
+
+    AGENT_ID = "resume-regression-agent"
+
+    @pytest.fixture
+    def agent(self) -> Agent:
+        return Agent(
+            id=self.AGENT_ID,
+            name="Regression Agent",
+            llm=create_test_llm("regression-llm"),
+            role="Test assistant",
+            goal="Verify flag reset",
+            max_loops=3,
+        )
+
+    def test_state_not_reset_when_is_resumed_true(self, agent: Agent, mocker) -> None:
+        """Documents the guard: state.reset() is intentionally skipped when is_resumed is True."""
+        agent._is_resumed = True
+        agent.state.current_loop = 5
+        agent.reset_run_state()
+        assert agent.state.current_loop == 5
+
+    def test_state_reset_when_is_resumed_false(self, agent: Agent, mocker) -> None:
+        """Documents the guard: state.reset() is called when is_resumed is False."""
+        agent._is_resumed = False
+        agent.state.current_loop = 5
+        agent.reset_run_state()
+        assert agent.state.current_loop == 0

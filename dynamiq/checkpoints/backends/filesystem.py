@@ -213,25 +213,30 @@ class FileSystem(CheckpointBackend):
         flow_id: str,
         run_id: str,
         *,
+        wf_run_id: str | None = None,
         status: CheckpointStatus | None = None,
         limit: int | None = None,
     ) -> list[FlowCheckpoint]:
-        run_dir = self._find_existing_run_dir(flow_id, run_id)
+        run_dir = self._find_existing_run_dir(flow_id, run_id, wf_run_id)
         if not run_dir:
             return []
+
+        ids_to_match = {run_id}
+        if wf_run_id:
+            ids_to_match.add(wf_run_id)
 
         checkpoints = []
         for cp_file in run_dir.glob("*.json"):
             cp = self._load_file(cp_file)
             if not cp:
                 continue
-            if cp.run_id != run_id and cp.wf_run_id != run_id:
+            if cp.run_id not in ids_to_match and cp.wf_run_id not in ids_to_match:
                 continue
             if status and cp.status != status:
                 continue
             checkpoints.append(cp)
 
-        checkpoints.sort(key=lambda c: c.updated_at, reverse=True)
+        checkpoints.sort(key=lambda c: c.created_at, reverse=True)
         return checkpoints[:limit] if limit is not None else checkpoints
 
     def _load_file(self, path: Path) -> FlowCheckpoint | None:
