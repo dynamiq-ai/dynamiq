@@ -648,8 +648,26 @@ class Agent(HistoryManagerMixin, BaseAgent):
         try:
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
-                to_summarize, _ = self._split_history()
-                tool_input = {**(action_input if isinstance(action_input, dict) else {}), "messages": to_summarize}
+                all_history = self._prompt.messages[self._history_offset :]
+                preserve_n = self.summarization_config.preserve_last_messages
+                if preserve_n > 0 and len(all_history) > preserve_n:
+                    msgs_to_summarize = all_history[:-preserve_n]
+                else:
+                    msgs_to_summarize = all_history
+
+                merged = {**(action_input if isinstance(action_input, dict) else {})}
+                running_summary = getattr(self, "_running_summary", None)
+                if self.summarization_config.incremental and running_summary:
+                    summary_content = f"\nObservation: {running_summary}\n"
+                    filtered = [
+                        m for m in msgs_to_summarize if not (m.static and m.content and m.content == summary_content)
+                    ]
+                    merged["messages"] = filtered if filtered else msgs_to_summarize
+                    merged["running_summary"] = running_summary
+                else:
+                    merged["messages"] = msgs_to_summarize
+
+                tool_input = merged
             else:
                 tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
                 tool_result = self._tool_cache.get(tool_cache_entry, None)
@@ -1132,7 +1150,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             logger.error(f"Agent {self.name} - {self.id}: Context Manager Tool not found.")
             return
 
-            action = self.sanitize_tool_name(context_tool.name)
+        action = self.sanitize_tool_name(context_tool.name)
 
         self._execute_tools_and_update_prompt(
             action=action,
