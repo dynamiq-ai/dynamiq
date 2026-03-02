@@ -155,8 +155,7 @@ class InMemory(MemoryBackend):
 
         # Perform BM25 search with query
         query_terms = query.lower().split()
-        searchable = [msg for msg in filtered_messages if msg.content]
-        document_texts = [msg.content for msg in searchable]
+        document_texts = [msg.content for msg in filtered_messages]
 
         # Handle empty document list
         if not document_texts:
@@ -164,7 +163,7 @@ class InMemory(MemoryBackend):
 
         # Calculate BM25 scores
         bm25 = BM25DocumentRanker(documents=document_texts)
-        scored_messages = [(msg, bm25.score(query_terms, msg.content)) for msg in searchable]
+        scored_messages = [(msg, bm25.score(query_terms, msg.content)) for msg in filtered_messages]
 
         # Filter out zero scores
         scored_messages = [(msg, score) for msg, score in scored_messages if score > 0]

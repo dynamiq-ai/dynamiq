@@ -78,8 +78,10 @@ class Memory(BaseModel):
             message = Message(role=role, content=content, metadata=sanitized_metadata)
             self.backend.add(message)
 
-            preview = (message.content or "")[:20]
-            logger.debug(f"Memory {self.backend.name}: " f"Added message: {message.role}: {preview}...")
+            logger.debug(
+                f"Memory {self.backend.name}: "
+                f"Added message: {message.role}: {message.content[:min(20, len(message.content))]}..."
+            )
         except Exception as e:
             logger.error(f"Unexpected error adding message: {e}")
             raise MemoryError(f"Unexpected error adding message: {e}") from e
@@ -196,10 +198,10 @@ class Memory(BaseModel):
             ValueError: If an unsupported format type is provided
         """
         if format_type == FormatType.PLAIN:
-            return "\n".join([f"{msg.role.value}: {msg.content or ''}" for msg in messages])
+            return "\n".join([f"{msg.role.value}: {msg.content}" for msg in messages])
 
         elif format_type == FormatType.MARKDOWN:
-            return "\n".join([f"**{msg.role.value}:** {msg.content or ''}" for msg in messages])
+            return "\n".join([f"**{msg.role.value}:** {msg.content}" for msg in messages])
 
         elif format_type == FormatType.XML:
             return "\n".join(
@@ -210,7 +212,7 @@ class Memory(BaseModel):
                             [
                                 "  <message>",
                                 f"    <role>{msg.role.value}</role>",
-                                f"    <content>{msg.content or ''}</content>",
+                                f"    <content>{msg.content}</content>",
                                 "  </message>",
                             ]
                         )

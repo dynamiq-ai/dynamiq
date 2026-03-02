@@ -911,7 +911,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         return messages[:-1] + [
             Message(
                 role=last_msg.role,
-                content=f"{last_msg.content or ''}{state_suffix}",
+                content=f"{last_msg.content}{state_suffix}",
                 metadata=last_msg.metadata,
                 static=last_msg.static,
             )
@@ -1048,7 +1048,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 f"Agent {self.name} (ID: {self.id}) "
                 f"has reached the maximum loop limit of {self.max_loops} "
                 f"without finding a final answer. "
-                f"Last response: {self._prompt.messages[-1].content or ''}\n"
+                f"Last response: {self._prompt.messages[-1].content}\n"
                 f"Consider increasing the maximum number of loops or "
                 f"reviewing the task complexity to ensure completion."
             )

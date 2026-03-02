@@ -158,3 +158,50 @@ def test_custom_vision_agent_workflow(model, inference_mode):
         input_data={"request": REQUEST, "url": URL},
     )
     assert reflection_agent._prompt.messages[1] == expected_result
+
+
+def test_history_input(model):
+    """History is prepended before input message in prompt."""
+    agent = create_react_agent(model, InferenceMode.XML)
+
+    agent.run(
+        input_data={
+            "input": "Second",
+            "history": [
+                Message(role=MessageRole.USER, content="First"),
+                Message(role=MessageRole.ASSISTANT, content="Reply"),
+            ],
+        }
+    )
+
+    msgs = agent._prompt.messages
+    assert msgs[0].role == MessageRole.SYSTEM
+    assert msgs[1].content == "First"
+    assert msgs[2].content == "Reply" and msgs[2].role == MessageRole.ASSISTANT
+    assert msgs[3].content == "Second" and msgs[3].role == MessageRole.USER
+
+    # get_history() returns history + input (no system, no ReAct internals)
+    history = agent.get_history()
+    assert all(m.role != MessageRole.SYSTEM for m in history)
+    assert history[0].content == "First"
+    assert history[1].content == "Reply"
+    assert history[2].content == "Second"
+
+
+def test_history_round_trip(model):
+    """get_history() + appended output can be fed into a subsequent call."""
+    agent = create_react_agent(model, InferenceMode.XML)
+
+    # First call
+    result_1 = agent.run(input_data={"input": "Hello"})
+    history = agent.get_history()
+    history.append(Message(role=MessageRole.ASSISTANT, content=result_1.output["content"]))
+
+    assert history[0].content == "Hello"
+
+    # Second call reusing history
+    agent.run(input_data={"input": "Follow-up", "history": history})
+    msgs = agent._prompt.messages
+    assert msgs[0].role == MessageRole.SYSTEM
+    assert msgs[1].content == "Hello"
+    assert msgs[-1].content == "Follow-up" and msgs[-1].role == MessageRole.USER

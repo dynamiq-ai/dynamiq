@@ -6,6 +6,7 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.prompts import Message, MessageRole
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 
 
@@ -156,3 +157,61 @@ def test_react_agent_role_with_special_characters(test_llm, test_id, agent_name,
     assert "4" in content, f"Expected '4' in the output, got: {content!r}"
 
     assert "have a nice day!" in content.lower(), f"Expected 'have a nice day!' in the output, got: {content!r}"
+
+
+@pytest.mark.unit
+def test_react_agent_with_history_input(test_llm, run_config):
+    """Test that passing history produces a correct answer using conversation context."""
+    agent = Agent(
+        name="TestHistoryInput",
+        llm=test_llm,
+        role="You are a helpful assistant.",
+        inference_mode=InferenceMode.DEFAULT,
+        tools=[],
+        max_loops=3,
+    )
+
+    result = agent.run(
+        input_data={
+            "input": "What is the secret number I just told you?",
+            "history": [
+                Message(role=MessageRole.USER, content="Remember: the secret number is 42."),
+                Message(role=MessageRole.ASSISTANT, content="Got it, I'll remember that."),
+            ],
+        },
+        config=run_config,
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "42" in result.output["content"]
+
+
+@pytest.mark.unit
+def test_react_agent_history_round_trip(test_llm, run_config):
+    """Test that get_history() output feeds into the next call and preserves context."""
+    agent = Agent(
+        name="TestHistoryRoundTrip",
+        llm=test_llm,
+        role="You are a helpful assistant.",
+        inference_mode=InferenceMode.DEFAULT,
+        tools=[],
+        max_loops=3,
+    )
+
+    result_1 = agent.run(
+        input_data={"input": "Remember: the secret number is 42."},
+        config=run_config,
+    )
+    history = agent.get_history()
+    history.append(Message(role=MessageRole.ASSISTANT, content=result_1.output["content"]))
+
+    result = agent.run(
+        input_data={
+            "input": "What is the secret number I told you?",
+            "history": history,
+        },
+        config=run_config,
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "42" in result.output["content"]

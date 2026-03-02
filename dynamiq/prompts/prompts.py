@@ -8,7 +8,7 @@ from typing import Any
 import filetype
 from jinja2 import Environment, meta
 from litellm import token_counter
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq.types.llm_tool import Tool
 from dynamiq.utils import generate_uuid
@@ -18,7 +18,6 @@ class MessageRole(str, enum.Enum):
     USER = "user"
     SYSTEM = "system"
     ASSISTANT = "assistant"
-    TOOL = "tool"
 
 
 class VisionMessageType(str, enum.Enum):
@@ -57,32 +56,17 @@ class Message(BaseModel):
     """
     Represents a message in a conversation.
 
-    Supports the standard OpenAI/Anthropic chat message format including tool calls.
-    At least one of ``content`` or ``tool_calls`` must be provided.
-
     Attributes:
-        content: The text content of the message (None for tool-call-only assistant messages).
+        content: The text content of the message.
         role: The role of the message sender.
         metadata: Additional metadata for the message, default is None.
         static: Determines whether it is possible to pass parameters via this message.
-        tool_calls: Tool/function calls requested by the assistant.
-        tool_call_id: ID of the tool call this message is a response to (role=tool).
-        name: Optional name of the message author (e.g. tool name).
     """
 
-    content: str | None = None
+    content: str
     role: MessageRole = MessageRole.USER
     metadata: dict | None = None
     static: bool = Field(default=False, exclude=True)
-    tool_calls: list[dict] | None = Field(default=None)
-    tool_call_id: str | None = Field(default=None)
-    name: str | None = Field(default=None)
-
-    @model_validator(mode="after")
-    def _validate_content_or_tool_calls(self):
-        if self.content is None and not self.tool_calls:
-            raise ValueError("Message must have at least 'content' or 'tool_calls'.")
-        return self
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -92,23 +76,17 @@ class Message(BaseModel):
 
     def format_message(self, **kwargs) -> "Message":
         """Returns a formatted copy of the message with templates rendered."""
-        if self.content is None:
-            return self.model_copy()
         return Message(
             role=self.role,
             content=self._Template(self.content).render(**kwargs),
-            tool_calls=self.tool_calls,
-            tool_call_id=self.tool_call_id,
-            name=self.name,
         )
 
     def to_api_dict(self) -> dict:
         """Produce a dict suitable for LLM API calls.
 
-        Excludes ``metadata``, ``static``, and any optional field that is ``None``.
+        Excludes ``metadata`` and ``static``.
         """
-        data = self.model_dump(exclude={"metadata"}, exclude_none=True)
-        return data
+        return self.model_dump(exclude={"metadata"})
 
 
 class VisionMessageTextContent(BaseModel):

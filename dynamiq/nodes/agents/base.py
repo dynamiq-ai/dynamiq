@@ -128,13 +128,12 @@ class ToolParams(BaseModel):
 
 class AgentInputSchema(BaseModel):
     input: str = Field(default="", description="Text input for the agent.")
-    messages: list[dict[str, Any]] | None = Field(
+    history: list[Message] | None = Field(
         default=None,
         description=(
-            "Optional pre-built conversation history as a list of message dicts "
-            "(with keys: role, content, and optionally tool_calls, tool_call_id, name). "
-            "When provided, the last user message is used as the current query "
-            "and preceding messages are used as history (bypassing memory retrieval)."
+            "Optional conversation history as a list of Message instances. "
+            "When provided, these messages are prepended before the input message "
+            "in the prompt (bypassing memory retrieval)."
         ),
         json_schema_extra={"is_accessible_to_agent": False},
     )
@@ -168,9 +167,7 @@ class AgentInputSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_input_fields(self, context):
-        if self.messages:
-            if not any(m.get("role") == "user" for m in self.messages):
-                raise ValueError("When 'messages' is provided, at least one message must have role='user'.")
+        if self.history is not None:
             return self
 
         ctx_msg = context.context.get("role") or ""
@@ -576,20 +573,15 @@ class Agent(Node):
         standard_fields = set(AgentInputSchema.model_fields.keys())
         extra_fields = input_data.model_dump(exclude=standard_fields)
 
-        if input_data.messages:
-            history_messages, input_message = self._build_history_from_messages(input_data.messages)
-        else:
-            input_message = (
-                input_message or self.input_message or Message(role=MessageRole.USER, content=input_data.input)
-            )
-            input_message = input_message.format_message(**extra_fields)
+        input_message = input_message or self.input_message or Message(role=MessageRole.USER, content=input_data.input)
+        input_message = input_message.format_message(**extra_fields)
 
         use_memory = self.memory and (input_data.user_id or input_data.session_id)
 
-        if input_data.messages:
+        if input_data.history is not None:
+            history_messages = list(input_data.history)
             if use_memory:
-                memory_content = input_message.content or ""
-                self.memory.add(role=MessageRole.USER, content=memory_content, metadata=custom_metadata)
+                self.memory.add(role=MessageRole.USER, content=input_message.content, metadata=custom_metadata)
         elif use_memory:
             history_messages = self._retrieve_memory(input_data)
             if len(history_messages) > 0:
@@ -602,7 +594,7 @@ class Agent(Node):
                     ),
                 )
             if isinstance(input_message, Message):
-                memory_content = input_message.content or ""
+                memory_content = input_message.content
             else:
                 text_parts = [
                     content.text for content in input_message.content if isinstance(content, VisionMessageTextContent)
@@ -671,6 +663,18 @@ class Agent(Node):
 
         return execution_result
 
+    def get_history(self) -> list[Message]:
+        """Return conversation messages from the last run, excluding the system prompt.
+
+        Returns history + user input (no internal ReAct steps). To build a
+        complete round-trip history, append the agent's output as an assistant
+        message::
+
+            history = agent.get_history()
+            history.append(Message(role=MessageRole.ASSISTANT, content=result.output["content"]))
+        """
+        return list(self._prompt.messages[1:])
+
     def retrieve_conversation_history(
         self,
         user_query: str = None,
@@ -732,39 +736,6 @@ class Agent(Node):
         )
         logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
         return history_messages
-
-    @staticmethod
-    def _build_history_from_messages(
-        messages: list[dict[str, Any]],
-    ) -> tuple[list[Message], Message]:
-        """Convert a list of message dicts into history messages and a current input message.
-
-        The last message with ``role='user'`` (searching from the end) is used as the
-        current input.  All other messages become the history.
-
-        Returns:
-            Tuple of (history_messages, input_message).
-
-        Raises:
-            ValueError: If no user message is found.
-        """
-        input_idx: int | None = None
-        for i in range(len(messages) - 1, -1, -1):
-            if messages[i].get("role") == "user":
-                input_idx = i
-                break
-
-        if input_idx is None:
-            raise ValueError("'messages' must contain at least one message with role='user'.")
-
-        history: list[Message] = []
-        for i, m in enumerate(messages):
-            if i == input_idx:
-                continue
-            history.append(Message(**m))
-
-        input_message = Message(**messages[input_idx])
-        return history, input_message
 
     def _run_llm(
         self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs
@@ -1422,7 +1393,7 @@ class Agent(Node):
             file_section = f"{file_section}{preview_section}"
 
         if isinstance(input_message, Message):
-            input_message.content = f"{(input_message.content or '').rstrip()}{file_section}"
+            input_message.content = f"{input_message.content.rstrip()}{file_section}"
         else:
             input_message.content = input_message.content + file_section
 

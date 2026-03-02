@@ -139,7 +139,7 @@ class HistoryManagerMixin:
                     if isinstance(content, VisionMessageTextContent):
                         history += content.text
             else:
-                text = message.content or ""
+                text = message.content
                 if message.role == MessageRole.ASSISTANT:
                     history += f"-TOOL DESCRIPTION START-\n{text}\n-TOOL DESCRIPTION END-\n"
                 elif message.role == MessageRole.USER:
