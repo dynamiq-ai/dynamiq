@@ -44,9 +44,13 @@ class E2BSandbox(Sandbox):
     _sandbox: E2BCodeInterpreterSandbox | None = PrivateAttr(default=None)
     _sandbox_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
-    def __init__(self, **kwargs):
-        """Initialize the E2B sandbox storage."""
-        super().__init__(**kwargs)
+    @property
+    def _sdk_class(self) -> type:
+        """Return the E2B SDK Sandbox class used for .create() and .connect().
+
+        Subclasses override this to swap the underlying SDK (e.g. e2b_desktop).
+        """
+        return E2BCodeInterpreterSandbox
 
     @property
     def current_sandbox_id(self) -> str | None:
@@ -152,9 +156,9 @@ class E2BSandbox(Sandbox):
             ),
             reraise=True,
         )
-        def connect() -> E2BCodeInterpreterSandbox:
+        def connect():
             logger.debug(f"Reconnecting to E2B sandbox: {self.sandbox_id}")
-            return E2BCodeInterpreterSandbox.connect(
+            return self._sdk_class.connect(
                 sandbox_id=self.sandbox_id,
                 api_key=self.connection.api_key,
                 domain=getattr(self.connection, "domain", None),
@@ -177,9 +181,9 @@ class E2BSandbox(Sandbox):
             ),
             reraise=True,
         )
-        def create() -> E2BCodeInterpreterSandbox:
+        def create():
             try:
-                return E2BCodeInterpreterSandbox.create(
+                return self._sdk_class.create(
                     template=self.template,
                     api_key=self.connection.api_key,
                     timeout=self.timeout,
