@@ -1,4 +1,3 @@
-import asyncio
 import threading
 from datetime import datetime
 from typing import Any
@@ -282,7 +281,6 @@ class CheckpointFlowMixin(BaseModel):
     _checkpoint: FlowCheckpoint | None = PrivateAttr(default=None)
     _effective_checkpoint_config: CheckpointConfig | None = PrivateAttr(default=None)
     _checkpoint_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
-    _checkpoint_async_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
     _checkpoint_persisted: bool = PrivateAttr(default=False)
 
     def _get_effective_checkpoint_config(self, config: RunnableConfig | None) -> CheckpointConfig:
@@ -323,42 +321,54 @@ class CheckpointFlowMixin(BaseModel):
         return cfg.enabled and cfg.backend is not None and cfg.checkpoint_on_failure_enabled
 
     def _setup_checkpoint_context(self, config: RunnableConfig | None) -> RunnableConfig | None:
-        """Setup checkpoint context for HITL and mid-agent-loop checkpointing."""
+        """Setup checkpoint context for HITL and mid-agent-loop checkpointing.
+
+        Callbacks are always invoked from thread-pool worker threads (both in the sync
+        ``run()`` path via ThreadExecutor and in the async ``run_async()`` path via
+        ``asyncio.to_thread``).  All mutation + persist operations are wrapped in the
+        ``_checkpoint_lock`` (threading.Lock) so concurrent node threads cannot interleave
+        checkpoint state changes.
+        """
         if not self._is_checkpoint_active():
             return config
 
         def on_pending_input(node_id: str, prompt: str, metadata: dict | None) -> None:
-            if self._checkpoint:
-                self._checkpoint.mark_pending_input(node_id, prompt, metadata)
-                self._save_checkpoint()
-                logger.info(f"Flow {self.id}: checkpoint saved with PENDING_INPUT status for node {node_id}")
+            with self._checkpoint_lock:
+                if self._checkpoint:
+                    self._checkpoint.mark_pending_input(node_id, prompt, metadata)
+                    self._save_checkpoint_unlocked()
+                    logger.info(f"Flow {self.id}: checkpoint saved with PENDING_INPUT status for node {node_id}")
 
         def on_input_received(node_id: str) -> None:
-            if self._checkpoint:
-                self._checkpoint.clear_pending_input(node_id)
-                self._save_checkpoint()
-                logger.debug(f"Flow {self.id}: cleared pending input for node {node_id}")
+            with self._checkpoint_lock:
+                if self._checkpoint:
+                    self._checkpoint.clear_pending_input(node_id)
+                    self._save_checkpoint_unlocked()
+                    logger.debug(f"Flow {self.id}: cleared pending input for node {node_id}")
 
         def on_save_mid_run(node_id: str) -> None:
-            cfg = self._effective_checkpoint_config or self.checkpoint
-            if self._checkpoint and cfg.checkpoint_mid_agent_loop_enabled:
-                node = self._node_by_id.get(node_id)
-                if node and isinstance(node, CheckpointNodeMixin):
-                    checkpoint_state = node.to_checkpoint_state()
-                    internal_state = (
-                        checkpoint_state.model_dump() if hasattr(checkpoint_state, "model_dump") else checkpoint_state
-                    )
-                    if node_id in self._checkpoint.node_states:
-                        self._checkpoint.node_states[node_id].internal_state = internal_state
-                    else:
-                        self._checkpoint.node_states[node_id] = NodeCheckpointState(
-                            node_id=node_id,
-                            node_type=node.type,
-                            status=CheckpointStatus.ACTIVE.value,
-                            internal_state=internal_state,
+            with self._checkpoint_lock:
+                cfg = self._effective_checkpoint_config or self.checkpoint
+                if self._checkpoint and cfg.checkpoint_mid_agent_loop_enabled:
+                    node = self._node_by_id.get(node_id)
+                    if node and isinstance(node, CheckpointNodeMixin):
+                        checkpoint_state = node.to_checkpoint_state()
+                        internal_state = (
+                            checkpoint_state.model_dump()
+                            if hasattr(checkpoint_state, "model_dump")
+                            else checkpoint_state
                         )
-                self._save_checkpoint()
-                logger.debug(f"Flow {self.id}: mid-run checkpoint saved for node {node_id}")
+                        if node_id in self._checkpoint.node_states:
+                            self._checkpoint.node_states[node_id].internal_state = internal_state
+                        else:
+                            self._checkpoint.node_states[node_id] = NodeCheckpointState(
+                                node_id=node_id,
+                                node_type=node.type,
+                                status=CheckpointStatus.ACTIVE.value,
+                                internal_state=internal_state,
+                            )
+                    self._save_checkpoint_unlocked()
+                    logger.debug(f"Flow {self.id}: mid-run checkpoint saved for node {node_id}")
 
         checkpoint_context = CheckpointContext(
             on_pending_input=on_pending_input,
@@ -386,8 +396,11 @@ class CheckpointFlowMixin(BaseModel):
 
         return None
 
-    def _save_checkpoint(self) -> None:
-        """Save current checkpoint to backend.
+    def _save_checkpoint_unlocked(self) -> None:
+        """Persist the current checkpoint without acquiring ``_checkpoint_lock``.
+
+        Callers that already hold the lock (e.g. the context callbacks created by
+        ``_setup_checkpoint_context``) use this to avoid re-entering the non-reentrant lock.
 
         In APPEND mode every save after the initial one creates a new snapshot
         with a fresh ID and a ``parent_checkpoint_id`` link to the previous one,
@@ -400,57 +413,76 @@ class CheckpointFlowMixin(BaseModel):
             return
 
         try:
-            with self._checkpoint_lock:
-                if cfg.behavior == CheckpointBehavior.APPEND and self._checkpoint_persisted:
-                    old_id = self._checkpoint.id
-                    self._checkpoint = self._checkpoint.model_copy(
-                        update={"id": str(uuid4()), "parent_checkpoint_id": old_id, "created_at": utc_now()}
-                    )
-                    cfg.backend.save(self._checkpoint)
-                    logger.debug(f"Flow {self.id}: checkpoint appended - {self._checkpoint.id} (parent={old_id})")
-                else:
-                    cfg.backend.save(self._checkpoint)
-                    self._checkpoint_persisted = True
-                    logger.debug(f"Flow {self.id}: checkpoint saved - {self._checkpoint.id}")
+            now = utc_now()
+            if cfg.behavior == CheckpointBehavior.APPEND and self._checkpoint_persisted:
+                old_id = self._checkpoint.id
+                self._checkpoint = self._checkpoint.model_copy(
+                    update={
+                        "id": str(uuid4()),
+                        "parent_checkpoint_id": old_id,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                )
+                cfg.backend.save(self._checkpoint)
+                logger.debug(f"Flow {self.id}: checkpoint appended - {self._checkpoint.id} (parent={old_id})")
+            else:
+                self._checkpoint.updated_at = now
+                cfg.backend.save(self._checkpoint)
+                self._checkpoint_persisted = True
+                logger.debug(f"Flow {self.id}: checkpoint saved - {self._checkpoint.id}")
         except Exception as e:
             logger.warning(f"Flow {self.id}: failed to save checkpoint - {e}")
 
+    def _save_checkpoint(self) -> None:
+        """Save current checkpoint to backend (thread-safe).
+
+        Acquires ``_checkpoint_lock`` then delegates to ``_save_checkpoint_unlocked``.
+        """
+        with self._checkpoint_lock:
+            self._save_checkpoint_unlocked()
+
     def _update_checkpoint(self, new_results: dict[str, RunnableResult], status: CheckpointStatus) -> None:
-        """Update checkpoint with new node results."""
-        if not self._checkpoint:
-            return
+        """Update checkpoint with new node results (thread-safe).
 
-        for node_id, result in new_results.items():
-            node = self._node_by_id.get(node_id)
-            if not node:
-                continue
+        Holds ``_checkpoint_lock`` for the entire mutation+save so concurrent node-thread
+        callbacks cannot interleave with the update.
+        """
+        with self._checkpoint_lock:
+            if not self._checkpoint:
+                return
 
-            cfg = self._effective_checkpoint_config or self.checkpoint
-            if node_id in cfg.exclude_node_ids:
-                continue
+            for node_id, result in new_results.items():
+                node = self._node_by_id.get(node_id)
+                if not node:
+                    continue
 
-            internal_state = {}
-            if isinstance(node, CheckpointNodeMixin):
-                checkpoint_state = node.to_checkpoint_state()
-                internal_state = (
-                    checkpoint_state.model_dump() if hasattr(checkpoint_state, "model_dump") else checkpoint_state
+                cfg = self._effective_checkpoint_config or self.checkpoint
+                if node_id in cfg.exclude_node_ids:
+                    continue
+
+                internal_state = {}
+                if isinstance(node, CheckpointNodeMixin):
+                    checkpoint_state = node.to_checkpoint_state()
+                    internal_state = (
+                        checkpoint_state.model_dump() if hasattr(checkpoint_state, "model_dump") else checkpoint_state
+                    )
+
+                node_state = NodeCheckpointState(
+                    node_id=node_id,
+                    node_type=node.type,
+                    status=result.status.value,
+                    input_data=result.input,
+                    output_data=result.output,
+                    error=result.error.to_dict() if result.error else None,
+                    internal_state=internal_state,
+                    completed_at=utc_now(),
                 )
 
-            node_state = NodeCheckpointState(
-                node_id=node_id,
-                node_type=node.type,
-                status=result.status.value,
-                input_data=result.input,
-                output_data=result.output,
-                error=result.error.to_dict() if result.error else None,
-                internal_state=internal_state,
-                completed_at=utc_now(),
-            )
+                self._checkpoint.mark_node_complete(node_id, node_state)
 
-            self._checkpoint.mark_node_complete(node_id, node_state)
-
-        self._checkpoint.status = status
-        self._save_checkpoint()
+            self._checkpoint.status = status
+            self._save_checkpoint_unlocked()
 
     def _cleanup_old_checkpoints(self) -> None:
         """Remove old checkpoints beyond max_checkpoints."""
@@ -480,34 +512,54 @@ class CheckpointFlowMixin(BaseModel):
 
         return None
 
-    async def _save_checkpoint_async(self) -> None:
-        """Async save of the current checkpoint to backend.
+    async def _save_checkpoint_async_unlocked(self) -> None:
+        """Async persist without acquiring ``_checkpoint_lock``.
 
-        Mirrors ``_save_checkpoint`` semantics (APPEND / REPLACE) but uses the
-        backend's non-blocking async API so the event loop is never stalled.
+        Callers that already hold the lock use this to avoid deadlocking.
+        Mirrors ``_save_checkpoint_unlocked`` but uses the backend's async API.
         """
         cfg = self._effective_checkpoint_config or self.checkpoint
         if not self._checkpoint or not cfg.backend:
             return
 
         try:
-            async with self._checkpoint_async_lock:
-                if cfg.behavior == CheckpointBehavior.APPEND and self._checkpoint_persisted:
-                    old_id = self._checkpoint.id
-                    self._checkpoint = self._checkpoint.model_copy(
-                        update={"id": str(uuid4()), "parent_checkpoint_id": old_id, "created_at": utc_now()}
-                    )
-                    await cfg.backend.save_async(self._checkpoint)
-                    logger.debug(f"Flow {self.id}: checkpoint appended - {self._checkpoint.id} (parent={old_id})")
-                else:
-                    await cfg.backend.save_async(self._checkpoint)
-                    self._checkpoint_persisted = True
-                    logger.debug(f"Flow {self.id}: checkpoint saved - {self._checkpoint.id}")
+            now = utc_now()
+            if cfg.behavior == CheckpointBehavior.APPEND and self._checkpoint_persisted:
+                old_id = self._checkpoint.id
+                self._checkpoint = self._checkpoint.model_copy(
+                    update={
+                        "id": str(uuid4()),
+                        "parent_checkpoint_id": old_id,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                )
+                await cfg.backend.save_async(self._checkpoint)
+                logger.debug(f"Flow {self.id}: checkpoint appended - {self._checkpoint.id} (parent={old_id})")
+            else:
+                self._checkpoint.updated_at = now
+                await cfg.backend.save_async(self._checkpoint)
+                self._checkpoint_persisted = True
+                logger.debug(f"Flow {self.id}: checkpoint saved - {self._checkpoint.id}")
         except Exception as e:
             logger.warning(f"Flow {self.id}: failed to save checkpoint - {e}")
 
+    async def _save_checkpoint_async(self) -> None:
+        """Async save of the current checkpoint to backend.
+
+        Only called from the event loop after ``asyncio.gather`` returns (all node
+        threads finished), so no thread-level contention with ``_checkpoint_lock``
+        exists at call time. Uses the unlocked helper directly.
+        """
+        await self._save_checkpoint_async_unlocked()
+
     async def _update_checkpoint_async(self, new_results: dict[str, RunnableResult], status: CheckpointStatus) -> None:
-        """Async update of checkpoint with new node results."""
+        """Async update of checkpoint with new node results.
+
+        Only called from the event loop after ``asyncio.gather`` returns (all node
+        threads finished), so no thread-level contention exists. The event loop is
+        single-threaded so no additional lock is needed.
+        """
         if not self._checkpoint:
             return
 
@@ -541,7 +593,7 @@ class CheckpointFlowMixin(BaseModel):
             self._checkpoint.mark_node_complete(node_id, node_state)
 
         self._checkpoint.status = status
-        await self._save_checkpoint_async()
+        await self._save_checkpoint_async_unlocked()
 
     async def _cleanup_old_checkpoints_async(self) -> None:
         """Async removal of old checkpoints beyond max_checkpoints."""

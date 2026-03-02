@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
@@ -34,12 +34,9 @@ class InMemory(CheckpointBackend):
 
     def save(self, checkpoint: FlowCheckpoint) -> str:
         """Save checkpoint to memory."""
-        updated_at = datetime.now(timezone.utc)
         copy = checkpoint.model_copy(deep=True)
-        copy.updated_at = updated_at
         with self._lock:
             self._checkpoints[checkpoint.id] = copy
-        checkpoint.updated_at = updated_at
         return checkpoint.id
 
     def load(self, checkpoint_id: str) -> FlowCheckpoint | None:
@@ -50,14 +47,11 @@ class InMemory(CheckpointBackend):
 
     def update(self, checkpoint: FlowCheckpoint) -> None:
         """Update existing checkpoint in memory."""
-        updated_at = datetime.now(timezone.utc)
         copy = checkpoint.model_copy(deep=True)
-        copy.updated_at = updated_at
         with self._lock:
             if checkpoint.id not in self._checkpoints:
                 raise FileNotFoundError(f"Checkpoint {checkpoint.id} not found")
             self._checkpoints[checkpoint.id] = copy
-        checkpoint.updated_at = updated_at
 
     def delete(self, checkpoint_id: str) -> bool:
         """Delete checkpoint from memory."""

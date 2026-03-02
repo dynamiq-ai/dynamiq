@@ -394,6 +394,11 @@ class GraphOrchestrator(Orchestrator):
                 self._current_state_id = state.id
                 self._completed_iterations = i + 1
 
+    def reset_run_state(self) -> None:
+        super().reset_run_state()
+        if not self.is_resumed:
+            self._current_state_id = None
+
     def get_iteration_state(self) -> IterationState:
         data = GraphOrchestratorIterationData(
             chat_history=list(self._chat_history),

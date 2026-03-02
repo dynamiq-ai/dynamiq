@@ -4,7 +4,7 @@ import json
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -112,8 +112,6 @@ class FileSystem(CheckpointBackend):
         return None
 
     def save(self, checkpoint: FlowCheckpoint) -> str:
-        updated_at = datetime.now(timezone.utc)
-
         run_dir = self._get_or_create_run_dir(
             checkpoint.flow_id, checkpoint.run_id, checkpoint.created_at, checkpoint.wf_run_id
         )
@@ -122,7 +120,6 @@ class FileSystem(CheckpointBackend):
         target = run_dir / filename
 
         copy = checkpoint.model_copy(deep=True)
-        copy.updated_at = updated_at
 
         fd, tmp_path = tempfile.mkstemp(dir=run_dir, suffix=".tmp")
         try:
@@ -134,7 +131,6 @@ class FileSystem(CheckpointBackend):
                 os.unlink(tmp_path)
             raise
 
-        checkpoint.updated_at = updated_at
         return checkpoint.id
 
     def load(self, checkpoint_id: str) -> FlowCheckpoint | None:

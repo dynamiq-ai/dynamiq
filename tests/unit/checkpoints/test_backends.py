@@ -67,6 +67,19 @@ class BackendTestMixin:
         assert "node-1" in loaded.node_states
         assert "node-1" in loaded.completed_node_ids
 
+    def test_save_does_not_mutate_caller(self, backend: CheckpointBackend, sample_checkpoint: FlowCheckpoint):
+        """Backend.save must not mutate the caller's checkpoint object."""
+        original_updated_at = sample_checkpoint.updated_at
+        backend.save(sample_checkpoint)
+        assert sample_checkpoint.updated_at == original_updated_at
+
+    def test_update_does_not_mutate_caller(self, backend: CheckpointBackend, sample_checkpoint: FlowCheckpoint):
+        """Backend.update must not mutate the caller's checkpoint object."""
+        backend.save(sample_checkpoint)
+        original_updated_at = sample_checkpoint.updated_at
+        backend.update(sample_checkpoint)
+        assert sample_checkpoint.updated_at == original_updated_at
+
     def test_delete(self, backend: CheckpointBackend, sample_checkpoint: FlowCheckpoint):
         """Test deleting a checkpoint."""
         backend.save(sample_checkpoint)
