@@ -13,7 +13,7 @@ from dynamiq.types.streaming import (
     StreamingThought,
     StreamingToolInput,
 )
-from dynamiq.utils import format_value
+from dynamiq.utils import format_value, generate_uuid
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -486,7 +486,10 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             content_to_stream = thought_model.to_dict()
         elif step == StreamingState.TOOL_INPUT:
             tool_input_model = StreamingToolInput(
-                content=content, tool_name=self._current_action_name or "", loop_num=self.loop_num
+                tool_run_id=self.agent._streaming_tool_run_id or "",
+                content=content,
+                tool_name=self._current_action_name or "",
+                loop_num=self.loop_num,
             )
             content_to_stream = tool_input_model.to_dict()
         elif step == StreamingState.ANSWER:
@@ -593,6 +596,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                 self._state_last_emit_index = self._state_start_index
             elif idx_action_input != -1 and (idx_answer == -1 or idx_action_input < idx_answer):
                 self._current_state = StreamingState.TOOL_INPUT
+                self.agent._streaming_tool_run_id = generate_uuid()
                 self._state_start_index = idx_action_input + len(XMLModeTag.OPEN_ACTION_INPUT)
                 self._state_last_emit_index = self._state_start_index
             elif idx_answer != -1:

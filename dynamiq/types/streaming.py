@@ -91,6 +91,7 @@ class StreamingThought(BaseModel):
 class StreamingToolInput(BaseModel):
     """Model for tool input streaming chunks."""
 
+    tool_run_id: str
     content: str
     tool_name: str
     loop_num: int

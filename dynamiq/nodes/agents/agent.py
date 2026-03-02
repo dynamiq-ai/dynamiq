@@ -109,6 +109,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
     _requested_output_files: list[str] = []
+    _streaming_tool_run_id: str | None = None
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
@@ -626,7 +627,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
             return error_message, [], False, False, None
 
-        tool_run_id = generate_uuid()
+        tool_run_id = self._streaming_tool_run_id or generate_uuid()
+        self._streaming_tool_run_id = None
         tool_data = AgentToolData(
             name=tool.name,
             type=tool.type,
