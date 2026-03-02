@@ -511,6 +511,8 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             content_to_stream = tool_input_model.model_dump()
         elif step == StreamingState.ANSWER:
             content_to_stream = content
+        else:
+            content_to_stream = content
 
         self.agent.stream_content(
             content=content_to_stream,
@@ -892,7 +894,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             keep_from = self._state_last_emit_index
         else:
             if (
-                self._current_state in (StreamingState.REASONING, StreamingState.ANSWER)
+                self._current_state in (StreamingState.REASONING, StreamingState.ANSWER, StreamingState.TOOL_INPUT)
                 and self._state_start_index != -1
             ):
                 keep_from = max(0, min(self._state_last_emit_index - self._tail_guard, self._state_start_index - 1))
