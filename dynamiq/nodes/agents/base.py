@@ -23,7 +23,6 @@ from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.file_tools import (
-    EXTRACTED_TEXT_SUFFIX,
     FileListTool,
     FileReadTool,
     FileSearchTool,
@@ -40,7 +39,7 @@ from dynamiq.sandboxes.base import Sandbox, SandboxConfig
 from dynamiq.skills.config import SkillsConfig
 from dynamiq.skills.registries.dynamiq import Dynamiq
 from dynamiq.skills.types import SkillMetadata
-from dynamiq.skills.utils import ingest_skills_into_sandbox
+from dynamiq.skills.utils import ingest_skills_into_sandbox, normalize_sandbox_skills_base_path
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
@@ -474,29 +473,37 @@ class Agent(Node):
         if source is None:
             return
         metadata = self.skills.get_skills_metadata()
-        skills_summary = self._format_skills_summary(metadata)
+        sandbox_base = normalize_sandbox_skills_base_path(getattr(source, "sandbox_skills_base_path", None))
+        skills_summary = self._format_skills_summary(
+            metadata, sandbox_skills_base_path=sandbox_base if sandbox_base else None
+        )
         self.system_prompt_manager.set_block("skills", skills_summary)
         self.system_prompt_manager.set_initial_variable("tool_description", self.tool_description)
+        if sandbox_base:
+            self.system_prompt_manager.set_initial_variable("sandbox_skills_base_path", sandbox_base)
         logger.info(
             f"Agent {self.name} - {self.id}: initialized with {len(metadata)} skills "
             f"(source={source.__class__.__name__})"
         )
 
-    def _format_skills_summary(self, metadata: list[SkillMetadata]) -> str:
+    def _format_skills_summary(self, metadata: list[SkillMetadata], sandbox_skills_base_path: str | None = None) -> str:
         """Format skills summary for prompt.
 
-        Args:
-            metadata: List of SkillMetadata objects.
-
-        Returns:
-            Formatted string with skill information.
+        When sandbox_skills_base_path is set (caller must pass an already-normalized path or None),
+        each line includes the path to read the skill in the sandbox so the agent can go straight
+        to SandboxShellTool without calling SkillsTool list.
         """
         if not metadata:
             return ""
 
+        base = sandbox_skills_base_path or ""
         lines = []
         for skill in metadata:
-            lines.append(f"- **{skill.name}**: {skill.description}")
+            if base:
+                skill_path = f"{base}/{skill.name}/SKILL.md"
+                lines.append(f"- **{skill.name}**: {skill.description} — read: `{skill_path}`")
+            else:
+                lines.append(f"- **{skill.name}**: {skill.description}")
         return "\n".join(lines)
 
     def set_block(self, block_name: str, content: str):
@@ -605,14 +612,8 @@ class Agent(Node):
             history_messages = None
 
         files = input_data.files
-        uploaded_file_names: set[str] = set()
         if files:
             normalized_files = self._ensure_named_files(files)
-            uploaded_file_names = {
-                getattr(f, "name", None)
-                for f in normalized_files
-                if hasattr(f, "name") and getattr(f, "name") is not None
-            }
             if self.sandbox_backend:
                 self._upload_files_to_sandbox(normalized_files)
             else:
@@ -641,22 +642,32 @@ class Agent(Node):
             "content": result,
         }
 
-        if self.file_store_backend and not self.file_store_backend.is_empty():
-            stored_files = self.file_store_backend.list_files_bytes()
-            filtered_files = self._filter_generated_files(stored_files, uploaded_file_names)
-            if filtered_files:
-                execution_result["files"] = filtered_files
+        requested_paths = getattr(self, "_requested_output_files", None)
+
+        if self.file_store_backend and requested_paths:
+            try:
+                stored_files = self.file_store_backend.list_files_bytes(requested_paths)
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from file store: {e}")
+                stored_files = []
+            if stored_files:
+                execution_result["files"] = stored_files
                 logger.info(
-                    f"Agent {self.name} - {self.id}: returning {len(filtered_files)} generated file(s) in file store"
+                    f"Agent {self.name} - {self.id}: "
+                    f"returning {len(stored_files)} requested file(s) from file store"
                 )
 
-        if self.sandbox_backend:
-            sandbox_files = self._collect_files_from_sandbox()
+        if self.sandbox_backend and requested_paths:
+            try:
+                sandbox_files = self.sandbox_backend.collect_files(file_paths=requested_paths)
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from sandbox: {e}")
+                sandbox_files = []
             if sandbox_files:
                 existing_files = execution_result.get("files", [])
                 execution_result["files"] = existing_files + sandbox_files
                 logger.info(
-                    f"Agent {self.name} - {self.id}: returning {len(sandbox_files)} generated file(s) from sandbox"
+                    f"Agent {self.name} - {self.id}: " f"returning {len(sandbox_files)} requested file(s) from sandbox"
                 )
 
         logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
@@ -1021,25 +1032,6 @@ class Agent(Node):
                     )
                 merged_input.pop("delegate_final", None)
 
-        if isinstance(tool, ContextManagerTool):
-            all_history = self._prompt.messages[self._history_offset :]
-            preserve_n = self.summarization_config.preserve_last_messages
-            if preserve_n > 0 and len(all_history) > preserve_n:
-                msgs_to_summarize = all_history[:-preserve_n]
-            else:
-                msgs_to_summarize = all_history
-
-            running_summary = getattr(self, "_running_summary", None)
-            if self.summarization_config.incremental and running_summary:
-                summary_content = f"\nObservation: {running_summary}\n"
-                filtered = [
-                    m for m in msgs_to_summarize if not (m.static and m.content and m.content == summary_content)
-                ]
-                merged_input["messages"] = filtered if filtered else msgs_to_summarize
-                merged_input["running_summary"] = running_summary
-            else:
-                merged_input["messages"] = msgs_to_summarize
-
         raw_tool_params = kwargs.get("tool_params", ToolParams())
         tool_params = (
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
@@ -1250,55 +1242,6 @@ class Agent(Node):
 
         if stored_files:
             logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
-
-    INTERNAL_CACHE_SUFFIXES: ClassVar[tuple[str, ...]] = (EXTRACTED_TEXT_SUFFIX,)
-
-    @classmethod
-    def _filter_generated_files(cls, files: list[io.BytesIO], uploaded_names: set[str]) -> list[io.BytesIO]:
-        if not files:
-            return []
-
-        filtered: list[io.BytesIO] = []
-        for file in files:
-            name = getattr(file, "name", None)
-            if not name:
-                filtered.append(file)
-                continue
-            if name in uploaded_names:
-                continue
-            if cls._is_internal_cache_file(name, uploaded_names):
-                continue
-            filtered.append(file)
-        return filtered
-
-    @classmethod
-    def _is_internal_cache_file(cls, name: str, uploaded_names: set[str]) -> bool:
-        for suffix in cls.INTERNAL_CACHE_SUFFIXES:
-            if not name.endswith(suffix):
-                continue
-            base_name = name[: -len(suffix)]
-            if not base_name:
-                return True
-            if (not uploaded_names) or (base_name in uploaded_names):
-                return True
-        return False
-
-    def _collect_files_from_sandbox(self) -> list[io.BytesIO]:
-        """Collect output files from the sandbox backend.
-
-        Downloads all files from the sandbox output directory.
-
-        Returns:
-            List of BytesIO objects with name, description, and content_type attributes.
-        """
-        if not self.sandbox_backend:
-            return []
-
-        try:
-            return self.sandbox_backend.collect_output_files()
-        except Exception as e:
-            logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from sandbox: {e}")
-            return []
 
     def _upload_files_to_sandbox(self, normalized_files: list) -> None:
         """Upload file-like objects to the sandbox backend."""

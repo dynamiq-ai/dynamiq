@@ -13,10 +13,12 @@ Observation: [Result from the tool]
 
 When you have enough information to provide a final answer:
 Thought: [Your reasoning for the final answer]
+Output Files: [Optional: comma-separated file paths to return, omit this line if there are no files]
 Answer: [Your complete answer to the user's question]
 
 For questions that don't require tools:
 Thought: [Your reasoning about the question]
+Output Files: [Optional: comma-separated file paths to return, omit this line if there are no files]
 Answer: [Your direct response]
 
 ADVANCED REASONING:
@@ -47,8 +49,7 @@ IMPORTANT RULES:
 
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
-- Files are automatically collected and will be returned with your final answer
-- Mention created files in your final answer so users know what was generated
+- If you want to return files, include an "Output Files:" line before "Answer:" listing file paths (comma-separated). This line is optional — omit it if there are no files to return.
 """  # noqa: E501
 
 REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
@@ -76,6 +77,7 @@ When you have enough information to provide a final answer:
     <answer>
         [Your complete answer to the user's question]
     </answer>
+    <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 </output>
 
 For questions that don't require tools:
@@ -86,6 +88,7 @@ For questions that don't require tools:
     <answer>
         [Your direct response]
     </answer>
+    <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 </output>
 
 ADVANCED REASONING:
@@ -127,7 +130,5 @@ JSON FORMATTING REQUIREMENTS:
 
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
-- Generated files are automatically collected and returned with your final answer
-- File operations are handled transparently - focus on the task, not file management
-
+- If you want to return files, include an <output_files> tag after </answer> (but still inside <output>) listing absolute file paths (comma-separated). This tag is optional — omit it if there are no files to return.
 """  # noqa: E501

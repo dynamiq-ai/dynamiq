@@ -14,6 +14,7 @@ from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     JSONParsingError,
     MaxLoopsExceededException,
+    OutputFileNotFoundError,
     ParsingError,
     RecoverableAgentException,
     TagNotFoundError,
@@ -107,7 +108,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
-    _skip_next_observation: bool = False
+    _requested_output_files: list[str] = []
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
@@ -217,6 +218,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     context_tool = ContextManagerTool(
                         llm=self.llm,
                         name="context-manager",
+                        token_budget_ratio=self.summarization_config.token_budget_ratio,
                     )
                     self.tools.append(context_tool)
                     self._excluded_tool_ids.add(context_tool.id)
@@ -348,7 +350,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return None, None, None
 
         if "Answer:" in llm_generated_output:
-            thought, final_answer = parser.extract_default_final_answer(llm_generated_output)
+            thought, final_answer, output_files_raw = parser.extract_default_final_answer(llm_generated_output)
+            self._requested_output_files = self._parse_output_files_csv(output_files_raw)
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
 
@@ -378,6 +381,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
         thought = llm_generated_output_json["thought"]
         if action == "provide_final_answer":
             final_answer = llm_generated_output_json["answer"]
+            self._requested_output_files = self._parse_output_files_csv(
+                llm_generated_output_json.get("output_files") or ""
+            )
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
 
@@ -420,6 +426,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
         action_input = llm_generated_output_json["action_input"]
 
         if action == "finish":
+            self._requested_output_files = self._parse_output_files_csv(
+                llm_generated_output_json.get("output_files") or ""
+            )
             self.log_final_output(thought, action_input, loop_num)
             return thought, "final_answer", action_input
 
@@ -454,10 +463,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         try:
             parsed_data = XMLParser.parse(
-                llm_generated_output, required_tags=["thought", "answer"], optional_tags=["output"]
+                llm_generated_output,
+                required_tags=["thought", "answer"],
+                optional_tags=["output", "output_files"],
             )
             thought = parsed_data.get("thought")
             final_answer = parsed_data.get("answer")
+
+            self._requested_output_files = self._parse_output_files_csv(parsed_data.get("output_files") or "")
+
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
 
@@ -632,14 +646,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
         )
 
         try:
-            # Don't cache ContextManagerTool results - they should always be regenerated
-            # (messages are injected in _run_tool in base.py)
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
+                to_summarize, _ = self._split_history()
+                tool_input = {**(action_input if isinstance(action_input, dict) else {}), "messages": to_summarize}
             else:
-                # For other tools, check cache for previously computed results
                 tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
                 tool_result = self._tool_cache.get(tool_cache_entry, None)
+                tool_input = action_input
 
             delegate_final = self._should_delegate_final(tool, action_input)
 
@@ -649,7 +663,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 run_tool_result = self._run_tool(
                     tool,
-                    action_input,
+                    tool_input,
                     config,
                     delegate_final=delegate_final,
                     update_run_depends=update_run_depends,
@@ -696,8 +710,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 return tool_result, tool_files, True, True, dependency
 
             if isinstance(tool, ContextManagerTool):
-                self._compact_history(summary=tool_result)
-                self._skip_next_observation = True
+                self._compact_history(summary=tool_output_meta.get("summary", tool_result))
 
             # Stream the result
             self._stream_agent_event(
@@ -864,7 +877,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 if is_delegated:
                     return tool_result
 
-            # Add feedback about skipped tools if any were filtered out
             if skipped_tools:
                 skipped_notice = (
                     f"\n\n[Note: The following tools were NOT executed because context-manager "
@@ -873,10 +885,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
                 tool_result = f"{tool_result}{skipped_notice}" if tool_result else skipped_notice
 
-            if self._skip_next_observation:
-                self._skip_next_observation = False
-            else:
-                self._add_observation(tool_result)
+            self._add_observation(tool_result)
 
         # else: No action or no tools available - no reasoning to stream
 
@@ -939,6 +948,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
 
         self.state.max_loops = self.max_loops
+        self._requested_output_files = []
         self._refresh_agent_state(1)
 
         self._setup_prompt_and_stop_sequences(input_message, history_messages)
@@ -1002,6 +1012,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 # Handle final answer
                 if result[1] == "final_answer":
+                    self._resolve_requested_output_files(strict=True)
                     return result[2]
 
                 # Handle recovery (for modes that support it)
@@ -1017,6 +1028,20 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 if final_answer is not None:
                     return final_answer
+
+            except OutputFileNotFoundError as e:
+                self._requested_output_files = []
+                self._append_recovery_instruction(
+                    error_label=type(e).__name__,
+                    error_detail=str(e),
+                    llm_generated_output=llm_generated_output,
+                    extra_guidance=(
+                        "The response format is correct, but some files could not be found. "
+                        "Please create the missing files or correct the file paths, "
+                        "then provide your final answer again."
+                    ),
+                )
+                continue
 
             except ActionParsingException as e:
                 extra_guidance = None
@@ -1039,6 +1064,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     extra_guidance=extra_guidance,
                 )
                 continue
+            except Exception as e:
+                logger.error(f"Agent {self.name} - {self.id}: Error during agent execution: {e}")
+                raise e
 
             # Inject automatic summarization if token limit exceeded (like Context Manager Tool)
             self._try_summarize_history(config=config, **kwargs)
@@ -1055,6 +1083,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             raise MaxLoopsExceededException(message=error_message)
         else:
             max_loop_final_answer = self._handle_max_loops_exceeded(input_message, config, **kwargs)
+            self._resolve_requested_output_files(strict=False)
             if self.streaming.enabled:
                 self.stream_content(
                     content=max_loop_final_answer,
@@ -1103,7 +1132,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             logger.error(f"Agent {self.name} - {self.id}: Context Manager Tool not found.")
             return
 
-        action = self.sanitize_tool_name(context_tool.name)
+            action = self.sanitize_tool_name(context_tool.name)
 
         self._execute_tools_and_update_prompt(
             action=action,
@@ -1113,6 +1142,53 @@ class Agent(HistoryManagerMixin, BaseAgent):
             config=config,
             **kwargs,
         )
+
+    @staticmethod
+    def _parse_output_files_csv(raw: str) -> list[str]:
+        """Parse a comma-separated string of file paths into a list.
+
+        Strips whitespace from each entry and drops empty entries.
+        """
+        if not raw or not raw.strip():
+            return []
+        return [p.strip() for p in raw.split(",") if p.strip()]
+
+    def _resolve_requested_output_files(self, *, strict: bool = True) -> None:
+        """Resolve ``_requested_output_files`` against the file backend.
+
+        Each requested path is checked as-is first, then by basename.
+        When *strict* is ``True`` (inside the normal loop), missing files
+        raise :class:`OutputFileNotFoundError` so the agent can retry.
+        When *strict* is ``False`` (max-loops path), missing files are
+        silently dropped because there are no retries left.
+        """
+        if not self._requested_output_files:
+            return
+
+        file_backend = self.sandbox_backend or self.file_store_backend
+        if not file_backend:
+            return
+
+        resolved: list[str] = []
+        file_not_found: list[str] = []
+        for f in self._requested_output_files:
+            basename = f.rsplit("/", 1)[-1]
+            if file_backend.exists(f):
+                resolved.append(f)
+            elif f != basename and file_backend.exists(basename):
+                resolved.append(basename)
+            else:
+                file_not_found.append(f)
+
+        if file_not_found and strict:
+            raise OutputFileNotFoundError(f"File not found: {file_not_found}.", recoverable=True)
+
+        if file_not_found and not strict:
+            logger.warning(
+                f"Agent {self.name} - {self.id}: " f"max-loops output_files not found (skipped): {file_not_found}"
+            )
+
+        self._requested_output_files = resolved
 
     def _handle_max_loops_exceeded(
         self, input_message: Message | VisionMessage, config: RunnableConfig | None = None, **kwargs
@@ -1154,9 +1230,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
                 final_answer = llm_final_attempt
 
+            raw_output_files = XMLParser.extract_first_tag_lxml(llm_final_attempt, ["output_files"])
+            if raw_output_files is None:
+                raw_output_files = XMLParser.extract_first_tag_regex(llm_final_attempt, ["output_files"])
+            self._requested_output_files = self._parse_output_files_csv(raw_output_files or "")
+
         except Exception as e:
             logger.error(f"Max loops handler: Error during final answer extraction: {e}. Returning raw output.")
             final_answer = llm_final_attempt
+            self._requested_output_files = []
 
         return f"{final_answer}"
 
@@ -1210,7 +1292,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             context_compaction_enabled=self.summarization_config.enabled,
             todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
             or bool(self.sandbox_backend),
-            sandbox_output_dir=self.sandbox_backend.output_dir if self.sandbox_backend else None,
             sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
         )
 
@@ -1254,6 +1335,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
             unique_key = self._build_unique_file_key(aggregated, sanitized_name)
             aggregated[unique_key] = files
 
+    def _is_tool_parallel_eligible(self, tool_name: str) -> bool:
+        """Check if a tool is eligible for parallel execution based on its is_parallel_execution_allowed flag."""
+        tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
+        return tool.is_parallel_execution_allowed if tool else False
+
     def _execute_tools(
         self,
         tools_data: list[dict[str, Any]],
@@ -1264,6 +1350,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
     ) -> tuple[str, dict[str, Any]]:
         """
         Execute one or more tools and gather their results.
+
+        Tools are split into two groups based on their ``is_parallel_execution_allowed`` flag:
+        parallel-eligible tools run concurrently first, then sequential-only
+        tools run one-by-one.
 
         Args:
             tools_data (list): List of dictionaries containing name and input for each tool
@@ -1300,22 +1390,21 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 continue
             prepared_tools.append({"order": idx, "name": tool_name, "input": tool_input})
 
-        def execute_and_convert(tool_name: str, tool_input: Any, order: int) -> dict[str, Any]:
-            """Execute tool and convert tuple result to dict for parallel execution."""
+        def _execute_single_tool_to_result(tool_payload: dict[str, Any], **extra) -> dict[str, Any]:
+            """Execute a single tool and wrap the result as a dict."""
             tool_result, tool_files, _, success, dependency = self._execute_single_tool(
-                tool_name,
-                tool_input,
+                tool_payload["name"],
+                tool_payload["input"],
                 thought or "",
                 loop_num,
                 config,
-                update_run_depends=False,
                 collect_dependency=True,
-                is_parallel=True,
+                **extra,
                 **kwargs,
             )
             return {
-                "order": order,
-                "tool_name": tool_name,
+                "order": tool_payload["order"],
+                "tool_name": tool_payload["name"],
                 "success": success,
                 "result": tool_result,
                 "files": tool_files,
@@ -1324,42 +1413,40 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         if prepared_tools:
             if len(prepared_tools) == 1:
-                tool_payload = prepared_tools[0]
-                tool_result, tool_files, _, success, dependency = self._execute_single_tool(
-                    tool_payload["name"],
-                    tool_payload["input"],
-                    thought or "",
-                    loop_num,
-                    config,
-                    update_run_depends=True,
-                    collect_dependency=True,
-                    **kwargs,
-                )
-                res = {
-                    "order": tool_payload["order"],
-                    "tool_name": tool_payload["name"],
-                    "success": success,
-                    "result": tool_result,
-                    "files": tool_files,
-                    "dependency": dependency,
-                }
-                all_results.append(res)
+                all_results.append(_execute_single_tool_to_result(prepared_tools[0], update_run_depends=True))
             else:
-                max_workers = len(prepared_tools)
-                with ContextAwareThreadPoolExecutor(max_workers=max_workers) as executor:
-                    future_map = {}
-                    for tool_payload in prepared_tools:
-                        future = executor.submit(
-                            execute_and_convert,
-                            tool_payload["name"],
-                            tool_payload["input"],
-                            tool_payload["order"],
-                        )
-                        future_map[future] = tool_payload
+                parallel_group = [tp for tp in prepared_tools if self._is_tool_parallel_eligible(tp["name"])]
+                sequential_group = [tp for tp in prepared_tools if not self._is_tool_parallel_eligible(tp["name"])]
 
-                    for future in as_completed(future_map.keys()):
-                        res = future.result()
-                        all_results.append(res)
+                if sequential_group:
+                    seq_names = [tp["name"] for tp in sequential_group]
+                    logger.info(
+                        f"Agent {self.name} - {self.id}: tools excluded from parallel execution "
+                        f"(is_parallel_execution_allowed=False): {seq_names}"
+                    )
+
+                # Phase 1: run parallel-eligible tools concurrently
+                if len(parallel_group) > 1:
+                    max_workers = len(parallel_group)
+                    with ContextAwareThreadPoolExecutor(max_workers=max_workers) as executor:
+                        future_map = {}
+                        for tool_payload in parallel_group:
+                            future = executor.submit(
+                                _execute_single_tool_to_result,
+                                tool_payload,
+                                is_parallel=True,
+                                update_run_depends=False,
+                            )
+                            future_map[future] = tool_payload
+
+                        for future in as_completed(future_map.keys()):
+                            all_results.append(future.result())
+                elif len(parallel_group) == 1:
+                    all_results.append(_execute_single_tool_to_result(parallel_group[0], update_run_depends=False))
+
+                # Phase 2: run sequential-only tools one-by-one
+                for tool_payload in sequential_group:
+                    all_results.append(_execute_single_tool_to_result(tool_payload, update_run_depends=False))
 
         observation_parts: list[str] = []
         aggregated_files: dict[str, Any] = {}

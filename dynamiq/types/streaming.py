@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from enum import Enum
 from functools import cached_property
 from queue import Queue
@@ -117,6 +118,7 @@ class AgentToolResultEventMessageData(BaseModel):
     files: list = Field(default_factory=list)
     loop_num: int
     output: dict[str, Any] | None = None
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class StreamingConfig(BaseModel):

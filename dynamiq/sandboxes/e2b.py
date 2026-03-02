@@ -91,7 +91,6 @@ class E2BSandbox(Sandbox):
                 public_url_error = str(e)
         return SandboxInfo(
             base_path=self.base_path,
-            output_dir=self.output_dir,
             sandbox_id=self.sandbox_id,
             public_host=public_host,
             public_url=public_url,
@@ -129,14 +128,14 @@ class E2BSandbox(Sandbox):
             return self._sandbox
 
     def _ensure_directories(self) -> None:
-        """Create the base and output directories inside the sandbox if they do not exist."""
+        """Create the base directory inside the sandbox if it does not exist."""
         if self._sandbox is None:
             return
         try:
-            self._sandbox.commands.run(f"mkdir -p {shlex.quote(self.base_path)} {shlex.quote(self.output_dir)}")
-            logger.debug(f"E2BSandbox ensured directories exist: {self.base_path}, {self.output_dir}")
+            self._sandbox.commands.run(f"mkdir -p {shlex.quote(self.base_path)}")
+            logger.debug(f"E2BSandbox ensured directory exists: {self.base_path}")
         except Exception as e:
-            logger.warning(f"E2BSandbox failed to create directories: {e}")
+            logger.warning(f"E2BSandbox failed to create directory: {e}")
 
     def _reconnect_with_retry(self) -> E2BDesktopSandbox:
         """Reconnect to existing sandbox with exponential backoff on rate-limit."""
@@ -234,15 +233,24 @@ class E2BSandbox(Sandbox):
                 exit_code=1,
             )
 
-    def upload_file(self, file_name: str, content: bytes, destination_path: str | None = None) -> str:
+    def upload_file(
+        self,
+        file_name: str,
+        content: bytes,
+        destination_path: str | None = None,
+        ensure_parent_dirs: bool = True,
+    ) -> str:
         """Upload a file to the E2B sandbox.
 
-        Note: Parent directories are created automatically by E2B's ``files.write()``.
+        When ensure_parent_dirs is True, parent directories are created with ``mkdir -p``
+        before writing so that existing directories (e.g. from a previous skill ingestion)
+        do not cause 500 errors from backends that use non-idempotent mkdir.
 
         Args:
             file_name: Name of the file.
             content: File content as bytes.
             destination_path: Optional destination path in sandbox. If None, uses base_path/file_name.
+            ensure_parent_dirs: When True, run mkdir -p for the destination's parent before write.
 
         Returns:
             The path where the file was uploaded in the sandbox.
@@ -251,6 +259,15 @@ class E2BSandbox(Sandbox):
 
         if destination_path is None:
             destination_path = f"{self.base_path}/{file_name}"
+
+        if ensure_parent_dirs and destination_path:
+            parent = destination_path.rsplit("/", 1)[0]
+            if parent and parent != destination_path:
+                try:
+                    sandbox.commands.run(f"mkdir -p {shlex.quote(parent)}")
+                    logger.debug(f"E2BSandbox ensured parent dir: {parent}")
+                except Exception as e:
+                    logger.warning(f"E2BSandbox mkdir -p for {parent!r} failed (continuing): {e}")
 
         try:
             sandbox.files.write(destination_path, content)

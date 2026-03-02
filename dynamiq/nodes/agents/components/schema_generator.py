@@ -33,8 +33,12 @@ FINAL_ANSWER_FUNCTION_SCHEMA = {
                     "description": "Your reasoning about why you can answer original question.",
                 },
                 "answer": {"type": "string", "description": "Answer on initial request."},
+                "output_files": {
+                    "type": "string",
+                    "description": "Optional comma-separated file paths to return. Empty string if none.",
+                },
             },
-            "required": ["thought", "answer"],
+            "required": ["thought", "answer", "output_files"],
         },
     },
 }
@@ -108,7 +112,7 @@ def generate_structured_output_schemas(
             "strict": True,
             "schema": {
                 "type": "object",
-                "required": ["thought", "action", "action_input"],
+                "required": ["thought", "action", "action_input", "output_files"],
                 "properties": {
                     "thought": {
                         "type": "string",
@@ -121,6 +125,12 @@ def generate_structured_output_schemas(
                     "action_input": {
                         "type": "string",
                         "description": action_input_description,
+                    },
+                    "output_files": {
+                        "type": "string",
+                        "description": (
+                            "Comma-separated file paths to return when action is finish." " Empty string otherwise."
+                        ),
                     },
                 },
                 "additionalProperties": False,
@@ -172,7 +182,7 @@ def generate_property_schema(properties: dict, name: str, field: Any) -> None:
             elif param_type := TYPE_MAPPING.get(param):
                 types.append(param_type)
 
-            elif issubclass(param, Enum):
+            elif isinstance(param, type) and issubclass(param, Enum):
                 element_type = TYPE_MAPPING.get(filter_format_type(type(list(param.__members__.values())[0].value))[0])
                 types.append(element_type)
                 properties[name]["enum"] = [field.value for field in param.__members__.values()]

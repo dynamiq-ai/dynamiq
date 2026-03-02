@@ -81,6 +81,7 @@ class ContextManagerTool(Node):
     )
 
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=60))
+    token_budget_ratio: float = Field(default=0.75, gt=0, lt=1)
     llm: Node = Field(..., description="LLM instance for generating summaries")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -202,8 +203,10 @@ class ContextManagerTool(Node):
         **kwargs,
     ) -> str:
         """Send *messages* to the LLM and return the generated text."""
+        """Send *messages* to the LLM and return the generated text."""
         llm_result = self.llm.run(
             input_data={},
+            prompt=Prompt(messages=messages),
             prompt=Prompt(messages=messages),
             config=config,
             **(kwargs | {"parent_run_id": kwargs.get("run_id"), "run_depends": []}),
@@ -402,10 +405,11 @@ class ContextManagerTool(Node):
                 **kwargs,
             )
 
-        result_content = summary_result
         if input_data.notes:
-            result_content = f"Notes: {input_data.notes}\n\n{summary_result}"
+            summary_result = f"Notes: {input_data.notes}\n\n{summary_result}"
 
         return {
-            "content": result_content,
+            "content": f"Conversation history was summarized successfully ({len(input_data.messages)} "
+            "messages compressed).",
+            "summary": summary_result,
         }
