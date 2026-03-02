@@ -34,9 +34,12 @@ class InMemory(CheckpointBackend):
 
     def save(self, checkpoint: FlowCheckpoint) -> str:
         """Save checkpoint to memory."""
-        checkpoint.updated_at = datetime.now(timezone.utc)
+        updated_at = datetime.now(timezone.utc)
+        copy = checkpoint.model_copy(deep=True)
+        copy.updated_at = updated_at
         with self._lock:
-            self._checkpoints[checkpoint.id] = checkpoint.model_copy(deep=True)
+            self._checkpoints[checkpoint.id] = copy
+        checkpoint.updated_at = updated_at
         return checkpoint.id
 
     def load(self, checkpoint_id: str) -> FlowCheckpoint | None:
@@ -47,11 +50,14 @@ class InMemory(CheckpointBackend):
 
     def update(self, checkpoint: FlowCheckpoint) -> None:
         """Update existing checkpoint in memory."""
-        checkpoint.updated_at = datetime.now(timezone.utc)
+        updated_at = datetime.now(timezone.utc)
+        copy = checkpoint.model_copy(deep=True)
+        copy.updated_at = updated_at
         with self._lock:
             if checkpoint.id not in self._checkpoints:
                 raise FileNotFoundError(f"Checkpoint {checkpoint.id} not found")
-            self._checkpoints[checkpoint.id] = checkpoint.model_copy(deep=True)
+            self._checkpoints[checkpoint.id] = copy
+        checkpoint.updated_at = updated_at
 
     def delete(self, checkpoint_id: str) -> bool:
         """Delete checkpoint from memory."""
@@ -111,7 +117,7 @@ class InMemory(CheckpointBackend):
                 for cp in self._checkpoints.values()
                 if cp.flow_id == flow_id and self._matches_run(cp, run_id) and (status is None or cp.status == status)
             ]
-            result.sort(key=lambda x: x.updated_at, reverse=True)
+            result.sort(key=lambda x: x.created_at, reverse=True)
             return result[:limit] if limit is not None else result
 
     def clear(self) -> None:

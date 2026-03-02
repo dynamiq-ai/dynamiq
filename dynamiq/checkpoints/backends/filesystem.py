@@ -112,7 +112,7 @@ class FileSystem(CheckpointBackend):
         return None
 
     def save(self, checkpoint: FlowCheckpoint) -> str:
-        checkpoint.updated_at = datetime.now(timezone.utc)
+        updated_at = datetime.now(timezone.utc)
 
         run_dir = self._get_or_create_run_dir(
             checkpoint.flow_id, checkpoint.run_id, checkpoint.created_at, checkpoint.wf_run_id
@@ -121,16 +121,20 @@ class FileSystem(CheckpointBackend):
         filename = self._checkpoint_filename(checkpoint.id, checkpoint.created_at)
         target = run_dir / filename
 
+        copy = checkpoint.model_copy(deep=True)
+        copy.updated_at = updated_at
+
         fd, tmp_path = tempfile.mkstemp(dir=run_dir, suffix=".tmp")
         try:
             with os.fdopen(fd, "w") as f:
-                json.dump(checkpoint.to_dict(), f, default=encode_reversible, ensure_ascii=False)
+                json.dump(copy.to_dict(), f, default=encode_reversible, ensure_ascii=False)
             os.replace(tmp_path, target)
         except BaseException:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
             raise
 
+        checkpoint.updated_at = updated_at
         return checkpoint.id
 
     def load(self, checkpoint_id: str) -> FlowCheckpoint | None:
@@ -184,7 +188,7 @@ class FileSystem(CheckpointBackend):
                     continue
                 checkpoints.append(cp)
 
-        checkpoints.sort(key=lambda c: c.updated_at, reverse=True)
+        checkpoints.sort(key=lambda c: c.created_at, reverse=True)
         return checkpoints[:limit] if limit is not None else checkpoints
 
     def get_latest_by_flow(self, flow_id: str, *, status: CheckpointStatus | None = None) -> FlowCheckpoint | None:

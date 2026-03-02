@@ -390,6 +390,10 @@ class Flow(CheckpointFlowMixin, BaseFlow):
             if not self._checkpoint:
                 raise ValueError(f"Checkpoint not found: {effective_resume}")
 
+            # The checkpoint already exists in the backend; mark it persisted so
+            # the first _save_checkpoint() call creates a new APPEND snapshot
+            # instead of overwriting the loaded one in-place.
+            self._checkpoint_persisted = True
             self._restore_from_checkpoint(self._checkpoint)
 
             if input_data is None:
@@ -544,6 +548,10 @@ class Flow(CheckpointFlowMixin, BaseFlow):
             if not self._checkpoint:
                 raise ValueError(f"Checkpoint not found: {effective_resume}")
 
+            # The checkpoint already exists in the backend; mark it persisted so
+            # the first _save_checkpoint_async() call creates a new APPEND snapshot
+            # instead of overwriting the loaded one in-place.
+            self._checkpoint_persisted = True
             self._restore_from_checkpoint(self._checkpoint)
 
             if input_data is None:

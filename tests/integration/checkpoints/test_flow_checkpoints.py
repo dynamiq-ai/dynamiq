@@ -7,7 +7,7 @@ from dynamiq import Workflow, connections, flows
 from dynamiq.checkpoints.backends.filesystem import FileSystem
 from dynamiq.checkpoints.backends.in_memory import InMemory
 from dynamiq.checkpoints.checkpoint import CheckpointStatus
-from dynamiq.checkpoints.config import CheckpointConfig
+from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.node import NodeDependency
@@ -630,6 +630,58 @@ class TestCheckpointStatusLifecycle:
 
         assert backend.get_latest_by_flow(flow.id).status == CheckpointStatus.FAILED
 
+    @pytest.mark.parametrize("backend_type", ["in_memory", "file"])
+    def test_resume_in_append_mode_creates_new_snapshot_not_overwrite(self, mocker, backend_factory, backend_type):
+        """Regression: resuming must not overwrite the loaded checkpoint in APPEND mode.
+
+        Before the fix, _checkpoint_persisted stayed False on resume so the first
+        _save_checkpoint() call took the 'else' branch and called backend.save() with
+        the *original* checkpoint ID, corrupting the time-travel chain.
+        After the fix, _checkpoint_persisted is set to True before the first save,
+        so a brand-new snapshot with a fresh ID and parent_checkpoint_id link is created.
+        """
+        backend = backend_factory(backend_type)
+        call_count = {"value": 0}
+
+        def side_effect(stream: bool, *args, **kwargs):
+            call_count["value"] += 1
+            if call_count["value"] == 1:
+                raise RuntimeError("Transient failure")
+            r = ModelResponse()
+            r["choices"][0]["message"]["content"] = "Success"
+            return r
+
+        mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=side_effect)
+
+        flow = flows.Flow(
+            nodes=make_pipeline(),
+            checkpoint=CheckpointConfig(
+                enabled=True,
+                backend=backend,
+                behavior=CheckpointBehavior.APPEND,
+                max_checkpoints=50,
+            ),
+        )
+
+        # First run — fails; checkpoint is saved with a known ID.
+        flow.run_sync(input_data={"query": "test"})
+        failed_cp = backend.get_latest_by_flow(flow.id)
+        assert failed_cp is not None
+        original_id = failed_cp.id
+
+        # Resume — the first save on resume must NOT overwrite original_id.
+        flow.run_sync(input_data={"query": "test"}, resume_from=original_id)
+
+        # The original checkpoint must still exist and be unchanged.
+        original_still_exists = backend.load(original_id)
+        assert original_still_exists is not None, "Original checkpoint was overwritten — regression!"
+        assert original_still_exists.id == original_id
+
+        # A new snapshot linked to the original must have been created.
+        all_checkpoints = backend.get_list_by_flow(flow.id, limit=50)
+        children = [cp for cp in all_checkpoints if cp.parent_checkpoint_id == original_id]
+        assert len(children) >= 1, "No APPEND snapshot linked to the original checkpoint was created"
+
 
 class TestBinaryDataCheckpoint:
     """Checkpoint handles binary/BytesIO input data."""
@@ -869,6 +921,56 @@ class TestAsyncCheckpointBehaviour:
         same_run = [cp for cp in checkpoints if cp.run_id == run_id]
         assert len(same_run) == 1
         assert same_run[0].parent_checkpoint_id is None
+
+    @pytest.mark.asyncio
+    async def test_resume_in_append_mode_creates_new_snapshot_not_overwrite(self, mocker):
+        """Regression (async): resuming must not overwrite the loaded checkpoint in APPEND mode.
+
+        Mirrors the sync variant — verifies that _checkpoint_persisted is set to True
+        before the first _save_checkpoint_async() call so a new linked snapshot is
+        produced rather than an in-place overwrite of the original checkpoint ID.
+        """
+        backend = InMemory()
+        call_count = {"value": 0}
+
+        def side_effect(stream: bool, *args, **kwargs):
+            call_count["value"] += 1
+            if call_count["value"] == 1:
+                raise RuntimeError("Transient failure")
+            r = ModelResponse()
+            r["choices"][0]["message"]["content"] = "Success"
+            return r
+
+        mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=side_effect)
+
+        flow = flows.Flow(
+            nodes=make_pipeline(),
+            checkpoint=CheckpointConfig(
+                enabled=True,
+                backend=backend,
+                behavior=CheckpointBehavior.APPEND,
+                max_checkpoints=50,
+            ),
+        )
+
+        # First run — fails; checkpoint is saved with a known ID.
+        await flow.run_async(input_data={"query": "test"})
+        failed_cp = await backend.get_latest_by_flow_async(flow.id)
+        assert failed_cp is not None
+        original_id = failed_cp.id
+
+        # Resume — the first async save must NOT overwrite original_id.
+        await flow.run_async(input_data={"query": "test"}, resume_from=original_id)
+
+        # The original checkpoint must still exist and be unchanged.
+        original_still_exists = await backend.load_async(original_id)
+        assert original_still_exists is not None, "Original checkpoint was overwritten — regression!"
+        assert original_still_exists.id == original_id
+
+        # A new snapshot linked to the original must have been created.
+        all_checkpoints = await backend.get_list_by_flow_async(flow.id, limit=50)
+        children = [cp for cp in all_checkpoints if cp.parent_checkpoint_id == original_id]
+        assert len(children) >= 1, "No APPEND snapshot linked to the original checkpoint was created"
 
 
 class TestAsyncPerRunConfig:
