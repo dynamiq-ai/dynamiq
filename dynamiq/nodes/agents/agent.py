@@ -135,6 +135,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """Resets the agent's run state including AgentState."""
         super().reset_run_state()
         self.state.reset()
+        self._streaming_tool_run_id = None
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
