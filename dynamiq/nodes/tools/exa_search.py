@@ -26,7 +26,7 @@ Usage strategy:
 - Provide `include_text` / `exclude_text` or domain allow/deny lists to steer SERP quality
 - Request `contents` when the agent expects to quote passages, needs summaries, or requires subpages/extras
 
-Parameter quick-reference (ExaInputSchema):
+Parameter quick-reference (input schema):
 - `query` (required): natural-language search string.
 - `query_type`: `keyword`, `neural`, or `auto` (auto chooses best fit).
 - `category`: focus on company/research paper/news/pdf/github/tweet/personal site/linkedin profile/financial report.
@@ -162,7 +162,7 @@ class ContextOptions(BaseModel):
         alias="maxCharacters",
         description=(
             "Total character budget for the concatenated context string. Characters are split across results "
-            "(roughly evenly). Exa suggests >=10000 characters for best RAG quality."
+            "(roughly evenly). Suggested: >=10000 characters for best RAG quality."
         ),
     )
 
@@ -193,13 +193,13 @@ class ContentsRequest(BaseModel):
         default=None,
         description=(
             "Livecrawl strategy: 'never' (disable), 'fallback' (crawl when cache missing), 'always', or 'preferred' "
-            "(try livecrawl but fall back to cache). Defaults align with Exa search type."
+            "(try livecrawl but fall back to cache). Defaults align with tool'ssearch type."
         ),
     )
     livecrawl_timeout: int | None = Field(
         default=None,
         alias="livecrawlTimeout",
-        description="Timeout in ms for livecrawl fetches (Exa default 10000).",
+        description="Timeout in ms for livecrawl fetches (default 10000).",
     )
     subpages: int | None = Field(
         default=None,
@@ -208,7 +208,7 @@ class ContentsRequest(BaseModel):
     subpage_target: str | list[str] | None = Field(
         default=None,
         alias="subpageTarget",
-        description="Keyword(s) that help Exa find relevant subpages (string or list of strings).",
+        description="Keyword(s) that help the tool find relevant subpages (string or list of strings).",
     )
     extras: ContentsExtrasOptions | None = Field(
         default=None,
@@ -258,7 +258,7 @@ class ExaInputSchema(BaseModel):
         default=None,
         ge=1,
         le=100,
-        description=("Number of search results to return (keyword max 10, neural max 100 per Exa's API)."),
+        description=("Number of search results to return (keyword max 10, neural max 100)."),
     )
     include_domains: list[str] | None = Field(
         default=None,
@@ -330,7 +330,7 @@ class ExaTool(ConnectionNode):
         action_type (ActionType): The type of action this tool performs.
         connection (Exa): The connection instance for the Exa API.
         include_full_content (bool): If true, retrieve full content, highlights, and summaries.
-        use_autoprompt (bool): If true, query will be converted to a Exa query.
+        use_autoprompt (bool): If true, query will be converted to an Exa query.
         query_type (QueryType): Type of query to be used.
         category (CategoryType): A data category to focus on.
         limit (int): Number of search results to return.
@@ -343,7 +343,7 @@ class ExaTool(ConnectionNode):
         start_published_date (str, optional): Include links published after this date.
         end_published_date (str, optional): Include links published before this date.
         context (bool | dict, optional): Return combined context content for results.
-        moderation (bool, optional): Enable Exa moderation filter.
+        moderation (bool, optional): Enable moderation filter.
         contents (dict, optional): Advanced contents configuration overriding include_full_content defaults.
     """
 
@@ -385,7 +385,7 @@ class ExaTool(ConnectionNode):
     )
     moderation: bool | None = Field(default=None, description="Enable content moderation filter.")
     contents: ContentsRequest | None = Field(
-        default=None, description="Advanced contents configuration mirroring Exa's ContentsRequest schema."
+        default=None, description="Advanced contents configuration mirroring ContentsRequest schema."
     )
 
     MAX_SNIPPET_CHARS: ClassVar[int] = 800

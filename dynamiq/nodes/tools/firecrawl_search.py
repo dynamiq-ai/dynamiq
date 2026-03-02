@@ -113,7 +113,7 @@ class FirecrawlSearchTool(ConnectionNode):
     limit: int = Field(default=5, ge=1, le=100, description="Number of results to request.")
     sources: list[SourceType] = Field(default_factory=lambda: [SourceWeb()], description="Result verticals to include.")
     categories: list[CategoryType] = Field(default_factory=list, description="Optional category filters.")
-    tbs: str | None = Field(default=None, description="Time-based search filter passed to Firecrawl.")
+    tbs: str | None = Field(default=None, description="Time-based search filter passed to the tool.")
     location: str | None = Field(default=None, description="Geographic bias for the search query.")
     country: str = Field(default="US", description="ISO country code for geo-targeting.")
     timeout: int = Field(default=60000, description="Request timeout in milliseconds.")
@@ -169,9 +169,9 @@ class FirecrawlSearchTool(ConnectionNode):
 
     def _format_scraped_results(self, query: str, results: list[dict[str, Any]]) -> str:
         if not results:
-            return f'## Firecrawl Search Results for "{query}"\nNo results returned.'
+            return f'## Search Results for "{query}"\nNo results returned.'
 
-        sections = [f'## Firecrawl Search Results for "{query}"']
+        sections = [f'## Search Results for "{query}"']
         for index, item in enumerate(results, start=1):
             title = item.get("title") or "Untitled result"
             url = item.get("url")
@@ -214,7 +214,7 @@ class FirecrawlSearchTool(ConnectionNode):
         return section
 
     def _format_indexed_results(self, query: str, data: dict[str, Any]) -> str:
-        sections = [f'## Firecrawl Search Results for "{query}"']
+        sections = [f'## Search Results for "{query}"']
         sections.extend(self._format_result_list("Web Results", data.get("web", [])))
         sections.extend(self._format_result_list("News Results", data.get("news", [])))
         sections.extend(self._format_result_list("Image Results", data.get("images", [])))
@@ -230,7 +230,7 @@ class FirecrawlSearchTool(ConnectionNode):
             return self._format_scraped_results(query, data)
         if isinstance(data, dict):
             return self._format_indexed_results(query, data)
-        return f'## Firecrawl Search Results for "{query}"\nNo results returned.'
+        return f'## Search Results for "{query}"\nNo results returned.'
 
     def execute(
         self, input_data: FirecrawlSearchInput, config: RunnableConfig | None = None, **kwargs

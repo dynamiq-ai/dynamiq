@@ -579,7 +579,7 @@ class JinaSearchTool(ConnectionNode):
 
         if self.is_optimized_for_agents:
             result_sections = [
-                f"## Jina Search Results for '{request_body['q']}'",
+                f"## Search Results for '{request_body['q']}'",
                 "",
             ]
             if sources_with_url:
@@ -587,7 +587,7 @@ class JinaSearchTool(ConnectionNode):
             if formatted_results:
                 result_sections.append(formatted_results)
             else:
-                result_sections.append("No results were returned by Jina Search.")
+                result_sections.append("No results were returned by the tool.")
             result = "\n".join(result_sections).strip()
         else:
             images = {}

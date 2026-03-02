@@ -26,9 +26,9 @@ Usage strategy:
 - Set `max_age`, `store_in_cache`, or `zero_data_retention` based on freshness vs. compliance needs
 - Combine `actions` with `wait_for` to ensure dynamic content loads before scraping/screenshotting
 
-Parameter guide (FirecrawlInputSchema):
+Parameter guide (input schema):
 - `url` (required): target page.
-- `formats`: output mix, strings or objects from Firecrawl's Formats schema.
+- `formats`: output mix, strings or objects from Formats schema.
 - `only_main_content` / `include_tags` / `exclude_tags`: trim boilerplate or force specific HTML tags.
 - `max_age`, `headers`, `wait_for`, `mobile`, `skip_tls_verification`, `timeout`: control fetch/crawl behavior.
 - `parsers`: `['pdf']` by default; send [] to skip PDF parsing or objects like `{'type': 'pdf','maxPages':5}`.
@@ -76,7 +76,7 @@ class FirecrawlInputSchema(BaseModel):
     formats: list[str | dict[str, Any]] | None = Field(
         default=None,
         description=(
-            "Firecrawl output formats. Accepts plain strings (markdown/html/rawHtml/links/summary/"
+            "Tool output formats. Accepts plain strings (markdown/html/rawHtml/links/summary/"
             "screenshot/json/changeTracking/branding) or objects with format-specific options."
         ),
     )
@@ -98,7 +98,7 @@ class FirecrawlInputSchema(BaseModel):
     max_age: int | None = Field(
         default=None,
         alias="maxAge",
-        description="Cache freshness window in ms (Firecrawl default is 172800000 = two days).",
+        description="Cache freshness window in ms (default is 172800000 = two days).",
     )
     headers: dict[str, Any] | None = Field(
         default=None,
@@ -116,13 +116,13 @@ class FirecrawlInputSchema(BaseModel):
     skip_tls_verification: bool | None = Field(
         default=None,
         alias="skipTlsVerification",
-        description="True disables TLS verification (Firecrawl default), set False for strict cert checks.",
+        description="True disables TLS verification (default), set False for strict cert checks.",
     )
     timeout: int | None = Field(default=None, description="Request timeout in ms for the upstream fetch.")
     parsers: list[str | dict[str, Any]] | None = Field(
         default=None,
         description=(
-            "Controls file parsers. Firecrawl defaults to ['pdf']; pass [] to disable auto PDF parsing or "
+            "Controls file parsers. Defaults to ['pdf']; pass [] to disable auto PDF parsing or "
             "objects like {'type': 'pdf', 'maxPages': 5} to limit cost."
         ),
     )
@@ -130,7 +130,7 @@ class FirecrawlInputSchema(BaseModel):
         default=None,
         description=(
             "Optional automation instructions executed before scraping. Supports wait/screenshot/click/write/"
-            "press/scroll/scrape/executeJavascript/pdf actions following Firecrawl's schema."
+            "press/scroll/scrape/executeJavascript/pdf actions following the tool's schema."
         ),
     )
     location: LocationSettings | None = Field(
@@ -145,25 +145,25 @@ class FirecrawlInputSchema(BaseModel):
     block_ads: bool | None = Field(
         default=None,
         alias="blockAds",
-        description="Enable ad + cookie popup blocking (default True on Firecrawl).",
+        description="Enable ad + cookie popup blocking (default True).",
     )
     proxy: Literal["basic", "stealth", "auto"] | None = Field(
         default=None,
         description=(
             "Proxy tier: 'basic' (fast, low protection), 'stealth' (solves harder anti-bot, higher cost), or "
-            "'auto' (retry with stealth on failure; Firecrawl default)."
+            "'auto' (retry with stealth on failure by default)."
         ),
     )
     store_in_cache: bool | None = Field(
         default=None,
         alias="storeInCache",
-        description="True lets Firecrawl index/cache the page "
+        description="True lets the tool index/cache the page "
         "(default True, forced False when using sensitive params).",
     )
     zero_data_retention: bool | None = Field(
         default=None,
         alias="zeroDataRetention",
-        description="Opt-in compliance flag; True enables Firecrawl's zero data retention mode (requires approval).",
+        description="Opt-in compliance flag; True enables zero data retention mode (requires approval).",
     )
     brief: str = Field(
         default="Scraping the web for information.",

@@ -299,7 +299,7 @@ class E2BInterpreterTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.CODE_EXECUTION
-    name: str = "E2b Code Interpreter Tool"
+    name: str = "E2B Code Interpreter Tool"
     description: str = DESCRIPTION_E2B
     connection: E2BConnection
     installed_packages: list = []
