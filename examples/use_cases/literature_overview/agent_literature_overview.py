@@ -8,7 +8,7 @@ from typing import Iterable
 from dynamiq import Workflow
 from dynamiq.connections import ScaleSerp, ZenRows
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents import Agent, SubAgentTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.utils.logger import logger
@@ -19,63 +19,72 @@ from examples.llm_setup import setup_llm
 OUTPUT_FILE_PATH = Path("literature_overview.md")
 
 
-def _research_agent(llm, search_tool: ScaleSerpTool, scraper_tool: ScraperSummarizerTool) -> Agent:
+def _research_agent_tool(llm, search_tool: ScaleSerpTool, scraper_tool: ScraperSummarizerTool) -> SubAgentTool:
     role = (
         "You are the Lead Research Analyst sub-agent.\n"
         "- Always expect tool input as {'input': '<topic or question>'}.\n"
         "- Use the web search and scraper tools to surface current, credible information.\n"
         "- Provide key findings with inline source references and include the raw URLs you touched."
     )
-    return Agent(
+    return SubAgentTool(
         name="Lead Research Analyst",
         description="Surfaces fresh evidence using search + scraping tools.",
-        role=role,
-        llm=llm,
-        tools=[search_tool, scraper_tool],
-        inference_mode=InferenceMode.XML,
-        parallel_tool_calls_enabled=True,
-        max_loops=8,
-        behaviour_on_max_loops=Behavior.RETURN,
+        factory=lambda: Agent(
+            name="Lead Research Analyst",
+            role=role,
+            llm=llm,
+            tools=[search_tool, scraper_tool],
+            inference_mode=InferenceMode.XML,
+            parallel_tool_calls_enabled=True,
+            max_loops=8,
+            behaviour_on_max_loops=Behavior.RETURN,
+        ),
     )
 
 
-def _citation_agent(llm) -> Agent:
+def _citation_agent_tool(llm) -> SubAgentTool:
     role = (
         "You are the Citation Curator sub-agent.\n"
         "- Always expect tool input as {'input': '<research summary>'}.\n"
         "- Extract a clean bibliography with annotated highlights for each source.\n"
         "- Return structured bullet points that the writer can reference directly."
     )
-    return Agent(
+    return SubAgentTool(
         name="Citation Curator",
         description="Normalizes research into a citation digest.",
-        role=role,
-        llm=llm,
-        inference_mode=InferenceMode.XML,
-        max_loops=6,
-        behaviour_on_max_loops=Behavior.RETURN,
+        factory=lambda: Agent(
+            name="Citation Curator",
+            role=role,
+            llm=llm,
+            inference_mode=InferenceMode.XML,
+            max_loops=6,
+            behaviour_on_max_loops=Behavior.RETURN,
+        ),
     )
 
 
-def _writer_agent(llm) -> Agent:
+def _writer_agent_tool(llm) -> SubAgentTool:
     role = (
         "You are the Literature Writer sub-agent.\n"
         "- Always expect tool input as {'input': '<synthesis context>'}.\n"
         "- Produce a markdown literature overview with introduction, key themes, applications, and conclusion.\n"
         "- Cite sources inline using markdown footnotes and include a final references list."
     )
-    return Agent(
+    return SubAgentTool(
         name="Literature Writer",
         description="Delivers the polished overview in markdown format.",
-        role=role,
-        llm=llm,
-        inference_mode=InferenceMode.XML,
-        max_loops=6,
-        behaviour_on_max_loops=Behavior.RETURN,
+        factory=lambda: Agent(
+            name="Literature Writer",
+            role=role,
+            llm=llm,
+            inference_mode=InferenceMode.XML,
+            max_loops=6,
+            behaviour_on_max_loops=Behavior.RETURN,
+        ),
     )
 
 
-def _manager_agent(llm, subagents: Iterable[Agent]) -> Agent:
+def _manager_agent(llm, subagents: Iterable[SubAgentTool]) -> Agent:
     role = (
         "You are the Literature Overview Manager coordinating researcher sub-agents.\n"
         "- Break the user request into clear subtasks and delegate via the available tools.\n"
@@ -121,9 +130,9 @@ def run_literature_overview(
     llm = _build_llm(model_provider=model_provider, model_name=model_name)
     search_tool, scraper_tool = _build_tools(llm)
 
-    researcher = _research_agent(llm, search_tool, scraper_tool)
-    citation_curator = _citation_agent(llm)
-    writer = _writer_agent(llm)
+    researcher = _research_agent_tool(llm, search_tool, scraper_tool)
+    citation_curator = _citation_agent_tool(llm)
+    writer = _writer_agent_tool(llm)
     manager = _manager_agent(llm, [researcher, citation_curator, writer])
 
     workflow = Workflow(flow=Flow(nodes=[manager]))

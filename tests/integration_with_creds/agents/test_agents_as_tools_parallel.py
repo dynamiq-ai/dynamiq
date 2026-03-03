@@ -9,7 +9,7 @@ from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.memory import Memory
 from dynamiq.memory.backends import InMemory
-from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents import Agent, SubAgentTool
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.operators import Map
 from dynamiq.nodes.types import InferenceMode
@@ -22,13 +22,18 @@ def _openai_llm(model: str = "gpt-4o-mini") -> OpenAI:
     return OpenAI(model=model, connection=connections.OpenAI())
 
 
-def _child_researcher(llm: OpenAI) -> Agent:
+def _child_researcher(llm: OpenAI, memory: Memory | None = None, streaming: StreamingConfig | None = None) -> Agent:
     role = (
         "You are a Researcher sub-agent.\n"
         "- Always expect a single string input under the 'input' key.\n"
         "- Do NOT expect or require other keys like 'query' or 'metadata'.\n"
         "- Provide a concise factual summary based on the provided input.\n"
     )
+    kwargs = {}
+    if memory:
+        kwargs["memory"] = memory
+    if streaming:
+        kwargs["streaming"] = streaming
     return Agent(
         name="Researcher",
         description=(
@@ -41,16 +46,22 @@ def _child_researcher(llm: OpenAI) -> Agent:
         inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=False,
         max_loops=6,
+        **kwargs,
     )
 
 
-def _child_writer(llm: OpenAI) -> Agent:
+def _child_writer(llm: OpenAI, memory: Memory | None = None, streaming: StreamingConfig | None = None) -> Agent:
     role = (
         "You are a Writer sub-agent.\n"
         "- Always expect a single string input under the 'input' key.\n"
         "- Do NOT expect or require other keys like 'query' or 'metadata'.\n"
         "- Based on the 'input' topic, produce a clean, concise brief.\n"
     )
+    kwargs = {}
+    if memory:
+        kwargs["memory"] = memory
+    if streaming:
+        kwargs["streaming"] = streaming
     return Agent(
         name="Writer",
         description=(
@@ -63,6 +74,7 @@ def _child_writer(llm: OpenAI) -> Agent:
         inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=False,
         max_loops=6,
+        **kwargs,
     )
 
 
@@ -78,11 +90,24 @@ def test_manager_with_subagents_parallel_calls():
     llm = _openai_llm()
 
     shared_memory = Memory(backend=InMemory())
+    stream_cfg = StreamingConfig(enabled=True, mode=StreamingMode.ALL)
 
-    researcher = _child_researcher(llm)
-    writer = _child_writer(llm)
-    researcher.memory = shared_memory
-    writer.memory = shared_memory
+    researcher_tool = SubAgentTool(
+        name="Researcher",
+        description=(
+            "Sub-agent that summarizes research for a given topic. "
+            "IMPORTANT: Accepts only {'input': '<topic>'} when invoked as a tool."
+        ),
+        factory=lambda: _child_researcher(llm, memory=shared_memory, streaming=stream_cfg),
+    )
+    writer_tool = SubAgentTool(
+        name="Writer",
+        description=(
+            "Sub-agent that drafts a concise brief based on a topic. "
+            "IMPORTANT: Accepts only {'input': '<topic>'} when invoked as a tool."
+        ),
+        factory=lambda: _child_writer(llm, memory=shared_memory, streaming=stream_cfg),
+    )
 
     manager_role = (
         "You are a Manager agent coordinating sub-agents.\n"
@@ -95,17 +120,13 @@ def test_manager_with_subagents_parallel_calls():
         description=("Manager that delegates to Researcher and Writer. Tools expect {'input': '<topic>'}."),
         role=manager_role,
         llm=llm,
-        tools=[researcher, writer],
+        tools=[researcher_tool, writer_tool],
         inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=True,
         memory=shared_memory,
         max_loops=10,
+        streaming=stream_cfg,
     )
-
-    stream_cfg = StreamingConfig(enabled=True, mode=StreamingMode.ALL)
-    manager.streaming = stream_cfg
-    researcher.streaming = stream_cfg
-    writer.streaming = stream_cfg
 
     wf = Workflow(flow=Flow(nodes=[manager]))
 
@@ -134,10 +155,10 @@ def test_manager_with_subagents_parallel_calls():
             sources.add(src.name)
     assert received > 0
 
-    if not any(name in sources for name in ("Researcher", "Writer", "Manager")):
+    if not all(name in sources for name in ("Researcher", "Writer", "Manager")):
         node_runs = [run for run in tracing.runs.values() if getattr(run, "metadata", None)]
         node_names = [getattr(run, "name", "") for run in node_runs]
-        assert any(n in node_names for n in ("Researcher", "Writer", "Manager"))
+        assert all(n in node_names for n in ("Researcher", "Writer", "Manager"))
 
 
 @pytest.mark.integration
@@ -148,11 +169,24 @@ def test_agents_as_tools_with_map_parallel_streaming_tracing_memory():
 
     memory = Memory(backend=InMemory())
     llm = _openai_llm("gpt-4o-mini")
+    stream_cfg = StreamingConfig(enabled=True, mode=StreamingMode.ALL)
 
-    researcher = _child_researcher(llm)
-    writer = _child_writer(llm)
-    researcher.memory = memory
-    writer.memory = memory
+    researcher_tool = SubAgentTool(
+        name="Researcher",
+        description=(
+            "Sub-agent that summarizes research for a given topic. "
+            "IMPORTANT: Accepts only {'input': '<topic>'} when invoked as a tool."
+        ),
+        factory=lambda: _child_researcher(llm, memory=memory, streaming=stream_cfg),
+    )
+    writer_tool = SubAgentTool(
+        name="Writer",
+        description=(
+            "Sub-agent that drafts a concise brief based on a topic. "
+            "IMPORTANT: Accepts only {'input': '<topic>'} when invoked as a tool."
+        ),
+        factory=lambda: _child_writer(llm, memory=memory, streaming=stream_cfg),
+    )
 
     manager_role = (
         "You are a Manager agent coordinating sub-agents.\n"
@@ -165,16 +199,13 @@ def test_agents_as_tools_with_map_parallel_streaming_tracing_memory():
         description=("Manager that delegates to Researcher and Writer. Tools expect {'input': '<topic>'}."),
         role=manager_role,
         llm=llm,
-        tools=[researcher, writer],
+        tools=[researcher_tool, writer_tool],
         inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=True,
         memory=memory,
         max_loops=10,
+        streaming=stream_cfg,
     )
-
-    stream_cfg = StreamingConfig(enabled=True, mode=StreamingMode.ALL)
-    for a in (manager, researcher, writer):
-        a.streaming = stream_cfg
 
     map_node = Map(node=manager, max_workers=2)
     wf = Workflow(flow=Flow(nodes=[map_node]))

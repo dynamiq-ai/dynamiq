@@ -3,7 +3,7 @@ import json
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents import Agent, SubAgentTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import JsonWorkflowEncoder
@@ -25,7 +25,7 @@ Summarize final results for the user.
 """
 
 
-def make_child_agent(llm):
+def make_child_tool(llm):
     python_tool = Python(
         code="""
 def run(params: dict):
@@ -38,24 +38,26 @@ def run(params: dict):
         description='Computes the sum of the first n integers; expects input {"n": int}',
     )
 
-    child = Agent(
+    return SubAgentTool(
         name="Coder Agent",
         description='Call with {"input": "<calculation request>"}',
-        role=CHILD_ROLE,
-        llm=llm,
-        tools=[python_tool],
-        max_loops=3,
+        factory=lambda: Agent(
+            name="Coder Agent",
+            role=CHILD_ROLE,
+            llm=llm,
+            tools=[python_tool],
+            max_loops=3,
+        ),
     )
-    return child
 
 
-def make_parent_agent(llm, child_agent):
+def make_parent_agent(llm, child_tool):
     parent = Agent(
         name="Manager Agent",
         description="Delegates subtasks to a coding agent when computation is required.",
         role=PARENT_ROLE,
         llm=llm,
-        tools=[child_agent],
+        tools=[child_tool],
         max_loops=3,
     )
     return parent
@@ -67,8 +69,8 @@ def run_workflow():
     Returns (content, traces) for graph drawing utilities.
     """
     llm = setup_llm()
-    child = make_child_agent(llm)
-    parent = make_parent_agent(llm, child)
+    child_tool = make_child_tool(llm)
+    parent = make_parent_agent(llm, child_tool)
 
     tracing = TracingCallbackHandler()
     wf = Workflow(flow=Flow(nodes=[parent]))

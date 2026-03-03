@@ -1,7 +1,7 @@
 import pytest
 
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents import Agent, SubAgentTool
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -51,17 +51,19 @@ def test_delegation_flag_verified_in_traces(llm_instance, run_config, inference_
     calculator_llm = llm_instance.model_copy(update={"name": "CalculatorLLM"})
     delegator_llm = llm_instance.model_copy(update={"name": "DelegatorLLM"})
 
-    calculator_agent = Agent(
+    calculator_sub_agent = SubAgentTool(
         name="CalculatorAgentTool",
-        id="calculator_agent_tool",
-        llm=calculator_llm,
-        description="You are a mathematical calculator assistant. Use the calculator tool "
-        "to perform calculations accurately.",
-        role="You are a mathematical calculator assistant. "
-        "Use the calculator tool to perform calculations accurately.",
-        inference_mode=inference_mode,
-        tools=[],
-        verbose=True,
+        description="A mathematical calculator assistant that performs calculations accurately.",
+        factory=lambda: Agent(
+            name="CalculatorAgentTool",
+            id="calculator_agent_tool",
+            llm=calculator_llm,
+            role="You are a mathematical calculator assistant. "
+            "Use the calculator tool to perform calculations accurately.",
+            inference_mode=inference_mode,
+            tools=[],
+            verbose=True,
+        ),
     )
 
     main_agent = Agent(
@@ -71,8 +73,8 @@ def test_delegation_flag_verified_in_traces(llm_instance, run_config, inference_
         role="You are a helpful assistant. When users ask mathematical questions, delegate to "
         "the CalculatorAgentTool and use delegate_final.",
         inference_mode=inference_mode,
-        tools=[calculator_agent],
-        delegation_allowed=True,  # Enable delegation
+        tools=[calculator_sub_agent],
+        delegation_allowed=True,
         verbose=True,
     )
 

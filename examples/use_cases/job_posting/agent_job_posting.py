@@ -9,7 +9,7 @@ from typing import Iterable
 from dynamiq import Workflow
 from dynamiq.connections import ScaleSerp
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents import Agent, SubAgentTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.utils.logger import logger
@@ -35,7 +35,7 @@ def _optional_file_reader(file_path: Path | None) -> FileReaderTool | None:
     return FileReaderTool(files=[buffer])
 
 
-def _research_agent(llm, search_tool: ScaleSerpTool, file_reader: FileReaderTool | None) -> Agent:
+def _research_agent_tool(llm, search_tool: ScaleSerpTool, file_reader: FileReaderTool | None) -> SubAgentTool:
     role = (
         "You are the Research Strategist sub-agent.\n"
         "- Always expect tool input as {'input': '<research task>'}.\n"
@@ -47,20 +47,23 @@ def _research_agent(llm, search_tool: ScaleSerpTool, file_reader: FileReaderTool
     if file_reader:
         tools.append(file_reader)
 
-    return Agent(
+    return SubAgentTool(
         name="Research Strategist",
         description="Compiles hiring insights using search and optional company brief.",
-        role=role,
-        llm=llm,
-        tools=tools,
-        inference_mode=InferenceMode.XML,
-        parallel_tool_calls_enabled=True,
-        max_loops=8,
-        behaviour_on_max_loops=Behavior.RETURN,
+        factory=lambda: Agent(
+            name="Research Strategist",
+            role=role,
+            llm=llm,
+            tools=tools,
+            inference_mode=InferenceMode.XML,
+            parallel_tool_calls_enabled=True,
+            max_loops=8,
+            behaviour_on_max_loops=Behavior.RETURN,
+        ),
     )
 
 
-def _value_prop_agent(llm, file_reader: FileReaderTool | None) -> Agent:
+def _value_prop_agent_tool(llm, file_reader: FileReaderTool | None) -> SubAgentTool:
     role = (
         "You are the Employer Value Proposition sub-agent.\n"
         "- Always expect tool input as {'input': '<context>'}.\n"
@@ -70,19 +73,22 @@ def _value_prop_agent(llm, file_reader: FileReaderTool | None) -> Agent:
     )
     tools = [file_reader] if file_reader else []
 
-    return Agent(
+    return SubAgentTool(
         name="Value Proposition Curator",
         description="Shapes employer messaging from context and briefs.",
-        role=role,
-        llm=llm,
-        tools=tools,
-        inference_mode=InferenceMode.XML,
-        max_loops=6,
-        behaviour_on_max_loops=Behavior.RETURN,
+        factory=lambda: Agent(
+            name="Value Proposition Curator",
+            role=role,
+            llm=llm,
+            tools=tools,
+            inference_mode=InferenceMode.XML,
+            max_loops=6,
+            behaviour_on_max_loops=Behavior.RETURN,
+        ),
     )
 
 
-def _writer_agent(llm, file_reader: FileReaderTool | None) -> Agent:
+def _writer_agent_tool(llm, file_reader: FileReaderTool | None) -> SubAgentTool:
     role = (
         "You are the Job Posting Writer sub-agent.\n"
         "- Always expect tool input as {'input': '<draft context>'}.\n"
@@ -93,19 +99,22 @@ def _writer_agent(llm, file_reader: FileReaderTool | None) -> Agent:
     )
     tools = [file_reader] if file_reader else []
 
-    return Agent(
+    return SubAgentTool(
         name="Job Posting Writer",
         description="Drafts the job post in structured markdown.",
-        role=role,
-        llm=llm,
-        tools=tools,
-        inference_mode=InferenceMode.XML,
-        max_loops=6,
-        behaviour_on_max_loops=Behavior.RETURN,
+        factory=lambda: Agent(
+            name="Job Posting Writer",
+            role=role,
+            llm=llm,
+            tools=tools,
+            inference_mode=InferenceMode.XML,
+            max_loops=6,
+            behaviour_on_max_loops=Behavior.RETURN,
+        ),
     )
 
 
-def _editor_agent(llm) -> Agent:
+def _editor_agent_tool(llm) -> SubAgentTool:
     role = (
         "You are the Hiring Communications Editor sub-agent.\n"
         "- Always expect tool input as {'input': '<draft>'}.\n"
@@ -113,18 +122,21 @@ def _editor_agent(llm) -> Agent:
         "- Ensure the call-to-action is actionable and highlight key perks.\n"
         "- Return an edited markdown draft plus a changelog of improvements."
     )
-    return Agent(
+    return SubAgentTool(
         name="Communications Editor",
         description="Refines the job post for clarity and impact.",
-        role=role,
-        llm=llm,
-        inference_mode=InferenceMode.XML,
-        max_loops=6,
-        behaviour_on_max_loops=Behavior.RETURN,
+        factory=lambda: Agent(
+            name="Communications Editor",
+            role=role,
+            llm=llm,
+            inference_mode=InferenceMode.XML,
+            max_loops=6,
+            behaviour_on_max_loops=Behavior.RETURN,
+        ),
     )
 
 
-def _manager_agent(llm, subagents: Iterable[Agent]) -> Agent:
+def _manager_agent(llm, subagent_tools: Iterable[SubAgentTool]) -> Agent:
     role = (
         "You are the Job Campaign Manager coordinating recruiting specialists.\n"
         "- Break the request into research, messaging, drafting, and editing tasks.\n"
@@ -137,7 +149,7 @@ def _manager_agent(llm, subagents: Iterable[Agent]) -> Agent:
         description="Orchestrates sub-agents to produce the final job posting.",
         role=role,
         llm=llm,
-        tools=list(subagents),
+        tools=list(subagent_tools),
         inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=True,
         max_loops=12,
@@ -165,10 +177,10 @@ def run_job_posting(
     search_tool = ScaleSerpTool(connection=ScaleSerp())
     file_reader = _optional_file_reader(company_brief_path)
 
-    researcher = _research_agent(llm, search_tool, file_reader)
-    value_prop = _value_prop_agent(llm, file_reader)
-    writer = _writer_agent(llm, file_reader)
-    editor = _editor_agent(llm)
+    researcher = _research_agent_tool(llm, search_tool, file_reader)
+    value_prop = _value_prop_agent_tool(llm, file_reader)
+    writer = _writer_agent_tool(llm, file_reader)
+    editor = _editor_agent_tool(llm)
     manager = _manager_agent(llm, [researcher, value_prop, writer, editor])
 
     workflow = Workflow(flow=Flow(nodes=[manager]))

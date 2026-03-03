@@ -4,7 +4,7 @@ from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents import Agent, SubAgentTool
 from dynamiq.nodes.tools.http_api_call import HttpApiCall, ResponseType
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
@@ -53,27 +53,30 @@ def make_http_tools():
     return cat_api, dog_api
 
 
-def make_child_agent(llm):
+def make_child_tool(llm):
     cat_api, dog_api = make_http_tools()
 
-    return Agent(
+    return SubAgentTool(
         name="Research Agent",
         description="Calls HTTP APIs to gather animal facts.",
-        role=CHILD_ROLE,
-        llm=llm,
-        tools=[cat_api, dog_api],
-        max_loops=3,
-        inference_mode=InferenceMode.XML,
+        factory=lambda: Agent(
+            name="Research Agent",
+            role=CHILD_ROLE,
+            llm=llm,
+            tools=[cat_api, dog_api],
+            max_loops=3,
+            inference_mode=InferenceMode.XML,
+        ),
     )
 
 
-def make_parent_agent(llm, child_agent):
+def make_parent_agent(llm, child_tool):
     return Agent(
         name="Manager Agent",
         description="Delegates API lookups to the Research Agent and summarises results.",
         role=PARENT_ROLE,
         llm=llm,
-        tools=[child_agent],
+        tools=[child_tool],
         max_loops=3,
         inference_mode=InferenceMode.XML,
     )
@@ -81,8 +84,8 @@ def make_parent_agent(llm, child_agent):
 
 def run_workflow():
     llm = setup_llm()
-    child = make_child_agent(llm)
-    parent = make_parent_agent(llm, child)
+    child_tool = make_child_tool(llm)
+    parent = make_parent_agent(llm, child_tool)
 
     tracing = TracingCallbackHandler()
     workflow = Workflow(flow=Flow(nodes=[parent]))

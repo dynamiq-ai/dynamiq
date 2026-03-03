@@ -8,7 +8,7 @@ from typing import Iterable
 from dynamiq import Workflow
 from dynamiq.connections import ScaleSerp
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents import Agent, SubAgentTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.utils.logger import logger
@@ -19,63 +19,72 @@ from examples.use_cases.trip_planner.prompts import generate_customer_prompt
 OUTPUT_FILE_PATH = Path("trip_plan.md")
 
 
-def _city_selection_agent(llm, search_tool: ScaleSerpTool) -> Agent:
+def _city_selection_agent_tool(llm, search_tool: ScaleSerpTool) -> SubAgentTool:
     role = (
         "You are the City Selection sub-agent.\n"
         "- Always expect tool input as {'input': '<travel task>'}.\n"
         "- Compare candidate destinations using the ScaleSerp search tool.\n"
         "- Justify your recommendation with weather, events, and cost insights."
     )
-    return Agent(
+    return SubAgentTool(
         name="City Selection Expert",
         description="Evaluates candidate cities using web search data.",
-        role=role,
-        llm=llm,
-        tools=[search_tool],
-        inference_mode=InferenceMode.XML,
-        max_loops=8,
-        behaviour_on_max_loops=Behavior.RETURN,
+        factory=lambda: Agent(
+            name="City Selection Expert",
+            role=role,
+            llm=llm,
+            tools=[search_tool],
+            inference_mode=InferenceMode.XML,
+            max_loops=8,
+            behaviour_on_max_loops=Behavior.RETURN,
+        ),
     )
 
 
-def _city_guide_agent(llm, search_tool: ScaleSerpTool) -> Agent:
+def _city_guide_agent_tool(llm, search_tool: ScaleSerpTool) -> SubAgentTool:
     role = (
         "You are the City Guide sub-agent.\n"
         "- Always expect tool input as {'input': '<city to research>'}.\n"
         "- Enrich the guide with logistics, local tips, and daily highlights.\n"
         "- Use ScaleSerp search results for up-to-date details when needed."
     )
-    return Agent(
+    return SubAgentTool(
         name="City Guide Expert",
         description="Builds a rich guide for the selected destination.",
-        role=role,
-        llm=llm,
-        tools=[search_tool],
-        inference_mode=InferenceMode.XML,
-        max_loops=8,
-        behaviour_on_max_loops=Behavior.RETURN,
+        factory=lambda: Agent(
+            name="City Guide Expert",
+            role=role,
+            llm=llm,
+            tools=[search_tool],
+            inference_mode=InferenceMode.XML,
+            max_loops=8,
+            behaviour_on_max_loops=Behavior.RETURN,
+        ),
     )
 
 
-def _itinerary_agent(llm) -> Agent:
+def _itinerary_agent_tool(llm) -> SubAgentTool:
     role = (
         "You are the Itinerary Writer sub-agent.\n"
         "- Always expect tool input as {'input': '<city insights>'}.\n"
         "- Produce a structured 7-day itinerary with budgets and packing tips.\n"
         "- Combine research provided by the other agents without inventing data."
     )
-    return Agent(
+    return SubAgentTool(
         name="Itinerary Writer",
         description="Transforms research into a polished multi-day travel plan.",
-        role=role,
-        llm=llm,
-        inference_mode=InferenceMode.XML,
-        max_loops=6,
-        behaviour_on_max_loops=Behavior.RETURN,
+        factory=lambda: Agent(
+            name="Itinerary Writer",
+            role=role,
+            llm=llm,
+            inference_mode=InferenceMode.XML,
+            max_loops=6,
+            behaviour_on_max_loops=Behavior.RETURN,
+        ),
     )
 
 
-def _manager_agent(llm, subagents: Iterable[Agent]) -> Agent:
+def _manager_agent(llm, subagent_tools: Iterable[SubAgentTool]) -> Agent:
     role = (
         "You are the Trip Planner Manager coordinating specialist agents.\n"
         "- Decompose the travel request and delegate tasks strategically.\n"
@@ -88,7 +97,7 @@ def _manager_agent(llm, subagents: Iterable[Agent]) -> Agent:
         description="Coordinates sub-agents to research and assemble the travel plan.",
         role=role,
         llm=llm,
-        tools=list(subagents),
+        tools=list(subagent_tools),
         inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=True,
         max_loops=12,
@@ -114,9 +123,9 @@ def run_trip_planner(
     llm = _build_llm(model_provider=model_provider, model_name=model_name)
     search_tool = ScaleSerpTool(connection=ScaleSerp())
 
-    city_selector = _city_selection_agent(llm, search_tool)
-    city_guide = _city_guide_agent(llm, search_tool)
-    itinerary_writer = _itinerary_agent(llm)
+    city_selector = _city_selection_agent_tool(llm, search_tool)
+    city_guide = _city_guide_agent_tool(llm, search_tool)
+    itinerary_writer = _itinerary_agent_tool(llm)
     manager = _manager_agent(llm, [city_selector, city_guide, itinerary_writer])
 
     workflow = Workflow(flow=Flow(nodes=[manager]))

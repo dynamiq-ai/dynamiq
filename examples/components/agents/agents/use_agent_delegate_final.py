@@ -5,7 +5,7 @@ from dynamiq import Workflow
 from dynamiq.callbacks import DynamiqTracingCallbackHandler, TracingCallbackHandler
 from dynamiq.connections import Tavily as TavilyConnection
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents import Agent, SubAgentTool
 from dynamiq.nodes.tools import TavilyTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
@@ -30,7 +30,7 @@ Do not summarize or rewrite its output yourself.
 """
 
 
-def make_researcher_agent(llm):
+def make_researcher_tool(llm):
     tavily_connection = TavilyConnection()
     search_tool = TavilyTool(
         name="Tavily Search",
@@ -38,24 +38,27 @@ def make_researcher_agent(llm):
         connection=tavily_connection,
     )
 
-    return Agent(
+    return SubAgentTool(
         name="Researcher Agent",
         description='Call with {"input": "<topic to research>"}',
-        role=RESEARCHER_ROLE,
-        llm=llm,
-        tools=[search_tool],
-        max_loops=2,
-        inference_mode=InferenceMode.XML,
+        factory=lambda: Agent(
+            name="Researcher Agent",
+            role=RESEARCHER_ROLE,
+            llm=llm,
+            tools=[search_tool],
+            max_loops=2,
+            inference_mode=InferenceMode.XML,
+        ),
     )
 
 
-def make_manager_agent(llm, researcher):
+def make_manager_agent(llm, researcher_tool):
     return Agent(
         name="Manager Agent",
         description="Delegates research questions to a markdown-focused researcher.",
         role=MANAGER_ROLE,
         llm=llm,
-        tools=[researcher],
+        tools=[researcher_tool],
         max_loops=3,
         delegation_allowed=True,
         inference_mode=InferenceMode.XML,
@@ -68,8 +71,8 @@ def run_workflow(callbacks: list | None = None):
     Returns (content, traces) for graph drawing utilities.
     """
     llm = setup_llm()
-    researcher = make_researcher_agent(llm)
-    manager = make_manager_agent(llm, researcher)
+    researcher_tool = make_researcher_tool(llm)
+    manager = make_manager_agent(llm, researcher_tool)
 
     default_tracing = None
     if callbacks is None:

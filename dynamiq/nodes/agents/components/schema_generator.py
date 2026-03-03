@@ -4,7 +4,7 @@ import types
 from enum import Enum
 from typing import Any, Callable, Union, get_args, get_origin
 
-from dynamiq.nodes.agents.base import Agent as BaseAgent
+from dynamiq.nodes.agents.sub_agent_tool import SubAgentTool
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node
 
@@ -99,7 +99,7 @@ def generate_structured_output_schemas(
 
     action_input_description = "Input for chosen action."
 
-    if delegation_allowed and any(isinstance(tool, BaseAgent) for tool in tools):
+    if delegation_allowed and any(isinstance(tool, SubAgentTool) for tool in tools):
         action_input_description += (
             ' For agent tools, include {"input": "<subtask>", "delegate_final": true} '
             "to return that agent's response directly as the final answer."
@@ -221,7 +221,7 @@ def generate_function_calling_schemas(
 
     for tool in tools:
         # Agent tools: accept action_input as a JSON string to avoid nested schema issues.
-        if isinstance(tool, BaseAgent):
+        if isinstance(tool, SubAgentTool):
             agent_action_input_description = "JSON string containing the agent's inputs "
             if delegation_allowed:
                 agent_action_input_description += '(e.g., {"input": "<subtask>", "delegate_final": true}).'

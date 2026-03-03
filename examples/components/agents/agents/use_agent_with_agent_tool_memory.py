@@ -2,7 +2,7 @@ from dynamiq import Workflow
 from dynamiq.flows import Flow
 from dynamiq.memory import Memory
 from dynamiq.memory.backends.in_memory import InMemory
-from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents import Agent, SubAgentTool
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
@@ -18,24 +18,29 @@ Use clear task descriptions when delegating and return concise, useful summaries
 """
 
 
-def make_researcher(llm: object) -> Agent:
-    return Agent(
+def make_researcher_tool(llm: object) -> tuple[SubAgentTool, Memory]:
+    researcher_memory = Memory(backend=InMemory())
+    tool = SubAgentTool(
         name="Researcher",
         description='Call with {"input": "<research question>"}',
-        role=RESEARCHER_ROLE,
-        llm=llm,
-        memory=Memory(backend=InMemory()),
-        max_loops=3,
+        factory=lambda: Agent(
+            name="Researcher",
+            role=RESEARCHER_ROLE,
+            llm=llm,
+            memory=researcher_memory,
+            max_loops=3,
+        ),
     )
+    return tool, researcher_memory
 
 
-def make_manager(llm: object, researcher: Agent) -> Agent:
+def make_manager(llm: object, researcher_tool: SubAgentTool) -> Agent:
     return Agent(
         name="Manager",
         description="Delegates fact gathering to the Researcher tool and summarizes results.",
         role=MANAGER_ROLE,
         llm=llm,
-        tools=[researcher],
+        tools=[researcher_tool],
         memory=Memory(backend=InMemory()),
         max_loops=3,
     )
@@ -47,8 +52,8 @@ def run_workflow():
     so both agents use their own memories consistently.
     """
     llm = setup_llm()
-    researcher = make_researcher(llm)
-    manager = make_manager(llm, researcher)
+    researcher_tool, researcher_memory = make_researcher_tool(llm)
+    manager = make_manager(llm, researcher_tool)
 
     wf = Workflow(flow=Flow(nodes=[manager]))
 
@@ -67,7 +72,7 @@ def run_workflow():
     logger.info("Second turn:\n%s", second_answer)
 
     logger.info("Manager memory:\n%s", manager.memory.get_all_messages_as_string())
-    logger.info("Researcher memory:\n%s", researcher.memory.get_all_messages_as_string())
+    logger.info("Researcher memory:\n%s", researcher_memory.get_all_messages_as_string())
 
 
 if __name__ == "__main__":

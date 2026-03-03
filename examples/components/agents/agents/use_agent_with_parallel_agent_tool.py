@@ -4,7 +4,7 @@ import os
 from dynamiq import Workflow
 from dynamiq.callbacks import DynamiqTracingCallbackHandler, TracingCallbackHandler
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents import Agent, SubAgentTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import JsonWorkflowEncoder
@@ -28,7 +28,7 @@ Summarize the specialist's findings for the user.
 """
 
 
-def make_child_agent(llm):
+def make_child_tool(llm):
     sum_tool = Python(
         name="Range Sum",
         description='Returns sum(1..n). Expects input {"n": int}.',
@@ -53,24 +53,27 @@ def run(params: dict):
 """,
     )
 
-    return Agent(
+    return SubAgentTool(
         name="Math Specialist",
         description='Call with {"input": "Compute sums/products ..."}',
-        role=CHILD_ROLE,
-        llm=llm,
-        tools=[sum_tool, product_tool],
-        max_loops=3,
-        parallel_tool_calls_enabled=True,
+        factory=lambda: Agent(
+            name="Math Specialist",
+            role=CHILD_ROLE,
+            llm=llm,
+            tools=[sum_tool, product_tool],
+            max_loops=3,
+            parallel_tool_calls_enabled=True,
+        ),
     )
 
 
-def make_parent_agent(llm, child_agent):
+def make_parent_agent(llm, child_tool):
     return Agent(
         name="Delegator Agent",
         description="Delegates range calculations to the Math Specialist agent tool.",
         role=PARENT_ROLE,
         llm=llm,
-        tools=[child_agent],
+        tools=[child_tool],
         max_loops=3,
         parallel_tool_calls_enabled=True,
     )
@@ -87,8 +90,8 @@ def _resolve_trace_runs(callbacks: list) -> dict:
 def run_workflow(callbacks: list | None = None):
     """Run the workflow and return (content, trace_runs)."""
     llm = setup_llm()
-    child = make_child_agent(llm)
-    parent = make_parent_agent(llm, child)
+    child_tool = make_child_tool(llm)
+    parent = make_parent_agent(llm, child_tool)
     default_tracing = None
     if callbacks is None:
         default_tracing = TracingCallbackHandler()

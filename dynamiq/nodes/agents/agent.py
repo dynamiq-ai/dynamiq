@@ -175,11 +175,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
         tool: Node | None,
         action_input: Any,
     ) -> bool:
-        """Only Agent tools with per-call delegate_final flag can delegate."""
+        """Only SubAgentTool tools with per-call delegate_final flag can delegate."""
+        from dynamiq.nodes.agents.sub_agent_tool import SubAgentTool
+
         if not self.delegation_allowed:
             return False
 
-        if not isinstance(tool, Agent):
+        if not isinstance(tool, SubAgentTool):
             return False
 
         if isinstance(action_input, str):

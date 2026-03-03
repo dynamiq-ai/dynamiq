@@ -303,6 +303,14 @@ class Agent(Node):
                 expanded_tools.append(tool)
 
         self.tools = expanded_tools
+
+        for tool in self.tools:
+            if isinstance(tool, Agent):
+                raise ValueError(
+                    f"Agent '{tool.name}' cannot be passed directly as a tool. "
+                    f"Use SubAgentTool(name=..., description=..., factory=lambda: Agent(...)) instead."
+                )
+
         if self.file_store_backend and self.sandbox_backend:
             raise ValueError("file_store and sandbox cannot both be enabled for an Agent at the same time")
 
@@ -1050,7 +1058,13 @@ class Agent(Node):
                 logger.debug("\n".join(debug_info))
 
         child_kwargs = kwargs | {"recoverable_error": True}
-        is_child_agent = isinstance(tool, Agent)
+
+        from dynamiq.nodes.agents.sub_agent_tool import SubAgentTool
+
+        is_child_agent = False
+        if isinstance(tool, SubAgentTool):
+            tool = tool.factory()
+            is_child_agent = True
 
         if is_child_agent and self._current_call_context:
             child_context = self._build_child_agent_context(tool)
