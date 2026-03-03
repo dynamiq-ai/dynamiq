@@ -109,6 +109,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
     _requested_output_files: list[str] = []
+    _streaming_tool_run_id: str | None = None
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
@@ -134,6 +135,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """Resets the agent's run state including AgentState."""
         super().reset_run_state()
         self.state.reset()
+        self._streaming_tool_run_id = None
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -626,7 +628,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
             return error_message, [], False, False, None
 
-        tool_run_id = generate_uuid()
+        tool_run_id = self._streaming_tool_run_id or generate_uuid()
+        self._streaming_tool_run_id = None
         tool_data = AgentToolData(
             name=tool.name,
             type=tool.type,
@@ -646,7 +649,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             config,
             **kwargs,
         )
-
         try:
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
@@ -1066,9 +1068,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     extra_guidance=extra_guidance,
                 )
                 continue
-            except Exception as e:
-                logger.error(f"Agent {self.name} - {self.id}: Error during agent execution: {e}")
-                raise e
 
             # Inject automatic summarization if token limit exceeded (like Context Manager Tool)
             self._try_summarize_history(config=config, **kwargs)

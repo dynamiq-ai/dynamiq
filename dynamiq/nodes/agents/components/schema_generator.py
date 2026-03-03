@@ -44,6 +44,16 @@ FINAL_ANSWER_FUNCTION_SCHEMA = {
 }
 
 
+PRIORITY_FIELDS = ("brief",)
+
+
+def _reorder_fields(fields: dict) -> list[tuple[str, Any]]:
+    """Reorder fields so that priority fields (e.g. brief) come first."""
+    priority = [(k, v) for k, v in fields.items() if k in PRIORITY_FIELDS]
+    rest = [(k, v) for k, v in fields.items() if k not in PRIORITY_FIELDS]
+    return priority + rest
+
+
 def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str], str]) -> str:
     """
     Generate formatted input descriptions for each tool.
@@ -58,7 +68,7 @@ def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str]
     input_formats = []
     for tool in tools:
         params = []
-        for name, field in tool.input_schema.model_fields.items():
+        for name, field in _reorder_fields(tool.input_schema.model_fields):
             if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
                 args = get_args(field.annotation)
                 if get_origin(field.annotation) in (Union, types.UnionType):
@@ -129,7 +139,7 @@ def generate_structured_output_schemas(
                     "output_files": {
                         "type": "string",
                         "description": (
-                            "Comma-separated file paths to return when action is finish." " Empty string otherwise."
+                            "Comma-separated file paths to return when action is finish. Empty string otherwise."
                         ),
                     },
                 },
