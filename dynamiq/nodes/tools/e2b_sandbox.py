@@ -280,7 +280,7 @@ class E2BInterpreterInputSchema(BaseModel):
 
 class E2BInterpreterTool(ConnectionNode):
     """
-    A tool for executing code and managing files in an E2B sandbox environment.
+    A tool for executing code and managing files in a sandbox environment.
 
     This tool provides a secure execution environment for running Python code,
     shell commands, and managing file operations.
@@ -299,7 +299,7 @@ class E2BInterpreterTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.CODE_EXECUTION
-    name: str = "E2b Code Interpreter Tool"
+    name: str = "E2B Code Interpreter Tool"
     description: str = DESCRIPTION_E2B
     connection: E2BConnection
     installed_packages: list = []
@@ -810,7 +810,7 @@ class E2BInterpreterTool(ConnectionNode):
                             # Create BytesIO object with metadata
                             file_bytesio = io.BytesIO(content_bytes)
                             file_bytesio.name = file_name
-                            file_bytesio.description = f"Generated file from E2B sandbox: {file_path}"
+                            file_bytesio.description = f"Generated file from sandbox: {file_path}"
                             file_bytesio.content_type = content_type
 
                             # Ensure the BytesIO object is positioned at the beginning for reading

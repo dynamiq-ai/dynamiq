@@ -13,11 +13,11 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_TAVILY = """Search the web with Tavily's latest API,
+DESCRIPTION_TAVILY = """Search the web,
 including automatic parameter tuning, structured filters, and enriched responses.
 
 Key Capabilities:
-- Auto-parameterization toggles (let Tavily infer best depth/topic) or manual control
+- Auto-parameterization toggles (let the tool infer best depth/topic) or manual control
 - Basic vs advanced search depth with chunked content snippets
 - Topic-specific queries (general/news/finance) plus country/time filters
 - Optional LLM answers, raw HTML/text content, favicons, and rich image metadata
@@ -30,7 +30,7 @@ Usage Strategy:
 
 Parameter Guide:
 - query: Required natural language search query
-- auto_parameters: Let Tavily choose topic/search_depth for you (beta, extra credit cost)
+- auto_parameters: Let the tool choose topic/search_depth for you (beta, extra credit cost)
 - search_depth: `basic` (fast) vs `advanced` (thorough + chunk snippets)
 - topic: `general`, `news`, or `finance`
 - max_results: Limit (default 5, up to 20)
@@ -41,7 +41,7 @@ Parameter Guide:
 - include_images & include_image_descriptions: Return related images
 - include_favicon: Adds site favicons to each result
 - include_domains / exclude_domains / country: Focus or filter sources
-- use_cache: Reuse existing Tavily results when possible
+- use_cache: Reuse existing search results when possible
 
 Examples:
 - {"query": "React performance optimization", "search_depth": "advanced", "chunks_per_source": 2}
@@ -55,10 +55,10 @@ Examples:
 
 
 class TavilyInputSchema(BaseModel):
-    query: str = Field(..., description="Natural language Tavily search query.")
+    query: str = Field(..., description="Natural language search query.")
     auto_parameters: bool | None = Field(
         default=None,
-        description="Let Tavily automatically select topic/search_depth for the query (beta, costs extra credits).",
+        description="Let the tool automatically select topic/search_depth for the query (beta, costs extra credits).",
     )
     search_depth: Literal["basic", "advanced"] | None = Field(
         default=None,
@@ -122,7 +122,7 @@ class TavilyInputSchema(BaseModel):
     )
     use_cache: bool | None = Field(
         default=None,
-        description="Use cached Tavily results when available.",
+        description="Use cached search results when available.",
     )
 
 
