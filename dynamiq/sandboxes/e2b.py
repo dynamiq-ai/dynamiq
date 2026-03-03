@@ -5,7 +5,7 @@ import threading
 from typing import Any
 
 from e2b.exceptions import RateLimitException as E2BRateLimitException
-from e2b_desktop import Sandbox as E2BDesktopSandbox
+from e2b_code_interpreter import Sandbox as E2BCodeInterpreterSandbox
 from pydantic import ConfigDict, Field, PrivateAttr
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
@@ -41,12 +41,16 @@ class E2BSandbox(Sandbox):
         default_factory=SandboxCreationErrorHandling,
         description="Retry and backoff config for sandbox creation and reconnection (rate-limit and transient errors).",
     )
-    _sandbox: E2BDesktopSandbox | None = PrivateAttr(default=None)
+    _sandbox: E2BCodeInterpreterSandbox | None = PrivateAttr(default=None)
     _sandbox_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
-    def __init__(self, **kwargs):
-        """Initialize the E2B sandbox storage."""
-        super().__init__(**kwargs)
+    @property
+    def _sdk_class(self) -> type:
+        """Return the E2B SDK Sandbox class used for .create() and .connect().
+
+        Subclasses override this to swap the underlying SDK (e.g. e2b_desktop).
+        """
+        return E2BCodeInterpreterSandbox
 
     @property
     def current_sandbox_id(self) -> str | None:
@@ -97,7 +101,7 @@ class E2BSandbox(Sandbox):
             public_url_error=public_url_error,
         )
 
-    def _ensure_sandbox(self) -> E2BDesktopSandbox:
+    def _ensure_sandbox(self) -> E2BCodeInterpreterSandbox:
         """Lazily initialize or reconnect to E2B sandbox, with retries on rate-limit and transient errors.
 
         Uses double-checked locking so concurrent threads (e.g. parallel tool
@@ -115,6 +119,12 @@ class E2BSandbox(Sandbox):
                 try:
                     self._sandbox = self._reconnect_with_retry()
                     logger.debug(f"E2B sandbox reconnected: {self.sandbox_id}")
+                    # Call set_timeout explicitly to ensure the sandbox timeout
+                    # is set to the proper value after reconnect.
+                    try:
+                        self._sandbox.set_timeout(self.timeout)
+                    except Exception as e:
+                        logger.debug("set_timeout after reconnect failed: %s", e)
                     self._ensure_directories()
                     return self._sandbox
                 except Exception as e:
@@ -137,7 +147,7 @@ class E2BSandbox(Sandbox):
         except Exception as e:
             logger.warning(f"E2BSandbox failed to create directory: {e}")
 
-    def _reconnect_with_retry(self) -> E2BDesktopSandbox:
+    def _reconnect_with_retry(self) -> E2BCodeInterpreterSandbox:
         """Reconnect to existing sandbox with exponential backoff on rate-limit."""
         cfg = self.creation_error_handling
 
@@ -152,17 +162,21 @@ class E2BSandbox(Sandbox):
             ),
             reraise=True,
         )
-        def connect() -> E2BDesktopSandbox:
+        def connect():
             logger.debug(f"Reconnecting to E2B sandbox: {self.sandbox_id}")
-            return E2BDesktopSandbox.connect(
+            # Always pass timeout explicitly to avoid resetting
+            # the sandbox timeout to the 5-minute default
+            # if connect() is called without a timeout value.
+            return self._sdk_class.connect(
                 sandbox_id=self.sandbox_id,
                 api_key=self.connection.api_key,
                 domain=getattr(self.connection, "domain", None),
+                timeout=self.timeout,
             )
 
         return connect()
 
-    def _create_with_retry(self) -> E2BDesktopSandbox:
+    def _create_with_retry(self) -> E2BCodeInterpreterSandbox:
         """Create a new sandbox with exponential backoff on rate-limit."""
         cfg = self.creation_error_handling
 
@@ -177,9 +191,9 @@ class E2BSandbox(Sandbox):
             ),
             reraise=True,
         )
-        def create() -> E2BDesktopSandbox:
+        def create():
             try:
-                return E2BDesktopSandbox.create(
+                return self._sdk_class.create(
                     template=self.template,
                     api_key=self.connection.api_key,
                     timeout=self.timeout,
