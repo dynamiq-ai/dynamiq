@@ -12,7 +12,7 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_SERP = """Performs web search using Scale SERP with support for web, news, images, and video results.
+DESCRIPTION_SERP = """Performs web search with support for web, news, images, and video results.
 
 Key Capabilities:
 - Multi-format search: web, news, images, videos

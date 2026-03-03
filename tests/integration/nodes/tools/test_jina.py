@@ -117,7 +117,7 @@ def test_jina_search_agent_optimized(mock_search_requests, mock_jina_search_resp
     assert result.status == RunnableStatus.SUCCESS
 
     content = result.output["content"]
-    assert f"## Jina Search Results for '{input_data['query']}'" in content
+    assert f"## Search Results for '{input_data['query']}'" in content
     assert "### Sources" in content
     assert all(f"[{r['title']}]({r['url']})" in content for r in mock_jina_search_response["data"])
     assert "### Result 1" in content
