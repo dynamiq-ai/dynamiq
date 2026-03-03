@@ -608,7 +608,12 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                 else -1
             )
 
-            if not final_answer_only and idx_thought != -1 and (idx_answer == -1 or idx_thought < idx_answer):
+            if (
+                not final_answer_only
+                and idx_thought != -1
+                and (idx_answer == -1 or idx_thought < idx_answer)
+                and (idx_action_input == -1 or idx_thought < idx_action_input)
+            ):
                 self._current_action_name = None
                 self._current_state = StreamingState.REASONING
                 self._state_start_index = idx_thought + len(XMLModeTag.OPEN_THOUGHT)
