@@ -6,8 +6,15 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Iterator
 
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.callbacks.base import get_run_id
-from dynamiq.types.streaming import StreamingEntitySource, StreamingEventMessage, StreamingMode, StreamingThought
-from dynamiq.utils import format_value
+from dynamiq.types.streaming import (
+    AgentReasoningEventMessageData,
+    AgentToolData,
+    StreamingEntitySource,
+    StreamingEventMessage,
+    StreamingMode,
+    StreamingThought,
+)
+from dynamiq.utils import format_value, generate_uuid
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -39,6 +46,9 @@ class XMLModeTag(str, Enum):
     OPEN_THOUGHT = "<thought>"
     CLOSE_THOUGHT = "</thought>"
     OPEN_ACTION = "<action>"
+    CLOSE_ACTION = "</action>"
+    OPEN_ACTION_INPUT = "<action_input>"
+    CLOSE_ACTION_INPUT = "</action_input>"
     OPEN_ANSWER = "<answer>"
     CLOSE_ANSWER = "</answer>"
 
@@ -61,6 +71,7 @@ class StreamingState(str, Enum):
 
     REASONING = "reasoning"
     ANSWER = "answer"
+    TOOL_INPUT = "tool_input"
 
 
 class InferenceMode(str, Enum):
@@ -327,9 +338,11 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._state_start_index: int = 0
         self._state_last_emit_index: int = 0
         self._answer_started: bool = False
+        self._current_action_name: str | None = None
         self._state_has_emitted: dict[str, bool] = {
             StreamingState.REASONING: False,
             StreamingState.ANSWER: False,
+            StreamingState.TOOL_INPUT: False,
         }
 
         # Set a tail guard to avoid streaming parts of the next tag that may arrive in next chunk
@@ -392,7 +405,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         if not self._buffer or len(self._buffer) <= self._state_last_emit_index:
             return
 
-        if self._current_state in (StreamingState.REASONING, StreamingState.ANSWER):
+        if self._current_state in (StreamingState.REASONING, StreamingState.ANSWER, StreamingState.TOOL_INPUT):
             remaining_content = self._buffer[self._state_last_emit_index :]
             if remaining_content.strip():
                 self._emit(remaining_content, step=self._current_state)
@@ -447,6 +460,19 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
         return arguments_text, function_name
 
+    def _resolve_tool_data(self) -> AgentToolData:
+        """Resolve the current action name to an AgentToolData instance."""
+        action_name = self._current_action_name or ""
+        sanitized = self.agent.sanitize_tool_name(action_name)
+        tool = self.agent.tool_by_names.get(sanitized)
+        if tool:
+            return AgentToolData(
+                name=tool.name,
+                type=tool.type,
+                action_type=tool.action_type.value if tool.action_type else None,
+            )
+        return AgentToolData(name=action_name, type="unknown")
+
     def _emit(self, content: str, step: str) -> None:
         """Emit the parsed content using the agent's stream_content method.
 
@@ -472,7 +498,20 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         if step == StreamingState.REASONING:
             thought_model = StreamingThought(thought=content, loop_num=self.loop_num)
             content_to_stream = thought_model.to_dict()
+        elif step == StreamingState.TOOL_INPUT:
+            tool_data = self._resolve_tool_data()
+            tool_input_model = AgentReasoningEventMessageData(
+                tool_run_id=self.agent._streaming_tool_run_id or "",
+                thought="",
+                action=self._current_action_name or "",
+                tool=tool_data,
+                action_input=content,
+                loop_num=self.loop_num,
+            )
+            content_to_stream = tool_input_model.model_dump()
         elif step == StreamingState.ANSWER:
+            content_to_stream = content
+        else:
             content_to_stream = content
 
         self.agent.stream_content(
@@ -547,12 +586,42 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
     def _process_xml_mode(self, final_answer_only: bool) -> None:
         if self._current_state is None:
             start = self._state_last_emit_index
+
+            # Extract action name from <action>...</action> if visible in buffer
+            if self._current_action_name is None:
+                close_action_pos = self._buffer.find(XMLModeTag.CLOSE_ACTION, start)
+                if close_action_pos != -1:
+                    open_action_pos = self._buffer.rfind(XMLModeTag.OPEN_ACTION, 0, close_action_pos)
+                    if open_action_pos != -1:
+                        self._current_action_name = self._buffer[
+                            open_action_pos + len(XMLModeTag.OPEN_ACTION) : close_action_pos
+                        ].strip()
+                    self._state_last_emit_index = close_action_pos + len(XMLModeTag.CLOSE_ACTION)
+                    start = self._state_last_emit_index
+
             idx_thought = self._buffer.find(XMLModeTag.OPEN_THOUGHT, start) if not final_answer_only else -1
             idx_answer = self._buffer.find(XMLModeTag.OPEN_ANSWER, start)
+            idx_action_input = (
+                self._buffer.find(XMLModeTag.OPEN_ACTION_INPUT, start)
+                if not final_answer_only
+                and self._current_action_name
+                else -1
+            )
 
-            if not final_answer_only and idx_thought != -1 and (idx_answer == -1 or idx_thought < idx_answer):
+            if (
+                not final_answer_only
+                and idx_thought != -1
+                and (idx_answer == -1 or idx_thought < idx_answer)
+                and (idx_action_input == -1 or idx_thought < idx_action_input)
+            ):
+                self._current_action_name = None
                 self._current_state = StreamingState.REASONING
                 self._state_start_index = idx_thought + len(XMLModeTag.OPEN_THOUGHT)
+                self._state_last_emit_index = self._state_start_index
+            elif idx_action_input != -1 and (idx_answer == -1 or idx_action_input < idx_answer):
+                self._current_state = StreamingState.TOOL_INPUT
+                self.agent._streaming_tool_run_id = generate_uuid()
+                self._state_start_index = idx_action_input + len(XMLModeTag.OPEN_ACTION_INPUT)
                 self._state_last_emit_index = self._state_start_index
             elif idx_answer != -1:
                 self._current_state = StreamingState.ANSWER
@@ -598,19 +667,35 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             return
 
         # If the current state is 'answer', stream up to the </answer> tag
-        end_pos = self._buffer.find(XMLModeTag.CLOSE_ANSWER, search_start)
-        if end_pos != -1:
-            if end_pos > self._state_last_emit_index:
-                self._emit(self._buffer[self._state_last_emit_index : end_pos], step=StreamingState.ANSWER)
-            # Close the answer
-            self._current_state = None
-            self._state_last_emit_index = end_pos + len(XMLModeTag.CLOSE_ANSWER)
+        if self._current_state == StreamingState.ANSWER:
+            end_pos = self._buffer.find(XMLModeTag.CLOSE_ANSWER, search_start)
+            if end_pos != -1:
+                if end_pos > self._state_last_emit_index:
+                    self._emit(self._buffer[self._state_last_emit_index : end_pos], step=StreamingState.ANSWER)
+                self._current_state = None
+                self._state_last_emit_index = end_pos + len(XMLModeTag.CLOSE_ANSWER)
+                return
+
+            safe_end = max(self._state_last_emit_index, len(self._buffer) - self._tail_guard)
+            if safe_end > self._state_last_emit_index:
+                self._emit(self._buffer[self._state_last_emit_index : safe_end], step=StreamingState.ANSWER)
+                self._state_last_emit_index = safe_end
             return
 
-        safe_end = max(self._state_last_emit_index, len(self._buffer) - self._tail_guard)
-        if safe_end > self._state_last_emit_index:
-            self._emit(self._buffer[self._state_last_emit_index : safe_end], step=StreamingState.ANSWER)
-            self._state_last_emit_index = safe_end
+        if self._current_state == StreamingState.TOOL_INPUT:
+            end_pos = self._buffer.find(XMLModeTag.CLOSE_ACTION_INPUT, search_start)
+            if end_pos != -1:
+                if end_pos > self._state_last_emit_index:
+                    self._emit(self._buffer[self._state_last_emit_index : end_pos], step=StreamingState.TOOL_INPUT)
+                self._current_state = None
+                self._current_action_name = None
+                self._state_last_emit_index = end_pos + len(XMLModeTag.CLOSE_ACTION_INPUT)
+                return
+
+            safe_end = max(self._state_last_emit_index, len(self._buffer) - self._tail_guard)
+            if safe_end > self._state_last_emit_index:
+                self._emit(self._buffer[self._state_last_emit_index : safe_end], step=StreamingState.TOOL_INPUT)
+                self._state_last_emit_index = safe_end
 
     def _process_structured_output_mode(self, final_answer_only: bool) -> None:
         """Process structured output mode."""
@@ -814,7 +899,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             keep_from = self._state_last_emit_index
         else:
             if (
-                self._current_state in (StreamingState.REASONING, StreamingState.ANSWER)
+                self._current_state in (StreamingState.REASONING, StreamingState.ANSWER, StreamingState.TOOL_INPUT)
                 and self._state_start_index != -1
             ):
                 keep_from = max(0, min(self._state_last_emit_index - self._tail_guard, self._state_start_index - 1))
