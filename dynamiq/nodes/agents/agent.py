@@ -648,24 +648,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
         try:
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
-                all_history = self._prompt.messages[self._history_offset :]
-                preserve_n = self.summarization_config.preserve_last_messages
-                if preserve_n > 0 and len(all_history) > preserve_n:
-                    msgs_to_summarize = all_history[:-preserve_n]
-                else:
-                    msgs_to_summarize = all_history
+                to_summarize, _ = self._split_history()
 
                 merged = {**(action_input if isinstance(action_input, dict) else {})}
                 running_summary = getattr(self, "_running_summary", None)
                 if self.summarization_config.incremental and running_summary:
                     summary_content = f"\nObservation: {running_summary}\n"
                     filtered = [
-                        m for m in msgs_to_summarize if not (m.static and m.content and m.content == summary_content)
+                        m for m in to_summarize if not (m.static and m.content and m.content == summary_content)
                     ]
-                    merged["messages"] = filtered if filtered else msgs_to_summarize
+                    merged["messages"] = filtered if filtered else to_summarize
                     merged["running_summary"] = running_summary
                 else:
-                    merged["messages"] = msgs_to_summarize
+                    merged["messages"] = to_summarize
 
                 tool_input = merged
             else:
@@ -1120,9 +1115,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         Check if summarization is needed and inject it automatically if token limit is exceeded.
 
-        Applies a two-phase approach:
-        1. Compaction (cheap, reversible) -- replace stale tool outputs with refs
-        2. LLM summarization (expensive, lossy) -- only if still over limit after compaction
+        Works like an automatic Context Manager Tool invocation.
 
         Args:
             config: Configuration for the agent run
@@ -1133,12 +1126,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         if not self.is_token_limit_exceeded():
             return
-
-        if self.summarization_config.compaction_enabled:
-            self._compact_tool_outputs()
-            if not self.is_token_limit_exceeded():
-                logger.info(f"Agent {self.name} - {self.id}: Compaction was sufficient, skipping LLM summarization.")
-                return
 
         logger.info(
             f"Agent {self.name} - {self.id}: Token limit exceeded. Automatically invoking Context Manager Tool."

@@ -166,11 +166,10 @@ class AgentInputSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_input_fields(self, context):
-        if self.history is not None:
-            return self
-
-        ctx_msg = context.context.get("role") or ""
-        messages = [Message(role=MessageRole.USER, content=ctx_msg)]
+        messages = []
+        if self.history is None:
+            ctx_msg = context.context.get("role") or ""
+            messages.append(Message(role=MessageRole.USER, content=ctx_msg))
         if message := context.context.get("input_message"):
             messages.append(message)
 

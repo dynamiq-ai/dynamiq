@@ -1,7 +1,5 @@
 """History and context management mixin for agents."""
 
-from litellm import token_counter
-
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.utils.logger import logger
 
@@ -19,6 +17,30 @@ class HistoryManagerMixin:
     """
 
     _running_summary: str | None = None
+
+    def _split_history(
+        self,
+    ) -> tuple[list[Message | VisionMessage], list[Message | VisionMessage]]:
+        """Split conversation history into messages to summarize and messages to preserve.
+
+        Uses ``preserve_last_messages`` from summarization config to determine
+        the split point.  When the history is too short to split, all messages
+        go to the summarize bucket and nothing is preserved.
+
+        Returns:
+            Tuple of (to_summarize, to_preserve).
+        """
+        preserve_count = self.summarization_config.preserve_last_messages
+        conversation_history = self._prompt.messages[self._history_offset :]
+
+        if preserve_count > 0 and len(conversation_history) > preserve_count:
+            to_summarize = conversation_history[:-preserve_count]
+            to_preserve = [m.copy() for m in conversation_history[-preserve_count:]]
+        else:
+            to_summarize = conversation_history
+            to_preserve = []
+
+        return to_summarize, to_preserve
 
     def is_token_limit_exceeded(self) -> bool:
         """
@@ -49,13 +71,7 @@ class HistoryManagerMixin:
         Args:
             summary: Optional summary text to insert after prefix.
         """
-        preserve_n = self.summarization_config.preserve_last_messages
-        all_history = self._prompt.messages[self._history_offset :]
-
-        if preserve_n > 0 and len(all_history) > preserve_n:
-            preserved = [m.copy() for m in all_history[-preserve_n:]]
-        else:
-            preserved = []
+        _, preserved = self._split_history()
 
         self._prompt.messages = self._prompt.messages[: self._history_offset]
 
@@ -71,54 +87,6 @@ class HistoryManagerMixin:
             f"Agent {self.name} - {self.id}: History compacted. "
             f"Summary: {'yes' if summary else 'no'}, preserved: {len(preserved)} messages."
         )
-
-    def _compact_tool_outputs(self) -> bool:
-        """Replace stale tool observation content with compact references.
-
-        Iterates over messages outside the preserved tail and replaces large
-        Observation messages with short placeholders.  The full content is
-        stored in the agent's file store so the agent can retrieve it if needed.
-
-        Returns:
-            True if any compaction was performed.
-        """
-        preserve_n = self.summarization_config.preserve_last_messages
-        threshold = self.summarization_config.compaction_token_threshold
-        history_end = -preserve_n if preserve_n > 0 else len(self._prompt.messages)
-        compactable = self._prompt.messages[self._history_offset : history_end]
-
-        compacted_any = False
-        for msg in compactable:
-            if not (isinstance(msg, Message) and msg.role == MessageRole.USER and msg.content):
-                continue
-            if not msg.content.lstrip().startswith("Observation:"):
-                continue
-
-            msg_tokens = token_counter(
-                model=self.llm.model,
-                messages=[msg.model_dump(exclude={"metadata"}, exclude_none=True)],
-            )
-            if msg_tokens <= threshold:
-                continue
-
-            from dynamiq.utils import generate_uuid
-
-            ref_id = generate_uuid()
-            file_store = getattr(self, "file_store_backend", None)
-            if file_store:
-                file_store.store(f"compacted/{ref_id}.txt", msg.content.encode())
-                msg.content = (
-                    f"\nObservation: [Output compacted - ref:{ref_id}. "
-                    f"Use file_read tool with path 'compacted/{ref_id}.txt' to retrieve full content.]\n"
-                )
-            else:
-                msg.content = "\nObservation: [Output compacted to save context space.]\n"
-            msg.static = True
-            compacted_any = True
-
-        if compacted_any:
-            logger.info(f"Agent {self.name} - {self.id}: Compacted stale tool outputs.")
-        return compacted_any
 
     @staticmethod
     def aggregate_history(messages: list[Message | VisionMessage]) -> str:
