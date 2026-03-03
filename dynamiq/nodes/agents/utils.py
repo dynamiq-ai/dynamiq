@@ -973,6 +973,9 @@ class SummarizationConfig(BaseModel):
         incremental (bool): When True, subsequent summarization passes build on the
           previous running summary instead of re-summarizing from scratch. This bounds
           information loss across multiple passes.
+        token_budget_ratio (float): Fraction of the LLM context window used for input
+          messages during summarization. The remainder is reserved for the summarization
+          prompt and generated output. Defaults to 0.75.
     """
 
     enabled: bool = False
@@ -980,3 +983,4 @@ class SummarizationConfig(BaseModel):
     context_usage_ratio: float = Field(default=0.8, gt=0, le=1)
     preserve_last_messages: int = Field(default=2, ge=0)
     incremental: bool = Field(default=True)
+    token_budget_ratio: float = Field(default=0.75, gt=0, lt=1)

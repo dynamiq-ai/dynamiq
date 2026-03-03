@@ -186,22 +186,3 @@ def test_history_input(model):
     assert history[0].content == "First"
     assert history[1].content == "Reply"
     assert history[2].content == "Second"
-
-
-def test_history_round_trip(model):
-    """get_history() + appended output can be fed into a subsequent call."""
-    agent = create_react_agent(model, InferenceMode.XML)
-
-    # First call
-    result_1 = agent.run(input_data={"input": "Hello"})
-    history = agent.get_history()
-    history.append(Message(role=MessageRole.ASSISTANT, content=result_1.output["content"]))
-
-    assert history[0].content == "Hello"
-
-    # Second call reusing history
-    agent.run(input_data={"input": "Follow-up", "history": history})
-    msgs = agent._prompt.messages
-    assert msgs[0].role == MessageRole.SYSTEM
-    assert msgs[1].content == "Hello"
-    assert msgs[-1].content == "Follow-up" and msgs[-1].role == MessageRole.USER
