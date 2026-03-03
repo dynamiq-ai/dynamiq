@@ -5,16 +5,30 @@ from typing import Any
 
 from pydantic import BaseModel, Field, TypeAdapter
 
+from dynamiq.checkpoints.checkpoint import IterationState
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
-from dynamiq.nodes.agents.orchestrators.orchestrator import ActionParseError, Decision, Orchestrator, OrchestratorError
+from dynamiq.nodes.agents.orchestrators.orchestrator import (
+    ActionParseError,
+    Decision,
+    Orchestrator,
+    OrchestratorError,
+    OrchestratorIterationData,
+)
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.feedback import PlanApprovalConfig
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
+
+
+class LinearOrchestratorIterationData(OrchestratorIterationData):
+    """Typed iteration data for LinearOrchestrator loop-level checkpoints."""
+
+    results: dict[int, dict[str, Any]] = Field(default_factory=dict)
+    tasks: list[dict] = Field(default_factory=list)
 
 
 class Task(BaseModel):
@@ -67,6 +81,7 @@ class LinearOrchestrator(Orchestrator):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._results = {}
+        self._saved_tasks: list[Task] = []
 
     @property
     def to_dict_exclude_params(self):
@@ -86,6 +101,21 @@ class LinearOrchestrator(Orchestrator):
     def reset_run_state(self):
         super().reset_run_state()
         self._results = {}
+        self._saved_tasks = []
+
+    def get_iteration_state(self) -> IterationState:
+        data = LinearOrchestratorIterationData(
+            chat_history=list(self._chat_history),
+            results=dict(self._results),
+            tasks=[t.model_dump() for t in self._saved_tasks],
+        )
+        return IterationState(completed_iterations=self._completed_iterations, iteration_data=data.model_dump())
+
+    def restore_iteration_state(self, state: IterationState) -> None:
+        data = LinearOrchestratorIterationData(**state.iteration_data)
+        self._chat_history = list(data.chat_history)
+        self._results = dict(data.results)
+        self._saved_tasks = [Task(**t) for t in data.tasks] if data.tasks else []
 
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
@@ -224,7 +254,7 @@ class LinearOrchestrator(Orchestrator):
     def run_tasks(self, tasks: list[Task], input_task: str, config: RunnableConfig = None, **kwargs) -> None:
         """Execute the tasks using appropriate agents."""
 
-        for count, task in enumerate(tasks, start=1):
+        for count, task in enumerate(tasks[self._resumed_iterations :], start=self._resumed_iterations + 1):
             task_per_llm = f"**{task.description}**\n**Required information for output**: {task.output}"
 
             dependency_outputs = self.get_dependency_outputs(task.dependencies)
@@ -289,8 +319,8 @@ class LinearOrchestrator(Orchestrator):
                 task_per_llm += f"Error occurred:{manager_result.error.to_dict()}"
 
             if success_flag:
+                self._completed_iterations = count
                 continue
-
             else:
                 raise ValueError(
                     f"Orchestrator {self.name} - {self.id}: "
@@ -361,7 +391,11 @@ class LinearOrchestrator(Orchestrator):
         if decision == Decision.RESPOND:
             return {"content": message}
         else:
-            tasks = self.get_tasks(input_task, config=config, **kwargs)
+            if self._saved_tasks:
+                tasks = self._saved_tasks
+            else:
+                tasks = self.get_tasks(input_task, config=config, **kwargs)
+                self._saved_tasks = tasks
             self.run_tasks(tasks=tasks, input_task=input_task, config=config, **kwargs)
             return {"content": self.generate_final_answer(input_task, config, **kwargs)}
 

@@ -195,13 +195,16 @@ class AdaptiveOrchestrator(Orchestrator):
         if decision == Decision.RESPOND:
             return {"content": message}
         else:
-            self._chat_history.append({"role": "user", "content": input_task})
+            if not self._chat_history:
+                self._chat_history.append({"role": "user", "content": input_task})
 
-            for i in range(self.max_loops):
+            for i in range(self._resumed_iterations, self.max_loops):
                 action = self.get_next_action(config=config, **kwargs)
                 logger.info(f"Orchestrator {self.name} - {self.id}: Loop {i + 1} - Action: {action.dict()}")
+
                 if action.command == ActionCommand.DELEGATE:
                     self._handle_delegation(action=action, config=config, **kwargs)
+                    self._completed_iterations = i + 1
 
                 elif action.command == ActionCommand.RESPOND:
                     respond_result = self._handle_respond(action=action)
