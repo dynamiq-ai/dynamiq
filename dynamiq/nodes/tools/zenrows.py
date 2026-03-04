@@ -21,9 +21,6 @@ Key Capabilities:
 Usage Strategy:
 Use for websites that block standard scrapers or require JavaScript execution.
 
-Parameter Guide:
-- url: Target website URL to scrape
-
 Examples:
 - Basic scraping: {"url": "https://example.com"}
 - E-commerce data: {"url": "https://shop.example.com/products"}

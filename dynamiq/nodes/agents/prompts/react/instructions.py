@@ -135,11 +135,6 @@ them in any order you choose to complete the task:\n
 {{ tool_description }}
 """
 
-REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
-- Avoid phrases like 'based on the information gathered or provided.'
-- Clearly mention any files that were generated during the process.
-- Provide file names and brief descriptions of their contents.
-"""
 
 REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """Always structure your responses in this JSON format:
 
@@ -246,8 +241,30 @@ listing absolute file paths (comma-separated). This tag is optional — omit it 
 """
 
 
-REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
-- Avoid phrases like 'based on the information gathered or provided.'
+REACT_BLOCK_OUTPUT_FORMAT = """
+
+In your answers, adhere to the following formatting and stylistic guidelines:
+
+- Use GitHub-flavored Markdown as the default format for all responses and generated documents.
+- Write in a professional, academic tone using complete, well-structured paragraphs.
+- Avoid excessive bullet points; prioritize fully developed prose.
+- When appropriate, alternate between explanatory paragraphs and structured tables
+  to improve clarity, comparison, or organization of key information.
+- Use bold formatting to emphasize essential concepts, distinctions, terminology, or conclusions.
+- Use blockquotes to highlight formal definitions, cited statements, or especially important excerpts.
+- Include inline hyperlinks when referencing websites, platforms, or external resources.
+- When making factual claims, support them with inline numeric citations using Markdown reference-style links.
+- CRITICAL: Only use emojis if the user explicitly requests it.
+You MUST AVOID using emojis in all communication unless asked.
+
+IMPORTANT:
+- Formatting must enhance readability and analytical clarity.
+- Tables should only be used when they materially improve organization or comparison.
+- Do not over-format; maintain a professional and academically consistent presentation style.
+- In your final answer:
+    - Avoid phrases like 'based on the information gathered or provided'.
+    - Clearly mention any files that were generated during the process
+    - Provide file names and brief descriptions of their contents.
 """
 
 REACT_MAX_LOOPS_PROMPT = """
