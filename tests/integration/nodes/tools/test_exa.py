@@ -21,7 +21,7 @@ def mock_exa_response(mocker):
             {
                 "title": "Test Article 1",
                 "url": "https://example.com/article1",
-                "publishedDate": "2024-01-01",
+                "publishedDate": "2026-01-01",
                 "author": "John Doe",
                 "score": 0.95,
                 "highlights": ["This is a highlight from article 1"],
@@ -30,7 +30,7 @@ def mock_exa_response(mocker):
             {
                 "title": "Test Article 2",
                 "url": "https://example.com/article2",
-                "publishedDate": "2024-01-02",
+                "publishedDate": "2026-01-02",
                 "author": "Jane Smith",
                 "score": 0.85,
                 "highlights": ["This is a highlight from article 2"],
