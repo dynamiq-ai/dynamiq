@@ -1276,7 +1276,10 @@ class Agent(Node):
                     if isinstance(content, str):
                         content = content.encode("utf-8")
                     unique_file_name = self._get_unique_upload_filename(file_name, seen_names)
-                    destination_path = self.sandbox_backend.upload_file(unique_file_name, content)
+                    input_path = f"{self.sandbox_backend.base_path.rstrip('/')}/input/{unique_file_name}"
+                    destination_path = self.sandbox_backend.upload_file(
+                        unique_file_name, content, destination_path=input_path
+                    )
                     file_paths[index] = destination_path
                 except Exception as e:
                     logger.warning(f"Failed to upload file {file_name} to sandbox: {e}")
