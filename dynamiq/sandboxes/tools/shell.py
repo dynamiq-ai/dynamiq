@@ -141,16 +141,19 @@ class SandboxShellTool(Node):
                 "stdout": result.stdout,
                 "stderr": result.stderr,
                 "exit_code": result.exit_code,
+                "error": result.error,
                 "success": result.is_success,
             }
 
             if not result.is_success:
                 parts = [f"Command failed with exit code {result.exit_code}."]
+                if result.error:
+                    parts.append(f"error: {result.error}")
                 if result.stderr:
                     parts.append(f"stderr: {result.stderr}")
                 if result.stdout:
                     parts.append(f"stdout: {result.stdout}")
-                if not result.stderr and not result.stdout:
+                if not result.error and not result.stderr and not result.stdout:
                     parts.append("No output was produced.")
                 output["content"] = "\n".join(parts)
 
