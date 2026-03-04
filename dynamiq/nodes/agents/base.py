@@ -1264,9 +1264,9 @@ class Agent(Node):
 
     def _upload_files_to_sandbox(self, normalized_files: list) -> list[str]:
         """Upload file-like objects to the sandbox backend."""
-        file_paths = []
+        file_paths = [""] * len(normalized_files)
         seen_names = self._list_existing_sandbox_file_names()
-        for file_obj in normalized_files:
+        for index, file_obj in enumerate(normalized_files):
             file_name = getattr(file_obj, "name", None)
             if file_name and hasattr(file_obj, "read"):
                 try:
@@ -1277,15 +1277,14 @@ class Agent(Node):
                         content = content.encode("utf-8")
                     unique_file_name = self._get_unique_upload_filename(file_name, seen_names)
                     destination_path = self.sandbox_backend.upload_file(unique_file_name, content)
-                    file_paths.append(destination_path)
+                    file_paths[index] = destination_path
                 except Exception as e:
                     logger.warning(f"Failed to upload file {file_name} to sandbox: {e}")
-                    file_paths.append(f"file {file_name} was not stored.")
         return file_paths
 
     def _upload_files_to_file_store(self, normalized_files: list) -> list[str]:
         """Store file-like objects in the file store backend."""
-        file_paths = []
+        file_paths = [""] * len(normalized_files)
         seen_names: set[str] = set()
 
         def file_exists(candidate: str) -> bool:
@@ -1294,7 +1293,7 @@ class Agent(Node):
             except Exception:
                 return False
 
-        for file_obj in normalized_files:
+        for index, file_obj in enumerate(normalized_files):
             file_name = getattr(file_obj, "name", None)
             if not file_name or not hasattr(file_obj, "read"):
                 continue
@@ -1313,10 +1312,9 @@ class Agent(Node):
                     metadata={"description": description, "source": "user_upload"},
                     overwrite=False,
                 )
-                file_paths.append(unique_file_name)
+                file_paths[index] = unique_file_name
             except Exception as e:
                 logger.warning(f"Failed to store file {file_name} in file store: {e}")
-                file_paths.append(f"file {file_name} was not stored.")
         return file_paths
 
     def _setup_in_memory_file_store_and_tools(self) -> None:
@@ -1365,6 +1363,9 @@ class Agent(Node):
             description = getattr(f, "description", "") or ""
             description = description.strip()
             saved_path = normalized_paths[index] if index < len(normalized_paths) else ""
+            if saved_path == "":
+                saved_path = "File is not stored."
+                
             saved_suffix = f" (saved as: {saved_path})" if saved_path else ""
             if description:
                 file_lines.append(f"- {name}{saved_suffix}: {description}")

@@ -647,9 +647,9 @@ def test_inject_attached_files_includes_saved_paths(openai_node, mock_llm_execut
     assert "- scores.csv (saved as: scores.csv)" in result.content
 
 
-def test_inject_attached_files_fallback_when_paths_missing(openai_node, mock_llm_executor):
-    agent = Agent(name="Path Fallback Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
-    input_message = prompts.Message(role="user", content="Please analyze the uploads.")
+def test_inject_attached_files_no_paths_shows_not_stored(openai_node, mock_llm_executor):
+    agent = Agent(name="No Paths Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    input_message = prompts.Message(role="user", content="Check these files.")
 
     first_file = BytesIO(b"first")
     first_file.name = "notes.txt"
@@ -660,12 +660,11 @@ def test_inject_attached_files_fallback_when_paths_missing(openai_node, mock_llm
     result = agent._inject_attached_files_into_message(
         input_message,
         [first_file, second_file],
-        file_paths=["/home/user/notes.txt"],
+        file_paths=["", "/home/user/scores.csv"],
     )
 
-    assert "- notes.txt (saved as: /home/user/notes.txt): meeting notes" in result.content
-    assert "- scores.csv" in result.content
-    assert "- scores.csv (saved as:" not in result.content
+    assert "- notes.txt (saved as: File is not stored.): meeting notes" in result.content
+    assert "- scores.csv (saved as: /home/user/scores.csv)" in result.content
 
 
 def test_inject_attached_files_skips_vision_message(openai_node, mock_llm_executor):
