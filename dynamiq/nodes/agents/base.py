@@ -1365,7 +1365,7 @@ class Agent(Node):
             saved_path = normalized_paths[index] if index < len(normalized_paths) else ""
             if saved_path == "":
                 saved_path = "File is not stored."
-                
+
             saved_suffix = f" (saved as: {saved_path})" if saved_path else ""
             if description:
                 file_lines.append(f"- {name}{saved_suffix}: {description}")
