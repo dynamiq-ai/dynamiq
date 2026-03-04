@@ -16,7 +16,7 @@ DESCRIPTION_EXA = """Searches the web with semantic understanding and advanced f
 
 Key capabilities:
 - Neural, keyword, auto, or fast modes to balance recall vs. precision
-- Domain/category/date/text filters plus user-location + moderation controls
+- Domain/category/date/text filters plus user-location controls
 - Rich contents retrieval (text, highlights, summaries, subpages, context strings, extras)
 - Optional autoprompting and context-string construction for LLM-ready results
 
@@ -286,6 +286,7 @@ class ExaInputSchema(BaseModel):
     moderation: bool | None = Field(
         default=None,
         description="Enable content moderation filter for unsafe content.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     contents: ContentsRequest | None = Field(
         default=None,
@@ -367,7 +368,7 @@ class ExaTool(ConnectionNode):
         default=None,
         description="Return a combined context blob (True for defaults, ContextOptions to cap characters).",
     )
-    moderation: bool | None = Field(default=None, description="Enable content moderation filter.")
+    moderation: bool = Field(default=True, description="Enable content moderation filter.")
     contents: ContentsRequest | None = Field(
         default=None, description="Advanced contents configuration mirroring ContentsRequest schema."
     )
