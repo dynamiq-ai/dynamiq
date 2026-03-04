@@ -597,14 +597,17 @@ class Agent(Node):
         files = input_data.files
         if files:
             normalized_files = self._ensure_named_files(files)
+            file_paths = []
             if self.sandbox_backend:
-                self._upload_files_to_sandbox(normalized_files)
+                file_paths = self._upload_files_to_sandbox(normalized_files)
             else:
                 if not self.file_store_backend:
                     self._setup_in_memory_file_store_and_tools()
                 if self.file_store_backend:
-                    self._upload_files_to_file_store(normalized_files)
-            input_message = self._inject_attached_files_into_message(input_message, normalized_files)
+                    file_paths = self._upload_files_to_file_store(normalized_files)
+            input_message = self._inject_attached_files_into_message(
+                input_message, normalized_files, file_paths=file_paths
+            )
 
         if input_data.tool_params:
             kwargs["tool_params"] = input_data.tool_params
@@ -1215,8 +1218,9 @@ class Agent(Node):
         if stored_files:
             logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
 
-    def _upload_files_to_sandbox(self, normalized_files: list) -> None:
+    def _upload_files_to_sandbox(self, normalized_files: list) -> list[str]:
         """Upload file-like objects to the sandbox backend."""
+        file_paths = []
         for file_obj in normalized_files:
             file_name = getattr(file_obj, "name", None)
             if file_name and hasattr(file_obj, "read"):
@@ -1226,12 +1230,15 @@ class Agent(Node):
                     content = file_obj.read()
                     if isinstance(content, str):
                         content = content.encode("utf-8")
-                    self.sandbox_backend.upload_file(file_name, content)
+                    destination_path = self.sandbox_backend.upload_file(file_name, content)
+                    file_paths.append(destination_path)
                 except Exception as e:
                     logger.warning(f"Failed to upload file {file_name} to sandbox: {e}")
+        return file_paths
 
-    def _upload_files_to_file_store(self, normalized_files: list) -> None:
+    def _upload_files_to_file_store(self, normalized_files: list) -> list[str]:
         """Store file-like objects in the file store backend."""
+        file_paths = []
         for file_obj in normalized_files:
             file_name = getattr(file_obj, "name", None)
             if not file_name or not hasattr(file_obj, "read"):
@@ -1250,8 +1257,10 @@ class Agent(Node):
                     metadata={"description": description, "source": "user_upload"},
                     overwrite=True,
                 )
+                file_paths.append(file_name)
             except Exception as e:
                 logger.warning(f"Failed to store file {file_name} in file store: {e}")
+        return file_paths
 
     def _setup_in_memory_file_store_and_tools(self) -> None:
         """Create in-memory file store and file tools when files are uploaded and no sandbox/file store exists."""
@@ -1280,7 +1289,10 @@ class Agent(Node):
                 )
 
     def _inject_attached_files_into_message(
-        self, input_message: Message | VisionMessage, files: list[io.BytesIO]
+        self,
+        input_message: Message | VisionMessage,
+        files: list[io.BytesIO],
+        file_paths: list[str] | None = None,
     ) -> Message | VisionMessage:
         if not files:
             return input_message
@@ -1290,14 +1302,17 @@ class Agent(Node):
 
         file_lines = []
 
-        for f in files:
+        normalized_paths = file_paths or []
+        for index, f in enumerate(files):
             name = getattr(f, "name", None) or "unnamed_file"
             description = getattr(f, "description", "") or ""
             description = description.strip()
+            saved_path = normalized_paths[index] if index < len(normalized_paths) else ""
+            saved_suffix = f" (saved as: {saved_path})" if saved_path else ""
             if description:
-                file_lines.append(f"- {name}: {description}")
+                file_lines.append(f"- {name}{saved_suffix}: {description}")
             else:
-                file_lines.append(f"- {name}")
+                file_lines.append(f"- {name}{saved_suffix}")
 
         if not file_lines:
             return input_message

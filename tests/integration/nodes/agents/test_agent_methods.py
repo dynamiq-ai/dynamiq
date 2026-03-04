@@ -1,4 +1,5 @@
 import uuid
+from io import BytesIO
 
 import pytest
 
@@ -622,6 +623,68 @@ def test_agent_state_updates_with_todos(openai_node):
     assert state.current_loop == 0
     assert state.max_loops == 10
     assert state.todos == []
+
+
+def test_inject_attached_files_includes_saved_paths(openai_node, mock_llm_executor):
+    agent = Agent(name="Path Injection Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    input_message = prompts.Message(role="user", content="Please analyze the uploads.")
+
+    first_file = BytesIO(b"first")
+    first_file.name = "notes.txt"
+    first_file.description = "meeting notes"
+    second_file = BytesIO(b"second")
+    second_file.name = "scores.csv"
+
+    result = agent._inject_attached_files_into_message(
+        input_message,
+        [first_file, second_file],
+        file_paths=["/home/user/notes.txt", "scores.csv"],
+    )
+
+    assert "Attached files available to you:" in result.content
+    assert "- notes.txt (saved as: /home/user/notes.txt): meeting notes" in result.content
+    assert "- scores.csv (saved as: scores.csv)" in result.content
+
+
+def test_inject_attached_files_fallback_when_paths_missing(openai_node, mock_llm_executor):
+    agent = Agent(name="Path Fallback Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    input_message = prompts.Message(role="user", content="Please analyze the uploads.")
+
+    first_file = BytesIO(b"first")
+    first_file.name = "notes.txt"
+    first_file.description = "meeting notes"
+    second_file = BytesIO(b"second")
+    second_file.name = "scores.csv"
+
+    result = agent._inject_attached_files_into_message(
+        input_message,
+        [first_file, second_file],
+        file_paths=["/home/user/notes.txt"],
+    )
+
+    assert "- notes.txt (saved as: /home/user/notes.txt): meeting notes" in result.content
+    assert "- scores.csv" in result.content
+    assert "- scores.csv (saved as:" not in result.content
+
+
+def test_inject_attached_files_skips_vision_message(openai_node, mock_llm_executor):
+    agent = Agent(name="Vision No Injection Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    input_message = prompts.VisionMessage(
+        role="user",
+        content=[prompts.VisionMessageTextContent(text="Please analyze the uploads.")],
+    )
+
+    first_file = BytesIO(b"first")
+    first_file.name = "notes.txt"
+
+    result = agent._inject_attached_files_into_message(
+        input_message,
+        [first_file],
+        file_paths=["/home/user/notes.txt"],
+    )
+
+    assert result is input_message
+    assert result.content == [prompts.VisionMessageTextContent(text="Please analyze the uploads.")]
 
 
 class TestParallelToolCloning:
