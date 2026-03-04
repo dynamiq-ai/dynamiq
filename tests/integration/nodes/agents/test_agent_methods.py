@@ -626,90 +626,9 @@ def test_agent_state_updates_with_todos(openai_node):
     assert state.todos == []
 
 
-def test_inject_attached_files_includes_saved_paths(openai_node, mock_llm_executor):
-    agent = Agent(name="Path Injection Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
-    input_message = prompts.Message(role="user", content="Please analyze the uploads.")
-
-    first_file = BytesIO(b"first")
-    first_file.name = "notes.txt"
-    first_file.description = "meeting notes"
-    second_file = BytesIO(b"second")
-    second_file.name = "scores.csv"
-
-    result = agent._inject_attached_files_into_message(
-        input_message,
-        [first_file, second_file],
-        file_paths=["/home/user/notes.txt", "scores.csv"],
-    )
-
-    assert "Attached files available to you:" in result.content
-    assert "- notes.txt (saved as: /home/user/notes.txt): meeting notes" in result.content
-    assert "- scores.csv (saved as: scores.csv)" in result.content
-
-
-def test_inject_attached_files_no_paths_shows_not_stored(openai_node, mock_llm_executor):
-    agent = Agent(name="No Paths Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
-    input_message = prompts.Message(role="user", content="Check these files.")
-
-    first_file = BytesIO(b"first")
-    first_file.name = "notes.txt"
-    first_file.description = "meeting notes"
-    second_file = BytesIO(b"second")
-    second_file.name = "scores.csv"
-
-    result = agent._inject_attached_files_into_message(
-        input_message,
-        [first_file, second_file],
-        file_paths=["", "/home/user/scores.csv"],
-    )
-
-    assert "- notes.txt (saved as: File is not stored.): meeting notes" in result.content
-    assert "- scores.csv (saved as: /home/user/scores.csv)" in result.content
-
-
-def test_inject_attached_files_skips_vision_message(openai_node, mock_llm_executor):
-    agent = Agent(name="Vision No Injection Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
-    input_message = prompts.VisionMessage(
-        role="user",
-        content=[prompts.VisionMessageTextContent(text="Please analyze the uploads.")],
-    )
-
-    first_file = BytesIO(b"first")
-    first_file.name = "notes.txt"
-
-    result = agent._inject_attached_files_into_message(
-        input_message,
-        [first_file],
-        file_paths=["/home/user/notes.txt"],
-    )
-
-    assert result is input_message
-    assert result.content == [prompts.VisionMessageTextContent(text="Please analyze the uploads.")]
-
-
-def test_upload_files_to_file_store_renames_same_batch_duplicates(openai_node, mock_llm_executor):
-    backend = InMemoryFileStore()
-    agent = Agent(
-        name="File Upload Agent",
-        llm=openai_node,
-        tools=[],
-        file_store=FileStoreConfig(enabled=True, backend=backend),
-        inference_mode=InferenceMode.DEFAULT,
-    )
-
-    first = BytesIO(b"first content")
-    first.name = "report.pdf"
-    second = BytesIO(b"second content")
-    second.name = "report.pdf"
-
-    saved_paths = agent._upload_files_to_file_store([first, second])
-
-    assert saved_paths == ["report.pdf", "report_1.pdf"]
-    assert backend.retrieve("report.pdf") == b"first content"
-    assert backend.retrieve("report_1.pdf") == b"second content"
-
-
-def test_upload_files_to_file_store_renames_when_name_exists(openai_node, mock_llm_executor):
+def test_execute_file_store_file_upload_flow(openai_node, mocker):
+    """Regression: full execute() with file store — deduplicates batch and pre-existing
+    names, stores files correctly, and injects saved paths into the LLM message."""
     backend = InMemoryFileStore()
     backend.store(
         file_path="report.pdf",
@@ -719,77 +638,134 @@ def test_upload_files_to_file_store_renames_when_name_exists(openai_node, mock_l
         overwrite=True,
     )
     agent = Agent(
-        name="Existing Name Upload Agent",
+        name="FileStore Upload Agent",
         llm=openai_node,
         tools=[],
         file_store=FileStoreConfig(enabled=True, backend=backend),
         inference_mode=InferenceMode.DEFAULT,
     )
 
-    uploaded = BytesIO(b"new content")
-    uploaded.name = "report.pdf"
+    answer_result = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        output={"content": "Thought: Files received.\nAnswer: Analysis complete."},
+    )
+    mock_run_llm = mocker.patch.object(agent, "_run_llm", return_value=answer_result)
 
-    saved_paths = agent._upload_files_to_file_store([uploaded])
+    file_a = BytesIO(b"first content")
+    file_a.name = "report.pdf"
+    file_a.description = "Q1 report"
+    file_b = BytesIO(b"second content")
+    file_b.name = "report.pdf"
 
-    assert saved_paths == ["report_1.pdf"]
+    result = agent.run(input_data={"input": "Analyze these files", "files": [file_a, file_b]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == "Analysis complete."
+
     assert backend.retrieve("report.pdf") == b"existing content"
-    assert backend.retrieve("report_1.pdf") == b"new content"
+    assert backend.retrieve("report_1.pdf") == b"first content"
+    assert backend.retrieve("report_2.pdf") == b"second content"
+
+    messages = mock_run_llm.call_args.kwargs["messages"]
+    user_message = next(m for m in messages if m.role == "user")
+    assert "Attached files available to you:" in user_message.content
+    assert "report.pdf (saved as: report_1.pdf): Q1 report" in user_message.content
+    assert "report.pdf (saved as: report_2.pdf)" in user_message.content
 
 
-def test_upload_files_to_sandbox_renames_batch_and_existing_duplicates(openai_node, mock_llm_executor, mocker):
-    agent = Agent(name="Sandbox Upload Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
-    sandbox_backend = mocker.Mock()
-    sandbox_backend.base_path = "/home/user"
-    sandbox_backend.list_files.return_value = ["/home/user/report.pdf"]
-    sandbox_backend.upload_file.side_effect = lambda file_name, content: f"/home/user/{file_name}"
-    mocker.patch.object(Agent, "sandbox_backend", new_callable=PropertyMock, return_value=sandbox_backend)
+def test_execute_sandbox_file_upload_flow(openai_node, mocker):
+    """Regression: full execute() with sandbox — deduplicates batch and pre-existing
+    names, uploads with unique names, and injects saved sandbox paths into the LLM message."""
+    agent = Agent(
+        name="Sandbox Upload Agent",
+        llm=openai_node,
+        tools=[],
+        inference_mode=InferenceMode.DEFAULT,
+    )
 
-    first = BytesIO(b"first content")
-    first.name = "report.pdf"
-    second = BytesIO(b"second content")
-    second.name = "report.pdf"
+    sandbox_mock = mocker.Mock()
+    sandbox_mock.base_path = "/home/user"
+    sandbox_mock.list_files.return_value = ["/home/user/report.pdf"]
+    sandbox_mock.upload_file.side_effect = lambda name, content: f"/home/user/{name}"
+    mocker.patch.object(Agent, "sandbox_backend", new_callable=PropertyMock, return_value=sandbox_mock)
 
-    saved_paths = agent._upload_files_to_sandbox([first, second])
+    answer_result = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        output={"content": "Thought: Files received.\nAnswer: Sandbox analysis done."},
+    )
+    mock_run_llm = mocker.patch.object(agent, "_run_llm", return_value=answer_result)
 
-    assert saved_paths == ["/home/user/report_1.pdf", "/home/user/report_2.pdf"]
-    assert sandbox_backend.upload_file.call_count == 2
-    assert sandbox_backend.upload_file.call_args_list[0].args[0] == "report_1.pdf"
-    assert sandbox_backend.upload_file.call_args_list[1].args[0] == "report_2.pdf"
+    file_a = BytesIO(b"alpha")
+    file_a.name = "report.pdf"
+    file_a.description = "Q1 report"
+    file_b = BytesIO(b"beta")
+    file_b.name = "report.pdf"
+
+    result = agent.run(input_data={"input": "Check sandbox files", "files": [file_a, file_b]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == "Sandbox analysis done."
+
+    assert sandbox_mock.upload_file.call_count == 2
+    assert sandbox_mock.upload_file.call_args_list[0].args[0] == "report_1.pdf"
+    assert sandbox_mock.upload_file.call_args_list[1].args[0] == "report_2.pdf"
+
+    messages = mock_run_llm.call_args.kwargs["messages"]
+    user_message = next(m for m in messages if m.role == "user")
+    assert "Attached files available to you:" in user_message.content
+    assert "/home/user/report_1.pdf" in user_message.content
+    assert "/home/user/report_2.pdf" in user_message.content
 
 
-def test_upload_files_to_file_store_appends_not_stored_on_failure(openai_node, mock_llm_executor, mocker):
+def test_file_upload_failures_return_empty_paths(openai_node, mock_llm_executor, mocker):
+    """Upload failures for both file-store and sandbox backends produce empty path strings."""
     backend = InMemoryFileStore()
     mocker.patch.object(InMemoryFileStore, "store", side_effect=RuntimeError("store failed"))
-    agent = Agent(
-        name="File Store Failure Agent",
+    fs_agent = Agent(
+        name="FileStore Failure Agent",
         llm=openai_node,
         tools=[],
         file_store=FileStoreConfig(enabled=True, backend=backend),
         inference_mode=InferenceMode.DEFAULT,
     )
 
-    uploaded = BytesIO(b"new content")
-    uploaded.name = "report.pdf"
+    fs_file = BytesIO(b"content")
+    fs_file.name = "report.pdf"
+    assert fs_agent._upload_files_to_file_store([fs_file]) == [""]
 
-    saved_paths = agent._upload_files_to_file_store([uploaded])
+    mocker.stopall()
 
-    assert saved_paths == [""]
+    sandbox_agent = Agent(
+        name="Sandbox Failure Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT
+    )
+    sandbox_mock = mocker.Mock()
+    sandbox_mock.base_path = "/home/user"
+    sandbox_mock.list_files.return_value = []
+    sandbox_mock.upload_file.side_effect = RuntimeError("upload failed")
+    mocker.patch.object(Agent, "sandbox_backend", new_callable=PropertyMock, return_value=sandbox_mock)
+
+    sb_file = BytesIO(b"content")
+    sb_file.name = "report.pdf"
+    assert sandbox_agent._upload_files_to_sandbox([sb_file]) == [""]
 
 
-def test_upload_files_to_sandbox_appends_not_stored_on_failure(openai_node, mock_llm_executor, mocker):
-    agent = Agent(name="Sandbox Failure Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
-    sandbox_backend = mocker.Mock()
-    sandbox_backend.base_path = "/home/user"
-    sandbox_backend.list_files.return_value = []
-    sandbox_backend.upload_file.side_effect = RuntimeError("upload failed")
-    mocker.patch.object(Agent, "sandbox_backend", new_callable=PropertyMock, return_value=sandbox_backend)
+def test_inject_attached_files_skips_vision_message(openai_node, mock_llm_executor):
+    """VisionMessage inputs are returned unmodified — file metadata is not injected."""
+    agent = Agent(name="Vision Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    input_message = prompts.VisionMessage(
+        role="user",
+        content=[prompts.VisionMessageTextContent(text="Analyze the uploads.")],
+    )
 
-    uploaded = BytesIO(b"new content")
-    uploaded.name = "report.pdf"
+    file_obj = BytesIO(b"data")
+    file_obj.name = "notes.txt"
 
-    saved_paths = agent._upload_files_to_sandbox([uploaded])
+    result = agent._inject_attached_files_into_message(
+        input_message, [file_obj], file_paths=["/home/user/notes.txt"]
+    )
 
-    assert saved_paths == [""]
+    assert result is input_message
+    assert result.content == [prompts.VisionMessageTextContent(text="Analyze the uploads.")]
 
 
 class TestParallelToolCloning:
