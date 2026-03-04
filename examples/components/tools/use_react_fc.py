@@ -42,7 +42,7 @@ if __name__ == "__main__":
 
     result = agent.run(
         input_data={
-            "input": "I was born in 2000, and now is 2024. Your task is to calculate my age and then find the top films, limiting results to number of my age"  # noqa: E501
+            "input": "I was born in 2000, and now is 2026. Your task is to calculate my age and then find the top films, limiting results to number of my age"  # noqa: E501
         }
     )
 

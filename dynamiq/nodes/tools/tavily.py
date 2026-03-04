@@ -28,21 +28,6 @@ Usage Strategy:
 - Combine time_range/start_date/end_date with include/exclude_domains for curated monitoring
 - Turn on include_answer/include_raw_content/include_images when agents must summarize or embed
 
-Parameter Guide:
-- query: Required natural language search query
-- auto_parameters: Let the tool choose topic/search_depth for you (beta, extra credit cost)
-- search_depth: `basic` (fast) vs `advanced` (thorough + chunk snippets)
-- topic: `general`, `news`, or `finance`
-- max_results: Limit (default 5, up to 20)
-- chunks_per_source: 1-3 chunks per source (advanced-only)
-- time_range / start_date / end_date: Recency controls using relative or ISO dates
-- include_answer: `true`/`false` or `basic`/`advanced` summaries
-- include_raw_content: `true`/`false` or `markdown`/`text` full content
-- include_images & include_image_descriptions: Return related images
-- include_favicon: Adds site favicons to each result
-- include_domains / exclude_domains / country: Focus or filter sources
-- use_cache: Reuse existing search results when possible
-
 Examples:
 - {"query": "React performance optimization", "search_depth": "advanced", "chunks_per_source": 2}
 - {"query": "latest AI developments", "topic": "news",
