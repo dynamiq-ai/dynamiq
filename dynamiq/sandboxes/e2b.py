@@ -5,6 +5,7 @@ import threading
 from typing import Any
 
 from e2b.exceptions import RateLimitException as E2BRateLimitException
+from e2b.sandbox.commands.command_handle import CommandExitException
 from e2b_code_interpreter import Sandbox as E2BCodeInterpreterSandbox
 from pydantic import ConfigDict, Field, PrivateAttr
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
@@ -227,25 +228,24 @@ class E2BSandbox(Sandbox):
         try:
             if run_in_background_enabled:
                 sandbox.commands.run(command, background=True)
-                return ShellCommandResult(
-                    stdout=f"Command started in background: {command}",
-                    stderr="",
-                    exit_code=0,
-                )
+                return ShellCommandResult(background=True)
 
             result = sandbox.commands.run(command, timeout=timeout)
             return ShellCommandResult(
-                stdout=result.stdout or "",
-                stderr=result.stderr or "",
-                exit_code=getattr(result, "exit_code", None),
+                stdout=result.stdout,
+                stderr=result.stderr,
+                exit_code=result.exit_code,
+            )
+        except CommandExitException as e:
+            logger.debug(f"Command exited with non-zero code: {e.exit_code}, stderr: {e.stderr}")
+            return ShellCommandResult(
+                stdout=e.stdout,
+                stderr=e.stderr,
+                exit_code=e.exit_code,
             )
         except Exception as e:
             logger.error(f"Command execution failed: {e}")
-            return ShellCommandResult(
-                stdout="",
-                stderr=str(e),
-                exit_code=1,
-            )
+            return ShellCommandResult(error=str(e))
 
     def upload_file(
         self,

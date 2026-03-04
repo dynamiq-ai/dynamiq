@@ -25,9 +25,16 @@ class SandboxTool(str, Enum):
 class ShellCommandResult(BaseModel):
     """Result of a shell command execution."""
 
-    stdout: str
-    stderr: str
-    exit_code: int | None
+    stdout: str | None = None
+    stderr: str | None = None
+    exit_code: int | None = None
+    background: bool = False
+    error: str | None = None
+
+    @property
+    def is_success(self) -> bool:
+        """Determine if the command execution was successful."""
+        return (self.exit_code == 0 or (self.exit_code is None and not self.stderr)) and self.error is None
 
 
 class SandboxInfo(BaseModel):
