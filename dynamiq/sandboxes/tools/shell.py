@@ -136,22 +136,29 @@ class SandboxShellTool(Node):
                 run_in_background_enabled=input_data.run_in_background_enabled,
             )
 
-            # Handle None exit_code: treat as success unless stderr indicates error
-            is_success = result.exit_code == 0 or (result.exit_code is None and not result.stderr)
             output = {
                 "content": result.stdout if result.stdout else "(no output)",
                 "stdout": result.stdout,
                 "stderr": result.stderr,
                 "exit_code": result.exit_code,
-                "success": is_success,
+                "error": result.error,
+                "success": result.is_success,
+                "background": result.background,
             }
 
-            if not is_success:
-                output["content"] = (
-                    f"Command failed with exit code {result.exit_code}.\n"
-                    f"stdout: {result.stdout}\n"
-                    f"stderr: {result.stderr}"
-                )
+            if result.background:
+                output["content"] = f"Command started in background: {input_data.command}"
+            elif not result.is_success:
+                parts = [f"Command failed with exit code {result.exit_code}."]
+                if result.error:
+                    parts.append(f"error: {result.error}")
+                if result.stderr:
+                    parts.append(f"stderr: {result.stderr}")
+                if result.stdout:
+                    parts.append(f"stdout: {result.stdout}")
+                if not result.error and not result.stderr and not result.stdout:
+                    parts.append("No output was produced.")
+                output["content"] = "\n".join(parts)
 
             logger.info(f"Tool {self.name} - {self.id}: command completed with exit code {result.exit_code}")
             return output
