@@ -31,7 +31,8 @@ You operate inside a persistent sandbox filesystem.
 The sandbox directory is your working memory.
 
 - Use {base_path}/ for ALL files: scripts, research, logs, intermediate artifacts, data, and final output.
-- Uploaded files are placed in {base_path}/input/ as well as files returned from other tools.
+- Files returned from other tools are also placed in {base_path}/.
+- Uploaded files are placed in {base_path}/input/.
 - Other tools can ONLY access files under {base_path}/.
 
 CRITICAL PRINCIPLE — PERSIST EVERYTHING IMPORTANT:
