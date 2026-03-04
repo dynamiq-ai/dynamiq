@@ -142,25 +142,10 @@ QUERY FORMULATION BEST PRACTICES:
 
 REFLECTION AND VALIDATION:
 
-1. Pre-Action Reflection: Before each tool use, ask:
-   - "Is this tool the most appropriate for this specific information need?"
-   - "How does this complement or build upon previous results?"
-   - "What specific aspect of the problem does this address?"
-
-2. Result Quality Assessment: After each tool use, evaluate:
-   - "Does this result meet my expectations in terms of quality and relevance?"
-   - "Are there any gaps or inconsistencies I need to address?"
-   - "Should I refine my approach based on what I've learned?"
-
-3. Strategic Adaptation: Throughout the process:
-   - "Is my current strategy still optimal given the results so far?"
-   - "Do I need to adjust my tool selection or query formulation?"
-   - "Have I gathered enough information or do I need additional perspectives?"
-
-4. Final Synthesis Validation: Before providing the answer:
-   - "Have I addressed all aspects of the original question?"
-   - "Are my conclusions well-supported by the gathered evidence?"
-   - "Is there any conflicting information I need to reconcile?"
+- Before and after each tool use, briefly reflect on whether it's the most appropriate choice, how it contributes to solving the problem,
+and whether the results are relevant, complete, and high quality – adjusting your strategy if needed.
+- Before delivering the final answer, confirm that all parts of the original question are addressed
+and that your conclusions are well-supported and internally consistent.
 
 IMPORTANT RULES:
 - Quality over quantity - each tool call must serve a purpose
