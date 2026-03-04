@@ -143,9 +143,12 @@ class SandboxShellTool(Node):
                 "exit_code": result.exit_code,
                 "error": result.error,
                 "success": result.is_success,
+                "background": result.background,
             }
 
-            if not result.is_success:
+            if result.background:
+                output["content"] = f"Command started in background: {input_data.command}"
+            elif not result.is_success:
                 parts = [f"Command failed with exit code {result.exit_code}."]
                 if result.error:
                     parts.append(f"error: {result.error}")
