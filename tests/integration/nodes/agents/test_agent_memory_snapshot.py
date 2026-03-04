@@ -18,6 +18,9 @@ from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Message, MessageRole
 
+USER_ID = "test-user"
+SESSION_ID = "test-session"
+
 
 @pytest.fixture
 def openai_connection():
@@ -44,10 +47,6 @@ def agent(llm, memory, mock_llm_executor):
         inference_mode=InferenceMode.DEFAULT,
         memory=memory,
     )
-
-
-USER_ID = "test-user"
-SESSION_ID = "test-session"
 
 
 def test_memory_snapshot_saves_all_non_system_messages(agent, memory):

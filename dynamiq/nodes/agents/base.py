@@ -610,9 +610,16 @@ class Agent(Node):
             result = self._run_agent(input_message, history_messages, config=config, **kwargs)
         finally:
             self._current_call_context = None
-
-        if use_memory:
-            self._save_history_to_memory(custom_metadata)
+            if use_memory:
+                try:
+                    self._save_history_to_memory(custom_metadata)
+                except Exception as save_error:
+                    logger.error(
+                        "Agent %s - %s: failed to save history to memory: %s",
+                        self.name,
+                        self.id,
+                        save_error,
+                    )
 
         execution_result = {
             "content": result,

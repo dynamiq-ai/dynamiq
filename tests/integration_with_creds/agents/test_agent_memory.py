@@ -407,7 +407,7 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
     session_id = str(uuid.uuid4())
 
     # --- Turn 1: ask about a person (forces tool call) ---
-    logger.info("--- InMemory Snapshot: Turn 1 - Tool call ---")
+
     result_1 = wf.run(
         input_data={
             "input": f"Where does {USER_NAME} work?",
@@ -442,7 +442,6 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
     assert USER_COMPANY in turn_1_observations[0], "Observation should contain tool output with company name"
 
     turn_1_count = len(stored_after_t1)
-    logger.info(f"Turn 1 stored {turn_1_count} message(s)")
 
     agent = Agent(
         name="SecondInMemorySnapshotAgent",
@@ -456,7 +455,7 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
 
     wf1 = Workflow(flow=flows.Flow(nodes=[agent]))
     # --- Turn 2: ask agent to recall the tool result from turn 1 ---
-    logger.info("--- InMemory Snapshot: Turn 2 - Recall ---")
+
     result_2 = wf1.run(
         input_data={
             "input": (
@@ -498,6 +497,3 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
 
     contents = " ".join(m.content for m in stored_after_t2)
     assert USER_COMPANY in contents, "Memory snapshot should still contain the tool result from turn 1"
-
-    logger.info(f"Turn 2 stored {len(stored_after_t2)} message(s) — snapshot verified")
-    logger.info("--- InMemory Snapshot Test Passed ---")
