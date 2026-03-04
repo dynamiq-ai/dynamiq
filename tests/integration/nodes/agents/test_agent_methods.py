@@ -1,6 +1,6 @@
 import uuid
 from io import BytesIO
-from unittest.mock import PropertyMock
+from unittest.mock import PropertyMock, patch
 
 import pytest
 
@@ -938,3 +938,28 @@ class TestContextManagerEarlyReturn:
         assert len(context_agent._prompt.messages) == original_count
         for original, current in zip(messages, context_agent._prompt.messages):
             assert original.content == current.content
+
+    def test_early_return_streams_tool_result_event(self, context_agent):
+        """The early-return path must stream a tool-result event to pair with the reasoning event."""
+        context_agent._prompt = Prompt(
+            messages=[
+                Message(role=MessageRole.SYSTEM, content="You are a helpful assistant.", static=True),
+                Message(role=MessageRole.USER, content="Hello", static=True),
+                Message(role=MessageRole.ASSISTANT, content="Hi there!", static=True),
+            ]
+        )
+        context_agent._history_offset = 1
+
+        with patch.object(context_agent, "_stream_agent_event", wraps=context_agent._stream_agent_event) as spy:
+            context_agent._execute_single_tool(
+                action="context-manager",
+                action_input={},
+                thought="compact",
+                loop_num=1,
+                config=RunnableConfig(),
+            )
+
+            steps = [call.args[1] for call in spy.call_args_list]
+            assert steps == ["reasoning", "tool"], (
+                "Early return must stream both a reasoning event and a tool-result event"
+            )
