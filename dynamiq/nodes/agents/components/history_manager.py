@@ -11,7 +11,9 @@ class HistoryManagerMixin:
     - _prompt: Prompt object with messages
     - llm: LLM object with model and get_token_limit()
     - summarization_config: SummarizationConfig object
-    - _history_offset: int offset for history
+    - _history_offset: int offset past the system prompt (typically 1);
+      everything from this index onward (memory history, user input,
+      ReAct loop messages) is eligible for summarization.
     - name: str agent name
     - id: str agent id
     """

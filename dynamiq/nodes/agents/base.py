@@ -238,7 +238,7 @@ class Agent(Node):
     _excluded_tool_ids: set[str] = PrivateAttr(default_factory=set)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
     _history_offset: int = PrivateAttr(
-        default=2,  # Offset to the first message (default: 2 — system and initial user messages).
+        default=1,  # Offset past the system prompt; everything after is eligible for summarization.
     )
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
@@ -583,14 +583,6 @@ class Agent(Node):
                         "Use this context to inform your response.",
                     ),
                 )
-            if isinstance(input_message, Message):
-                memory_content = input_message.content
-            else:
-                text_parts = [
-                    content.text for content in input_message.content if isinstance(content, VisionMessageTextContent)
-                ]
-                memory_content = " ".join(text_parts) if text_parts else "Image input"
-            self.memory.add(role=MessageRole.USER, content=memory_content, metadata=custom_metadata)
         else:
             history_messages = None
 
@@ -618,8 +610,8 @@ class Agent(Node):
         finally:
             self._current_call_context = None
 
-        if use_memory:
-            self.memory.add(role=MessageRole.ASSISTANT, content=result, metadata=custom_metadata)
+            if use_memory:
+                self._save_history_to_memory(custom_metadata)
 
         execution_result = {
             "content": result,
@@ -719,6 +711,41 @@ class Agent(Node):
         )
         logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
         return history_messages
+
+    def _save_history_to_memory(
+        self,
+        metadata: dict,
+    ) -> None:
+        """Snapshot the current prompt state into memory, replacing previous content.
+
+        Clears existing memory and writes every non-system message from
+        ``self._prompt.messages``.  This ensures that if the context was
+        summarized/compacted during execution, memory reflects the compact
+        version rather than retaining stale verbose messages.
+
+        Args:
+            metadata: Metadata dict forwarded to each ``memory.add`` call.
+        """
+        self.memory.clear()
+
+        saved = 0
+        for msg in self._prompt.messages:
+            if msg.role == MessageRole.SYSTEM:
+                continue
+            if isinstance(msg, Message):
+                content = msg.content
+            else:
+                text_parts = [c.text for c in msg.content if isinstance(c, VisionMessageTextContent)]
+                content = " ".join(text_parts) if text_parts else "Image input"
+            self.memory.add(role=msg.role, content=content, metadata=metadata)
+            saved += 1
+
+        logger.info(
+            "Agent %s - %s: saved %d message(s) to memory (snapshot)",
+            self.name,
+            self.id,
+            saved,
+        )
 
     def _run_llm(
         self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs

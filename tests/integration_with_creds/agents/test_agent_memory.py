@@ -6,11 +6,13 @@ import pytest
 
 from dynamiq import Workflow, connections, flows
 from dynamiq.memory import Memory
-from dynamiq.memory.backends import DynamoDB, Pinecone, Qdrant
+from dynamiq.memory.backends import DynamoDB, InMemory, Pinecone, Qdrant
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.prompts import MessageRole
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from dynamiq.utils.logger import logger
@@ -357,3 +359,148 @@ def test_react_agent_with_dynamodb_memory(
         pytest.fail(f"Memory verification failed: {e}")
 
     logger.info("--- DynamoDB Memory Test Passed ---")
+
+
+@pytest.mark.integration
+@pytest.mark.flaky(reruns=3)
+def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
+    """Test that memory uses snapshot semantics: clear + rewrite after each run.
+
+    Uses a Python tool so the agent produces tool-call / observation messages.
+
+    Verifies:
+    1. After turn 1, memory contains all non-system prompt messages (including
+       tool interactions).
+    2. No system messages leak into memory.
+    3. After turn 2, memory is replaced (not appended) with the full
+       conversation snapshot and the agent can recall the tool result from
+       the previous turn.
+    """
+    lookup_tool = Python(
+        name="company-lookup",
+        description="Look up which company a person works at. Input: {'person': '<name>'}",
+        code=(
+            "def run(input_data):\n"
+            f"    if '{USER_NAME}'.lower() in input_data.get('person', '').lower():\n"
+            f"        return '{USER_NAME} works at {USER_COMPANY}.'\n"
+            "    return 'Person not found.'\n"
+        ),
+    )
+
+    memory = Memory(backend=InMemory())
+
+    agent = Agent(
+        name="InMemorySnapshotAgent",
+        llm=openai_llm,
+        tools=[lookup_tool],
+        role=(
+            "You are a helpful assistant. When asked about a person, "
+            "use the company-lookup tool to find where they work. In final answer just provide: 'Found'"
+        ),
+        inference_mode=InferenceMode.XML,
+        memory=memory,
+        max_loops=3,
+    )
+
+    wf = Workflow(flow=flows.Flow(nodes=[agent]))
+    user_id = str(uuid.uuid4())
+    session_id = str(uuid.uuid4())
+
+    # --- Turn 1: ask about a person (forces tool call) ---
+    logger.info("--- InMemory Snapshot: Turn 1 - Tool call ---")
+    result_1 = wf.run(
+        input_data={
+            "input": f"Where does {USER_NAME} work?",
+            "user_id": user_id,
+            "session_id": session_id,
+        },
+        config=run_config,
+    )
+    assert result_1.status == RunnableStatus.SUCCESS, f"Turn 1 failed: {result_1.error}"
+
+    response_1 = result_1.output[agent.id]["output"]["content"]
+    assert "Found" in response_1, f"Agent should mention 'Found': {response_1}"
+
+    stored_after_t1 = memory.backend.messages
+    assert len(stored_after_t1) == 4, (
+        "Turn 1 must persist exactly 4 non-system messages: "
+        "input, assistant tool-call message, observation, final answer"
+    )
+
+    for msg in stored_after_t1:
+        assert msg.role != MessageRole.SYSTEM, f"System message leaked: {msg.content[:80]}"
+        assert msg.metadata.get("user_id") == user_id
+        assert msg.metadata.get("session_id") == session_id
+
+    prompt_non_system_t1 = [m for m in agent._prompt.messages if m.role != MessageRole.SYSTEM]
+    assert len(stored_after_t1) == len(
+        prompt_non_system_t1
+    ), f"Turn 1: memory ({len(stored_after_t1)}) != prompt ({len(prompt_non_system_t1)})"
+
+    turn_1_contents = [m.content for m in stored_after_t1]
+    turn_1_observations = [c for c in turn_1_contents if "Observation:" in c]
+    assert len(turn_1_observations) == 1, "Turn 1 must contain exactly one observation message"
+    assert USER_COMPANY in turn_1_observations[0], "Observation should contain tool output with company name"
+
+    turn_1_user_count = sum(1 for m in stored_after_t1 if m.role == MessageRole.USER)
+    turn_1_assistant_count = sum(1 for m in stored_after_t1 if m.role == MessageRole.ASSISTANT)
+    assert turn_1_user_count == 2, "Turn 1 must have 2 USER messages (input + observation)"
+    assert turn_1_assistant_count == 2, "Turn 1 must have 2 ASSISTANT messages (tool call + final answer)"
+
+    turn_1_count = len(stored_after_t1)
+    logger.info(f"Turn 1 stored {turn_1_count} message(s)")
+
+    agent = Agent(
+        name="SecondInMemorySnapshotAgent",
+        llm=openai_llm,
+        tools=[],
+        role=("You are a helpful assistant."),
+        inference_mode=InferenceMode.XML,
+        memory=memory,
+        max_loops=3,
+    )
+
+    wf1 = Workflow(flow=flows.Flow(nodes=[agent]))
+    # --- Turn 2: ask agent to recall the tool result from turn 1 ---
+    logger.info("--- InMemory Snapshot: Turn 2 - Recall ---")
+    result_2 = wf1.run(
+        input_data={
+            "input": (
+                f"Based on our previous conversation, remind me: where does {USER_NAME} work? "
+                "Do NOT use any tool, just answer from what you already know."
+            ),
+            "user_id": user_id,
+            "session_id": session_id,
+        },
+        config=run_config,
+    )
+    assert result_2.status == RunnableStatus.SUCCESS, f"Turn 2 failed: {result_2.error}"
+
+    recall_response = result_2.output[agent.id]["output"]["content"]
+    assert USER_COMPANY in recall_response, f"Agent should recall '{USER_COMPANY}' from memory: {recall_response}"
+
+    stored_after_t2 = memory.backend.messages
+    prompt_non_system_t2 = [m for m in agent._prompt.messages if m.role != MessageRole.SYSTEM]
+    assert len(stored_after_t2) == len(
+        prompt_non_system_t2
+    ), f"Turn 2: memory ({len(stored_after_t2)}) != prompt ({len(prompt_non_system_t2)})"
+
+    assert len(stored_after_t2) == turn_1_count + 2, (
+        "After turn 2, memory must add exactly 2 messages: " "new user input and assistant final answer (no tool call)"
+    )
+
+    turn_2_new_messages = stored_after_t2[turn_1_count:]
+    assert len(turn_2_new_messages) == 2
+    assert turn_2_new_messages[0].role == MessageRole.USER, "Turn 2 first new message must be USER input"
+    assert turn_2_new_messages[1].role == MessageRole.ASSISTANT, "Turn 2 second new message must be ASSISTANT output"
+    assert "Observation:" not in turn_2_new_messages[0].content
+    assert "Observation:" not in turn_2_new_messages[1].content
+
+    for msg in stored_after_t2:
+        assert msg.role != MessageRole.SYSTEM
+
+    contents = " ".join(m.content for m in stored_after_t2)
+    assert USER_COMPANY in contents, "Memory snapshot should still contain the tool result from turn 1"
+
+    logger.info(f"Turn 2 stored {len(stored_after_t2)} message(s) — snapshot verified")
+    logger.info("--- InMemory Snapshot Test Passed ---")
