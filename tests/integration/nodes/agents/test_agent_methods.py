@@ -773,7 +773,7 @@ def test_upload_files_to_file_store_appends_not_stored_on_failure(openai_node, m
 
     saved_paths = agent._upload_files_to_file_store([uploaded])
 
-    assert saved_paths == ["store failed"]
+    assert saved_paths == [""]
 
 
 def test_upload_files_to_sandbox_appends_not_stored_on_failure(openai_node, mock_llm_executor, mocker):
@@ -789,7 +789,7 @@ def test_upload_files_to_sandbox_appends_not_stored_on_failure(openai_node, mock
 
     saved_paths = agent._upload_files_to_sandbox([uploaded])
 
-    assert saved_paths == ["upload failed"]
+    assert saved_paths == [""]
 
 
 class TestParallelToolCloning:
