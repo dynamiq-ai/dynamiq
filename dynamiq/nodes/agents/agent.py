@@ -655,7 +655,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 to_summarize, _ = self._split_history()
                 if not to_summarize:
                     logger.info(f"Agent {self.name} - {self.id}: Nothing to summarize, skipping context compaction.")
-                    return None, None, False, False, None
+                    return (
+                        "Nothing was summarized because the conversation history is small enough to fit in context.",
+                        [],
+                        False,
+                        False,
+                        None,
+                    )
                 tool_input = {**(action_input if isinstance(action_input, dict) else {}), "messages": to_summarize}
             else:
                 tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
