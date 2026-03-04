@@ -654,9 +654,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 tool_result = None
                 to_summarize, _ = self._split_history()
                 if not to_summarize:
-                    logger.info(
-                        f"Agent {self.name} - {self.id}: Nothing to summarize, skipping context compaction."
-                    )
+                    logger.info(f"Agent {self.name} - {self.id}: Nothing to summarize, skipping context compaction.")
                     return None, None, False, False, None
                 tool_input = {**(action_input if isinstance(action_input, dict) else {}), "messages": to_summarize}
             else:
@@ -965,7 +963,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         for loop_num in range(1, self.max_loops + 1):
             if loop_num > 1:
                 self._refresh_agent_state(loop_num)
-
 
             try:
                 streaming_callback, llm_config, original_streaming_enabled = self._setup_streaming_callback(
