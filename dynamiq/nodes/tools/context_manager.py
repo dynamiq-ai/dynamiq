@@ -68,7 +68,7 @@ class ContextManagerTool(Node):
         "save any necessary information because previous messages will be removed.\n"
     )
 
-    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=60))
+    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=3600))
     token_budget_ratio: float = Field(default=0.75, gt=0, lt=1)
     llm: Node = Field(..., description="LLM instance for generating summaries")
 
