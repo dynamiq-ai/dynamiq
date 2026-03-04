@@ -23,18 +23,8 @@ Key capabilities:
 Usage strategy:
 - Keep `only_main_content=True` for articles/blogs; disable when layout/menus matter
 - Pass `formats` as strings or typed dicts (e.g. `{'type': 'json', 'schema': {...}}`) to shape the response
-- Set `max_age`, `store_in_cache`, or `zero_data_retention` based on freshness vs. compliance needs
+- Set `max_age` or `zero_data_retention` based on freshness vs. compliance needs
 - Combine `actions` with `wait_for` to ensure dynamic content loads before scraping/screenshotting
-
-Parameter guide (input schema):
-- `url` (required): target page.
-- `formats`: output mix, strings or objects from Formats schema.
-- `only_main_content` / `include_tags` / `exclude_tags`: trim boilerplate or force specific HTML tags.
-- `max_age`, `headers`, `wait_for`, `mobile`, `skip_tls_verification`, `timeout`: control fetch/crawl behavior.
-- `parsers`: `['pdf']` by default; send [] to skip PDF parsing or objects like `{'type': 'pdf','maxPages':5}`.
-- `actions`: ordered automation objects (wait/click/write/press/scroll/screenshot/pdf/executeJavascript/scrape).
-- `location`: emulate country + languages for proxies and Accept-Language headers.
-- `remove_base64_images`, `block_ads`, `proxy`, `store_in_cache`, `zero_data_retention`: caching/compliance knobs.
 
 Example:
 {"url": "https://example.com", "formats": ["markdown", "links"], "only_main_content": true, "proxy": "auto"}"""
@@ -99,6 +89,7 @@ class FirecrawlInputSchema(BaseModel):
         default=None,
         alias="maxAge",
         description="Cache freshness window in ms (default is 172800000 = two days).",
+        json_schema_extra={"is_accessible_to_agent": False}
     )
     headers: dict[str, Any] | None = Field(
         default=None,
@@ -141,11 +132,13 @@ class FirecrawlInputSchema(BaseModel):
         default=None,
         alias="removeBase64Images",
         description="True strips giant base64 <img> blobs and replaces them with placeholders (default True).",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     block_ads: bool | None = Field(
         default=None,
         alias="blockAds",
         description="Enable ad + cookie popup blocking (default True).",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     proxy: Literal["basic", "stealth", "auto"] | None = Field(
         default=None,
@@ -153,17 +146,20 @@ class FirecrawlInputSchema(BaseModel):
             "Proxy tier: 'basic' (fast, low protection), 'stealth' (solves harder anti-bot, higher cost), or "
             "'auto' (retry with stealth on failure by default)."
         ),
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     store_in_cache: bool | None = Field(
         default=None,
         alias="storeInCache",
         description="True lets the tool index/cache the page "
         "(default True, forced False when using sensitive params).",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     zero_data_retention: bool | None = Field(
         default=None,
         alias="zeroDataRetention",
         description="Opt-in compliance flag; True enables zero data retention mode (requires approval).",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     brief: str = Field(
         default="Scraping the web for information.",
