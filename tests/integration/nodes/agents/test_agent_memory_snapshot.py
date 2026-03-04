@@ -1,9 +1,9 @@
 """
 Integration tests for agent memory snapshot behavior.
 
-Verifies that _save_history_to_memory clears memory and writes the current
-prompt state (all non-system messages) after each agent run, rather than
-appending only new messages.
+Verifies that _save_history_to_memory replaces only the current user/session
+slice and writes the current prompt state (all non-system messages) after
+each agent run.
 """
 
 import uuid
@@ -118,3 +118,35 @@ def test_memory_metadata_contains_user_and_session(agent, memory):
     for msg in memory.backend.messages:
         assert msg.metadata.get("user_id") == USER_ID, f"Missing user_id in metadata: {msg.metadata}"
         assert msg.metadata.get("session_id") == SESSION_ID, f"Missing session_id in metadata: {msg.metadata}"
+
+
+def test_memory_snapshot_replaces_only_current_user_scope(llm, memory, mock_llm_executor):
+    """Replacing one user's snapshot must preserve other users' messages."""
+    agent = Agent(
+        name="ScopedMemorySnapshotAgent",
+        llm=llm,
+        tools=[],
+        inference_mode=InferenceMode.DEFAULT,
+        memory=memory,
+    )
+
+    user_a = {"user_id": "user-a", "session_id": "session-a"}
+    user_b = {"user_id": "user-b", "session_id": "session-b"}
+
+    # Seed memory for user A and user B.
+    agent.run(input_data={"input": "A1", **user_a})
+    agent.run(input_data={"input": "B1", **user_b})
+
+    before = memory.get_agent_conversation(filters=user_b)
+    assert len(before) > 0, "Expected user B history to exist before user A update"
+    before_contents = [m.content for m in before]
+
+    # Update only user A snapshot.
+    agent.run(input_data={"input": "A2", **user_a})
+
+    after_b = memory.get_agent_conversation(filters=user_b)
+    after_b_contents = [m.content for m in after_b]
+    assert after_b_contents == before_contents, "User B history should remain unchanged"
+
+    after_a = memory.get_agent_conversation(filters=user_a)
+    assert any("A2" in m.content for m in after_a), "User A snapshot should contain the latest input"

@@ -541,7 +541,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
         else:
             self._prompt.messages = [system_message, input_message]
 
-        self._history_offset = 1  # Only the system prompt is protected from summarization
+        self._history_offset = 1
+        self._pinned_input = input_message
 
         # Configure stop sequences based on inference mode
         stop_sequences = []

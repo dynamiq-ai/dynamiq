@@ -240,6 +240,7 @@ class Agent(Node):
     _history_offset: int = PrivateAttr(
         default=1,  # Offset past the system prompt; everything after is eligible for summarization.
     )
+    _pinned_input: Message | VisionMessage | None = PrivateAttr(default=None)
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
 
@@ -610,8 +611,8 @@ class Agent(Node):
         finally:
             self._current_call_context = None
 
-            if use_memory:
-                self._save_history_to_memory(custom_metadata)
+        if use_memory:
+            self._save_history_to_memory(custom_metadata)
 
         execution_result = {
             "content": result,
@@ -716,19 +717,30 @@ class Agent(Node):
         self,
         metadata: dict,
     ) -> None:
-        """Snapshot the current prompt state into memory, replacing previous content.
+        """Snapshot prompt state into memory for current user/session scope.
 
-        Clears existing memory and writes every non-system message from
-        ``self._prompt.messages``.  This ensures that if the context was
-        summarized/compacted during execution, memory reflects the compact
-        version rather than retaining stale verbose messages.
+        Replaces only the messages matching current ``user_id``/``session_id``
+        filters, then writes every non-system message from ``self._prompt.messages``.
+        This avoids wiping unrelated users/sessions when a backend is shared.
 
         Args:
             metadata: Metadata dict forwarded to each ``memory.add`` call.
         """
-        self.memory.clear()
+        scope_filters = {}
+        if metadata.get("user_id"):
+            scope_filters["user_id"] = metadata["user_id"]
+        if metadata.get("session_id"):
+            scope_filters["session_id"] = metadata["session_id"]
+        if not scope_filters:
+            logger.warning(
+                "Agent %s - %s: skipping memory snapshot save because no user/session scope was provided",
+                self.name,
+                self.id,
+            )
+            return
 
         saved = 0
+        snapshot_messages: list[Message] = []
         for msg in self._prompt.messages:
             if msg.role == MessageRole.SYSTEM:
                 continue
@@ -737,8 +749,10 @@ class Agent(Node):
             else:
                 text_parts = [c.text for c in msg.content if isinstance(c, VisionMessageTextContent)]
                 content = " ".join(text_parts) if text_parts else "Image input"
-            self.memory.add(role=msg.role, content=content, metadata=metadata)
+            snapshot_messages.append(Message(role=msg.role, content=content, metadata=metadata.copy()))
             saved += 1
+
+        self.memory.replace_messages(filters=scope_filters, messages=snapshot_messages)
 
         logger.info(
             "Agent %s - %s: saved %d message(s) to memory (snapshot)",

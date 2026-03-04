@@ -188,10 +188,20 @@ class InMemory(MemoryBackend):
         return len(self.messages) == 0
 
     def clear(self) -> None:
-        """
-        Clears the in-memory list.
-
-        Raises:
-            MemoryBackendError: If the memory cannot be cleared
-        """
+        """Clears the in-memory list."""
         self.messages = []
+
+    def delete(self, session_id: str | None = None, user_id: str | None = None) -> None:
+        """Delete messages scoped by session and/or user."""
+        if session_id is None and user_id is None:
+            return
+
+        def _matches(msg: Message) -> bool:
+            meta = msg.metadata or {}
+            if session_id and meta.get("session_id") != session_id:
+                return False
+            if user_id and meta.get("user_id") != user_id:
+                return False
+            return True
+
+        self.messages = [msg for msg in self.messages if not _matches(msg)]

@@ -254,6 +254,72 @@ class Memory(BaseModel):
             logger.error(f"Unexpected error clearing memory: {e}")
             raise MemoryError(f"Unexpected error clearing memory: {e}") from e
 
+    def delete(self, session_id: str | None = None, user_id: str | None = None) -> None:
+        """Delete messages scoped by session and/or user.
+
+        Args:
+            session_id: Delete items belonging to this session.
+            user_id: Delete items belonging to this user.
+
+        Raises:
+            MemoryError: If the backend does not support scoped deletion
+                or the operation fails.
+        """
+        try:
+            self.backend.delete(session_id=session_id, user_id=user_id)
+            logger.debug(
+                "Memory %s: deleted messages (session_id=%s, user_id=%s)",
+                self.backend.name,
+                session_id,
+                user_id,
+            )
+        except NotImplementedError:
+            logger.warning(
+                "Memory %s: backend does not support scoped delete, skipping.",
+                self.backend.name,
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error deleting messages: {e}")
+            raise MemoryError(f"Unexpected error deleting messages: {e}") from e
+
+    def replace_messages(self, filters: dict[str, Any], messages: list[Message]) -> None:
+        """Replace only messages matching filters, preserving all others.
+
+        Deletes the scoped slice via ``delete()`` and then writes the new
+        snapshot messages.
+
+        Args:
+            filters: Metadata filters defining which conversation slice to replace
+                (for example ``{"user_id": "...", "session_id": "..."}``).
+            messages: New snapshot messages for the filtered slice.
+        """
+        if not filters:
+            raise MemoryError("replace_messages requires non-empty filters to avoid global data wipe")
+
+        try:
+            self.backend.delete(
+                session_id=filters.get("session_id"),
+                user_id=filters.get("user_id"),
+            )
+
+            for msg in messages:
+                self.add(role=msg.role, content=msg.content, metadata=msg.metadata)
+
+            logger.debug(
+                "Memory %s: replaced scoped messages (filters=%s, new=%d)",
+                self.backend.name,
+                filters,
+                len(messages),
+            )
+        except NotImplementedError:
+            logger.warning(
+                "Memory %s: backend does not support scoped delete, skipping memory save.",
+                self.backend.name,
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error replacing scoped messages: {e}")
+            raise MemoryError(f"Unexpected error replacing scoped messages: {e}") from e
+
     def get_agent_conversation(
         self,
         query: str | None = None,

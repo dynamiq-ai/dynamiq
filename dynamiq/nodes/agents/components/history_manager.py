@@ -12,8 +12,10 @@ class HistoryManagerMixin:
     - llm: LLM object with model and get_token_limit()
     - summarization_config: SummarizationConfig object
     - _history_offset: int offset past the system prompt (typically 1);
-      everything from this index onward (memory history, user input,
-      ReAct loop messages) is eligible for summarization.
+      everything from this index onward is eligible for summarization.
+    - _pinned_input: Message | VisionMessage | None — the original user
+      input message.  When set, its content is appended verbatim to the
+      summary so the original request is never lost through summarization.
     - name: str agent name
     - id: str agent id
     """
@@ -61,20 +63,25 @@ class HistoryManagerMixin:
 
         Replaces the conversation history with::
 
-            [prefix] [summary] [preserved msg 1] [preserved msg 2]
+            [system prefix] [summary + original request] [preserved msgs …]
 
-        The last ``preserve_last_messages`` messages are kept verbatim.
-        If *summary* is provided it is inserted as a user message between the
-        prefix and the preserved messages.
+        If ``_pinned_input`` was among the summarized messages, the original
+        user request is appended verbatim to the summary so it is never lost.
+        If it is still in the preserved tail, nothing is appended.
 
         Args:
             summary: Optional summary text to insert after prefix.
         """
-        _, preserved = self._split_history()
+        to_summarize, preserved = self._split_history()
 
         self._prompt.messages = self._prompt.messages[: self._history_offset]
 
         if summary:
+            pinned = self._pinned_input
+            if pinned is not None and any(m is pinned for m in to_summarize):
+                content = pinned.content if isinstance(pinned, Message) else str(pinned.content)
+                summary = f"{summary}\n\nOriginal request: {content}"
+
             self._prompt.messages.append(
                 Message(role=MessageRole.USER, content=f"\nObservation: {summary}\n", static=True)
             )

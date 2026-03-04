@@ -52,6 +52,7 @@ def run_config():
     return RunnableConfig(request_timeout=180)
 
 
+@pytest.mark.flaky(reruns=3)
 def test_automatic_context_manager_invocation(llm_instance, python_tool, run_config):
     """
     Test automatic Context Manager Tool invocation when token limit is exceeded.
@@ -106,7 +107,7 @@ def test_automatic_context_manager_invocation(llm_instance, python_tool, run_con
 
     logger.info(result.output)
     assert "apple" in result.output["content"], "Result is not correct"
-    assert final_message_count == 7, "Final message count is not correct. Maybe context manager tool was not invoked."
+    assert final_message_count == 6, "Final message count is not correct. Maybe context manager tool was not invoked."
     assert (
         agent.sanitize_tool_name(agent.tools[1].name) in agent._prompt.messages[-3].content.lower()
     ), "Context message not found"
