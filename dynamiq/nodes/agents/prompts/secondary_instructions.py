@@ -27,18 +27,49 @@ TODO_TOOLS_INSTRUCTIONS = """TODO MANAGEMENT:
 
 
 SANDBOX_INSTRUCTIONS_TEMPLATE = """SANDBOX EXECUTION ENVIRONMENT:
-- Use {base_path}/ for all files: scripts, data, and generated output.
-  Uploaded files are also placed here. Other tools can only access files under {base_path}/.
-- Files returned from other tools are placed in {base_path}/ and can be accessed by other tools.
+You operate inside a persistent sandbox filesystem.
+The sandbox directory is your working memory.
 
-Rules:
+- Use {base_path}/ for ALL files: scripts, research, logs, intermediate artifacts, data, and final output.
+- Uploaded files are placed in {base_path}/ as well as files returned from other tools.
+- Other tools can ONLY access files under {base_path}/.
+
+CRITICAL PRINCIPLE — PERSIST EVERYTHING IMPORTANT:
+The sandbox filesystem is your long-term memory. Do not rely on conversation context alone.
+
+Whenever you:
+- call research tools
+- scrape websites
+- process large data
+- perform multi-step analysis
+
+You need to write meaningful outputs to files in {base_path}/.
+For textual artifacts, use structured Markdown (.md) files with headings.
+
+Example:
+- research_notes.md
+- tool_output_raw.md
+- parsed_results.md
+- intermediate_analysis_step_1.md
+
+EXECUTION RULES:
 1. Use 'python3' instead of 'python'.
-2. For Python tasks: write a .py script file first, then run it. \
-NEVER use one-liners with semicolons — compound statements \
-(with, for, if/else) cause SyntaxError after semicolons.
-3. Always add output to confirm success of script execution — \
-use print() in Python scripts or echo in shell commands \
-(e.g. print('Done'), echo 'File created successfully').
+2. For Python tasks:
+   - Always write a .py script file first; then execute it.
+   - Never use one-liners with semicolons (compound statements (with, for, if/else) break after semicolons).
+3. Observability is mandatory:
+   - Every script must print progress and completion messages.
+   - Every shell command must be followed by echo confirming success.
+   - Silent execution is unacceptable.
+4. Never suppress or hide errors.
+   - Never use `2>&1`, `|&`, or redirect stderr into stdout; do not silence errors.
+   - If a command fails:
+        a) Inspect the error
+        b) Identify the root cause
+        c) Fix it properly
+        d) Re-run cleanly
+5. Do not construct files using echo with escaped newlines.
+   Use proper file-writing mechanisms.
 """
 
 
@@ -69,45 +100,9 @@ Decision Framework:
    - Multiple aspects of complex topic
    - Creating reports or extensive documentation
 
-MANDATORY MULTI-TOOL PATTERNS:
-
-1. Research Tasks (Adaptive Scaling):
-   - START: Analyze query complexity
-   - IF simple fact: 1-2 tool calls
-   - IF moderate complexity: 3-4 tool calls with complementary queries
-   - IF comprehensive research: 5+ tool calls covering:
-     * Broad overview query
-     * Specific benefits/advantages/features
-     * Limitations/challenges/drawbacks
-     * Comparisons/alternatives
-     * Recent developments/updates
-
-   Example progression:
-   - Query 1: General topic overview
-   - Query 2: Specific aspect (benefits, use cases)
-   - Query 3: Challenges or limitations
-   - Query 4+: Deep dives on critical aspects
-
-2. Coding and Technical Tasks:
-   - Documentation lookup: 1-2 tools (official docs + examples)
-   - Debugging: 2-3 tools (error search + solution patterns)
-   - Architecture decisions: 3-5 tools (best practices + comparisons + examples)
-   - Full implementation: 5+ tools (docs + patterns + edge cases + optimization)
-
-3. Data Collection/Analysis:
-   - Single source: 1 tool
-   - Multiple sources: Use parallel calls for efficiency
-   - Comparative analysis: Minimum 3 sources
-   - Market research: 5+ diverse sources
-
-4. Verification and Fact-Checking:
-   - Simple facts: 1-2 authoritative sources
-   - Controversial topics: 3+ diverse sources
-   - Critical information: Cross-reference with 3+ sources
-
 EFFICIENCY GUIDELINES:
 
-1. Parallel vs Sequential:
+1. Parallel vs Sequential Tool Calls:
    - Use PARALLEL calls when queries are independent
    - Use SEQUENTIAL only when later queries depend on earlier results
 
@@ -122,28 +117,6 @@ EFFICIENCY GUIDELINES:
    - Add detail queries based on initial results
    - Stop when sufficient information gathered
    - Don't over-research simple questions
-
-TASK-SPECIFIC STRATEGIES:
-
-1. Current Events/News:
-   - Recent headlines: 2-3 news sources
-   - In-depth coverage: 5+ sources including analysis
-   - Fact verification: Cross-reference 3+ sources
-
-2. Technical Documentation:
-   - Quick reference: 1-2 official sources
-   - Implementation guide: 3-4 sources (docs + examples + gotchas)
-   - Comprehensive tutorial: 5+ sources covering all aspects
-
-3. Product/Service Research:
-   - Basic info: 1-2 sources
-   - Comparison shopping: 3-5 sources
-   - Detailed analysis: 5+ including reviews, specs, alternatives
-
-4. Scientific/Academic Topics:
-   - Basic concepts: 1-2 authoritative sources
-   - Current research: 3-5 recent papers/articles
-   - Comprehensive review: 5+ sources spanning fundamentals to cutting-edge
 
 MULTIPLE ENTITIES PATTERN:
 When researching multiple distinct entities (companies, products, people, locations):
@@ -160,7 +133,7 @@ QUERY FORMULATION BEST PRACTICES:
    - "benefits of X" → "advantages of X" → "X success stories"
 3. Temporal Layering: Mix timeframes
    - "latest developments in X"
-   - "X trends 2024-2025"
+   - "X trends 2025-2026"
    - "future of X"
 4. Source Diversification: Target different source types
    - Official documentation
