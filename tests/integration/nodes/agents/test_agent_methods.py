@@ -758,6 +758,41 @@ def test_upload_files_to_sandbox_renames_batch_and_existing_duplicates(openai_no
     assert sandbox_backend.upload_file.call_args_list[1].args[0] == "report_2.pdf"
 
 
+def test_upload_files_to_file_store_appends_not_stored_on_failure(openai_node, mock_llm_executor, mocker):
+    backend = InMemoryFileStore()
+    mocker.patch.object(InMemoryFileStore, "store", side_effect=RuntimeError("store failed"))
+    agent = Agent(
+        name="File Store Failure Agent",
+        llm=openai_node,
+        tools=[],
+        file_store=FileStoreConfig(enabled=True, backend=backend),
+        inference_mode=InferenceMode.DEFAULT,
+    )
+
+    uploaded = BytesIO(b"new content")
+    uploaded.name = "report.pdf"
+
+    saved_paths = agent._upload_files_to_file_store([uploaded])
+
+    assert saved_paths == ["file report.pdf was not stored."]
+
+
+def test_upload_files_to_sandbox_appends_not_stored_on_failure(openai_node, mock_llm_executor, mocker):
+    agent = Agent(name="Sandbox Failure Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    sandbox_backend = mocker.Mock()
+    sandbox_backend.base_path = "/home/user"
+    sandbox_backend.list_files.return_value = []
+    sandbox_backend.upload_file.side_effect = RuntimeError("upload failed")
+    mocker.patch.object(Agent, "sandbox_backend", new_callable=PropertyMock, return_value=sandbox_backend)
+
+    uploaded = BytesIO(b"new content")
+    uploaded.name = "report.pdf"
+
+    saved_paths = agent._upload_files_to_sandbox([uploaded])
+
+    assert saved_paths == ["file report.pdf was not stored."]
+
+
 class TestParallelToolCloning:
     """Test parallel tool cloning."""
 

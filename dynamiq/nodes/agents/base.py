@@ -1280,6 +1280,7 @@ class Agent(Node):
                     file_paths.append(destination_path)
                 except Exception as e:
                     logger.warning(f"Failed to upload file {file_name} to sandbox: {e}")
+                    file_paths.append(f"file {file_name} was not stored.")
         return file_paths
 
     def _upload_files_to_file_store(self, normalized_files: list) -> list[str]:
@@ -1315,6 +1316,7 @@ class Agent(Node):
                 file_paths.append(unique_file_name)
             except Exception as e:
                 logger.warning(f"Failed to store file {file_name} in file store: {e}")
+                file_paths.append(f"file {file_name} was not stored.")
         return file_paths
 
     def _setup_in_memory_file_store_and_tools(self) -> None:
