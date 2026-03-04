@@ -25,9 +25,11 @@ class SandboxTool(str, Enum):
 class ShellCommandResult(BaseModel):
     """Result of a shell command execution."""
 
-    stdout: str
-    stderr: str
-    exit_code: int | None
+    stdout: str | None = None
+    stderr: str | None = None
+    exit_code: int | None = None
+    background: bool = False
+    error: str | None = None
 
 
 class SandboxInfo(BaseModel):
