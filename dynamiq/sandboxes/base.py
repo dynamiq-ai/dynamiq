@@ -31,6 +31,11 @@ class ShellCommandResult(BaseModel):
     background: bool = False
     error: str | None = None
 
+    @property
+    def is_success(self) -> bool:
+        """Determine if the command execution was successful."""
+        return (self.exit_code == 0 or (self.exit_code is None and not self.stderr)) and self.error is None
+
 
 class SandboxInfo(BaseModel):
     """Schema for sandbox metadata returned by get_sandbox_info()."""
