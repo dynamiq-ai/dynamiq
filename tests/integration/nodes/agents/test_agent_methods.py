@@ -1,5 +1,6 @@
 import uuid
 from io import BytesIO
+from unittest.mock import PropertyMock
 
 import pytest
 
@@ -685,6 +686,76 @@ def test_inject_attached_files_skips_vision_message(openai_node, mock_llm_execut
 
     assert result is input_message
     assert result.content == [prompts.VisionMessageTextContent(text="Please analyze the uploads.")]
+
+
+def test_upload_files_to_file_store_renames_same_batch_duplicates(openai_node, mock_llm_executor):
+    backend = InMemoryFileStore()
+    agent = Agent(
+        name="File Upload Agent",
+        llm=openai_node,
+        tools=[],
+        file_store=FileStoreConfig(enabled=True, backend=backend),
+        inference_mode=InferenceMode.DEFAULT,
+    )
+
+    first = BytesIO(b"first content")
+    first.name = "report.pdf"
+    second = BytesIO(b"second content")
+    second.name = "report.pdf"
+
+    saved_paths = agent._upload_files_to_file_store([first, second])
+
+    assert saved_paths == ["report.pdf", "report_1.pdf"]
+    assert backend.retrieve("report.pdf") == b"first content"
+    assert backend.retrieve("report_1.pdf") == b"second content"
+
+
+def test_upload_files_to_file_store_renames_when_name_exists(openai_node, mock_llm_executor):
+    backend = InMemoryFileStore()
+    backend.store(
+        file_path="report.pdf",
+        content=b"existing content",
+        content_type="application/octet-stream",
+        metadata={"source": "seed"},
+        overwrite=True,
+    )
+    agent = Agent(
+        name="Existing Name Upload Agent",
+        llm=openai_node,
+        tools=[],
+        file_store=FileStoreConfig(enabled=True, backend=backend),
+        inference_mode=InferenceMode.DEFAULT,
+    )
+
+    uploaded = BytesIO(b"new content")
+    uploaded.name = "report.pdf"
+
+    saved_paths = agent._upload_files_to_file_store([uploaded])
+
+    assert saved_paths == ["report_1.pdf"]
+    assert backend.retrieve("report.pdf") == b"existing content"
+    assert backend.retrieve("report_1.pdf") == b"new content"
+
+
+def test_upload_files_to_sandbox_renames_batch_and_existing_duplicates(openai_node, mock_llm_executor, mocker):
+    agent = Agent(name="Sandbox Upload Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    sandbox_backend = mocker.Mock()
+    sandbox_backend.base_path = "/home/user"
+    sandbox_backend.list_files.return_value = ["/home/user/report.pdf"]
+    sandbox_backend.upload_file.side_effect = lambda file_name, content: f"/home/user/{file_name}"
+    mocker.patch.object(Agent, "sandbox_backend", new_callable=PropertyMock, return_value=sandbox_backend)
+
+    first = BytesIO(b"first content")
+    first.name = "report.pdf"
+    second = BytesIO(b"second content")
+    second.name = "report.pdf"
+
+    saved_paths = agent._upload_files_to_sandbox([first, second])
+
+    assert saved_paths == ["/home/user/report_1.pdf", "/home/user/report_2.pdf"]
+    assert sandbox_backend.upload_file.call_count == 2
+    assert sandbox_backend.upload_file.call_args_list[0].args[0] == "report_1.pdf"
+    assert sandbox_backend.upload_file.call_args_list[1].args[0] == "report_2.pdf"
 
 
 class TestParallelToolCloning:
