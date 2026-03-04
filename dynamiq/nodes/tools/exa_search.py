@@ -300,7 +300,7 @@ class ExaInputSchema(BaseModel):
         ),
     )
     moderation: bool | None = Field(
-        default=True,
+        default=None,
         description="Enable content moderation filter for unsafe content.",
         json_schema_extra={"is_accessible_to_agent": False},
     )
