@@ -1363,10 +1363,10 @@ class Agent(Node):
             description = getattr(f, "description", "") or ""
             description = description.strip()
             saved_path = normalized_paths[index] if index < len(normalized_paths) else ""
-            if saved_path == "":
+            if not saved_path:
                 saved_path = "File is not stored."
 
-            saved_suffix = f" (saved as: {saved_path})" if saved_path else ""
+            saved_suffix = f" (saved as: {saved_path})"
             if description:
                 file_lines.append(f"- {name}{saved_suffix}: {description}")
             else:
