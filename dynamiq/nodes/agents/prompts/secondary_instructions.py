@@ -73,7 +73,7 @@ EXECUTION RULES:
 """
 
 
-REACT_BLOCK_MULTI_TOOL_PLANNING = f"""
+REACT_BLOCK_MULTI_TOOL_PLANNING = """
 MULTI-TOOL PLANNING AND STRATEGY:
 
 Core Principle: Scale tool usage to match task complexity
