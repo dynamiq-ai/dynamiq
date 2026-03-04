@@ -100,23 +100,50 @@ Decision Framework:
    - Multiple aspects of complex topic
    - Creating reports or extensive documentation
 
+MANDATORY MULTI-TOOL PATTERNS:
+
+1. Research & Data Tasks:
+
+   - Start: Analyze query complexity.
+   - Simple facts / single source: 1–2 tool calls.
+   - Moderate complexity / multiple sources: 3–4 tool calls with complementary queries.
+   - Comprehensive research / broad topics: 5+ tool calls covering:
+     - General overview
+     - Specific benefits, use cases, or features
+     - Limitations, challenges, or drawbacks
+     - Comparisons or alternatives
+     - Recent developments or updates
+   - Example progression:
+     1. General topic overview
+     2. Specific aspects (benefits, use cases)
+     3. Challenges or limitations
+     4+. Deep dives on critical aspects
+
+2. Coding & Technical Tasks:
+   - Documentation lookup: 1–2 tools (official docs + examples)
+   - Debugging: 2–3 tools (error search + solution patterns)
+   - Architecture decisions: 3–5 tools (best practices + comparisons + examples)
+   - Full implementation: 5+ tools (docs + patterns + edge cases + optimization)
+
+3. Comparative Analysis / Verification:
+   - Single source: 1 tool
+   - Multiple sources: Use parallel calls for efficiency
+   - Comparative or critical analysis: Minimum 3 sources
+   - Market research or controversial topics: 3+ diverse sources, cross-referenced
+   - Scientific/technical validation: Cross-check experiments, methods, or datasets
+
 EFFICIENCY GUIDELINES:
 
 1. Parallel vs Sequential Tool Calls:
    - Use PARALLEL calls when queries are independent
    - Use SEQUENTIAL only when later queries depend on earlier results
 
-2. Query Optimization:
-   - Start broad, then narrow based on results
-   - Use different search parameters for variety
-   - Avoid redundant or overlapping queries
-   - Each tool call should add unique value
-
-3. Smart Scaling:
-   - Begin with essential queries
-   - Add detail queries based on initial results
-   - Stop when sufficient information gathered
-   - Don't over-research simple questions
+2. Optimized Query Strategy:
+   - Start broad, then narrow based on results.
+   - Use varied search parameters to cover different angles.
+   - Each tool call should add unique value; avoid redundant queries.
+   - Scale detail dynamically: begin with essentials, add deeper queries if needed,
+   and stop once sufficient information is gathered.
 
 MULTIPLE ENTITIES PATTERN:
 When researching multiple distinct entities (companies, products, people, locations):
