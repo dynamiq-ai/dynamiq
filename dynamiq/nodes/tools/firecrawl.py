@@ -26,16 +26,6 @@ Usage strategy:
 - Set `max_age`, `store_in_cache`, or `zero_data_retention` based on freshness vs. compliance needs
 - Combine `actions` with `wait_for` to ensure dynamic content loads before scraping/screenshotting
 
-Parameter guide (input schema):
-- `url` (required): target page.
-- `formats`: output mix, strings or objects from Formats schema.
-- `only_main_content` / `include_tags` / `exclude_tags`: trim boilerplate or force specific HTML tags.
-- `max_age`, `headers`, `wait_for`, `mobile`, `skip_tls_verification`, `timeout`: control fetch/crawl behavior.
-- `parsers`: `['pdf']` by default; send [] to skip PDF parsing or objects like `{'type': 'pdf','maxPages':5}`.
-- `actions`: ordered automation objects (wait/click/write/press/scroll/screenshot/pdf/executeJavascript/scrape).
-- `location`: emulate country + languages for proxies and Accept-Language headers.
-- `remove_base64_images`, `block_ads`, `proxy`, `store_in_cache`, `zero_data_retention`: caching/compliance knobs.
-
 Example:
 {"url": "https://example.com", "formats": ["markdown", "links"], "only_main_content": true, "proxy": "auto"}"""
 
