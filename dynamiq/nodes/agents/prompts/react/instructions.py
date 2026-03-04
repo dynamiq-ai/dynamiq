@@ -135,11 +135,6 @@ them in any order you choose to complete the task:\n
 {{ tool_description }}
 """
 
-REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
-- Avoid phrases like 'based on the information gathered or provided.'
-- Clearly mention any files that were generated during the process.
-- Provide file names and brief descriptions of their contents.
-"""
 
 REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """Always structure your responses in this JSON format:
 
@@ -266,7 +261,10 @@ IMPORTANT:
 - Formatting must enhance readability and analytical clarity.
 - Tables should only be used when they materially improve organization or comparison.
 - Do not over-format; maintain a professional and academically consistent presentation style.
-- In your final answer, avoid phrases like 'based on the information gathered or provided.'
+- In your final answer:
+    - Avoid phrases like 'based on the information gathered or provided'.
+    - Clearly mention any files that were generated during the process
+    - Provide file names and brief descriptions of their contents.
 """
 
 REACT_MAX_LOOPS_PROMPT = """
