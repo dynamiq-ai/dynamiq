@@ -18,20 +18,6 @@ What it does:
 - Returns SERP results with geo/time filters and category biasing (github/research/pdf)
 - Lets you control result count, recency, geo bias, timeout, and URL validation in one call
 
-Parameters (FirecrawlSearchInput):
-- `query` (required): search string.
-- `limit` (1-100): max results to return (default 5).
-- `sources` (list of objects): choose verticals with optional per-source settings:
-  - Web: {"type":"web","tbs":"qdr:d","location":"San Francisco,California,United States"}
-  - News: {"type":"news"}
-  - Images: {"type":"images"}
-- `categories` (list): bias results toward content types, e.g., ["github","research","pdf"].
-- `tbs`: time filter (qdr:h/d/w/m/y or custom ranges like cdr:1,cd_min:MM/DD/YYYY,cd_max:MM/DD/YYYY).
-- `location`: city/state/country string for geo bias.
-- `country`: ISO country code for geo targeting (e.g., "US").
-- `timeout`: request timeout in milliseconds (default 60000).
-- `ignoreInvalidURLs`: true to drop invalid links from the response.
-
 Examples:
 {"query": "firecrawl docs", "limit": 5}
 {"query": "openai funding", "sources": [{"type": "news"}], "limit": 3}
@@ -80,7 +66,7 @@ class FirecrawlSearchInput(BaseModel):
     tbs: str | None = Field(
         default=None,
         description="Time-based search filter (qdr:h/d/w/m/y or custom ranges like "
-        "cdr:1,cd_min:12/1/2024,cd_max:12/31/2024).",
+        "cdr:1,cd_min:12/1/2026,cd_max:12/31/2026).",
     )
     location: str | None = Field(
         default=None,
