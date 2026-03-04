@@ -686,7 +686,9 @@ def test_execute_sandbox_file_upload_flow(openai_node, mocker):
     sandbox_mock = mocker.Mock()
     sandbox_mock.base_path = "/home/user"
     sandbox_mock.list_files.return_value = ["/home/user/report.pdf"]
-    sandbox_mock.upload_file.side_effect = lambda name, content: f"/home/user/{name}"
+    sandbox_mock.upload_file.side_effect = lambda name, content, **kwargs: kwargs.get(
+        "destination_path", f"/home/user/{name}"
+    )
     mocker.patch.object(Agent, "sandbox_backend", new_callable=PropertyMock, return_value=sandbox_mock)
 
     answer_result = RunnableResult(
@@ -713,8 +715,8 @@ def test_execute_sandbox_file_upload_flow(openai_node, mocker):
     messages = mock_run_llm.call_args.kwargs["messages"]
     user_message = next(m for m in messages if m.role == "user")
     assert "Attached files available to you:" in user_message.content
-    assert "/home/user/report_1.pdf" in user_message.content
-    assert "/home/user/report_2.pdf" in user_message.content
+    assert "/home/user/input/report_1.pdf" in user_message.content
+    assert "/home/user/input/report_2.pdf" in user_message.content
 
 
 def test_file_upload_failures_return_empty_paths(openai_node, mock_llm_executor, mocker):
