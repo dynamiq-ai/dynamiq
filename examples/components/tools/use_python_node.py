@@ -8,7 +8,7 @@ def run(input_data):
     name = input_data.get('name', 'World')
     age = input_data.get('age', 0)
 
-    birth_year = 2024 - age
+    birth_year = 2026 - age
 
     return {
         'greeting': f'Hello, {name}!',
