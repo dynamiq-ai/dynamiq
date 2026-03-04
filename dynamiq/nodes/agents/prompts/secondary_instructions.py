@@ -31,7 +31,7 @@ You operate inside a persistent sandbox filesystem.
 The sandbox directory is your working memory.
 
 - Use {base_path}/ for ALL files: scripts, research, logs, intermediate artifacts, data, and final output.
-- Uploaded files are placed in {base_path}/ as well as files returned from other tools.
+- Uploaded files are placed in {base_path}/input/ as well as files returned from other tools.
 - Other tools can ONLY access files under {base_path}/.
 
 CRITICAL PRINCIPLE — PERSIST EVERYTHING IMPORTANT:
@@ -73,7 +73,7 @@ EXECUTION RULES:
 """
 
 
-REACT_BLOCK_MULTI_TOOL_PLANNING = """
+REACT_BLOCK_MULTI_TOOL_PLANNING = f"""
 MULTI-TOOL PLANNING AND STRATEGY:
 
 Core Principle: Scale tool usage to match task complexity
