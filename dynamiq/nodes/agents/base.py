@@ -781,9 +781,11 @@ class Agent(Node):
                 self.name,
                 self.id,
             )
+            saved = 0
             pinned_content = self._get_pinned_content()
             if pinned_content is not None:
                 self.memory.add(role=MessageRole.USER, content=pinned_content, metadata=metadata.copy())
+                saved += 1
             last_assistant = next(
                 (m for m in reversed(snapshot_messages) if m.role == MessageRole.ASSISTANT),
                 None,
@@ -794,9 +796,10 @@ class Agent(Node):
                     content=last_assistant.content,
                     metadata=metadata.copy(),
                 )
+                saved += 1
 
         logger.info(
-            "Agent %s - %s: saved %d message(s) to memory (snapshot)",
+            "Agent %s - %s: saved %d message(s) to memory",
             self.name,
             self.id,
             saved,
@@ -896,6 +899,8 @@ class Agent(Node):
             self._prompt.messages = [system_message, *history_messages, input_message]
         else:
             self._prompt.messages = [system_message, input_message]
+
+        self._pinned_input = input_message
 
         try:
             llm_result = self._run_llm(self._prompt.messages, config=config, **kwargs).output["content"]
