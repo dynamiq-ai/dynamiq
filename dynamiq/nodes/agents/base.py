@@ -604,18 +604,29 @@ class Agent(Node):
 
         try:
             result = self._run_agent(input_message, history_messages, config=config, **kwargs)
-        finally:
-            self._current_call_context = None
+        except Exception:
             if use_memory:
                 try:
-                    self._save_history_to_memory(custom_metadata)
+                    self._append_user_input_to_memory(custom_metadata)
                 except Exception as save_error:
                     logger.error(
-                        "Agent %s - %s: failed to save history to memory: %s",
-                        self.name,
-                        self.id,
-                        save_error,
+                        f"Agent {self.name} - {self.id}: failed to save user input to memory "
+                        f"after agent error: {save_error}",
                     )
+            raise
+        finally:
+            self._current_call_context = None
+
+        if use_memory:
+            try:
+                self._save_history_to_memory(custom_metadata)
+            except Exception as save_error:
+                logger.error(
+                    "Agent %s - %s: failed to save history to memory: %s",
+                    self.name,
+                    self.id,
+                    save_error,
+                )
 
         execution_result = {
             "content": result,
@@ -775,6 +786,18 @@ class Agent(Node):
         logger.info(
             f"Agent {self.name} - {self.id}: saved {saved} message(s) to memory",
         )
+
+    def _append_user_input_to_memory(self, metadata: dict) -> None:
+        """Append only the user input to memory (used on agent failure).
+
+        Unlike ``_save_history_to_memory`` this never deletes existing data,
+        making it safe to call when the agent errored before producing a response.
+        """
+        if self._pinned_input is None:
+            return
+        pinned_content = extract_message_text(self._pinned_input)
+        self.memory.add(role=MessageRole.USER, content=pinned_content, metadata=metadata.copy())
+        logger.info(f"Agent {self.name} - {self.id}: saved user input to memory after agent error")
 
     def _append_fallback_messages(self, metadata: dict, snapshot_messages: list[Message]) -> None:
         """Append only the user input and last assistant response to memory (safe fallback)."""
