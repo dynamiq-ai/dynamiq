@@ -1,6 +1,7 @@
 """Unit tests for HistoryManagerMixin — token-bounded _split_history and _compact_history."""
 
 import uuid
+from unittest.mock import patch
 
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.utils import SummarizationConfig
@@ -206,3 +207,38 @@ class TestCompactHistory:
         agent._compact_history(summary="Summary of 20 messages.")
 
         assert len(agent._prompt.messages) < original_count
+
+    def test_precomputed_preserved_skips_split_history(self):
+        """When preserved is passed explicitly, _split_history must not be called."""
+        msgs = [
+            _system(),
+            _user("old message " * 1000),
+            _assistant("old response " * 1000),
+            _user("recent question"),
+            _assistant("recent answer"),
+        ]
+        agent = FakeAgent(messages=msgs, max_preserved_tokens=500)
+        preserved = [_user("recent question"), _assistant("recent answer")]
+
+        with patch.object(agent, "_split_history", wraps=agent._split_history) as spy:
+            agent._compact_history(summary="A summary.", preserved=preserved)
+            spy.assert_not_called()
+
+        assert agent._prompt.messages[0].content == msgs[0].content
+        assert "summary" in agent._prompt.messages[1].content.lower()
+        assert agent._prompt.messages[2].content == "recent question"
+        assert agent._prompt.messages[3].content == "recent answer"
+
+    def test_no_preserved_arg_falls_back_to_split(self):
+        """When preserved is not supplied, _split_history is still called."""
+        msgs = [
+            _system(),
+            _user("old message " * 1000),
+            _assistant("old response " * 1000),
+            _user("recent"),
+        ]
+        agent = FakeAgent(messages=msgs, max_preserved_tokens=500)
+
+        with patch.object(agent, "_split_history", wraps=agent._split_history) as spy:
+            agent._compact_history(summary="A summary.")
+            spy.assert_called_once()

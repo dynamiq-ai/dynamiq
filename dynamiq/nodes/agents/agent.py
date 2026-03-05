@@ -652,7 +652,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         try:
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
-                to_summarize, _ = self._split_history()
+                to_summarize, to_preserve = self._split_history()
                 if not to_summarize:
                     logger.info(f"Agent {self.name} - {self.id}: Nothing to summarize, skipping context compaction.")
                     skip_message = (
@@ -735,7 +735,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 return tool_result, tool_files, True, True, dependency
 
             if isinstance(tool, ContextManagerTool):
-                self._compact_history(summary=tool_output_meta.get("summary", tool_result))
+                self._compact_history(
+                    summary=tool_output_meta.get("summary", tool_result),
+                    preserved=to_preserve,
+                )
 
             # Stream the result
             self._stream_agent_event(

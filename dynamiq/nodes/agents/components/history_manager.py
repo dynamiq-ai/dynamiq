@@ -65,7 +65,11 @@ class HistoryManagerMixin:
 
         return to_summarize, to_preserve
 
-    def _compact_history(self, summary: str | None = None) -> None:
+    def _compact_history(
+        self,
+        summary: str | None = None,
+        preserved: list[Message | VisionMessage] | None = None,
+    ) -> None:
         """Compact history, optionally inserting a summary before preserved messages.
 
         Replaces the conversation history with::
@@ -77,8 +81,11 @@ class HistoryManagerMixin:
 
         Args:
             summary: Optional summary text to insert after prefix.
+            preserved: Pre-computed preserved messages from ``_split_history``.
+                When supplied, skips the redundant ``_split_history`` call.
         """
-        _, preserved = self._split_history()
+        if preserved is None:
+            _, preserved = self._split_history()
 
         self._prompt.messages = self._prompt.messages[: self._history_offset]
 
