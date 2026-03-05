@@ -306,11 +306,13 @@ class Memory(BaseModel):
             user_id=filters.get("user_id"),
         )
 
+        written = 0
         try:
             for seq, msg in enumerate(messages):
                 metadata = dict(msg.metadata) if msg.metadata else {}
                 metadata["sequence"] = seq
                 self.add(role=msg.role, content=msg.content, metadata=metadata)
+                written += 1
 
             logger.debug(
                 "Memory %s: replaced scoped messages (filters=%s, new=%d)",
@@ -319,8 +321,14 @@ class Memory(BaseModel):
                 len(messages),
             )
         except Exception as e:
-            logger.error(f"Unexpected error replacing scoped messages: {e}")
-            raise MemoryError(f"Unexpected error replacing scoped messages: {e}") from e
+            logger.error(
+                "Memory %s: wrote %d/%d messages before failure after delete: %s",
+                self.backend.name,
+                written,
+                len(messages),
+                e,
+            )
+            raise MemoryError(f"Partial write after delete ({written}/{len(messages)} messages written): {e}") from e
 
     def get_agent_conversation(
         self,

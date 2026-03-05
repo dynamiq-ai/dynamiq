@@ -717,7 +717,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             if isinstance(tool, ContextManagerTool):
                 self._compact_history(
                     summary=tool_output_meta.get("summary", tool_result),
-                    pinned_content=self._get_pinned_content(),
+                    pinned_content=self._extract_message_text(self._pinned_input) if self._pinned_input else None,
                 )
 
             # Stream the result

@@ -719,20 +719,6 @@ class Agent(Node):
         logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
         return history_messages
 
-    def _get_pinned_content(self) -> str | None:
-        """Extract text content from ``_pinned_input``, handling VisionMessage.
-
-        Returns:
-            The pinned input as a plain string, or ``None`` if not set.
-        """
-        pinned = self._pinned_input
-        if pinned is None:
-            return None
-        if isinstance(pinned, Message):
-            return pinned.content
-        text_parts = [c.text for c in pinned.content if isinstance(c, VisionMessageTextContent)]
-        return " ".join(text_parts) if text_parts else "Image input"
-
     def _save_history_to_memory(
         self,
         metadata: dict,
@@ -782,8 +768,8 @@ class Agent(Node):
                 self.id,
             )
             saved = 0
-            pinned_content = self._get_pinned_content()
-            if pinned_content is not None:
+            if self._pinned_input is not None:
+                pinned_content = self._extract_message_text(self._pinned_input)
                 self.memory.add(role=MessageRole.USER, content=pinned_content, metadata=metadata.copy())
                 saved += 1
             last_assistant = next(

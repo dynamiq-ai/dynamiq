@@ -74,15 +74,13 @@ class HistoryManagerMixin:
             summary: Optional summary text to insert after prefix.
             pinned_content: Plain-text content of the original user request.
         """
-        to_summarize, preserved = self._split_history()
+        _, preserved = self._split_history()
 
         self._prompt.messages = self._prompt.messages[: self._history_offset]
 
         if summary:
             if pinned_content is not None:
-                preserved_has_pinned = any(
-                    (m.content if isinstance(m, Message) else str(m.content)) == pinned_content for m in preserved
-                )
+                preserved_has_pinned = any(self._extract_message_text(m) == pinned_content for m in preserved)
                 if not preserved_has_pinned:
                     summary = f"{summary}\n\nOriginal request: {pinned_content}"
 
@@ -95,6 +93,14 @@ class HistoryManagerMixin:
             f"Agent {self.name} - {self.id}: History compacted. "
             f"Summary: {'yes' if summary else 'no'}, preserved: {len(preserved)} messages."
         )
+
+    @staticmethod
+    def _extract_message_text(message: Message | VisionMessage) -> str:
+        """Extract plain text from a Message or VisionMessage."""
+        if isinstance(message, Message):
+            return message.content
+        text_parts = [c.text for c in message.content if isinstance(c, VisionMessageTextContent)]
+        return " ".join(text_parts) if text_parts else "Image input"
 
     @staticmethod
     def aggregate_history(messages: list[Message | VisionMessage]) -> str:
