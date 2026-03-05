@@ -17,17 +17,13 @@ from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     ToolCacheEntry,
     convert_bytesio_to_file_info,
+    extract_message_text,
     process_tool_output_for_agent,
 )
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
-from dynamiq.nodes.tools.file_tools import (
-    FileListTool,
-    FileReadTool,
-    FileSearchTool,
-    FileWriteTool,
-)
+from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileSearchTool, FileWriteTool
 from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsTool
 from dynamiq.nodes.tools.python import Python
@@ -769,7 +765,7 @@ class Agent(Node):
             )
             saved = 0
             if self._pinned_input is not None:
-                pinned_content = self._extract_message_text(self._pinned_input)
+                pinned_content = extract_message_text(self._pinned_input)
                 self.memory.add(role=MessageRole.USER, content=pinned_content, metadata=metadata.copy())
                 saved += 1
             last_assistant = next(

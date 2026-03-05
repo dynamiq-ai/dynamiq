@@ -1,5 +1,6 @@
 """History and context management mixin for agents."""
 
+from dynamiq.nodes.agents.utils import extract_message_text
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.utils.logger import logger
 
@@ -80,7 +81,7 @@ class HistoryManagerMixin:
 
         if summary:
             if pinned_content is not None:
-                preserved_has_pinned = any(self._extract_message_text(m) == pinned_content for m in preserved)
+                preserved_has_pinned = any(extract_message_text(m) == pinned_content for m in preserved)
                 if not preserved_has_pinned:
                     summary = f"{summary}\n\nOriginal request: {pinned_content}"
 
@@ -93,14 +94,6 @@ class HistoryManagerMixin:
             f"Agent {self.name} - {self.id}: History compacted. "
             f"Summary: {'yes' if summary else 'no'}, preserved: {len(preserved)} messages."
         )
-
-    @staticmethod
-    def _extract_message_text(message: Message | VisionMessage) -> str:
-        """Extract plain text from a Message or VisionMessage."""
-        if isinstance(message, Message):
-            return message.content
-        text_parts = [c.text for c in message.content if isinstance(c, VisionMessageTextContent)]
-        return " ".join(text_parts) if text_parts else "Image input"
 
     @staticmethod
     def aggregate_history(messages: list[Message | VisionMessage]) -> str:

@@ -19,7 +19,7 @@ from dynamiq.nodes.agents.exceptions import (
     RecoverableAgentException,
     TagNotFoundError,
 )
-from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
+from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser, extract_message_text
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsInputSchema
@@ -717,7 +717,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             if isinstance(tool, ContextManagerTool):
                 self._compact_history(
                     summary=tool_output_meta.get("summary", tool_result),
-                    pinned_content=self._extract_message_text(self._pinned_input) if self._pinned_input else None,
+                    pinned_content=extract_message_text(self._pinned_input) if self._pinned_input else None,
                 )
 
             # Stream the result

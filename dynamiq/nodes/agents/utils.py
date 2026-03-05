@@ -25,6 +25,14 @@ from dynamiq.utils.utils import CHARS_PER_TOKEN
 TOOL_MAX_TOKENS = 64000
 
 
+def extract_message_text(message: Message | VisionMessage) -> str:
+    """Extract plain text from a Message or VisionMessage."""
+    if isinstance(message, Message):
+        return message.content
+    text_parts = [c.text for c in message.content if isinstance(c, VisionMessageTextContent)]
+    return " ".join(text_parts) if text_parts else "Image input"
+
+
 def convert_bytesio_to_file_info(bytesio_obj: io.BytesIO, key: str, index: int = None) -> FileInfo:
     """Convert a BytesIO object to a FileInfo object with base64 encoded content."""
     content_bytes = bytesio_obj.getvalue()
@@ -978,5 +986,5 @@ class SummarizationConfig(BaseModel):
     enabled: bool = False
     max_token_context_length: int | None = None
     context_usage_ratio: float = Field(default=0.8, gt=0, le=1)
-    preserve_last_messages: int = Field(default=4, ge=0)
+    preserve_last_messages: int = Field(default=8, ge=0)
     token_budget_ratio: float = Field(default=0.75, gt=0, lt=1)
