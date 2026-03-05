@@ -298,8 +298,8 @@ class Memory(BaseModel):
             NotImplementedError: If the backend does not support scoped delete.
             MemoryError: If filters are empty or the write fails.
         """
-        if not filters:
-            raise MemoryError("replace_messages requires non-empty filters to avoid global data wipe")
+        if not filters or not (filters.get("session_id") or filters.get("user_id")):
+            raise MemoryError("replace_messages requires at least one of 'session_id' or 'user_id' in filters")
 
         self.backend.delete(
             session_id=filters.get("session_id"),

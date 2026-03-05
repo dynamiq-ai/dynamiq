@@ -16,7 +16,8 @@ from dynamiq.memory.backends import InMemory
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
-from dynamiq.prompts import Message, MessageRole
+from dynamiq.prompts import MessageRole
+from dynamiq.runnables import RunnableStatus
 
 USER_ID = "test-user"
 SESSION_ID = "test-session"
@@ -49,42 +50,30 @@ def agent(llm, memory, mock_llm_executor):
     )
 
 
-def test_memory_snapshot_saves_all_non_system_messages(agent, memory):
-    """After a single run, memory should contain all non-system messages from the prompt."""
-    agent.run(input_data={"input": "Hello", "user_id": USER_ID, "session_id": SESSION_ID})
-
-    prompt_non_system = [m for m in agent._prompt.messages if m.role != MessageRole.SYSTEM]
-    stored = memory.backend.messages
-
-    assert len(stored) > 0, "Memory should not be empty after a run"
-    assert len(stored) == len(prompt_non_system), (
-        f"Memory should contain exactly the non-system prompt messages: "
-        f"expected {len(prompt_non_system)}, got {len(stored)}"
+def test_memory_on_failure_appends_only_user_input(llm, memory, mocker):
+    """When the agent explicitly fails, only the user input should be appended to memory."""
+    mocker.patch(
+        "dynamiq.nodes.llms.base.BaseLLM._completion",
+        side_effect=Exception("LLM failure"),
     )
+    agent = Agent(
+        name="FailingAgent",
+        llm=llm,
+        tools=[],
+        role="You are a helpful assistant.",
+        inference_mode=InferenceMode.DEFAULT,
+        memory=memory,
+    )
+    result = agent.run(input_data={"input": "Hello", "user_id": USER_ID, "session_id": SESSION_ID})
 
-    for stored_msg, prompt_msg in zip(stored, prompt_non_system):
-        assert stored_msg.role == prompt_msg.role
-        expected_content = prompt_msg.content if isinstance(prompt_msg, Message) else "Image input"
-        assert stored_msg.content == expected_content
+    assert result.status == RunnableStatus.FAILURE
 
-
-def test_memory_snapshot_replaces_on_second_run(agent, memory):
-    """On a second run, memory.clear() should wipe previous messages and write the new snapshot."""
-    agent.run(input_data={"input": "First message", "user_id": USER_ID, "session_id": SESSION_ID})
-    first_run_count = len(memory.backend.messages)
-    assert first_run_count > 0
-
-    agent.run(input_data={"input": "Second message", "user_id": USER_ID, "session_id": SESSION_ID})
-    second_run_messages = memory.backend.messages
-
-    contents = [m.content for m in second_run_messages]
-    assert "First message" in contents, "History from first run should be included in snapshot"
-    assert "Second message" in contents, "New user input should be in snapshot"
-
-    prompt_non_system = [m for m in agent._prompt.messages if m.role != MessageRole.SYSTEM]
-    assert len(second_run_messages) == len(
-        prompt_non_system
-    ), f"Memory should mirror the prompt: expected {len(prompt_non_system)}, got {len(second_run_messages)}"
+    stored = memory.backend.messages
+    assert len(stored) == 1, f"Only user input should be stored on failure, got {len(stored)}"
+    assert stored[0].role == MessageRole.USER
+    assert stored[0].content == "Hello"
+    assert stored[0].metadata.get("user_id") == USER_ID
+    assert stored[0].metadata.get("session_id") == SESSION_ID
 
 
 def test_memory_snapshot_no_system_messages_stored(agent, memory):

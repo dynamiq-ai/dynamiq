@@ -193,7 +193,7 @@ class InMemory(MemoryBackend):
 
     def delete(self, session_id: str | None = None, user_id: str | None = None) -> None:
         """Delete messages scoped by session and/or user."""
-        if session_id is None and user_id is None:
+        if not session_id and not user_id:
             return
 
         def _matches(msg: Message) -> bool:
