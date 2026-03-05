@@ -975,6 +975,8 @@ class SummarizationConfig(BaseModel):
           prompt and generated output. Defaults to 0.75.
     """
 
+    model_config = ConfigDict(extra="ignore")
+
     enabled: bool = False
     max_token_context_length: int | None = None
     context_usage_ratio: float = Field(default=0.8, gt=0, le=1)
