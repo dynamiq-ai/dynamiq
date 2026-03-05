@@ -50,7 +50,7 @@ def llm_instance():
     llm = OpenAI(
         connection=connection,
         model="gpt-5-mini",
-        max_tokens=1000,
+        max_tokens=5000,
         temperature=0,
     )
     return llm
