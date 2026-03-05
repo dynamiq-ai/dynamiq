@@ -729,18 +729,15 @@ class Agent(Node):
         Args:
             metadata: Metadata dict forwarded to each ``memory.add`` call.
         """
-        scope_filters = {}
-        if metadata.get("user_id"):
-            scope_filters["user_id"] = metadata["user_id"]
-        if metadata.get("session_id"):
-            scope_filters["session_id"] = metadata["session_id"]
-        if not scope_filters:
+        user_id = metadata.get("user_id")
+        session_id = metadata.get("session_id")
+        if not user_id or not session_id:
             logger.warning(
-                "Agent %s - %s: skipping memory snapshot save because no user/session scope was provided",
-                self.name,
-                self.id,
+                f"Agent {self.name} - {self.id}: skipping memory snapshot save "
+                f"because both user_id and session_id are required (got user_id={user_id}, session_id={session_id})",
             )
             return
+        scope_filters = {"user_id": user_id, "session_id": session_id}
 
         saved = 0
         snapshot_messages: list[Message] = []
