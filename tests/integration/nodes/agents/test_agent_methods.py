@@ -913,7 +913,7 @@ class TestContextManagerEarlyReturn:
         assert "Nothing was summarized" in tool_result
         assert tool_files == []
         assert is_delegated is False
-        assert success is False
+        assert success is True
         assert dependency is None
 
     def test_prompt_unchanged_after_early_return(self, context_agent):

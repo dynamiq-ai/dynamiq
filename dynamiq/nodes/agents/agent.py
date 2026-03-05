@@ -673,7 +673,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         config,
                         **kwargs,
                     )
-                    return skip_message, [], False, False, None
+                    return skip_message, [], False, True, None
                 tool_input = {**(action_input if isinstance(action_input, dict) else {}), "messages": to_summarize}
             else:
                 tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
