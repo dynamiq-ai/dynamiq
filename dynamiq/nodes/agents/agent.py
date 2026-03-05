@@ -653,7 +653,28 @@ class Agent(HistoryManagerMixin, BaseAgent):
         try:
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
-                to_summarize, _ = self._split_history()
+                to_summarize, to_preserve = self._split_history()
+                if not to_summarize:
+                    logger.info(f"Agent {self.name} - {self.id}: Nothing to summarize, skipping context compaction.")
+                    skip_message = (
+                        "Nothing was summarized because the conversation history is small enough to fit in context."
+                    )
+                    self._stream_agent_event(
+                        AgentToolResultEventMessageData(
+                            tool_run_id=tool_run_id,
+                            name=tool.name,
+                            tool=tool_data,
+                            input=action_input,
+                            result=skip_message,
+                            files=[],
+                            loop_num=loop_num,
+                            output={},
+                        ),
+                        "tool",
+                        config,
+                        **kwargs,
+                    )
+                    return skip_message, [], False, True, None
                 tool_input = {**(action_input if isinstance(action_input, dict) else {}), "messages": to_summarize}
             else:
                 tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
@@ -718,6 +739,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self._compact_history(
                     summary=tool_output_meta.get("summary", tool_result),
                     pinned_content=extract_message_text(self._pinned_input) if self._pinned_input else None,
+                    preserved=to_preserve,
                 )
 
             # Stream the result

@@ -1,6 +1,6 @@
 import uuid
 from io import BytesIO
-from unittest.mock import PropertyMock
+from unittest.mock import PropertyMock, patch
 
 import pytest
 
@@ -18,11 +18,13 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
     XMLParsingError,
 )
-from dynamiq.nodes.agents.utils import XMLParser
+from dynamiq.nodes.agents.utils import SummarizationConfig, XMLParser
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.prompts import Message, MessageRole
+from dynamiq.prompts.prompts import Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.storages.file.base import FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
@@ -871,3 +873,93 @@ class TestParallelToolCloning:
             assert (
                 call.kwargs.get("is_parallel") is True
             ), "Concurrent dispatch must set is_parallel=True for every tool"
+
+
+class TestContextManagerEarlyReturn:
+    """Regression tests for _execute_single_tool early return when nothing needs summarizing."""
+
+    @pytest.fixture
+    def context_agent(self, openai_node, mock_llm_executor):
+        """Agent with summarization enabled (auto-adds ContextManagerTool)."""
+        return Agent(
+            name="ContextTestAgent",
+            llm=openai_node,
+            tools=[],
+            inference_mode=InferenceMode.XML,
+            summarization_config=SummarizationConfig(enabled=True, max_preserved_tokens=100_000),
+        )
+
+    def test_skips_tool_when_history_fits_in_context(self, context_agent):
+        """When all conversation messages fit within max_preserved_tokens,
+        _split_history returns an empty to_summarize list and
+        _execute_single_tool must return early without invoking the tool."""
+        context_agent._prompt = Prompt(
+            messages=[
+                Message(role=MessageRole.SYSTEM, content="You are a helpful assistant.", static=True),
+                Message(role=MessageRole.USER, content="Hello", static=True),
+                Message(role=MessageRole.ASSISTANT, content="Hi there!", static=True),
+            ]
+        )
+        context_agent._history_offset = 1
+
+        tool_result, tool_files, is_delegated, success, dependency = context_agent._execute_single_tool(
+            action="context-manager",
+            action_input={},
+            thought="I should compact context",
+            loop_num=1,
+            config=RunnableConfig(),
+        )
+
+        assert "Nothing was summarized" in tool_result
+        assert tool_files == []
+        assert is_delegated is False
+        assert success is True
+        assert dependency is None
+
+    def test_prompt_unchanged_after_early_return(self, context_agent):
+        """The agent's prompt must not be modified when the early return fires."""
+        messages = [
+            Message(role=MessageRole.SYSTEM, content="System prompt.", static=True),
+            Message(role=MessageRole.USER, content="Question?", static=True),
+            Message(role=MessageRole.ASSISTANT, content="Answer.", static=True),
+        ]
+        context_agent._prompt = Prompt(messages=list(messages))
+        context_agent._history_offset = 1
+        original_count = len(context_agent._prompt.messages)
+
+        context_agent._execute_single_tool(
+            action="context-manager",
+            action_input={},
+            thought="compact",
+            loop_num=1,
+            config=RunnableConfig(),
+        )
+
+        assert len(context_agent._prompt.messages) == original_count
+        for original, current in zip(messages, context_agent._prompt.messages):
+            assert original.content == current.content
+
+    def test_early_return_streams_tool_result_event(self, context_agent):
+        """The early-return path must stream a tool-result event to pair with the reasoning event."""
+        context_agent._prompt = Prompt(
+            messages=[
+                Message(role=MessageRole.SYSTEM, content="You are a helpful assistant.", static=True),
+                Message(role=MessageRole.USER, content="Hello", static=True),
+                Message(role=MessageRole.ASSISTANT, content="Hi there!", static=True),
+            ]
+        )
+        context_agent._history_offset = 1
+
+        with patch.object(context_agent, "_stream_agent_event", wraps=context_agent._stream_agent_event) as spy:
+            context_agent._execute_single_tool(
+                action="context-manager",
+                action_input={},
+                thought="compact",
+                loop_num=1,
+                config=RunnableConfig(),
+            )
+
+            steps = [call.args[1] for call in spy.call_args_list]
+            assert steps == ["reasoning", "tool"], (
+                "Early return must stream both a reasoning event and a tool-result event"
+            )
