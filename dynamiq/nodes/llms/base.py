@@ -4,7 +4,7 @@ import warnings
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
 
-from litellm import get_max_tokens, supports_vision
+from litellm import get_max_tokens, get_model_info, supports_vision
 from litellm.exceptions import (
     APIConnectionError,
     BudgetExceededError,
@@ -299,6 +299,13 @@ class BaseLLM(ConnectionNode):
         Returns:
             int: Number of tokens.
         """
+        try:
+            model_info = get_model_info(model=self.model)
+            max_input = model_info.get("max_input_tokens")
+            if max_input:
+                return max_input
+        except Exception:
+            logger.warning(f"Failed to get token limit for model {self.model}. Using litellm's default token limit.")
         return get_max_tokens(self.model)
 
     @property
