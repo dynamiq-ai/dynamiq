@@ -1,5 +1,7 @@
 """History and context management mixin for agents."""
 
+from litellm import token_counter
+
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.utils.logger import logger
 
@@ -35,40 +37,59 @@ class HistoryManagerMixin:
     ) -> tuple[list[Message | VisionMessage], list[Message | VisionMessage]]:
         """Split conversation history into messages to summarize and messages to preserve.
 
-        Uses ``preserve_last_messages`` from summarization config to determine
-        the split point.  When the history is too short to split, all messages
-        go to the summarize bucket and nothing is preserved.
+        Walks from newest to oldest, greedily keeping messages that fit within
+        ``max_preserved_tokens``.  Everything else goes to the summarize bucket.
 
         Returns:
             Tuple of (to_summarize, to_preserve).
         """
-        preserve_count = self.summarization_config.preserve_last_messages
         conversation_history = self._prompt.messages[self._history_offset :]
 
-        if preserve_count > 0 and len(conversation_history) > preserve_count:
+        n_tokens, preserve_count = 0, 0
+        for msg in reversed(conversation_history):
+            msg_tokens = token_counter(
+                model=self.llm.model,
+                messages=[msg.model_dump(exclude={"metadata"})],
+            )
+            if n_tokens + msg_tokens > self.summarization_config.max_preserved_tokens:
+                break
+            n_tokens += msg_tokens
+            preserve_count += 1
+
+        if preserve_count > 0:
             to_summarize = conversation_history[:-preserve_count]
             to_preserve = [m.copy() for m in conversation_history[-preserve_count:]]
         else:
             to_summarize = conversation_history
             to_preserve = []
 
+        if to_summarize == [] and self.is_token_limit_exceeded():
+            to_summarize = conversation_history
+            to_preserve = []
+
         return to_summarize, to_preserve
 
-    def _compact_history(self, summary: str | None = None) -> None:
+    def _compact_history(
+        self,
+        summary: str | None = None,
+        preserved: list[Message | VisionMessage] | None = None,
+    ) -> None:
         """Compact history, optionally inserting a summary before preserved messages.
 
         Replaces the conversation history with::
 
             [prefix] [summary] [preserved msg 1] [preserved msg 2]
 
-        The last ``preserve_last_messages`` messages are kept verbatim.
         If *summary* is provided it is inserted as a user message between the
         prefix and the preserved messages.
 
         Args:
             summary: Optional summary text to insert after prefix.
+            preserved: Pre-computed preserved messages from ``_split_history``.
+                When supplied, skips the redundant ``_split_history`` call.
         """
-        _, preserved = self._split_history()
+        if preserved is None:
+            _, preserved = self._split_history()
 
         self._prompt.messages = self._prompt.messages[: self._history_offset]
 
