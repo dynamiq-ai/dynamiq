@@ -31,24 +31,13 @@ from dynamiq.runnables import RunnableConfig, RunnableStatus
 DYNAMIQ_URL = os.getenv("DYNAMIQ_URL", "https://api.getdynamiq.ai")
 DYNAMIQ_API_KEY = os.getenv("DYNAMIQ_API_KEY", "your_dynamiq_api_key")
 DYNAMIQ_MEMORY_ID = os.getenv("DYNAMIQ_MEMORY_ID", "your_dynamiq_memory_id")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your_openai_api_key")
 
 USER_NAME = "Alex"
 USER_COMPANY = "TechCorp"
 
 
 def main():
-    if DYNAMIQ_API_KEY == "your_dynamiq_api_key":
-        print("Error: Set DYNAMIQ_API_KEY environment variable or update the default in this script.")
-        sys.exit(1)
-    if DYNAMIQ_MEMORY_ID == "your_dynamiq_memory_id":
-        print("Error: Set DYNAMIQ_MEMORY_ID environment variable or update the default in this script.")
-        sys.exit(1)
-    if OPENAI_API_KEY == "your_openai_api_key":
-        print("Error: Set OPENAI_API_KEY environment variable or update the default in this script.")
-        sys.exit(1)
-
-    openai_conn = connections.OpenAI(api_key=OPENAI_API_KEY)
+    openai_conn = connections.OpenAI()
     llm = OpenAI(name="OpenAI", model="gpt-4o-mini", connection=openai_conn)
     run_config = RunnableConfig(request_timeout=120)
 
@@ -70,6 +59,17 @@ def main():
     user_id = str(uuid.uuid4())
     session_id = str(uuid.uuid4())
     filters = {"user_id": user_id, "session_id": session_id}
+
+    other_user_id = str(uuid.uuid4())
+    other_session_id = str(uuid.uuid4())
+    other_filters = {"user_id": other_user_id, "session_id": other_session_id}
+
+    # --- Seed another user's data that must survive our agent runs ---
+    OTHER_USER_MESSAGE = "I need help with my billing issue."
+    OTHER_ASSISTANT_MESSAGE = "Sure, I can help you with billing. What is your account number?"
+    memory.add(role=MessageRole.USER, content=OTHER_USER_MESSAGE, metadata=other_filters.copy())
+    memory.add(role=MessageRole.ASSISTANT, content=OTHER_ASSISTANT_MESSAGE, metadata=other_filters.copy())
+    print(f"Seeded other user's data ({other_user_id[:8]}...): 2 messages")
 
     # --- Turn 1: ask about a person (forces tool call) ---
 
@@ -159,9 +159,26 @@ def main():
     else:
         print(f"\nFAILED: Agent did not recall '{USER_COMPANY}' from memory")
 
+    # --- Verify other user's data is preserved ---
+    other_stored = memory.get_agent_conversation(filters=other_filters)
+    print(f"\nOther user's messages after agent runs: {len(other_stored)}")
+    for i, msg in enumerate(other_stored):
+        print(f"  [{i}] {msg.role.value}: {msg.content[:80]}...")
+
+    other_ok = (
+        len(other_stored) == 2
+        and any(OTHER_USER_MESSAGE in m.content for m in other_stored)
+        and any(OTHER_ASSISTANT_MESSAGE in m.content for m in other_stored)
+    )
+    if other_ok:
+        print("SUCCESS: Other user's data is intact")
+    else:
+        print("FAILED: Other user's data was corrupted or lost!")
+
     # Cleanup
     try:
         memory.delete(session_id=session_id, user_id=user_id)
+        memory.delete(session_id=other_session_id, user_id=other_user_id)
         print("Cleaned up test data from remote store")
     except Exception as e:
         print(f"Warning: Failed to clean up: {e}")

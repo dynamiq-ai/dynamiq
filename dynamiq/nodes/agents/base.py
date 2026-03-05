@@ -232,10 +232,8 @@ class Agent(Node):
     _history_offset: int = PrivateAttr(
         default=1,  # Offset past the system prompt; everything after is eligible for summarization.
     )
-    _pinned_input: Message | VisionMessage | None = PrivateAttr(
-        default=None,
-        description="Original user input message preserved from compaction and used for memory fallback.",
-    )
+    # Original user input message preserved from compaction and used for memory fallback.
+    _pinned_input: Message | VisionMessage | None = PrivateAttr(default=None)
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
 
