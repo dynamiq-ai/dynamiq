@@ -315,18 +315,11 @@ class Memory(BaseModel):
                 written += 1
 
             logger.debug(
-                "Memory %s: replaced scoped messages (filters=%s, new=%d)",
-                self.backend.name,
-                filters,
-                len(messages),
+                f"Memory {self.backend.name}: replaced scoped messages (filters={filters}, new={len(messages)})"
             )
         except Exception as e:
             logger.error(
-                "Memory %s: wrote %d/%d messages before failure after delete: %s",
-                self.backend.name,
-                written,
-                len(messages),
-                e,
+                f"Memory {self.backend.name}: wrote {written}/{len(messages)} messages before failure after delete: {e}"
             )
             raise MemoryError(f"Partial write after delete ({written}/{len(messages)} messages written): {e}") from e
 
