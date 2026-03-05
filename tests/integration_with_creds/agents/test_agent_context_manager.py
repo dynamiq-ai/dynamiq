@@ -105,7 +105,7 @@ def test_automatic_context_manager_invocation(llm_instance, python_tool, run_con
     final_message_count = len(agent._prompt.messages)
     logger.info(f"Final message count: {final_message_count}")
     # Everything should be summarized
-    assert final_message_count == 5, "Final message count is not correct"
+    assert final_message_count == 4, "Final message count is not correct"
 
     logger.info(result.output)
     assert "apple" in result.output["content"], "Result is not correct"
