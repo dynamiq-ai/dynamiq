@@ -13,9 +13,6 @@ class HistoryManagerMixin:
     - summarization_config: SummarizationConfig object
     - _history_offset: int offset past the system prompt (typically 1);
       everything from this index onward is eligible for summarization.
-    - _pinned_input: Message | VisionMessage | None — the original user
-      input message.  When set, its content is appended verbatim to the
-      summary so the original request is never lost through summarization.
     - name: str agent name
     - id: str agent id
     """
@@ -58,29 +55,36 @@ class HistoryManagerMixin:
 
         return to_summarize, to_preserve
 
-    def _compact_history(self, summary: str | None = None) -> None:
+    def _compact_history(
+        self,
+        summary: str | None = None,
+        pinned_content: str | None = None,
+    ) -> None:
         """Compact history, optionally inserting a summary before preserved messages.
 
         Replaces the conversation history with::
 
             [system prefix] [summary + original request] [preserved msgs …]
 
-        If ``_pinned_input`` was among the summarized messages, the original
-        user request is appended verbatim to the summary so it is never lost.
-        If it is still in the preserved tail, nothing is appended.
+        If *pinned_content* is provided and not present in the preserved tail,
+        the original user request is appended verbatim to the summary so it is
+        never lost across repeated compactions.
 
         Args:
             summary: Optional summary text to insert after prefix.
+            pinned_content: Plain-text content of the original user request.
         """
         to_summarize, preserved = self._split_history()
 
         self._prompt.messages = self._prompt.messages[: self._history_offset]
 
         if summary:
-            pinned = self._pinned_input
-            if pinned is not None and any(m is pinned for m in to_summarize):
-                content = pinned.content if isinstance(pinned, Message) else str(pinned.content)
-                summary = f"{summary}\n\nOriginal request: {content}"
+            if pinned_content is not None:
+                preserved_has_pinned = any(
+                    (m.content if isinstance(m, Message) else str(m.content)) == pinned_content for m in preserved
+                )
+                if not preserved_has_pinned:
+                    summary = f"{summary}\n\nOriginal request: {pinned_content}"
 
             self._prompt.messages.append(
                 Message(role=MessageRole.USER, content=f"\nObservation: {summary}\n", static=True)

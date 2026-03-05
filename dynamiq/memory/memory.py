@@ -286,35 +286,37 @@ class Memory(BaseModel):
         """Replace only messages matching filters, preserving all others.
 
         Deletes the scoped slice via ``delete()`` and then writes the new
-        snapshot messages.
+        snapshot messages.  Raises ``NotImplementedError`` when the backend
+        does not support scoped deletion so callers can implement a fallback.
 
         Args:
             filters: Metadata filters defining which conversation slice to replace
                 (for example ``{"user_id": "...", "session_id": "..."}``).
             messages: New snapshot messages for the filtered slice.
+
+        Raises:
+            NotImplementedError: If the backend does not support scoped delete.
+            MemoryError: If filters are empty or the write fails.
         """
         if not filters:
             raise MemoryError("replace_messages requires non-empty filters to avoid global data wipe")
 
-        try:
-            self.backend.delete(
-                session_id=filters.get("session_id"),
-                user_id=filters.get("user_id"),
-            )
+        self.backend.delete(
+            session_id=filters.get("session_id"),
+            user_id=filters.get("user_id"),
+        )
 
-            for msg in messages:
-                self.add(role=msg.role, content=msg.content, metadata=msg.metadata)
+        try:
+            for seq, msg in enumerate(messages):
+                metadata = dict(msg.metadata) if msg.metadata else {}
+                metadata["sequence"] = seq
+                self.add(role=msg.role, content=msg.content, metadata=metadata)
 
             logger.debug(
                 "Memory %s: replaced scoped messages (filters=%s, new=%d)",
                 self.backend.name,
                 filters,
                 len(messages),
-            )
-        except NotImplementedError:
-            logger.warning(
-                "Memory %s: backend does not support scoped delete, skipping memory save.",
-                self.backend.name,
             )
         except Exception as e:
             logger.error(f"Unexpected error replacing scoped messages: {e}")
@@ -412,8 +414,9 @@ class Memory(BaseModel):
 
         def message_sort_key(msg):
             timestamp = msg.metadata.get("timestamp", float("inf"))
+            sequence = msg.metadata.get("sequence", 0)
             role_priority = 0 if msg.role == MessageRole.USER else 0.1
-            return (timestamp, role_priority)
+            return (timestamp, sequence, role_priority)
 
         sorted_messages = sorted(messages, key=message_sort_key)
 

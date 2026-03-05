@@ -715,7 +715,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 return tool_result, tool_files, True, True, dependency
 
             if isinstance(tool, ContextManagerTool):
-                self._compact_history(summary=tool_output_meta.get("summary", tool_result))
+                self._compact_history(
+                    summary=tool_output_meta.get("summary", tool_result),
+                    pinned_content=self._get_pinned_content(),
+                )
 
             # Stream the result
             self._stream_agent_event(

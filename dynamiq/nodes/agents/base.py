@@ -723,6 +723,20 @@ class Agent(Node):
         logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
         return history_messages
 
+    def _get_pinned_content(self) -> str | None:
+        """Extract text content from ``_pinned_input``, handling VisionMessage.
+
+        Returns:
+            The pinned input as a plain string, or ``None`` if not set.
+        """
+        pinned = self._pinned_input
+        if pinned is None:
+            return None
+        if isinstance(pinned, Message):
+            return pinned.content
+        text_parts = [c.text for c in pinned.content if isinstance(c, VisionMessageTextContent)]
+        return " ".join(text_parts) if text_parts else "Image input"
+
     def _save_history_to_memory(
         self,
         metadata: dict,
@@ -762,7 +776,28 @@ class Agent(Node):
             snapshot_messages.append(Message(role=msg.role, content=content, metadata=metadata.copy()))
             saved += 1
 
-        self.memory.replace_messages(filters=scope_filters, messages=snapshot_messages)
+        try:
+            self.memory.replace_messages(filters=scope_filters, messages=snapshot_messages)
+        except NotImplementedError:
+            logger.warning(
+                "Agent %s - %s: backend does not support scoped delete, "
+                "falling back to appending user input and assistant response.",
+                self.name,
+                self.id,
+            )
+            pinned_content = self._get_pinned_content()
+            if pinned_content is not None:
+                self.memory.add(role=MessageRole.USER, content=pinned_content, metadata=metadata.copy())
+            last_assistant = next(
+                (m for m in reversed(snapshot_messages) if m.role == MessageRole.ASSISTANT),
+                None,
+            )
+            if last_assistant:
+                self.memory.add(
+                    role=last_assistant.role,
+                    content=last_assistant.content,
+                    metadata=metadata.copy(),
+                )
 
         logger.info(
             "Agent %s - %s: saved %d message(s) to memory (snapshot)",
