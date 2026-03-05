@@ -63,6 +63,10 @@ class HistoryManagerMixin:
             to_summarize = conversation_history
             to_preserve = []
 
+        if to_summarize == [] and self.is_token_limit_exceeded():
+            to_summarize = conversation_history
+            to_preserve = []
+
         return to_summarize, to_preserve
 
     def _compact_history(

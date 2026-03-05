@@ -157,6 +157,24 @@ class TestSplitHistory:
         total = len(to_summarize) + len(to_preserve)
         assert total == 2  # only conv1, conv2
 
+    def test_token_limit_exceeded_forces_summarize_all(self):
+        """When conversation fits in max_preserved_tokens but the total prompt
+        exceeds the token limit, all messages must go to to_summarize so that
+        compaction makes progress instead of looping as a no-op."""
+        msgs = [_system(), _user("Hello"), _assistant("Hi there"), _user("How are you?")]
+        agent = FakeAgent(
+            messages=msgs,
+            max_preserved_tokens=10_000,
+            max_token_context_length=1,
+        )
+
+        assert agent.is_token_limit_exceeded()
+
+        to_summarize, to_preserve = agent._split_history()
+
+        assert len(to_summarize) == 3
+        assert to_preserve == []
+
 
 class TestCompactHistory:
     """Tests for _compact_history."""
