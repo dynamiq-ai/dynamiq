@@ -10,7 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.tools.file_tools import RESERVED_AGENT_PATH_PREFIX
 from dynamiq.runnables import RunnableConfig
 from dynamiq.sandboxes.base import Sandbox
 from dynamiq.storages.file.base import FileStore
@@ -25,8 +27,7 @@ class TodoStatus(str, Enum):
     COMPLETED = "completed"
 
 
-# Path where todos are stored within the file store
-TODOS_FILE_PATH = "._agent/todos.json"
+TODOS_FILE_PATH = f"{RESERVED_AGENT_PATH_PREFIX}/todos.json"
 
 
 class TodoItem(BaseModel):
@@ -54,13 +55,15 @@ class TodoWriteInputSchema(BaseModel):
     todos: list[TodoItem] = Field(
         ...,
         description=(
-            "List of todo items. Each item MUST have: "
-            "'id' (required string), 'content' (string), 'status' (TodoStatus enum: pending/in_progress/completed)."
+            "List of todo items. Each item MUST have 'id', 'content', and 'status'. "
+            "When updating (merge=true), content is required but ignored — the original content is preserved."
         ),
     )
     merge: bool = Field(
         default=True,
-        description="If true, merge with existing todos (update by id). If false, replace all.",
+        description="If true, update status of existing todos by id (content you send is ignored, "
+        "original is preserved). "
+        "If false, replace all todos with the provided list.",
     )
 
 
@@ -73,15 +76,22 @@ class TodoWriteTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "todo-write"
-    description: str = """Save or update the todo list.
+    description: str = """Save or update the todo list. Every item requires 'id', 'content', and 'status'.
 
-Each todo item needs: 'id', 'content', 'status' (pending/in_progress/completed).
+Two modes:
+
+CREATE (merge=false): Build the full todo list.
+  {"todos": [{"id": "1", "content": "Implement auth", "status": "in_progress"},
+  {"id": "2", "content": "Add tests", "status": "pending"}], "merge": false}
+
+UPDATE (merge=true, default): Change status only. Content is required but ignored — the original content is preserved.
+  {"todos": [{"id": "1", "content": "ignored", "status": "completed"},
+  {"id": "2", "content": "ignored", "status": "in_progress"}], "merge": true}
 
 RULES:
-- When creating initial list: first task "in_progress", rest "pending"
-- After initial creation, ONLY update status via merge=true - do not restructure the plan
-- Use merge=true to update existing todos by id
-- Only use merge=false for initial list creation
+- Use merge=false ONLY for initial list creation. First task should be "in_progress", rest "pending".
+- Use merge=true for ALL subsequent updates — only status is applied, content stays unchanged.
+- Do NOT restructure, reword, or reorder todos when updating status.
 """
 
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=30))
@@ -107,7 +117,6 @@ RULES:
                 if not isinstance(todos, list):
                     logger.warning(f"TodoWriteTool: Invalid todos format (expected list, got {type(todos).__name__})")
                     return []
-                # Validate each item is a valid TodoItem
                 validated = []
                 for t in todos:
                     try:
@@ -146,13 +155,18 @@ RULES:
         new_todos = [todo.model_dump() for todo in input_data.todos]
 
         if input_data.merge:
-            # Merge with existing todos
             existing = self._load_todos()
             existing_by_id = {t.get("id"): t for t in existing if t.get("id")}
 
-            # id is guaranteed by TodoItem validation
+            unknown_ids = [t["id"] for t in new_todos if t["id"] not in existing_by_id]
+            if unknown_ids:
+                raise ToolExecutionException(
+                    f"Todo ids not found: {unknown_ids}. Existing ids: {list(existing_by_id.keys())}",
+                    recoverable=True,
+                )
+
             for todo in new_todos:
-                existing_by_id[todo["id"]] = todo
+                existing_by_id[todo["id"]]["status"] = todo["status"]
 
             final_todos = list(existing_by_id.values())
         else:

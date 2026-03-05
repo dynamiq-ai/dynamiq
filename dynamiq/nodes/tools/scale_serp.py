@@ -12,11 +12,10 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_SERP = """Performs web search using Scale SERP with support for web, news, images, and video results.
+DESCRIPTION_SERP = """Performs web search with support for web, news, images, and video results.
 
 Key Capabilities:
 - Multi-format search: web, news, images, videos
-- Geographic targeting with location and country filtering
 - Language preferences and safe search filtering
 - Customizable result counts (1-100) and time-based filtering
 
@@ -24,16 +23,10 @@ Usage Strategy:
 - Web: General research, documentation, comprehensive results
 - News: Current events, recent developments with time_range
 - Images/Videos: Visual content for presentations, analysis
-- Use location for local results, num parameter for analysis depth
-
-Parameter Guide:
-- search_type: web/news/images/videos for content type
-- location: Geographic targeting ("New York", "London")
-- num: Result count based on analysis needs (1-100)
-- time_range: Recent results (day, week, month, year)
+- Use num parameter for analysis depth
 
 Examples:
-- {"query": "coffee shops", "search_type": "web", "location": "New York"}
+- {"query": "coffee shops", "search_type": "web"}
 - {"query": "tech news", "search_type": "news", "time_range": "week"}
 - {"query": "data visualization", "search_type": "images", "num": 30}"""
 

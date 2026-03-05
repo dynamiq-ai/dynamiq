@@ -23,18 +23,8 @@ Key capabilities:
 Usage strategy:
 - Keep `only_main_content=True` for articles/blogs; disable when layout/menus matter
 - Pass `formats` as strings or typed dicts (e.g. `{'type': 'json', 'schema': {...}}`) to shape the response
-- Set `max_age`, `store_in_cache`, or `zero_data_retention` based on freshness vs. compliance needs
+- Set `max_age` or `zero_data_retention` based on freshness vs. compliance needs
 - Combine `actions` with `wait_for` to ensure dynamic content loads before scraping/screenshotting
-
-Parameter guide (FirecrawlInputSchema):
-- `url` (required): target page.
-- `formats`: output mix, strings or objects from Firecrawl's Formats schema.
-- `only_main_content` / `include_tags` / `exclude_tags`: trim boilerplate or force specific HTML tags.
-- `max_age`, `headers`, `wait_for`, `mobile`, `skip_tls_verification`, `timeout`: control fetch/crawl behavior.
-- `parsers`: `['pdf']` by default; send [] to skip PDF parsing or objects like `{'type': 'pdf','maxPages':5}`.
-- `actions`: ordered automation objects (wait/click/write/press/scroll/screenshot/pdf/executeJavascript/scrape).
-- `location`: emulate country + languages for proxies and Accept-Language headers.
-- `remove_base64_images`, `block_ads`, `proxy`, `store_in_cache`, `zero_data_retention`: caching/compliance knobs.
 
 Example:
 {"url": "https://example.com", "formats": ["markdown", "links"], "only_main_content": true, "proxy": "auto"}"""
@@ -76,7 +66,7 @@ class FirecrawlInputSchema(BaseModel):
     formats: list[str | dict[str, Any]] | None = Field(
         default=None,
         description=(
-            "Firecrawl output formats. Accepts plain strings (markdown/html/rawHtml/links/summary/"
+            "Tool output formats. Accepts plain strings (markdown/html/rawHtml/links/summary/"
             "screenshot/json/changeTracking/branding) or objects with format-specific options."
         ),
     )
@@ -98,7 +88,8 @@ class FirecrawlInputSchema(BaseModel):
     max_age: int | None = Field(
         default=None,
         alias="maxAge",
-        description="Cache freshness window in ms (Firecrawl default is 172800000 = two days).",
+        description="Cache freshness window in ms (default is 172800000 = two days).",
+        json_schema_extra={"is_accessible_to_agent": False}
     )
     headers: dict[str, Any] | None = Field(
         default=None,
@@ -116,13 +107,13 @@ class FirecrawlInputSchema(BaseModel):
     skip_tls_verification: bool | None = Field(
         default=None,
         alias="skipTlsVerification",
-        description="True disables TLS verification (Firecrawl default), set False for strict cert checks.",
+        description="True disables TLS verification (default), set False for strict cert checks.",
     )
     timeout: int | None = Field(default=None, description="Request timeout in ms for the upstream fetch.")
     parsers: list[str | dict[str, Any]] | None = Field(
         default=None,
         description=(
-            "Controls file parsers. Firecrawl defaults to ['pdf']; pass [] to disable auto PDF parsing or "
+            "Controls file parsers. Defaults to ['pdf']; pass [] to disable auto PDF parsing or "
             "objects like {'type': 'pdf', 'maxPages': 5} to limit cost."
         ),
     )
@@ -130,7 +121,7 @@ class FirecrawlInputSchema(BaseModel):
         default=None,
         description=(
             "Optional automation instructions executed before scraping. Supports wait/screenshot/click/write/"
-            "press/scroll/scrape/executeJavascript/pdf actions following Firecrawl's schema."
+            "press/scroll/scrape/executeJavascript/pdf actions following the tool's schema."
         ),
     )
     location: LocationSettings | None = Field(
@@ -141,29 +132,34 @@ class FirecrawlInputSchema(BaseModel):
         default=None,
         alias="removeBase64Images",
         description="True strips giant base64 <img> blobs and replaces them with placeholders (default True).",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     block_ads: bool | None = Field(
         default=None,
         alias="blockAds",
-        description="Enable ad + cookie popup blocking (default True on Firecrawl).",
+        description="Enable ad + cookie popup blocking (default True).",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     proxy: Literal["basic", "stealth", "auto"] | None = Field(
         default=None,
         description=(
             "Proxy tier: 'basic' (fast, low protection), 'stealth' (solves harder anti-bot, higher cost), or "
-            "'auto' (retry with stealth on failure; Firecrawl default)."
+            "'auto' (retry with stealth on failure by default)."
         ),
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     store_in_cache: bool | None = Field(
         default=None,
         alias="storeInCache",
-        description="True lets Firecrawl index/cache the page "
+        description="True lets the tool index/cache the page "
         "(default True, forced False when using sensitive params).",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     zero_data_retention: bool | None = Field(
         default=None,
         alias="zeroDataRetention",
-        description="Opt-in compliance flag; True enables Firecrawl's zero data retention mode (requires approval).",
+        description="Opt-in compliance flag; True enables zero data retention mode (requires approval).",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     brief: str = Field(
         default="Scraping the web for information.",
@@ -177,6 +173,7 @@ class FirecrawlTool(ConnectionNode):
     action_type: ActionType = ActionType.WEB_SCRAPE
     name: str = "Firecrawl Tool"
     description: str = DESCRIPTION_FIRECRAWL
+    is_parallel_execution_allowed: bool = True
     connection: Firecrawl
     url: str | None = None
     input_schema: ClassVar[type[FirecrawlInputSchema]] = FirecrawlInputSchema
@@ -265,7 +262,7 @@ class FirecrawlTool(ConnectionNode):
         """Format the response for agent consumption using Markdown."""
         data = response.get("data", {}) or {}
         sections = [
-            "## Firecrawl Scrape Result",
+            "## Web Scraping Result",
             f"- URL: {url}",
             f"- Success: {response.get('success', False)}",
         ]

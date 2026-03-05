@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from io import BytesIO
 
 import pytest
@@ -410,3 +411,40 @@ def test_edit_validation_rejects_invalid_inputs():
 
     with pytest.raises(ValueError):
         FileWriteInputSchema(action="write", file_path="t.txt", brief="no content")
+
+
+def test_file_info_model_dump_json_serializes_bytes_as_base64():
+    """FileInfo.model_dump(mode='json') must encode content as base64 and datetime as ISO string."""
+    import base64
+    import json
+
+    from dynamiq.storages.file.base import FileInfo
+
+    raw = b"\x89PNG\r\n\x1a\n"
+    info = FileInfo(
+        name="image.png",
+        path="/tmp/image.png",
+        size=len(raw),
+        content_type="image/png",
+        content=raw,
+    )
+
+    dumped = info.model_dump(mode="json")
+
+    assert isinstance(dumped["content"], str)
+    assert base64.b64decode(dumped["content"]) == raw
+
+    assert isinstance(dumped["created_at"], str)
+
+    json.dumps(dumped)
+
+    # model_dump() without mode="json" returns raw Python types
+    raw_dumped = info.model_dump()
+    assert isinstance(raw_dumped["content"], bytes)
+    assert raw_dumped["content"] == raw
+    assert isinstance(raw_dumped["created_at"], datetime)
+
+    none_info = FileInfo(name="x", path="x", size=0, content=None)
+    none_dumped = none_info.model_dump(mode="json")
+    assert none_dumped["content"] is None
+    json.dumps(none_dumped)

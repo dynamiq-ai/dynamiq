@@ -33,11 +33,25 @@ FINAL_ANSWER_FUNCTION_SCHEMA = {
                     "description": "Your reasoning about why you can answer original question.",
                 },
                 "answer": {"type": "string", "description": "Answer on initial request."},
+                "output_files": {
+                    "type": "string",
+                    "description": "Optional comma-separated file paths to return. Empty string if none.",
+                },
             },
-            "required": ["thought", "answer"],
+            "required": ["thought", "answer", "output_files"],
         },
     },
 }
+
+
+PRIORITY_FIELDS = ("brief",)
+
+
+def _reorder_fields(fields: dict) -> list[tuple[str, Any]]:
+    """Reorder fields so that priority fields (e.g. brief) come first."""
+    priority = [(k, v) for k, v in fields.items() if k in PRIORITY_FIELDS]
+    rest = [(k, v) for k, v in fields.items() if k not in PRIORITY_FIELDS]
+    return priority + rest
 
 
 def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str], str]) -> str:
@@ -54,7 +68,7 @@ def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str]
     input_formats = []
     for tool in tools:
         params = []
-        for name, field in tool.input_schema.model_fields.items():
+        for name, field in _reorder_fields(tool.input_schema.model_fields):
             if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
                 args = get_args(field.annotation)
                 if get_origin(field.annotation) in (Union, types.UnionType):
@@ -108,7 +122,7 @@ def generate_structured_output_schemas(
             "strict": True,
             "schema": {
                 "type": "object",
-                "required": ["thought", "action", "action_input"],
+                "required": ["thought", "action", "action_input", "output_files"],
                 "properties": {
                     "thought": {
                         "type": "string",
@@ -121,6 +135,12 @@ def generate_structured_output_schemas(
                     "action_input": {
                         "type": "string",
                         "description": action_input_description,
+                    },
+                    "output_files": {
+                        "type": "string",
+                        "description": (
+                            "Comma-separated file paths to return when action is finish. Empty string otherwise."
+                        ),
                     },
                 },
                 "additionalProperties": False,
@@ -172,7 +192,7 @@ def generate_property_schema(properties: dict, name: str, field: Any) -> None:
             elif param_type := TYPE_MAPPING.get(param):
                 types.append(param_type)
 
-            elif issubclass(param, Enum):
+            elif isinstance(param, type) and issubclass(param, Enum):
                 element_type = TYPE_MAPPING.get(filter_format_type(type(list(param.__members__.values())[0].value))[0])
                 types.append(element_type)
                 properties[name]["enum"] = [field.value for field in param.__members__.values()]

@@ -153,9 +153,10 @@ def test_extract_default_final_answer():
     output = """Thought: I have all the information I need
 Answer: The final answer is 42"""
 
-    thought, answer = parser.extract_default_final_answer(output)
+    thought, answer, output_files = parser.extract_default_final_answer(output)
     assert thought == "I have all the information I need"
     assert answer == "The final answer is 42"
+    assert output_files == ""
 
 
 def test_extract_default_final_answer_multiline():
@@ -166,8 +167,59 @@ Answer: The final answer is:
 2. Second point
 3. Third point"""
 
-    thought, answer = parser.extract_default_final_answer(output)
+    thought, answer, output_files = parser.extract_default_final_answer(output)
     assert thought == "I have all the information I need"
     assert "The final answer is:" in answer
     assert "1. First point" in answer
     assert "3. Third point" in answer
+    assert output_files == ""
+
+
+def test_extract_default_final_answer_with_output_files():
+    """Test extraction of final answer with Output Files field."""
+    output = """Thought: I created the requested files.
+Output Files: /home/user/result.txt, /home/user/data.csv
+Answer: Here are your files."""
+
+    thought, answer, output_files = parser.extract_default_final_answer(output)
+    assert thought == "I created the requested files."
+    assert answer == "Here are your files."
+    assert output_files == "/home/user/result.txt, /home/user/data.csv"
+
+
+def test_extract_default_final_answer_without_output_files():
+    """Test that Output Files is empty when not present."""
+    output = """Thought: No files needed.
+Answer: The answer is 42."""
+
+    thought, answer, output_files = parser.extract_default_final_answer(output)
+    assert thought == "No files needed."
+    assert answer == "The answer is 42."
+    assert output_files == ""
+
+
+def test_extract_default_final_answer_output_files_phrase_in_thought():
+    """'Output Files:' embedded in thought text must not be treated as the output-files field."""
+    output = (
+        "Thought: I checked the Output Files: section and found nothing relevant.\n"
+        "Answer: No files found."
+    )
+
+    thought, answer, output_files = parser.extract_default_final_answer(output)
+    assert thought == "I checked the Output Files: section and found nothing relevant."
+    assert answer == "No files found."
+    assert output_files == ""
+
+
+def test_extract_default_final_answer_output_files_in_thought_and_real_field():
+    """When 'Output Files:' appears both in the thought and as a real field, the real field wins."""
+    output = (
+        "Thought: I noted the Output Files: field is important.\n"
+        "Output Files: /tmp/result.csv\n"
+        "Answer: Done."
+    )
+
+    thought, answer, output_files = parser.extract_default_final_answer(output)
+    assert thought == "I noted the Output Files: field is important."
+    assert answer == "Done."
+    assert output_files == "/tmp/result.csv"

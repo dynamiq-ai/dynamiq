@@ -11,7 +11,7 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_SCRAPE = """Scrapes web content from URLs using Jina with CSS selector targeting and content filtering.
+DESCRIPTION_SCRAPE = """Scrapes web content from URLs with CSS selector targeting and content filtering.
 
 Key Capabilities:
 - Clean text extraction with CSS selector precision
@@ -24,37 +24,18 @@ Usage Strategy:
 - Use remove_selector to filter out ads, navigation
 - Enable include_links/include_images based on analysis needs
 
-Parameter Guide:
-- url: URL to scrape (e.g., "https://example.com")
-- target_selector: CSS selector for specific content (".content", "#main")
-- remove_selector: Filter unwanted elements (".ads", ".nav")
-- include_links/include_images: Additional content extraction
-- engine: "browser" for JS-heavy sites, "direct" for speed
-
 Examples:
 - {"url": "https://example.com", "target_selector": ".content"}
 - {"url": "https://news.com", "remove_selector": ".ads"}
 - {"url": "https://blog.com", "include_images": true}"""
 
-DESCRIPTION_SEARCH = """Searches the web with the Jina Search API and returns LLM-ready SERP data.
+DESCRIPTION_SEARCH = """Searches the web with the Search API and returns LLM-ready SERP data.
 
 Highlights:
 - Supports geo/language targeting plus per-domain searches for authoritative sources
 - Controls payload size with `include_full_content`, `X-Respond-With`, and image/links summaries
 - Flexible renderers (markdown/html/text/screenshot/pageshot) and browser engines
 - Complete header access (`X-With-*`, `X-Retain-Images`, `X-No-Cache`, `X-Proxy-Url`, etc.) for advanced use cases
-
-Common Parameters:
-- query (required): What to search for
-- max_results (1-100), page: Tune breadth and pagination
-- country, location, language, locale: Localize SERP responses
-- site: Lock search scope to a domain
-- return_format: markdown, html, text, screenshot, or pageshot
-- include_links / include_images: Summaries (`true`) or exhaustive lists (`all`)
-- include_favicons / include_favicon: Surface favicons per SERP result or per page
-- include_full_content: Pull full article text (switches engine to browser automatically unless overridden)
-- no_cache, timeout, cookies, proxy_url: Reliability controls
-- retain_images, respond_with, engine: Low-level knobs for payload control
 
 Example Invocations:
 - {"query": "restaurants near downtown", "site": "yelp.com", "include_links": true}
@@ -64,8 +45,10 @@ Example Invocations:
 
 class JinaScrapeInputSchema(BaseModel):
     url: str | None = Field(None, description="URL of the page to scrape")
-    target_selector: str | None = Field(None, description="CSS selector to focus on specific elements")
-    remove_selector: str | None = Field(None, description="CSS selector to exclude elements")
+    target_selector: str | None = Field(
+        None, description="CSS selector to focus on specific elements ('.content', '#main')"
+    )
+    remove_selector: str | None = Field(None, description="CSS selector to exclude elements ('.ads', '.nav')")
     include_links: bool | None = Field(None, description="Include links summary")
     include_images: bool | None = Field(None, description="Include images summary")
     generate_alt_text: bool | None = Field(None, description="Generate alt text for images")
@@ -579,7 +562,7 @@ class JinaSearchTool(ConnectionNode):
 
         if self.is_optimized_for_agents:
             result_sections = [
-                f"## Jina Search Results for '{request_body['q']}'",
+                f"## Search Results for '{request_body['q']}'",
                 "",
             ]
             if sources_with_url:
@@ -587,7 +570,7 @@ class JinaSearchTool(ConnectionNode):
             if formatted_results:
                 result_sections.append(formatted_results)
             else:
-                result_sections.append("No results were returned by Jina Search.")
+                result_sections.append("No results were returned by the tool.")
             result = "\n".join(result_sections).strip()
         else:
             images = {}

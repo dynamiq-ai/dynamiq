@@ -5,7 +5,8 @@ import threading
 from typing import Any
 
 from e2b.exceptions import RateLimitException as E2BRateLimitException
-from e2b_desktop import Sandbox as E2BDesktopSandbox
+from e2b.sandbox.commands.command_handle import CommandExitException
+from e2b_code_interpreter import Sandbox as E2BCodeInterpreterSandbox
 from pydantic import ConfigDict, Field, PrivateAttr
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
@@ -41,12 +42,16 @@ class E2BSandbox(Sandbox):
         default_factory=SandboxCreationErrorHandling,
         description="Retry and backoff config for sandbox creation and reconnection (rate-limit and transient errors).",
     )
-    _sandbox: E2BDesktopSandbox | None = PrivateAttr(default=None)
+    _sandbox: E2BCodeInterpreterSandbox | None = PrivateAttr(default=None)
     _sandbox_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
-    def __init__(self, **kwargs):
-        """Initialize the E2B sandbox storage."""
-        super().__init__(**kwargs)
+    @property
+    def _sdk_class(self) -> type:
+        """Return the E2B SDK Sandbox class used for .create() and .connect().
+
+        Subclasses override this to swap the underlying SDK (e.g. e2b_desktop).
+        """
+        return E2BCodeInterpreterSandbox
 
     @property
     def current_sandbox_id(self) -> str | None:
@@ -91,14 +96,13 @@ class E2BSandbox(Sandbox):
                 public_url_error = str(e)
         return SandboxInfo(
             base_path=self.base_path,
-            output_dir=self.output_dir,
             sandbox_id=self.sandbox_id,
             public_host=public_host,
             public_url=public_url,
             public_url_error=public_url_error,
         )
 
-    def _ensure_sandbox(self) -> E2BDesktopSandbox:
+    def _ensure_sandbox(self) -> E2BCodeInterpreterSandbox:
         """Lazily initialize or reconnect to E2B sandbox, with retries on rate-limit and transient errors.
 
         Uses double-checked locking so concurrent threads (e.g. parallel tool
@@ -116,6 +120,12 @@ class E2BSandbox(Sandbox):
                 try:
                     self._sandbox = self._reconnect_with_retry()
                     logger.debug(f"E2B sandbox reconnected: {self.sandbox_id}")
+                    # Call set_timeout explicitly to ensure the sandbox timeout
+                    # is set to the proper value after reconnect.
+                    try:
+                        self._sandbox.set_timeout(self.timeout)
+                    except Exception as e:
+                        logger.debug("set_timeout after reconnect failed: %s", e)
                     self._ensure_directories()
                     return self._sandbox
                 except Exception as e:
@@ -129,16 +139,16 @@ class E2BSandbox(Sandbox):
             return self._sandbox
 
     def _ensure_directories(self) -> None:
-        """Create the base and output directories inside the sandbox if they do not exist."""
+        """Create the base directory inside the sandbox if it does not exist."""
         if self._sandbox is None:
             return
         try:
-            self._sandbox.commands.run(f"mkdir -p {shlex.quote(self.base_path)} {shlex.quote(self.output_dir)}")
-            logger.debug(f"E2BSandbox ensured directories exist: {self.base_path}, {self.output_dir}")
+            self._sandbox.commands.run(f"mkdir -p {shlex.quote(self.base_path)}")
+            logger.debug(f"E2BSandbox ensured directory exists: {self.base_path}")
         except Exception as e:
-            logger.warning(f"E2BSandbox failed to create directories: {e}")
+            logger.warning(f"E2BSandbox failed to create directory: {e}")
 
-    def _reconnect_with_retry(self) -> E2BDesktopSandbox:
+    def _reconnect_with_retry(self) -> E2BCodeInterpreterSandbox:
         """Reconnect to existing sandbox with exponential backoff on rate-limit."""
         cfg = self.creation_error_handling
 
@@ -153,17 +163,21 @@ class E2BSandbox(Sandbox):
             ),
             reraise=True,
         )
-        def connect() -> E2BDesktopSandbox:
+        def connect():
             logger.debug(f"Reconnecting to E2B sandbox: {self.sandbox_id}")
-            return E2BDesktopSandbox.connect(
+            # Always pass timeout explicitly to avoid resetting
+            # the sandbox timeout to the 5-minute default
+            # if connect() is called without a timeout value.
+            return self._sdk_class.connect(
                 sandbox_id=self.sandbox_id,
                 api_key=self.connection.api_key,
                 domain=getattr(self.connection, "domain", None),
+                timeout=self.timeout,
             )
 
         return connect()
 
-    def _create_with_retry(self) -> E2BDesktopSandbox:
+    def _create_with_retry(self) -> E2BCodeInterpreterSandbox:
         """Create a new sandbox with exponential backoff on rate-limit."""
         cfg = self.creation_error_handling
 
@@ -178,9 +192,9 @@ class E2BSandbox(Sandbox):
             ),
             reraise=True,
         )
-        def create() -> E2BDesktopSandbox:
+        def create():
             try:
-                return E2BDesktopSandbox.create(
+                return self._sdk_class.create(
                     template=self.template,
                     api_key=self.connection.api_key,
                     timeout=self.timeout,
@@ -214,35 +228,43 @@ class E2BSandbox(Sandbox):
         try:
             if run_in_background_enabled:
                 sandbox.commands.run(command, background=True)
-                return ShellCommandResult(
-                    stdout=f"Command started in background: {command}",
-                    stderr="",
-                    exit_code=0,
-                )
+                return ShellCommandResult(background=True)
 
             result = sandbox.commands.run(command, timeout=timeout)
             return ShellCommandResult(
-                stdout=result.stdout or "",
-                stderr=result.stderr or "",
-                exit_code=getattr(result, "exit_code", None),
+                stdout=result.stdout,
+                stderr=result.stderr,
+                exit_code=result.exit_code,
+            )
+        except CommandExitException as e:
+            logger.debug(f"Command exited with non-zero code: {e.exit_code}, stderr: {e.stderr}")
+            return ShellCommandResult(
+                stdout=e.stdout,
+                stderr=e.stderr,
+                exit_code=e.exit_code,
             )
         except Exception as e:
             logger.error(f"Command execution failed: {e}")
-            return ShellCommandResult(
-                stdout="",
-                stderr=str(e),
-                exit_code=1,
-            )
+            return ShellCommandResult(error=str(e))
 
-    def upload_file(self, file_name: str, content: bytes, destination_path: str | None = None) -> str:
+    def upload_file(
+        self,
+        file_name: str,
+        content: bytes,
+        destination_path: str | None = None,
+        ensure_parent_dirs: bool = True,
+    ) -> str:
         """Upload a file to the E2B sandbox.
 
-        Note: Parent directories are created automatically by E2B's ``files.write()``.
+        When ensure_parent_dirs is True, parent directories are created with ``mkdir -p``
+        before writing so that existing directories (e.g. from a previous skill ingestion)
+        do not cause 500 errors from backends that use non-idempotent mkdir.
 
         Args:
             file_name: Name of the file.
             content: File content as bytes.
             destination_path: Optional destination path in sandbox. If None, uses base_path/file_name.
+            ensure_parent_dirs: When True, run mkdir -p for the destination's parent before write.
 
         Returns:
             The path where the file was uploaded in the sandbox.
@@ -251,6 +273,15 @@ class E2BSandbox(Sandbox):
 
         if destination_path is None:
             destination_path = f"{self.base_path}/{file_name}"
+
+        if ensure_parent_dirs and destination_path:
+            parent = destination_path.rsplit("/", 1)[0]
+            if parent and parent != destination_path:
+                try:
+                    sandbox.commands.run(f"mkdir -p {shlex.quote(parent)}")
+                    logger.debug(f"E2BSandbox ensured parent dir: {parent}")
+                except Exception as e:
+                    logger.warning(f"E2BSandbox mkdir -p for {parent!r} failed (continuing): {e}")
 
         try:
             sandbox.files.write(destination_path, content)
