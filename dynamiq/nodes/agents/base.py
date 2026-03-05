@@ -731,13 +731,14 @@ class Agent(Node):
         """
         user_id = metadata.get("user_id")
         session_id = metadata.get("session_id")
-        if not user_id or not session_id:
+        if not user_id and not session_id:
             logger.warning(
                 f"Agent {self.name} - {self.id}: skipping memory snapshot save "
-                f"because both user_id and session_id are required (got user_id={user_id}, session_id={session_id})",
+                f"because at least one of user_id or session_id is required",
             )
             return
-        scope_filters = {"user_id": user_id, "session_id": session_id}
+
+        fully_scoped = bool(user_id and session_id)
 
         saved = 0
         snapshot_messages: list[Message] = []
@@ -752,38 +753,48 @@ class Agent(Node):
             snapshot_messages.append(Message(role=msg.role, content=content, metadata=metadata.copy()))
             saved += 1
 
-        try:
-            self.memory.replace_messages(filters=scope_filters, messages=snapshot_messages)
-        except NotImplementedError:
-            logger.warning(
-                "Agent %s - %s: backend does not support scoped delete, "
-                "falling back to appending user input and assistant response.",
-                self.name,
-                self.id,
-            )
-            saved = 0
-            if self._pinned_input is not None:
-                pinned_content = extract_message_text(self._pinned_input)
-                self.memory.add(role=MessageRole.USER, content=pinned_content, metadata=metadata.copy())
-                saved += 1
-            last_assistant = next(
-                (m for m in reversed(snapshot_messages) if m.role == MessageRole.ASSISTANT),
-                None,
-            )
-            if last_assistant:
-                self.memory.add(
-                    role=last_assistant.role,
-                    content=last_assistant.content,
-                    metadata=metadata.copy(),
+        if fully_scoped:
+            scope_filters = {"user_id": user_id, "session_id": session_id}
+            try:
+                self.memory.replace_messages(filters=scope_filters, messages=snapshot_messages)
+            except NotImplementedError:
+                logger.warning(
+                    f"Agent {self.name} - {self.id}: backend does not support scoped delete, "
+                    "falling back to appending user input and assistant response.",
                 )
-                saved += 1
+                self._append_fallback_messages(metadata, snapshot_messages)
+                return
+        else:
+            logger.info(
+                f"Agent {self.name} - {self.id}: only one of user_id/session_id provided, "
+                "using append-only save to avoid cross-scope data loss.",
+            )
+            self._append_fallback_messages(metadata, snapshot_messages)
+            return
 
         logger.info(
-            "Agent %s - %s: saved %d message(s) to memory",
-            self.name,
-            self.id,
-            saved,
+            f"Agent {self.name} - {self.id}: saved {saved} message(s) to memory",
         )
+
+    def _append_fallback_messages(self, metadata: dict, snapshot_messages: list[Message]) -> None:
+        """Append only the user input and last assistant response to memory (safe fallback)."""
+        saved = 0
+        if self._pinned_input is not None:
+            pinned_content = extract_message_text(self._pinned_input)
+            self.memory.add(role=MessageRole.USER, content=pinned_content, metadata=metadata.copy())
+            saved += 1
+        last_assistant = next(
+            (m for m in reversed(snapshot_messages) if m.role == MessageRole.ASSISTANT),
+            None,
+        )
+        if last_assistant:
+            self.memory.add(
+                role=last_assistant.role,
+                content=last_assistant.content,
+                metadata=metadata.copy(),
+            )
+            saved += 1
+        logger.info(f"Agent {self.name} - {self.id}: saved {saved} message(s) to memory (fallback)")
 
     def _run_llm(
         self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs
