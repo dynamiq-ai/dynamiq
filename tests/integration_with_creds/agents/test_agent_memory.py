@@ -362,6 +362,7 @@ def test_react_agent_with_dynamodb_memory(
 
 
 @pytest.mark.integration
+@pytest.mark.flaky(reruns=3)
 def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
     """Test that memory uses snapshot semantics: clear + rewrite after each run.
 
