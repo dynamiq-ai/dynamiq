@@ -29,7 +29,7 @@ from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, Parallel
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.nodes.tools.skills_tool import SkillsTool
-from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
+from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox, SandboxConfig
 from dynamiq.skills.config import SkillsConfig
@@ -756,11 +756,7 @@ class Agent(Node):
         for msg in self._prompt.messages:
             if msg.role == MessageRole.SYSTEM:
                 continue
-            if isinstance(msg, Message):
-                content = msg.content
-            else:
-                text_parts = [c.text for c in msg.content if isinstance(c, VisionMessageTextContent)]
-                content = " ".join(text_parts) if text_parts else "Image input"
+            content = extract_message_text(msg)
             snapshot_messages.append(Message(role=msg.role, content=content, metadata=metadata.copy()))
             saved += 1
 
