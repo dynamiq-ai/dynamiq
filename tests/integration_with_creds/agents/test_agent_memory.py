@@ -362,7 +362,6 @@ def test_react_agent_with_dynamodb_memory(
 
 
 @pytest.mark.integration
-@pytest.mark.flaky(reruns=3)
 def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
     """Test that memory uses snapshot semantics: clear + rewrite after each run.
 
@@ -375,6 +374,8 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
     3. After turn 2, memory is replaced (not appended) with the full
        conversation snapshot and the agent can recall the tool result from
        the previous turn.
+    4. Another user/session's data seeded before the agent runs remains
+       intact after both turns (cross-scope isolation).
     """
     lookup_tool = Python(
         name="company-lookup",
@@ -406,6 +407,15 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
     user_id = str(uuid.uuid4())
     session_id = str(uuid.uuid4())
 
+    # --- Seed another user/session that must survive all agent runs ---
+    other_user_id = str(uuid.uuid4())
+    other_session_id = str(uuid.uuid4())
+    other_filters = {"user_id": other_user_id, "session_id": other_session_id}
+    OTHER_USER_MSG = "I need help with my billing issue."
+    OTHER_ASSISTANT_MSG = "Sure, I can help you with billing. What is your account number?"
+    memory.add(role=MessageRole.USER, content=OTHER_USER_MSG, metadata=other_filters.copy())
+    memory.add(role=MessageRole.ASSISTANT, content=OTHER_ASSISTANT_MSG, metadata=other_filters.copy())
+
     # --- Turn 1: ask about a person (forces tool call) ---
 
     result_1 = wf.run(
@@ -421,7 +431,8 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
     response_1 = result_1.output[agent.id]["output"]["content"]
     assert "Found" in response_1, f"Agent should mention 'Found': {response_1}"
 
-    stored_after_t1 = memory.backend.messages
+    filters = {"user_id": user_id, "session_id": session_id}
+    stored_after_t1 = memory.get_agent_conversation(filters=filters)
 
     for msg in stored_after_t1:
         assert msg.role != MessageRole.SYSTEM, f"System message leaked: {msg.content[:80]}"
@@ -450,7 +461,7 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
         role=("You are a helpful assistant."),
         inference_mode=InferenceMode.XML,
         memory=memory,
-        max_loops=3,
+        max_loops=5,
     )
 
     wf1 = Workflow(flow=flows.Flow(nodes=[agent]))
@@ -472,7 +483,7 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
     recall_response = result_2.output[agent.id]["output"]["content"]
     assert USER_COMPANY in recall_response, f"Agent should recall '{USER_COMPANY}' from memory: {recall_response}"
 
-    stored_after_t2 = memory.backend.messages
+    stored_after_t2 = memory.get_agent_conversation(filters=filters)
     prompt_non_system_t2 = [m for m in agent._prompt.messages if m.role != MessageRole.SYSTEM]
     assert len(stored_after_t2) == len(
         prompt_non_system_t2
@@ -497,3 +508,10 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
 
     contents = " ".join(m.content for m in stored_after_t2)
     assert USER_COMPANY in contents, "Memory snapshot should still contain the tool result from turn 1"
+
+    # --- Verify other user/session data survived both agent runs ---
+    other_stored = memory.get_agent_conversation(filters=other_filters)
+    assert len(other_stored) == 2, f"Other user's messages should be intact after agent runs, got {len(other_stored)}"
+    other_contents = [m.content for m in other_stored]
+    assert OTHER_USER_MSG in other_contents, "Other user's message should be preserved"
+    assert OTHER_ASSISTANT_MSG in other_contents, "Other assistant's reply should be preserved"
