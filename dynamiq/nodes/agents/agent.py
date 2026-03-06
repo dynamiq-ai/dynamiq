@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
+from dynamiq.nodes.agents.agent_tool import SubAgentTool
 from dynamiq.nodes.agents.base import Agent as BaseAgent
 from dynamiq.nodes.agents.components import parser, schema_generator
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
@@ -181,7 +182,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if not self.delegation_allowed:
             return False
 
-        if not isinstance(tool, Agent):
+        if not isinstance(tool, SubAgentTool):
             return False
 
         if isinstance(action_input, str):

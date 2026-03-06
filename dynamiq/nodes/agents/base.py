@@ -285,6 +285,17 @@ class Agent(Node):
         super().__init__(**kwargs)
         self._run_depends: list[dict] = []
         self._prompt = Prompt(messages=[])
+        # Added for backward compatibility with old Agent tools
+        from dynamiq.nodes.agents.agent_tool import SubAgentTool
+
+        self.tools = [
+            (
+                SubAgentTool(agent=t, name=t.name, description=t.description or "")
+                if isinstance(t, Agent) and not isinstance(t, SubAgentTool)
+                else t
+            )
+            for t in self.tools
+        ]
 
         expanded_tools = []
         for tool in self.tools:
@@ -1147,10 +1158,14 @@ class Agent(Node):
                 logger.debug("\n".join(debug_info))
 
         child_kwargs = kwargs | {"recoverable_error": True}
-        is_child_agent = isinstance(tool, Agent)
+
+        from dynamiq.nodes.agents.agent_tool import SubAgentTool
+
+        is_child_agent = isinstance(tool, SubAgentTool)
+        resolved_agent = tool.get_or_create_agent() if is_child_agent else None
 
         if is_child_agent and self._current_call_context:
-            child_context = self._build_child_agent_context(tool)
+            child_context = self._build_child_agent_context(resolved_agent)
             for ctx_key in ("user_id", "session_id"):
                 if ctx_key not in merged_input and child_context.get(ctx_key):
                     merged_input[ctx_key] = child_context[ctx_key]
@@ -1159,9 +1174,9 @@ class Agent(Node):
 
         if is_child_agent and tool_params:
             nested_any = (
-                tool_params.by_id_params.get(getattr(tool, "id", ""))
-                or tool_params.by_name_params.get(getattr(tool, "name", ""))
-                or tool_params.by_name_params.get(self.sanitize_tool_name(getattr(tool, "name", "")))
+                tool_params.by_id_params.get(getattr(resolved_agent, "id", ""))
+                or tool_params.by_name_params.get(getattr(resolved_agent, "name", ""))
+                or tool_params.by_name_params.get(self.sanitize_tool_name(getattr(resolved_agent, "name", "")))
             )
             if nested_any:
                 if isinstance(nested_any, ToolParams):
@@ -1177,10 +1192,10 @@ class Agent(Node):
         if is_child_agent and isinstance(merged_input, dict) and "delegate_final" in merged_input:
             effective_delegate_final = effective_delegate_final or bool(merged_input.pop("delegate_final"))
 
-        tool_to_run = tool
+        tool_to_run = resolved_agent if resolved_agent is not None else tool
         tool_config = ensure_config(config)
-        if is_parallel:
-            tool_to_run, tool_config = self._clone_tool_for_execution(tool, tool_config)
+        if is_parallel and not is_child_agent:
+            tool_to_run, tool_config = self._clone_tool_for_execution(tool_to_run, tool_config)
 
         tool_result = tool_to_run.run(
             input_data=merged_input,
