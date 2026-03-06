@@ -2,6 +2,7 @@
 
 from litellm import token_counter
 
+from dynamiq.nodes.agents.utils import extract_message_text
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.utils.logger import logger
 
@@ -13,7 +14,8 @@ class HistoryManagerMixin:
     - _prompt: Prompt object with messages
     - llm: LLM object with model and get_token_limit()
     - summarization_config: SummarizationConfig object
-    - _history_offset: int offset for history
+    - _history_offset: int offset past the system prompt (typically 1);
+      everything from this index onward is eligible for summarization.
     - name: str agent name
     - id: str agent id
     """
@@ -73,18 +75,21 @@ class HistoryManagerMixin:
         self,
         summary: str | None = None,
         preserved: list[Message | VisionMessage] | None = None,
+        pinned_content: str | None = None,
     ) -> None:
         """Compact history, optionally inserting a summary before preserved messages.
 
         Replaces the conversation history with::
 
-            [prefix] [summary] [preserved msg 1] [preserved msg 2]
+            [system prefix] [summary + original request] [preserved msgs …]
 
-        If *summary* is provided it is inserted as a user message between the
-        prefix and the preserved messages.
+        If *pinned_content* is provided and not present in the preserved tail,
+        the original user request is appended verbatim to the summary so it is
+        never lost across repeated compactions.
 
         Args:
             summary: Optional summary text to insert after prefix.
+            pinned_content: Plain-text content of the original user request.
             preserved: Pre-computed preserved messages from ``_split_history``.
                 When supplied, skips the redundant ``_split_history`` call.
         """
@@ -94,6 +99,11 @@ class HistoryManagerMixin:
         self._prompt.messages = self._prompt.messages[: self._history_offset]
 
         if summary:
+            if pinned_content is not None:
+                preserved_has_pinned = any(extract_message_text(m) == pinned_content for m in preserved)
+                if not preserved_has_pinned:
+                    summary = f"{summary}\n\nOriginal request: {pinned_content}"
+
             self._prompt.messages.append(
                 Message(role=MessageRole.USER, content=f"\nObservation: {summary}\n", static=True)
             )

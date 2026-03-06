@@ -19,7 +19,7 @@ from dynamiq.nodes.agents.exceptions import (
     RecoverableAgentException,
     TagNotFoundError,
 )
-from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
+from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser, extract_message_text
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsInputSchema
@@ -541,7 +541,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
         else:
             self._prompt.messages = [system_message, input_message]
 
-        self._history_offset = len(self._prompt.messages)
+        self._history_offset = 1
+        self._pinned_input = input_message
 
         # Configure stop sequences based on inference mode
         stop_sequences = []
@@ -737,6 +738,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             if isinstance(tool, ContextManagerTool):
                 self._compact_history(
                     summary=tool_output_meta.get("summary", tool_result),
+                    pinned_content=extract_message_text(self._pinned_input) if self._pinned_input else None,
                     preserved=to_preserve,
                 )
 

@@ -25,6 +25,14 @@ from dynamiq.utils.utils import CHARS_PER_TOKEN
 TOOL_MAX_TOKENS = 64000
 
 
+def extract_message_text(message: Message | VisionMessage) -> str:
+    """Extract plain text from a Message or VisionMessage."""
+    if isinstance(message, Message):
+        return message.content
+    text_parts = [c.text for c in message.content if isinstance(c, VisionMessageTextContent)]
+    return " ".join(text_parts) if text_parts else "Image input"
+
+
 def convert_bytesio_to_file_info(bytesio_obj: io.BytesIO, key: str, index: int = None) -> FileInfo:
     """Convert a BytesIO object to a FileInfo object with base64 encoded content."""
     content_bytes = bytesio_obj.getvalue()

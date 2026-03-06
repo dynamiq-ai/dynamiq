@@ -98,12 +98,28 @@ class MemoryBackend(ABC, BaseModel):
     @abstractmethod
     def clear(self) -> None:
         """
-        Clears the memory storage.
+        Clears all memory items from the storage.
 
         Raises:
             MemoryBackendError: If the memory cannot be cleared
         """
         raise NotImplementedError
+
+    def delete(self, session_id: str | None = None, user_id: str | None = None) -> None:
+        """Delete memory items scoped by session and/or user.
+
+        At least one of ``session_id`` or ``user_id`` must be provided.
+        Backends that do not support scoped deletion should not override
+        this method — the default raises ``NotImplementedError``.
+
+        Args:
+            session_id: Delete items belonging to this session.
+            user_id: Delete items belonging to this user.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support scoped delete. "
+            "Override the delete() method to enable this feature."
+        )
 
     def _prepare_filters(self, filters: dict[str, Any] | None = None) -> dict[str, Any] | None:
         """
