@@ -63,7 +63,8 @@ class TestSubAgentToolCreation:
         assert tool.agent_factory is None
         assert tool.is_factory_mode is False
         assert tool.name == "Researcher"
-        assert tool.description == "Performs web research"
+        assert tool.description.startswith("Performs web research")
+        assert SubAgentTool.INITIALIZED_HINT in tool.description
 
     def test_factory_mode(self, test_llm):
         factory = lambda: Agent(name="Researcher", llm=test_llm, role="research", tools=[])
@@ -230,7 +231,8 @@ class TestAutoWrapping:
 
         wrapper = agent_tools[0]
         assert wrapper.name == "Researcher"
-        assert wrapper.description == "Performs web research"
+        assert wrapper.description.startswith("Performs web research")
+        assert SubAgentTool.INITIALIZED_HINT in wrapper.description
         assert wrapper.agent is child_agent
 
     def test_agent_no_description_gets_empty_string(self, test_llm, child_agent_no_description):
@@ -244,7 +246,7 @@ class TestAutoWrapping:
 
         agent_tools = [t for t in parent.tools if isinstance(t, SubAgentTool)]
         wrapper = agent_tools[0]
-        assert wrapper.description == ""
+        assert SubAgentTool.INITIALIZED_HINT in wrapper.description
 
     def test_non_agent_tools_not_wrapped(self, test_llm):
         python_tool = Python(code="def run(input_data): return input_data")
