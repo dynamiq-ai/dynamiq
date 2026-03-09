@@ -64,11 +64,15 @@ class SubAgentTool(Node):
     group: NodeGroup = NodeGroup.AGENTS
     name: str = Field(
         ...,
-        description="Name of the sub-agent tool. Exposed to the LLM as the tool/function name during schema generation.",
+        description=(
+            "Name of the sub-agent tool. Exposed to the LLM as the tool/function name during schema generation."
+        ),
     )
     description: str = Field(
         ...,
-        description="Short description of what this sub-agent does. Exposed to the LLM as the tool/function description.",
+        description=(
+            "Short description of what this sub-agent does. Exposed to the LLM as the tool/function description."
+        ),
     )
     error_handling: ErrorHandling = Field(
         default_factory=lambda: ErrorHandling(timeout_seconds=3600),
@@ -142,10 +146,22 @@ class SubAgentTool(Node):
         logger.info(f"SubAgentTool '{self.name}': created new agent from factory")
         return agent
 
+    @property
+    def to_dict_exclude_params(self):
+        return super().to_dict_exclude_params | {"agent": True, "agent_factory": True}
+
     def to_dict(self, **kwargs) -> dict:
+        data = super().to_dict(**kwargs)
         if self.agent is not None:
-            return self.agent.to_dict(**kwargs)
-        return super().to_dict(**kwargs)
+            data["agent"] = self.agent.to_dict(**kwargs)
+        elif isinstance(self.agent_factory, dict):
+            data["agent_factory"] = self.agent_factory
+        elif callable(self.agent_factory):
+            raise ValueError(
+                f"SubAgentTool '{self.name}': callable agent_factory cannot be serialized. "
+                "Use a dict agent_factory or an initialized agent instead."
+            )
+        return data
 
     def execute(
         self,

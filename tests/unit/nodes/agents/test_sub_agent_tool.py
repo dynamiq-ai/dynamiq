@@ -2,9 +2,11 @@ import re
 
 import pytest
 
+from dynamiq import Workflow
 from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.agents.agent_tool import SubAgentTool, SubAgentToolInputSchema
+from dynamiq.nodes.agents.agent_tool import SubAgentTool
 from dynamiq.nodes.agents.components import schema_generator
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.python import Python
@@ -67,7 +69,9 @@ class TestSubAgentToolCreation:
         assert SubAgentTool.INITIALIZED_HINT in tool.description
 
     def test_factory_mode(self, test_llm):
-        factory = lambda: Agent(name="Researcher", llm=test_llm, role="research", tools=[])
+        def factory():
+            return Agent(name="Researcher", llm=test_llm, role="research", tools=[])
+
         tool = SubAgentTool(
             name="Researcher",
             description="Performs web research",
@@ -312,23 +316,46 @@ class TestToolLookup:
 
 
 class TestSerialization:
-    def test_to_dict_delegates_to_agent(self, child_agent):
-        tool = SubAgentTool(agent=child_agent, name="Researcher", description="research")
+    def test_to_dict_preserves_wrapper_and_nests_agent(self, child_agent):
+        tool = SubAgentTool(agent=child_agent, name="Research Tool", description="Delegates to researcher")
         result = tool.to_dict()
 
-        assert result["name"] == "Researcher"
-        assert result["type"] == child_agent.type
+        assert "SubAgentTool" in result["type"]
+        assert result["name"] == "Research Tool"
+        assert "Delegates to researcher" in result["description"]
+        assert SubAgentTool.INITIALIZED_HINT in result["description"]
+        assert "agent" in result
+        assert result["agent"]["name"] == "Researcher"
+        assert result["agent"]["type"] == child_agent.type
 
-    def test_to_dict_factory_mode_uses_default(self, test_llm):
+    def test_to_dict_callable_factory_raises(self, test_llm):
         tool = SubAgentTool(
             name="Researcher",
             description="research",
             agent_factory=lambda: Agent(name="Researcher", llm=test_llm, role="r", tools=[]),
         )
+
+        with pytest.raises(ValueError, match="callable agent_factory cannot be serialized"):
+            tool.to_dict()
+
+    def test_to_dict_dict_factory_serializes(self, test_llm):
+        tool = SubAgentTool(
+            name="Researcher",
+            description="research",
+            agent_factory={
+                "name": "Researcher",
+                "llm": test_llm,
+                "role": "You are a research agent.",
+                "tools": [],
+            },
+        )
         result = tool.to_dict()
 
         assert result["name"] == "Researcher"
         assert "SubAgentTool" in result.get("type", "")
+        assert "agent" not in result
+        assert "agent_factory" in result
+        assert result["agent_factory"]["name"] == "Researcher"
 
 
 # --- Schema generation ---
@@ -439,3 +466,150 @@ class TestDelegation:
 
         result = parent._should_delegate_final(python_tool, {"input": "task", "delegate_final": True})
         assert result is False
+
+
+# --- YAML roundtrip ---
+
+
+class TestYamlRoundtrip:
+    def test_sub_agent_tool_yaml_roundtrip(self, tmp_path):
+        """Roundtrip: to_yaml_file -> from_yaml_file -> to_yaml_file -> from_yaml_file.
+
+        Ensures an explicit SubAgentTool wrapping a child Agent survives
+        serialization and is not duplicated after reload.
+        """
+        openai_conn = OpenAIConnection(id="openai-conn", api_key="test-key")
+        parent_llm = OpenAI(id="parent-llm", connection=openai_conn, model="gpt-4o")
+        child_llm = OpenAI(id="child-llm", connection=openai_conn, model="gpt-4o")
+
+        child_agent = Agent(
+            id="researcher-agent",
+            name="Researcher Agent",
+            description="I am a research agent",
+            llm=child_llm,
+            role="You are a research agent.",
+            tools=[],
+            max_loops=3,
+        )
+        sub_agent_tool = SubAgentTool(
+            agent=child_agent,
+            name="Research Tool",
+            description="Delegates to researcher",
+        )
+
+        parent = Agent(
+            id="manager-agent",
+            name="Manager",
+            llm=parent_llm,
+            role="You are a manager.",
+            tools=[sub_agent_tool],
+            max_loops=5,
+        )
+
+        wf = Workflow(
+            id="sub-agent-wf",
+            flow=Flow(id="sub-agent-flow", name="SubAgent Flow", nodes=[parent]),
+            version="1",
+        )
+
+        yaml_path = tmp_path / "sub_agent_tool.yaml"
+        wf.to_yaml_file(yaml_path)
+
+        loaded = Workflow.from_yaml_file(str(yaml_path), init_components=True)
+        assert len(loaded.flow.nodes) == 1
+        loaded_agent = loaded.flow.nodes[0]
+        assert isinstance(loaded_agent, Agent)
+
+        agent_tools = [t for t in loaded_agent.tools if isinstance(t, SubAgentTool)]
+        assert len(agent_tools) == 1, "First load should have exactly one SubAgentTool"
+        wrapper = agent_tools[0]
+        assert wrapper.name == "Research Tool"
+        assert "Delegates to researcher" in wrapper.description
+        assert SubAgentTool.INITIALIZED_HINT in wrapper.description
+        assert wrapper.agent.name == "Researcher Agent"
+        assert wrapper.agent.description == "I am a research agent"
+
+        rt_path = tmp_path / "sub_agent_tool_rt.yaml"
+        loaded.to_yaml_file(rt_path)
+
+        rt = Workflow.from_yaml_file(str(rt_path), init_components=True)
+        rt_agent = rt.flow.nodes[0]
+        assert isinstance(rt_agent, Agent)
+
+        rt_tools = [t for t in rt_agent.tools if isinstance(t, SubAgentTool)]
+        assert len(rt_tools) == 1, "After roundtrip, SubAgentTool must not be duplicated"
+        rt_wrapper = rt_tools[0]
+        assert rt_wrapper.name == "Research Tool"
+        assert "Delegates to researcher" in rt_wrapper.description
+        assert SubAgentTool.INITIALIZED_HINT in rt_wrapper.description
+        assert rt_wrapper.agent.name == "Researcher Agent"
+        assert rt_wrapper.agent.description == "I am a research agent"
+
+    def test_agent_as_tool_yaml_roundtrip_backward_compat(self, tmp_path):
+        """Roundtrip with a raw Agent passed as a tool (backward-compatible auto-wrap).
+
+        The parent Agent.__init__ auto-wraps child Agents into SubAgentTool
+        using the agent's own name/description. After YAML serialization the
+        SubAgentTool is preserved, so the wrapper keeps the agent's values.
+        """
+        openai_conn = OpenAIConnection(id="openai-conn", api_key="test-key")
+        parent_llm = OpenAI(id="parent-llm", connection=openai_conn, model="gpt-4o")
+        child_llm = OpenAI(id="child-llm", connection=openai_conn, model="gpt-4o")
+
+        child_agent = Agent(
+            id="researcher-agent",
+            name="Researcher",
+            description="Performs web research",
+            llm=child_llm,
+            role="You are a research agent.",
+            tools=[],
+            max_loops=3,
+        )
+
+        parent = Agent(
+            id="manager-agent",
+            name="Manager",
+            llm=parent_llm,
+            role="You are a manager.",
+            tools=[child_agent],
+            max_loops=5,
+        )
+
+        wf = Workflow(
+            id="compat-wf",
+            flow=Flow(id="compat-flow", name="Compat Flow", nodes=[parent]),
+            version="1",
+        )
+
+        yaml_path = tmp_path / "agent_as_tool.yaml"
+        wf.to_yaml_file(yaml_path)
+
+        loaded = Workflow.from_yaml_file(str(yaml_path), init_components=True)
+        assert len(loaded.flow.nodes) == 1
+        loaded_agent = loaded.flow.nodes[0]
+        assert isinstance(loaded_agent, Agent)
+
+        agent_tools = [t for t in loaded_agent.tools if isinstance(t, SubAgentTool)]
+        assert len(agent_tools) == 1, "First load should have exactly one SubAgentTool"
+        wrapper = agent_tools[0]
+        assert wrapper.name == "Researcher"
+        assert "Performs web research" in wrapper.description
+        assert SubAgentTool.INITIALIZED_HINT in wrapper.description
+        assert wrapper.agent.name == "Researcher"
+        assert wrapper.agent.description == "Performs web research"
+
+        rt_path = tmp_path / "agent_as_tool_rt.yaml"
+        loaded.to_yaml_file(rt_path)
+
+        rt = Workflow.from_yaml_file(str(rt_path), init_components=True)
+        rt_agent = rt.flow.nodes[0]
+        assert isinstance(rt_agent, Agent)
+
+        rt_tools = [t for t in rt_agent.tools if isinstance(t, SubAgentTool)]
+        assert len(rt_tools) == 1, "After roundtrip, SubAgentTool must not be duplicated"
+        rt_wrapper = rt_tools[0]
+        assert rt_wrapper.name == "Researcher"
+        assert "Performs web research" in rt_wrapper.description
+        assert SubAgentTool.INITIALIZED_HINT in rt_wrapper.description
+        assert rt_wrapper.agent.name == "Researcher"
+        assert rt_wrapper.agent.description == "Performs web research"
