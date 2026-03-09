@@ -194,13 +194,12 @@ class TestGetOrCreateAgent:
         assert agent1 is agent2
 
     def test_init_components_rejects_bad_factory(self):
-        tool = SubAgentTool(
-            name="Bad",
-            description="returns a string",
-            agent_factory=lambda: "not an agent",
-        )
         with pytest.raises(TypeError, match="agent_factory must return an Agent"):
-            tool.init_components()
+            _ = SubAgentTool(
+                name="Bad",
+                description="returns a string",
+                agent_factory=lambda: "not an agent",
+            )
 
     def test_factory_returns_new_instance_each_time(self, test_llm):
         tool = SubAgentTool(
@@ -613,3 +612,109 @@ class TestYamlRoundtrip:
         assert SubAgentTool.INITIALIZED_HINT in rt_wrapper.description
         assert rt_wrapper.agent.name == "Researcher"
         assert rt_wrapper.agent.description == "Performs web research"
+
+    def test_dict_factory_yaml_roundtrip(self, tmp_path):
+        """Roundtrip for SubAgentTool in dict-factory mode.
+
+        Verifies that to_yaml -> from_yaml preserves factory semantics:
+        the reloaded tool should still be in factory mode (agent is None,
+        agent_factory is a dict) and get_or_create_agent() should produce
+        distinct Agent instances.
+        """
+        openai_conn = OpenAIConnection(id="openai-conn", api_key="test-key")
+        parent_llm = OpenAI(id="parent-llm", connection=openai_conn, model="gpt-4o")
+        child_llm = OpenAI(id="child-llm", connection=openai_conn, model="gpt-4o")
+        python_tool = Python(id="py-tool", code="def run(input_data): return input_data")
+
+        sub_agent_tool = SubAgentTool(
+            name="Researcher",
+            description="Performs web research",
+            agent_factory={
+                "name": "Researcher",
+                "llm": child_llm,
+                "role": "You are a research agent.",
+                "tools": [python_tool],
+                "max_loops": 3,
+            },
+        )
+
+        parent = Agent(
+            id="manager-agent",
+            name="Manager",
+            llm=parent_llm,
+            role="You are a manager.",
+            tools=[sub_agent_tool],
+            max_loops=5,
+        )
+
+        wf = Workflow(
+            id="dict-factory-wf",
+            flow=Flow(id="dict-factory-flow", name="Dict Factory Flow", nodes=[parent]),
+            version="1",
+        )
+
+        yaml_path = tmp_path / "dict_factory.yaml"
+        wf.to_yaml_file(yaml_path)
+
+        loaded = Workflow.from_yaml_file(str(yaml_path), init_components=True)
+        assert len(loaded.flow.nodes) == 1
+        loaded_parent = loaded.flow.nodes[0]
+        assert isinstance(loaded_parent, Agent)
+
+        agent_tools = [t for t in loaded_parent.tools if isinstance(t, SubAgentTool)]
+        assert len(agent_tools) == 1, "Should have exactly one SubAgentTool"
+        wrapper = agent_tools[0]
+        assert wrapper.name == "Researcher"
+        assert "Performs web research" in wrapper.description
+        assert SubAgentTool.FACTORY_HINT in wrapper.description
+        assert wrapper.is_factory_mode is True
+        assert wrapper.agent is None
+        assert isinstance(wrapper.agent_factory, dict)
+
+        agent_a = wrapper.get_or_create_agent()
+        agent_b = wrapper.get_or_create_agent()
+        assert isinstance(agent_a, Agent)
+        assert isinstance(agent_b, Agent)
+        assert agent_a is not agent_b, "Factory must produce distinct instances"
+        assert agent_a.name == "Researcher"
+        assert agent_b.name == "Researcher"
+        assert agent_a.role == "You are a research agent."
+        assert len(agent_a.tools) >= 1
+
+        # Second roundtrip
+        rt_path = tmp_path / "dict_factory_rt.yaml"
+        loaded.to_yaml_file(rt_path)
+
+        rt = Workflow.from_yaml_file(str(rt_path), init_components=True)
+        rt_parent = rt.flow.nodes[0]
+        rt_tools = [t for t in rt_parent.tools if isinstance(t, SubAgentTool)]
+        assert len(rt_tools) == 1, "After roundtrip, SubAgentTool must not be duplicated"
+        rt_wrapper = rt_tools[0]
+        assert rt_wrapper.is_factory_mode is True
+        assert rt_wrapper.agent is None
+        assert isinstance(rt_wrapper.agent_factory, dict)
+
+        rt_agent = rt_wrapper.get_or_create_agent()
+        assert isinstance(rt_agent, Agent)
+        assert rt_agent.name == "Researcher"
+
+    def test_example_agents_as_tools_yaml_loads(self):
+        """Verify the example agents_as_tools.yaml loads with SubAgentTool changes."""
+        import os
+
+        yaml_path = os.path.join(
+            os.path.dirname(__file__),
+            "..", "..", "..", "..",
+            "examples", "components", "core", "dag", "agents_as_tools.yaml",
+        )
+        if not os.path.exists(yaml_path):
+            pytest.skip("Example YAML not found")
+
+        loaded = Workflow.from_yaml_file(yaml_path, init_components=False)
+        assert len(loaded.flow.nodes) == 1
+        parent = loaded.flow.nodes[0]
+        assert isinstance(parent, Agent)
+
+        agent_tools = [t for t in parent.tools if isinstance(t, SubAgentTool)]
+        assert len(agent_tools) == 1
+        assert agent_tools[0].agent.name == "Coder Agent"

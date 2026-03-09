@@ -41,19 +41,28 @@ class SubAgentTool(Node):
       - **Factory dict** (``agent_factory`` as dict): JSON-serializable Agent kwargs;
         a fresh ``Agent(**agent_factory)`` is created per invocation.
 
+    .. note::
+        **Dict factory and shared tool references** — In dict factory mode the
+        kwargs (including ``llm`` and ``tools``) are passed by reference to each
+        new ``Agent``.  This is safe for stateless objects (LLMs, most built-in
+        tools) because they hold no per-agent mutable state.  If your tools are
+        **stateful** (e.g. they accumulate results or maintain a session), use
+        the callable factory instead so you can create fresh tool instances on
+        every invocation.
+
     Examples::
 
         # Mode 1 — reuse an existing agent
         tool = SubAgentTool(agent=researcher_agent)
 
-        # Mode 2a — callable factory
+        # Mode 2a — callable factory (use for stateful tools)
         tool = SubAgentTool(
             name="Researcher",
             description="Performs web research",
             agent_factory=lambda: Agent(name="Researcher", llm=llm, tools=[exa]),
         )
 
-        # Mode 2b — dict factory (JSON-serializable)
+        # Mode 2b — dict factory (JSON-serializable, tools are shared)
         tool = SubAgentTool(
             name="Researcher",
             description="Performs web research",
@@ -119,7 +128,12 @@ class SubAgentTool(Node):
         return self.agent_factory is not None
 
     def _create_agent_from_factory(self) -> Agent:
-        """Create an Agent from the factory (callable or dict)."""
+        """Create an Agent from the factory (callable or dict).
+
+        Dict factories pass kwargs by reference, so LLM and tool objects are
+        shared across agents.  This is intentional — stateless components
+        benefit from reuse.  For stateful tools, use a callable factory.
+        """
         if isinstance(self.agent_factory, dict):
             from dynamiq.nodes.agents.agent import Agent as ReActAgent
 
@@ -136,6 +150,9 @@ class SubAgentTool(Node):
                 raise TypeError(
                     f"SubAgentTool '{self.name}': agent_factory must return an Agent, " f"got {type(trial).__name__}"
                 )
+        elif self.agent is not None:
+            if self.agent.is_postponed_component_init:
+                self.agent.init_components(connection_manager)
 
     def get_or_create_agent(self) -> Agent:
         """Return the initialized agent or create a new one from the factory."""
@@ -150,12 +167,23 @@ class SubAgentTool(Node):
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"agent": True, "agent_factory": True}
 
+    @staticmethod
+    def _serialize_value(value: Any, **kwargs) -> Any:
+        """Recursively convert live objects to plain dicts for serialization."""
+        if hasattr(value, "to_dict") and callable(value.to_dict):
+            return value.to_dict(**kwargs)
+        if isinstance(value, dict):
+            return {k: SubAgentTool._serialize_value(v, **kwargs) for k, v in value.items()}
+        if isinstance(value, list):
+            return [SubAgentTool._serialize_value(item, **kwargs) for item in value]
+        return value
+
     def to_dict(self, **kwargs) -> dict:
         data = super().to_dict(**kwargs)
         if self.agent is not None:
             data["agent"] = self.agent.to_dict(**kwargs)
         elif isinstance(self.agent_factory, dict):
-            data["agent_factory"] = self.agent_factory
+            data["agent_factory"] = self._serialize_value(self.agent_factory, **kwargs)
         elif callable(self.agent_factory):
             raise ValueError(
                 f"SubAgentTool '{self.name}': callable agent_factory cannot be serialized. "
