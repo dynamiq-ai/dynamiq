@@ -22,6 +22,7 @@ class Anthropic(BaseLLM):
 
     Attributes:
         connection (AnthropicConnection | None): The connection to use for the Anthropic LLM.
+        cache_control (AnthropicCacheControl | None): The cache control configuration.
     """
     connection: AnthropicConnection | None = None
     MODEL_PREFIX = "anthropic/"
