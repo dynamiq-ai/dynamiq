@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.nodes.llms.base import BaseLLM
@@ -25,7 +25,7 @@ class Anthropic(BaseLLM):
     """
     connection: AnthropicConnection | None = None
     MODEL_PREFIX = "anthropic/"
-    cache_control: AnthropicCacheControl | None = Field(default_factory=AnthropicCacheControl)
+    cache_control: AnthropicCacheControl | None = None
 
     def __init__(self, **kwargs):
         """Initialize the Anthropic LLM node.
@@ -76,5 +76,11 @@ class Anthropic(BaseLLM):
         """Attach Anthropic prompt caching configuration to completion params."""
         params = super().update_completion_params(params)
         if self.cache_control:
-            params["cache_control"] = self.cache_control.model_dump(exclude_none=True)
+            params.setdefault("cache_control_injection_points", []).append(
+                {
+                    "location": "message",
+                    "index": -1,
+                    "control": self.cache_control.model_dump(exclude_none=True),
+                }
+            )
         return params
