@@ -197,12 +197,25 @@ class TestGetOrCreateAgent:
         assert agent1 is agent2
 
     def test_init_components_rejects_bad_factory(self):
+        tool = SubAgentTool(
+            name="Bad",
+            description="returns a string",
+            agent_factory=lambda: "not an agent",
+        )
         with pytest.raises(TypeError, match="agent_factory must return an Agent"):
-            _ = SubAgentTool(
-                name="Bad",
-                description="returns a string",
-                agent_factory=lambda: "not an agent",
-            )
+            tool.init_components()
+
+    def test_validate_factory_false_skips_trial(self):
+        tool = SubAgentTool(
+            name="Bad",
+            description="returns a string",
+            agent_factory=lambda: "not an agent",
+            validate_factory=False,
+        )
+        tool.init_components()
+
+        with pytest.raises(TypeError, match="agent_factory must return an Agent"):
+            tool.get_or_create_agent()
 
     def test_factory_returns_new_instance_each_time(self, test_llm):
         tool = SubAgentTool(
@@ -822,3 +835,57 @@ class TestToolParamsResolution:
         passed_tp = kwargs.get("tool_params")
         assert passed_tp is not None, "Nested ToolParams should be propagated"
         assert passed_tp.global_params.get("nested_global") == "yes"
+
+
+# --- Streaming ---
+
+
+class TestSubAgentStreaming:
+    def test_streaming_propagated_and_delivered(self, test_llm, child_agent):
+        """Callbacks propagate to the child and stream events arrive at the parent's handler."""
+        from dynamiq.callbacks import BaseCallbackHandler
+        from dynamiq.runnables import RunnableConfig
+        from dynamiq.types.streaming import StreamingConfig
+
+        child_agent.streaming = StreamingConfig(enabled=True)
+
+        parent = Agent(
+            name="Manager",
+            llm=test_llm,
+            role="manage",
+            tools=[child_agent],
+            max_loops=3,
+        )
+        wrapper = next(t for t in parent.tools if isinstance(t, SubAgentTool))
+
+        stream_chunks = []
+        forwarded_config = {}
+
+        class CapturingCallback(BaseCallbackHandler):
+            def on_node_execute_stream(self, node_data, chunk, **kwargs):
+                stream_chunks.append(chunk)
+
+        capturing = CapturingCallback()
+        config = RunnableConfig(callbacks=[capturing])
+
+        def fake_run(input_data, config, **kwargs):
+            forwarded_config["value"] = config
+            child_agent.stream_content(
+                content="sub-agent answer",
+                source=child_agent.name,
+                step="answer",
+                config=config,
+            )
+            return _make_successful_run_result()
+
+        with patch.object(type(child_agent), "run", side_effect=fake_run):
+            parent._run_tool(tool=wrapper, tool_input={"input": "query"}, config=config)
+
+        assert (
+            capturing in forwarded_config["value"].callbacks
+        ), "Parent callback must appear in the config forwarded to the sub-agent"
+        assert len(stream_chunks) >= 1, "At least one stream chunk from the child must reach the callback"
+        delta = stream_chunks[0]["choices"][0]["delta"]
+        assert delta["content"] == "sub-agent answer"
+        assert delta["source"] == child_agent.name
+        assert delta["step"] == "answer"

@@ -184,3 +184,13 @@ IMPORTANT RULES:
 - Always consider user's implicit needs beyond explicit request
 - Employ strategic thinking and reflection at each step
 """  # noqa: E501
+
+SUB_AGENT_INSTRUCTIONS = """SUB-AGENT TOOLS:
+Sub-agent tools are specialized agents you can delegate tasks to. Each sub-agent is an independent agent \
+with its own tools and expertise — use them to break complex work into focused subtasks.
+
+Execution modes (shown in each tool's description):
+- "[Independent agent: ...]" — spawns a fresh instance per call. Safe to call in parallel with other tools.
+- "[Shared agent: ...]" — reuses a single instance. Calls run sequentially; do not call in parallel.
+
+Provide each sub-agent with a clear, self-contained task description in the "input" field."""

@@ -20,6 +20,10 @@ if TYPE_CHECKING:
 class SubAgentToolInputSchema(BaseModel):
     """Input schema for SubAgentTool, mirrors the core agent input format."""
 
+    brief: str = Field(
+        default="Delegating task to a sub-agent.",
+        description="Very brief description of the action being performed. Example: 'Research latest AI papers'.",
+    )
     input: str = Field(default="", description="Task or query to pass to the sub-agent.")
     images: list[str | bytes | io.BytesIO] | None = Field(
         default=None,
@@ -101,6 +105,11 @@ class SubAgentTool(Node):
         ),
     )
 
+    validate_factory: bool = Field(
+        default=True,
+        description="If True, init_components creates a trial agent to validate the factory.",
+    )
+
     is_postponed_component_init: bool = True
     _connection_manager: Any = PrivateAttr(default=None)
 
@@ -146,6 +155,13 @@ class SubAgentTool(Node):
         else:
             agent = self.agent_factory()
 
+        from dynamiq.nodes.agents.base import Agent as BaseAgent
+
+        if not isinstance(agent, BaseAgent):
+            raise TypeError(
+                f"SubAgentTool '{self.name}': agent_factory must return an Agent, " f"got {type(agent).__name__}"
+            )
+
         agent.id = generate_uuid()
 
         if self._connection_manager is not None:
@@ -156,14 +172,9 @@ class SubAgentTool(Node):
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         super().init_components(connection_manager)
         self._connection_manager = connection_manager
-        if self.agent_factory is not None:
-            from dynamiq.nodes.agents.base import Agent as BaseAgent
-
+        if self.agent_factory is not None and self.validate_factory:
             trial = self._create_agent_from_factory()
-            if not isinstance(trial, BaseAgent):
-                raise TypeError(
-                    f"SubAgentTool '{self.name}': agent_factory must return an Agent, " f"got {type(trial).__name__}"
-                )
+            logger.info(f"SubAgentTool '{self.name}': created trial agent from factory with id {trial.id}")
             del trial
         elif self.agent is not None:
             if self.agent.is_postponed_component_init:

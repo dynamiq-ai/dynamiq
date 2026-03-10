@@ -1301,6 +1301,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
 
         # Setup ReAct-specific prompts via prompt manager.
+        from dynamiq.nodes.agents.agent_tool import SubAgentTool
+
         has_tools = bool(self.tools) or (self.skills.enabled and self.skills.source is not None)
         self.system_prompt_manager.setup_for_react_agent(
             inference_mode=self.inference_mode,
@@ -1311,6 +1313,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
             or bool(self.sandbox_backend),
             sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
+            has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
         )
 
         # Only auto-wrap the entire role in a raw block if the user did not

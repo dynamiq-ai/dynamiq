@@ -1453,6 +1453,8 @@ class Agent(Node):
             from dynamiq.nodes.agents.agent import Agent
 
             if isinstance(self, Agent):
+                from dynamiq.nodes.agents.agent_tool import SubAgentTool
+
                 self.system_prompt_manager.setup_for_react_agent(
                     inference_mode=self.inference_mode,
                     parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
@@ -1461,6 +1463,7 @@ class Agent(Node):
                     context_compaction_enabled=self.summarization_config.enabled,
                     todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
                     or bool(self.sandbox_backend),
+                    has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
                 )
 
     def _inject_attached_files_into_message(
