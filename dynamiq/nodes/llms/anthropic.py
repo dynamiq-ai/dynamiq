@@ -1,7 +1,18 @@
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
 from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.prompts.prompts import VisionMessageType
 from dynamiq.utils.logger import logger
+
+
+class AnthropicCacheControl(BaseModel):
+    """Anthropic prompt caching configuration."""
+
+    type: Literal["ephemeral"] = "ephemeral"
+    ttl: Literal["1h"] | None = None
 
 
 class Anthropic(BaseLLM):
@@ -14,6 +25,7 @@ class Anthropic(BaseLLM):
     """
     connection: AnthropicConnection | None = None
     MODEL_PREFIX = "anthropic/"
+    cache_control: AnthropicCacheControl | None = Field(default_factory=AnthropicCacheControl)
 
     def __init__(self, **kwargs):
         """Initialize the Anthropic LLM node.
@@ -59,3 +71,10 @@ class Anthropic(BaseLLM):
         """
         messages = super().get_messages(prompt, input_data)
         return self._convert_non_image_to_file_content(messages)
+
+    def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Attach Anthropic prompt caching configuration to completion params."""
+        params = super().update_completion_params(params)
+        if self.cache_control:
+            params["cache_control"] = self.cache_control.model_dump(exclude_none=True)
+        return params

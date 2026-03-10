@@ -108,6 +108,8 @@ class BaseLLMUsageData(BaseModel):
         completion_tokens_cost_usd (float | None): Cost of completion tokens in USD.
         total_tokens (int): Total number of tokens.
         total_tokens_cost_usd (float | None): Total cost of tokens in USD.
+        cache_read_input_tokens (int | None): Number of cache read input tokens.
+        cache_creation_input_tokens (int | None): Number of cache creation input tokens.
     """
     prompt_tokens: int
     prompt_tokens_cost_usd: float | None
@@ -115,6 +117,8 @@ class BaseLLMUsageData(BaseModel):
     completion_tokens_cost_usd: float | None
     total_tokens: int
     total_tokens_cost_usd: float | None
+    cache_read_input_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
 
 
 class BaseLLMInputSchema(BaseModel):
@@ -353,6 +357,8 @@ class BaseLLM(ConnectionNode):
         prompt_tokens = usage.prompt_tokens
         completion_tokens = usage.completion_tokens
         total_tokens = usage.total_tokens
+        cache_read_input_tokens = getattr(usage, "cache_read_input_tokens", None)
+        cache_creation_input_tokens = getattr(usage, "cache_creation_input_tokens", None)
 
         try:
             prompt_tokens_cost_usd, completion_tokens_cost_usd = cost_per_token(
@@ -369,6 +375,8 @@ class BaseLLM(ConnectionNode):
             completion_tokens_cost_usd=completion_tokens_cost_usd,
             total_tokens=total_tokens,
             total_tokens_cost_usd=total_tokens_cost_usd,
+            cache_read_input_tokens=cache_read_input_tokens,
+            cache_creation_input_tokens=cache_creation_input_tokens,
         )
 
     def _handle_completion_response(
