@@ -5,10 +5,11 @@ from __future__ import annotations
 import io
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.runnables import RunnableConfig
+from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -99,6 +100,8 @@ class SubAgentTool(Node):
         ),
     )
 
+    _connection_manager: Any = PrivateAttr(default=None)
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[SubAgentToolInputSchema]] = SubAgentToolInputSchema
 
@@ -128,7 +131,7 @@ class SubAgentTool(Node):
         return self.agent_factory is not None
 
     def _create_agent_from_factory(self) -> Agent:
-        """Create an Agent from the factory (callable or dict).
+        """Create an Agent from the factory (callable or dict) and initialize its components.
 
         Dict factories pass kwargs by reference, so LLM and tool objects are
         shared across agents.  This is intentional — stateless components
@@ -137,11 +140,20 @@ class SubAgentTool(Node):
         if isinstance(self.agent_factory, dict):
             from dynamiq.nodes.agents.agent import Agent as ReActAgent
 
-            return ReActAgent(**self.agent_factory)
-        return self.agent_factory()
+            agent = ReActAgent(**self.agent_factory)
+        else:
+            agent = self.agent_factory()
+
+        agent.id = generate_uuid()
+
+        if self._connection_manager is not None:
+            agent.init_components(self._connection_manager)
+
+        return agent
 
     def init_components(self, connection_manager=None):
         super().init_components(connection_manager)
+        self._connection_manager = connection_manager
         if self.agent_factory is not None:
             from dynamiq.nodes.agents.base import Agent as BaseAgent
 

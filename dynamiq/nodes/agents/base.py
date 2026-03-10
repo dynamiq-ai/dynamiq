@@ -1174,7 +1174,10 @@ class Agent(Node):
 
         if is_child_agent and tool_params:
             nested_any = (
-                tool_params.by_id_params.get(getattr(resolved_agent, "id", ""))
+                tool_params.by_id_params.get(tool.id)
+                or tool_params.by_id_params.get(getattr(resolved_agent, "id", ""))
+                or tool_params.by_name_params.get(tool.name)
+                or tool_params.by_name_params.get(self.sanitize_tool_name(tool.name))
                 or tool_params.by_name_params.get(getattr(resolved_agent, "name", ""))
                 or tool_params.by_name_params.get(self.sanitize_tool_name(getattr(resolved_agent, "name", "")))
             )

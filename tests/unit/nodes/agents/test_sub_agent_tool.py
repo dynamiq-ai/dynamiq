@@ -215,6 +215,25 @@ class TestGetOrCreateAgent:
         assert isinstance(agent2, Agent)
         assert agent1 is not agent2
 
+    def test_factory_always_generates_unique_id(self, test_llm):
+        tool = SubAgentTool(
+            name="Researcher",
+            description="research",
+            agent_factory={
+                "name": "Researcher",
+                "id": "fixed-id",
+                "llm": test_llm,
+                "role": "r",
+                "tools": [],
+            },
+        )
+
+        agents = [tool.get_or_create_agent() for _ in range(5)]
+        ids = [a.id for a in agents]
+
+        assert all(aid != "fixed-id" for aid in ids), "Factory agents must not keep the explicit ID"
+        assert len(set(ids)) == 5, "Every factory agent must have a unique ID"
+
 
 # --- Auto-wrapping in Agent.__init__ ---
 
