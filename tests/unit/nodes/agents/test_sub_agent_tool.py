@@ -1,4 +1,5 @@
 import re
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -7,10 +8,12 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.agent_tool import SubAgentTool
+from dynamiq.nodes.agents.base import ToolParams
 from dynamiq.nodes.agents.components import schema_generator
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.runnables import RunnableResult, RunnableStatus
 
 
 def _sanitize_tool_name(s: str) -> str:
@@ -737,3 +740,85 @@ class TestYamlRoundtrip:
         agent_tools = [t for t in parent.tools if isinstance(t, SubAgentTool)]
         assert len(agent_tools) == 1
         assert agent_tools[0].agent.name == "Coder Agent"
+
+
+# --- ToolParams resolution through SubAgentTool wrapper ---
+
+
+def _make_successful_run_result():
+    """Return a mock RunnableResult that looks like a successful tool run."""
+    result = MagicMock(spec=RunnableResult)
+    result.status = RunnableStatus.SUCCESS
+    result.output = {"content": "ok"}
+    return result
+
+
+class TestToolParamsResolution:
+    def test_flat_params_applied_by_agent_name_and_id(self, test_llm):
+        """Flat params keyed by the original agent name/ID are applied to merged_input."""
+        child = Agent(
+            name="Coder",
+            id="coder-42",
+            llm=test_llm,
+            role="code",
+            tools=[],
+            max_loops=3,
+        )
+        parent = Agent(
+            name="Boss",
+            llm=test_llm,
+            role="manage",
+            tools=[child],
+            max_loops=3,
+        )
+        wrapper = next(t for t in parent.tools if isinstance(t, SubAgentTool))
+        assert wrapper.id != "coder-42", "SubAgentTool must have its own auto-generated ID"
+
+        tp = ToolParams(
+            by_name={"Coder": {"name_param": "from_name"}},
+            by_id={"coder-42": {"id_param": "from_id"}},
+        )
+
+        with patch.object(type(child), "run", return_value=_make_successful_run_result()) as mock_run:
+            parent._run_tool(tool=wrapper, tool_input={"input": "x"}, config=None, tool_params=tp)
+            kwargs = mock_run.call_args[1]
+
+        data = kwargs["input_data"]
+        assert data["name_param"] == "from_name", "by_name via resolved_agent.name"
+        assert data["id_param"] == "from_id", "by_id via resolved_agent.id"
+
+    def test_nested_tool_params_propagated_to_child(self, test_llm):
+        """Nested ToolParams keyed by wrapper ID are propagated into child_kwargs."""
+        child = Agent(
+            name="Coder",
+            id="coder-42",
+            llm=test_llm,
+            role="code",
+            tools=[],
+            max_loops=3,
+        )
+        parent = Agent(
+            name="Boss",
+            llm=test_llm,
+            role="manage",
+            tools=[child],
+            max_loops=3,
+        )
+        wrapper = next(t for t in parent.tools if isinstance(t, SubAgentTool))
+
+        nested_tp = ToolParams(
+            **{
+                "global": {"nested_global": "yes"},
+            }
+        )
+        tp = ToolParams(
+            by_id={"coder-42": nested_tp},
+        )
+
+        with patch.object(type(child), "run", return_value=_make_successful_run_result()) as mock_run:
+            parent._run_tool(tool=wrapper, tool_input={"input": "x"}, config=None, tool_params=tp)
+            kwargs = mock_run.call_args[1]
+
+        passed_tp = kwargs.get("tool_params")
+        assert passed_tp is not None, "Nested ToolParams should be propagated"
+        assert passed_tp.global_params.get("nested_global") == "yes"

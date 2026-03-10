@@ -13,6 +13,7 @@ from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
+    from dynamiq.connections.managers import ConnectionManager
     from dynamiq.nodes.agents.base import Agent
 
 
@@ -100,6 +101,7 @@ class SubAgentTool(Node):
         ),
     )
 
+    is_postponed_component_init: bool = True
     _connection_manager: Any = PrivateAttr(default=None)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -151,7 +153,7 @@ class SubAgentTool(Node):
 
         return agent
 
-    def init_components(self, connection_manager=None):
+    def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         super().init_components(connection_manager)
         self._connection_manager = connection_manager
         if self.agent_factory is not None:
@@ -162,6 +164,7 @@ class SubAgentTool(Node):
                 raise TypeError(
                     f"SubAgentTool '{self.name}': agent_factory must return an Agent, " f"got {type(trial).__name__}"
                 )
+            del trial
         elif self.agent is not None:
             if self.agent.is_postponed_component_init:
                 self.agent.init_components(connection_manager)

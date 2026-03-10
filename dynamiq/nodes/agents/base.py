@@ -1117,6 +1117,11 @@ class Agent(Node):
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
         )
 
+        from dynamiq.nodes.agents.agent_tool import SubAgentTool
+
+        is_child_agent = isinstance(tool, SubAgentTool)
+        resolved_agent = tool.get_or_create_agent() if is_child_agent else None
+
         self._inject_files_into_tool(tool, merged_input)
 
         if tool_params:
@@ -1131,8 +1136,11 @@ class Agent(Node):
                 self._apply_parameters(merged_input, global_params, "global", debug_info)
 
             # 2. Apply parameters by tool name (medium priority)
-            name_params_any = tool_params.by_name_params.get(tool.name) or tool_params.by_name_params.get(
-                self.sanitize_tool_name(tool.name)
+            name_params_any = (
+                tool_params.by_name_params.get(tool.name)
+                or tool_params.by_name_params.get(self.sanitize_tool_name(tool.name))
+                or (resolved_agent and tool_params.by_name_params.get(resolved_agent.name))
+                or (resolved_agent and tool_params.by_name_params.get(self.sanitize_tool_name(resolved_agent.name)))
             )
             if name_params_any:
                 if isinstance(name_params_any, ToolParams):
@@ -1144,7 +1152,9 @@ class Agent(Node):
                     self._apply_parameters(merged_input, name_params_any, f"name:{tool.name}", debug_info)
 
             # 3. Apply parameters by tool ID (highest priority)
-            id_params_any = tool_params.by_id_params.get(tool.id)
+            id_params_any = tool_params.by_id_params.get(tool.id) or (
+                resolved_agent and tool_params.by_id_params.get(resolved_agent.id)
+            )
             if id_params_any:
                 if isinstance(id_params_any, ToolParams):
                     if self.verbose:
@@ -1158,11 +1168,6 @@ class Agent(Node):
                 logger.debug("\n".join(debug_info))
 
         child_kwargs = kwargs | {"recoverable_error": True}
-
-        from dynamiq.nodes.agents.agent_tool import SubAgentTool
-
-        is_child_agent = isinstance(tool, SubAgentTool)
-        resolved_agent = tool.get_or_create_agent() if is_child_agent else None
 
         if is_child_agent and self._current_call_context:
             child_context = self._build_child_agent_context(resolved_agent)
