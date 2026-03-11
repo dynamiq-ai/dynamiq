@@ -177,6 +177,7 @@ class SubAgentTool(Node):
             logger.info(
                 f"SubAgentTool '{self.name}': successfully created a trial agent from factory with id {trial.name}"
             )
+            self.cleanup_factory_agent(trial)
             del trial
         elif self.agent is not None:
             if self.agent.is_postponed_component_init:
@@ -190,6 +191,15 @@ class SubAgentTool(Node):
         agent = self._create_agent_from_factory()
         logger.info(f"SubAgentTool '{self.name}': created new agent from factory")
         return agent
+
+    @staticmethod
+    def cleanup_factory_agent(agent: Agent) -> None:
+        """Kill sandbox resources on a factory-created agent."""
+        if getattr(agent, "sandbox_backend", None):
+            try:
+                agent.sandbox_backend.close(kill=True)
+            except Exception as e:
+                logger.warning("Factory agent sandbox cleanup failed: %s", e)
 
     @property
     def to_dict_exclude_params(self):

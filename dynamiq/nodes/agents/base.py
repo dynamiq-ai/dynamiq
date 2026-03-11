@@ -1249,11 +1249,8 @@ class Agent(Node):
 
             return tool_result_content_processed, output_files, tool_output_meta
         finally:
-            if _factory_agent is not None and getattr(_factory_agent, "sandbox_backend", None):
-                try:
-                    _factory_agent.sandbox_backend.close(kill=True)
-                except Exception as e:
-                    logger.warning("Agent %s: factory sub-agent sandbox cleanup failed: %s", self.name, e)
+            if _factory_agent is not None:
+                SubAgentTool.cleanup_factory_agent(_factory_agent)
 
     def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> list[io.BytesIO | bytes]:
         """Ensure all uploaded files have name and description attributes and store them in storage backend."""
