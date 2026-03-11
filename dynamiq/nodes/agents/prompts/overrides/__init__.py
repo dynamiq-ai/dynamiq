@@ -17,21 +17,26 @@ try:
         REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
     )
 
-    register_model_prompts(
-        model_name="gpt-5.1",
-        prompts={
-            "REACT_BLOCK_INSTRUCTIONS_SINGLE": REACT_BLOCK_INSTRUCTIONS_SINGLE,
-            "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE": REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
-        },
-    )
+    _GPT_PROMPTS = {
+        "REACT_BLOCK_INSTRUCTIONS_SINGLE": REACT_BLOCK_INSTRUCTIONS_SINGLE,
+        "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE": REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
+    }
 
-    register_model_prompts(
-        model_name="gpt-5.1-codex",
-        prompts={
-            "REACT_BLOCK_INSTRUCTIONS_SINGLE": REACT_BLOCK_INSTRUCTIONS_SINGLE,
-            "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE": REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
-        },
-    )
+    _GPT_MODELS = [
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4.1",
+        "gpt-4.1-mini",
+        "gpt-4.1-nano",
+        "gpt-5",
+        "gpt-5-mini",
+        "gpt-5.1",
+        "gpt-5.1-codex",
+        "gpt-5.4",
+    ]
+
+    for _model in _GPT_MODELS:
+        register_model_prompts(model_name=_model, prompts=_GPT_PROMPTS)
 
     logger.debug("Registered GPT model prompts")
 except ImportError as e:
