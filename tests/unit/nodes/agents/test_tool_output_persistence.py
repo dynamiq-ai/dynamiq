@@ -48,7 +48,7 @@ def test_under_threshold_still_respects_max_tokens_truncation():
         tool_name="SandboxShellTool",
         tool_input={"command": "echo large"},
         sandbox=sandbox,
-        is_output_persisted_in_sandbox_allowed=True,
+        save_tool_output_to_sandbox=True,
         sandbox_persistence_config=persistence_config,
         max_tokens=100,
         truncate=True,
