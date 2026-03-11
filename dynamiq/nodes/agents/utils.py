@@ -1095,7 +1095,8 @@ def process_tool_output_with_sandbox_persistence(
         return process_tool_output_for_agent(content=prepared, max_tokens=max_tokens, truncate=truncate)
 
     preview = prepared[: config.summary_chars]
-    return f"Tool output saved to: {target_path}\n\nTool output summary:\n{preview}"
+    summary_result = f"Tool output saved to: {target_path}\n\nTool output summary:\n{preview}"
+    return process_tool_output_for_agent(content=summary_result, max_tokens=max_tokens, truncate=truncate)
 
 
 class ToolCacheEntry(BaseModel):
