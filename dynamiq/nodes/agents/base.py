@@ -1090,6 +1090,7 @@ class Agent(Node):
         collect_dependency: bool = False,
         delegate_final: bool = False,
         is_parallel: bool = False,
+        tool_run_id: str | None = None,
         **kwargs,
     ) -> Any:
         """Runs a specific tool with the given input."""
@@ -1121,6 +1122,8 @@ class Agent(Node):
 
         is_child_agent = isinstance(tool, SubAgentTool)
         resolved_agent = tool.get_or_create_agent() if is_child_agent else None
+        if resolved_agent is not None and tool.is_factory_mode and tool_run_id:
+            resolved_agent.id = tool_run_id
 
         self._inject_files_into_tool(tool, merged_input)
 
@@ -1205,44 +1208,52 @@ class Agent(Node):
         if is_parallel and not is_child_agent:
             tool_to_run, tool_config = self._clone_tool_for_execution(tool_to_run, tool_config)
 
-        tool_result = tool_to_run.run(
-            input_data=merged_input,
-            config=tool_config,
-            run_depends=deepcopy(self._run_depends),
-            **child_kwargs,
-        )
-        dependency_node = tool_to_run if tool_to_run is not tool else tool
-        dependency_dict = NodeDependency(node=dependency_node).to_dict(for_tracing=True)
-        if update_run_depends:
-            self._run_depends = [dependency_dict]
-        if tool_result.status != RunnableStatus.SUCCESS:
-            error_message = f"Tool '{tool.name}' failed: {tool_result.error.to_dict()}"
-            if tool_result.error.recoverable:
-                raise ToolExecutionException({error_message})
-            else:
-                raise ValueError({error_message})
-        tool_result_output_content = tool_result.output.get("content")
-
-        self._handle_tool_generated_files(tool, tool_result)
-
-        tool_result_content_processed = process_tool_output_for_agent(
-            content=tool_result_output_content,
-            max_tokens=self.tool_output_max_length,
-            truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
-        )
-
-        output_files = tool_result.output.get("files", [])
-        tool_output_meta = {k: v for k, v in tool_result.output.items() if k not in ("content", "files")}
-
-        if not isinstance(tool, ContextManagerTool):
-            self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = (
-                tool_result_content_processed,
-                tool_output_meta,
+        _factory_agent = resolved_agent if (resolved_agent is not None and tool.is_factory_mode) else None
+        try:
+            tool_result = tool_to_run.run(
+                input_data=merged_input,
+                config=tool_config,
+                run_depends=deepcopy(self._run_depends),
+                **child_kwargs,
             )
-        if collect_dependency:
-            return tool_result_content_processed, output_files, tool_output_meta, dependency_dict
+            dependency_node = tool_to_run if tool_to_run is not tool else tool
+            dependency_dict = NodeDependency(node=dependency_node).to_dict(for_tracing=True)
+            if update_run_depends:
+                self._run_depends = [dependency_dict]
+            if tool_result.status != RunnableStatus.SUCCESS:
+                error_message = f"Tool '{tool.name}' failed: {tool_result.error.to_dict()}"
+                if tool_result.error.recoverable:
+                    raise ToolExecutionException({error_message})
+                else:
+                    raise ValueError({error_message})
+            tool_result_output_content = tool_result.output.get("content")
 
-        return tool_result_content_processed, output_files, tool_output_meta
+            self._handle_tool_generated_files(tool, tool_result)
+
+            tool_result_content_processed = process_tool_output_for_agent(
+                content=tool_result_output_content,
+                max_tokens=self.tool_output_max_length,
+                truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
+            )
+
+            output_files = tool_result.output.get("files", [])
+            tool_output_meta = {k: v for k, v in tool_result.output.items() if k not in ("content", "files")}
+
+            if not isinstance(tool, ContextManagerTool):
+                self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = (
+                    tool_result_content_processed,
+                    tool_output_meta,
+                )
+            if collect_dependency:
+                return tool_result_content_processed, output_files, tool_output_meta, dependency_dict
+
+            return tool_result_content_processed, output_files, tool_output_meta
+        finally:
+            if _factory_agent is not None and getattr(_factory_agent, "sandbox_backend", None):
+                try:
+                    _factory_agent.sandbox_backend.close(kill=True)
+                except Exception as e:
+                    logger.warning("Agent %s: factory sub-agent sandbox cleanup failed: %s", self.name, e)
 
     def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> list[io.BytesIO | bytes]:
         """Ensure all uploaded files have name and description attributes and store them in storage backend."""

@@ -696,6 +696,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     update_run_depends=update_run_depends,
                     collect_dependency=collect_dependency,
                     is_parallel=is_parallel,
+                    tool_run_id=tool_run_id,
                     **tool_kwargs,
                 )
                 if collect_dependency:

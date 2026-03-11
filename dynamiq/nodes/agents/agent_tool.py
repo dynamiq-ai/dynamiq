@@ -174,7 +174,9 @@ class SubAgentTool(Node):
         self._connection_manager = connection_manager
         if self.agent_factory is not None and self.validate_factory:
             trial = self._create_agent_from_factory()
-            logger.info(f"SubAgentTool '{self.name}': created trial agent from factory with id {trial.id}")
+            logger.info(
+                f"SubAgentTool '{self.name}': successfully created a trial agent from factory with id {trial.name}"
+            )
             del trial
         elif self.agent is not None:
             if self.agent.is_postponed_component_init:
@@ -210,11 +212,6 @@ class SubAgentTool(Node):
             data["agent"] = self.agent.to_dict(**kwargs)
         elif isinstance(self.agent_factory, dict):
             data["agent_factory"] = self._serialize_value(self.agent_factory, **kwargs)
-        elif callable(self.agent_factory):
-            raise ValueError(
-                f"SubAgentTool '{self.name}': callable agent_factory cannot be serialized. "
-                "Use a dict agent_factory or an initialized agent instead."
-            )
         return data
 
     def execute(
