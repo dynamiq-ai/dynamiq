@@ -38,6 +38,28 @@ def test_tool_output_not_persisted_when_under_threshold():
     assert sandbox.saved == []
 
 
+def test_under_threshold_still_respects_max_tokens_truncation():
+    sandbox = DummySandbox()
+    content = "X" * 8000
+    persistence_config = ToolOutputSandboxPersistenceConfig(dump_threshold_chars=10000, summary_chars=4000)
+
+    result = process_tool_output_with_sandbox_persistence(
+        content=content,
+        tool_name="SandboxShellTool",
+        tool_input={"command": "echo large"},
+        sandbox=sandbox,
+        is_output_persisted_in_sandbox_allowed=True,
+        sandbox_persistence_config=persistence_config,
+        max_tokens=100,
+        truncate=True,
+    )
+
+    # max_tokens=100 => 400 chars effective limit; function truncates with marker in the middle.
+    assert "[Content truncated]" in result
+    assert len(result) <= 400
+    assert sandbox.saved == []
+
+
 def test_large_tool_output_persisted_to_sandbox_with_summary():
     sandbox = DummySandbox()
     content = "A" * 9000

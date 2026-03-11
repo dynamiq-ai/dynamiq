@@ -1070,7 +1070,7 @@ def process_tool_output_with_sandbox_persistence(
         return prepared
 
     if len(prepared) <= config.dump_threshold_chars:
-        return prepared
+        return process_tool_output_for_agent(content=prepared, max_tokens=max_tokens, truncate=truncate)
 
     if not config.enabled or not save_tool_output_to_sandbox or sandbox is None:
         return process_tool_output_for_agent(content=prepared, max_tokens=max_tokens, truncate=truncate)
