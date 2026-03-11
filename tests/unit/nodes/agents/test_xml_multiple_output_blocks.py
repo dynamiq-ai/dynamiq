@@ -140,7 +140,7 @@ class TestStreamingXmlOutputComplete:
         self._feed(cb, first + "\n" + second)
 
         all_text = "".join(content for _, content in emitted)
-        assert "plan A" not in all_text or "plan B" not in all_text
+        assert "plan A" in all_text
         assert "plan B" not in all_text
         assert cb._xml_output_complete is True
 
