@@ -63,7 +63,7 @@ def test_large_tool_output_persisted_to_sandbox_with_summary():
 
     assert re.match(
         r"^/home/user/\.tools/sandbox-shell-tool/tools-cli-tool-list/"
-        r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_tools-cli-tools\.txt$",
+        r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_\d{6}_tools-cli-tools\.txt$",
         saved["file_path"],
     )
 
@@ -107,3 +107,23 @@ def test_large_output_not_persisted_when_tool_opt_out():
 
     assert sandbox.saved == []
     assert "[Content truncated]" in result
+
+
+def test_truncate_false_returns_full_content_with_sandbox_enabled():
+    sandbox = DummySandbox()
+    content = "D" * 9000
+    persistence_config = ToolOutputSandboxPersistenceConfig(dump_threshold_chars=8000, summary_chars=4000)
+
+    result = process_tool_output_with_sandbox_persistence(
+        content=content,
+        tool_name="SandboxShellTool",
+        tool_input={"command": "echo large"},
+        sandbox=sandbox,
+        save_tool_output_to_sandbox=True,
+        sandbox_persistence_config=persistence_config,
+        max_tokens=1000,
+        truncate=False,
+    )
+
+    assert result == content
+    assert sandbox.saved == []

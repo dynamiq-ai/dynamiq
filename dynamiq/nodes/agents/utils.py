@@ -1064,6 +1064,11 @@ def process_tool_output_with_sandbox_persistence(
     """
     config = sandbox_persistence_config or ToolOutputSandboxPersistenceConfig()
     prepared = process_tool_output_for_agent(content=content, max_tokens=max_tokens, truncate=False)
+
+    # Do not replace output with a sandbox summary if truncate is False.
+    if not truncate:
+        return prepared
+
     if len(prepared) <= config.dump_threshold_chars:
         return prepared
 
@@ -1073,7 +1078,7 @@ def process_tool_output_with_sandbox_persistence(
     tool_segment = normalize_tool_segment(tool_name, fallback="tool")
     action_segment = infer_tool_action_segment(tool_input)
     context_segment = infer_tool_file_context_segment(tool_name=tool_name, tool_input=tool_input)
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
     file_name = f"{timestamp}_{context_segment}.txt"
     target_path = f"{config.sandbox_tool_output_dir}/{tool_segment}/{action_segment}/{file_name}"
 
