@@ -348,6 +348,10 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         # Set a tail guard to avoid streaming parts of the next tag that may arrive in next chunk
         self._tail_guard: int = TAIL_GUARD_SIZE
 
+        # Tracks whether a complete XML output block has been processed (action or answer).
+        # Once set, the parser stops emitting content from any subsequent <output> blocks.
+        self._xml_output_complete: bool = False
+
         self.mode_name = getattr(self.agent.inference_mode, "name", str(self.agent.inference_mode)).upper()
 
     def on_node_execute_stream(self, serialized: dict[str, Any], chunk: dict[str, Any] | None = None, **kwargs: Any):
@@ -584,6 +588,9 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             self._state_last_emit_index = safe_end
 
     def _process_xml_mode(self, final_answer_only: bool) -> None:
+        if self._xml_output_complete:
+            return
+
         if self._current_state is None:
             start = self._state_last_emit_index
 
@@ -673,6 +680,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                 if end_pos > self._state_last_emit_index:
                     self._emit(self._buffer[self._state_last_emit_index : end_pos], step=StreamingState.ANSWER)
                 self._current_state = None
+                self._xml_output_complete = True
                 self._state_last_emit_index = end_pos + len(XMLModeTag.CLOSE_ANSWER)
                 return
 
@@ -689,6 +697,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                     self._emit(self._buffer[self._state_last_emit_index : end_pos], step=StreamingState.TOOL_INPUT)
                 self._current_state = None
                 self._current_action_name = None
+                self._xml_output_complete = True
                 self._state_last_emit_index = end_pos + len(XMLModeTag.CLOSE_ACTION_INPUT)
                 return
 

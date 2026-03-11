@@ -1,4 +1,5 @@
 import json
+import re
 from concurrent.futures import as_completed
 from typing import Any, Callable, Mapping
 
@@ -36,6 +37,8 @@ from dynamiq.types.streaming import (
 )
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
+
+_FIRST_OUTPUT_RE = re.compile(r"<output\b[^>]*>.*?</output>", re.DOTALL)
 
 
 class AgentState(BaseModel):
@@ -443,6 +446,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self.log_reasoning(thought, action, action_input, loop_num)
         return thought, action, action_input
 
+    @staticmethod
+    def _extract_first_output_block(text: str) -> str:
+        """If the LLM emitted multiple <output> blocks, keep only the first one."""
+        matches = list(_FIRST_OUTPUT_RE.finditer(text))
+        if len(matches) > 1:
+            logger.warning("Agent: LLM produced %d <output> blocks; discarding all but the first.", len(matches))
+            return matches[0].group(0)
+        return text
+
     def _handle_xml_mode(
         self, llm_generated_output: str, loop_num: int, config: RunnableConfig, **kwargs
     ) -> tuple[str | None, str | None, dict | list | None]:
@@ -462,6 +474,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 ),
             )
             return None, None, None
+
+        llm_generated_output = self._extract_first_output_block(llm_generated_output)
 
         try:
             parsed_data = XMLParser.parse(
