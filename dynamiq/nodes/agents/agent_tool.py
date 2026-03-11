@@ -169,9 +169,7 @@ class SubAgentTool(Node):
         self._connection_manager = connection_manager
         if self.agent_factory is not None and self.validate_factory:
             trial = self._create_agent_from_factory()
-            logger.info(
-                f"SubAgentTool '{self.name}': successfully created a trial agent from factory with id {trial.name}"
-            )
+            logger.info(f"SubAgentTool '{self.name}': successfully created a trial agent from factory with id {trial.id}")
             self.cleanup_factory_agent(trial)
             del trial
         elif self.agent is not None:
