@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
@@ -25,13 +24,9 @@ class SubAgentToolInputSchema(BaseModel):
         description="Very brief description of the action being performed. Example: 'Research latest AI papers'.",
     )
     input: str = Field(default="", description="Task or query to pass to the sub-agent.")
-    images: list[str | bytes | io.BytesIO] | None = Field(
+    files: list[str] | None = Field(
         default=None,
-        description="Image inputs (URLs, bytes, or file objects).",
-    )
-    files: list[io.BytesIO | bytes] | None = Field(
-        default=None,
-        description="Files to pass to the sub-agent.",
+        description="Full file paths to upload to the sub-agent.",
     )
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
@@ -222,6 +217,11 @@ class SubAgentTool(Node):
             data["agent"] = self.agent.to_dict(**kwargs)
         elif isinstance(self.agent_factory, dict):
             data["agent_factory"] = self._serialize_value(self.agent_factory, **kwargs)
+        elif self.agent_factory is not None:
+            data["agent_factory"] = {
+                "_type": "callable",
+                "_repr": getattr(self.agent_factory, "__name__", repr(self.agent_factory)),
+            }
         return data
 
     def execute(

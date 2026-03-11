@@ -126,7 +126,11 @@ class AgentInputSchema(BaseModel):
     images: list[str | bytes | io.BytesIO] | None = Field(
         default=None, description="Image inputs (URLs, bytes, or file objects)."
     )
-    files: list[io.BytesIO | bytes] | None = Field(default=None, description="Parameter to provide files to the agent.")
+    files: list[io.BytesIO | bytes] | None = Field(
+        default=None,
+        description="Parameter to provide files to the agent.",
+        json_schema_extra={"map_from_storage": True, "is_accessible_to_agent": False},
+    )
 
     user_id: str | None = Field(default=None, description="Parameter to provide user ID.")
     session_id: str | None = Field(default=None, description="Parameter to provide session ID.")
@@ -190,6 +194,7 @@ class Agent(Node):
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=3600))
     tools: list[Node] = []
     files: list[io.BytesIO | bytes] | None = None
+    is_files_allowed: bool = True
     images: list[str | bytes | io.BytesIO] = None
     name: str = "Agent"
     max_loops: int = 1
@@ -1125,91 +1130,91 @@ class Agent(Node):
         if resolved_agent is not None and tool.is_factory_mode and tool_run_id:
             resolved_agent.id = tool_run_id
 
-        self._inject_files_into_tool(tool, merged_input)
-
-        if tool_params:
-            debug_info = []
-            if self.verbose:
-                debug_info.append(f"Tool parameter merging for {tool.name} (ID: {tool.id}):")
-                debug_info.append(f"Starting with input: {merged_input}")
-
-            # 1. Apply global parameters (lowest priority)
-            global_params = tool_params.global_params
-            if global_params:
-                self._apply_parameters(merged_input, global_params, "global", debug_info)
-
-            # 2. Apply parameters by tool name (medium priority)
-            name_params_any = (
-                tool_params.by_name_params.get(tool.name)
-                or tool_params.by_name_params.get(self.sanitize_tool_name(tool.name))
-                or (resolved_agent and tool_params.by_name_params.get(resolved_agent.name))
-                or (resolved_agent and tool_params.by_name_params.get(self.sanitize_tool_name(resolved_agent.name)))
-            )
-            if name_params_any:
-                if isinstance(name_params_any, ToolParams):
-                    if self.verbose:
-                        debug_info.append(
-                            f"  - From name:{tool.name}: encountered nested ToolParams (ignored for non-agent tool)"
-                        )
-                elif isinstance(name_params_any, dict):
-                    self._apply_parameters(merged_input, name_params_any, f"name:{tool.name}", debug_info)
-
-            # 3. Apply parameters by tool ID (highest priority)
-            id_params_any = tool_params.by_id_params.get(tool.id) or (
-                resolved_agent and tool_params.by_id_params.get(resolved_agent.id)
-            )
-            if id_params_any:
-                if isinstance(id_params_any, ToolParams):
-                    if self.verbose:
-                        debug_info.append(
-                            f"  - From id:{tool.id}: encountered nested ToolParams (ignored for non-agent tool)"
-                        )
-                elif isinstance(id_params_any, dict):
-                    self._apply_parameters(merged_input, id_params_any, f"id:{tool.id}", debug_info)
-
-            if self.verbose and debug_info:
-                logger.debug("\n".join(debug_info))
-
-        child_kwargs = kwargs | {"recoverable_error": True}
-
-        if is_child_agent and self._current_call_context:
-            child_context = self._build_child_agent_context(resolved_agent)
-            for ctx_key in ("user_id", "session_id"):
-                if ctx_key not in merged_input and child_context.get(ctx_key):
-                    merged_input[ctx_key] = child_context[ctx_key]
-            if "metadata" not in merged_input and child_context.get("metadata"):
-                merged_input["metadata"] = child_context["metadata"]
-
-        if is_child_agent and tool_params:
-            nested_any = (
-                tool_params.by_id_params.get(tool.id)
-                or tool_params.by_id_params.get(getattr(resolved_agent, "id", ""))
-                or tool_params.by_name_params.get(tool.name)
-                or tool_params.by_name_params.get(self.sanitize_tool_name(tool.name))
-                or tool_params.by_name_params.get(getattr(resolved_agent, "name", ""))
-                or tool_params.by_name_params.get(self.sanitize_tool_name(getattr(resolved_agent, "name", "")))
-            )
-            if nested_any:
-                if isinstance(nested_any, ToolParams):
-                    nested_tp = nested_any
-                elif isinstance(nested_any, dict):
-                    nested_tp = ToolParams.model_validate(nested_any)
-                else:
-                    nested_tp = None
-                if nested_tp:
-                    child_kwargs = child_kwargs | {"tool_params": nested_tp}
-
-        effective_delegate_final = delegate_final and is_child_agent
-        if is_child_agent and isinstance(merged_input, dict) and "delegate_final" in merged_input:
-            effective_delegate_final = effective_delegate_final or bool(merged_input.pop("delegate_final"))
-
-        tool_to_run = resolved_agent if resolved_agent is not None else tool
-        tool_config = ensure_config(config)
-        if is_parallel and not is_child_agent:
-            tool_to_run, tool_config = self._clone_tool_for_execution(tool_to_run, tool_config)
-
         _factory_agent = resolved_agent if (resolved_agent is not None and tool.is_factory_mode) else None
         try:
+            self._inject_files_into_tool(resolved_agent or tool, merged_input)
+
+            if tool_params:
+                debug_info = []
+                if self.verbose:
+                    debug_info.append(f"Tool parameter merging for {tool.name} (ID: {tool.id}):")
+                    debug_info.append(f"Starting with input: {merged_input}")
+
+                # 1. Apply global parameters (lowest priority)
+                global_params = tool_params.global_params
+                if global_params:
+                    self._apply_parameters(merged_input, global_params, "global", debug_info)
+
+                # 2. Apply parameters by tool name (medium priority)
+                name_params_any = (
+                    tool_params.by_name_params.get(tool.name)
+                    or tool_params.by_name_params.get(self.sanitize_tool_name(tool.name))
+                    or (resolved_agent and tool_params.by_name_params.get(resolved_agent.name))
+                    or (resolved_agent and tool_params.by_name_params.get(self.sanitize_tool_name(resolved_agent.name)))
+                )
+                if name_params_any:
+                    if isinstance(name_params_any, ToolParams):
+                        if self.verbose:
+                            debug_info.append(
+                                f"  - From name:{tool.name}: encountered nested ToolParams (ignored for non-agent tool)"
+                            )
+                    elif isinstance(name_params_any, dict):
+                        self._apply_parameters(merged_input, name_params_any, f"name:{tool.name}", debug_info)
+
+                # 3. Apply parameters by tool ID (highest priority)
+                id_params_any = tool_params.by_id_params.get(tool.id) or (
+                    resolved_agent and tool_params.by_id_params.get(resolved_agent.id)
+                )
+                if id_params_any:
+                    if isinstance(id_params_any, ToolParams):
+                        if self.verbose:
+                            debug_info.append(
+                                f"  - From id:{tool.id}: encountered nested ToolParams (ignored for non-agent tool)"
+                            )
+                    elif isinstance(id_params_any, dict):
+                        self._apply_parameters(merged_input, id_params_any, f"id:{tool.id}", debug_info)
+
+                if self.verbose and debug_info:
+                    logger.debug("\n".join(debug_info))
+
+            child_kwargs = kwargs | {"recoverable_error": True}
+
+            if is_child_agent and self._current_call_context:
+                child_context = self._build_child_agent_context(resolved_agent)
+                for ctx_key in ("user_id", "session_id"):
+                    if ctx_key not in merged_input and child_context.get(ctx_key):
+                        merged_input[ctx_key] = child_context[ctx_key]
+                if "metadata" not in merged_input and child_context.get("metadata"):
+                    merged_input["metadata"] = child_context["metadata"]
+
+            if is_child_agent and tool_params:
+                nested_any = (
+                    tool_params.by_id_params.get(tool.id)
+                    or tool_params.by_id_params.get(getattr(resolved_agent, "id", ""))
+                    or tool_params.by_name_params.get(tool.name)
+                    or tool_params.by_name_params.get(self.sanitize_tool_name(tool.name))
+                    or tool_params.by_name_params.get(getattr(resolved_agent, "name", ""))
+                    or tool_params.by_name_params.get(self.sanitize_tool_name(getattr(resolved_agent, "name", "")))
+                )
+                if nested_any:
+                    if isinstance(nested_any, ToolParams):
+                        nested_tp = nested_any
+                    elif isinstance(nested_any, dict):
+                        nested_tp = ToolParams.model_validate(nested_any)
+                    else:
+                        nested_tp = None
+                    if nested_tp:
+                        child_kwargs = child_kwargs | {"tool_params": nested_tp}
+
+            effective_delegate_final = delegate_final and is_child_agent
+            if is_child_agent and isinstance(merged_input, dict) and "delegate_final" in merged_input:
+                effective_delegate_final = effective_delegate_final or bool(merged_input.pop("delegate_final"))
+
+            tool_to_run = resolved_agent if resolved_agent is not None else tool
+            tool_config = ensure_config(config)
+            if is_parallel and not is_child_agent:
+                tool_to_run, tool_config = self._clone_tool_for_execution(tool_to_run, tool_config)
+
             tool_result = tool_to_run.run(
                 input_data=merged_input,
                 config=tool_config,

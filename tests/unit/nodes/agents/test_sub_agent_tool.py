@@ -362,15 +362,17 @@ class TestSerialization:
         assert result["agent"]["name"] == "Researcher"
         assert result["agent"]["type"] == child_agent.type
 
-    def test_to_dict_callable_factory_raises(self, test_llm):
+    def test_to_dict_callable_factory_placeholder(self, test_llm):
         tool = SubAgentTool(
             name="Researcher",
             description="research",
             agent_factory=lambda: Agent(name="Researcher", llm=test_llm, role="r", tools=[]),
         )
 
-        with pytest.raises(ValueError, match="callable agent_factory cannot be serialized"):
-            tool.to_dict()
+        result = tool.to_dict()
+        assert "agent_factory" in result
+        assert result["agent_factory"]["_type"] == "callable"
+        assert "_repr" in result["agent_factory"]
 
     def test_to_dict_dict_factory_serializes(self, test_llm):
         tool = SubAgentTool(

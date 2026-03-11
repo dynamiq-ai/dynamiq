@@ -1302,8 +1302,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
 
         # Setup ReAct-specific prompts via prompt manager.
-        from dynamiq.nodes.agents.agent_tool import SubAgentTool
-
         has_tools = bool(self.tools) or (self.skills.enabled and self.skills.source is not None)
         self.system_prompt_manager.setup_for_react_agent(
             inference_mode=self.inference_mode,
