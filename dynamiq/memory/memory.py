@@ -254,6 +254,75 @@ class Memory(BaseModel):
             logger.error(f"Unexpected error clearing memory: {e}")
             raise MemoryError(f"Unexpected error clearing memory: {e}") from e
 
+    def delete(self, session_id: str | None = None, user_id: str | None = None) -> None:
+        """Delete messages scoped by session and/or user.
+
+        Args:
+            session_id: Delete items belonging to this session.
+            user_id: Delete items belonging to this user.
+
+        Raises:
+            MemoryError: If the backend does not support scoped deletion
+                or the operation fails.
+        """
+        try:
+            self.backend.delete(session_id=session_id, user_id=user_id)
+            logger.debug(
+                "Memory %s: deleted messages (session_id=%s, user_id=%s)",
+                self.backend.name,
+                session_id,
+                user_id,
+            )
+        except NotImplementedError:
+            logger.warning(
+                "Memory %s: backend does not support scoped delete, skipping.",
+                self.backend.name,
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error deleting messages: {e}")
+            raise MemoryError(f"Unexpected error deleting messages: {e}") from e
+
+    def replace_messages(self, filters: dict[str, Any], messages: list[Message]) -> None:
+        """Replace only messages matching filters, preserving all others.
+
+        Deletes the scoped slice via ``delete()`` and then writes the new
+        snapshot messages.  Raises ``NotImplementedError`` when the backend
+        does not support scoped deletion so callers can implement a fallback.
+
+        Args:
+            filters: Metadata filters defining which conversation slice to replace
+                (for example ``{"user_id": "...", "session_id": "..."}``).
+            messages: New snapshot messages for the filtered slice.
+
+        Raises:
+            NotImplementedError: If the backend does not support scoped delete.
+            MemoryError: If filters are empty or the write fails.
+        """
+        if not filters or not (filters.get("session_id") or filters.get("user_id")):
+            raise MemoryError("replace_messages requires at least one of 'session_id' or 'user_id' in filters")
+
+        self.backend.delete(
+            session_id=filters.get("session_id"),
+            user_id=filters.get("user_id"),
+        )
+
+        written = 0
+        try:
+            for seq, msg in enumerate(messages):
+                metadata = dict(msg.metadata) if msg.metadata else {}
+                metadata["sequence"] = seq
+                self.add(role=msg.role, content=msg.content, metadata=metadata)
+                written += 1
+
+            logger.debug(
+                f"Memory {self.backend.name}: replaced scoped messages (filters={filters}, new={len(messages)})"
+            )
+        except Exception as e:
+            logger.error(
+                f"Memory {self.backend.name}: wrote {written}/{len(messages)} messages before failure after delete: {e}"
+            )
+            raise MemoryError(f"Partial write after delete ({written}/{len(messages)} messages written): {e}") from e
+
     def get_agent_conversation(
         self,
         query: str | None = None,
@@ -346,8 +415,9 @@ class Memory(BaseModel):
 
         def message_sort_key(msg):
             timestamp = msg.metadata.get("timestamp", float("inf"))
+            sequence = msg.metadata.get("sequence", 0)
             role_priority = 0 if msg.role == MessageRole.USER else 0.1
-            return (timestamp, role_priority)
+            return (timestamp, sequence, role_priority)
 
         sorted_messages = sorted(messages, key=message_sort_key)
 

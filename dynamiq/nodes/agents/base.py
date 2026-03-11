@@ -17,23 +17,19 @@ from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     ToolCacheEntry,
     convert_bytesio_to_file_info,
+    extract_message_text,
     process_tool_output_with_sandbox_persistence,
 )
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
-from dynamiq.nodes.tools.file_tools import (
-    FileListTool,
-    FileReadTool,
-    FileSearchTool,
-    FileWriteTool,
-)
+from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileSearchTool, FileWriteTool
 from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.nodes.tools.skills_tool import SkillsTool
-from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
+from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox, SandboxConfig
 from dynamiq.skills.config import SkillsConfig
@@ -234,8 +230,10 @@ class Agent(Node):
     _excluded_tool_ids: set[str] = PrivateAttr(default_factory=set)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
     _history_offset: int = PrivateAttr(
-        default=2,  # Offset to the first message (default: 2 — system and initial user messages).
+        default=1,  # Offset past the system prompt; everything after is eligible for summarization.
     )
+    # Original user input message preserved from compaction and used for memory fallback.
+    _pinned_input: Message | VisionMessage | None = PrivateAttr(default=None)
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
 
@@ -579,14 +577,6 @@ class Agent(Node):
                         "Use this context to inform your response.",
                     ),
                 )
-            if isinstance(input_message, Message):
-                memory_content = input_message.content
-            else:
-                text_parts = [
-                    content.text for content in input_message.content if isinstance(content, VisionMessageTextContent)
-                ]
-                memory_content = " ".join(text_parts) if text_parts else "Image input"
-            self.memory.add(role=MessageRole.USER, content=memory_content, metadata=custom_metadata)
         else:
             history_messages = None
 
@@ -614,11 +604,29 @@ class Agent(Node):
 
         try:
             result = self._run_agent(input_message, history_messages, config=config, **kwargs)
+        except Exception:
+            if use_memory:
+                try:
+                    self._append_user_input_to_memory(custom_metadata)
+                except Exception as save_error:
+                    logger.error(
+                        f"Agent {self.name} - {self.id}: failed to save user input to memory "
+                        f"after agent error: {save_error}",
+                    )
+            raise
         finally:
             self._current_call_context = None
 
         if use_memory:
-            self.memory.add(role=MessageRole.ASSISTANT, content=result, metadata=custom_metadata)
+            try:
+                self._save_history_to_memory(custom_metadata)
+            except Exception as save_error:
+                logger.error(
+                    "Agent %s - %s: failed to save history to memory: %s",
+                    self.name,
+                    self.id,
+                    save_error,
+                )
 
         execution_result = {
             "content": result,
@@ -719,6 +727,94 @@ class Agent(Node):
         logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
         return history_messages
 
+    def _save_history_to_memory(
+        self,
+        metadata: dict,
+    ) -> None:
+        """Snapshot prompt state into memory for current user/session scope.
+
+        Replaces only the messages matching current ``user_id``/``session_id``
+        filters, then writes every non-system message from ``self._prompt.messages``.
+        This avoids wiping unrelated users/sessions when a backend is shared.
+
+        Args:
+            metadata: Metadata dict forwarded to each ``memory.add`` call.
+        """
+        user_id = metadata.get("user_id")
+        session_id = metadata.get("session_id")
+        if not user_id and not session_id:
+            logger.warning(
+                f"Agent {self.name} - {self.id}: skipping memory snapshot save "
+                f"because at least one of user_id or session_id is required",
+            )
+            return
+
+        fully_scoped = bool(user_id and session_id)
+
+        saved = 0
+        snapshot_messages: list[Message] = []
+        for msg in self._prompt.messages:
+            if msg.role == MessageRole.SYSTEM:
+                continue
+            content = extract_message_text(msg)
+            snapshot_messages.append(Message(role=msg.role, content=content, metadata=metadata.copy()))
+            saved += 1
+
+        if fully_scoped:
+            scope_filters = {"user_id": user_id, "session_id": session_id}
+            try:
+                self.memory.replace_messages(filters=scope_filters, messages=snapshot_messages)
+            except NotImplementedError:
+                logger.warning(
+                    f"Agent {self.name} - {self.id}: backend does not support scoped delete, "
+                    "falling back to appending user input and assistant response.",
+                )
+                self._append_fallback_messages(metadata, snapshot_messages)
+                return
+        else:
+            logger.info(
+                f"Agent {self.name} - {self.id}: only one of user_id/session_id provided, "
+                "using append-only save to avoid cross-scope data loss.",
+            )
+            self._append_fallback_messages(metadata, snapshot_messages)
+            return
+
+        logger.info(
+            f"Agent {self.name} - {self.id}: saved {saved} message(s) to memory",
+        )
+
+    def _append_user_input_to_memory(self, metadata: dict) -> None:
+        """Append only the user input to memory (used on agent failure).
+
+        Unlike ``_save_history_to_memory`` this never deletes existing data,
+        making it safe to call when the agent errored before producing a response.
+        """
+        if self._pinned_input is None:
+            return
+        pinned_content = extract_message_text(self._pinned_input)
+        self.memory.add(role=MessageRole.USER, content=pinned_content, metadata=metadata.copy())
+        logger.info(f"Agent {self.name} - {self.id}: saved user input to memory after agent error")
+
+    def _append_fallback_messages(self, metadata: dict, snapshot_messages: list[Message]) -> None:
+        """Append only the user input and last assistant response to memory (safe fallback)."""
+        saved = 0
+        if self._pinned_input is not None:
+            pinned_content = extract_message_text(self._pinned_input)
+            self.memory.add(role=MessageRole.USER, content=pinned_content, metadata=metadata.copy())
+            saved += 1
+        last_assistant = next(
+            (m for m in reversed(snapshot_messages) if m.role == MessageRole.ASSISTANT),
+            None,
+        )
+        if last_assistant:
+            self.memory.add(
+                role=last_assistant.role,
+                content=last_assistant.content,
+                metadata=metadata.copy(),
+            )
+            saved += 1
+        logger.info(f"Agent {self.name} - {self.id}: saved {saved} message(s) to memory (fallback)")
+
     def _run_llm(
         self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs
     ) -> RunnableResult:
@@ -813,6 +909,8 @@ class Agent(Node):
             self._prompt.messages = [system_message, *history_messages, input_message]
         else:
             self._prompt.messages = [system_message, input_message]
+
+        self._pinned_input = input_message
 
         try:
             llm_result = self._run_llm(self._prompt.messages, config=config, **kwargs).output["content"]
