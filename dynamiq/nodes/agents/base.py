@@ -39,7 +39,7 @@ from dynamiq.skills.utils import ingest_skills_into_sandbox, normalize_sandbox_s
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
-from dynamiq.utils.utils import deep_merge
+from dynamiq.utils.utils import ToolOutputSandboxPersistenceConfig, deep_merge
 
 
 class StreamChunkChoiceDelta(BaseModel):
@@ -195,6 +195,10 @@ class Agent(Node):
     max_loops: int = 1
     tool_output_max_length: int = TOOL_MAX_TOKENS
     tool_output_truncate_enabled: bool = True
+    tool_output_sandbox_persistence: ToolOutputSandboxPersistenceConfig = Field(
+        default_factory=ToolOutputSandboxPersistenceConfig,
+        description="Configuration for saving large tool outputs to sandbox files.",
+    )
     delegation_allowed: bool = Field(
         default=False,
         description="Allow returning a child agent tool's output directly via delegate_final flag.",
@@ -1207,6 +1211,8 @@ class Agent(Node):
             tool_name=tool.name,
             tool_input=tool_input,
             sandbox=self.sandbox_backend,
+            save_tool_output_to_sandbox=bool(self.sandbox_backend and tool.is_output_persisted_in_sandbox_allowed),
+            sandbox_persistence_config=self.tool_output_sandbox_persistence,
             max_tokens=self.tool_output_max_length,
             truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
         )

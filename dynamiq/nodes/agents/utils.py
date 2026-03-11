@@ -21,12 +21,9 @@ from dynamiq.prompts import (
 )
 from dynamiq.storages.file.base import FileInfo
 from dynamiq.utils.logger import logger
-from dynamiq.utils.utils import CHARS_PER_TOKEN
+from dynamiq.utils.utils import CHARS_PER_TOKEN, ToolOutputSandboxPersistenceConfig
 
 TOOL_MAX_TOKENS = 64000
-TOOL_OUTPUT_FILE_DUMP_THRESHOLD_CHARS = 7000
-TOOL_OUTPUT_FILE_DUMP_PREVIEW_CHARS = 7000
-SANDBOX_TOOL_OUTPUT_DIR = "/home/user/.tools"
 
 
 def extract_message_text(message: Message | VisionMessage) -> str:
@@ -1040,10 +1037,10 @@ def process_tool_output_with_sandbox_persistence(
     tool_input: dict | str | None,
     sandbox: Any | None = None,
     *,
+    save_tool_output_to_sandbox: bool = False,
+    sandbox_persistence_config: ToolOutputSandboxPersistenceConfig | None = None,
     max_tokens: int = TOOL_MAX_TOKENS,
     truncate: bool = True,
-    dump_threshold_chars: int = TOOL_OUTPUT_FILE_DUMP_THRESHOLD_CHARS,
-    summary_chars: int = TOOL_OUTPUT_FILE_DUMP_PREVIEW_CHARS,
 ) -> str:
     """
     Process tool output and persist large payloads to sandbox files when available.
@@ -1056,19 +1053,21 @@ def process_tool_output_with_sandbox_persistence(
         tool_name (str): The tool's name.
         tool_input (dict | str | None): Tool input context.
         sandbox (Any | None): Optional sandbox object with 'store' method.
+        save_tool_output_to_sandbox (bool): Whether this tool output should be persisted in sandbox
+            if available.
+        sandbox_persistence_config (ToolOutputSandboxPersistenceConfig | None): Persistence behavior config.
         max_tokens (int): Max allowed tokens for returned string.
-        truncate (bool): Whether to truncate if over in threshold and no sandbox.
-        dump_threshold_chars (int): Char count beyond which to dump to sandbox if possible.
-        summary_chars (int): Size of summary in result.
+        truncate (bool): Whether to truncate if over threshold and no sandbox persistence.
 
     Returns:
         str: Content, possibly a summary and sandbox path if large.
     """
+    config = sandbox_persistence_config or ToolOutputSandboxPersistenceConfig()
     prepared = process_tool_output_for_agent(content=content, max_tokens=max_tokens, truncate=False)
-    if len(prepared) <= dump_threshold_chars:
+    if len(prepared) <= config.dump_threshold_chars:
         return prepared
 
-    if sandbox is None:
+    if not config.enabled or not save_tool_output_to_sandbox or sandbox is None:
         return process_tool_output_for_agent(content=prepared, max_tokens=max_tokens, truncate=truncate)
 
     tool_segment = normalize_tool_segment(tool_name, fallback="tool")
@@ -1076,7 +1075,7 @@ def process_tool_output_with_sandbox_persistence(
     context_segment = infer_tool_file_context_segment(tool_name=tool_name, tool_input=tool_input)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     file_name = f"{timestamp}_{context_segment}.txt"
-    target_path = f"{SANDBOX_TOOL_OUTPUT_DIR}/{tool_segment}/{action_segment}/{file_name}"
+    target_path = f"{config.sandbox_tool_output_dir}/{tool_segment}/{action_segment}/{file_name}"
 
     try:
         sandbox.store(
@@ -1090,7 +1089,7 @@ def process_tool_output_with_sandbox_persistence(
         logger.warning("Failed to persist large tool output to sandbox at %s: %s", target_path, exc)
         return process_tool_output_for_agent(content=prepared, max_tokens=max_tokens, truncate=truncate)
 
-    preview = prepared[:summary_chars]
+    preview = prepared[: config.summary_chars]
     return f"Tool output saved to: {target_path}\n\nTool output summary:\n{preview}"
 
 
