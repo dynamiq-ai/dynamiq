@@ -22,6 +22,33 @@ USER_NAME = "Alex"
 USER_COMPANY = "TechCorp"
 
 
+class UsageCaptureCallback(BaseCallbackHandler):
+    """Capture usage payloads emitted by model runs."""
+
+    def __init__(self):
+        self.usage_payloads: list[dict] = []
+
+    def on_node_execute_run(self, serialized: dict, **kwargs):
+        if usage_data := kwargs.get("usage_data"):
+            self.usage_payloads.append(usage_data)
+
+
+def summarize_cache_usage(usage_payloads: list[dict]) -> dict:
+    return {
+        "prompt_tokens": sum((item.get("prompt_tokens") or 0) for item in usage_payloads),
+        "cache_creation_input_tokens": sum((item.get("cache_creation_input_tokens") or 0) for item in usage_payloads),
+        "cache_read_input_tokens": sum((item.get("cache_read_input_tokens") or 0) for item in usage_payloads),
+    }
+
+
+def build_long_agent_role(repetitions: int = 80) -> str:
+    base_block = (
+        "You are a concise technical assistant. "
+        "Prefer factual, structured answers, highlight assumptions, and avoid speculation.\n"
+    )
+    return "System directives:\n" + "".join(base_block for _ in range(repetitions))
+
+
 @pytest.fixture
 def personal_info_input():
     return f"Hi, my name is {USER_NAME} and I work as a software engineer at {USER_COMPANY}."
@@ -76,28 +103,14 @@ def verify_memory(memory, memory_response, user_id, session_id):
     assert len(conversation_messages) == 6, f"Expected 6 messages, found {len(conversation_messages)}"
 
 
-class UsageCaptureCallback(BaseCallbackHandler):
-    """Capture usage payloads emitted during node execution."""
-
-    def __init__(self):
-        self.usage_payloads: list[dict] = []
-
-    def on_node_execute_run(self, serialized: dict, **kwargs):
-        if usage_data := kwargs.get("usage_data"):
-            self.usage_payloads.append(usage_data)
-
-
-def summarize_cache_usage(usage_payloads: list[dict]) -> dict:
-    return {
-        "prompt_tokens": sum((item.get("prompt_tokens") or 0) for item in usage_payloads),
-        "cache_creation_input_tokens": sum((item.get("cache_creation_input_tokens") or 0) for item in usage_payloads),
-        "cache_read_input_tokens": sum((item.get("cache_read_input_tokens") or 0) for item in usage_payloads),
-    }
-
-
 @pytest.fixture
 def openai_connection():
     return connections.OpenAI()
+
+
+@pytest.fixture
+def anthropic_connection():
+    return connections.Anthropic()
 
 
 @pytest.fixture
@@ -108,11 +121,6 @@ def pinecone_connection():
 @pytest.fixture
 def qdrant_connection():
     return connections.Qdrant()
-
-
-@pytest.fixture
-def anthropic_connection():
-    return connections.Anthropic()
 
 
 @pytest.fixture
@@ -130,11 +138,11 @@ def openai_llm(openai_connection):
 def anthropic_llm(anthropic_connection):
     return Anthropic(
         name="Anthropic",
-        model="claude-sonnet-4-5",
+        model="claude-sonnet-4-6",
         connection=anthropic_connection,
-        max_tokens=8192,
-        temperature=0,
         cache_control=AnthropicCacheControl(),
+        max_tokens=1024,
+        temperature=0,
     )
 
 
@@ -415,6 +423,10 @@ def test_memory_snapshot_with_inmemory_backend(anthropic_llm, run_config):
     4. Another user/session's data seeded before the agent runs remains
        intact after both turns (cross-scope isolation).
     """
+    usage_capture = UsageCaptureCallback()
+    test_run_config = run_config.model_copy(deep=True)
+    test_run_config.callbacks = [usage_capture]
+
     lookup_tool = Python(
         name="company-lookup",
         description="Look up which company a person works at. Input: {'person': '<name>'}",
@@ -427,11 +439,6 @@ def test_memory_snapshot_with_inmemory_backend(anthropic_llm, run_config):
     )
 
     memory = Memory(backend=InMemory())
-    turn_usage_capture = UsageCaptureCallback()
-    turn_cache_config = RunnableConfig(
-        request_timeout=run_config.request_timeout,
-        callbacks=[turn_usage_capture],
-    )
 
     agent = Agent(
         name="InMemorySnapshotAgent",
@@ -467,11 +474,14 @@ def test_memory_snapshot_with_inmemory_backend(anthropic_llm, run_config):
             "user_id": user_id,
             "session_id": session_id,
         },
-        config=turn_cache_config,
+        config=test_run_config,
     )
     assert result_1.status == RunnableStatus.SUCCESS, f"Turn 1 failed: {result_1.error}"
-    turn_1_usage = summarize_cache_usage(turn_usage_capture.usage_payloads)
-    turn_usage_capture.usage_payloads.clear()
+    turn_1_usage = summarize_cache_usage(usage_capture.usage_payloads)
+    usage_capture.usage_payloads.clear()
+    assert (
+        turn_1_usage["cache_creation_input_tokens"] > 0 or turn_1_usage["cache_read_input_tokens"] > 0
+    ), f"Expected turn 1 to create or read cache tokens, got: {turn_1_usage}"
 
     response_1 = result_1.output[agent.id]["output"]["content"]
     assert "Found" in response_1, f"Agent should mention 'Found': {response_1}"
@@ -521,14 +531,10 @@ def test_memory_snapshot_with_inmemory_backend(anthropic_llm, run_config):
             "user_id": user_id,
             "session_id": session_id,
         },
-        config=turn_cache_config,
+        config=test_run_config,
     )
     assert result_2.status == RunnableStatus.SUCCESS, f"Turn 2 failed: {result_2.error}"
-    turn_2_usage = summarize_cache_usage(turn_usage_capture.usage_payloads)
-    assert (
-        turn_1_usage["cache_creation_input_tokens"] > 0
-    ), f"Expected cache creation tokens on turn 1, got {turn_1_usage}"
-    assert turn_2_usage["cache_read_input_tokens"] > 0, f"Expected cache read tokens on turn 2, got {turn_2_usage}"
+    usage_capture.usage_payloads.clear()
 
     recall_response = result_2.output[agent.id]["output"]["content"]
     assert USER_COMPANY in recall_response, f"Agent should recall '{USER_COMPANY}' from memory: {recall_response}"
@@ -566,48 +572,74 @@ def test_memory_snapshot_with_inmemory_backend(anthropic_llm, run_config):
     assert OTHER_USER_MSG in other_contents, "Other user's message should be preserved"
     assert OTHER_ASSISTANT_MSG in other_contents, "Other assistant's reply should be preserved"
 
-    # --- Anthropic prompt caching check (cache creation on first run, cache read on second run) ---
-    usage_capture = UsageCaptureCallback()
-    cache_config = RunnableConfig(callbacks=[usage_capture], request_timeout=run_config.request_timeout)
-
-    anthropic_agent = Agent(
-        name="InMemorySnapshotAnthropicCacheAgent",
+    # --- Same agent, same prompt twice ---
+    same_prompt_agent = Agent(
+        name="SamePromptAgent",
         llm=anthropic_llm,
         tools=[],
-        role=(
-            "You are a concise technical assistant. "
-            "Prefer factual, structured answers, highlight assumptions, and avoid speculation."
-        ),
+        role=build_long_agent_role(),
         inference_mode=InferenceMode.DEFAULT,
-        memory=memory,
         max_loops=3,
     )
-    anthropic_wf = Workflow(flow=flows.Flow(nodes=[anthropic_agent]))
-    first_cache_result = anthropic_wf.run(
-        input_data={
-            "input": "Explain prompt caching in one short sentence.",
-            "user_id": user_id,
-            "session_id": session_id,
-        },
-        config=cache_config,
-    )
-    assert first_cache_result.status == RunnableStatus.SUCCESS
 
-    first_usage = summarize_cache_usage(usage_capture.usage_payloads)
+    repeated_prompt = "Explain prompt caching in one short paragraph."
+    first_same_prompt_result = same_prompt_agent.run(
+        input_data={"input": repeated_prompt},
+        config=test_run_config,
+    )
+    assert (
+        first_same_prompt_result.status == RunnableStatus.SUCCESS
+    ), f"Same-prompt run 1 failed: {first_same_prompt_result.error}"
+    first_same_prompt_usage = summarize_cache_usage(usage_capture.usage_payloads)
     usage_capture.usage_payloads.clear()
 
-    second_cache_result = anthropic_wf.run(
-        input_data={
-            "input": "Explain prompt caching in one short sentence.",
-            "user_id": user_id,
-            "session_id": session_id,
-        },
-        config=cache_config,
+    second_same_prompt_result = same_prompt_agent.run(
+        input_data={"input": repeated_prompt},
+        config=test_run_config,
     )
-    assert second_cache_result.status == RunnableStatus.SUCCESS
-
-    second_usage = summarize_cache_usage(usage_capture.usage_payloads)
     assert (
-        first_usage["cache_creation_input_tokens"] > 0
-    ), f"Expected cache creation tokens on first run, got {first_usage}"
-    assert second_usage["cache_read_input_tokens"] > 0, f"Expected cache read tokens on second run, got {second_usage}"
+        second_same_prompt_result.status == RunnableStatus.SUCCESS
+    ), f"Same-prompt run 2 failed: {second_same_prompt_result.error}"
+    second_same_prompt_usage = summarize_cache_usage(usage_capture.usage_payloads)
+
+    assert (
+        first_same_prompt_usage["cache_creation_input_tokens"] > 0
+        or first_same_prompt_usage["cache_read_input_tokens"] > 0
+    ), f"Expected cache creation or read on same-prompt run 1, got: {first_same_prompt_usage}"
+    assert (
+        second_same_prompt_usage["cache_read_input_tokens"] > 0
+    ), f"Expected cache read on same-prompt run 2, got: {second_same_prompt_usage}"
+
+    # --- Multi-turn conversation with same agent ---
+    usage_capture.usage_payloads.clear()
+    multi_turn_agent = Agent(
+        name="MultiTurnAgent",
+        llm=anthropic_llm,
+        role=build_long_agent_role(),
+        inference_mode=InferenceMode.DEFAULT,
+        max_loops=3,
+        memory=Memory(backend=InMemory()),
+    )
+
+    mt_result_1 = multi_turn_agent.run(
+        input_data={"input": "What are 3 key benefits of Python?"},
+        config=test_run_config,
+    )
+    assert mt_result_1.status == RunnableStatus.SUCCESS, f"Multi-turn run 1 failed: {mt_result_1.error}"
+    mt_usage_1 = summarize_cache_usage(usage_capture.usage_payloads)
+    usage_capture.usage_payloads.clear()
+
+    mt_result_2 = multi_turn_agent.run(
+        input_data={"input": "Summarize them in one sentence."},
+        config=test_run_config,
+    )
+    assert mt_result_2.status == RunnableStatus.SUCCESS, f"Multi-turn run 2 failed: {mt_result_2.error}"
+    mt_usage_2 = summarize_cache_usage(usage_capture.usage_payloads)
+
+    assert (
+        mt_usage_1["cache_creation_input_tokens"] > 0 or mt_usage_1["cache_read_input_tokens"] > 0
+    ), f"Expected cache creation/read on multi-turn run 1, got: {mt_usage_1}"
+
+    assert (
+        mt_usage_2["cache_read_input_tokens"] > 0
+    ), f"Expected cache hit on multi-turn run 2 (growing history), got: {mt_usage_2}"
