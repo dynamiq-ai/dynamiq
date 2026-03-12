@@ -96,7 +96,7 @@ def openai_llm(openai_connection):
         name="OpenAI",
         model="gpt-5-mini",
         connection=openai_connection,
-        max_tokens=1000,
+        max_tokens=5000,
         temperature=0,
     )
 
