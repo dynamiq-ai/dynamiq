@@ -119,6 +119,7 @@ class AgentToolResultEventMessageData(BaseModel):
     loop_num: int
     output: dict[str, Any] | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    status: str = "success"
 
 
 class StreamingConfig(BaseModel):
