@@ -606,6 +606,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         update_run_depends: bool = True,
         collect_dependency: bool = False,
         is_parallel: bool = False,
+        group_id: str | None = None,
         **kwargs,
     ) -> tuple[Any, list, bool, bool, dict | None]:
         """Execute a single tool with caching support.
@@ -645,6 +646,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 tool=tool_data,
                 action_input=action_input,
                 loop_num=loop_num,
+                group_id=group_id,
             ),
             "reasoning",
             config,
@@ -1429,6 +1431,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             }
 
         if prepared_tools:
+            group_id = generate_uuid() if len(prepared_tools) > 1 else None
+
             if len(prepared_tools) == 1:
                 all_results.append(_execute_single_tool_to_result(prepared_tools[0], update_run_depends=True))
             else:
@@ -1453,17 +1457,22 @@ class Agent(HistoryManagerMixin, BaseAgent):
                                 tool_payload,
                                 is_parallel=True,
                                 update_run_depends=False,
+                                group_id=group_id,
                             )
                             future_map[future] = tool_payload
 
                         for future in as_completed(future_map.keys()):
                             all_results.append(future.result())
                 elif len(parallel_group) == 1:
-                    all_results.append(_execute_single_tool_to_result(parallel_group[0], update_run_depends=False))
+                    all_results.append(
+                        _execute_single_tool_to_result(parallel_group[0], update_run_depends=False, group_id=group_id)
+                    )
 
                 # Phase 2: run sequential-only tools one-by-one
                 for tool_payload in sequential_group:
-                    all_results.append(_execute_single_tool_to_result(tool_payload, update_run_depends=False))
+                    all_results.append(
+                        _execute_single_tool_to_result(tool_payload, update_run_depends=False, group_id=group_id)
+                    )
 
         observation_parts: list[str] = []
         aggregated_files: dict[str, Any] = {}

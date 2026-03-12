@@ -245,3 +245,25 @@ class TestExecuteToolsSplit:
         assert any(
             "is_parallel_execution_allowed=False" in record.message for record in caplog.records
         ), "Should log which tools are excluded from parallel execution"
+
+
+class TestGroupIdPropagation:
+    """Test that _execute_tools generates a shared group_id for parallel batches."""
+
+    def test_mixed_batch_shares_group_id(
+        self, openai_node, mock_llm_executor, parallel_tool_a, sequential_tool_x, mocker
+    ):
+        """Both parallel and sequential tools in a mixed batch share the same group_id."""
+        agent = _build_agent(openai_node, mock_llm_executor, [parallel_tool_a, sequential_tool_x])
+        mock_single = mocker.patch.object(agent, "_execute_single_tool", return_value=SINGLE_TOOL_RESULT)
+
+        tools_data = [
+            {"name": "ToolA", "input": {"x": 1}},
+            {"name": "ToolX", "input": {"x": 2}},
+        ]
+        agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
+
+        assert mock_single.call_count == 2
+        group_ids = [c.kwargs["group_id"] for c in mock_single.call_args_list]
+        assert all(gid is not None for gid in group_ids)
+        assert group_ids[0] == group_ids[1]
