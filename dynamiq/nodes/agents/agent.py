@@ -351,7 +351,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         batch_tool_run_id = self._streaming_tool_run_id or generate_uuid()
         self._streaming_tool_run_id = None
-        parallel_tool = self.tool_by_names.get(PARALLEL_TOOL_NAME)
+        parallel_tool = self.tool_by_names.get(self.sanitize_tool_name(PARALLEL_TOOL_NAME))
         batch_tool_data = AgentToolData(
             name=PARALLEL_TOOL_NAME,
             type=parallel_tool.type if parallel_tool else "tool",
@@ -417,7 +417,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 ).model_dump()
             )
 
-        parallel_tool = self.tool_by_names.get(PARALLEL_TOOL_NAME)
+        parallel_tool = self.tool_by_names.get(self.sanitize_tool_name(PARALLEL_TOOL_NAME))
         batch_tool_data = AgentToolData(
             name=PARALLEL_TOOL_NAME,
             type=parallel_tool.type if parallel_tool else "tool",
