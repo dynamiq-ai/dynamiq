@@ -138,7 +138,7 @@ def openai_llm(openai_connection):
 def anthropic_llm(anthropic_connection):
     return Anthropic(
         name="Anthropic",
-        model="claude-sonnet-4-6",
+        model="claude-sonnet-4-5",
         connection=anthropic_connection,
         cache_control=AnthropicCacheControl(),
         max_tokens=1024,

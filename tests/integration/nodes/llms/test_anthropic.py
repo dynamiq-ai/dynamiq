@@ -49,7 +49,6 @@ def get_anthropic_workflow(
     ],
 )
 def test_workflow_with_anthropic_llm(mock_llm_response_text, mock_llm_executor, model, expected_model):
-    model = model
     connection = connections.Anthropic(
         id=str(uuid.uuid4()),
         api_key="api_key",
