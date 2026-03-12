@@ -348,12 +348,18 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         batch_tool_run_id = self._streaming_tool_run_id or generate_uuid()
         self._streaming_tool_run_id = None
+        parallel_tool = self.tool_by_names.get(PARALLEL_TOOL_NAME)
+        batch_tool_data = AgentToolData(
+            name=PARALLEL_TOOL_NAME,
+            type=parallel_tool.type if parallel_tool else "tool",
+            action_type=parallel_tool.action_type.value if parallel_tool and parallel_tool.action_type else None,
+        )
         self._stream_agent_event(
             AgentReasoningEventMessageData(
                 tool_run_id=batch_tool_run_id,
                 thought=thought or "",
                 action=PARALLEL_TOOL_NAME,
-                tool=AgentToolData(name=PARALLEL_TOOL_NAME, type="tool"),
+                tool=batch_tool_data,
                 action_input=per_tool_reasoning,
                 loop_num=loop_num,
             ),
@@ -665,7 +671,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         update_run_depends: bool = True,
         collect_dependency: bool = False,
         is_parallel: bool = False,
-        skip_reasoning_stream: bool = False,
         tool_run_id: str | None = None,
         **kwargs,
     ) -> tuple[Any, list, bool, bool, dict | None]:
@@ -676,8 +681,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             collect_dependency: Whether to collect and return the dependency dict.
             is_parallel: Whether this tool is being executed in parallel with other tools.
                 When True, the tool will be cloned for thread-safe execution.
-            skip_reasoning_stream: When True, suppress the per-tool reasoning stream event.
-                Used when a batch reasoning event has already been streamed by _execute_tools.
             tool_run_id: Pre-generated tool run ID. When provided, reuses it instead of
                 generating a new one, so tool result events match the batch reasoning event.
 
@@ -702,20 +705,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
             action_type=tool.action_type.value if tool.action_type else None,
         )
 
-        if not skip_reasoning_stream:
-            self._stream_agent_event(
-                AgentReasoningEventMessageData(
-                    tool_run_id=tool_run_id,
-                    thought=thought or "",
-                    action=action,
-                    tool=tool_data,
-                    action_input=action_input,
-                    loop_num=loop_num,
-                ),
-                "reasoning",
-                config,
-                **kwargs,
-            )
+        self._stream_agent_event(
+            AgentReasoningEventMessageData(
+                tool_run_id=tool_run_id,
+                thought=thought or "",
+                action=action,
+                tool=tool_data,
+                action_input=action_input,
+                loop_num=loop_num,
+            ),
+            "reasoning",
+            config,
+            **kwargs,
+        )
         try:
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
@@ -1524,7 +1526,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                                 tool_payload,
                                 is_parallel=True,
                                 update_run_depends=False,
-                                skip_reasoning_stream=True,
                                 tool_run_id=tool_payload["tool_run_id"],
                             )
                             future_map[future] = tool_payload
@@ -1536,7 +1537,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         _execute_single_tool_to_result(
                             parallel_group[0],
                             update_run_depends=False,
-                            skip_reasoning_stream=True,
                             tool_run_id=parallel_group[0]["tool_run_id"],
                         )
                     )
@@ -1547,7 +1547,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         _execute_single_tool_to_result(
                             tool_payload,
                             update_run_depends=False,
-                            skip_reasoning_stream=True,
                             tool_run_id=tool_payload["tool_run_id"],
                         )
                     )

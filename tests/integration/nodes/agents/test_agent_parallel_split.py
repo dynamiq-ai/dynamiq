@@ -248,15 +248,18 @@ class TestExecuteToolsSplit:
 
 
 class TestBatchReasoningStream:
-    """Test that multi-tool batches stream a single run_parallel reasoning event."""
+    """Test that multi-tool batches stream a batch run_parallel event plus individual per-tool events."""
 
-    def test_multi_tool_batch_skips_individual_reasoning(
+    def test_multi_tool_batch_streams_batch_and_individual_reasoning(
         self, openai_node, mock_llm_executor, parallel_tool_a, parallel_tool_b, mocker
     ):
-        """All tools in a multi-tool batch should be called with skip_reasoning_stream=True."""
+        """A multi-tool batch should emit a batch run_parallel reasoning event
+        as an extra message, while each tool also emits its own reasoning event."""
+        from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME
+
         agent = _build_agent(openai_node, mock_llm_executor, [parallel_tool_a, parallel_tool_b])
         mock_single = mocker.patch.object(agent, "_execute_single_tool", return_value=SINGLE_TOOL_RESULT)
-        mocker.patch.object(agent, "_stream_agent_event")
+        mock_stream = mocker.patch.object(agent, "_stream_agent_event")
 
         tools_data = [
             {"name": "ToolA", "input": {"x": 1}},
@@ -264,18 +267,14 @@ class TestBatchReasoningStream:
         ]
         agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
 
+        # Batch run_parallel reasoning event is emitted once via _stream_agent_event
+        assert mock_stream.call_count == 1
+        batch_event = mock_stream.call_args[0][0]
+        assert batch_event.action == PARALLEL_TOOL_NAME
+        assert isinstance(batch_event.action_input, list)
+        assert len(batch_event.action_input) == 2
+
+        # Individual per-tool reasoning events are emitted inside _execute_single_tool
         assert mock_single.call_count == 2
         for c in mock_single.call_args_list:
-            assert c.kwargs.get("skip_reasoning_stream") is True
             assert c.kwargs.get("tool_run_id") is not None
-
-    def test_single_tool_does_not_skip_reasoning(self, openai_node, mock_llm_executor, parallel_tool_a, mocker):
-        """A single-tool batch should NOT set skip_reasoning_stream."""
-        agent = _build_agent(openai_node, mock_llm_executor, [parallel_tool_a])
-        mock_single = mocker.patch.object(agent, "_execute_single_tool", return_value=SINGLE_TOOL_RESULT)
-
-        tools_data = [{"name": "ToolA", "input": {"x": 1}}]
-        agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
-
-        mock_single.assert_called_once()
-        assert mock_single.call_args.kwargs.get("skip_reasoning_stream", False) is False
