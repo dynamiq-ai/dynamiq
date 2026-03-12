@@ -5,11 +5,12 @@ from time import sleep
 import pytest
 
 from dynamiq import Workflow, connections, flows
+from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.memory import Memory
 from dynamiq.memory.backends import DynamoDB, InMemory, Pinecone, Qdrant
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
-from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.llms import Anthropic, OpenAI
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import MessageRole
@@ -75,6 +76,25 @@ def verify_memory(memory, memory_response, user_id, session_id):
     assert len(conversation_messages) == 6, f"Expected 6 messages, found {len(conversation_messages)}"
 
 
+class UsageCaptureCallback(BaseCallbackHandler):
+    """Capture usage payloads emitted during node execution."""
+
+    def __init__(self):
+        self.usage_payloads: list[dict] = []
+
+    def on_node_execute_run(self, serialized: dict, **kwargs):
+        if usage_data := kwargs.get("usage_data"):
+            self.usage_payloads.append(usage_data)
+
+
+def summarize_cache_usage(usage_payloads: list[dict]) -> dict:
+    return {
+        "prompt_tokens": sum((item.get("prompt_tokens") or 0) for item in usage_payloads),
+        "cache_creation_input_tokens": sum((item.get("cache_creation_input_tokens") or 0) for item in usage_payloads),
+        "cache_read_input_tokens": sum((item.get("cache_read_input_tokens") or 0) for item in usage_payloads),
+    }
+
+
 @pytest.fixture
 def openai_connection():
     return connections.OpenAI()
@@ -91,12 +111,28 @@ def qdrant_connection():
 
 
 @pytest.fixture
+def anthropic_connection():
+    return connections.Anthropic()
+
+
+@pytest.fixture
 def openai_llm(openai_connection):
     return OpenAI(
         name="OpenAI",
         model="gpt-5-mini",
         connection=openai_connection,
         max_tokens=5000,
+        temperature=0,
+    )
+
+
+@pytest.fixture
+def anthropic_llm(anthropic_connection):
+    return Anthropic(
+        name="Anthropic",
+        model="claude-sonnet-4-5",
+        connection=anthropic_connection,
+        max_tokens=8192,
         temperature=0,
     )
 
@@ -363,7 +399,7 @@ def test_react_agent_with_dynamodb_memory(
 
 @pytest.mark.integration
 @pytest.mark.flaky(reruns=3)
-def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
+def test_memory_snapshot_with_inmemory_backend(anthropic_llm, run_config):
     """Test that memory uses snapshot semantics: clear + rewrite after each run.
 
     Uses a Python tool so the agent produces tool-call / observation messages.
@@ -390,10 +426,15 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
     )
 
     memory = Memory(backend=InMemory())
+    turn_usage_capture = UsageCaptureCallback()
+    turn_cache_config = RunnableConfig(
+        request_timeout=run_config.request_timeout,
+        callbacks=[turn_usage_capture],
+    )
 
     agent = Agent(
         name="InMemorySnapshotAgent",
-        llm=openai_llm,
+        llm=anthropic_llm,
         tools=[lookup_tool],
         role=(
             "You are a helpful assistant. When asked about a person, "
@@ -425,9 +466,11 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
             "user_id": user_id,
             "session_id": session_id,
         },
-        config=run_config,
+        config=turn_cache_config,
     )
     assert result_1.status == RunnableStatus.SUCCESS, f"Turn 1 failed: {result_1.error}"
+    turn_1_usage = summarize_cache_usage(turn_usage_capture.usage_payloads)
+    turn_usage_capture.usage_payloads.clear()
 
     response_1 = result_1.output[agent.id]["output"]["content"]
     assert "Found" in response_1, f"Agent should mention 'Found': {response_1}"
@@ -457,7 +500,7 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
 
     agent = Agent(
         name="SecondInMemorySnapshotAgent",
-        llm=openai_llm,
+        llm=anthropic_llm,
         tools=[],
         role=("You are a helpful assistant."),
         inference_mode=InferenceMode.XML,
@@ -477,9 +520,14 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
             "user_id": user_id,
             "session_id": session_id,
         },
-        config=run_config,
+        config=turn_cache_config,
     )
     assert result_2.status == RunnableStatus.SUCCESS, f"Turn 2 failed: {result_2.error}"
+    turn_2_usage = summarize_cache_usage(turn_usage_capture.usage_payloads)
+    assert (
+        turn_1_usage["cache_creation_input_tokens"] > 0
+    ), f"Expected cache creation tokens on turn 1, got {turn_1_usage}"
+    assert turn_2_usage["cache_read_input_tokens"] > 0, f"Expected cache read tokens on turn 2, got {turn_2_usage}"
 
     recall_response = result_2.output[agent.id]["output"]["content"]
     assert USER_COMPANY in recall_response, f"Agent should recall '{USER_COMPANY}' from memory: {recall_response}"
@@ -516,3 +564,49 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
     other_contents = [m.content for m in other_stored]
     assert OTHER_USER_MSG in other_contents, "Other user's message should be preserved"
     assert OTHER_ASSISTANT_MSG in other_contents, "Other assistant's reply should be preserved"
+
+    # --- Anthropic prompt caching check (cache creation on first run, cache read on second run) ---
+    usage_capture = UsageCaptureCallback()
+    cache_config = RunnableConfig(callbacks=[usage_capture], request_timeout=run_config.request_timeout)
+
+    anthropic_agent = Agent(
+        name="InMemorySnapshotAnthropicCacheAgent",
+        llm=anthropic_llm,
+        tools=[],
+        role=(
+            "You are a concise technical assistant. "
+            "Prefer factual, structured answers, highlight assumptions, and avoid speculation."
+        ),
+        inference_mode=InferenceMode.DEFAULT,
+        memory=memory,
+        max_loops=3,
+    )
+    anthropic_wf = Workflow(flow=flows.Flow(nodes=[anthropic_agent]))
+    first_cache_result = anthropic_wf.run(
+        input_data={
+            "input": "Explain prompt caching in one short sentence.",
+            "user_id": user_id,
+            "session_id": session_id,
+        },
+        config=cache_config,
+    )
+    assert first_cache_result.status == RunnableStatus.SUCCESS
+
+    first_usage = summarize_cache_usage(usage_capture.usage_payloads)
+    usage_capture.usage_payloads.clear()
+
+    second_cache_result = anthropic_wf.run(
+        input_data={
+            "input": "Explain prompt caching in one short sentence.",
+            "user_id": user_id,
+            "session_id": session_id,
+        },
+        config=cache_config,
+    )
+    assert second_cache_result.status == RunnableStatus.SUCCESS
+
+    second_usage = summarize_cache_usage(usage_capture.usage_payloads)
+    assert (
+        first_usage["cache_creation_input_tokens"] > 0
+    ), f"Expected cache creation tokens on first run, got {first_usage}"
+    assert second_usage["cache_read_input_tokens"] > 0, f"Expected cache read tokens on second run, got {second_usage}"

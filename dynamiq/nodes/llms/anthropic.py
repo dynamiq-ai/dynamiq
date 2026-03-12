@@ -13,6 +13,7 @@ class AnthropicCacheControl(BaseModel):
 
     type: Literal["ephemeral"] = "ephemeral"
     ttl: Literal["5m", "1h"] | None = "5m"
+    cache_injection_point_index: int = -2
 
 
 class Anthropic(BaseLLM):
@@ -80,8 +81,11 @@ class Anthropic(BaseLLM):
             params.setdefault("cache_control_injection_points", []).append(
                 {
                     "location": "message",
-                    "index": -1,
-                    "control": self.cache_control.model_dump(exclude_none=True),
+                    "index": self.cache_control.cache_injection_point_index,
+                    "control": self.cache_control.model_dump(
+                        exclude_none=True,
+                        exclude={"cache_injection_point_index"},
+                    ),
                 }
             )
         return params
