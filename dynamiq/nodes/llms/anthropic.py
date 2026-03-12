@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.nodes.llms.base import BaseLLM
@@ -12,7 +12,7 @@ class AnthropicCacheControl(BaseModel):
     """Anthropic prompt caching configuration."""
 
     type: Literal["ephemeral"] = "ephemeral"
-    ttl: Literal["1h"] | None = None
+    ttl: Literal["5m", "1h"] | None = "5m"
 
 
 class Anthropic(BaseLLM):
@@ -26,7 +26,7 @@ class Anthropic(BaseLLM):
     """
     connection: AnthropicConnection | None = None
     MODEL_PREFIX = "anthropic/"
-    cache_control: AnthropicCacheControl | None = None
+    cache_control: AnthropicCacheControl | None = Field(default_factory=AnthropicCacheControl)
 
     def __init__(self, **kwargs):
         """Initialize the Anthropic LLM node.
