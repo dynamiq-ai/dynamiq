@@ -1,5 +1,5 @@
 from .ai21 import AI21
-from .anthropic import Anthropic
+from .anthropic import Anthropic, AnthropicCacheControl
 from .anyscale import Anyscale
 from .azureai import AzureAI
 from .base import BaseLLM
