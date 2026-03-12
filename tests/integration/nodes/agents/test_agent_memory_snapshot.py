@@ -138,3 +138,17 @@ def test_memory_snapshot_replaces_only_current_user_scope(llm, memory, mock_llm_
 
     after_a = memory.get_agent_conversation(filters=user_a)
     assert any("A2" in m.content for m in after_a), "User A snapshot should contain the latest input"
+
+
+def test_memory_retrieved_messages_are_static(memory):
+    """Messages from memory must have static=True to skip Jinja2 rendering."""
+    memory.add(role=MessageRole.USER, content="hello", metadata={"user_id": USER_ID, "session_id": SESSION_ID})
+    memory.add(role=MessageRole.ASSISTANT, content="hi", metadata={"user_id": USER_ID, "session_id": SESSION_ID})
+
+    filters = {"user_id": USER_ID, "session_id": SESSION_ID}
+    for msg in memory.get_all():
+        assert msg.static is True
+    for msg in memory.search(filters=filters):
+        assert msg.static is True
+    for msg in memory.get_agent_conversation(filters=filters):
+        assert msg.static is True

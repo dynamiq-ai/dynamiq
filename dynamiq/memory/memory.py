@@ -104,7 +104,7 @@ class Memory(BaseModel):
             effective_limit = limit if limit is not None else self.message_limit
 
             messages = self.backend.get_all(limit=effective_limit)
-            retrieved_messages = [Message(**msg.model_dump()) for msg in messages]
+            retrieved_messages = [Message(**msg.model_dump(), static=True) for msg in messages]
             logger.debug(f"Memory {self.backend.name}: Retrieved {len(retrieved_messages)} messages")
             return retrieved_messages
         except Exception as e:
@@ -153,7 +153,7 @@ class Memory(BaseModel):
 
             results = self.backend.search(query=query, filters=effective_filters, limit=effective_limit)
 
-            retrieved_messages = [Message(**msg.model_dump()) for msg in results]
+            retrieved_messages = [Message(**msg.model_dump(), static=True) for msg in results]
             logger.debug(
                 f"Memory {self.backend.name}: Found {len(retrieved_messages)} search results for query: {query}, "
                 f"filters: {effective_filters}"
