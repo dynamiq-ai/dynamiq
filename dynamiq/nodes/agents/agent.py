@@ -1495,7 +1495,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             }
 
         if prepared_tools:
-            group_id = generate_uuid() if len(prepared_tools) > 1 else None
 
             if len(prepared_tools) == 1:
                 all_results.append(_execute_single_tool_to_result(prepared_tools[0], update_run_depends=True))

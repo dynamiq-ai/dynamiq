@@ -105,7 +105,6 @@ class AgentReasoningEventMessageData(BaseModel):
     tool: AgentToolData
     action_input: Any
     loop_num: int
-    group_id: str | None = None
 
 
 class AgentToolResultEventMessageData(BaseModel):
