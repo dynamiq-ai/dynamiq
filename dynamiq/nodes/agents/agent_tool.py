@@ -122,7 +122,7 @@ class SubAgentTool(Node):
     @model_validator(mode="after")
     def validate_agent_config(self):
         if isinstance(self.agent_factory, dict):
-            self.agent_factory = yaml.dump(self.agent_factory, default_flow_style=False)
+            self.agent_factory = yaml.safe_dump(self.agent_factory, default_flow_style=False)
 
         if self.agent is None and self.agent_factory is None:
             raise ValueError("SubAgentTool requires either 'agent' or 'agent_factory'.")
