@@ -5,11 +5,12 @@ from time import sleep
 import pytest
 
 from dynamiq import Workflow, connections, flows
+from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.memory import Memory
 from dynamiq.memory.backends import DynamoDB, InMemory, Pinecone, Qdrant
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
-from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.llms import Anthropic, AnthropicCacheControl, OpenAI
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import MessageRole
@@ -19,6 +20,33 @@ from dynamiq.utils.logger import logger
 
 USER_NAME = "Alex"
 USER_COMPANY = "TechCorp"
+
+
+class UsageCaptureCallback(BaseCallbackHandler):
+    """Capture usage payloads emitted by model runs."""
+
+    def __init__(self):
+        self.usage_payloads: list[dict] = []
+
+    def on_node_execute_run(self, serialized: dict, **kwargs):
+        if usage_data := kwargs.get("usage_data"):
+            self.usage_payloads.append(usage_data)
+
+
+def summarize_cache_usage(usage_payloads: list[dict]) -> dict:
+    return {
+        "prompt_tokens": sum((item.get("prompt_tokens") or 0) for item in usage_payloads),
+        "cache_creation_input_tokens": sum((item.get("cache_creation_input_tokens") or 0) for item in usage_payloads),
+        "cache_read_input_tokens": sum((item.get("cache_read_input_tokens") or 0) for item in usage_payloads),
+    }
+
+
+def build_long_agent_role(repetitions: int = 80) -> str:
+    base_block = (
+        "You are a concise technical assistant. "
+        "Prefer factual, structured answers, highlight assumptions, and avoid speculation.\n"
+    )
+    return "System directives:\n" + "".join(base_block for _ in range(repetitions))
 
 
 @pytest.fixture
@@ -81,6 +109,11 @@ def openai_connection():
 
 
 @pytest.fixture
+def anthropic_connection():
+    return connections.Anthropic()
+
+
+@pytest.fixture
 def pinecone_connection():
     return connections.Pinecone()
 
@@ -96,7 +129,19 @@ def openai_llm(openai_connection):
         name="OpenAI",
         model="gpt-5-mini",
         connection=openai_connection,
-        max_tokens=1000,
+        max_tokens=5000,
+        temperature=0,
+    )
+
+
+@pytest.fixture
+def anthropic_llm(anthropic_connection):
+    return Anthropic(
+        name="Anthropic",
+        model="claude-sonnet-4-5",
+        connection=anthropic_connection,
+        cache_control=AnthropicCacheControl(),
+        max_tokens=1024,
         temperature=0,
     )
 
@@ -363,7 +408,7 @@ def test_react_agent_with_dynamodb_memory(
 
 @pytest.mark.integration
 @pytest.mark.flaky(reruns=3)
-def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
+def test_memory_snapshot_with_inmemory_backend(anthropic_llm, run_config):
     """Test that memory uses snapshot semantics: clear + rewrite after each run.
 
     Uses a Python tool so the agent produces tool-call / observation messages.
@@ -378,6 +423,10 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
     4. Another user/session's data seeded before the agent runs remains
        intact after both turns (cross-scope isolation).
     """
+    usage_capture = UsageCaptureCallback()
+    test_run_config = run_config.model_copy(deep=True)
+    test_run_config.callbacks = [usage_capture]
+
     lookup_tool = Python(
         name="company-lookup",
         description="Look up which company a person works at. Input: {'person': '<name>'}",
@@ -393,7 +442,7 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
 
     agent = Agent(
         name="InMemorySnapshotAgent",
-        llm=openai_llm,
+        llm=anthropic_llm,
         tools=[lookup_tool],
         role=(
             "You are a helpful assistant. When asked about a person, "
@@ -425,9 +474,14 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
             "user_id": user_id,
             "session_id": session_id,
         },
-        config=run_config,
+        config=test_run_config,
     )
     assert result_1.status == RunnableStatus.SUCCESS, f"Turn 1 failed: {result_1.error}"
+    turn_1_usage = summarize_cache_usage(usage_capture.usage_payloads)
+    usage_capture.usage_payloads.clear()
+    assert (
+        turn_1_usage["cache_creation_input_tokens"] > 0 or turn_1_usage["cache_read_input_tokens"] > 0
+    ), f"Expected turn 1 to create or read cache tokens, got: {turn_1_usage}"
 
     response_1 = result_1.output[agent.id]["output"]["content"]
     assert "Found" in response_1, f"Agent should mention 'Found': {response_1}"
@@ -457,7 +511,7 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
 
     agent = Agent(
         name="SecondInMemorySnapshotAgent",
-        llm=openai_llm,
+        llm=anthropic_llm,
         tools=[],
         role=("You are a helpful assistant."),
         inference_mode=InferenceMode.XML,
@@ -477,9 +531,10 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
             "user_id": user_id,
             "session_id": session_id,
         },
-        config=run_config,
+        config=test_run_config,
     )
     assert result_2.status == RunnableStatus.SUCCESS, f"Turn 2 failed: {result_2.error}"
+    usage_capture.usage_payloads.clear()
 
     recall_response = result_2.output[agent.id]["output"]["content"]
     assert USER_COMPANY in recall_response, f"Agent should recall '{USER_COMPANY}' from memory: {recall_response}"
@@ -516,3 +571,75 @@ def test_memory_snapshot_with_inmemory_backend(openai_llm, run_config):
     other_contents = [m.content for m in other_stored]
     assert OTHER_USER_MSG in other_contents, "Other user's message should be preserved"
     assert OTHER_ASSISTANT_MSG in other_contents, "Other assistant's reply should be preserved"
+
+    # --- Same agent, same prompt twice ---
+    same_prompt_agent = Agent(
+        name="SamePromptAgent",
+        llm=anthropic_llm,
+        tools=[],
+        role=build_long_agent_role(),
+        inference_mode=InferenceMode.DEFAULT,
+        max_loops=3,
+    )
+
+    repeated_prompt = "Explain prompt caching in one short paragraph."
+    first_same_prompt_result = same_prompt_agent.run(
+        input_data={"input": repeated_prompt},
+        config=test_run_config,
+    )
+    assert (
+        first_same_prompt_result.status == RunnableStatus.SUCCESS
+    ), f"Same-prompt run 1 failed: {first_same_prompt_result.error}"
+    first_same_prompt_usage = summarize_cache_usage(usage_capture.usage_payloads)
+    usage_capture.usage_payloads.clear()
+
+    second_same_prompt_result = same_prompt_agent.run(
+        input_data={"input": repeated_prompt},
+        config=test_run_config,
+    )
+    assert (
+        second_same_prompt_result.status == RunnableStatus.SUCCESS
+    ), f"Same-prompt run 2 failed: {second_same_prompt_result.error}"
+    second_same_prompt_usage = summarize_cache_usage(usage_capture.usage_payloads)
+
+    assert (
+        first_same_prompt_usage["cache_creation_input_tokens"] > 0
+        or first_same_prompt_usage["cache_read_input_tokens"] > 0
+    ), f"Expected cache creation or read on same-prompt run 1, got: {first_same_prompt_usage}"
+    assert (
+        second_same_prompt_usage["cache_read_input_tokens"] > 0
+    ), f"Expected cache read on same-prompt run 2, got: {second_same_prompt_usage}"
+
+    # --- Multi-turn conversation with same agent ---
+    usage_capture.usage_payloads.clear()
+    multi_turn_agent = Agent(
+        name="MultiTurnAgent",
+        llm=anthropic_llm,
+        role=build_long_agent_role(),
+        inference_mode=InferenceMode.DEFAULT,
+        max_loops=3,
+        memory=Memory(backend=InMemory()),
+    )
+
+    mt_result_1 = multi_turn_agent.run(
+        input_data={"input": "What are 3 key benefits of Python?"},
+        config=test_run_config,
+    )
+    assert mt_result_1.status == RunnableStatus.SUCCESS, f"Multi-turn run 1 failed: {mt_result_1.error}"
+    mt_usage_1 = summarize_cache_usage(usage_capture.usage_payloads)
+    usage_capture.usage_payloads.clear()
+
+    mt_result_2 = multi_turn_agent.run(
+        input_data={"input": "Summarize them in one sentence."},
+        config=test_run_config,
+    )
+    assert mt_result_2.status == RunnableStatus.SUCCESS, f"Multi-turn run 2 failed: {mt_result_2.error}"
+    mt_usage_2 = summarize_cache_usage(usage_capture.usage_payloads)
+
+    assert (
+        mt_usage_1["cache_creation_input_tokens"] > 0 or mt_usage_1["cache_read_input_tokens"] > 0
+    ), f"Expected cache creation/read on multi-turn run 1, got: {mt_usage_1}"
+
+    assert (
+        mt_usage_2["cache_read_input_tokens"] > 0
+    ), f"Expected cache hit on multi-turn run 2 (growing history), got: {mt_usage_2}"

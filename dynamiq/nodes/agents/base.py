@@ -591,6 +591,7 @@ class Agent(Node):
                         role=MessageRole.SYSTEM,
                         content="Below is the previous conversation history. "
                         "Use this context to inform your response.",
+                        static=True,
                     ),
                 )
         else:
@@ -855,7 +856,7 @@ class Agent(Node):
             self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
             if llm_result.status != RunnableStatus.SUCCESS:
                 error_message = f"LLM '{self.llm.name}' failed: {llm_result.error.message}"
-                raise ValueError({error_message})
+                raise ValueError(error_message)
 
             return llm_result
 
