@@ -10,7 +10,7 @@ from dynamiq.memory import Memory
 from dynamiq.memory.backends import DynamoDB, InMemory, Pinecone, Qdrant
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
-from dynamiq.nodes.llms import Anthropic, OpenAI
+from dynamiq.nodes.llms import Anthropic, AnthropicCacheControl, OpenAI
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import MessageRole
@@ -134,6 +134,7 @@ def anthropic_llm(anthropic_connection):
         connection=anthropic_connection,
         max_tokens=8192,
         temperature=0,
+        cache_control=AnthropicCacheControl(),
     )
 
 
