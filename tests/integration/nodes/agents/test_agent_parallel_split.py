@@ -247,8 +247,8 @@ class TestExecuteToolsSplit:
         ), "Should log which tools are excluded from parallel execution"
 
 
-class TestBatchReasoningStream:
-    """Test that multi-tool batches stream a batch run_parallel event plus individual per-tool events."""
+class TestBatchStreamEvents:
+    """Test that multi-tool batches stream batch reasoning and completion events."""
 
     def test_multi_tool_batch_streams_batch_and_individual_reasoning(
         self, openai_node, mock_llm_executor, parallel_tool_a, parallel_tool_b, mocker
@@ -267,14 +267,90 @@ class TestBatchReasoningStream:
         ]
         agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
 
-        # Batch run_parallel reasoning event is emitted once via _stream_agent_event
-        assert mock_stream.call_count == 1
-        batch_event = mock_stream.call_args[0][0]
-        assert batch_event.action == PARALLEL_TOOL_NAME
-        assert isinstance(batch_event.action_input, list)
-        assert len(batch_event.action_input) == 2
+        # Two _stream_agent_event calls: batch reasoning + batch completion
+        assert mock_stream.call_count == 2
+
+        reasoning_event = mock_stream.call_args_list[0][0][0]
+        assert reasoning_event.action == PARALLEL_TOOL_NAME
+        assert isinstance(reasoning_event.action_input, list)
+        assert len(reasoning_event.action_input) == 2
 
         # Individual per-tool reasoning events are emitted inside _execute_single_tool
         assert mock_single.call_count == 2
         for c in mock_single.call_args_list:
             assert c.kwargs.get("tool_run_id") is not None
+
+    def test_batch_completion_event_emitted_after_tools_finish(
+        self, openai_node, mock_llm_executor, parallel_tool_a, parallel_tool_b, mocker
+    ):
+        """After all parallel tools finish, a run_parallel tool-result event should be emitted
+        with per-tool status summaries and no actual results."""
+        from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME
+        from dynamiq.types.streaming import AgentToolResultEventMessageData
+
+        agent = _build_agent(openai_node, mock_llm_executor, [parallel_tool_a, parallel_tool_b])
+        mocker.patch.object(agent, "_execute_single_tool", return_value=SINGLE_TOOL_RESULT)
+        mock_stream = mocker.patch.object(agent, "_stream_agent_event")
+
+        tools_data = [
+            {"name": "ToolA", "input": {"x": 1}},
+            {"name": "ToolB", "input": {"x": 2}},
+        ]
+        agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
+
+        # Second call is the completion event
+        completion_event = mock_stream.call_args_list[1][0][0]
+        completion_step = mock_stream.call_args_list[1][0][1]
+
+        assert isinstance(completion_event, AgentToolResultEventMessageData)
+        assert completion_step == "tool"
+        assert completion_event.name == PARALLEL_TOOL_NAME
+        assert completion_event.tool.name == PARALLEL_TOOL_NAME
+        assert completion_event.tool.action_type == "parallel_execution"
+        assert completion_event.status == "success"
+
+        # result is a list of per-tool summaries
+        assert isinstance(completion_event.result, list)
+        assert len(completion_event.result) == 2
+        tool_names = {entry["name"] for entry in completion_event.result}
+        assert tool_names == {"ToolA", "ToolB"}
+        for entry in completion_event.result:
+            assert entry["result"] is None
+            assert entry["status"] == "success"
+            assert "tool_run_id" in entry
+
+    def test_batch_completion_reports_partial_failure(
+        self, openai_node, mock_llm_executor, parallel_tool_a, parallel_tool_b, mocker
+    ):
+        """If one tool fails, the batch completion status should be partial_failure."""
+        from dynamiq.types.streaming import AgentToolResultEventMessageData
+
+        agent = _build_agent(openai_node, mock_llm_executor, [parallel_tool_a, parallel_tool_b])
+        success_result = ("ok", [], False, True, {"node": "dep"})
+        failure_result = ("error msg", [], False, False, None)
+
+        call_count = 0
+
+        def mock_execute(name, inp, thought, loop, config, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if name == "ToolA":
+                return success_result
+            return failure_result
+
+        mocker.patch.object(agent, "_execute_single_tool", side_effect=mock_execute)
+        mock_stream = mocker.patch.object(agent, "_stream_agent_event")
+
+        tools_data = [
+            {"name": "ToolA", "input": {"x": 1}},
+            {"name": "ToolB", "input": {"x": 2}},
+        ]
+        agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
+
+        completion_event = mock_stream.call_args_list[1][0][0]
+        assert isinstance(completion_event, AgentToolResultEventMessageData)
+        assert completion_event.status == "partial_failure"
+
+        statuses = {entry["name"]: entry["status"] for entry in completion_event.result}
+        assert statuses["ToolA"] == "success"
+        assert statuses["ToolB"] == "error"
