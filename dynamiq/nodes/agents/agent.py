@@ -27,7 +27,7 @@ from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, Parallel
 from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
-from dynamiq.runnables import RunnableConfig
+from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import (
     AgentReasoningEventMessageData,
@@ -683,6 +683,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                             files=[],
                             loop_num=loop_num,
                             output={},
+                            status=RunnableStatus.SKIP,
                         ),
                         "tool",
                         config,
@@ -788,6 +789,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     files=[],
                     loop_num=loop_num,
                     output={},
+                    status=RunnableStatus.FAILURE,
                 ),
                 "tool",
                 config,
