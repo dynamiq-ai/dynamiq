@@ -330,7 +330,6 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self.loop_num = loop_num
         self.kwargs = kwargs
 
-        # Aggregate streamed text from the LLM in the current loop for proper tracing inside the agent
         self.accumulated_content: str = ""
 
         self._buffer: str = ""
@@ -348,7 +347,6 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         # Set a tail guard to avoid streaming parts of the next tag that may arrive in next chunk
         self._tail_guard: int = TAIL_GUARD_SIZE
 
-        # Tracks whether a complete XML output block has been processed (action or answer).
         # Once set, the parser stops emitting content from any subsequent <output> blocks.
         self._xml_output_complete: bool = False
 
