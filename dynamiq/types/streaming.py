@@ -7,7 +7,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, field_validator
 
-from dynamiq.runnables import RunnableStatus
 from dynamiq.utils import generate_uuid
 
 
@@ -120,7 +119,7 @@ class AgentToolResultEventMessageData(BaseModel):
     loop_num: int
     output: dict[str, Any] | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    status: RunnableStatus = RunnableStatus.SUCCESS
+    status: str = "success"
 
 
 class StreamingConfig(BaseModel):
