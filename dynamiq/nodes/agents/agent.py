@@ -394,11 +394,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
             config: Configuration for the runnable.
             **kwargs: Additional keyword arguments forwarded to streaming.
         """
-        results_by_name = {r.get("tool_name"): r for r in all_results}
+        results_by_run_id = {r.get("tool_run_id"): r for r in all_results if r.get("tool_run_id")}
         per_tool_summary = []
         for tp in prepared_tools:
             tool_name = tp["name"]
-            result_entry = results_by_name.get(tool_name, {})
+            result_entry = results_by_run_id.get(tp.get("tool_run_id"), {})
             resolved = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
             tool_data = AgentToolData(
                 name=resolved.name if resolved else tool_name,
@@ -1563,6 +1563,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return {
                 "order": tool_payload["order"],
                 "tool_name": tool_payload["name"],
+                "tool_run_id": tool_payload.get("tool_run_id"),
                 "success": success,
                 "result": tool_result,
                 "files": tool_files,
