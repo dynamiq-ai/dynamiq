@@ -170,6 +170,11 @@ class SubAgentTool(Node):
             agent = ReActAgent(**resolved)
         elif callable(self.agent_factory):
             agent = self.agent_factory()
+        else:
+            raise TypeError(
+                f"SubAgentTool '{self.name}': agent_factory must be a str (YAML) or callable, "
+                f"got {type(self.agent_factory).__name__}"
+            )
 
         from dynamiq.nodes.agents.base import Agent as BaseAgent
 
