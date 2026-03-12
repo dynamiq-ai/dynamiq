@@ -9,7 +9,7 @@ from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
-from dynamiq.runnables import RunnableConfig
+from dynamiq.runnables import RunnableConfig, RunnableStatus
 
 
 @pytest.fixture
@@ -307,7 +307,7 @@ class TestBatchStreamEvents:
         assert completion_event.name == PARALLEL_TOOL_NAME
         assert completion_event.tool.name == PARALLEL_TOOL_NAME
         assert completion_event.tool.action_type == "parallel_execution"
-        assert completion_event.status == "success"
+        assert completion_event.status == RunnableStatus.SUCCESS
 
         # result is a list of per-tool summaries
         assert isinstance(completion_event.result, list)
@@ -316,13 +316,13 @@ class TestBatchStreamEvents:
         assert tool_names == {"ToolA", "ToolB"}
         for entry in completion_event.result:
             assert entry["result"] is None
-            assert entry["status"] == "success"
+            assert entry["status"] == RunnableStatus.SUCCESS
             assert "tool_run_id" in entry
 
-    def test_batch_completion_reports_partial_failure(
+    def test_batch_completion_reports_failure(
         self, openai_node, mock_llm_executor, parallel_tool_a, parallel_tool_b, mocker
     ):
-        """If one tool fails, the batch completion status should be partial_failure."""
+        """If one tool fails, the batch completion status should be failure."""
         from dynamiq.types.streaming import AgentToolResultEventMessageData
 
         agent = _build_agent(openai_node, mock_llm_executor, [parallel_tool_a, parallel_tool_b])
@@ -349,8 +349,8 @@ class TestBatchStreamEvents:
 
         completion_event = mock_stream.call_args_list[1][0][0]
         assert isinstance(completion_event, AgentToolResultEventMessageData)
-        assert completion_event.status == "partial_failure"
+        assert completion_event.status == RunnableStatus.FAILURE
 
         statuses = {entry["name"]: entry["status"] for entry in completion_event.result}
-        assert statuses["ToolA"] == "success"
-        assert statuses["ToolB"] == "error"
+        assert statuses["ToolA"] == RunnableStatus.SUCCESS
+        assert statuses["ToolB"] == RunnableStatus.FAILURE

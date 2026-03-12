@@ -413,7 +413,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     input=tp["input"],
                     result=None,
                     loop_num=loop_num,
-                    status="success" if result_entry.get("success") else "error",
+                    status=RunnableStatus.SUCCESS if result_entry.get("success") else RunnableStatus.FAILURE,
                 ).model_dump()
             )
 
@@ -423,7 +423,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
             type=parallel_tool.type if parallel_tool else "tool",
             action_type=parallel_tool.action_type.value if parallel_tool and parallel_tool.action_type else None,
         )
-        overall_status = "success" if all(s.get("status") == "success" for s in per_tool_summary) else "partial_failure"
+        overall_status = (
+            RunnableStatus.SUCCESS
+            if all(s.get("status") == RunnableStatus.SUCCESS for s in per_tool_summary)
+            else RunnableStatus.FAILURE
+        )
         self._stream_agent_event(
             AgentToolResultEventMessageData(
                 tool_run_id=batch_tool_run_id,
