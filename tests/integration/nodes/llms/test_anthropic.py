@@ -5,7 +5,7 @@ import pytest
 from dynamiq import Workflow, connections
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
-from dynamiq.nodes.llms import Anthropic
+from dynamiq.nodes.llms import Anthropic, AnthropicCacheControl
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 
@@ -54,7 +54,7 @@ def test_workflow_with_anthropic_llm(mock_llm_response_text, mock_llm_executor, 
         id=str(uuid.uuid4()),
         api_key="api_key",
     )
-    wf_anthropic = get_anthropic_workflow(model=model, connection=connection, cache_control=None)
+    wf_anthropic = get_anthropic_workflow(model=model, connection=connection)
 
     response = wf_anthropic.run(
         input_data={},
@@ -105,7 +105,7 @@ def test_workflow_with_anthropic_llm_prompt_caching(mock_llm_response_text, mock
         id=str(uuid.uuid4()),
         api_key="api_key",
     )
-    wf_anthropic = get_anthropic_workflow(model=model, connection=connection)
+    wf_anthropic = get_anthropic_workflow(model=model, connection=connection, cache_control=AnthropicCacheControl())
 
     response = wf_anthropic.run(
         input_data={},
