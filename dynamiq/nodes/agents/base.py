@@ -1227,9 +1227,9 @@ class Agent(Node):
             if tool_result.status != RunnableStatus.SUCCESS:
                 error_message = f"Tool '{tool.name}' failed: {tool_result.error.to_dict()}"
                 if tool_result.error.recoverable:
-                    raise ToolExecutionException({error_message})
+                    raise ToolExecutionException(error_message)
                 else:
-                    raise ValueError({error_message})
+                    raise ValueError(error_message)
             tool_result_output_content = tool_result.output.get("content")
 
             self._handle_tool_generated_files(tool, tool_result)
