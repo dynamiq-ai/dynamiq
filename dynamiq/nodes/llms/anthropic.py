@@ -1,7 +1,19 @@
+from typing import Any, Literal
+
+from pydantic import BaseModel
+
 from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.prompts.prompts import VisionMessageType
 from dynamiq.utils.logger import logger
+
+
+class AnthropicCacheControl(BaseModel):
+    """Anthropic prompt caching configuration."""
+
+    type: Literal["ephemeral"] = "ephemeral"
+    ttl: Literal["5m", "1h"] | None = "5m"
+    cache_injection_point_index: int = -2
 
 
 class Anthropic(BaseLLM):
@@ -11,9 +23,11 @@ class Anthropic(BaseLLM):
 
     Attributes:
         connection (AnthropicConnection | None): The connection to use for the Anthropic LLM.
+        cache_control (AnthropicCacheControl | None): The cache control configuration.
     """
     connection: AnthropicConnection | None = None
     MODEL_PREFIX = "anthropic/"
+    cache_control: AnthropicCacheControl | None = None
 
     def __init__(self, **kwargs):
         """Initialize the Anthropic LLM node.
@@ -59,3 +73,19 @@ class Anthropic(BaseLLM):
         """
         messages = super().get_messages(prompt, input_data)
         return self._convert_non_image_to_file_content(messages)
+
+    def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Attach Anthropic prompt caching configuration to completion params."""
+        params = super().update_completion_params(params)
+        if self.cache_control:
+            params.setdefault("cache_control_injection_points", []).append(
+                {
+                    "location": "message",
+                    "index": self.cache_control.cache_injection_point_index,
+                    "control": self.cache_control.model_dump(
+                        exclude_none=True,
+                        exclude={"cache_injection_point_index"},
+                    ),
+                }
+            )
+        return params
