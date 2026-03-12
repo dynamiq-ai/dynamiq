@@ -1126,12 +1126,15 @@ class Agent(Node):
         from dynamiq.nodes.agents.agent_tool import SubAgentTool
 
         is_child_agent = isinstance(tool, SubAgentTool)
-        resolved_agent = tool.get_or_create_agent() if is_child_agent else None
-        if resolved_agent is not None and tool.is_factory_mode and tool_run_id:
-            resolved_agent.id = tool_run_id
-
-        _factory_agent = resolved_agent if (resolved_agent is not None and tool.is_factory_mode) else None
+        resolved_agent = None
+        _factory_agent = None
         try:
+            resolved_agent = tool.get_or_create_agent() if is_child_agent else None
+            if resolved_agent is not None and tool.is_factory_mode:
+                _factory_agent = resolved_agent
+                if tool_run_id:
+                    resolved_agent.id = tool_run_id
+
             self._inject_files_into_tool(resolved_agent or tool, merged_input)
 
             if tool_params:
@@ -1155,9 +1158,8 @@ class Agent(Node):
                 if name_params_any:
                     if isinstance(name_params_any, ToolParams):
                         if self.verbose:
-                            debug_info.append(
-                                f"  - From name:{tool.name}: encountered nested ToolParams (ignored for non-agent tool)"
-                            )
+                            detail = "will apply to child agent" if is_child_agent else "ignored for non-agent tool"
+                            debug_info.append(f"  - From name:{tool.name}: encountered nested ToolParams ({detail})")
                     elif isinstance(name_params_any, dict):
                         self._apply_parameters(merged_input, name_params_any, f"name:{tool.name}", debug_info)
 
@@ -1168,9 +1170,8 @@ class Agent(Node):
                 if id_params_any:
                     if isinstance(id_params_any, ToolParams):
                         if self.verbose:
-                            debug_info.append(
-                                f"  - From id:{tool.id}: encountered nested ToolParams (ignored for non-agent tool)"
-                            )
+                            detail = "will apply to child agent" if is_child_agent else "ignored for non-agent tool"
+                            debug_info.append(f"  - From id:{tool.id}: encountered nested ToolParams ({detail})")
                     elif isinstance(id_params_any, dict):
                         self._apply_parameters(merged_input, id_params_any, f"id:{tool.id}", debug_info)
 

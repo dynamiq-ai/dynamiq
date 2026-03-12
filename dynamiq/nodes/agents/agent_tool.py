@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
-
 import yaml
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
@@ -42,35 +40,37 @@ class SubAgentTool(Node):
       - **Initialized** (``agent``): reuses a single agent instance across calls.
       - **Factory callable** (``agent_factory`` as callable): creates a fresh agent
         per invocation, enabling isolated state and parallel execution.
-      - **Factory dict** (``agent_factory`` as dict): JSON-serializable Agent kwargs;
-        a fresh ``Agent(**agent_factory)`` is created per invocation.
-
-    .. note::
-        **Dict factory and shared tool references** — In dict factory mode the
-        kwargs (including ``llm`` and ``tools``) are passed by reference to each
-        new ``Agent``.  This is safe for stateless objects (LLMs, most built-in
-        tools) because they hold no per-agent mutable state.  If your tools are
-        **stateful** (e.g. they accumulate results or maintain a session), use
-        the callable factory instead so you can create fresh tool instances on
-        every invocation.
+      - **Factory YAML** (``agent_factory`` as str/dict): a YAML blueprint using the
+        same format as workflow YAML files.  Parsed and resolved via
+        ``WorkflowYAMLLoader`` on each invocation, producing completely fresh
+        and isolated Agent instances.
 
     Examples::
 
         # Mode 1 — reuse an existing agent
         tool = SubAgentTool(agent=researcher_agent)
 
-        # Mode 2a — callable factory (use for stateful tools)
+        # Mode 2a — callable factory
         tool = SubAgentTool(
             name="Researcher",
             description="Performs web research",
             agent_factory=lambda: Agent(name="Researcher", llm=llm, tools=[exa]),
         )
 
-        # Mode 2b — dict factory (JSON-serializable, tools are shared)
+        # Mode 2b — YAML blueprint (same format as workflow YAML files)
         tool = SubAgentTool(
             name="Researcher",
             description="Performs web research",
-            agent_factory={"name": "Researcher", "llm": llm, "tools": [exa]},
+            agent_factory=\"\"\"
+                connections:
+                  openai-conn:
+                    type: dynamiq.connections.OpenAI
+                name: Researcher
+                llm:
+                  type: dynamiq.nodes.llms.OpenAI
+                  connection: openai-conn
+                  model: gpt-4o
+            \"\"\",
         )
     """
 
@@ -121,8 +121,8 @@ class SubAgentTool(Node):
 
     @model_validator(mode="after")
     def validate_agent_config(self):
-        if isinstance(self.agent_factory, str):
-            self.agent_factory = yaml.safe_load(self.agent_factory)
+        if isinstance(self.agent_factory, dict):
+            self.agent_factory = yaml.dump(self.agent_factory, default_flow_style=False)
 
         if self.agent is None and self.agent_factory is None:
             raise ValueError("SubAgentTool requires either 'agent' or 'agent_factory'.")
@@ -142,40 +142,33 @@ class SubAgentTool(Node):
         """True when the tool creates a fresh agent per call."""
         return self.agent_factory is not None
 
-    @staticmethod
-    def _resolve_blueprint(data: Any) -> Any:
-        """Recursively resolve dicts with a ``cls`` key into live objects, bottom-up.
-
-        Leaf dicts are resolved first so that parent constructors receive
-        already-instantiated children.  Dicts without ``cls`` are returned
-        as plain dicts.  Each call creates completely fresh instances.
-        """
-        if isinstance(data, dict):
-            resolved = {k: SubAgentTool._resolve_blueprint(v) for k, v in data.items()}
-            if "cls" in resolved:
-                cls_path = resolved.pop("cls")
-                module_path, class_name = cls_path.rsplit(".", 1)
-                module = importlib.import_module(module_path)
-                cls = getattr(module, class_name)
-                return cls(**resolved)
-            return resolved
-        if isinstance(data, list):
-            return [SubAgentTool._resolve_blueprint(item) for item in data]
-        return data
-
     def _create_agent_from_factory(self) -> Agent:
-        """Create an Agent from the factory (callable or dict) and initialize its components.
+        """Create an Agent from the factory and initialize its components.
 
-        For dict factories the blueprint is resolved via ``_resolve_blueprint``
-        which instantiates every ``cls``-keyed dict bottom-up.  Each call
-        produces completely fresh objects — no shared state, no deep-copy.
+        For YAML-string factories the blueprint is parsed with ``yaml.safe_load``
+        and resolved via ``WorkflowYAMLLoader`` methods — the same resolution
+        path used for real workflow YAML files.  Each call produces completely
+        fresh objects with no shared state.
         """
-        if isinstance(self.agent_factory, dict):
+        if isinstance(self.agent_factory, str):
             from dynamiq.nodes.agents.agent import Agent as ReActAgent
+            from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
 
-            factory_kwargs = self._resolve_blueprint(dict(self.agent_factory))
-            agent = ReActAgent(**factory_kwargs)
-        else:
+            data = yaml.safe_load(self.agent_factory)
+            registry: dict = {}
+            connections = WorkflowYAMLLoader.get_connections(data, registry)
+            agent_data = {k: v for k, v in data.items() if k != "connections"}
+            resolved = WorkflowYAMLLoader.get_updated_node_init_data_with_initialized_nodes(
+                node_init_data=agent_data,
+                nodes={},
+                flows={},
+                connections=connections,
+                prompts={},
+                registry=registry,
+                connection_manager=self._connection_manager,
+            )
+            agent = ReActAgent(**resolved)
+        elif callable(self.agent_factory):
             agent = self.agent_factory()
 
         from dynamiq.nodes.agents.base import Agent as BaseAgent
@@ -197,7 +190,7 @@ class SubAgentTool(Node):
         self._connection_manager = connection_manager
         if self.agent_factory is not None and self.validate_factory:
             trial = self._create_agent_from_factory()
-            logger.info(f"SubAgentTool '{self.name}': successfully created a trial agent from factory with id {trial.id}")
+            logger.info(f"SubAgentTool '{self.name}': successfully created a trial agent with id {trial.id}")
             self.cleanup_factory_agent(trial)
             del trial
         elif self.agent is not None:
@@ -226,25 +219,12 @@ class SubAgentTool(Node):
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"agent": True, "agent_factory": True}
 
-    @staticmethod
-    def _serialize_value(value: Any, **kwargs) -> Any:
-        """Recursively convert live objects to plain dicts for serialization."""
-        if hasattr(value, "to_dict") and callable(value.to_dict):
-            return value.to_dict(**kwargs)
-        if isinstance(value, dict):
-            return {k: SubAgentTool._serialize_value(v, **kwargs) for k, v in value.items()}
-        if isinstance(value, list):
-            return [SubAgentTool._serialize_value(item, **kwargs) for item in value]
-        return value
-
     def to_dict(self, **kwargs) -> dict:
         data = super().to_dict(**kwargs)
         if self.agent is not None:
             data["agent"] = self.agent.to_dict(**kwargs)
-        elif isinstance(self.agent_factory, dict):
-            data["agent_factory"] = yaml.dump(
-                self._serialize_value(self.agent_factory, **kwargs), default_flow_style=False
-            )
+        elif isinstance(self.agent_factory, str):
+            data["agent_factory"] = self.agent_factory
         elif self.agent_factory is not None:
             data["agent_factory"] = {
                 "_type": "callable",

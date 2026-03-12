@@ -1,0 +1,64 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+  e2b-conn:
+    type: dynamiq.connections.E2B
+
+nodes:
+  parent-agent:
+    type: dynamiq.nodes.agents.Agent
+    name: Manager Agent
+    description: Orchestrates sub-agents for research and coding tasks.
+    role: |
+      You are a senior assistant who delegates work to specialized sub-agents.
+      Each sub-agent gets a fresh sandbox — safe to call in parallel.
+      Pass a clear, self-contained task description as input.
+    llm:
+      id: parent-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o
+      temperature: 0.1
+      max_tokens: 4000
+    tools:
+      - type: dynamiq.nodes.agents.SubAgentTool
+        name: Researcher
+        description: Performs web research and summarizes findings.
+        agent_factory: |
+          connections:
+            openai-conn:
+              type: dynamiq.connections.OpenAI
+            e2b-conn:
+              type: dynamiq.connections.E2B
+
+          name: Researcher
+          role: You are a research agent. Search the web and summarize findings.
+          llm:
+            type: dynamiq.nodes.llms.OpenAI
+            connection: openai-conn
+            model: gpt-4o
+            temperature: 0.1
+            max_tokens: 4000
+          tools:
+            - type: dynamiq.nodes.tools.python.Python
+              code: |
+                def run(input_data):
+                    return {"content": str(input_data)}
+          sandbox:
+            enabled: true
+            backend:
+              type: dynamiq.sandboxes.e2b.E2BSandbox
+              connection: e2b-conn
+          max_loops: 5
+    max_loops: 5
+
+flows:
+  subagent-factory-flow:
+    name: SubAgent Factory Flow
+    nodes:
+      - parent-agent
+
+workflows:
+  subagent-factory-workflow:
+    flow: subagent-factory-flow
+    version: 1

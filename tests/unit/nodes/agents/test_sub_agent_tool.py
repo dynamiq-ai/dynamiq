@@ -14,7 +14,6 @@ from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableResult, RunnableStatus
-from dynamiq.sandboxes import SandboxConfig
 from dynamiq.sandboxes.e2b import E2BSandbox
 
 
@@ -87,20 +86,30 @@ class TestSubAgentToolCreation:
         assert tool.agent_factory is factory
         assert tool.is_factory_mode is True
 
-    def test_dict_factory_mode(self, test_llm):
+    def test_dict_factory_mode(self):
         tool = SubAgentTool(
             name="Researcher",
             description="Performs web research",
             agent_factory={
+                "connections": {
+                    "openai-conn": {
+                        "type": "dynamiq.connections.OpenAI",
+                        "api_key": "test-key",
+                    },
+                },
                 "name": "Researcher",
-                "llm": test_llm,
+                "llm": {
+                    "type": "dynamiq.nodes.llms.OpenAI",
+                    "connection": "openai-conn",
+                    "model": "gpt-4o",
+                },
                 "role": "You are a research agent.",
                 "tools": [],
             },
         )
 
         assert tool.agent is None
-        assert isinstance(tool.agent_factory, dict)
+        assert isinstance(tool.agent_factory, str)
         assert tool.is_factory_mode is True
         assert tool.is_parallel_execution_allowed is True
 
@@ -110,40 +119,6 @@ class TestSubAgentToolCreation:
 
         agent2 = tool.get_or_create_agent()
         assert agent2 is not agent
-
-    def test_dict_factory_with_tools(self, test_llm):
-        python_tool = Python(code="def run(input_data): return input_data")
-        researcher_tool = SubAgentTool(
-            name="Researcher",
-            description="Searches the web",
-            agent_factory={
-                "name": "Researcher",
-                "llm": test_llm,
-                "role": "You are a research agent.",
-                "tools": [python_tool],
-            },
-        )
-
-        programmer_tool = SubAgentTool(
-            name="Programmer",
-            description="Writes code",
-            agent_factory={
-                "name": "Programmer",
-                "llm": test_llm,
-                "role": "You are a programming agent.",
-                "tools": [],
-            },
-        )
-
-        researcher = researcher_tool.get_or_create_agent()
-        programmer = programmer_tool.get_or_create_agent()
-
-        assert researcher.name == "Researcher"
-        assert programmer.name == "Programmer"
-        assert len(researcher.tools) == 1
-        assert len(programmer.tools) == 0
-        assert researcher.role == "You are a research agent."
-        assert programmer.role == "You are a programming agent."
 
     def test_requires_agent_or_factory(self):
         with pytest.raises(ValueError, match="requires either"):
@@ -233,14 +208,24 @@ class TestGetOrCreateAgent:
         assert isinstance(agent2, Agent)
         assert agent1 is not agent2
 
-    def test_factory_always_generates_unique_id(self, test_llm):
+    def test_factory_always_generates_unique_id(self):
         tool = SubAgentTool(
             name="Researcher",
             description="research",
             agent_factory={
+                "connections": {
+                    "openai-conn": {
+                        "type": "dynamiq.connections.OpenAI",
+                        "api_key": "test-key",
+                    },
+                },
                 "name": "Researcher",
                 "id": "fixed-id",
-                "llm": test_llm,
+                "llm": {
+                    "type": "dynamiq.nodes.llms.OpenAI",
+                    "connection": "openai-conn",
+                    "model": "gpt-4o",
+                },
                 "role": "r",
                 "tools": [],
             },
@@ -376,13 +361,23 @@ class TestSerialization:
         assert result["agent_factory"]["_type"] == "callable"
         assert "_repr" in result["agent_factory"]
 
-    def test_to_dict_dict_factory_serializes(self, test_llm):
+    def test_to_dict_dict_factory_serializes(self):
         tool = SubAgentTool(
             name="Researcher",
             description="research",
             agent_factory={
+                "connections": {
+                    "openai-conn": {
+                        "type": "dynamiq.connections.OpenAI",
+                        "api_key": "test-key",
+                    },
+                },
                 "name": "Researcher",
-                "llm": test_llm,
+                "llm": {
+                    "type": "dynamiq.nodes.llms.OpenAI",
+                    "connection": "openai-conn",
+                    "model": "gpt-4o",
+                },
                 "role": "You are a research agent.",
                 "tools": [],
             },
@@ -393,7 +388,8 @@ class TestSerialization:
         assert "SubAgentTool" in result.get("type", "")
         assert "agent" not in result
         assert "agent_factory" in result
-        assert result["agent_factory"]["name"] == "Researcher"
+        assert isinstance(result["agent_factory"], str)
+        assert "Researcher" in result["agent_factory"]
 
 
 # --- Schema generation ---
@@ -653,11 +649,11 @@ class TestYamlRoundtrip:
         assert rt_wrapper.agent.description == "Performs web research"
 
     def test_dict_factory_yaml_roundtrip(self, tmp_path):
-        """Roundtrip for SubAgentTool in dict-factory mode with cls blueprint.
+        """Roundtrip for SubAgentTool in YAML-string factory mode.
 
         Verifies that to_yaml -> from_yaml preserves factory semantics:
         the reloaded tool should still be in factory mode (agent is None,
-        agent_factory is a dict) and get_or_create_agent() should produce
+        agent_factory is a YAML string) and get_or_create_agent() should produce
         distinct Agent instances with isolated sandbox and tools.
         """
         openai_conn = OpenAIConnection(id="openai-conn", api_key="test-key")
@@ -667,36 +663,35 @@ class TestYamlRoundtrip:
             name="Researcher",
             description="Performs web research",
             agent_factory={
-                "name": "Researcher",
-                "llm": {
-                    "cls": "dynamiq.nodes.llms.OpenAI",
-                    "id": "child-llm",
-                    "model": "gpt-4o",
-                    "connection": {
-                        "cls": "dynamiq.connections.OpenAI",
-                        "id": "openai-conn",
+                "connections": {
+                    "openai-conn": {
+                        "type": "dynamiq.connections.OpenAI",
                         "api_key": "test-key",
                     },
+                    "e2b-conn": {
+                        "type": "dynamiq.connections.E2B",
+                        "api_key": "test-key",
+                    },
+                },
+                "name": "Researcher",
+                "llm": {
+                    "type": "dynamiq.nodes.llms.OpenAI",
+                    "connection": "openai-conn",
+                    "model": "gpt-4o",
                 },
                 "role": "You are a research agent.",
                 "tools": [
                     {
-                        "cls": "dynamiq.nodes.tools.python.Python",
-                        "id": "py-tool",
+                        "type": "dynamiq.nodes.tools.python.Python",
                         "code": "def run(input_data): return input_data",
                     },
                 ],
                 "max_loops": 3,
                 "sandbox": {
-                    "cls": "dynamiq.sandboxes.SandboxConfig",
                     "enabled": True,
                     "backend": {
-                        "cls": "dynamiq.sandboxes.e2b.E2BSandbox",
-                        "connection": {
-                            "cls": "dynamiq.connections.E2B",
-                            "id": "e2b-conn",
-                            "api_key": "test-key",
-                        },
+                        "type": "dynamiq.sandboxes.e2b.E2BSandbox",
+                        "connection": "e2b-conn",
                     },
                 },
             },
@@ -733,7 +728,7 @@ class TestYamlRoundtrip:
         assert SubAgentTool.FACTORY_HINT in wrapper.description
         assert wrapper.is_factory_mode is True
         assert wrapper.agent is None
-        assert isinstance(wrapper.agent_factory, dict)
+        assert isinstance(wrapper.agent_factory, str)
 
         agent_a = wrapper.get_or_create_agent()
         agent_b = wrapper.get_or_create_agent()
@@ -768,7 +763,7 @@ class TestYamlRoundtrip:
         rt_wrapper = rt_tools[0]
         assert rt_wrapper.is_factory_mode is True
         assert rt_wrapper.agent is None
-        assert isinstance(rt_wrapper.agent_factory, dict)
+        assert isinstance(rt_wrapper.agent_factory, str)
 
         rt_agent = rt_wrapper.get_or_create_agent()
         assert isinstance(rt_agent, Agent)
@@ -778,26 +773,74 @@ class TestYamlRoundtrip:
         assert rt_agent.sandbox.enabled is True
         assert isinstance(rt_agent.sandbox.backend, E2BSandbox)
 
-    def test_example_agents_as_tools_yaml_loads(self):
-        """Verify the example agents_as_tools.yaml loads with SubAgentTool changes."""
+    def test_example_yaml_files_load(self, tmp_path):
+        """Verify example YAML files load and factory roundtrips correctly."""
         import os
 
-        yaml_path = os.path.join(
+        examples_dir = os.path.join(
             os.path.dirname(__file__),
-            "..", "..", "..", "..",
-            "examples", "components", "core", "dag", "agents_as_tools.yaml",
+            "..",
+            "..",
+            "..",
+            "..",
+            "examples",
+            "components",
+            "core",
+            "dag",
         )
-        if not os.path.exists(yaml_path):
+
+        # --- agents_as_tools.yaml (initialized agent mode) ---
+        agents_path = os.path.join(examples_dir, "agents_as_tools.yaml")
+        if not os.path.exists(agents_path):
             pytest.skip("Example YAML not found")
 
-        loaded = Workflow.from_yaml_file(yaml_path, init_components=False)
+        loaded = Workflow.from_yaml_file(agents_path, init_components=False)
+        assert len(loaded.flow.nodes) == 1
+        parent = loaded.flow.nodes[0]
+        assert isinstance(parent, Agent)
+        agent_tools = [t for t in parent.tools if isinstance(t, SubAgentTool)]
+        assert len(agent_tools) == 1
+        assert agent_tools[0].agent.name == "Coder Agent"
+
+        # --- subagent_factory.yaml (YAML-string factory mode + roundtrip) ---
+        factory_path = os.path.join(examples_dir, "subagent_factory.yaml")
+        if not os.path.exists(factory_path):
+            pytest.skip("Example YAML not found")
+
+        loaded = Workflow.from_yaml_file(factory_path, init_components=True)
         assert len(loaded.flow.nodes) == 1
         parent = loaded.flow.nodes[0]
         assert isinstance(parent, Agent)
 
         agent_tools = [t for t in parent.tools if isinstance(t, SubAgentTool)]
         assert len(agent_tools) == 1
-        assert agent_tools[0].agent.name == "Coder Agent"
+        wrapper = agent_tools[0]
+        assert wrapper.name == "Researcher"
+        assert wrapper.is_factory_mode is True
+        assert isinstance(wrapper.agent_factory, str)
+
+        agent_a = wrapper.get_or_create_agent()
+        agent_b = wrapper.get_or_create_agent()
+        assert isinstance(agent_a, Agent)
+        assert agent_a is not agent_b, "Factory must produce distinct instances"
+        assert agent_a.name == "Researcher"
+        assert agent_a.sandbox is not None
+        assert isinstance(agent_a.sandbox.backend, E2BSandbox)
+        assert agent_a.sandbox.backend is not agent_b.sandbox.backend
+
+        rt_path = tmp_path / "subagent_factory_rt.yaml"
+        loaded.to_yaml_file(rt_path)
+
+        rt = Workflow.from_yaml_file(str(rt_path), init_components=True)
+        rt_wrapper = [t for t in rt.flow.nodes[0].tools if isinstance(t, SubAgentTool)][0]
+        assert rt_wrapper.is_factory_mode is True
+        assert isinstance(rt_wrapper.agent_factory, str)
+
+        rt_agent = rt_wrapper.get_or_create_agent()
+        assert isinstance(rt_agent, Agent)
+        assert rt_agent.name == "Researcher"
+        assert rt_agent.sandbox is not None
+        assert isinstance(rt_agent.sandbox.backend, E2BSandbox)
 
 
 # --- ToolParams resolution through SubAgentTool wrapper ---
