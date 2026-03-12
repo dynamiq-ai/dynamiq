@@ -306,6 +306,146 @@ class Agent(HistoryManagerMixin, BaseAgent):
             **kwargs,
         )
 
+    def _stream_batch_reasoning_event(
+        self,
+        prepared_tools: list[dict[str, Any]],
+        thought: str | None,
+        loop_num: int,
+        config: RunnableConfig,
+        **kwargs,
+    ) -> str:
+        """Stream a single batch reasoning event for parallel tool calls.
+
+        Builds per-tool reasoning objects (assigning a ``tool_run_id`` to each
+        prepared tool payload) and emits one ``run_parallel`` reasoning event
+        whose ``action_input`` is the list of per-tool reasoning dicts.
+
+        Args:
+            prepared_tools: Mutable list of tool payloads; each dict gets a
+                ``tool_run_id`` key added in-place.
+            thought: The agent's reasoning text.
+            loop_num: Current loop iteration number.
+            config: Configuration for the runnable.
+            **kwargs: Additional keyword arguments forwarded to streaming.
+
+        Returns:
+            str: The batch tool_run_id used for the run_parallel event.
+        """
+        per_tool_reasoning = []
+        for tp in prepared_tools:
+            tid = generate_uuid()
+            tp["tool_run_id"] = tid
+            resolved = self.tool_by_names.get(self.sanitize_tool_name(tp["name"]))
+            tool_data = AgentToolData(
+                name=resolved.name if resolved else tp["name"],
+                type=resolved.type if resolved else "unknown",
+                action_type=resolved.action_type.value if resolved and resolved.action_type else None,
+            )
+            per_tool_reasoning.append(
+                AgentReasoningEventMessageData(
+                    tool_run_id=tid,
+                    thought=thought or "",
+                    action=tp["name"],
+                    tool=tool_data,
+                    action_input=tp["input"],
+                    loop_num=loop_num,
+                ).model_dump()
+            )
+
+        batch_tool_run_id = self._streaming_tool_run_id or generate_uuid()
+        self._streaming_tool_run_id = None
+        parallel_tool = self.tool_by_names.get(self.sanitize_tool_name(PARALLEL_TOOL_NAME))
+        batch_tool_data = AgentToolData(
+            name=PARALLEL_TOOL_NAME,
+            type=parallel_tool.type if parallel_tool else "tool",
+            action_type=parallel_tool.action_type.value if parallel_tool and parallel_tool.action_type else None,
+        )
+        self._stream_agent_event(
+            AgentReasoningEventMessageData(
+                tool_run_id=batch_tool_run_id,
+                thought=thought or "",
+                action=PARALLEL_TOOL_NAME,
+                tool=batch_tool_data,
+                action_input=per_tool_reasoning,
+                loop_num=loop_num,
+            ),
+            "reasoning",
+            config,
+            **kwargs,
+        )
+        return batch_tool_run_id
+
+    def _stream_batch_tool_result_event(
+        self,
+        batch_tool_run_id: str,
+        prepared_tools: list[dict[str, Any]],
+        all_results: list[dict[str, Any]],
+        loop_num: int,
+        config: RunnableConfig,
+        **kwargs,
+    ) -> None:
+        """Stream a completion event after all parallel tools have finished.
+
+        Emits a single ``run_parallel`` tool-result event summarizing which
+        tools were executed and their status, without including the actual results.
+
+        Args:
+            batch_tool_run_id: The tool_run_id from the batch reasoning event.
+            prepared_tools: The tool payloads (with ``tool_run_id`` assigned).
+            all_results: Collected results from all tool executions.
+            loop_num: Current loop iteration number.
+            config: Configuration for the runnable.
+            **kwargs: Additional keyword arguments forwarded to streaming.
+        """
+        results_by_run_id = {r.get("tool_run_id"): r for r in all_results if r.get("tool_run_id")}
+        per_tool_summary = []
+        for tp in prepared_tools:
+            tool_name = tp["name"]
+            result_entry = results_by_run_id.get(tp.get("tool_run_id"), {})
+            resolved = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
+            tool_data = AgentToolData(
+                name=resolved.name if resolved else tool_name,
+                type=resolved.type if resolved else "unknown",
+                action_type=resolved.action_type.value if resolved and resolved.action_type else None,
+            )
+            per_tool_summary.append(
+                AgentToolResultEventMessageData(
+                    tool_run_id=tp.get("tool_run_id", ""),
+                    name=tool_name,
+                    tool=tool_data,
+                    input=tp["input"],
+                    result=None,
+                    loop_num=loop_num,
+                    status=RunnableStatus.SUCCESS if result_entry.get("success") else RunnableStatus.FAILURE,
+                ).model_dump()
+            )
+
+        parallel_tool = self.tool_by_names.get(self.sanitize_tool_name(PARALLEL_TOOL_NAME))
+        batch_tool_data = AgentToolData(
+            name=PARALLEL_TOOL_NAME,
+            type=parallel_tool.type if parallel_tool else "tool",
+            action_type=parallel_tool.action_type.value if parallel_tool and parallel_tool.action_type else None,
+        )
+        overall_status = (
+            RunnableStatus.SUCCESS
+            if all(s.get("status") == RunnableStatus.SUCCESS for s in per_tool_summary)
+            else RunnableStatus.FAILURE
+        )
+        self._stream_agent_event(
+            AgentToolResultEventMessageData(
+                tool_run_id=batch_tool_run_id,
+                name=PARALLEL_TOOL_NAME,
+                tool=batch_tool_data,
+                input=[{"name": tp["name"], "input": tp["input"]} for tp in prepared_tools],
+                result=per_tool_summary,
+                loop_num=loop_num,
+                status=overall_status,
+            ),
+            "tool",
+            config,
+            **kwargs,
+        )
+
     def _append_assistant_message(self, llm_result: Any, llm_generated_output: str) -> None:
         """
         Appends the assistant's message to conversation history based on inference mode.
@@ -620,6 +760,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         update_run_depends: bool = True,
         collect_dependency: bool = False,
         is_parallel: bool = False,
+        tool_run_id: str | None = None,
         **kwargs,
     ) -> tuple[Any, list, bool, bool, dict | None]:
         """Execute a single tool with caching support.
@@ -629,6 +770,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             collect_dependency: Whether to collect and return the dependency dict.
             is_parallel: Whether this tool is being executed in parallel with other tools.
                 When True, the tool will be cloned for thread-safe execution.
+            tool_run_id: Pre-generated tool run ID. When provided, reuses it instead of
+                generating a new one, so tool result events match the batch reasoning event.
 
         Returns:
             tuple: (tool_result, tool_files, is_delegated, success, dependency)
@@ -643,7 +786,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
             return error_message, [], False, False, None
 
-        tool_run_id = self._streaming_tool_run_id or generate_uuid()
+        tool_run_id = tool_run_id or self._streaming_tool_run_id or generate_uuid()
         self._streaming_tool_run_id = None
         tool_data = AgentToolData(
             name=tool.name,
@@ -1438,6 +1581,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return {
                 "order": tool_payload["order"],
                 "tool_name": tool_payload["name"],
+                "tool_run_id": tool_payload.get("tool_run_id"),
                 "success": success,
                 "result": tool_result,
                 "files": tool_files,
@@ -1445,9 +1589,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
             }
 
         if prepared_tools:
+
             if len(prepared_tools) == 1:
                 all_results.append(_execute_single_tool_to_result(prepared_tools[0], update_run_depends=True))
             else:
+                batch_tool_run_id = self._stream_batch_reasoning_event(
+                    prepared_tools, thought, loop_num, config, **kwargs
+                )
+
                 parallel_group = [tp for tp in prepared_tools if self._is_tool_parallel_eligible(tp["name"])]
                 sequential_group = [tp for tp in prepared_tools if not self._is_tool_parallel_eligible(tp["name"])]
 
@@ -1469,17 +1618,34 @@ class Agent(HistoryManagerMixin, BaseAgent):
                                 tool_payload,
                                 is_parallel=True,
                                 update_run_depends=False,
+                                tool_run_id=tool_payload["tool_run_id"],
                             )
                             future_map[future] = tool_payload
 
                         for future in as_completed(future_map.keys()):
                             all_results.append(future.result())
                 elif len(parallel_group) == 1:
-                    all_results.append(_execute_single_tool_to_result(parallel_group[0], update_run_depends=False))
+                    all_results.append(
+                        _execute_single_tool_to_result(
+                            parallel_group[0],
+                            update_run_depends=False,
+                            tool_run_id=parallel_group[0]["tool_run_id"],
+                        )
+                    )
 
                 # Phase 2: run sequential-only tools one-by-one
                 for tool_payload in sequential_group:
-                    all_results.append(_execute_single_tool_to_result(tool_payload, update_run_depends=False))
+                    all_results.append(
+                        _execute_single_tool_to_result(
+                            tool_payload,
+                            update_run_depends=False,
+                            tool_run_id=tool_payload["tool_run_id"],
+                        )
+                    )
+
+                self._stream_batch_tool_result_event(
+                    batch_tool_run_id, prepared_tools, all_results, loop_num, config, **kwargs
+                )
 
         observation_parts: list[str] = []
         aggregated_files: dict[str, Any] = {}
