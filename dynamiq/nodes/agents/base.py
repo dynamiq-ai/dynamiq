@@ -579,6 +579,7 @@ class Agent(Node):
                         role=MessageRole.SYSTEM,
                         content="Below is the previous conversation history. "
                         "Use this context to inform your response.",
+                        static=True,
                     ),
                 )
         else:
@@ -843,7 +844,7 @@ class Agent(Node):
             self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
             if llm_result.status != RunnableStatus.SUCCESS:
                 error_message = f"LLM '{self.llm.name}' failed: {llm_result.error.message}"
-                raise ValueError({error_message})
+                raise ValueError(error_message)
 
             return llm_result
 
@@ -1199,9 +1200,9 @@ class Agent(Node):
         if tool_result.status != RunnableStatus.SUCCESS:
             error_message = f"Tool '{tool.name}' failed: {tool_result.error.to_dict()}"
             if tool_result.error.recoverable:
-                raise ToolExecutionException({error_message})
+                raise ToolExecutionException(error_message)
             else:
-                raise ValueError({error_message})
+                raise ValueError(error_message)
         tool_result_output_content = tool_result.output.get("content")
 
         self._handle_tool_generated_files(tool, tool_result)

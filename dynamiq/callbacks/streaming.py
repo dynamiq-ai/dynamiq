@@ -330,7 +330,6 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self.loop_num = loop_num
         self.kwargs = kwargs
 
-        # Aggregate streamed text from the LLM in the current loop for proper tracing inside the agent
         self.accumulated_content: str = ""
 
         self._buffer: str = ""
