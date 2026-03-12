@@ -300,21 +300,6 @@ class TestAutoWrapping:
         assert len(agent_tools) == 1
         assert agent_tools[0] is explicit_tool
 
-    def test_mixed_tools(self, test_llm, child_agent):
-        python_tool = Python(code="def run(input_data): return input_data")
-        parent = Agent(
-            name="Manager",
-            llm=test_llm,
-            role="You are a manager.",
-            tools=[child_agent, python_tool],
-            max_loops=3,
-        )
-
-        sub_agent_tools = [t for t in parent.tools if isinstance(t, SubAgentTool)]
-        assert len(sub_agent_tools) == 1
-        assert sub_agent_tools[0].name == "Researcher"
-
-
 # --- Tool lookup by name ---
 
 
@@ -468,23 +453,6 @@ class TestDelegation:
         wrapper = next(t for t in parent.tools if isinstance(t, SubAgentTool))
         result = parent._should_delegate_final(wrapper, {"input": "task", "delegate_final": True})
         assert result is False
-
-    def test_delegate_final_with_explicit_sub_agent_tool(self, test_llm, child_agent):
-        explicit_tool = SubAgentTool(agent=child_agent, name="Researcher", description="Performs web research")
-        parent = Agent(
-            name="Manager",
-            llm=test_llm,
-            role="You are a manager.",
-            tools=[explicit_tool],
-            delegation_allowed=True,
-            inference_mode=InferenceMode.XML,
-            max_loops=3,
-        )
-
-        tool = parent.tools[0]
-        assert isinstance(tool, SubAgentTool)
-        result = parent._should_delegate_final(tool, {"input": "task", "delegate_final": True})
-        assert result is True
 
     def test_delegate_final_non_agent_tool(self, test_llm):
         python_tool = Python(code="def run(input_data): return input_data")

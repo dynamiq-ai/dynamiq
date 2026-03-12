@@ -1127,13 +1127,8 @@ class Agent(Node):
 
         is_child_agent = isinstance(tool, SubAgentTool)
         resolved_agent = None
-        _factory_agent = None
         try:
             resolved_agent = tool.get_or_create_agent() if is_child_agent else None
-            if resolved_agent is not None and tool.is_factory_mode:
-                _factory_agent = resolved_agent
-                if tool_run_id:
-                    resolved_agent.id = tool_run_id
 
             self._inject_files_into_tool(resolved_agent or tool, merged_input)
 
@@ -1215,6 +1210,8 @@ class Agent(Node):
             tool_config = ensure_config(config)
             if is_parallel and not is_child_agent:
                 tool_to_run, tool_config = self._clone_tool_for_execution(tool_to_run, tool_config)
+            if is_child_agent and tool.is_factory_mode and tool_run_id:
+                resolved_agent.id = tool_run_id
 
             tool_result = tool_to_run.run(
                 input_data=merged_input,
@@ -1255,8 +1252,8 @@ class Agent(Node):
 
             return tool_result_content_processed, output_files, tool_output_meta
         finally:
-            if _factory_agent is not None:
-                SubAgentTool.cleanup_factory_agent(_factory_agent)
+            if is_child_agent and tool.is_factory_mode and resolved_agent is not None:
+                SubAgentTool.cleanup_factory_agent(resolved_agent)
 
     def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> list[io.BytesIO | bytes]:
         """Ensure all uploaded files have name and description attributes and store them in storage backend."""
