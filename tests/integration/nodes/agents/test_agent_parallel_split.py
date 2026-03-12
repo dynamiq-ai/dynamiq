@@ -247,23 +247,35 @@ class TestExecuteToolsSplit:
         ), "Should log which tools are excluded from parallel execution"
 
 
-class TestGroupIdPropagation:
-    """Test that _execute_tools generates a shared group_id for parallel batches."""
+class TestBatchReasoningStream:
+    """Test that multi-tool batches stream a single run_parallel reasoning event."""
 
-    def test_mixed_batch_shares_group_id(
-        self, openai_node, mock_llm_executor, parallel_tool_a, sequential_tool_x, mocker
+    def test_multi_tool_batch_skips_individual_reasoning(
+        self, openai_node, mock_llm_executor, parallel_tool_a, parallel_tool_b, mocker
     ):
-        """Both parallel and sequential tools in a mixed batch share the same group_id."""
-        agent = _build_agent(openai_node, mock_llm_executor, [parallel_tool_a, sequential_tool_x])
+        """All tools in a multi-tool batch should be called with skip_reasoning_stream=True."""
+        agent = _build_agent(openai_node, mock_llm_executor, [parallel_tool_a, parallel_tool_b])
         mock_single = mocker.patch.object(agent, "_execute_single_tool", return_value=SINGLE_TOOL_RESULT)
+        mocker.patch.object(agent, "_stream_agent_event")
 
         tools_data = [
             {"name": "ToolA", "input": {"x": 1}},
-            {"name": "ToolX", "input": {"x": 2}},
+            {"name": "ToolB", "input": {"x": 2}},
         ]
         agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
 
         assert mock_single.call_count == 2
-        group_ids = [c.kwargs["group_id"] for c in mock_single.call_args_list]
-        assert all(gid is not None for gid in group_ids)
-        assert group_ids[0] == group_ids[1]
+        for c in mock_single.call_args_list:
+            assert c.kwargs.get("skip_reasoning_stream") is True
+            assert c.kwargs.get("tool_run_id") is not None
+
+    def test_single_tool_does_not_skip_reasoning(self, openai_node, mock_llm_executor, parallel_tool_a, mocker):
+        """A single-tool batch should NOT set skip_reasoning_stream."""
+        agent = _build_agent(openai_node, mock_llm_executor, [parallel_tool_a])
+        mock_single = mocker.patch.object(agent, "_execute_single_tool", return_value=SINGLE_TOOL_RESULT)
+
+        tools_data = [{"name": "ToolA", "input": {"x": 1}}]
+        agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
+
+        mock_single.assert_called_once()
+        assert mock_single.call_args.kwargs.get("skip_reasoning_stream", False) is False
