@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
+
+import yaml
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
@@ -92,7 +95,7 @@ class SubAgentTool(Node):
         default=None,
         description="Initialized agent instance to reuse across invocations.",
     )
-    agent_factory: Callable[..., Any] | dict | None = Field(
+    agent_factory: Callable[..., Any] | dict | str | None = Field(
         default=None,
         description=(
             "Factory for creating a new Agent per invocation. "
@@ -118,6 +121,9 @@ class SubAgentTool(Node):
 
     @model_validator(mode="after")
     def validate_agent_config(self):
+        if isinstance(self.agent_factory, str):
+            self.agent_factory = yaml.safe_load(self.agent_factory)
+
         if self.agent is None and self.agent_factory is None:
             raise ValueError("SubAgentTool requires either 'agent' or 'agent_factory'.")
         if self.agent is not None and self.agent_factory is not None:
@@ -136,17 +142,39 @@ class SubAgentTool(Node):
         """True when the tool creates a fresh agent per call."""
         return self.agent_factory is not None
 
+    @staticmethod
+    def _resolve_blueprint(data: Any) -> Any:
+        """Recursively resolve dicts with a ``cls`` key into live objects, bottom-up.
+
+        Leaf dicts are resolved first so that parent constructors receive
+        already-instantiated children.  Dicts without ``cls`` are returned
+        as plain dicts.  Each call creates completely fresh instances.
+        """
+        if isinstance(data, dict):
+            resolved = {k: SubAgentTool._resolve_blueprint(v) for k, v in data.items()}
+            if "cls" in resolved:
+                cls_path = resolved.pop("cls")
+                module_path, class_name = cls_path.rsplit(".", 1)
+                module = importlib.import_module(module_path)
+                cls = getattr(module, class_name)
+                return cls(**resolved)
+            return resolved
+        if isinstance(data, list):
+            return [SubAgentTool._resolve_blueprint(item) for item in data]
+        return data
+
     def _create_agent_from_factory(self) -> Agent:
         """Create an Agent from the factory (callable or dict) and initialize its components.
 
-        Dict factories pass kwargs by reference, so LLM and tool objects are
-        shared across agents.  This is intentional — stateless components
-        benefit from reuse.  For stateful tools, use a callable factory.
+        For dict factories the blueprint is resolved via ``_resolve_blueprint``
+        which instantiates every ``cls``-keyed dict bottom-up.  Each call
+        produces completely fresh objects — no shared state, no deep-copy.
         """
         if isinstance(self.agent_factory, dict):
             from dynamiq.nodes.agents.agent import Agent as ReActAgent
 
-            agent = ReActAgent(**self.agent_factory)
+            factory_kwargs = self._resolve_blueprint(dict(self.agent_factory))
+            agent = ReActAgent(**factory_kwargs)
         else:
             agent = self.agent_factory()
 
@@ -214,7 +242,9 @@ class SubAgentTool(Node):
         if self.agent is not None:
             data["agent"] = self.agent.to_dict(**kwargs)
         elif isinstance(self.agent_factory, dict):
-            data["agent_factory"] = self._serialize_value(self.agent_factory, **kwargs)
+            data["agent_factory"] = yaml.dump(
+                self._serialize_value(self.agent_factory, **kwargs), default_flow_style=False
+            )
         elif self.agent_factory is not None:
             data["agent_factory"] = {
                 "_type": "callable",

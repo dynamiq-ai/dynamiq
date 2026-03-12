@@ -14,6 +14,8 @@ from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableResult, RunnableStatus
+from dynamiq.sandboxes import SandboxConfig
+from dynamiq.sandboxes.e2b import E2BSandbox
 
 
 def _sanitize_tool_name(s: str) -> str:
@@ -651,27 +653,52 @@ class TestYamlRoundtrip:
         assert rt_wrapper.agent.description == "Performs web research"
 
     def test_dict_factory_yaml_roundtrip(self, tmp_path):
-        """Roundtrip for SubAgentTool in dict-factory mode.
+        """Roundtrip for SubAgentTool in dict-factory mode with cls blueprint.
 
         Verifies that to_yaml -> from_yaml preserves factory semantics:
         the reloaded tool should still be in factory mode (agent is None,
         agent_factory is a dict) and get_or_create_agent() should produce
-        distinct Agent instances.
+        distinct Agent instances with isolated sandbox and tools.
         """
         openai_conn = OpenAIConnection(id="openai-conn", api_key="test-key")
         parent_llm = OpenAI(id="parent-llm", connection=openai_conn, model="gpt-4o")
-        child_llm = OpenAI(id="child-llm", connection=openai_conn, model="gpt-4o")
-        python_tool = Python(id="py-tool", code="def run(input_data): return input_data")
 
         sub_agent_tool = SubAgentTool(
             name="Researcher",
             description="Performs web research",
             agent_factory={
                 "name": "Researcher",
-                "llm": child_llm,
+                "llm": {
+                    "cls": "dynamiq.nodes.llms.OpenAI",
+                    "id": "child-llm",
+                    "model": "gpt-4o",
+                    "connection": {
+                        "cls": "dynamiq.connections.OpenAI",
+                        "id": "openai-conn",
+                        "api_key": "test-key",
+                    },
+                },
                 "role": "You are a research agent.",
-                "tools": [python_tool],
+                "tools": [
+                    {
+                        "cls": "dynamiq.nodes.tools.python.Python",
+                        "id": "py-tool",
+                        "code": "def run(input_data): return input_data",
+                    },
+                ],
                 "max_loops": 3,
+                "sandbox": {
+                    "cls": "dynamiq.sandboxes.SandboxConfig",
+                    "enabled": True,
+                    "backend": {
+                        "cls": "dynamiq.sandboxes.e2b.E2BSandbox",
+                        "connection": {
+                            "cls": "dynamiq.connections.E2B",
+                            "id": "e2b-conn",
+                            "api_key": "test-key",
+                        },
+                    },
+                },
             },
         )
 
@@ -718,6 +745,18 @@ class TestYamlRoundtrip:
         assert agent_a.role == "You are a research agent."
         assert len(agent_a.tools) >= 1
 
+        assert agent_a.sandbox is not None, "Factory-created agent must have sandbox"
+        assert agent_a.sandbox.enabled is True
+        assert isinstance(agent_a.sandbox.backend, E2BSandbox)
+        assert agent_b.sandbox is not None
+        assert agent_a.sandbox is not agent_b.sandbox, "Each factory agent must get its own sandbox"
+        assert agent_a.sandbox.backend is not agent_b.sandbox.backend, "Each factory agent must get its own backend"
+
+        a_py_tools = [t for t in agent_a.tools if isinstance(t, Python)]
+        b_py_tools = [t for t in agent_b.tools if isinstance(t, Python)]
+        assert len(a_py_tools) >= 1 and len(b_py_tools) >= 1
+        assert a_py_tools[0] is not b_py_tools[0], "Each factory agent must get its own tool instances"
+
         # Second roundtrip
         rt_path = tmp_path / "dict_factory_rt.yaml"
         loaded.to_yaml_file(rt_path)
@@ -734,6 +773,10 @@ class TestYamlRoundtrip:
         rt_agent = rt_wrapper.get_or_create_agent()
         assert isinstance(rt_agent, Agent)
         assert rt_agent.name == "Researcher"
+
+        assert rt_agent.sandbox is not None, "Roundtrip factory-created agent must have sandbox"
+        assert rt_agent.sandbox.enabled is True
+        assert isinstance(rt_agent.sandbox.backend, E2BSandbox)
 
     def test_example_agents_as_tools_yaml_loads(self):
         """Verify the example agents_as_tools.yaml loads with SubAgentTool changes."""
