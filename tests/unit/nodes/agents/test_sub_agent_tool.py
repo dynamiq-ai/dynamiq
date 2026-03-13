@@ -5,6 +5,7 @@ import pytest
 
 from dynamiq import Workflow
 from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.connections.managers import ConnectionManager, get_connection_manager
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
@@ -15,6 +16,7 @@ from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableResult, RunnableStatus
 from dynamiq.sandboxes.e2b import E2BSandbox
+from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
 
 
 def _sanitize_tool_name(s: str) -> str:
@@ -757,6 +759,75 @@ class TestYamlRoundtrip:
         assert rt_agent.name == "Researcher"
         assert rt_agent.sandbox is not None
         assert isinstance(rt_agent.sandbox.backend, E2BSandbox)
+
+    def test_initialized_agent_yaml_roundtrip_with_explicit_connection_manager(self, tmp_path):
+        """YAML roundtrip for initialized-agent mode with an explicit CM.
+
+        Verifies that the explicit ConnectionManager flows through to the
+        child agent's init_components call.
+        """
+        openai_conn = OpenAIConnection(id="openai-conn", api_key="test-key")
+        parent_llm = OpenAI(id="parent-llm", connection=openai_conn, model="gpt-4o")
+        child_llm = OpenAI(id="child-llm", connection=openai_conn, model="gpt-4o")
+
+        child_agent = Agent(
+            id="researcher-agent",
+            name="Researcher Agent",
+            description="I am a research agent",
+            llm=child_llm,
+            role="You are a research agent.",
+            tools=[],
+            max_loops=3,
+        )
+        sub_agent_tool = SubAgentTool(
+            agent=child_agent,
+            name="Research Tool",
+            description="Delegates to researcher",
+        )
+
+        parent = Agent(
+            id="manager-agent",
+            name="Manager",
+            llm=parent_llm,
+            role="You are a manager.",
+            tools=[sub_agent_tool],
+            max_loops=5,
+        )
+
+        wf = Workflow(
+            id="init-cm-wf",
+            flow=Flow(id="init-cm-flow", name="Init CM Flow", nodes=[parent]),
+            version="1",
+        )
+
+        yaml_path = tmp_path / "init_cm.yaml"
+        wf.to_yaml_file(yaml_path)
+
+        with get_connection_manager() as cm:
+            wf_data = WorkflowYAMLLoader.load(
+                file_path=str(yaml_path),
+                connection_manager=cm,
+                init_components=True,
+            )
+            loaded = Workflow.from_yaml_file_data(file_data=wf_data)
+
+            loaded_parent = loaded.flow.nodes[0]
+            assert isinstance(loaded_parent, Agent)
+
+            agent_tools = [t for t in loaded_parent.tools if isinstance(t, SubAgentTool)]
+            assert len(agent_tools) == 1
+            wrapper = agent_tools[0]
+
+            assert wrapper._connection_manager is cm, (
+                "Explicit CM must be stored on SubAgentTool._connection_manager"
+            )
+            assert wrapper.agent is not None
+            assert wrapper.name == "Research Tool"
+            assert "Delegates to researcher" in wrapper.description
+            assert wrapper.agent.name == "Researcher Agent"
+            assert wrapper.agent.is_postponed_component_init is False, (
+                "Child agent must have been initialized via init_components"
+            )
 
 
 # --- ToolParams resolution through SubAgentTool wrapper ---
