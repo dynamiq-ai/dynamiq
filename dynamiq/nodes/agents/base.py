@@ -128,7 +128,7 @@ class AgentInputSchema(BaseModel):
     )
     files: list[io.BytesIO | bytes] | None = Field(
         default=None,
-        description="Parameter to provide files to the agent.",
+        description="List of file paths to pass to the agent.",
         json_schema_extra={"map_from_storage": True, "is_accessible_to_agent": False},
     )
 
@@ -288,7 +288,7 @@ class Agent(Node):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        from dynamiq.nodes.agents.agent_tool import SubAgentTool
+        from dynamiq.nodes.tools.agent_tool import SubAgentTool
         self._run_depends: list[dict] = []
         self._prompt = Prompt(messages=[])
         # Added for backward compatibility with old Agent tools
@@ -1100,7 +1100,7 @@ class Agent(Node):
         **kwargs,
     ) -> Any:
         """Runs a specific tool with the given input."""
-        from dynamiq.nodes.agents.agent_tool import SubAgentTool
+        from dynamiq.nodes.tools.agent_tool import SubAgentTool
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
 
         if not self.delegation_allowed:
@@ -1464,7 +1464,7 @@ class Agent(Node):
             from dynamiq.nodes.agents.agent import Agent
 
             if isinstance(self, Agent):
-                from dynamiq.nodes.agents.agent_tool import SubAgentTool
+                from dynamiq.nodes.tools.agent_tool import SubAgentTool
 
                 self.system_prompt_manager.setup_for_react_agent(
                     inference_mode=self.inference_mode,

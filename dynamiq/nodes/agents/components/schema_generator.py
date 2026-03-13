@@ -4,7 +4,7 @@ import types
 from enum import Enum
 from typing import Any, Callable, Union, get_args, get_origin
 
-from dynamiq.nodes.agents.agent_tool import SubAgentTool
+from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node
 

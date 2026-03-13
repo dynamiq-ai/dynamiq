@@ -7,7 +7,7 @@ from dynamiq import Workflow
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.agents.agent_tool import SubAgentTool
+from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.agents.base import ToolParams
 from dynamiq.nodes.agents.components import schema_generator
 from dynamiq.nodes.llms import OpenAI

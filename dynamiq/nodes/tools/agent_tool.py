@@ -153,6 +153,7 @@ class SubAgentTool(Node):
         with no shared state.
         """
         from dynamiq.nodes.agents.base import Agent as BaseAgent
+
         if isinstance(self.agent_factory, dict):
             from dynamiq.nodes.agents.agent import Agent as ReActAgent
             from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
