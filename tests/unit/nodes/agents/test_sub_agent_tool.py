@@ -5,7 +5,7 @@ import pytest
 
 from dynamiq import Workflow
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.connections.managers import ConnectionManager, get_connection_manager
+from dynamiq.connections.managers import get_connection_manager
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
