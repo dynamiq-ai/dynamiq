@@ -282,6 +282,7 @@ class ExaInputSchema(BaseModel):
             "Return all page contents concatenated into a single context string. True uses defaults; provide "
             "ContextOptions to set a maxCharacters budget (recommended: >=10000)."
         ),
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     moderation: bool | None = Field(
         default=None,
@@ -295,6 +296,7 @@ class ExaInputSchema(BaseModel):
             "(text/highlights/summary/livecrawl/subpages/extras/context). "
             "Use this when include_full_content is insufficient."
         ),
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     brief: str = Field(
         default="Searching the web for information.",
