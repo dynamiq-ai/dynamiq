@@ -7,11 +7,17 @@ OPENAI_NODE = "dynamiq.nodes.llms.OpenAI"
 ANTHROPIC_NODE = "dynamiq.nodes.llms.Anthropic"
 OPENAI_CONN = "dynamiq.connections.OpenAI"
 ANTHROPIC_CONN = "dynamiq.connections.Anthropic"
+AGENT_NODE = "dynamiq.nodes.agents.Agent"
 
 NODE_1 = "node1"
 NODE_2 = "node2"
 CONN_1 = "conn-1"
+CONN_2 = "conn-2"
 CONN_REGULAR = "regular"
+AGENT_ID = "agent-1"
+AGENT_ID_2 = "agent-2"
+LLM_ID = "agent-llm"
+LLM_ID_2 = "agent-llm-2"
 
 REQ_1 = "req-1"
 REQ_2 = "req-2"
@@ -579,3 +585,93 @@ def test_apply_resolved_value_path_invalid_jsonpath_raises():
 
     with pytest.raises(WorkflowYAMLLoaderException, match="Invalid value_path"):
         WorkflowYAMLLoader.apply_resolved_requirements(data, {REQ_1: {"key": "value"}})
+
+
+def test_nested_inline_node_with_inline_dict_connection():
+    """Verify inline dict connection on a nested inline node resolves correctly."""
+    data = {
+        "connections": {},
+        "nodes": {
+            AGENT_ID: {
+                "type": AGENT_NODE,
+                "llm": {
+                    "id": LLM_ID,
+                    "type": OPENAI_NODE,
+                    "connection": {"type": OPENAI_CONN, "api_key": API_KEY},
+                    "model": MODEL_GPT,
+                },
+            }
+        },
+        "flows": {},
+        "workflows": {},
+    }
+
+    result = WorkflowYAMLLoader.parse(data, init_components=False)
+
+    assert AGENT_ID in result.nodes
+    agent = result.nodes[AGENT_ID]
+    assert agent.llm.connection.api_key == API_KEY
+
+
+def test_nested_inline_node_with_string_ref_connection():
+    """Verify string reference connection inside an inline LLM node resolves correctly."""
+    data = {
+        "connections": {CONN_1: {"type": OPENAI_CONN, "api_key": API_KEY}},
+        "nodes": {
+            AGENT_ID: {
+                "type": AGENT_NODE,
+                "llm": {
+                    "id": LLM_ID,
+                    "type": OPENAI_NODE,
+                    "connection": CONN_1,
+                    "model": MODEL_GPT,
+                },
+            }
+        },
+        "flows": {},
+        "workflows": {},
+    }
+
+    result = WorkflowYAMLLoader.parse(data, init_components=False)
+
+    assert AGENT_ID in result.nodes
+    agent = result.nodes[AGENT_ID]
+    assert agent.llm.connection.id == CONN_1
+    assert CONN_1 in result.connections
+
+
+def test_nested_inline_node_inline_dict_and_string_ref_connections_together():
+    """Verify two agents — one using inline dict connection, one using string ref — both parse correctly."""
+    data = {
+        "connections": {CONN_2: {"type": OPENAI_CONN, "api_key": "other-api-key"}},
+        "nodes": {
+            AGENT_ID: {
+                "type": AGENT_NODE,
+                "llm": {
+                    "id": LLM_ID,
+                    "type": OPENAI_NODE,
+                    "connection": {"type": OPENAI_CONN, "api_key": API_KEY},
+                    "model": MODEL_GPT,
+                },
+            },
+            AGENT_ID_2: {
+                "type": AGENT_NODE,
+                "llm": {
+                    "id": LLM_ID_2,
+                    "type": OPENAI_NODE,
+                    "connection": CONN_2,
+                    "model": MODEL_GPT,
+                },
+            },
+        },
+        "flows": {},
+        "workflows": {},
+    }
+
+    result = WorkflowYAMLLoader.parse(data, init_components=False)
+
+    assert AGENT_ID in result.nodes
+    assert AGENT_ID_2 in result.nodes
+    assert result.nodes[AGENT_ID].llm.connection.api_key == API_KEY
+    assert result.nodes[AGENT_ID_2].llm.connection.id == CONN_2
+    assert result.nodes[AGENT_ID_2].llm.connection.api_key == "other-api-key"
