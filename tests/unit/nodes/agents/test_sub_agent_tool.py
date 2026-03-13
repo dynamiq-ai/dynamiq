@@ -109,7 +109,7 @@ class TestSubAgentToolCreation:
         )
 
         assert tool.agent is None
-        assert isinstance(tool.agent_factory, str)
+        assert isinstance(tool.agent_factory, dict)
         assert tool.is_factory_mode is True
         assert tool.is_parallel_execution_allowed is True
 
@@ -373,8 +373,8 @@ class TestSerialization:
         assert "SubAgentTool" in result.get("type", "")
         assert "agent" not in result
         assert "agent_factory" in result
-        assert isinstance(result["agent_factory"], str)
-        assert "Researcher" in result["agent_factory"]
+        assert isinstance(result["agent_factory"], dict)
+        assert result["agent_factory"]["name"] == "Researcher"
 
 
 # --- Schema generation ---
@@ -696,7 +696,7 @@ class TestYamlRoundtrip:
         assert SubAgentTool.FACTORY_HINT in wrapper.description
         assert wrapper.is_factory_mode is True
         assert wrapper.agent is None
-        assert isinstance(wrapper.agent_factory, str)
+        assert isinstance(wrapper.agent_factory, dict)
 
         agent_a = wrapper.get_or_create_agent()
         agent_b = wrapper.get_or_create_agent()
@@ -731,7 +731,7 @@ class TestYamlRoundtrip:
         rt_wrapper = rt_tools[0]
         assert rt_wrapper.is_factory_mode is True
         assert rt_wrapper.agent is None
-        assert isinstance(rt_wrapper.agent_factory, str)
+        assert isinstance(rt_wrapper.agent_factory, dict)
 
         rt_agent = rt_wrapper.get_or_create_agent()
         assert isinstance(rt_agent, Agent)
@@ -785,7 +785,7 @@ class TestYamlRoundtrip:
         wrapper = agent_tools[0]
         assert wrapper.name == "Researcher"
         assert wrapper.is_factory_mode is True
-        assert isinstance(wrapper.agent_factory, str)
+        assert isinstance(wrapper.agent_factory, dict)
 
         agent_a = wrapper.get_or_create_agent()
         agent_b = wrapper.get_or_create_agent()
@@ -802,7 +802,7 @@ class TestYamlRoundtrip:
         rt = Workflow.from_yaml_file(str(rt_path), init_components=True)
         rt_wrapper = [t for t in rt.flow.nodes[0].tools if isinstance(t, SubAgentTool)][0]
         assert rt_wrapper.is_factory_mode is True
-        assert isinstance(rt_wrapper.agent_factory, str)
+        assert isinstance(rt_wrapper.agent_factory, dict)
 
         rt_agent = rt_wrapper.get_or_create_agent()
         assert isinstance(rt_agent, Agent)

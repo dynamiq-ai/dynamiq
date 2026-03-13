@@ -24,13 +24,12 @@ nodes:
       - type: dynamiq.nodes.agents.SubAgentTool
         name: Researcher
         description: Performs web research and summarizes findings.
-        agent_factory: |
+        agent_factory:
           connections:
             openai-conn:
               type: dynamiq.connections.OpenAI
             e2b-conn:
               type: dynamiq.connections.E2B
-
           name: Researcher
           role: You are a research agent. Search the web and summarize findings.
           llm:

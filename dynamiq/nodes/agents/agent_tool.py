@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import yaml
+import copy
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
@@ -40,8 +40,8 @@ class SubAgentTool(Node):
       - **Initialized** (``agent``): reuses a single agent instance across calls.
       - **Factory callable** (``agent_factory`` as callable): creates a fresh agent
         per invocation, enabling isolated state and parallel execution.
-      - **Factory YAML** (``agent_factory`` as str/dict): a YAML blueprint using the
-        same format as workflow YAML files.  Parsed and resolved via
+      - **Factory dict** (``agent_factory`` as dict): a blueprint dict using the
+        same format as workflow YAML node definitions.  Resolved via
         ``WorkflowYAMLLoader`` on each invocation, producing completely fresh
         and isolated Agent instances.
 
@@ -57,20 +57,23 @@ class SubAgentTool(Node):
             agent_factory=lambda: Agent(name="Researcher", llm=llm, tools=[exa]),
         )
 
-        # Mode 2b — YAML blueprint (same format as workflow YAML files)
+        # Mode 2b — dict blueprint (same format as workflow YAML files)
         tool = SubAgentTool(
             name="Researcher",
             description="Performs web research",
-            agent_factory=\"\"\"
-                connections:
-                  openai-conn:
-                    type: dynamiq.connections.OpenAI
-                name: Researcher
-                llm:
-                  type: dynamiq.nodes.llms.OpenAI
-                  connection: openai-conn
-                  model: gpt-4o
-            \"\"\",
+            agent_factory={
+                "connections": {
+                    "openai-conn": {"type": "dynamiq.connections.OpenAI"},
+                },
+                "name": "Researcher",
+                "llm": {
+                    "type": "dynamiq.nodes.llms.OpenAI",
+                    "connection": "openai-conn",
+                    "model": "gpt-4o",
+                },
+                "role": "You are a research agent.",
+                "tools": [],
+            },
         )
     """
 
@@ -95,11 +98,11 @@ class SubAgentTool(Node):
         default=None,
         description="Initialized agent instance to reuse across invocations.",
     )
-    agent_factory: Callable[..., Any] | dict | str | None = Field(
+    agent_factory: Callable[..., Any] | dict | None = Field(
         default=None,
         description=(
             "Factory for creating a new Agent per invocation. "
-            "Either a callable returning an Agent, or a dict of Agent kwargs (JSON-serializable)."
+            "Either a callable returning an Agent, or a dict blueprint (same format as workflow YAML)."
         ),
     )
 
@@ -121,9 +124,6 @@ class SubAgentTool(Node):
 
     @model_validator(mode="after")
     def validate_agent_config(self):
-        if isinstance(self.agent_factory, dict):
-            self.agent_factory = yaml.safe_dump(self.agent_factory, default_flow_style=False)
-
         if self.agent is None and self.agent_factory is None:
             raise ValueError("SubAgentTool requires either 'agent' or 'agent_factory'.")
         if self.agent is not None and self.agent_factory is not None:
@@ -145,16 +145,16 @@ class SubAgentTool(Node):
     def _create_agent_from_factory(self) -> Agent:
         """Create an Agent from the factory and initialize its components.
 
-        For YAML-string factories the blueprint is parsed with ``yaml.safe_load``
-        and resolved via ``WorkflowYAMLLoader`` methods — the same resolution
-        path used for real workflow YAML files.  Each call produces completely
-        fresh objects with no shared state.
+        For dict factories the blueprint is deep-copied and resolved via
+        ``WorkflowYAMLLoader`` methods — the same resolution path used for
+        real workflow YAML files.  Each call produces completely fresh objects
+        with no shared state.
         """
-        if isinstance(self.agent_factory, str):
+        if isinstance(self.agent_factory, dict):
             from dynamiq.nodes.agents.agent import Agent as ReActAgent
             from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
 
-            data = yaml.safe_load(self.agent_factory)
+            data = copy.deepcopy(self.agent_factory)
             registry: dict = {}
             connections = WorkflowYAMLLoader.get_connections(data, registry)
             agent_data = {k: v for k, v in data.items() if k != "connections"}
@@ -172,7 +172,7 @@ class SubAgentTool(Node):
             agent = self.agent_factory()
         else:
             raise TypeError(
-                f"SubAgentTool '{self.name}': agent_factory must be a str (YAML) or callable, "
+                f"SubAgentTool '{self.name}': agent_factory must be a dict or callable, "
                 f"got {type(self.agent_factory).__name__}"
             )
 
@@ -228,9 +228,9 @@ class SubAgentTool(Node):
         data = super().to_dict(**kwargs)
         if self.agent is not None:
             data["agent"] = self.agent.to_dict(**kwargs)
-        elif isinstance(self.agent_factory, str):
+        elif isinstance(self.agent_factory, dict):
             data["agent_factory"] = self.agent_factory
-        elif self.agent_factory is not None:
+        elif callable(self.agent_factory):
             data["agent_factory"] = {
                 "_type": "callable",
                 "_repr": getattr(self.agent_factory, "__name__", repr(self.agent_factory)),
