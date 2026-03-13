@@ -227,3 +227,48 @@ def test_agents_as_tools_with_map_parallel_streaming_tracing_memory():
         and run.input.get("session_id") in (None, session_id)
     ]
     assert len(manager_runs_with_ids) >= 1
+
+
+@pytest.mark.integration
+def test_sub_agent_tool_yaml_roundtrip_and_execution(tmp_path):
+    """YAML roundtrip: serialize workflow with SubAgentTool, reload with real connections, execute."""
+    if not os.getenv("OPENAI_API_KEY"):
+        pytest.skip("OPENAI_API_KEY is not set")
+
+    conn = connections.OpenAI(id="shared-openai")
+    llm = OpenAI(id="shared-llm", model="gpt-4o-mini", connection=conn)
+
+    child = Agent(
+        id="child-agent",
+        name="Researcher",
+        description="Answers factual questions concisely.",
+        role="You are a concise research assistant. Answer in one sentence.",
+        llm=llm,
+        tools=[],
+        inference_mode=InferenceMode.XML,
+        max_loops=3,
+    )
+    parent = Agent(
+        id="parent-agent",
+        name="Manager",
+        role="Delegate all questions to the Researcher tool. Return its answer.",
+        llm=llm,
+        tools=[child],
+        inference_mode=InferenceMode.XML,
+        max_loops=5,
+    )
+    wf = Workflow(id="roundtrip-wf", flow=Flow(id="roundtrip-flow", nodes=[parent]))
+
+    yaml_path = tmp_path / "sub_agent_roundtrip.yaml"
+    wf.to_yaml_file(yaml_path)
+
+    loaded = Workflow.from_yaml_file(str(yaml_path), init_components=True)
+    result = loaded.run(
+        input_data={"input": "What is the capital of France?"},
+        config=RunnableConfig(),
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = str(result.output.get("parent-agent", {}).get("output", {}).get("content", ""))
+    assert len(content.strip()) > 0
+    assert "paris" in content.lower()
