@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.runnables import RunnableConfig
-from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:

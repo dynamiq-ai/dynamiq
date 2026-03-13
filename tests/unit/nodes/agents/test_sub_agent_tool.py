@@ -202,35 +202,6 @@ class TestGetOrCreateAgent:
         assert isinstance(agent2, Agent)
         assert agent1 is not agent2
 
-    def test_factory_always_generates_unique_id(self):
-        tool = SubAgentTool(
-            name="Researcher",
-            description="research",
-            agent_factory={
-                "connections": {
-                    "openai-conn": {
-                        "type": "dynamiq.connections.OpenAI",
-                        "api_key": "test-key",
-                    },
-                },
-                "name": "Researcher",
-                "id": "fixed-id",
-                "llm": {
-                    "type": "dynamiq.nodes.llms.OpenAI",
-                    "connection": "openai-conn",
-                    "model": "gpt-4o",
-                },
-                "role": "r",
-                "tools": [],
-            },
-        )
-
-        agents = [tool.get_or_create_agent() for _ in range(5)]
-        ids = [a.id for a in agents]
-
-        assert all(aid != "fixed-id" for aid in ids), "Factory agents must not keep the explicit ID"
-        assert len(set(ids)) == 5, "Every factory agent must have a unique ID"
-
 
 class TestAutoWrapping:
     def test_agent_in_tools_gets_wrapped(self, test_llm, child_agent):
