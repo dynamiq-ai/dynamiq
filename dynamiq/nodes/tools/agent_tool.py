@@ -171,6 +171,7 @@ class SubAgentTool(Node):
                 registry=registry,
                 connection_manager=self._connection_manager,
             )
+            resolved.setdefault("is_postponed_component_init", True)
             agent = ReActAgent(**resolved)
         elif callable(self.agent_factory):
             agent = self.agent_factory()
@@ -185,10 +186,10 @@ class SubAgentTool(Node):
                 f"SubAgentTool '{self.name}': agent_factory must return an Agent, " f"got {type(agent).__name__}"
             )
 
-        agent.id = generate_uuid()
-
         if self._connection_manager is not None:
             agent.init_components(self._connection_manager)
+        else:
+            agent.init_components()
 
         return agent
 

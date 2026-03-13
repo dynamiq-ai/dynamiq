@@ -21,7 +21,7 @@ nodes:
       temperature: 0.1
       max_tokens: 4000
     tools:
-      - type: dynamiq.nodes.agents.SubAgentTool
+      - type: dynamiq.nodes.tools.agent_tool.SubAgentTool
         name: Researcher
         description: Performs web research and summarizes findings.
         agent_factory:
