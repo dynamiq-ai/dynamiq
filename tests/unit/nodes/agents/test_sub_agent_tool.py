@@ -58,9 +58,6 @@ def child_agent_no_description(test_llm):
     )
 
 
-# --- SubAgentTool creation ---
-
-
 class TestSubAgentToolCreation:
     def test_initialized_mode(self, child_agent):
         tool = SubAgentTool(agent=child_agent, name="Researcher", description="Performs web research")
@@ -159,9 +156,6 @@ class TestParallelExecutionFlag:
         assert tool.is_parallel_execution_allowed is True
 
 
-# --- get_or_create_agent ---
-
-
 class TestGetOrCreateAgent:
     def test_initialized_returns_same_instance(self, child_agent):
         tool = SubAgentTool(agent=child_agent, name="Researcher", description="research")
@@ -238,9 +232,6 @@ class TestGetOrCreateAgent:
         assert len(set(ids)) == 5, "Every factory agent must have a unique ID"
 
 
-# --- Auto-wrapping in Agent.__init__ ---
-
-
 class TestAutoWrapping:
     def test_agent_in_tools_gets_wrapped(self, test_llm, child_agent):
         parent = Agent(
@@ -300,8 +291,6 @@ class TestAutoWrapping:
         assert len(agent_tools) == 1
         assert agent_tools[0] is explicit_tool
 
-# --- Tool lookup by name ---
-
 
 class TestToolLookup:
     def test_tool_by_names_includes_wrapped_agent(self, test_llm, child_agent):
@@ -316,9 +305,6 @@ class TestToolLookup:
         tool_map = parent.tool_by_names
         assert "Researcher" in tool_map
         assert isinstance(tool_map["Researcher"], SubAgentTool)
-
-
-# --- to_dict serialization ---
 
 
 class TestSerialization:
@@ -377,9 +363,6 @@ class TestSerialization:
         assert result["agent_factory"]["name"] == "Researcher"
 
 
-# --- Schema generation ---
-
-
 class TestSchemaGeneration:
     def test_function_calling_schema_detects_sub_agent_tool(self, test_llm, child_agent):
         tool = SubAgentTool(agent=child_agent, name="Researcher", description="Performs web research")
@@ -403,9 +386,6 @@ class TestSchemaGeneration:
 
         action_input_desc = schema["json_schema"]["schema"]["properties"]["action_input"]["description"]
         assert "delegate_final" in action_input_desc
-
-
-# --- _should_delegate_final ---
 
 
 class TestDelegation:
@@ -468,9 +448,6 @@ class TestDelegation:
 
         result = parent._should_delegate_final(python_tool, {"input": "task", "delegate_final": True})
         assert result is False
-
-
-# --- YAML roundtrip ---
 
 
 class TestYamlRoundtrip:
@@ -891,9 +868,6 @@ class TestToolParamsResolution:
         passed_tp = kwargs.get("tool_params")
         assert passed_tp is not None, "Nested ToolParams should be propagated"
         assert passed_tp.global_params.get("nested_global") == "yes"
-
-
-# --- Streaming ---
 
 
 class TestSubAgentStreaming:

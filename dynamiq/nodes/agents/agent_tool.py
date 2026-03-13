@@ -102,7 +102,9 @@ class SubAgentTool(Node):
         default=None,
         description=(
             "Factory for creating a new Agent per invocation. "
-            "Either a callable returning an Agent, or a dict blueprint (same format as workflow YAML)."
+            "Either a callable returning an Agent, or a dict blueprint (same format as workflow YAML). "
+            "Blueprint only — not instantiated at init time. "
+            "A fresh Agent is created from this on each call to _create_agent_from_factory()."
         ),
     )
 
@@ -150,6 +152,7 @@ class SubAgentTool(Node):
         real workflow YAML files.  Each call produces completely fresh objects
         with no shared state.
         """
+        from dynamiq.nodes.agents.base import Agent as BaseAgent
         if isinstance(self.agent_factory, dict):
             from dynamiq.nodes.agents.agent import Agent as ReActAgent
             from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
@@ -175,8 +178,6 @@ class SubAgentTool(Node):
                 f"SubAgentTool '{self.name}': agent_factory must be a dict or callable, "
                 f"got {type(self.agent_factory).__name__}"
             )
-
-        from dynamiq.nodes.agents.base import Agent as BaseAgent
 
         if not isinstance(agent, BaseAgent):
             raise TypeError(

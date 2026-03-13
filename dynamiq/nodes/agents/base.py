@@ -288,10 +288,10 @@ class Agent(Node):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        from dynamiq.nodes.agents.agent_tool import SubAgentTool
         self._run_depends: list[dict] = []
         self._prompt = Prompt(messages=[])
         # Added for backward compatibility with old Agent tools
-        from dynamiq.nodes.agents.agent_tool import SubAgentTool
 
         self.tools = [
             (
@@ -1100,6 +1100,7 @@ class Agent(Node):
         **kwargs,
     ) -> Any:
         """Runs a specific tool with the given input."""
+        from dynamiq.nodes.agents.agent_tool import SubAgentTool
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
 
         if not self.delegation_allowed:
@@ -1123,8 +1124,6 @@ class Agent(Node):
         tool_params = (
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
         )
-
-        from dynamiq.nodes.agents.agent_tool import SubAgentTool
 
         is_child_agent = isinstance(tool, SubAgentTool)
         resolved_agent = None
