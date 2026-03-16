@@ -127,7 +127,11 @@ class AgentInputSchema(BaseModel):
     images: list[str | bytes | io.BytesIO] | None = Field(
         default=None, description="Image inputs (URLs, bytes, or file objects)."
     )
-    files: list[io.BytesIO | bytes] | None = Field(default=None, description="Parameter to provide files to the agent.")
+    files: list[io.BytesIO | bytes] | None = Field(
+        default=None,
+        description="List of file paths to pass to the agent.",
+        json_schema_extra={"map_from_storage": True, "is_accessible_to_agent": False},
+    )
 
     user_id: str | None = Field(default=None, description="Parameter to provide user ID.")
     session_id: str | None = Field(default=None, description="Parameter to provide session ID.")
@@ -191,6 +195,7 @@ class Agent(Node):
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=3600))
     tools: list[Node] = []
     files: list[io.BytesIO | bytes] | None = None
+    is_files_allowed: bool = True
     images: list[str | bytes | io.BytesIO] = None
     name: str = "Agent"
     max_loops: int = 1
@@ -288,8 +293,19 @@ class Agent(Node):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        from dynamiq.nodes.tools.agent_tool import SubAgentTool
         self._run_depends: list[dict] = []
         self._prompt = Prompt(messages=[])
+        # Added for backward compatibility with old Agent tools
+
+        self.tools = [
+            (
+                SubAgentTool(agent=t, name=t.name, description=t.description or "")
+                if isinstance(t, Agent) and not isinstance(t, SubAgentTool)
+                else t
+            )
+            for t in self.tools
+        ]
 
         expanded_tools = []
         for tool in self.tools:
@@ -1085,9 +1101,11 @@ class Agent(Node):
         collect_dependency: bool = False,
         delegate_final: bool = False,
         is_parallel: bool = False,
+        tool_run_id: str | None = None,
         **kwargs,
     ) -> Any:
         """Runs a specific tool with the given input."""
+        from dynamiq.nodes.tools.agent_tool import SubAgentTool
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
 
         if not self.delegation_allowed:
@@ -1112,125 +1130,140 @@ class Agent(Node):
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
         )
 
-        self._inject_files_into_tool(tool, merged_input)
+        is_child_agent = isinstance(tool, SubAgentTool)
+        resolved_agent = None
+        try:
+            resolved_agent = tool.get_or_create_agent() if is_child_agent else None
 
-        if tool_params:
-            debug_info = []
-            if self.verbose:
-                debug_info.append(f"Tool parameter merging for {tool.name} (ID: {tool.id}):")
-                debug_info.append(f"Starting with input: {merged_input}")
+            self._inject_files_into_tool(resolved_agent or tool, merged_input)
 
-            # 1. Apply global parameters (lowest priority)
-            global_params = tool_params.global_params
-            if global_params:
-                self._apply_parameters(merged_input, global_params, "global", debug_info)
+            if tool_params:
+                debug_info = []
+                if self.verbose:
+                    debug_info.append(f"Tool parameter merging for {tool.name} (ID: {tool.id}):")
+                    debug_info.append(f"Starting with input: {merged_input}")
 
-            # 2. Apply parameters by tool name (medium priority)
-            name_params_any = tool_params.by_name_params.get(tool.name) or tool_params.by_name_params.get(
-                self.sanitize_tool_name(tool.name)
+                # 1. Apply global parameters (lowest priority)
+                global_params = tool_params.global_params
+                if global_params:
+                    self._apply_parameters(merged_input, global_params, "global", debug_info)
+
+                # 2. Apply parameters by tool name (medium priority)
+                name_params_any = (
+                    tool_params.by_name_params.get(tool.name)
+                    or tool_params.by_name_params.get(self.sanitize_tool_name(tool.name))
+                    or (resolved_agent and tool_params.by_name_params.get(resolved_agent.name))
+                    or (resolved_agent and tool_params.by_name_params.get(self.sanitize_tool_name(resolved_agent.name)))
+                )
+                if name_params_any:
+                    if isinstance(name_params_any, ToolParams):
+                        if self.verbose:
+                            detail = "will apply to child agent" if is_child_agent else "ignored for non-agent tool"
+                            debug_info.append(f"  - From name:{tool.name}: encountered nested ToolParams ({detail})")
+                    elif isinstance(name_params_any, dict):
+                        self._apply_parameters(merged_input, name_params_any, f"name:{tool.name}", debug_info)
+
+                # 3. Apply parameters by tool ID (highest priority)
+                id_params_any = tool_params.by_id_params.get(tool.id) or (
+                    resolved_agent and tool_params.by_id_params.get(resolved_agent.id)
+                )
+                if id_params_any:
+                    if isinstance(id_params_any, ToolParams):
+                        if self.verbose:
+                            detail = "will apply to child agent" if is_child_agent else "ignored for non-agent tool"
+                            debug_info.append(f"  - From id:{tool.id}: encountered nested ToolParams ({detail})")
+                    elif isinstance(id_params_any, dict):
+                        self._apply_parameters(merged_input, id_params_any, f"id:{tool.id}", debug_info)
+
+                if self.verbose and debug_info:
+                    logger.debug("\n".join(debug_info))
+
+            child_kwargs = kwargs | {"recoverable_error": True}
+
+            if is_child_agent and self._current_call_context:
+                child_context = self._build_child_agent_context(resolved_agent)
+                for ctx_key in ("user_id", "session_id"):
+                    if ctx_key not in merged_input and child_context.get(ctx_key):
+                        merged_input[ctx_key] = child_context[ctx_key]
+                if "metadata" not in merged_input and child_context.get("metadata"):
+                    merged_input["metadata"] = child_context["metadata"]
+
+            if is_child_agent and tool_params:
+                nested_any = (
+                    tool_params.by_id_params.get(tool.id)
+                    or tool_params.by_id_params.get(getattr(resolved_agent, "id", ""))
+                    or tool_params.by_name_params.get(tool.name)
+                    or tool_params.by_name_params.get(self.sanitize_tool_name(tool.name))
+                    or tool_params.by_name_params.get(getattr(resolved_agent, "name", ""))
+                    or tool_params.by_name_params.get(self.sanitize_tool_name(getattr(resolved_agent, "name", "")))
+                )
+                if nested_any:
+                    if isinstance(nested_any, ToolParams):
+                        nested_tp = nested_any
+                    elif isinstance(nested_any, dict):
+                        nested_tp = ToolParams.model_validate(nested_any)
+                    else:
+                        nested_tp = None
+                    if nested_tp:
+                        child_kwargs = child_kwargs | {"tool_params": nested_tp}
+
+            effective_delegate_final = delegate_final and is_child_agent
+            if is_child_agent and isinstance(merged_input, dict) and "delegate_final" in merged_input:
+                effective_delegate_final = effective_delegate_final or bool(merged_input.pop("delegate_final"))
+
+            tool_to_run = resolved_agent if resolved_agent is not None else tool
+            tool_config = ensure_config(config)
+            if is_parallel and not is_child_agent:
+                tool_to_run, tool_config = self._clone_tool_for_execution(tool_to_run, tool_config)
+            if is_child_agent and tool.is_factory_mode and tool_run_id:
+                resolved_agent.id = tool_run_id
+
+            tool_result = tool_to_run.run(
+                input_data=merged_input,
+                config=tool_config,
+                run_depends=deepcopy(self._run_depends),
+                **child_kwargs,
             )
-            if name_params_any:
-                if isinstance(name_params_any, ToolParams):
-                    if self.verbose:
-                        debug_info.append(
-                            f"  - From name:{tool.name}: encountered nested ToolParams (ignored for non-agent tool)"
-                        )
-                elif isinstance(name_params_any, dict):
-                    self._apply_parameters(merged_input, name_params_any, f"name:{tool.name}", debug_info)
-
-            # 3. Apply parameters by tool ID (highest priority)
-            id_params_any = tool_params.by_id_params.get(tool.id)
-            if id_params_any:
-                if isinstance(id_params_any, ToolParams):
-                    if self.verbose:
-                        debug_info.append(
-                            f"  - From id:{tool.id}: encountered nested ToolParams (ignored for non-agent tool)"
-                        )
-                elif isinstance(id_params_any, dict):
-                    self._apply_parameters(merged_input, id_params_any, f"id:{tool.id}", debug_info)
-
-            if self.verbose and debug_info:
-                logger.debug("\n".join(debug_info))
-
-        child_kwargs = kwargs | {"recoverable_error": True}
-        is_child_agent = isinstance(tool, Agent)
-
-        if is_child_agent and self._current_call_context:
-            child_context = self._build_child_agent_context(tool)
-            for ctx_key in ("user_id", "session_id"):
-                if ctx_key not in merged_input and child_context.get(ctx_key):
-                    merged_input[ctx_key] = child_context[ctx_key]
-            if "metadata" not in merged_input and child_context.get("metadata"):
-                merged_input["metadata"] = child_context["metadata"]
-
-        if is_child_agent and tool_params:
-            nested_any = (
-                tool_params.by_id_params.get(getattr(tool, "id", ""))
-                or tool_params.by_name_params.get(getattr(tool, "name", ""))
-                or tool_params.by_name_params.get(self.sanitize_tool_name(getattr(tool, "name", "")))
-            )
-            if nested_any:
-                if isinstance(nested_any, ToolParams):
-                    nested_tp = nested_any
-                elif isinstance(nested_any, dict):
-                    nested_tp = ToolParams.model_validate(nested_any)
+            dependency_node = tool_to_run if tool_to_run is not tool else tool
+            dependency_dict = NodeDependency(node=dependency_node).to_dict(for_tracing=True)
+            if update_run_depends:
+                self._run_depends = [dependency_dict]
+            if tool_result.status != RunnableStatus.SUCCESS:
+                error_message = f"Tool '{tool.name}' failed: {tool_result.error.to_dict()}"
+                if tool_result.error.recoverable:
+                    raise ToolExecutionException(error_message)
                 else:
-                    nested_tp = None
-                if nested_tp:
-                    child_kwargs = child_kwargs | {"tool_params": nested_tp}
+                    raise ValueError(error_message)
+            tool_result_output_content = tool_result.output.get("content")
 
-        effective_delegate_final = delegate_final and is_child_agent
-        if is_child_agent and isinstance(merged_input, dict) and "delegate_final" in merged_input:
-            effective_delegate_final = effective_delegate_final or bool(merged_input.pop("delegate_final"))
+            self._handle_tool_generated_files(tool, tool_result)
 
-        tool_to_run = tool
-        tool_config = ensure_config(config)
-        if is_parallel:
-            tool_to_run, tool_config = self._clone_tool_for_execution(tool, tool_config)
-
-        tool_result = tool_to_run.run(
-            input_data=merged_input,
-            config=tool_config,
-            run_depends=deepcopy(self._run_depends),
-            **child_kwargs,
-        )
-        dependency_node = tool_to_run if tool_to_run is not tool else tool
-        dependency_dict = NodeDependency(node=dependency_node).to_dict(for_tracing=True)
-        if update_run_depends:
-            self._run_depends = [dependency_dict]
-        if tool_result.status != RunnableStatus.SUCCESS:
-            error_message = f"Tool '{tool.name}' failed: {tool_result.error.to_dict()}"
-            if tool_result.error.recoverable:
-                raise ToolExecutionException(error_message)
-            else:
-                raise ValueError(error_message)
-        tool_result_output_content = tool_result.output.get("content")
-
-        self._handle_tool_generated_files(tool, tool_result)
-
-        tool_result_content_processed = process_tool_output_with_sandbox_persistence(
-            content=tool_result_output_content,
-            tool_name=tool.name,
-            tool_input=tool_input,
-            sandbox=self.sandbox_backend,
-            save_tool_output_to_sandbox=bool(self.sandbox_backend and tool.is_output_persisted_in_sandbox_allowed),
-            sandbox_persistence_config=self.tool_output_sandbox_persistence,
-            max_tokens=self.tool_output_max_length,
-            truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
-        )
-
-        output_files = tool_result.output.get("files", [])
-        tool_output_meta = {k: v for k, v in tool_result.output.items() if k not in ("content", "files")}
-
-        if not isinstance(tool, ContextManagerTool):
-            self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = (
-                tool_result_content_processed,
-                tool_output_meta,
+            tool_result_content_processed = process_tool_output_with_sandbox_persistence(
+                content=tool_result_output_content,
+                tool_name=tool.name,
+                tool_input=tool_input,
+                sandbox=self.sandbox_backend,
+                save_tool_output_to_sandbox=bool(self.sandbox_backend and tool.is_output_persisted_in_sandbox_allowed),
+                sandbox_persistence_config=self.tool_output_sandbox_persistence,
+                max_tokens=self.tool_output_max_length,
+                truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
             )
-        if collect_dependency:
-            return tool_result_content_processed, output_files, tool_output_meta, dependency_dict
 
-        return tool_result_content_processed, output_files, tool_output_meta
+            output_files = tool_result.output.get("files", [])
+            tool_output_meta = {k: v for k, v in tool_result.output.items() if k not in ("content", "files")}
+
+            if not isinstance(tool, ContextManagerTool):
+                self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = (
+                    tool_result_content_processed,
+                    tool_output_meta,
+                )
+            if collect_dependency:
+                return tool_result_content_processed, output_files, tool_output_meta, dependency_dict
+
+            return tool_result_content_processed, output_files, tool_output_meta
+        finally:
+            if is_child_agent and tool.is_factory_mode and resolved_agent is not None:
+                SubAgentTool.cleanup_factory_agent(resolved_agent)
 
     def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> list[io.BytesIO | bytes]:
         """Ensure all uploaded files have name and description attributes and store them in storage backend."""
@@ -1441,6 +1474,8 @@ class Agent(Node):
             from dynamiq.nodes.agents.agent import Agent
 
             if isinstance(self, Agent):
+                from dynamiq.nodes.tools.agent_tool import SubAgentTool
+
                 self.system_prompt_manager.setup_for_react_agent(
                     inference_mode=self.inference_mode,
                     parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
@@ -1449,6 +1484,7 @@ class Agent(Node):
                     context_compaction_enabled=self.summarization_config.enabled,
                     todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
                     or bool(self.sandbox_backend),
+                    has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
                 )
 
     def _inject_attached_files_into_message(

@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
+from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.agents.base import Agent as BaseAgent
 from dynamiq.nodes.agents.components import parser, schema_generator
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
@@ -181,7 +182,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if not self.delegation_allowed:
             return False
 
-        if not isinstance(tool, Agent):
+        if not isinstance(tool, SubAgentTool):
             return False
 
         if isinstance(action_input, str):
@@ -839,6 +840,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     update_run_depends=update_run_depends,
                     collect_dependency=collect_dependency,
                     is_parallel=is_parallel,
+                    tool_run_id=tool_run_id,
                     **tool_kwargs,
                 )
                 if collect_dependency:
@@ -1455,6 +1457,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
             or bool(self.sandbox_backend),
             sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
+            has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
         )
 
         # Only auto-wrap the entire role in a raw block if the user did not

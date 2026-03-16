@@ -26,6 +26,7 @@ from dynamiq.nodes.agents.prompts.secondary_instructions import (
     DELEGATION_INSTRUCTIONS_XML,
     REACT_BLOCK_MULTI_TOOL_PLANNING,
     SANDBOX_INSTRUCTIONS_TEMPLATE,
+    SUB_AGENT_INSTRUCTIONS,
     TODO_TOOLS_INSTRUCTIONS,
 )
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
@@ -215,6 +216,7 @@ class AgentPromptManager:
         context_compaction_enabled: bool = False,
         todo_management_enabled: bool = False,
         sandbox_base_path: str | None = None,
+        has_sub_agent_tools: bool = False,
     ) -> None:
         """
         Setup prompts for ReAct-style Agent.
@@ -231,6 +233,7 @@ class AgentPromptManager:
             context_compaction_enabled=context_compaction_enabled,
             todo_management_enabled=todo_management_enabled,
             sandbox_base_path=sandbox_base_path,
+            has_sub_agent_tools=has_sub_agent_tools,
         )
 
         # Update prompt blocks
@@ -259,6 +262,7 @@ def get_model_specific_prompts(
     context_compaction_enabled: bool = False,
     todo_management_enabled: bool = False,
     sandbox_base_path: str | None = None,
+    has_sub_agent_tools: bool = False,
 ) -> tuple[dict[str, str], str]:
     """
     Get model-specific prompts based on the model name and agent configuration.
@@ -271,6 +275,7 @@ def get_model_specific_prompts(
         delegation_allowed: Whether delegation is allowed
         context_compaction_enabled: Whether context compaction/summarization is enabled
         todo_management_enabled: Whether todo management is enabled
+        has_sub_agent_tools: Whether the agent has sub-agent tools
 
     Returns:
         Tuple of (prompt_blocks dict, agent_prompt_template string)
@@ -355,6 +360,8 @@ def get_model_specific_prompts(
                 base_path=sandbox_base_path,
             )
         )
+    if has_sub_agent_tools:
+        secondary_parts.append(SUB_AGENT_INSTRUCTIONS)
 
     if secondary_parts:
         prompt_blocks["secondary_instructions"] = "\n\n".join(secondary_parts)
