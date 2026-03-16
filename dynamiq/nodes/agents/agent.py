@@ -1574,6 +1574,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 "dependency": dependency,
             }
 
+        sequential_group: list[dict[str, Any]] = []
+
         if prepared_tools:
 
             if len(prepared_tools) == 1:
