@@ -21,9 +21,18 @@ from dynamiq.prompts import (
 )
 from dynamiq.storages.file.base import FileInfo
 from dynamiq.utils.logger import logger
-from dynamiq.utils.utils import CHARS_PER_TOKEN, ToolOutputSandboxPersistenceConfig
+from dynamiq.utils.utils import CHARS_PER_TOKEN
 
 TOOL_MAX_TOKENS = 64000
+
+
+class ToolOutputSandboxPersistenceConfig(BaseModel):
+    """Configuration for persisting large tool outputs to sandbox files."""
+
+    enabled: bool = True
+    dump_threshold_chars: int = 7000
+    summary_chars: int = 7000
+    sandbox_tool_output_dir: str = "/home/user/.tools"
 
 
 def extract_message_text(message: Message | VisionMessage) -> str:

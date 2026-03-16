@@ -17,15 +17,6 @@ TRUNCATE_LIST_LIMIT = 50
 CHARS_PER_TOKEN = 4
 
 
-class ToolOutputSandboxPersistenceConfig(BaseModel):
-    """Configuration for persisting large tool outputs to sandbox files."""
-
-    enabled: bool = True
-    dump_threshold_chars: int = 7000
-    summary_chars: int = 7000
-    sandbox_tool_output_dir: str = "/home/user/.tools"
-
-
 class TruncationMethod(str, Enum):
     """Enum for text truncation methods."""
 

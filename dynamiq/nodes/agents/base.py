@@ -16,6 +16,7 @@ from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     ToolCacheEntry,
+    ToolOutputSandboxPersistenceConfig,
     convert_bytesio_to_file_info,
     extract_message_text,
     process_tool_output_with_sandbox_persistence,
@@ -39,7 +40,7 @@ from dynamiq.skills.utils import ingest_skills_into_sandbox, normalize_sandbox_s
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
-from dynamiq.utils.utils import ToolOutputSandboxPersistenceConfig, deep_merge
+from dynamiq.utils.utils import deep_merge
 
 
 class StreamChunkChoiceDelta(BaseModel):

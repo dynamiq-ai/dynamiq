@@ -1,7 +1,6 @@
 import re
 
-from dynamiq.nodes.agents.utils import process_tool_output_with_sandbox_persistence
-from dynamiq.utils.utils import ToolOutputSandboxPersistenceConfig
+from dynamiq.nodes.agents.utils import ToolOutputSandboxPersistenceConfig, process_tool_output_with_sandbox_persistence
 
 
 class DummySandbox:
