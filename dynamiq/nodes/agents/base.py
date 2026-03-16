@@ -16,9 +16,10 @@ from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     ToolCacheEntry,
+    ToolOutputSandboxPersistenceConfig,
     convert_bytesio_to_file_info,
     extract_message_text,
-    process_tool_output_for_agent,
+    process_tool_output_with_sandbox_persistence,
 )
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
@@ -200,6 +201,10 @@ class Agent(Node):
     max_loops: int = 1
     tool_output_max_length: int = TOOL_MAX_TOKENS
     tool_output_truncate_enabled: bool = True
+    tool_output_sandbox_persistence: ToolOutputSandboxPersistenceConfig = Field(
+        default_factory=ToolOutputSandboxPersistenceConfig,
+        description="Configuration for saving large tool outputs to sandbox files.",
+    )
     delegation_allowed: bool = Field(
         default=False,
         description="Allow returning a child agent tool's output directly via delegate_final flag.",
@@ -1233,8 +1238,13 @@ class Agent(Node):
 
             self._handle_tool_generated_files(tool, tool_result)
 
-            tool_result_content_processed = process_tool_output_for_agent(
+            tool_result_content_processed = process_tool_output_with_sandbox_persistence(
                 content=tool_result_output_content,
+                tool_name=tool.name,
+                tool_input=tool_input,
+                sandbox=self.sandbox_backend,
+                save_tool_output_to_sandbox=bool(self.sandbox_backend and tool.is_output_persisted_in_sandbox_allowed),
+                sandbox_persistence_config=self.tool_output_sandbox_persistence,
                 max_tokens=self.tool_output_max_length,
                 truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
             )
