@@ -22,7 +22,7 @@ class DummySandbox:
 def test_tool_output_not_persisted_when_under_threshold():
     sandbox = DummySandbox()
     content = "small output"
-    persistence_config = ToolOutputSandboxPersistenceConfig(dump_threshold_chars=8000, summary_chars=4000)
+    persistence_config = ToolOutputSandboxPersistenceConfig(dump_threshold_chars=8000, preview_chars=4000)
 
     result = process_tool_output_with_sandbox_persistence(
         content=content,
@@ -40,7 +40,7 @@ def test_tool_output_not_persisted_when_under_threshold():
 def test_under_threshold_still_respects_max_tokens_truncation():
     sandbox = DummySandbox()
     content = "X" * 8000
-    persistence_config = ToolOutputSandboxPersistenceConfig(dump_threshold_chars=10000, summary_chars=4000)
+    persistence_config = ToolOutputSandboxPersistenceConfig(dump_threshold_chars=10000, preview_chars=4000)
 
     result = process_tool_output_with_sandbox_persistence(
         content=content,
@@ -59,10 +59,10 @@ def test_under_threshold_still_respects_max_tokens_truncation():
     assert sandbox.saved == []
 
 
-def test_large_tool_output_persisted_to_sandbox_with_summary():
+def test_large_tool_output_persisted_to_sandbox_with_preview():
     sandbox = DummySandbox()
     content = "A" * 9000
-    persistence_config = ToolOutputSandboxPersistenceConfig(dump_threshold_chars=8000, summary_chars=4000)
+    persistence_config = ToolOutputSandboxPersistenceConfig(dump_threshold_chars=8000, preview_chars=4000)
 
     result = process_tool_output_with_sandbox_persistence(
         content=content,
@@ -88,13 +88,32 @@ def test_large_tool_output_persisted_to_sandbox_with_summary():
         saved["file_path"],
     )
 
-    assert result.startswith(f"Tool output saved to: {saved['file_path']}\n\nTool output summary:\n")
+    assert result.startswith(f"Tool output saved to: {saved['file_path']}\n\nTool output preview:\n")
     assert result.endswith(content[:4000])
+
+
+def test_large_tool_output_with_zero_preview_chars_returns_saved_path_only():
+    sandbox = DummySandbox()
+    content = "E" * 9000
+    persistence_config = ToolOutputSandboxPersistenceConfig(dump_threshold_chars=8000, preview_chars=0)
+
+    result = process_tool_output_with_sandbox_persistence(
+        content=content,
+        tool_name="SandboxShellTool",
+        tool_input={"command": "tools-cli tool list google-calendar"},
+        sandbox=sandbox,
+        save_tool_output_to_sandbox=True,
+        sandbox_persistence_config=persistence_config,
+    )
+
+    assert len(sandbox.saved) == 1
+    saved = sandbox.saved[0]
+    assert result == f"Tool output saved to: {saved['file_path']}"
 
 
 def test_large_output_without_sandbox_falls_back_to_existing_truncation():
     content = "B" * 9000
-    persistence_config = ToolOutputSandboxPersistenceConfig(dump_threshold_chars=8000, summary_chars=4000)
+    persistence_config = ToolOutputSandboxPersistenceConfig(dump_threshold_chars=8000, preview_chars=4000)
 
     result = process_tool_output_with_sandbox_persistence(
         content=content,
@@ -113,7 +132,7 @@ def test_large_output_without_sandbox_falls_back_to_existing_truncation():
 def test_large_output_not_persisted_when_tool_opt_out():
     sandbox = DummySandbox()
     content = "C" * 9000
-    persistence_config = ToolOutputSandboxPersistenceConfig(dump_threshold_chars=8000, summary_chars=4000)
+    persistence_config = ToolOutputSandboxPersistenceConfig(dump_threshold_chars=8000, preview_chars=4000)
 
     result = process_tool_output_with_sandbox_persistence(
         content=content,
@@ -133,7 +152,7 @@ def test_large_output_not_persisted_when_tool_opt_out():
 def test_truncate_false_returns_full_content_with_sandbox_enabled():
     sandbox = DummySandbox()
     content = "D" * 9000
-    persistence_config = ToolOutputSandboxPersistenceConfig(dump_threshold_chars=8000, summary_chars=4000)
+    persistence_config = ToolOutputSandboxPersistenceConfig(dump_threshold_chars=8000, preview_chars=4000)
 
     result = process_tool_output_with_sandbox_persistence(
         content=content,

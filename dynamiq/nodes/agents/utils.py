@@ -31,7 +31,7 @@ class ToolOutputSandboxPersistenceConfig(BaseModel):
 
     enabled: bool = True
     dump_threshold_chars: int = 7000
-    summary_chars: int = 7000
+    preview_chars: int = 7000
     sandbox_tool_output_dir: str = "/home/user/.tools"
 
 
@@ -1055,7 +1055,7 @@ def process_tool_output_with_sandbox_persistence(
     Process tool output and persist large payloads to sandbox files when available.
 
     If the processed output exceeds a threshold, the full content is stored in the given sandbox
-    and a summary is returned.
+    and a preview is returned.
 
     Args:
         content (Any): Tool output, any type.
@@ -1069,7 +1069,7 @@ def process_tool_output_with_sandbox_persistence(
         truncate (bool): Whether to truncate if over threshold and no sandbox persistence.
 
     Returns:
-        str: Content, possibly a summary and sandbox path if large.
+        str: Content, possibly a preview and sandbox path if large.
     """
     config = sandbox_persistence_config or ToolOutputSandboxPersistenceConfig()
     prepared = process_tool_output_for_agent(content=content, max_tokens=max_tokens, truncate=False)
@@ -1103,9 +1103,12 @@ def process_tool_output_with_sandbox_persistence(
         logger.warning("Failed to persist large tool output to sandbox at %s: %s", target_path, exc)
         return process_tool_output_for_agent(content=prepared, max_tokens=max_tokens, truncate=truncate)
 
-    preview = prepared[: config.summary_chars]
-    summary_result = f"Tool output saved to: {target_path}\n\nTool output summary:\n{preview}"
-    return process_tool_output_for_agent(content=summary_result, max_tokens=max_tokens, truncate=truncate)
+    if config.preview_chars <= 0:
+        preview_result = f"Tool output saved to: {target_path}"
+    else:
+        preview = prepared[: config.preview_chars]
+        preview_result = f"Tool output saved to: {target_path}\n\nTool output preview:\n{preview}"
+    return process_tool_output_for_agent(content=preview_result, max_tokens=max_tokens, truncate=truncate)
 
 
 class ToolCacheEntry(BaseModel):
