@@ -362,7 +362,11 @@ class BaseLLM(ConnectionNode):
 
         try:
             prompt_tokens_cost_usd, completion_tokens_cost_usd = cost_per_token(
-                model=model, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens
+                model=model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cache_read_input_tokens=cache_read_input_tokens,
+                cache_creation_input_tokens=cache_creation_input_tokens,
             )
             total_tokens_cost_usd = prompt_tokens_cost_usd + completion_tokens_cost_usd
         except Exception:
