@@ -361,13 +361,17 @@ class BaseLLM(ConnectionNode):
         cache_creation_input_tokens = getattr(usage, "cache_creation_input_tokens", None)
 
         try:
-            prompt_tokens_cost_usd, completion_tokens_cost_usd = cost_per_token(
-                model=model,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                cache_read_input_tokens=cache_read_input_tokens,
-                cache_creation_input_tokens=cache_creation_input_tokens,
-            )
+            cost_kwargs: dict[str, Any] = {
+                "model": model,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+            }
+            if cache_read_input_tokens is not None:
+                cost_kwargs["cache_read_input_tokens"] = cache_read_input_tokens
+            if cache_creation_input_tokens is not None:
+                cost_kwargs["cache_creation_input_tokens"] = cache_creation_input_tokens
+
+            prompt_tokens_cost_usd, completion_tokens_cost_usd = cost_per_token(**cost_kwargs)
             total_tokens_cost_usd = prompt_tokens_cost_usd + completion_tokens_cost_usd
         except Exception:
             prompt_tokens_cost_usd, completion_tokens_cost_usd, total_tokens_cost_usd = None, None, None
