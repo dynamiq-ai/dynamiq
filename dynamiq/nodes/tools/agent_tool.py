@@ -143,13 +143,18 @@ class SubAgentTool(Node):
         """True when the tool creates a fresh agent per call."""
         return self.agent_factory is not None
 
-    def _create_agent_from_factory(self) -> Agent:
-        """Create an Agent from the factory and initialize its components.
+    def _build_agent_from_factory(self) -> Agent:
+        """Construct an Agent from the factory WITHOUT initializing components.
 
         For dict factories the blueprint is deep-copied and resolved via
         ``WorkflowYAMLLoader`` methods — the same resolution path used for
         real workflow YAML files.  Each call produces completely fresh objects
         with no shared state.
+
+        No side effects: ``init_components`` is NOT called, so no network
+        connections or sandbox resources are created.  Use this for
+        serialization or inspection; use ``_create_agent_from_factory`` when
+        a fully initialized agent is needed.
         """
         from dynamiq.nodes.agents.base import Agent as BaseAgent
 
@@ -184,6 +189,12 @@ class SubAgentTool(Node):
             raise TypeError(
                 f"SubAgentTool '{self.name}': agent_factory must return an Agent, " f"got {type(agent).__name__}"
             )
+
+        return agent
+
+    def _create_agent_from_factory(self) -> Agent:
+        """Create an Agent from the factory and initialize its components."""
+        agent = self._build_agent_from_factory()
 
         if self._connection_manager is not None:
             agent.init_components(self._connection_manager)
@@ -231,7 +242,8 @@ class SubAgentTool(Node):
         if self.agent is not None:
             data["agent"] = self.agent.to_dict(**kwargs)
         elif isinstance(self.agent_factory, dict):
-            data["agent_factory"] = self.agent_factory
+            agent = self._build_agent_from_factory()
+            data["agent_factory"] = agent.to_dict(**kwargs)
         elif callable(self.agent_factory):
             data["agent_factory"] = {
                 "_type": "callable",

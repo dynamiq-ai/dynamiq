@@ -24,6 +24,17 @@ def _sanitize_tool_name(s: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "", s)
 
 
+def _dict_contains_value(obj, needle: str) -> bool:
+    """Recursively check whether *needle* appears as a string value anywhere in a nested dict/list."""
+    if isinstance(obj, str):
+        return needle in obj
+    if isinstance(obj, dict):
+        return any(_dict_contains_value(v, needle) for v in obj.values())
+    if isinstance(obj, (list, tuple)):
+        return any(_dict_contains_value(item, needle) for item in obj)
+    return False
+
+
 @pytest.fixture
 def test_llm():
     connection = OpenAIConnection(api_key="test-api-key")
@@ -334,6 +345,61 @@ class TestSerialization:
         assert "agent_factory" in result
         assert isinstance(result["agent_factory"], dict)
         assert result["agent_factory"]["name"] == "Researcher"
+
+    def test_to_dict_dict_factory_for_tracing_strips_connections(self):
+        """for_tracing=True must strip connection details to just id and type."""
+        tool = SubAgentTool(
+            name="Researcher",
+            description="research",
+            agent_factory={
+                "connections": {
+                    "openai-conn": {
+                        "type": "dynamiq.connections.OpenAI",
+                        "api_key": "sk-secret-key-12345",
+                    },
+                },
+                "name": "Researcher",
+                "llm": {
+                    "type": "dynamiq.nodes.llms.OpenAI",
+                    "connection": "openai-conn",
+                    "model": "gpt-4o",
+                },
+                "role": "You are a research agent.",
+                "tools": [],
+            },
+        )
+        result = tool.to_dict(for_tracing=True)
+        assert not _dict_contains_value(result, "sk-secret-key-12345")
+
+        llm_conn = result["agent_factory"]["llm"]["connection"]
+        assert "id" in llm_conn
+        assert "type" in llm_conn
+        assert "api_key" not in llm_conn
+
+    def test_to_dict_dict_factory_include_secure_params_preserves_keys(self):
+        """include_secure_params=True must preserve full connection data for YAML serialization."""
+        tool = SubAgentTool(
+            name="Researcher",
+            description="research",
+            agent_factory={
+                "connections": {
+                    "openai-conn": {
+                        "type": "dynamiq.connections.OpenAI",
+                        "api_key": "sk-secret-key-12345",
+                    },
+                },
+                "name": "Researcher",
+                "llm": {
+                    "type": "dynamiq.nodes.llms.OpenAI",
+                    "connection": "openai-conn",
+                    "model": "gpt-4o",
+                },
+                "role": "You are a research agent.",
+                "tools": [],
+            },
+        )
+        result = tool.to_dict(include_secure_params=True)
+        assert _dict_contains_value(result, "sk-secret-key-12345")
 
 
 class TestSchemaGeneration:

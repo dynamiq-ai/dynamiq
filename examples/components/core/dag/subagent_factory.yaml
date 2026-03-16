@@ -1,9 +1,3 @@
-connections:
-  openai-conn:
-    type: dynamiq.connections.OpenAI
-  e2b-conn:
-    type: dynamiq.connections.E2B
-
 nodes:
   parent-agent:
     type: dynamiq.nodes.agents.Agent
@@ -16,7 +10,8 @@ nodes:
     llm:
       id: parent-llm
       type: dynamiq.nodes.llms.OpenAI
-      connection: openai-conn
+      connection:
+        type: dynamiq.connections.OpenAI
       model: gpt-4o
       temperature: 0.1
       max_tokens: 4000
@@ -25,16 +20,12 @@ nodes:
         name: Researcher
         description: Performs web research and summarizes findings.
         agent_factory:
-          connections:
-            openai-conn:
-              type: dynamiq.connections.OpenAI
-            e2b-conn:
-              type: dynamiq.connections.E2B
           name: Researcher
           role: You are a research agent. Search the web and summarize findings.
           llm:
             type: dynamiq.nodes.llms.OpenAI
-            connection: openai-conn
+            connection:
+              type: dynamiq.connections.OpenAI
             model: gpt-4o
             temperature: 0.1
             max_tokens: 4000
@@ -47,7 +38,8 @@ nodes:
             enabled: true
             backend:
               type: dynamiq.sandboxes.e2b.E2BSandbox
-              connection: e2b-conn
+              connection:
+                type: dynamiq.connections.E2B
           max_loops: 5
     max_loops: 5
 
