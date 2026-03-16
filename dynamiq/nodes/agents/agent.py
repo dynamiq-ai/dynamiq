@@ -1619,12 +1619,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         )
                     )
 
+                # Update run_depends from parallel results before sequential phase
+                # so the first sequential tool depends on all parallel tools.
+                if parallel_group:
+                    parallel_deps = [r.get("dependency") for r in all_results if r.get("dependency")]
+                    if parallel_deps:
+                        self._run_depends = parallel_deps
+
                 # Phase 2: run sequential-only tools one-by-one
                 for tool_payload in sequential_group:
                     all_results.append(
                         _execute_single_tool_to_result(
                             tool_payload,
-                            update_run_depends=False,
+                            update_run_depends=True,
                             tool_run_id=tool_payload["tool_run_id"],
                         )
                     )
@@ -1646,12 +1653,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             self._merge_tool_files(aggregated_files, tool_name, result.get("files"))
 
-        # Collect dependencies from results (for tracing)
-        dependencies = [result.get("dependency") for result in ordered_results if result.get("dependency")]
-
-        # Set run_depends after parallel execution completes
-        if dependencies:
-            self._run_depends = dependencies
+        # For parallel-only batches, set run_depends from collected results.
+        # For batches with sequential tools, run_depends is already correct
+        # (chained by update_run_depends=True in the sequential loop).
+        if not sequential_group:
+            dependencies = [result.get("dependency") for result in ordered_results if result.get("dependency")]
+            if dependencies:
+                self._run_depends = dependencies
 
         combined_observation = "\n\n".join(observation_parts)
 
