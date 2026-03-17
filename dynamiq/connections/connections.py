@@ -7,7 +7,14 @@ from functools import cached_property, partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 from pydantic_core.core_schema import ValidationInfo
 
 from dynamiq.utils import generate_uuid
@@ -45,6 +52,7 @@ class BaseConnection(BaseModel, ABC):
         id (str): A unique identifier for the connection, generated using `generate_uuid`.
         type (ConnectionType): The type of connection.
     """
+
     id: str = Field(default_factory=generate_uuid)
 
     @computed_field
@@ -91,6 +99,7 @@ class BaseApiKeyConnection(BaseConnection):
     Attributes:
         api_key (str): The API key used for authentication.
     """
+
     api_key: str
 
     @abstractmethod
@@ -225,8 +234,11 @@ class OpenAI(BaseApiKeyConnection):
         api_key (str): The API key for the OpenAI service, fetched from the environment variable 'OPENAI_API_KEY'.
         url (str): The endpoint url for the OpenAI service, fetched from the environment variable 'OPENAI_URL'.
     """
+
     api_key: str = Field(default_factory=partial(get_env_var, "OPENAI_API_KEY"))
-    url: str = Field(default_factory=partial(get_env_var, "OPENAI_URL", "https://api.openai.com/v1"))
+    url: str = Field(
+        default_factory=partial(get_env_var, "OPENAI_URL", "https://api.openai.com/v1")
+    )
 
     def connect(self) -> "OpenAIClient":
         """
@@ -270,7 +282,9 @@ class AWS(BaseConnection):
         default_factory=partial(get_env_var, "AWS_SECRET_ACCESS_KEY")
     )
     region: str = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_REGION"))
-    profile: str | None = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_PROFILE"))
+    profile: str | None = Field(
+        default_factory=partial(get_env_var, "AWS_DEFAULT_PROFILE")
+    )
 
     def connect(self):
         pass
@@ -291,6 +305,7 @@ class AWS(BaseConnection):
     def get_boto3_session(self):
         """Create and return a boto3.Session with properly formatted parameters"""
         import boto3
+
         params = {}
         if self.profile:
             params["profile_name"] = self.profile
@@ -316,8 +331,12 @@ class AWSNeptune(BaseConnection):
 
     host: str = Field(default_factory=partial(get_env_var, "NEPTUNE_HOST", "localhost"))
     port: int = Field(default_factory=partial(get_env_var, "NEPTUNE_PORT", 8182))
-    use_https: bool = Field(default_factory=partial(get_env_var, "NEPTUNE_USE_HTTPS", True))
-    verify_ssl: bool = Field(default_factory=partial(get_env_var, "NEPTUNE_VERIFY_SSL", True))
+    use_https: bool = Field(
+        default_factory=partial(get_env_var, "NEPTUNE_USE_HTTPS", True)
+    )
+    verify_ssl: bool = Field(
+        default_factory=partial(get_env_var, "NEPTUNE_VERIFY_SSL", True)
+    )
     timeout: int = Field(default_factory=partial(get_env_var, "NEPTUNE_TIMEOUT", 30))
 
     @property
@@ -357,18 +376,34 @@ class GoogleCloud(BaseConnection):
         universe_domain (str): The domain associated with the Google Cloud environment.
     """
 
-    project_id: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PROJECT_ID"))
-    private_key_id: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PRIVATE_KEY_ID"))
-    private_key: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PRIVATE_KEY"))
-    client_email: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_EMAIL"))
-    client_id: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_ID"))
+    project_id: str = Field(
+        default_factory=partial(get_env_var, "GOOGLE_CLOUD_PROJECT_ID")
+    )
+    private_key_id: str = Field(
+        default_factory=partial(get_env_var, "GOOGLE_CLOUD_PRIVATE_KEY_ID")
+    )
+    private_key: str = Field(
+        default_factory=partial(get_env_var, "GOOGLE_CLOUD_PRIVATE_KEY")
+    )
+    client_email: str = Field(
+        default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_EMAIL")
+    )
+    client_id: str = Field(
+        default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_ID")
+    )
     auth_uri: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_AUTH_URI"))
-    token_uri: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_TOKEN_URI"))
+    token_uri: str = Field(
+        default_factory=partial(get_env_var, "GOOGLE_CLOUD_TOKEN_URI")
+    )
     auth_provider_x509_cert_url: str = Field(
         default_factory=partial(get_env_var, "GOOGLE_CLOUD_AUTH_PROVIDER_X509_CERT_URL")
     )
-    client_x509_cert_url: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_X509_CERT_URL"))
-    universe_domain: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_UNIVERSE_DOMAIN"))
+    client_x509_cert_url: str = Field(
+        default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_X509_CERT_URL")
+    )
+    universe_domain: str = Field(
+        default_factory=partial(get_env_var, "GOOGLE_CLOUD_UNIVERSE_DOMAIN")
+    )
 
     def connect(self):
         pass
@@ -409,8 +444,12 @@ class VertexAI(GoogleCloud):
         vertex_project_location (str): The location of the GCP project.
     """
 
-    vertex_project_id: str = Field(default_factory=partial(get_env_var, "VERTEXAI_PROJECT_ID"))
-    vertex_project_location: str = Field(default_factory=partial(get_env_var, "VERTEXAI_PROJECT_LOCATION"))
+    vertex_project_id: str = Field(
+        default_factory=partial(get_env_var, "VERTEXAI_PROJECT_ID")
+    )
+    vertex_project_location: str = Field(
+        default_factory=partial(get_env_var, "VERTEXAI_PROJECT_LOCATION")
+    )
 
     def connect(self):
         pass
@@ -456,6 +495,7 @@ class Whisper(Http):
         method (str): HTTP method used for the request, defaults to HTTPMethod.POST.
         api_key (str): API key for authentication, fetched from the environment variable "OPENAI_API_KEY".
     """
+
     url: str = Field(
         default_factory=partial(
             get_env_var, "WHISPER_URL", "https://api.openai.com/v1/"
@@ -522,6 +562,7 @@ class Pinecone(BaseApiKeyConnection):
         """
         # Import in runtime to save memory
         from pinecone import Pinecone as PineconeClient
+
         pinecone_client = PineconeClient(self.api_key)
         logger.debug("Connected to Pinecone")
         return pinecone_client
@@ -568,7 +609,9 @@ class Neo4j(BaseConnection):
     uri: str = Field(default_factory=partial(get_env_var, "NEO4J_URI"))
     username: str = Field(default_factory=partial(get_env_var, "NEO4J_USERNAME"))
     password: str = Field(default_factory=partial(get_env_var, "NEO4J_PASSWORD"))
-    database: str | None = Field(default_factory=partial(get_env_var, "NEO4J_DATABASE", None))
+    database: str | None = Field(
+        default_factory=partial(get_env_var, "NEO4J_DATABASE", None)
+    )
     connectivity_verification_enabled: bool = Field(
         default=True,
         validation_alias="verify_connectivity",
@@ -628,12 +671,22 @@ class Weaviate(BaseApiKeyConnection):
     api_key: str = Field(default_factory=partial(get_env_var, "WEAVIATE_API_KEY"))
     url: str = Field(default_factory=partial(get_env_var, "WEAVIATE_URL"))
     http_host: str = Field(default_factory=partial(get_env_var, "WEAVIATE_HTTP_HOST"))
-    http_port: int = Field(default_factory=partial(get_env_var, "WEAVIATE_HTTP_PORT", 443))
+    http_port: int = Field(
+        default_factory=partial(get_env_var, "WEAVIATE_HTTP_PORT", 443)
+    )
     grpc_host: str = Field(default_factory=partial(get_env_var, "WEAVIATE_GRPC_HOST"))
-    grpc_port: int = Field(default_factory=partial(get_env_var, "WEAVIATE_GRPC_PORT", 50051))
-    timeout_init: int = Field(default=30, description="Timeout for initialization checks in seconds")
-    timeout_query: int = Field(default=180, description="Timeout for query operations in seconds")
-    timeout_insert: int = Field(default=120, description="Timeout for insert operations in seconds")
+    grpc_port: int = Field(
+        default_factory=partial(get_env_var, "WEAVIATE_GRPC_PORT", 50051)
+    )
+    timeout_init: int = Field(
+        default=30, description="Timeout for initialization checks in seconds"
+    )
+    timeout_query: int = Field(
+        default=180, description="Timeout for query operations in seconds"
+    )
+    timeout_insert: int = Field(
+        default=120, description="Timeout for insert operations in seconds"
+    )
 
     def connect(self) -> "WeaviateClient":
         """
@@ -653,7 +706,11 @@ class Weaviate(BaseApiKeyConnection):
                 cluster_url=self.url,
                 auth_credentials=Auth.api_key(self.api_key),
                 additional_config=AdditionalConfig(
-                    timeout=Timeout(init=self.timeout_init, query=self.timeout_query, insert=self.timeout_insert)
+                    timeout=Timeout(
+                        init=self.timeout_init,
+                        query=self.timeout_query,
+                        insert=self.timeout_insert,
+                    )
                 ),
             )
             logger.debug(f"Connected to Weaviate with url={self.url}")
@@ -670,7 +727,9 @@ class Weaviate(BaseApiKeyConnection):
                 auth_credentials=Auth.api_key(self.api_key),
                 additional_config=AdditionalConfig(
                     timeout=Timeout(
-                        init=self.timeout_init, query=self.timeout_query, insert=self.timeout_insert
+                        init=self.timeout_init,
+                        query=self.timeout_query,
+                        insert=self.timeout_insert,
                     ),  # Values in seconds
                 ),
                 skip_init_checks=False,
@@ -721,7 +780,9 @@ class Chroma(BaseConnection):
         from chromadb import HttpClient
 
         chroma_client = HttpClient(host=self.host, port=self.port)
-        logger.debug(f"Connected to Chroma with host={self.host} and port={str(self.port)}")
+        logger.debug(
+            f"Connected to Chroma with host={self.host} and port={str(self.port)}"
+        )
         return chroma_client
 
 
@@ -966,8 +1027,12 @@ class Milvus(BaseConnection):
     """
 
     deployment_type: MilvusDeploymentType = MilvusDeploymentType.HOST
-    uri: str = Field(default_factory=partial(get_env_var, "MILVUS_URI", "http://localhost:19530"))
-    api_key: str | None = Field(default_factory=partial(get_env_var, "MILVUS_API_TOKEN", None))
+    uri: str = Field(
+        default_factory=partial(get_env_var, "MILVUS_URI", "http://localhost:19530")
+    )
+    api_key: str | None = Field(
+        default_factory=partial(get_env_var, "MILVUS_API_TOKEN", None)
+    )
 
     @field_validator("uri")
     @classmethod
@@ -975,7 +1040,9 @@ class Milvus(BaseConnection):
         deployment_type = values.data.get("deployment_type")
 
         if deployment_type == MilvusDeploymentType.FILE and not uri.endswith(".db"):
-            raise ValueError("For FILE deployment, URI should point to a file ending with '.db'.")
+            raise ValueError(
+                "For FILE deployment, URI should point to a file ending with '.db'."
+            )
 
         return uri
 
@@ -1012,11 +1079,19 @@ class DeepSeek(BaseApiKeyConnection):
 
 
 class PostgreSQL(BaseConnection):
-    host: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_HOST", "localhost"))
+    host: str = Field(
+        default_factory=partial(get_env_var, "POSTGRESQL_HOST", "localhost")
+    )
     port: int = Field(default_factory=partial(get_env_var, "POSTGRESQL_PORT", 5432))
-    database: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_DATABASE", "db"))
-    user: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_USER", "postgres"))
-    password: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_PASSWORD", "password"))
+    database: str = Field(
+        default_factory=partial(get_env_var, "POSTGRESQL_DATABASE", "db")
+    )
+    user: str = Field(
+        default_factory=partial(get_env_var, "POSTGRESQL_USER", "postgres")
+    )
+    password: str = Field(
+        default_factory=partial(get_env_var, "POSTGRESQL_PASSWORD", "password")
+    )
 
     def connect(self):
         try:
@@ -1078,7 +1153,9 @@ class Exa(Http):
     def setup_headers(self):
         """Setup headers after model validation."""
         if self.api_key:
-            self.headers.update({"x-api-key": self.api_key, "Content-Type": "application/json"})
+            self.headers.update(
+                {"x-api-key": self.api_key, "Content-Type": "application/json"}
+            )
         return self
 
 
@@ -1134,18 +1211,26 @@ class MySQL(BaseConnection):
     port: int = Field(default_factory=partial(get_env_var, "MYSQL_PORT", 3306))
     database: str = Field(default_factory=partial(get_env_var, "MYSQL_DATABASE", "db"))
     user: str = Field(default_factory=partial(get_env_var, "MYSQL_USER", "mysql"))
-    password: str = Field(default_factory=partial(get_env_var, "MYSQL_PASSWORD", "password"))
+    password: str = Field(
+        default_factory=partial(get_env_var, "MYSQL_PASSWORD", "password")
+    )
 
     def connect(self):
         import mysql.connector
 
         try:
             conn = mysql.connector.connect(
-                host=self.host, port=self.port, database=self.database, user=self.user, passwd=self.password
+                host=self.host,
+                port=self.port,
+                database=self.database,
+                user=self.user,
+                passwd=self.password,
             )
             conn.autocommit = True
             logger.debug(
-                f"Connected to MySQL with host={self.host}, " f"user={self.user}, " f"database={self.database}."
+                f"Connected to MySQL with host={self.host}, "
+                f"user={self.user}, "
+                f"database={self.database}."
             )
             return conn
         except mysql.connector.Error as e:
@@ -1157,12 +1242,25 @@ class MySQL(BaseConnection):
 
 
 class Snowflake(BaseConnection):
-    user: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_USER", "snowflake"))
-    password: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_PASSWORD", "password"))
-    account: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_ACCOUNT", "account"))
-    warehouse: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_WAREHOUSE", "warehouse"))
-    database: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_DATABASE", "db"))
-    snowflake_schema: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_SCHEMA", "schema"), alias="schema")
+    user: str = Field(
+        default_factory=partial(get_env_var, "SNOWFLAKE_USER", "snowflake")
+    )
+    password: str = Field(
+        default_factory=partial(get_env_var, "SNOWFLAKE_PASSWORD", "password")
+    )
+    account: str = Field(
+        default_factory=partial(get_env_var, "SNOWFLAKE_ACCOUNT", "account")
+    )
+    warehouse: str = Field(
+        default_factory=partial(get_env_var, "SNOWFLAKE_WAREHOUSE", "warehouse")
+    )
+    database: str = Field(
+        default_factory=partial(get_env_var, "SNOWFLAKE_DATABASE", "db")
+    )
+    snowflake_schema: str = Field(
+        default_factory=partial(get_env_var, "SNOWFLAKE_SCHEMA", "schema"),
+        alias="schema",
+    )
 
     def connect(self):
         try:
@@ -1195,9 +1293,15 @@ class Snowflake(BaseConnection):
 class AWSRedshift(BaseConnection):
     host: str = Field(default_factory=partial(get_env_var, "AWS_REDSHIFT_HOST"))
     port: int = Field(default_factory=partial(get_env_var, "AWS_REDSHIFT_PORT", 5439))
-    database: str = Field(default_factory=partial(get_env_var, "AWS_REDSHIFT_DATABASE", "db"))
-    user: str = Field(default_factory=partial(get_env_var, "AWS_REDSHIFT_USER", "awsuser"))
-    password: str = Field(default_factory=partial(get_env_var, "AWS_REDSHIFT_PASSWORD", "password"))
+    database: str = Field(
+        default_factory=partial(get_env_var, "AWS_REDSHIFT_DATABASE", "db")
+    )
+    user: str = Field(
+        default_factory=partial(get_env_var, "AWS_REDSHIFT_USER", "awsuser")
+    )
+    password: str = Field(
+        default_factory=partial(get_env_var, "AWS_REDSHIFT_PASSWORD", "password")
+    )
 
     def connect(self):
         try:
@@ -1239,14 +1343,30 @@ class Elasticsearch(BaseConnection):
     """
 
     url: str = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_URL", None))
-    api_key_id: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_API_KEY_ID", None))
-    api_key: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_API_KEY", None))
-    username: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_USERNAME", None))
-    password: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_PASSWORD", None))
-    cloud_id: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_CLOUD_ID", None))
-    ca_path: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_CA_PATH", None))
-    verify_certs: bool = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_VERIFY_CERTS", False))
-    use_ssl: bool = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_USE_SSL", True))
+    api_key_id: str | None = Field(
+        default_factory=partial(get_env_var, "ELASTICSEARCH_API_KEY_ID", None)
+    )
+    api_key: str | None = Field(
+        default_factory=partial(get_env_var, "ELASTICSEARCH_API_KEY", None)
+    )
+    username: str | None = Field(
+        default_factory=partial(get_env_var, "ELASTICSEARCH_USERNAME", None)
+    )
+    password: str | None = Field(
+        default_factory=partial(get_env_var, "ELASTICSEARCH_PASSWORD", None)
+    )
+    cloud_id: str | None = Field(
+        default_factory=partial(get_env_var, "ELASTICSEARCH_CLOUD_ID", None)
+    )
+    ca_path: str | None = Field(
+        default_factory=partial(get_env_var, "ELASTICSEARCH_CA_PATH", None)
+    )
+    verify_certs: bool = Field(
+        default_factory=partial(get_env_var, "ELASTICSEARCH_VERIFY_CERTS", False)
+    )
+    use_ssl: bool = Field(
+        default_factory=partial(get_env_var, "ELASTICSEARCH_USE_SSL", True)
+    )
 
     def connect(self):
         """
@@ -1326,10 +1446,18 @@ class AWSOpenSearch(AWS):
     host: str = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_HOST"))
     port: int = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_PORT", 443))
 
-    service: str = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_SERVICE", "es"))
-    use_ssl: bool = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_USE_SSL", True))
-    verify_certs: bool = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_VERIFY_CERTS", True))
-    ca_certs: str | None = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_CA_CERTS"))
+    service: str = Field(
+        default_factory=partial(get_env_var, "AWS_OPENSEARCH_SERVICE", "es")
+    )
+    use_ssl: bool = Field(
+        default_factory=partial(get_env_var, "AWS_OPENSEARCH_USE_SSL", True)
+    )
+    verify_certs: bool = Field(
+        default_factory=partial(get_env_var, "AWS_OPENSEARCH_VERIFY_CERTS", True)
+    )
+    ca_certs: str | None = Field(
+        default_factory=partial(get_env_var, "AWS_OPENSEARCH_CA_CERTS")
+    )
 
     def connect(self):
         """
@@ -1342,7 +1470,9 @@ class AWSOpenSearch(AWS):
         credentials = session.get_credentials()
 
         if not credentials:
-            raise ValueError("Missing AWS credentials: provide profile or access_key_id/secret_access_key")
+            raise ValueError(
+                "Missing AWS credentials: provide profile or access_key_id/secret_access_key"
+            )
 
         awsauth = AWS4Auth(
             credentials.access_key,
@@ -1369,7 +1499,9 @@ class AWSOpenSearch(AWS):
             raise ConnectionError(f"Failed to connect to AWS OpenSearch: {e}")
 
         if not client.ping():
-            raise ConnectionError(f"Failed to ping AWS OpenSearch cluster at {self.host}:{self.port}")
+            raise ConnectionError(
+                f"Failed to ping AWS OpenSearch cluster at {self.host}:{self.port}"
+            )
 
         logger.debug(
             f"Connected to AWS OpenSearch at {self.host}:{self.port} (region={self.region}, profile={self.profile})"
@@ -1450,9 +1582,16 @@ class Databricks(BaseApiKeyConnection):
 
 class MCPSse(BaseConnection):
     url: str = Field(..., description="The SSE endpoint URL to connect to.")
-    headers: dict[str, Any] | None = Field(default=None, description="Optional headers to include in the SSE request.")
-    timeout: float = Field(default=5.0, description="Timeout in seconds for establishing the initial connection.")
-    sse_read_timeout: float = Field(default=60 * 5, description="Timeout for reading SSE messages (in seconds).")
+    headers: dict[str, Any] | None = Field(
+        default=None, description="Optional headers to include in the SSE request."
+    )
+    timeout: float = Field(
+        default=5.0,
+        description="Timeout in seconds for establishing the initial connection.",
+    )
+    sse_read_timeout: float = Field(
+        default=60 * 5, description="Timeout for reading SSE messages (in seconds)."
+    )
 
     def connect(self):
         """
@@ -1473,9 +1612,16 @@ class MCPSse(BaseConnection):
 
 class MCPStreamableHTTP(BaseConnection):
     url: str = Field(..., description="The endpoint URL to connect to.")
-    headers: dict[str, Any] | None = Field(default=None, description="Optional headers to include in the request.")
-    timeout: float = Field(default=30.0, description="Timeout in seconds for establishing the initial connection.")
-    sse_read_timeout: float = Field(default=60 * 5, description="Timeout for reading messages (in seconds).")
+    headers: dict[str, Any] | None = Field(
+        default=None, description="Optional headers to include in the request."
+    )
+    timeout: float = Field(
+        default=30.0,
+        description="Timeout in seconds for establishing the initial connection.",
+    )
+    sse_read_timeout: float = Field(
+        default=60 * 5, description="Timeout for reading messages (in seconds)."
+    )
 
     def connect(self):
         """
@@ -1502,12 +1648,22 @@ class MCPEncodingErrorHandler(str, Enum):
 
 class MCPStdio(BaseConnection):
     command: str = Field(..., description="The executable to run to start the server.")
-    args: list[str] = Field(default_factory=list, description="Command-line arguments to pass to the executable.")
-    env: dict[str, str] | None = Field(None, description="Environment variables for the process.")
-    cwd: str | Path | None = Field(None, description="Working directory for the process.")
-    encoding: str = Field(default="utf-8", description="Text encoding for communication.")
+    args: list[str] = Field(
+        default_factory=list,
+        description="Command-line arguments to pass to the executable.",
+    )
+    env: dict[str, str] | None = Field(
+        None, description="Environment variables for the process."
+    )
+    cwd: str | Path | None = Field(
+        None, description="Working directory for the process."
+    )
+    encoding: str = Field(
+        default="utf-8", description="Text encoding for communication."
+    )
     encoding_error_handler: MCPEncodingErrorHandler = Field(
-        default=MCPEncodingErrorHandler.STRICT, description="Strategy for handling encoding errors."
+        default=MCPEncodingErrorHandler.STRICT,
+        description="Strategy for handling encoding errors.",
     )
 
     def connect(self):
@@ -1533,7 +1689,9 @@ class MCPStdio(BaseConnection):
 
 
 class DatabricksSQL(BaseConnection):
-    server_hostname: str = Field(default_factory=partial(get_env_var, "DATABRICKS_SERVER_HOSTNAME"))
+    server_hostname: str = Field(
+        default_factory=partial(get_env_var, "DATABRICKS_SERVER_HOSTNAME")
+    )
     http_path: str = Field(default_factory=partial(get_env_var, "DATABRICKS_HTTP_PATH"))
     access_token: str = Field(default_factory=partial(get_env_var, "DATABRICKS_TOKEN"))
 
@@ -1553,3 +1711,48 @@ class DatabricksSQL(BaseConnection):
             return conn
         except Exception as e:
             raise ConnectionError(f"Failed to connect to Databricks: {str(e)}")
+
+
+class Novita(BaseApiKeyConnection):
+    """
+    Represents a connection to the Novita AI service.
+
+    Novita provides an OpenAI-compatible API endpoint.
+    The base URL is https://api.novita.ai/openai.
+
+    Attributes:
+        api_key (str): The API key for the Novita service, fetched from the environment variable 'NOVITA_API_KEY'.
+        url (str): The endpoint URL for the Novita service, defaults to 'https://api.novita.ai/openai'.
+    """
+
+    url: str = Field(default="https://api.novita.ai/openai")
+    api_key: str = Field(default_factory=partial(get_env_var, "NOVITA_API_KEY"))
+
+    def connect(self):
+        """
+        Connects to the Novita AI service.
+
+        This method establishes a connection to the Novita service using the provided API key.
+        Uses the OpenAI-compatible API endpoint.
+
+        Returns:
+            OpenAIClient: An instance of the OpenAIClient connected with the specified API key and base URL.
+        """
+        from openai import OpenAI
+
+        openai_client = OpenAI(api_key=self.api_key, base_url=self.url)
+        logger.debug("Connected to Novita")
+        return openai_client
+
+    @property
+    def conn_params(self) -> dict:
+        """
+        Returns the parameters required for connection.
+
+        Returns:
+            dict: A dictionary containing the API key with the key 'api_key' and base url with the key 'api_base'.
+        """
+        return {
+            "api_base": self.url,
+            "api_key": self.api_key,
+        }

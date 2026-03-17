@@ -25,3 +25,4 @@ from .togetherai import TogetherAI
 from .vertexai import VertexAI
 from .watsonx import WatsonX
 from .xai import xAI
+from .novita import Novita
