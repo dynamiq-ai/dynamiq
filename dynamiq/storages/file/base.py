@@ -26,6 +26,22 @@ class FileInfo(BaseModel):
     def bytes_as_base64(self, b: bytes) -> str:
         return base64.b64encode(b).decode("ascii")
 
+    def to_bytesio(self) -> BytesIO:
+        """Return file content wrapped in a ``BytesIO`` with metadata attributes.
+
+        Returns:
+            BytesIO with ``name``, ``path``, ``size``, ``created_at``,
+            ``description``, and ``content_type`` set.
+        """
+        bio = BytesIO(self.content or b"")
+        bio.name = self.name
+        bio.path = self.path
+        bio.size = self.size
+        bio.created_at = self.created_at
+        bio.description = self.metadata.get("description", "")
+        bio.content_type = self.content_type
+        return bio
+
 
 class StorageError(Exception):
     """Base exception for storage operations."""
