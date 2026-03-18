@@ -124,11 +124,31 @@ def serialize_file(file_obj: Any) -> Any:
         if name:
             result["name"] = name
         if content_type:
-            result["type"] = content_type
+            result["mime_type"] = content_type
         return result
     if isinstance(file_obj, bytes):
         return {"content": base64.b64encode(file_obj).decode("utf-8"), "size": len(file_obj)}
     return file_obj
+
+
+def serialize_files_in_value(value: Any) -> Any:
+    """Recursively walk a value and serialize any BytesIO/bytes objects found in dicts or lists.
+
+    Args:
+        value: Any Python value — dicts, lists, BytesIO, bytes, or primitives.
+
+    Returns:
+        The same structure with all BytesIO/bytes replaced by JSON-safe dicts.
+    """
+    if isinstance(value, (BytesIO, bytes)):
+        return serialize_file(value)
+    if isinstance(value, dict):
+        return {k: serialize_files_in_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [serialize_files_in_value(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(serialize_files_in_value(v) for v in value)
+    return value
 
 
 def encode_bytes(value: bytes) -> str:
