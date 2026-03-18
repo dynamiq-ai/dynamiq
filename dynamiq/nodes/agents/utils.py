@@ -50,20 +50,24 @@ def convert_bytesio_to_file_info(bytesio_obj: io.BytesIO, key: str, index: int =
     encoded = base64.b64encode(content_bytes).decode("utf-8")
 
     name = getattr(bytesio_obj, "name", f"file_{key}" if index is None else f"file_{key}_{index}")
+    path = getattr(bytesio_obj, "path", f"/{name}" if not name.startswith("/") else name)
     content_type = getattr(bytesio_obj, "content_type", "unknown")
     description = getattr(bytesio_obj, "description", "")
+    size = getattr(bytesio_obj, "size", len(content_bytes))
+    created_at = getattr(bytesio_obj, "created_at", None)
 
-    # Create a path based on the name
-    path = f"/{name}" if not name.startswith("/") else name
+    file_info_kwargs: dict[str, Any] = {
+        "content": encoded,
+        "path": path,
+        "name": name,
+        "content_type": content_type,
+        "metadata": {"description": description},
+        "size": size,
+    }
+    if created_at is not None:
+        file_info_kwargs["created_at"] = created_at
 
-    return FileInfo(
-        content=encoded,
-        path=path,
-        name=name,
-        content_type=content_type,
-        metadata={"description": description},
-        size=len(content_bytes),
-    )
+    return FileInfo(**file_info_kwargs)
 
 
 class FileMappedInput(BaseModel):
