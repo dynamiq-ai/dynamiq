@@ -607,7 +607,7 @@ class FileReadTool(Node):
     def _build_file_info(self, file_path: str, content: bytes) -> BytesIO:
         """Build a BytesIO from a read file path and its raw content."""
         bio = BytesIO(content)
-        bio.name = file_path
+        bio.name = os.path.basename(file_path)
         bio.description = ""
         bio.content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
         return bio
