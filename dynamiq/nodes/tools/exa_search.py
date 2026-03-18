@@ -378,7 +378,6 @@ class ExaTool(ConnectionNode):
     MAX_SNIPPET_CHARS: ClassVar[int] = 800
     MAX_CONTEXT_CHARS: ClassVar[int] = 4000
     MAX_HIGHLIGHTS: ClassVar[int] = 5
-    MAX_SOURCE_SNIPPET_CHARS: ClassVar[int] = 200
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[ExaInputSchema]] = ExaInputSchema
@@ -592,16 +591,13 @@ class ExaTool(ConnectionNode):
 
             sources = []
             for r in results:
-                snippet = (
-                    (r.get("text") or "").strip()
-                    or " ".join(r.get("highlights") or []).strip()
-                    or (r.get("summary") or "").strip()
-                )[: self.MAX_SOURCE_SNIPPET_CHARS]
                 sources.append(
                     {
                         "url": r.get("url", ""),
                         "title": r.get("title", ""),
-                        "snippet": snippet,
+                        "summary": r.get("summary") or "",
+                        "highlights": r.get("highlights") or [],
+                        "text": r.get("text") or "",
                     }
                 )
 
