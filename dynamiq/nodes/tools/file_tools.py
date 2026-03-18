@@ -26,7 +26,7 @@ from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox
-from dynamiq.storages.file.base import FileInfo, FileStore
+from dynamiq.storages.file.base import FileStore
 from dynamiq.utils.file_types import EXTENSION_MAP, FileType
 
 logger = logging.getLogger(__name__)
@@ -604,16 +604,13 @@ class FileReadTool(Node):
             }
         return data
 
-    def _build_file_info(self, file_path: str, content: bytes) -> FileInfo:
-        """Build a FileInfo instance from a read file path and its raw content."""
-        filename = os.path.basename(file_path)
-        return FileInfo(
-            name=filename,
-            path=file_path,
-            size=len(content),
-            content_type=mimetypes.guess_type(filename)[0] or "application/octet-stream",
-            content=content,
-        )
+    def _build_file_info(self, file_path: str, content: bytes) -> BytesIO:
+        """Build a BytesIO from a read file path and its raw content."""
+        bio = BytesIO(content)
+        bio.name = file_path
+        bio.description = ""
+        bio.content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+        return bio
 
     def execute(
         self,
@@ -665,7 +662,7 @@ class FileReadTool(Node):
                 processed = self._append_cache_hint(processed, cached_path, hint_enabled=False)
                 return {
                     "content": processed,
-                    "file_info": file_info.model_dump(mode="json"),
+                    "file_info": file_info,
                     "cached_text_path": cached_path,
                 }
 
@@ -706,7 +703,7 @@ class FileReadTool(Node):
                             file_path=input_data.file_path,
                         )
                         processed = self._append_cache_hint(processed, cached_path, hint_enabled)
-                        result_payload = {"content": processed, "file_info": file_info.model_dump(mode="json")}
+                        result_payload = {"content": processed, "file_info": file_info}
                         if page_entries:
                             result_payload["pages"] = page_entries
                         if cached_path:
@@ -736,7 +733,7 @@ class FileReadTool(Node):
                 file_path=input_data.file_path,
             )
 
-            return {"content": rendered_content, "file_info": file_info.model_dump(mode="json")}
+            return {"content": rendered_content, "file_info": file_info}
 
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to read file. Error: {str(e)}")
@@ -1078,7 +1075,7 @@ class FileWriteTool(Node):
 
         return {
             "content": message,
-            "file_info": file_info.model_dump(mode="json"),
+            "file_info": file_info.to_bytesio(),
         }
 
     def _execute_edit(self, input_data: FileWriteInputSchema) -> dict[str, Any]:
@@ -1148,7 +1145,7 @@ class FileWriteTool(Node):
 
         return {
             "content": f"{summary} Use FileReadTool to view the updated file.",
-            "file_info": file_info.model_dump(mode="json"),
+            "file_info": file_info.to_bytesio(),
         }
 
     def _prepare_content_payload(self, input_data: FileWriteInputSchema) -> tuple[bytes, str]:
