@@ -18,6 +18,7 @@ from .mistral import Mistral
 from .nvidia_nim import NvidiaNIM
 from .ollama import Ollama
 from .openai import OpenAI
+from .openrouter import OpenRouter
 from .perplexity import Perplexity
 from .replicate import Replicate
 from .sambanova import SambaNova

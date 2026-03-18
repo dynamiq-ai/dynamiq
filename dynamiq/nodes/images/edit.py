@@ -8,6 +8,7 @@ from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.connections import OpenRouter as OpenRouterConnection
 from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
@@ -130,7 +131,7 @@ Examples:
 - {"prompt": "Change the shirt color to blue", "files": <source_image>, "mask": <mask_image>}
 - {"prompt": "Make the image more vibrant and colorful", "n": 3, "files": <source_image>}"""
     model: str = "gpt-image-1"
-    connection: OpenAIConnection | None = None
+    connection: OpenAIConnection | OpenRouterConnection | None = None
     n: int | None = None
     size: ImageSize | str = ImageSize.SIZE_1024x1024
     response_format: ImageResponseFormat | str | None = Field(
