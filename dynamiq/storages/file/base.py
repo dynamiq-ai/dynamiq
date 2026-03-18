@@ -30,11 +30,14 @@ class FileInfo(BaseModel):
         """Return file content wrapped in a ``BytesIO`` with metadata attributes.
 
         Returns:
-            BytesIO with ``name``, ``description``, and ``content_type`` set.
+            BytesIO with ``name``, ``path``, ``size``, ``created_at``,
+            ``description``, and ``content_type`` set.
         """
         bio = BytesIO(self.content or b"")
         bio.name = self.name
         bio.path = self.path
+        bio.size = self.size
+        bio.created_at = self.created_at
         bio.description = self.metadata.get("description", "")
         bio.content_type = self.content_type
         return bio
