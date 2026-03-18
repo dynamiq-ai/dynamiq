@@ -176,6 +176,7 @@ class SubAgentTool(Node):
                 connection_manager=self._connection_manager,
             )
             resolved.setdefault("is_postponed_component_init", True)
+            resolved.pop("id", None)
             agent = ReActAgent(**resolved)
         elif callable(self.agent_factory):
             agent = self.agent_factory()
