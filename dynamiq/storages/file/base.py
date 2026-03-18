@@ -33,7 +33,8 @@ class FileInfo(BaseModel):
             BytesIO with ``name``, ``description``, and ``content_type`` set.
         """
         bio = BytesIO(self.content or b"")
-        bio.name = self.path
+        bio.name = self.name
+        bio.path = self.path
         bio.description = self.metadata.get("description", "")
         bio.content_type = self.content_type
         return bio

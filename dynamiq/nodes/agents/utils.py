@@ -50,11 +50,9 @@ def convert_bytesio_to_file_info(bytesio_obj: io.BytesIO, key: str, index: int =
     encoded = base64.b64encode(content_bytes).decode("utf-8")
 
     name = getattr(bytesio_obj, "name", f"file_{key}" if index is None else f"file_{key}_{index}")
+    path = getattr(bytesio_obj, "path", f"/{name}" if not name.startswith("/") else name)
     content_type = getattr(bytesio_obj, "content_type", "unknown")
     description = getattr(bytesio_obj, "description", "")
-
-    # Create a path based on the name
-    path = f"/{name}" if not name.startswith("/") else name
 
     return FileInfo(
         content=encoded,
