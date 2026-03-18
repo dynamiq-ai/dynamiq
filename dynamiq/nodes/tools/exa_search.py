@@ -593,8 +593,8 @@ class ExaTool(ConnectionNode):
             for r in results:
                 sources.append(
                     {
-                        "url": r.get("url", ""),
-                        "title": r.get("title", ""),
+                        "url": r.get("url") or "",
+                        "title": r.get("title") or "",
                         "summary": r.get("summary") or "",
                         "highlights": r.get("highlights") or [],
                         "text": r.get("text") or "",
