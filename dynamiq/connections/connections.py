@@ -1553,3 +1553,21 @@ class DatabricksSQL(BaseConnection):
             return conn
         except Exception as e:
             raise ConnectionError(f"Failed to connect to Databricks: {str(e)}")
+
+
+class OpenRouter(BaseApiKeyConnection):
+    api_key: str = Field(default_factory=partial(get_env_var, "OPENROUTER_API_KEY"))
+    url: str = Field(default_factory=partial(get_env_var, "OPENROUTER_API_BASE", "https://openrouter.ai/api/v1"))
+
+    def connect(self):
+        pass
+
+    @property
+    def conn_params(self) -> dict:
+        """
+        Returns the parameters required for connection.
+        """
+        return {
+            "api_base": self.url,
+            "api_key": self.api_key,
+        }
