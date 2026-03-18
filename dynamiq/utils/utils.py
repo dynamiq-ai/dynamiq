@@ -107,6 +107,30 @@ def merge(a: Any, b: Any) -> dict[str, Any]:
     return {**a, **b}
 
 
+def serialize_file(file_obj: Any) -> Any:
+    """Serialize a file-like object (BytesIO, bytes) to a JSON-safe dict with base64 content.
+
+    Args:
+        file_obj: A BytesIO, bytes, or other object to serialize.
+
+    Returns:
+        A dict with base64-encoded content and metadata, or the original object if not binary.
+    """
+    if isinstance(file_obj, BytesIO):
+        name = getattr(file_obj, "name", None)
+        content_type = getattr(file_obj, "content_type", None)
+        file_bytes = file_obj.getvalue()
+        result = {"content": base64.b64encode(file_bytes).decode("utf-8"), "size": len(file_bytes)}
+        if name:
+            result["name"] = name
+        if content_type:
+            result["type"] = content_type
+        return result
+    if isinstance(file_obj, bytes):
+        return {"content": base64.b64encode(file_obj).decode("utf-8"), "size": len(file_obj)}
+    return file_obj
+
+
 def encode_bytes(value: bytes) -> str:
     """
     Encode a bytes object to an encoded string.

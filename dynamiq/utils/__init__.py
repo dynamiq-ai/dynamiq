@@ -8,5 +8,6 @@ from .utils import (
     is_called_from_async_context,
     merge,
     serialize,
+    serialize_file,
     truncate_text_for_embedding,
 )
