@@ -589,17 +589,16 @@ class ExaTool(ConnectionNode):
                 result_parts.extend(["## Context", formatted_context])
             result = "\n\n".join(result_parts)
 
-            sources = []
-            for r in results:
-                sources.append(
-                    {
-                        "url": r.get("url") or "",
-                        "title": r.get("title") or "",
-                        "summary": r.get("summary") or "",
-                        "highlights": r.get("highlights") or [],
-                        "text": r.get("text") or "",
-                    }
-                )
+            sources = [
+                {
+                    "url": r.get("url") or "",
+                    "title": r.get("title") or "",
+                    "summary": r.get("summary") or "",
+                    "highlights": r.get("highlights") or [],
+                    "text": r.get("text") or "",
+                }
+                for r in results
+            ]
 
             output = {"content": result, "urls": urls, "sources": sources}
         else:
