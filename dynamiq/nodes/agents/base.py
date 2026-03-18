@@ -997,28 +997,44 @@ class Agent(Node):
             return {k: self._regenerate_node_ids(v) for k, v in obj.items()}
         return obj
 
-    def _clone_tool_for_execution(self, tool: Node, config: RunnableConfig | None) -> tuple[Node, RunnableConfig]:
-        """Clone tool and align config overrides so each execution is isolated."""
+    def _clone_tool_for_execution(
+        self,
+        tool: Node,
+        config: RunnableConfig | None,
+        *,
+        clone: bool = True,
+        override_source_ids: list[str] | None = None,
+        target_id: str | None = None,
+    ) -> tuple[Node, RunnableConfig]:
+        """Prepare a tool for isolated execution: optionally clone, regenerate IDs, align config overrides."""
         base_config = ensure_config(config)
-        try:
-            tool_copy = self._regenerate_node_ids(tool.clone())
-        except Exception as e:
-            logger.warning(f"Agent {self.name} - {self.id}: failed to clone tool {tool.name}: {e}")
-            return tool, base_config
+        original_id = tool.id
+        if clone:
+            try:
+                tool = self._regenerate_node_ids(tool.clone())
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: failed to clone tool {tool.name}: {e}")
+                return tool, base_config
+        else:
+            self._regenerate_node_ids(tool)
 
-        local_config = base_config
-        try:
-            local_config = base_config.model_copy(deep=False)
-            original_override = base_config.nodes_override.get(tool.id)
-            if original_override:
-                local_config.nodes_override[tool_copy.id] = original_override
-        except Exception as e:
-            logger.warning(
-                f"Agent {self.name} - {self.id}: failed to prepare config override for cloned tool {tool.name}: {e}"
-            )
-            local_config = base_config
+        if target_id:
+            tool.id = target_id
 
-        return tool_copy, local_config
+        try:
+            lookup_ids = [original_id] + (override_source_ids or [])
+            override = None
+            for oid in lookup_ids:
+                override = base_config.nodes_override.get(oid)
+                if override:
+                    break
+            if override and tool.id != original_id:
+                base_config = base_config.model_copy(deep=False)
+                base_config.nodes_override[tool.id] = override
+        except Exception as e:
+            logger.warning(f"Agent {self.name} - {self.id}: failed to align config override for tool {tool.name}: {e}")
+
+        return tool, base_config
 
     @staticmethod
     def _extract_file_paths_from_input(tool: Node, merged_input: dict[str, Any]) -> list[str] | None:
@@ -1215,8 +1231,14 @@ class Agent(Node):
             tool_config = ensure_config(config)
             if is_parallel and not is_child_agent:
                 tool_to_run, tool_config = self._clone_tool_for_execution(tool_to_run, tool_config)
-            if is_child_agent and tool.is_factory_mode and tool_run_id:
-                resolved_agent.id = tool_run_id
+            if is_child_agent and tool.is_factory_mode:
+                tool_to_run, tool_config = self._clone_tool_for_execution(
+                    resolved_agent,
+                    tool_config,
+                    clone=False,
+                    override_source_ids=[tool.id],
+                    target_id=tool_run_id,
+                )
 
             tool_result = tool_to_run.run(
                 input_data=merged_input,

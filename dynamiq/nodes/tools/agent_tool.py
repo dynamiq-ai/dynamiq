@@ -230,6 +230,7 @@ class SubAgentTool(Node):
         if getattr(agent, "sandbox_backend", None):
             try:
                 agent.sandbox_backend.close(kill=True)
+                logger.info(f"SubAgentTool '{agent.id}': successfully cleaned up factory agent sandbox")
             except Exception as e:
                 logger.warning("Factory agent sandbox cleanup failed: %s", e)
 

@@ -109,6 +109,7 @@ class TestSubAgentToolCreation:
                 },
                 "name": "Researcher",
                 "llm": {
+                    "id": "openai-conn",
                     "type": "dynamiq.nodes.llms.OpenAI",
                     "connection": "openai-conn",
                     "model": "gpt-4o",
@@ -129,6 +130,55 @@ class TestSubAgentToolCreation:
 
         agent2 = tool.get_or_create_agent()
         assert agent2 is not agent
+        assert agent.id != agent2.id, "Factory agents must have different IDs"
+
+    def test_clone_tool_for_execution_regenerates_ids_and_transfers_config(self):
+        """_clone_tool_for_execution(clone=False) must regenerate all nested IDs
+        and transfer nodes_override to the new agent ID."""
+        from dynamiq.runnables import RunnableConfig
+        from dynamiq.runnables.base import NodeRunnableConfig
+
+        tool = SubAgentTool(
+            name="Researcher",
+            description="Performs web research",
+            agent_factory={
+                "connections": {
+                    "openai-conn": {"type": "dynamiq.connections.OpenAI", "api_key": "test-key"},
+                },
+                "name": "Researcher",
+                "llm": {
+                    "id": "openai-conn",
+                    "type": "dynamiq.nodes.llms.OpenAI",
+                    "connection": "openai-conn",
+                    "model": "gpt-4o",
+                },
+                "role": "You are a research agent.",
+                "tools": [],
+            },
+        )
+
+        conn = OpenAIConnection(api_key="test-key")
+        parent_llm = OpenAI(connection=conn, model="gpt-4o")
+        parent = Agent(name="Manager", llm=parent_llm, role="manage", tools=[tool], max_loops=3)
+
+        agent = tool.get_or_create_agent()
+        original_agent_id = agent.id
+        original_llm_id = agent.llm.id
+
+        override = NodeRunnableConfig()
+        config = RunnableConfig(nodes_override={tool.id: override})
+
+        returned, new_config = parent._clone_tool_for_execution(
+            agent,
+            config,
+            clone=False,
+            override_source_ids=[tool.id],
+        )
+
+        assert returned is agent
+        assert returned.id != original_agent_id, "Agent ID must be regenerated"
+        assert returned.llm.id != original_llm_id, "LLM ID must be regenerated"
+        assert new_config.nodes_override.get(returned.id) is override, "Override keyed by wrapper ID must transfer"
 
     def test_requires_agent_or_factory(self):
         with pytest.raises(ValueError, match="requires either"):
@@ -214,6 +264,7 @@ class TestGetOrCreateAgent:
         assert isinstance(agent1, Agent)
         assert isinstance(agent2, Agent)
         assert agent1 is not agent2
+        assert agent1.id != agent2.id, "Factory agents must have different IDs"
 
 
 class TestAutoWrapping:
@@ -719,6 +770,7 @@ class TestYamlRoundtrip:
         assert isinstance(agent_a, Agent)
         assert isinstance(agent_b, Agent)
         assert agent_a is not agent_b, "Factory must produce distinct instances"
+        assert agent_a.id != agent_b.id, "Factory agents must have different IDs"
         assert agent_a.name == "Researcher"
         assert agent_b.name == "Researcher"
         assert agent_a.role == "You are a research agent."
