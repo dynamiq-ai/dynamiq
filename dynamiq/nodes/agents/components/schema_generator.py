@@ -204,7 +204,8 @@ def _resolve_type_schema(param: Any) -> dict[str, Any] | None:
 
     if origin is Literal:
         values = list(get_args(param))
-        return {"type": "string", "enum": values}
+        lit_type = type(values[0]) if values else str
+        return {"type": TYPE_MAPPING.get(lit_type, "string"), "enum": values}
 
     if origin is list:
         inner_args = get_args(param)
