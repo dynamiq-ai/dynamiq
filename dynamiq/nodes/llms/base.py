@@ -384,12 +384,21 @@ class BaseLLM(ConnectionNode):
         """
         from litellm import cost_per_token
 
-        usage = completion.model_extra["usage"]
-        prompt_tokens = usage.prompt_tokens
-        completion_tokens = usage.completion_tokens
-        total_tokens = usage.total_tokens
-        cache_read_input_tokens = getattr(usage, "cache_read_input_tokens", None)
-        cache_creation_input_tokens = getattr(usage, "cache_creation_input_tokens", None)
+        model_extra = getattr(completion, "model_extra", None) or {}
+        usage = getattr(completion, "usage", None) or model_extra.get("usage")
+        if usage is None and hasattr(completion, "get"):
+            usage = completion.get("usage")
+
+        def usage_value(key: str, default=None):
+            if isinstance(usage, dict):
+                return usage.get(key, default)
+            return getattr(usage, key, default)
+
+        prompt_tokens = usage_value("prompt_tokens", 0)
+        completion_tokens = usage_value("completion_tokens", 0)
+        total_tokens = usage_value("total_tokens", prompt_tokens + completion_tokens)
+        cache_read_input_tokens = usage_value("cache_read_input_tokens")
+        cache_creation_input_tokens = usage_value("cache_creation_input_tokens")
 
         try:
             cost_kwargs: dict[str, Any] = {
