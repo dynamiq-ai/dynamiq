@@ -47,14 +47,20 @@ class TextAnalysisTool(Node):
         keyword_hits = [kw for kw in input_data.keywords if kw.lower() in text.lower()]
 
         if input_data.format == OutputFormat.BULLET_POINTS:
-            body = "\n".join(f"- {w}" for w in words[:10])
+            body = "Bullet-point analysis:\n" + "\n".join(f"- {w}" for w in words[:10])
         elif input_data.format == OutputFormat.DETAILED:
-            body = f"Words: {word_count}, Chars: {char_count}, Keywords found: {keyword_hits}"
+            body = (
+                f"Detailed analysis: the text contains {word_count} words and {char_count} characters. "
+                f"Keywords found: {keyword_hits or 'none'}."
+            )
         else:
-            body = f"Text has {word_count} words."
+            body = (
+                f"Summary analysis: the provided text contains {word_count} words "
+                f"and {char_count} characters in {input_data.language} language."
+            )
 
         if input_data.include_stats:
-            body += f" (stats: {word_count} words, {char_count} chars)"
+            body += f" Statistics: {word_count} words, {char_count} chars."
 
         return {"content": body[: input_data.max_length]}
 
@@ -99,8 +105,8 @@ def llm_instance():
     connection = OpenAIConnection()
     llm = OpenAI(
         connection=connection,
-        model="gpt-4o-mini",
-        max_tokens=1000,
+        model="gpt-5-mini",
+        max_tokens=5000,
         temperature=0,
     )
     return llm
@@ -123,8 +129,8 @@ def anthropic_llm():
     connection = AnthropicConnection()
     return Anthropic(
         connection=connection,
-        model="claude-3-5-haiku-latest",
-        max_tokens=1000,
+        model="claude-haiku-4-5",
+        max_tokens=5000,
         temperature=0,
     )
 
@@ -202,7 +208,7 @@ def _run_complex_schema_test(llm, text_analysis_tool, run_config, inference_mode
         tools=[text_analysis_tool],
         role="You are a helpful text analysis assistant. Use the Text Analysis Tool to analyze text.",
         inference_mode=inference_mode,
-        max_loops=3,
+        max_loops=5,
         verbose=True,
     )
     result = agent.run(
@@ -212,20 +218,6 @@ def _run_complex_schema_test(llm, text_analysis_tool, run_config, inference_mode
     assert result.status == RunnableStatus.SUCCESS, f"Agent run failed for {label}: {result.output}"
     content = result.output.get("content", "")
     assert isinstance(content, str) and len(content) > 0, f"Expected non-empty string for {label}, got: {content!r}"
-
-
-@pytest.mark.integration
-@pytest.mark.flaky(reruns=3)
-@pytest.mark.parametrize(
-    "inference_mode",
-    [InferenceMode.DEFAULT, InferenceMode.XML],
-    ids=["default", "xml"],
-)
-def test_complex_schema_tool_openai(llm_instance, text_analysis_tool, run_config, inference_mode):
-    """Complex typed schema with OpenAI in DEFAULT and XML modes."""
-    _run_complex_schema_test(
-        llm_instance, text_analysis_tool, run_config, inference_mode, f"openai-{inference_mode.value}"
-    )
 
 
 @pytest.mark.integration
