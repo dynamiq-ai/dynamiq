@@ -35,7 +35,7 @@ from dynamiq.types.streaming import (
     AgentToolResultEventMessageData,
     StreamingMode,
 )
-from dynamiq.utils import generate_uuid
+from dynamiq.utils import generate_uuid, serialize_files_in_value
 from dynamiq.utils.logger import logger
 
 
@@ -296,8 +296,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return
 
         source = content.tool.name if step == "reasoning" else content.name
+        try:
+            stream_content = content.to_dict() if hasattr(content, "to_dict") else content.model_dump()
+        except Exception as e:
+            logger.error(f"Failed to serialize stream agent event via to_dict, applying fallback: {e}")
+            stream_content = serialize_files_in_value(content.model_dump())
         self.stream_content(
-            content=content.model_dump(),
+            content=stream_content,
             source=source,
             step=step,
             config=config,
