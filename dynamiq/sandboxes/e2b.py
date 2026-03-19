@@ -82,6 +82,17 @@ class E2BSandbox(Sandbox):
         domain = getattr(self.connection, "domain", None) or "e2b.app"
         return f"{port}-{self.sandbox_id}.{domain}"
 
+    def apply_public_preview_branding(
+        self, public_host: str | None, public_url: str | None
+    ) -> tuple[str | None, str | None]:
+        suffix = (self.connection.public_preview_domain or "").strip().lstrip(".")
+        domain = getattr(self.connection, "domain", None) or "e2b.app"
+        tail = f".{domain}"
+        if not suffix or not public_host or not public_host.endswith(tail):
+            return public_host, public_url
+        host = f"{public_host.removesuffix(tail)}.{suffix}"
+        return host, f"https://{host}"
+
     def get_sandbox_info(self, port: int | None = None) -> SandboxInfo:
         """Return sandbox metadata including optional public URL for a port."""
         public_host: str | None = None
@@ -94,6 +105,7 @@ class E2BSandbox(Sandbox):
             except Exception as e:
                 logger.debug("get_public_host failed: %s", e)
                 public_url_error = str(e)
+        public_host, public_url = self.apply_public_preview_branding(public_host, public_url)
         return SandboxInfo(
             base_path=self.base_path,
             sandbox_id=self.sandbox_id,
