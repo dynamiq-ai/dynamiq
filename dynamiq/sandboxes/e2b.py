@@ -85,6 +85,21 @@ class E2BSandbox(Sandbox):
     def apply_public_preview_branding(
         self, public_host: str | None, public_url: str | None
     ) -> tuple[str | None, str | None]:
+        """Rewrite E2B public preview URLs to a custom branded domain.
+
+        When public preview domain is configured, hosts that end with
+        the active E2B domain are rewritten to the configured suffix
+        while preserving the host prefix.
+
+        Args:
+            public_host: Original public host returned by E2B.
+            public_url: Original public URL associated with public_host.
+
+        Returns:
+            Tuple of (public_host, public_url). Returns rewritten values only
+            when public preview is configured and the host matches the E2B domain,
+            otherwise returns the input values unchanged.
+        """
         suffix = (self.connection.public_preview_domain or "").strip().lstrip(".")
         domain = getattr(self.connection, "domain", None) or "e2b.app"
         tail = f".{domain}"
