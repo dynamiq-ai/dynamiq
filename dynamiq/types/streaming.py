@@ -122,6 +122,13 @@ class AgentToolResultEventMessageData(BaseModel):
     status: str = "success"
 
     def to_dict(self, **kwargs) -> dict:
+        """Convert to dictionary with file objects serialized as base64.
+
+        Returns:
+            dict: Dictionary representation with all BytesIO/bytes values
+                in files, result, input, and output converted to
+                ``{"content": "<base64>", "size": ..., "name": ..., "mime_type": ...}``.
+        """
         data = super().model_dump(**kwargs)
         data["files"] = serialize_files_in_value(self.files)
         data["result"] = serialize_files_in_value(self.result)
