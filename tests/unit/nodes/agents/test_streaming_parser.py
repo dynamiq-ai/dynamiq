@@ -17,6 +17,8 @@ def _make_callback():
     agent.inference_mode.name = InferenceMode.STRUCTURED_OUTPUT.value
     agent.name = "test-agent"
     agent._streaming_tool_run_id = None
+    agent.tool_by_names = {}
+    agent.sanitize_tool_name = lambda name: name
     return AgentStreamingParserCallback(agent=agent, config=None, loop_num=1)
 
 
@@ -24,7 +26,7 @@ def _make_callback():
     "buf, expected_state, answer_started, tool_input_started, action_name",
     [
         pytest.param(
-            '{"action": "finish", "action_input": "Hello"}',
+            '{"action": "finish", "action_input": "Hello',
             StreamingState.ANSWER,
             True,
             False,
@@ -32,7 +34,7 @@ def _make_callback():
             id="finish",
         ),
         pytest.param(
-            '{"action": "search", "action_input": "query"}',
+            '{"action": "search", "action_input": "query',
             StreamingState.TOOL_INPUT,
             False,
             True,
@@ -40,7 +42,7 @@ def _make_callback():
             id="non_finish",
         ),
         pytest.param(
-            '{"thought": "I should search"}',
+            '{"thought": "I should search',
             StreamingState.REASONING,
             False,
             False,
