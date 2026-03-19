@@ -40,7 +40,12 @@ class ImageResponseFormat(str, Enum):
 
 
 def create_image_file(
-    image_bytes: bytes, index: int = 0, original_name: str | None = None, prefix: str | None = None
+    image_bytes: bytes,
+    index: int = 0,
+    original_name: str | None = None,
+    prefix: str | None = None,
+    output_file_name: str | None = None,
+    total_images: int = 1,
 ) -> io.BytesIO:
     """Create a properly configured BytesIO file from image bytes.
 
@@ -51,6 +56,8 @@ def create_image_file(
                        If provided, will create names like "original_0.png", "original_1.png".
                        If None, will use generic names like "generated_image_0.png" or "image_0.png" if prefix is None.
         prefix: Optional prefix for the filename (e.g., "generated", "edited", "variation").
+        output_file_name: Optional explicit output filename override.
+        total_images: Total number of images generated in this response.
 
     Returns:
         BytesIO object with name and content_type attributes.
@@ -59,12 +66,21 @@ def create_image_file(
 
     kind = filetype.guess(image_bytes)
     ext = f".{kind.extension}" if kind else ".png"
-    prefix_str = f"{prefix}_" if prefix else ""
-    if original_name:
-        base_name = Path(original_name).stem
-        image_file.name = f"{prefix_str}{base_name}_{index}{ext}"
+    if output_file_name:
+        explicit_path = Path(output_file_name)
+        explicit_stem = explicit_path.stem or "image"
+        explicit_ext = explicit_path.suffix or ext
+        if total_images > 1:
+            image_file.name = f"{explicit_stem}_{index}{explicit_ext}"
+        else:
+            image_file.name = f"{explicit_stem}{explicit_ext}"
     else:
-        image_file.name = f"{prefix_str}image_{index}{ext}"
+        prefix_str = f"{prefix}_" if prefix else ""
+        if original_name:
+            base_name = Path(original_name).stem
+            image_file.name = f"{prefix_str}{base_name}_{index}{ext}"
+        else:
+            image_file.name = f"{prefix_str}image_{index}{ext}"
 
     image_file.content_type = kind.mime if kind else "image/png"
     return image_file
@@ -89,6 +105,12 @@ class ImageGenerationInputSchema(BaseModel):
 
     prompt: str = Field(..., description="Text prompt describing the image to generate.")
     n: int | None = None
+    output_file_name: str = Field(
+        ...,
+        min_length=1,
+        description="Output filename for generated image file(s). "
+        "When multiple images are generated, an index suffix is added.",
+    )
 
 
 class ImageGeneration(ConnectionNode):
@@ -256,18 +278,31 @@ Examples:
 
         content = []
         files = []
+        total_images = len(response.data)
 
         try:
             for idx, img_data in enumerate(response.data):
                 if img_url := getattr(img_data, ImageResponseFormat.URL.value, None):
                     content.append(img_url)
                     image_bytes = download_image_from_url(img_url)
-                    file = create_image_file(image_bytes, idx, prefix=self.FILE_PREFIX)
+                    file = create_image_file(
+                        image_bytes,
+                        idx,
+                        prefix=self.FILE_PREFIX,
+                        output_file_name=input_data.output_file_name,
+                        total_images=total_images,
+                    )
                     files.append(file)
 
                 elif img_b64 := getattr(img_data, ImageResponseFormat.B64_JSON.value, None):
                     image_bytes = base64.b64decode(img_b64)
-                    file = create_image_file(image_bytes, idx, prefix=self.FILE_PREFIX)
+                    file = create_image_file(
+                        image_bytes,
+                        idx,
+                        prefix=self.FILE_PREFIX,
+                        output_file_name=input_data.output_file_name,
+                        total_images=total_images,
+                    )
                     content.append(f"{file.name} created")
                     files.append(file)
         except Exception as e:
