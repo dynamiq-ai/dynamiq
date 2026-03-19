@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 from dynamiq.callbacks.streaming import BaseStreamingCallbackHandler
 from dynamiq.connections import BaseConnection, HttpApiKey
 from dynamiq.nodes import ErrorHandling, NodeGroup
+from dynamiq.nodes.llms.registry import model_registry
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Prompt
@@ -40,6 +41,8 @@ LLM_RATE_LIMIT_ERROR_INDICATORS = (
     "capacity",
     "resource_exhausted",
 )
+
+LLM_DEFAULT_MAX_TOKENS = 4096
 
 LLM_CONNECTION_ERROR_INDICATORS = (
     "connection",
@@ -297,30 +300,58 @@ class BaseLLM(ConnectionNode):
         """Provides context for input schema that is required for proper validation."""
         return {"instance_prompt": self.prompt}
 
+    def _get_litellm_model_info(self) -> dict[str, Any] | None:
+        """Return litellm model info dict, or ``None`` if the model is unknown to litellm."""
+        try:
+            return get_model_info(model=self.model)
+        except Exception:
+            return None
+
     def get_token_limit(self) -> int:
         """Returns token limits of a llm.
 
         Returns:
             int: Number of tokens.
         """
-        try:
-            model_info = get_model_info(model=self.model)
-            max_input = model_info.get("max_input_tokens")
+        info = self._get_litellm_model_info()
+        if info is not None:
+            max_input = info.get("max_input_tokens")
             if max_input:
                 return max_input
+
+        try:
+            return get_max_tokens(self.model)
         except Exception:
-            logger.warning(f"Failed to get token limit for model {self.model}. Using litellm's default token limit.")
-        return get_max_tokens(self.model)
+            logger.debug("Model %s not found in litellm, falling back to custom registry.", self.model)
+
+        custom_max = model_registry.get_max_tokens(self.model)
+        if custom_max is not None:
+            return custom_max
+
+        logger.warning(f"Model {self.model} not found in litellm or custom registry. Using default token limit.")
+        return LLM_DEFAULT_MAX_TOKENS
 
     @property
     def is_vision_supported(self) -> bool:
         """Check if the LLM supports vision/image processing."""
-        return supports_vision(self.model)
+        if self._get_litellm_model_info() is not None:
+            try:
+                return supports_vision(self.model)
+            except Exception:
+                return False
+        custom = model_registry.supports_vision(self.model)
+        return custom if custom is not None else False
 
     @property
     def is_pdf_input_supported(self) -> bool:
         """Check if the LLM supports PDF input."""
-        return supports_pdf_input(self.model)
+        if self._get_litellm_model_info() is not None:
+            try:
+                return supports_pdf_input(self.model)
+            except Exception:
+                return False
+        custom = model_registry.supports_pdf_input(self.model)
+        return custom if custom is not None else False
 
     def get_messages(
         self,

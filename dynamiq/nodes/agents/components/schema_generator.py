@@ -10,7 +10,6 @@ from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
 
-# Type mapping for schema generation
 TYPE_MAPPING = {
     int: "integer",
     float: "number",
@@ -19,7 +18,6 @@ TYPE_MAPPING = {
     dict: "object",
 }
 
-# Final answer function schema for function calling mode
 FINAL_ANSWER_FUNCTION_SCHEMA = {
     "type": "function",
     "strict": True,
@@ -318,7 +316,6 @@ def generate_function_calling_schemas(
     schemas = [FINAL_ANSWER_FUNCTION_SCHEMA]
 
     for tool in tools:
-        # Agent tools: accept action_input as a JSON string to avoid nested schema issues.
         if isinstance(tool, SubAgentTool):
             agent_action_input_description = "JSON string containing the agent's inputs "
             if delegation_allowed:
