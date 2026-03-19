@@ -35,8 +35,6 @@ from dynamiq.utils.logger import logger
 
 _REGISTRY_FILE = Path(__file__).with_name("model_registry.json")
 
-_DEFAULT_MAX_TOKENS = 4096
-
 
 class ModelRegistry:
     """Litellm-compatible model metadata registry backed by a JSON file."""
