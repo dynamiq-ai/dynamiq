@@ -39,6 +39,10 @@ class SubAgentTool(Node):
       - **Initialized** (``agent``): reuses a single agent instance across calls.
       - **Factory callable** (``agent_factory`` as callable): creates a fresh agent
         per invocation, enabling isolated state and parallel execution.
+        The callable must **not** capture shared ``BaseModel`` objects (e.g. a
+        shared LLM or tool instance).  Captured objects are used as-is and are
+        not deep-copied, so mutations applied to the returned agent propagate
+        back to those shared originals. 
       - **Factory dict** (``agent_factory`` as dict): a blueprint dict using the
         same format as workflow YAML node definitions.  Resolved via
         ``WorkflowYAMLLoader`` on each invocation, producing completely fresh
@@ -103,7 +107,10 @@ class SubAgentTool(Node):
             "Factory for creating a new Agent per invocation. "
             "Either a callable returning an Agent, or a dict blueprint (same format as workflow YAML). "
             "Blueprint only — not instantiated at init time. "
-            "A fresh Agent is created from this on each call to _create_agent_from_factory()."
+            "A fresh Agent is created from this on each call to _create_agent_from_factory(). "
+            "For callable factories, every nested BaseModel (llm, tools, etc.) must be constructed "
+            "inside the callable — capturing shared instances causes unintended mutation of those "
+            "shared objects."
         ),
     )
 
