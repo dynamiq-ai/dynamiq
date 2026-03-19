@@ -221,9 +221,11 @@ def _resolve_type_schema(param: Any, _seen: set | None = None) -> dict[str, Any]
         if _seen is None:
             _seen = set()
         if param in _seen:
-            return {"type": "object"}
+            raise ValueError(f"Self-referencing model {param.__name__} is not supported in tool input schemas.")
         _seen.add(param)
-        return _basemodel_to_schema(param, _seen)
+        result = _basemodel_to_schema(param, _seen)
+        _seen.discard(param)
+        return result
 
     return None
 
