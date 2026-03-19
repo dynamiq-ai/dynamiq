@@ -375,7 +375,7 @@ class BaseLLM(ConnectionNode):
         return usage
 
     @staticmethod
-    def _usage_value(usage: Any, key: str, default=None):
+    def _usage_value(usage: Any, key: str, default: Any = None) -> Any:
         """Read a usage value from dict-like or object-like usage payloads."""
         if isinstance(usage, dict):
             return usage.get(key, default)
