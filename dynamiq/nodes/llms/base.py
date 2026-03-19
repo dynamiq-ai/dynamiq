@@ -365,6 +365,22 @@ class BaseLLM(ConnectionNode):
         messages = prompt.format_messages(**dict(input_data))
         return messages
 
+    @staticmethod
+    def _extract_usage(completion: "ModelResponse") -> Any:
+        """Extract usage payload from completion across response shapes."""
+        model_extra = getattr(completion, "model_extra", None) or {}
+        usage = getattr(completion, "usage", None) or model_extra.get("usage")
+        if usage is None and hasattr(completion, "get"):
+            usage = completion.get("usage")
+        return usage
+
+    @staticmethod
+    def _usage_value(usage: Any, key: str, default: Any = None) -> Any:
+        """Read a usage value from dict-like or object-like usage payloads."""
+        if isinstance(usage, dict):
+            return usage.get(key, default)
+        return getattr(usage, key, default)
+
     @classmethod
     def get_usage_data(
         cls,
@@ -384,12 +400,15 @@ class BaseLLM(ConnectionNode):
         """
         from litellm import cost_per_token
 
-        usage = completion.model_extra["usage"]
-        prompt_tokens = usage.prompt_tokens
-        completion_tokens = usage.completion_tokens
-        total_tokens = usage.total_tokens
-        cache_read_input_tokens = getattr(usage, "cache_read_input_tokens", None)
-        cache_creation_input_tokens = getattr(usage, "cache_creation_input_tokens", None)
+        usage = cls._extract_usage(completion=completion)
+        prompt_tokens = cls._usage_value(usage, "prompt_tokens", 0) or 0
+        completion_tokens = cls._usage_value(usage, "completion_tokens", 0) or 0
+        total_tokens = (
+            cls._usage_value(usage, "total_tokens", prompt_tokens + completion_tokens)
+            or prompt_tokens + completion_tokens
+        )
+        cache_read_input_tokens = cls._usage_value(usage, "cache_read_input_tokens")
+        cache_creation_input_tokens = cls._usage_value(usage, "cache_creation_input_tokens")
 
         try:
             cost_kwargs: dict[str, Any] = {
