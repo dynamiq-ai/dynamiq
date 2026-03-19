@@ -1016,7 +1016,11 @@ class Agent(Node):
                 logger.warning(f"Agent {self.name} - {self.id}: failed to clone tool {tool.name}: {e}")
                 return tool, base_config
         else:
-            self._regenerate_node_ids(tool)
+            try:
+                self._regenerate_node_ids(tool)
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: failed to regenerate IDs for tool {tool.name}: {e}")
+                return tool, base_config
 
         if target_id:
             tool.id = target_id
