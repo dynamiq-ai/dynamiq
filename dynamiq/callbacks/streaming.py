@@ -820,25 +820,10 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                             action_value = buf[v_start + 1 : end_quote]
                             if action_value.strip().lower() == "finish":
                                 self._answer_started = True
-                                # Try to find the action_input field
-                                action_input_start = self._find_field_string_value_start(
-                                    buf, JSONStreamingField.ACTION_INPUT.value, end_quote + 1
-                                )
-                                if action_input_start != -1:
-                                    self._current_state = StreamingState.ANSWER
-                                    self._state_start_index = action_input_start
-                                    self._state_last_emit_index = max(self._state_last_emit_index, action_input_start)
                             else:
                                 self._tool_input_started = True
                                 self._current_action_name = action_value.strip()
                                 self.agent._streaming_tool_run_id = generate_uuid()
-                                action_input_start = self._find_field_string_value_start(
-                                    buf, JSONStreamingField.ACTION_INPUT.value, end_quote + 1
-                                )
-                                if action_input_start != -1:
-                                    self._current_state = StreamingState.TOOL_INPUT
-                                    self._state_start_index = action_input_start
-                                    self._state_last_emit_index = max(self._state_last_emit_index, action_input_start)
 
         self._initialize_json_field_state(
             buf, JSONStreamingField.THOUGHT.value, StreamingState.REASONING, final_answer_only
