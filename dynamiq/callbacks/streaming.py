@@ -337,6 +337,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._state_start_index: int = 0
         self._state_last_emit_index: int = 0
         self._answer_started: bool = False
+        self._tool_input_started: bool = False
         self._current_action_name: str | None = None
         self._state_has_emitted: dict[str, bool] = {
             StreamingState.REASONING: False,
@@ -804,7 +805,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         """
         buf = self._buffer
 
-        if not is_function_calling and not self._answer_started:
+        if not is_function_calling and not self._answer_started and not self._tool_input_started:
             # If there is a "finish" action, enable answer streaming
             action_key_pos = buf.find(
                 f'"{JSONStreamingField.ACTION.value}"', max(0, self._state_last_emit_index - FIND_JSON_FIELD_MAX_OFFSET)
@@ -819,12 +820,22 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                             action_value = buf[v_start + 1 : end_quote]
                             if action_value.strip().lower() == "finish":
                                 self._answer_started = True
-                                # Try to find the action_input field
                                 action_input_start = self._find_field_string_value_start(
                                     buf, JSONStreamingField.ACTION_INPUT.value, end_quote + 1
                                 )
                                 if action_input_start != -1:
                                     self._current_state = StreamingState.ANSWER
+                                    self._state_start_index = action_input_start
+                                    self._state_last_emit_index = max(self._state_last_emit_index, action_input_start)
+                            else:
+                                self._tool_input_started = True
+                                self._current_action_name = action_value.strip()
+                                self.agent._streaming_tool_run_id = generate_uuid()
+                                action_input_start = self._find_field_string_value_start(
+                                    buf, JSONStreamingField.ACTION_INPUT.value, end_quote + 1
+                                )
+                                if action_input_start != -1:
+                                    self._current_state = StreamingState.TOOL_INPUT
                                     self._state_start_index = action_input_start
                                     self._state_last_emit_index = max(self._state_last_emit_index, action_input_start)
 
@@ -838,10 +849,15 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             )
             self._initialize_json_field_state(buf, answer_field, StreamingState.ANSWER)
 
+        if self._tool_input_started and not self._answer_started:
+            self._initialize_json_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT)
+
         if self._current_state == StreamingState.REASONING:
             self._emit_json_field_content(buf, StreamingState.REASONING)
         elif self._current_state == StreamingState.ANSWER:
             self._emit_json_field_content(buf, StreamingState.ANSWER)
+        elif self._current_state == StreamingState.TOOL_INPUT:
+            self._emit_json_field_content(buf, StreamingState.TOOL_INPUT)
 
     def _skip_whitespace(self, text: str, start: int) -> int:
         """Skip whitespace characters starting from the given position."""
