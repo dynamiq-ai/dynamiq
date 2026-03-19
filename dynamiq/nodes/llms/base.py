@@ -309,12 +309,6 @@ class BaseLLM(ConnectionNode):
     def get_token_limit(self) -> int:
         """Returns token limits of a llm.
 
-        Resolution order:
-        1. ``max_input_tokens`` from litellm's model info
-        2. ``get_max_tokens`` from litellm (legacy helper)
-        3. Custom model registry
-        4. Default (_DEFAULT_MAX_TOKENS)
-
         Returns:
             int: Number of tokens.
         """

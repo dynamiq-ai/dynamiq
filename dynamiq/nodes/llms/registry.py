@@ -1,30 +1,3 @@
-"""
-Custom LLM model registry.
-
-Provides model metadata (token limits, capability flags) as a fallback
-when litellm's built-in registry does not recognise a model.
-
-The registry uses the same JSON format as litellm's
-``model_prices_and_context_window.json``.  On import it loads
-``model_registry.json`` from this directory (if present).  Additional
-entries can be registered at runtime via ``model_registry.register()``,
-or by placing/editing the JSON file.
-
-Usage::
-
-    from dynamiq.nodes.llms.registry import model_registry
-
-    # Programmatic registration
-    model_registry.register("my-provider/custom-model", {
-        "max_input_tokens": 128_000,
-        "max_output_tokens": 16_384,
-        "supports_vision": True,
-    })
-
-    # Lookup (returns None on miss)
-    info = model_registry.get_model_info("my-provider/custom-model")
-"""
-
 from __future__ import annotations
 
 import json
