@@ -18,9 +18,7 @@ class ModelRegistry:
             self.load(path)
 
     def load(self, path: Path | str) -> None:
-        """Load model definitions from a JSON file (litellm format).
-
-        The ``sample_spec`` key is silently skipped.
+        """Load model definitions from a JSON file.
 
         Args:
             path: Path to the JSON file.
@@ -35,9 +33,9 @@ class ModelRegistry:
             logger.warning("ModelRegistry: failed to load %s: %s", path, exc)
             return
         for key, value in data.items():
-            if key == "sample_spec" or not isinstance(value, dict):
+            if not isinstance(value, dict):
                 continue
-            self._models[key] = value
+            self._models[key.lower()] = value
         logger.debug("ModelRegistry: loaded %d models from %s", len(self._models), path)
 
     def register(self, model: str, info: dict[str, Any]) -> None:
@@ -48,6 +46,7 @@ class ModelRegistry:
             info: Dict following the litellm model spec (``max_input_tokens``,
                 ``max_output_tokens``, ``supports_vision``, etc.).
         """
+        model = model.lower()
         self._models[model] = {**self._models.get(model, {}), **info}
 
     def _resolve(self, model: str) -> dict[str, Any] | None:
@@ -56,12 +55,13 @@ class ModelRegistry:
         Tries the full model string first (e.g. ``"together_ai/zai-org/GLM-5"``),
         then the part after the first ``/`` (e.g. ``"zai-org/GLM-5"``).
         """
-        info = self._models.get(model)
+        model_lower = model.lower()
+        info = self._models.get(model_lower)
         if info is not None:
             return info
-        sep = model.find("/")
+        sep = model_lower.find("/")
         if sep != -1:
-            return self._models.get(model[sep + 1 :])
+            return self._models.get(model_lower[sep + 1 :])
         return None
 
     def get_model_info(self, model: str) -> dict[str, Any] | None:

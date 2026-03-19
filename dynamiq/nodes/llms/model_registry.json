@@ -1,19 +1,4 @@
 {
-    "sample_spec": {
-        "max_input_tokens": "max input tokens",
-        "max_output_tokens": "max output tokens",
-        "max_tokens": "legacy: set to max_output_tokens or max_input_tokens",
-        "mode": "chat, embedding, completion, image_generation, etc.",
-        "litellm_provider": "provider identifier",
-        "supports_vision": true,
-        "supports_pdf_input": false,
-        "supports_function_calling": true,
-        "supports_parallel_function_calling": true,
-        "supports_response_schema": true,
-        "supports_system_messages": true,
-        "input_cost_per_token": 0.0,
-        "output_cost_per_token": 0.0
-    },
     "zai-org/GLM-5": {
         "max_input_tokens": 202000,
         "max_output_tokens": 131072,

@@ -12,7 +12,6 @@ MODEL_A = "test-org/model-a"
 MODEL_B = "test-org/model-b"
 
 TEST_REGISTRY_DATA = {
-    "sample_spec": {"max_tokens": 999},
     MODEL_A: {
         "max_input_tokens": 50_000,
         "max_output_tokens": 10_000,
@@ -45,6 +44,7 @@ def registry(tmp_path) -> ModelRegistry:
         (f"together_ai/{MODEL_A}", 50_000, False),
         (f"together_ai/{MODEL_B}", 200_000, True),
         (f"openai/{MODEL_A}", 50_000, False),
+        (f"together_ai/{MODEL_A.upper()}", 50_000, False),
     ],
 )
 def test_registry_resolves_tokens_and_vision(registry, model, expected_tokens, expected_vision):
@@ -55,10 +55,6 @@ def test_registry_resolves_tokens_and_vision(registry, model, expected_tokens, e
 def test_unknown_model_returns_none(registry):
     assert registry.get_model_info("unknown/model") is None
     assert registry.get_max_tokens("unknown/model") is None
-
-
-def test_sample_spec_is_skipped(registry):
-    assert registry.get_model_info("sample_spec") is None
 
 
 @pytest.fixture()

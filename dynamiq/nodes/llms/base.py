@@ -337,22 +337,26 @@ class BaseLLM(ConnectionNode):
         """Check if the LLM supports vision/image processing."""
         from dynamiq.nodes.llms.registry import model_registry
 
-        try:
-            return supports_vision(self.model)
-        except Exception:
-            custom = model_registry.supports_vision(self.model)
-            return custom if custom is not None else False
+        if self._get_litellm_model_info() is not None:
+            try:
+                return supports_vision(self.model)
+            except Exception:
+                return False
+        custom = model_registry.supports_vision(self.model)
+        return custom if custom is not None else False
 
     @property
     def is_pdf_input_supported(self) -> bool:
         """Check if the LLM supports PDF input."""
         from dynamiq.nodes.llms.registry import model_registry
 
-        try:
-            return supports_pdf_input(self.model)
-        except Exception:
-            custom = model_registry.supports_pdf_input(self.model)
-            return custom if custom is not None else False
+        if self._get_litellm_model_info() is not None:
+            try:
+                return supports_pdf_input(self.model)
+            except Exception:
+                return False
+        custom = model_registry.supports_pdf_input(self.model)
+        return custom if custom is not None else False
 
     def get_messages(
         self,
