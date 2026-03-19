@@ -401,9 +401,12 @@ class BaseLLM(ConnectionNode):
         from litellm import cost_per_token
 
         usage = cls._extract_usage(completion=completion)
-        prompt_tokens = cls._usage_value(usage, "prompt_tokens", 0)
-        completion_tokens = cls._usage_value(usage, "completion_tokens", 0)
-        total_tokens = cls._usage_value(usage, "total_tokens", prompt_tokens + completion_tokens)
+        prompt_tokens = cls._usage_value(usage, "prompt_tokens", 0) or 0
+        completion_tokens = cls._usage_value(usage, "completion_tokens", 0) or 0
+        total_tokens = (
+            cls._usage_value(usage, "total_tokens", prompt_tokens + completion_tokens)
+            or prompt_tokens + completion_tokens
+        )
         cache_read_input_tokens = cls._usage_value(usage, "cache_read_input_tokens")
         cache_creation_input_tokens = cls._usage_value(usage, "cache_creation_input_tokens")
 
