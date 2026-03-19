@@ -283,6 +283,12 @@ class Sandbox(abc.ABC, BaseModel):
             "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
         )
 
+    def apply_public_preview_branding(
+        self, public_host: str | None, public_url: str | None
+    ) -> tuple[str | None, str | None]:
+        """Map public host/URL to a proxied preview domain when the backend overrides this."""
+        return public_host, public_url
+
     def get_sandbox_info(self, port: int | None = None) -> SandboxInfo:
         """Return sandbox metadata for the agent (e.g. base_path, optional public URL for a port).
 

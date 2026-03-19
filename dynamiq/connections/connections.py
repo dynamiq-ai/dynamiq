@@ -837,6 +837,9 @@ class Firecrawl(Http):
 class E2B(BaseApiKeyConnection):
     api_key: str = Field(default_factory=partial(get_env_var, "E2B_API_KEY"))
     domain: str | None = Field(default_factory=partial(get_env_var, "E2B_DOMAIN"))
+    public_preview_domain: str | None = Field(
+        default_factory=partial(get_env_var, "E2B_PREVIEW_PUBLIC_DOMAIN", None),
+    )
 
     def connect(self):
         pass
