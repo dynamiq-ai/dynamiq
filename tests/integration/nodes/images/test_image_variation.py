@@ -32,7 +32,7 @@ def test_image_variation_with_url_response(
         flow=Flow(nodes=[image_node]),
     )
 
-    input_data = {"files": mock_image_file}
+    input_data = {"files": mock_image_file, "output_file_name": "variation_image.png"}
 
     response = wf.run(
         input_data=input_data,
@@ -74,7 +74,7 @@ def test_image_variation_with_b64_response(
         flow=Flow(nodes=[image_node]),
     )
 
-    input_data = {"files": mock_image_file}
+    input_data = {"files": mock_image_file, "output_file_name": "variation_image.png"}
 
     response = wf.run(
         input_data=input_data,
@@ -83,7 +83,7 @@ def test_image_variation_with_b64_response(
 
     assert response.status == RunnableStatus.SUCCESS
     node_output = response.output[image_node.id]
-    assert "test_image_0.png created" in node_output["output"]["content"][0]
+    assert "variation_image.png created" in node_output["output"]["content"][0]
     assert len(node_output["output"]["files"]) == 1
     assert isinstance(node_output["output"]["files"][0], io.BytesIO)
 
@@ -117,7 +117,7 @@ def test_image_variation_with_list_of_images_uses_first(
         flow=Flow(nodes=[image_node]),
     )
 
-    input_data = {"files": [image1, image2]}
+    input_data = {"files": [image1, image2], "output_file_name": "variation_image.png"}
 
     response = wf.run(
         input_data=input_data,
@@ -131,6 +131,38 @@ def test_image_variation_with_list_of_images_uses_first(
     call_kwargs = mock_image_variation_executor.call_args[1]
     assert "image" in call_kwargs
     assert isinstance(call_kwargs["image"], io.BytesIO)
+
+
+def test_image_variation_custom_output_filename(
+    mock_image_file,
+    mock_image_variation_executor,
+):
+    """Test image variation supports custom output filename from input schema."""
+    openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")
+
+    image_node = ImageVariation(
+        name="Image Variation Custom Filename",
+        model="gpt-image-1",
+        connection=openai_connection,
+        response_format=ImageResponseFormat.B64_JSON,
+    )
+
+    wf = Workflow(
+        id=str(uuid.uuid4()),
+        flow=Flow(nodes=[image_node]),
+    )
+
+    input_data = {"files": mock_image_file, "output_file_name": "variation_asset.png"}
+
+    response = wf.run(
+        input_data=input_data,
+        config=RunnableConfig(callbacks=[]),
+    )
+
+    assert response.status == RunnableStatus.SUCCESS
+    node_output = response.output[image_node.id]
+    assert node_output["output"]["content"][0] == "variation_asset.png created"
+    assert node_output["output"]["files"][0].name == "variation_asset.png"
 
 
 def test_image_variation_with_tracing(
@@ -154,7 +186,7 @@ def test_image_variation_with_tracing(
         flow=Flow(nodes=[image_node]),
     )
 
-    input_data = {"files": mock_image_file}
+    input_data = {"files": mock_image_file, "output_file_name": "variation_image.png"}
 
     response = wf.run(
         input_data=input_data,
@@ -195,7 +227,7 @@ def test_image_variation_optimized_for_agents_with_tracing(
         flow=Flow(nodes=[image_tool]),
     )
 
-    input_data = {"files": mock_image_file}
+    input_data = {"files": mock_image_file, "output_file_name": "agent_variation_image.png"}
 
     response = wf.run(
         input_data=input_data,
@@ -231,7 +263,7 @@ def test_image_variation_without_image_raises_error(
         flow=Flow(nodes=[image_node]),
     )
 
-    input_data = {"files": None}
+    input_data = {"files": None, "output_file_name": "variation_image.png"}
 
     response = wf.run(
         input_data=input_data,

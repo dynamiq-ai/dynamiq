@@ -77,8 +77,11 @@ class WhisperSTT(ConnectionNode):
         if not isinstance(audio, io.BytesIO):
             raise ValueError("Audio must be a BytesIO object or bytes.")
 
-        audio.name = getattr(audio, "name", self.default_file_name)
-        audio.content_type = getattr(audio, "content_type", self.default_content_type)
+        if not getattr(audio, "name", None):
+            audio.name = self.default_file_name
+
+        if not getattr(audio, "content_type", None):
+            audio.content_type = self.default_content_type
 
         if isinstance(self.connection, WhisperConnection):
             transcription = self.get_transcription_with_http_request(model=self.model, audio=audio)
