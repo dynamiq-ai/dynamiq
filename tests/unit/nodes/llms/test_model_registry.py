@@ -70,7 +70,7 @@ def _litellm_unknown():
 
 @pytest.fixture()
 def _patch_registry(registry):
-    with patch("dynamiq.nodes.llms.registry.model_registry", registry):
+    with patch("dynamiq.nodes.llms.base.model_registry", registry):
         yield
 
 
