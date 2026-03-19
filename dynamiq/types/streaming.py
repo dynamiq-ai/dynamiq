@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, field_validator
 
-from dynamiq.utils import generate_uuid
+from dynamiq.utils import generate_uuid, serialize_files_in_value
 
 
 class StreamingMode(str, Enum):
@@ -120,6 +120,22 @@ class AgentToolResultEventMessageData(BaseModel):
     output: dict[str, Any] | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     status: str = "success"
+
+    def to_dict(self, **kwargs) -> dict:
+        """Convert to dictionary with file objects serialized as base64.
+
+        Returns:
+            dict: Dictionary representation with all BytesIO/bytes values
+                in files, result, input, and output converted to
+                ``{"content": "<base64>", "size": ..., "name": ..., "mime_type": ...}``.
+        """
+        data = super().model_dump(**kwargs)
+        data["files"] = serialize_files_in_value(self.files)
+        data["result"] = serialize_files_in_value(self.result)
+        data["input"] = serialize_files_in_value(self.input)
+        if self.output is not None:
+            data["output"] = serialize_files_in_value(self.output)
+        return data
 
 
 class StreamingConfig(BaseModel):
