@@ -2,7 +2,7 @@
 
 import shlex
 import threading
-from typing import Any
+from typing import Any, ClassVar
 
 from e2b.exceptions import RateLimitException as E2BRateLimitException
 from e2b.sandbox.commands.command_handle import CommandExitException
@@ -27,6 +27,7 @@ class E2BSandbox(Sandbox):
     Supports reconnecting to existing sandboxes by providing sandbox_id.
     """
 
+    DEFAULT_E2B_DOMAIN: ClassVar[str] = "e2b.app"
     model_config = ConfigDict(arbitrary_types_allowed=True)
     connection: E2B
     timeout: int = 3600
@@ -79,8 +80,34 @@ class E2BSandbox(Sandbox):
                 return get_host(port)
             except Exception as e:
                 logger.debug("E2B get_host(port) failed, using URL pattern: %s", e)
-        domain = getattr(self.connection, "domain", None) or "e2b.app"
+        domain = getattr(self.connection, "domain", None) or self.DEFAULT_E2B_DOMAIN
         return f"{port}-{self.sandbox_id}.{domain}"
+
+    def apply_public_preview_branding(
+        self, public_host: str | None, public_url: str | None
+    ) -> tuple[str | None, str | None]:
+        """Rewrite E2B public preview URLs to a custom branded domain.
+
+        When public preview domain is configured, hosts that end with
+        the active E2B domain are rewritten to the configured suffix
+        while preserving the host prefix.
+
+        Args:
+            public_host: Original public host returned by E2B.
+            public_url: Original public URL associated with public_host.
+
+        Returns:
+            Tuple of (public_host, public_url). Returns rewritten values only
+            when public preview is configured and the host matches the E2B domain,
+            otherwise returns the input values unchanged.
+        """
+        suffix = (self.connection.public_preview_domain or "").strip().lstrip(".")
+        domain = getattr(self.connection, "domain", None) or self.DEFAULT_E2B_DOMAIN
+        tail = f".{domain}"
+        if not suffix or not public_host or not public_host.endswith(tail):
+            return public_host, public_url
+        host = f"{public_host.removesuffix(tail)}.{suffix}"
+        return host, f"https://{host}"
 
     def get_sandbox_info(self, port: int | None = None) -> SandboxInfo:
         """Return sandbox metadata including optional public URL for a port."""
@@ -94,6 +121,7 @@ class E2BSandbox(Sandbox):
             except Exception as e:
                 logger.debug("get_public_host failed: %s", e)
                 public_url_error = str(e)
+        public_host, public_url = self.apply_public_preview_branding(public_host, public_url)
         return SandboxInfo(
             base_path=self.base_path,
             sandbox_id=self.sandbox_id,
