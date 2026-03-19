@@ -169,7 +169,7 @@ def filter_format_type(param_annotation: Any) -> list[str]:
     return [param_annotation]
 
 
-def _resolve_type_schema(param: Any) -> dict[str, Any] | None:
+def _resolve_type_schema(param: Any, _seen: set | None = None) -> dict[str, Any] | None:
     """Return a JSON Schema fragment for a single type.
 
     ``BaseModel`` subclasses are expanded into proper object schemas with
@@ -197,7 +197,7 @@ def _resolve_type_schema(param: Any) -> dict[str, Any] | None:
     if origin in (Union, types.UnionType):
         args = [a for a in get_args(param) if a is not type(None)]
         for arg in args:
-            resolved = _resolve_type_schema(arg)
+            resolved = _resolve_type_schema(arg, _seen)
             if resolved is not None:
                 return resolved
         return {"type": "string"}
@@ -211,19 +211,24 @@ def _resolve_type_schema(param: Any) -> dict[str, Any] | None:
         inner_args = get_args(param)
         if not inner_args:
             return {"type": "array", "items": {"type": "string"}}
-        inner_schema = _resolve_type_schema(inner_args[0])
+        inner_schema = _resolve_type_schema(inner_args[0], _seen)
         return {"type": "array", "items": inner_schema or {"type": "string"}}
 
     if origin is dict:
         return {"type": "object"}
 
     if isinstance(param, type) and issubclass(param, BaseModel):
-        return _basemodel_to_schema(param)
+        if _seen is None:
+            _seen = set()
+        if param in _seen:
+            return {"type": "object"}
+        _seen.add(param)
+        return _basemodel_to_schema(param, _seen)
 
     return None
 
 
-def _basemodel_to_schema(model: type[BaseModel]) -> dict[str, Any]:
+def _basemodel_to_schema(model: type[BaseModel], _seen: set | None = None) -> dict[str, Any]:
     """Build an object schema from a Pydantic model with explicit properties.
 
     All fields are listed in ``required`` and ``additionalProperties`` is set
@@ -231,7 +236,7 @@ def _basemodel_to_schema(model: type[BaseModel]) -> dict[str, Any]:
     """
     properties: dict[str, Any] = {}
     for name, field in model.model_fields.items():
-        schema = _resolve_type_schema(field.annotation)
+        schema = _resolve_type_schema(field.annotation, _seen)
         if schema is None:
             schema = {"type": "string"}
         if field.description:
