@@ -56,6 +56,7 @@ def test_image_edit_response_formats(
     input_data = {
         "prompt": "Add a sunset background",
         "files": mock_image_file,
+        "output_file_name": "edited_image.png",
     }
 
     response = wf.run(
@@ -79,7 +80,7 @@ def test_image_edit_response_formats(
         assert "response_format" not in call_kwargs or call_kwargs.get("response_format") is None
         mock_requests_get.assert_called_once_with(mock_image_url, timeout=60.0)
     else:
-        assert "test_image_0.png created" in node_output["output"]["content"][0]
+        assert "edited_image.png created" in node_output["output"]["content"][0]
         assert call_kwargs["response_format"] == ImageResponseFormat.B64_JSON
 
 
@@ -107,6 +108,7 @@ def test_image_edit_with_mask(
         "prompt": "Change the masked area to blue",
         "files": mock_image_file,
         "mask": mock_mask_file,
+        "output_file_name": "edited_image.png",
     }
 
     response = wf.run(
@@ -146,6 +148,7 @@ def test_image_edit_multiple_outputs(
     input_data = {
         "prompt": f"{n_images} different edits",
         "files": mock_image_file,
+        "output_file_name": "edited_image.png",
     }
 
     response = wf.run(
@@ -161,6 +164,42 @@ def test_image_edit_multiple_outputs(
 
     call_kwargs = mock_image_edit_executor.call_args[1]
     assert call_kwargs["n"] == n_images
+
+
+def test_image_edit_custom_output_filename(
+    mock_image_file,
+    mock_image_edit_executor,
+):
+    """Test image edit supports custom output filename from input schema."""
+    openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")
+
+    node = ImageEdit(
+        name="Image Editor Custom Filename",
+        model="gpt-image-1",
+        connection=openai_connection,
+        response_format=ImageResponseFormat.B64_JSON,
+    )
+
+    wf = Workflow(
+        id=str(uuid.uuid4()),
+        flow=Flow(nodes=[node]),
+    )
+
+    input_data = {
+        "prompt": "Add a sunset background",
+        "files": mock_image_file,
+        "output_file_name": "edited_asset.png",
+    }
+
+    response = wf.run(
+        input_data=input_data,
+        config=RunnableConfig(callbacks=[]),
+    )
+
+    assert response.status == RunnableStatus.SUCCESS
+    node_output = response.output[node.id]
+    assert node_output["output"]["content"][0] == "edited_asset.png created"
+    assert node_output["output"]["files"][0].name == "edited_asset.png"
 
 
 @pytest.mark.parametrize(
@@ -218,6 +257,7 @@ def test_image_edit_input_types(
     input_data = {
         "prompt": "Edit image",
         "files": image_data,
+        "output_file_name": "edited_image.png",
     }
 
     response = wf.run(
@@ -258,6 +298,7 @@ def test_image_edit_with_tracing(
     input_data = {
         "prompt": "Add dramatic lighting",
         "files": mock_image_file,
+        "output_file_name": "edited_image.png",
     }
 
     response = wf.run(
@@ -304,6 +345,7 @@ def test_image_edit_optimized_for_agents_with_tracing(
     input_data = {
         "prompt": "Add sunset background",
         "files": mock_image_file,
+        "output_file_name": "agent_edited_image.png",
     }
 
     response = wf.run(
@@ -346,6 +388,7 @@ def test_image_edit_preserves_original_filename(
     input_data = {
         "prompt": "Brighten the image",
         "files": mock_image_file,
+        "output_file_name": "edited_image.png",
     }
 
     response = wf.run(
@@ -358,4 +401,4 @@ def test_image_edit_preserves_original_filename(
     assert len(node_output["output"]["files"]) == 1
     output_file = node_output["output"]["files"][0]
     assert hasattr(output_file, "name")
-    assert "original_photo" in output_file.name
+    assert "edited_image.png" in output_file.name
