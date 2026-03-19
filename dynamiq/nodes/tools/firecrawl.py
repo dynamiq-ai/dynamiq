@@ -348,7 +348,7 @@ class FirecrawlTool(ConnectionNode):
             result = self._format_agent_response(url, scrape_result)
             data = scrape_result.get("data") or {}
             page_metadata = data.get("metadata") or {}
-            output = {"content": result, "output": {"urls": [url], "page_metadata": page_metadata}}
+            output = {"content": result, "urls": [url], "page_metadata": page_metadata}
         else:
             result = {"success": scrape_result.get("success", False), "url": url, **(scrape_result.get("data") or {})}
             output = {"content": result}

@@ -600,7 +600,7 @@ class ExaTool(ConnectionNode):
                 for r in results
             ]
 
-            output = {"content": result, "output": {"urls": urls, "sources": sources}}
+            output = {"content": result, "urls": urls, "sources": sources}
         else:
             result = {
                 "result": formatted_results,
