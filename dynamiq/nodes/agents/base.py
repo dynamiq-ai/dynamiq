@@ -997,28 +997,48 @@ class Agent(Node):
             return {k: self._regenerate_node_ids(v) for k, v in obj.items()}
         return obj
 
-    def _clone_tool_for_execution(self, tool: Node, config: RunnableConfig | None) -> tuple[Node, RunnableConfig]:
-        """Clone tool and align config overrides so each execution is isolated."""
+    def _clone_tool_for_execution(
+        self,
+        tool: Node,
+        config: RunnableConfig | None,
+        *,
+        clone: bool = True,
+        override_source_ids: list[str] | None = None,
+        target_id: str | None = None,
+    ) -> tuple[Node, RunnableConfig]:
+        """Prepare a tool for isolated execution: optionally clone, regenerate IDs, align config overrides."""
         base_config = ensure_config(config)
-        try:
-            tool_copy = self._regenerate_node_ids(tool.clone())
-        except Exception as e:
-            logger.warning(f"Agent {self.name} - {self.id}: failed to clone tool {tool.name}: {e}")
-            return tool, base_config
+        original_id = tool.id
+        if clone:
+            try:
+                tool = self._regenerate_node_ids(tool.clone())
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: failed to clone tool {tool.name}: {e}")
+                return tool, base_config
+        else:
+            try:
+                self._regenerate_node_ids(tool)
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: failed to regenerate IDs for tool {tool.name}: {e}")
+                return tool, base_config
 
-        local_config = base_config
-        try:
-            local_config = base_config.model_copy(deep=False)
-            original_override = base_config.nodes_override.get(tool.id)
-            if original_override:
-                local_config.nodes_override[tool_copy.id] = original_override
-        except Exception as e:
-            logger.warning(
-                f"Agent {self.name} - {self.id}: failed to prepare config override for cloned tool {tool.name}: {e}"
-            )
-            local_config = base_config
+        if target_id:
+            tool.id = target_id
 
-        return tool_copy, local_config
+        try:
+            lookup_ids = [original_id] + (override_source_ids or [])
+            override = None
+            for oid in lookup_ids:
+                override = base_config.nodes_override.get(oid)
+                if override:
+                    break
+            if override and tool.id != original_id:
+                base_config = base_config.model_copy(deep=False)
+                base_config.nodes_override[tool.id] = override
+        except Exception as e:
+            logger.warning(f"Agent {self.name} - {self.id}: failed to align config override for tool {tool.name}: {e}")
+
+        return tool, base_config
 
     @staticmethod
     def _extract_file_paths_from_input(tool: Node, merged_input: dict[str, Any]) -> list[str] | None:
@@ -1215,8 +1235,14 @@ class Agent(Node):
             tool_config = ensure_config(config)
             if is_parallel and not is_child_agent:
                 tool_to_run, tool_config = self._clone_tool_for_execution(tool_to_run, tool_config)
-            if is_child_agent and tool.is_factory_mode and tool_run_id:
-                resolved_agent.id = tool_run_id
+            if is_child_agent and tool.is_factory_mode:
+                tool_to_run, tool_config = self._clone_tool_for_execution(
+                    resolved_agent,
+                    tool_config,
+                    clone=False,
+                    override_source_ids=[tool.id],
+                    target_id=tool_run_id,
+                )
 
             tool_result = tool_to_run.run(
                 input_data=merged_input,
@@ -1236,7 +1262,7 @@ class Agent(Node):
                     raise ValueError(error_message)
             tool_result_output_content = tool_result.output.get("content")
 
-            self._handle_tool_generated_files(tool, tool_result)
+            saved_files = self._handle_tool_generated_files(tool, tool_result)
 
             tool_result_content_processed = process_tool_output_with_sandbox_persistence(
                 content=tool_result_output_content,
@@ -1248,6 +1274,10 @@ class Agent(Node):
                 max_tokens=self.tool_output_max_length,
                 truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
             )
+
+            if saved_files:
+                paths = ", ".join(saved_files)
+                tool_result_content_processed = f"{tool_result_content_processed}\n\nFiles saved: {paths}"
 
             output_files = tool_result.output.get("files", [])
             tool_output_meta = {k: v for k, v in tool_result.output.items() if k not in ("content", "files")}
@@ -1328,23 +1358,26 @@ class Agent(Node):
                     existing_names.add(file_name)
         return existing_names
 
-    def _handle_tool_generated_files(self, tool: Node, tool_result: RunnableResult) -> None:
+    def _handle_tool_generated_files(self, tool: Node, tool_result: RunnableResult) -> list[str]:
         """
         Handle files generated by tools and store them in the file store and/or sandbox.
 
         Args:
             tool: The tool that generated the files
             tool_result: The result from the tool execution
+
+        Returns:
+            List of saved file paths (full sandbox paths or file-store keys).
         """
         if not self.file_store_backend and not self.sandbox_backend:
-            return
+            return []
 
         if not (isinstance(tool_result.output, dict) and "files" in tool_result.output):
-            return
+            return []
 
         tool_files = tool_result.output.get("files", [])
         if not tool_files:
-            return
+            return []
 
         stored_files = []
         for file in tool_files:
@@ -1360,7 +1393,7 @@ class Agent(Node):
                     try:
                         dest = f"{self.sandbox_backend.base_path}/{file_name}"
                         self.sandbox_backend.upload_file(file_name, content, destination_path=dest)
-                        stored_files.append(file_name)
+                        stored_files.append(dest)
                     except Exception as e:
                         logger.warning(f"Failed to upload tool file '{file_name}' to sandbox: {e}")
                 elif self.file_store_backend:
@@ -1382,7 +1415,7 @@ class Agent(Node):
                     try:
                         dest = f"{self.sandbox_backend.base_path}/{file_name}"
                         self.sandbox_backend.upload_file(file_name, file, destination_path=dest)
-                        stored_files.append(file_name)
+                        stored_files.append(dest)
                     except Exception as e:
                         logger.warning(f"Failed to upload tool file '{file_name}' to sandbox: {e}")
                 elif self.file_store_backend:
@@ -1399,6 +1432,7 @@ class Agent(Node):
 
         if stored_files:
             logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
+        return stored_files
 
     def _upload_files_to_sandbox(self, normalized_files: list) -> list[str]:
         """Upload file-like objects to the sandbox backend."""
