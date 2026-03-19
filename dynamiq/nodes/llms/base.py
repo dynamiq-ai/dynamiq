@@ -365,6 +365,22 @@ class BaseLLM(ConnectionNode):
         messages = prompt.format_messages(**dict(input_data))
         return messages
 
+    @staticmethod
+    def _extract_usage(completion: "ModelResponse") -> Any:
+        """Extract usage payload from completion across response shapes."""
+        model_extra = getattr(completion, "model_extra", None) or {}
+        usage = getattr(completion, "usage", None) or model_extra.get("usage")
+        if usage is None and hasattr(completion, "get"):
+            usage = completion.get("usage")
+        return usage
+
+    @staticmethod
+    def _usage_value(usage: Any, key: str, default=None):
+        """Read a usage value from dict-like or object-like usage payloads."""
+        if isinstance(usage, dict):
+            return usage.get(key, default)
+        return getattr(usage, key, default)
+
     @classmethod
     def get_usage_data(
         cls,
@@ -384,21 +400,12 @@ class BaseLLM(ConnectionNode):
         """
         from litellm import cost_per_token
 
-        model_extra = getattr(completion, "model_extra", None) or {}
-        usage = getattr(completion, "usage", None) or model_extra.get("usage")
-        if usage is None and hasattr(completion, "get"):
-            usage = completion.get("usage")
-
-        def usage_value(key: str, default=None):
-            if isinstance(usage, dict):
-                return usage.get(key, default)
-            return getattr(usage, key, default)
-
-        prompt_tokens = usage_value("prompt_tokens", 0)
-        completion_tokens = usage_value("completion_tokens", 0)
-        total_tokens = usage_value("total_tokens", prompt_tokens + completion_tokens)
-        cache_read_input_tokens = usage_value("cache_read_input_tokens")
-        cache_creation_input_tokens = usage_value("cache_creation_input_tokens")
+        usage = cls._extract_usage(completion=completion)
+        prompt_tokens = cls._usage_value(usage, "prompt_tokens", 0)
+        completion_tokens = cls._usage_value(usage, "completion_tokens", 0)
+        total_tokens = cls._usage_value(usage, "total_tokens", prompt_tokens + completion_tokens)
+        cache_read_input_tokens = cls._usage_value(usage, "cache_read_input_tokens")
+        cache_creation_input_tokens = cls._usage_value(usage, "cache_creation_input_tokens")
 
         try:
             cost_kwargs: dict[str, Any] = {

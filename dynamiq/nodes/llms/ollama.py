@@ -43,18 +43,9 @@ class Ollama(BaseLLM):
         Returns:
             BaseLLMUsageData: A model containing the usage data for the LLM.
         """
-        model_extra = getattr(completion, "model_extra", None) or {}
-        usage = getattr(completion, "usage", None) or model_extra.get("usage")
-        if usage is None and hasattr(completion, "get"):
-            usage = completion.get("usage")
-
-        def usage_value(key: str, default=0):
-            if isinstance(usage, dict):
-                return usage.get(key, default)
-            return getattr(usage, key, default)
-
-        prompt_tokens = usage_value("prompt_eval_count", usage_value("prompt_tokens", 0))
-        completion_tokens = usage_value("eval_count", usage_value("completion_tokens", 0))
+        usage = cls._extract_usage(completion=completion)
+        prompt_tokens = cls._usage_value(usage, "prompt_eval_count", cls._usage_value(usage, "prompt_tokens", 0))
+        completion_tokens = cls._usage_value(usage, "eval_count", cls._usage_value(usage, "completion_tokens", 0))
         total_tokens = prompt_tokens + completion_tokens
 
         return BaseLLMUsageData(
