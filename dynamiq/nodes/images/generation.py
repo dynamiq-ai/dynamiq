@@ -13,6 +13,7 @@ from dynamiq.connections import AWS as AWSConnection
 from dynamiq.connections import AzureAI as AzureAIConnection
 from dynamiq.connections import Gemini as GeminiConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.connections import OpenRouter as OpenRouterConnection
 from dynamiq.connections import VertexAI as VertexAIConnection
 from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -165,9 +166,15 @@ Examples:
 - {"prompt": "Modern minimalist logo for tech startup, blue and white", "n": 3}
 - {"prompt": "Abstract art with vibrant colors", "size": "1792x1024", "quality": "hd"}"""
     model: str = "gpt-image-1"
-    connection: OpenAIConnection | GeminiConnection | VertexAIConnection | AWSConnection | AzureAIConnection | None = (
-        None
-    )
+    connection: (
+        OpenAIConnection
+        | GeminiConnection
+        | VertexAIConnection
+        | AWSConnection
+        | AzureAIConnection
+        | OpenRouterConnection
+        | None
+    ) = None
     n: int | None = None
     size: ImageSize | str = ImageSize.SIZE_1024x1024
     quality: str | None = Field(
