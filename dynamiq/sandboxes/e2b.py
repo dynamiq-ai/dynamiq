@@ -2,7 +2,7 @@
 
 import shlex
 import threading
-from typing import Any
+from typing import Any, ClassVar
 
 from e2b.exceptions import RateLimitException as E2BRateLimitException
 from e2b.sandbox.commands.command_handle import CommandExitException
@@ -27,6 +27,7 @@ class E2BSandbox(Sandbox):
     Supports reconnecting to existing sandboxes by providing sandbox_id.
     """
 
+    DEFAULT_E2B_DOMAIN: ClassVar[str] = "e2b.app"
     model_config = ConfigDict(arbitrary_types_allowed=True)
     connection: E2B
     timeout: int = 3600
@@ -79,7 +80,7 @@ class E2BSandbox(Sandbox):
                 return get_host(port)
             except Exception as e:
                 logger.debug("E2B get_host(port) failed, using URL pattern: %s", e)
-        domain = getattr(self.connection, "domain", None) or "e2b.app"
+        domain = getattr(self.connection, "domain", None) or self.DEFAULT_E2B_DOMAIN
         return f"{port}-{self.sandbox_id}.{domain}"
 
     def apply_public_preview_branding(
@@ -101,7 +102,7 @@ class E2BSandbox(Sandbox):
             otherwise returns the input values unchanged.
         """
         suffix = (self.connection.public_preview_domain or "").strip().lstrip(".")
-        domain = getattr(self.connection, "domain", None) or "e2b.app"
+        domain = getattr(self.connection, "domain", None) or self.DEFAULT_E2B_DOMAIN
         tail = f".{domain}"
         if not suffix or not public_host or not public_host.endswith(tail):
             return public_host, public_url
