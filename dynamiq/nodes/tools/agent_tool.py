@@ -42,7 +42,7 @@ class SubAgentTool(Node):
         The callable must **not** capture shared ``BaseModel`` objects (e.g. a
         shared LLM or tool instance).  Captured objects are used as-is and are
         not deep-copied, so mutations applied to the returned agent propagate
-        back to those shared originals. 
+        back to those shared originals.
       - **Factory dict** (``agent_factory`` as dict): a blueprint dict using the
         same format as workflow YAML node definitions.  Resolved via
         ``WorkflowYAMLLoader`` on each invocation, producing completely fresh
