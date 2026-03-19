@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from dynamiq.nodes.llms.base import _DEFAULT_MAX_TOKENS
+from dynamiq.nodes.llms.base import LLM_DEFAULT_MAX_TOKENS
 from dynamiq.nodes.llms.registry import ModelRegistry
 
 MODEL_A = "test-org/model-a"
@@ -99,4 +99,4 @@ def test_totally_unknown_model_returns_default():
     from dynamiq.nodes.llms.togetherai import TogetherAI
 
     llm = TogetherAI(model="unknown/x", connection=TogetherAIConnection(api_key="test-key"))
-    assert llm.get_token_limit() == _DEFAULT_MAX_TOKENS
+    assert llm.get_token_limit() == LLM_DEFAULT_MAX_TOKENS

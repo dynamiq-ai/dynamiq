@@ -41,7 +41,7 @@ LLM_RATE_LIMIT_ERROR_INDICATORS = (
     "resource_exhausted",
 )
 
-_DEFAULT_MAX_TOKENS = 4096
+LLM_DEFAULT_MAX_TOKENS = 4096
 
 LLM_CONNECTION_ERROR_INDICATORS = (
     "connection",
@@ -330,7 +330,7 @@ class BaseLLM(ConnectionNode):
             return custom_max
 
         logger.warning(f"Model {self.model} not found in litellm or custom registry. Using default token limit.")
-        return _DEFAULT_MAX_TOKENS
+        return LLM_DEFAULT_MAX_TOKENS
 
     @property
     def is_vision_supported(self) -> bool:

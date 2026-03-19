@@ -6,7 +6,7 @@ from typing import Any
 
 from dynamiq.utils.logger import logger
 
-_REGISTRY_FILE = Path(__file__).with_name("model_registry.json")
+REGISTRY_FILE = Path(__file__).with_name("model_registry.json")
 
 
 class ModelRegistry:
@@ -94,4 +94,4 @@ class ModelRegistry:
         return list(self._models)
 
 
-model_registry = ModelRegistry(path=_REGISTRY_FILE)
+model_registry = ModelRegistry(path=REGISTRY_FILE)
