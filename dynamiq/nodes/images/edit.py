@@ -78,6 +78,12 @@ class ImageEditInputSchema(BaseModel):
         description="Optional mask image indicating areas to edit.",
     )
     n: int | None = None
+    output_file_name: str = Field(
+        ...,
+        min_length=1,
+        description="Output filename for edited image file(s). "
+        "When multiple images are generated, an index suffix is added.",
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -260,6 +266,7 @@ Examples:
 
         content = []
         files = []
+        total_images = len(response.data)
 
         try:
             file_idx = 0
@@ -270,7 +277,12 @@ Examples:
                     content.append(img_url)
                     image_bytes = download_image_from_url(img_url)
                     file = create_image_file(
-                        image_bytes, file_idx, original_name=original_name, prefix=self.FILE_PREFIX
+                        image_bytes,
+                        file_idx,
+                        original_name=original_name,
+                        prefix=self.FILE_PREFIX,
+                        output_file_name=input_data.output_file_name,
+                        total_images=total_images,
                     )
                     files.append(file)
                     file_idx += 1
@@ -278,7 +290,12 @@ Examples:
                 elif img_b64 := getattr(img_data, ImageResponseFormat.B64_JSON.value, None):
                     image_bytes = base64.b64decode(img_b64)
                     file = create_image_file(
-                        image_bytes, file_idx, original_name=original_name, prefix=self.FILE_PREFIX
+                        image_bytes,
+                        file_idx,
+                        original_name=original_name,
+                        prefix=self.FILE_PREFIX,
+                        output_file_name=input_data.output_file_name,
+                        total_images=total_images,
                     )
                     content.append(f"{file.name} created")
                     files.append(file)
