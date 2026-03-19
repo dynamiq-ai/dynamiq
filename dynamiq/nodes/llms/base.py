@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 from dynamiq.callbacks.streaming import BaseStreamingCallbackHandler
 from dynamiq.connections import BaseConnection, HttpApiKey
 from dynamiq.nodes import ErrorHandling, NodeGroup
+from dynamiq.nodes.llms.registry import model_registry
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Prompt
@@ -312,8 +313,6 @@ class BaseLLM(ConnectionNode):
         Returns:
             int: Number of tokens.
         """
-        from dynamiq.nodes.llms.registry import model_registry
-
         info = self._get_litellm_model_info()
         if info is not None:
             max_input = info.get("max_input_tokens")
@@ -335,8 +334,6 @@ class BaseLLM(ConnectionNode):
     @property
     def is_vision_supported(self) -> bool:
         """Check if the LLM supports vision/image processing."""
-        from dynamiq.nodes.llms.registry import model_registry
-
         if self._get_litellm_model_info() is not None:
             try:
                 return supports_vision(self.model)
@@ -348,8 +345,6 @@ class BaseLLM(ConnectionNode):
     @property
     def is_pdf_input_supported(self) -> bool:
         """Check if the LLM supports PDF input."""
-        from dynamiq.nodes.llms.registry import model_registry
-
         if self._get_litellm_model_info() is not None:
             try:
                 return supports_pdf_input(self.model)
