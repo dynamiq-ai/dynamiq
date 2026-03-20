@@ -35,6 +35,14 @@ class E2BSandbox(Sandbox):
     template: str | None = Field(
         default=None, description="Template to use for sandbox creation. " "If None, the default template is used."
     )
+    envs: dict[str, str] | None = Field(
+        default=None,
+        description="Custom environment variables passed to the sandbox on creation.",
+    )
+    metadata: dict[str, str] | None = Field(
+        default=None,
+        description="Custom metadata attached to the sandbox on creation.",
+    )
     sandbox_id: str | None = Field(
         default=None,
         description="Existing sandbox ID to reconnect to. If None, a new sandbox is created.",
@@ -227,6 +235,8 @@ class E2BSandbox(Sandbox):
                     api_key=self.connection.api_key,
                     timeout=self.timeout,
                     domain=getattr(self.connection, "domain", None),
+                    envs=self.envs or {},
+                    metadata=self.metadata or {},
                 )
             except E2BRateLimitException:
                 logger.warning("E2B sandbox creation rate-limited. Retrying with exponential backoff.")
