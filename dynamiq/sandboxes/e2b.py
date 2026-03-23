@@ -57,16 +57,13 @@ class E2BSandbox(Sandbox):
     @property
     def to_dict_exclude_params(self) -> dict[str, bool]:
         """Exclude sensitive fields from model_dump; re-added manually in to_dict when not tracing."""
-        return super().to_dict_exclude_params | {"envs": True, "template": True}
+        return super().to_dict_exclude_params | {"envs": True}
 
     def to_dict(self, **kwargs) -> dict[str, Any]:
         for_tracing = kwargs.get("for_tracing", False)
         data = super().to_dict(**kwargs)
-        if not for_tracing:
-            if self.envs is not None:
-                data["envs"] = self.envs
-            if self.template is not None:
-                data["template"] = self.template
+        if not for_tracing and self.envs is not None:
+            data["envs"] = self.envs
         return data
 
     @property
