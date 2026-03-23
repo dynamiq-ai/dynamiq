@@ -340,9 +340,11 @@ class Agent(Node):
                 self.tools.append(FileWriteTool(file_store=self.file_store_backend))
 
         if self.parallel_tool_calls_enabled:
-            # Filter out any user tools with the reserved parallel tool name
-            self.tools = [t for t in self.tools if t.name != PARALLEL_TOOL_NAME]
-            self.tools.append(ParallelToolCallsTool())
+            inference_mode = getattr(self, "inference_mode", None)
+            use_native_parallel = inference_mode is not None and inference_mode.value == "FUNCTION_CALLING"
+            if not use_native_parallel:
+                self.tools = [t for t in self.tools if t.name != PARALLEL_TOOL_NAME]
+                self.tools.append(ParallelToolCallsTool())
 
         if self._skills_should_init():
             self._init_skills()

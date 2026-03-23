@@ -436,6 +436,11 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         Extract incremental JSON values (arguments) and function name
         from the LLM streaming chunks in FUNCTION_CALLING inference mode.
 
+        When native parallel tool calling is active, the provider may
+        interleave deltas for multiple tool call indices.  We only
+        parse the first tool call (index 0) during streaming; the
+        full set of tool calls is handled after completion.
+
         Returns:
             tuple[str, str | None]: (arguments_text, function_name)
         """
@@ -448,8 +453,11 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             tool_calls = delta.get("tool_calls")
 
             if tool_calls and len(tool_calls) > 0:
-                tool_call = tool_calls[0]
-                if tool_call.get("type") == "function" and "function" in tool_call:
+                tool_call = next(
+                    (tc for tc in tool_calls if tc.get("index", 0) == 0),
+                    None,
+                )
+                if tool_call and tool_call.get("type") == "function" and "function" in tool_call:
                     function_data = tool_call["function"]
 
                     if function_data.get("name"):
