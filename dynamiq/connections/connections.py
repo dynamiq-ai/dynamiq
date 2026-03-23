@@ -1,7 +1,7 @@
 import enum
 import json
 from abc import ABC, abstractmethod
-from datetime import timedelta
+from datetime import datetime, timedelta
 from enum import Enum
 from functools import cached_property, partial
 from pathlib import Path
@@ -45,6 +45,7 @@ class BaseConnection(BaseModel, ABC):
         id (str): A unique identifier for the connection, generated using `generate_uuid`.
         type (ConnectionType): The type of connection.
     """
+
     id: str = Field(default_factory=generate_uuid)
 
     @computed_field
@@ -91,6 +92,7 @@ class BaseApiKeyConnection(BaseConnection):
     Attributes:
         api_key (str): The API key used for authentication.
     """
+
     api_key: str
 
     @abstractmethod
@@ -163,9 +165,7 @@ class Dynamiq(HttpApiKey):
     ``DYNAMIQ_URL`` and ``DYNAMIQ_API_KEY`` environment variables.
     """
 
-    url: str = Field(
-        default_factory=partial(get_env_var, "DYNAMIQ_URL", "https://api.getdynamiq.ai")
-    )
+    url: str = Field(default_factory=partial(get_env_var, "DYNAMIQ_URL", "https://api.getdynamiq.ai"))
     api_key: str = Field(default_factory=partial(get_env_var, "DYNAMIQ_API_KEY"))
     headers: dict[str, Any] = Field(default_factory=dict)
 
@@ -225,6 +225,7 @@ class OpenAI(BaseApiKeyConnection):
         api_key (str): The API key for the OpenAI service, fetched from the environment variable 'OPENAI_API_KEY'.
         url (str): The endpoint url for the OpenAI service, fetched from the environment variable 'OPENAI_URL'.
     """
+
     api_key: str = Field(default_factory=partial(get_env_var, "OPENAI_API_KEY"))
     url: str = Field(default_factory=partial(get_env_var, "OPENAI_URL", "https://api.openai.com/v1"))
 
@@ -263,12 +264,8 @@ class Anthropic(BaseApiKeyConnection):
 
 
 class AWS(BaseConnection):
-    access_key_id: str | None = Field(
-        default_factory=partial(get_env_var, "AWS_ACCESS_KEY_ID")
-    )
-    secret_access_key: str | None = Field(
-        default_factory=partial(get_env_var, "AWS_SECRET_ACCESS_KEY")
-    )
+    access_key_id: str | None = Field(default_factory=partial(get_env_var, "AWS_ACCESS_KEY_ID"))
+    secret_access_key: str | None = Field(default_factory=partial(get_env_var, "AWS_SECRET_ACCESS_KEY"))
     region: str = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_REGION"))
     profile: str | None = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_PROFILE"))
 
@@ -291,6 +288,7 @@ class AWS(BaseConnection):
     def get_boto3_session(self):
         """Create and return a boto3.Session with properly formatted parameters"""
         import boto3
+
         params = {}
         if self.profile:
             params["profile_name"] = self.profile
@@ -456,11 +454,8 @@ class Whisper(Http):
         method (str): HTTP method used for the request, defaults to HTTPMethod.POST.
         api_key (str): API key for authentication, fetched from the environment variable "OPENAI_API_KEY".
     """
-    url: str = Field(
-        default_factory=partial(
-            get_env_var, "WHISPER_URL", "https://api.openai.com/v1/"
-        )
-    )
+
+    url: str = Field(default_factory=partial(get_env_var, "WHISPER_URL", "https://api.openai.com/v1/"))
     method: str = HTTPMethod.POST
     api_key: str = Field(default_factory=partial(get_env_var, "OPENAI_API_KEY"))
 
@@ -522,6 +517,7 @@ class Pinecone(BaseApiKeyConnection):
         """
         # Import in runtime to save memory
         from pinecone import Pinecone as PineconeClient
+
         pinecone_client = PineconeClient(self.api_key)
         logger.debug("Connected to Pinecone")
         return pinecone_client
@@ -1574,3 +1570,357 @@ class OpenRouter(BaseApiKeyConnection):
             "api_base": self.url,
             "api_key": self.api_key,
         }
+
+
+class Lakera(BaseApiKeyConnection):
+    url: Literal["https://api.lakera.ai/v2/"] = "https://api.lakera.ai/v2/"
+    api_key: str = Field(default_factory=partial(get_env_var, "LAKERA_API_KEY"))
+
+    def connect(self):
+        """Connects to the Lakera API.
+
+        Returns:
+            requests: A requests module for making HTTP requests to the API.
+        """
+        import requests
+
+        return requests
+
+    @property
+    def conn_params(self) -> dict:
+        """Returns the parameters required for connection.
+
+        Returns:
+            dict: A dictionary containing the headers for authorization.
+        """
+        return {"Authorization": f"Bearer {self.api_key}"}
+
+
+class MistralOCR(Mistral):
+    """Connection to the Mistral OCR API."""
+
+    base_url: Literal["https://api.mistral.ai/"] = "https://api.mistral.ai/"
+
+    def connect(self):
+        """Connects to the Mistral OCR API.
+
+        Returns:
+            requests: A requests module for making HTTP requests to the API.
+        """
+        import requests
+
+        return requests
+
+
+class PipedreamEnvironment(enum.Enum):
+    DEVELOPMENT = "development"
+    PRODUCTION = "production"
+
+
+class PipedreamOAuth2(BaseConnection):
+    access_token: str = Field(default_factory=partial(get_env_var, "PIPEDREAM_ACCESS_TOKEN"))
+    project_id: str = Field(default_factory=partial(get_env_var, "PIPEDREAM_PROJECT_ID"))
+    url: Literal["https://api.pipedream.com/v1"] = "https://api.pipedream.com/v1"
+    environment: PipedreamEnvironment = PipedreamEnvironment.DEVELOPMENT
+    expires_at: datetime | None = None
+
+    def connect(self):
+        import requests
+
+        return requests
+
+    def conn_params(self) -> dict:
+        return {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+            "X-PD-Environment": self.environment.value,
+        }
+
+
+class StagehandEnvironment(str, enum.Enum):
+    BROWSERBASE = "BROWSERBASE"
+    LOCAL = "LOCAL"
+
+
+class Browserbase(BaseConnection):
+    """
+    Browserbase connection configuration.
+    The actual client is created and managed by the Stagehand node on a dedicated event loop.
+    """
+
+    browserbase_api_key: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_API_KEY"))
+    browserbase_project_id: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_PROJECT_ID"))
+    model_api_key: str = Field(..., description="API key for the LLM model.")
+    extra_config: dict[str, Any] = Field(
+        default_factory=dict, description="Additional options to pass into StagehandConfig"
+    )
+
+    def connect(self):
+        pass
+
+    @property
+    def config(self):
+        from stagehand import StagehandConfig
+
+        return StagehandConfig(
+            env=StagehandEnvironment.BROWSERBASE,
+            api_key=self.browserbase_api_key,
+            project_id=self.browserbase_project_id,
+            **self.extra_config,
+        )
+
+
+class Stagehand(Browserbase):
+    """
+    Backward-compatible Browserbase connection for the Stagehand node.
+    """
+
+    pass
+
+
+class SteelBrowserEnvironment(str, enum.Enum):
+    CLOUD = "CLOUD"
+    SELF_HOSTED = "SELF_HOSTED"
+
+
+class SteelBrowser(BaseConnection):
+    """
+    Steel.dev connection configuration for Stagehand.
+    """
+
+    environment: SteelBrowserEnvironment = Field(
+        default=SteelBrowserEnvironment.CLOUD,
+        description="""Steel Browser environment type.
+        CLOUD for Steel.dev cloud service, SELF_HOSTED for local Steel.dev instance.""",
+    )
+    api_key: str | None = Field(
+        default_factory=lambda: get_env_var("STEEL_API_KEY") or None,
+        description="Steel.dev cloud API key. Required when environment=CLOUD.",
+    )
+    base_url: str | None = Field(
+        default=None,
+        description="Steel.dev API base URL for self-hosted instances. Required when environment=SELF_HOSTED.",
+    )
+    model_api_key: str = Field(..., description="API key for the LLM model.")
+    session_config: dict[str, Any] = Field(
+        default_factory=lambda: {"block_ads": True},
+        description="Configuration options for Steel session creation",
+    )
+    extra_config: dict[str, Any] = Field(
+        default_factory=dict, description="Additional options to pass into StagehandConfig"
+    )
+
+    @model_validator(mode="after")
+    def validate_based_on_environment(self):
+        """Validate parameters based on the selected environment."""
+        if self.environment == SteelBrowserEnvironment.CLOUD:
+            if not self.api_key:
+                raise ValueError("api_key is required when environment='CLOUD'")
+            if self.base_url:
+                raise ValueError("base_url should not be provided when environment='CLOUD'")
+        elif self.environment == SteelBrowserEnvironment.SELF_HOSTED:
+            if not self.base_url:
+                self.base_url = "http://localhost:3000"
+            if self.api_key:
+                raise ValueError("api_key should not be provided when environment='SELF_HOSTED'")
+        return self
+
+    def connect(self):
+        pass
+
+
+class Composio(BaseConnection):
+    """Minimal HTTP connection for the Composio REST API.
+
+    The public API only requires the `x-api-key` header (see
+    https://docs.composio.dev/api-reference/authentication/get-auth-session-info),
+    so the connection keeps the session configuration intentionally lean.
+    """
+
+    api_key: str = Field(default_factory=partial(get_env_var, "COMPOSIO_API_KEY"))
+    url: Literal["https://backend.composio.dev/api/v3"] = "https://backend.composio.dev/api/v3"
+    timeout: float = 30
+    entity_id: str | None = None
+    connected_account_id: str | None = None
+
+    def connect(self):
+        import requests
+
+        session = requests.Session()
+        session.headers.update({"x-api-key": self.api_key})
+        return session
+
+
+class MailerLite(HttpApiKey):
+    """
+    Represents a connection to the MailerLite API.
+
+    Attributes:
+        url (str): Base URL for MailerLite API.
+        api_key (str): API token for authentication.
+    """
+
+    url: str = Field(default="https://connect.mailerlite.com/api/")
+    api_key: str = Field(default_factory=partial(get_env_var, "MAILERLITE_API_TOKEN"))
+    headers: dict = Field(default_factory=dict)
+
+    def connect(self):
+        """
+        Configures the request authorization header with the API key for authentication.
+        """
+        self.headers.update(
+            {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            }
+        )
+        return super().connect()
+
+
+class Airtable(HttpApiKey):
+    """
+    Represents a connection to the Airtable API.
+    Expects an environment variable 'AIRTABLE_API_TOKEN', or provide `api_key` explicitly.
+    """
+
+    url: str = Field(default="https://api.airtable.com/v0")
+    api_key: str = Field(default_factory=partial(get_env_var, "AIRTABLE_API_TOKEN"))
+
+    def connect(self):
+        """
+        Overwrites headers with the 'Authorization: Bearer <token>' for Airtable.
+        Then returns a requests session/module from HttpApiKey.connect().
+        """
+        self.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        return super().connect()
+
+
+class GitHub(HttpApiKey):
+    """
+    Represents a connection to the GitHub API that uses a Personal Access Token (PAT)
+    or GitHub App Installation Token for authentication.
+    """
+
+    url: str = Field(default="https://api.github.com")
+    headers: dict = Field(default_factory=dict)
+    api_key: str = Field(default_factory=partial(get_env_var, "GITHUB_API_KEY"))
+
+    def connect(self):
+        """
+        Configures the request authorization header with the GitHub token for authentication,
+        sets recommended "Accept" and "X-GitHub-Api-Version" headers.
+        """
+        self.headers.update(
+            {
+                "Authorization": f"Bearer {self.api_key}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            }
+        )
+        return super().connect()
+
+
+class Coda(HttpApiKey):
+    """
+    Represents a connection to the Coda API.
+
+    Attributes:
+        url (str): Base URL for Coda API.
+        api_key (str): API token for authentication.
+    """
+
+    url: str = Field(default="https://coda.io/apis/v1/")
+    api_key: str = Field(default_factory=partial(get_env_var, "CODA_API_TOKEN"))
+    headers: dict = Field(default_factory=dict)
+
+    def connect(self):
+        """
+        Configures the request authorization header with the API key for authentication.
+        """
+        self.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        return super().connect()
+
+
+class GoogleOAuth2(BaseConnection):
+    access_token: str = Field(default_factory=partial(get_env_var, "GOOGLE_OAUTH2_ACCESS_TOKEN"))
+
+    def connect(self):
+        pass
+
+
+class CuaOperatingSystemType(enum.Enum):
+    """Operating system types supported by CUA."""
+
+    LINUX = "linux"
+    WINDOWS = "windows"
+    MACOS = "macos"
+
+
+class CuaProviderType(enum.Enum):
+    """Provider types supported by CUA."""
+
+    CLOUD = "cloud"
+    DOCKER = "docker"
+
+
+class CuaDockerImage(enum.Enum):
+    XFCE = "trycua/cua-xfce:latest"
+    UBUNTU = "trycua/cua-ubuntu:latest"
+
+
+class CuaDesktop(BaseConnection):
+    """
+    Represents a connection to Cua desktop environment.
+    Supports both cloud-based and local Docker-based computer instances
+    to interact with a desktop environment.
+    """
+
+    api_key: str = Field(
+        default_factory=partial(get_env_var, "CUA_API_KEY"),
+        description="API key for cloud provider (required for `provider_type='cloud'`)",
+    )
+    os_type: CuaOperatingSystemType = Field(
+        default=CuaOperatingSystemType.LINUX, description="Operating system type for the computer"
+    )
+    provider_type: CuaProviderType = Field(
+        default=CuaProviderType.CLOUD, description="Provider type: `cloud` or `docker`"
+    )
+    computer_name: str | None = Field(default=None, description="Name of the sandbox to use")
+    image: CuaDockerImage | None = Field(
+        default=None,
+        description="Docker image name (required for `provider_type='docker'`). ",
+    )
+
+    def model_post_init(self, __context):
+        """Validate configuration after initialization."""
+        super().model_post_init(__context)
+
+        if self.provider_type == CuaProviderType.CLOUD and not self.api_key:
+            raise ValueError("api_key is required when provider_type is `cloud`")
+
+        if self.provider_type == CuaProviderType.DOCKER and self.image is None:
+            raise ValueError("image is required when provider_type is `docker`.")
+
+    def connect(self):
+        """
+        Connects to the CUA desktop environment.
+        Returns:
+            Computer: The CUA Computer client instance configured for the specified provider.
+        """
+        from computer import Computer
+
+        connection_params = {
+            "os_type": self.os_type.value,
+            "provider_type": self.provider_type.value,
+        }
+
+        if self.computer_name:
+            connection_params["name"] = self.computer_name
+
+        if self.provider_type == CuaProviderType.DOCKER and self.image is not None:
+            connection_params["image"] = self.image.value
+
+        computer = Computer(**connection_params)
+
+        return computer

@@ -1,0 +1,42 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+  stagehand-conn:
+    id: stagehand-conn
+    type: dynamiq.connections.Stagehand
+    model_api_key: ""
+
+nodes:
+  memory-agent:
+    type: dynamiq.nodes.agents.react.ReActAgent
+    llm:
+      id: react-agent-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o
+    tools:
+      - id: 4bf85203-f37a-4517-9d48-e437472b8e8f
+        name: stagehand
+        type: dynamiq.nodes.tools.Stagehand
+        connection: stagehand-conn
+        model_name: gpt-4o
+    role: "a helpful assistant capable of retaining context and answering questions effectively using file storage."
+    file_store:
+      enabled: true
+      backend:
+        type: dynamiq.storages.file.InMemoryFileStore
+      agent_file_write_enabled: true
+
+    max_loops: 5
+    inference_mode: XML
+
+flows:
+  memory-agent-flow:
+    name: Memory Agent Flow
+    nodes:
+      - memory-agent
+
+workflows:
+  memory-agent-workflow:
+    flow: memory-agent-flow
+    version: 1
