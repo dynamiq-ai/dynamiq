@@ -256,10 +256,10 @@ class E2BSandbox(Sandbox):
         )
         def create():
             try:
-                from datetime import UTC, datetime
+                from datetime import datetime, timezone
 
                 metadata = self.metadata.copy() if self.metadata else {}
-                metadata.setdefault("created_at", datetime.now(UTC).isoformat())
+                metadata.setdefault("created_at", datetime.now(timezone.utc).isoformat())
                 return self._sdk_class.create(
                     template=self.template,
                     api_key=self.connection.api_key,
