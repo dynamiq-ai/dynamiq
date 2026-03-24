@@ -25,7 +25,7 @@ from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsInputSchema, ToolCallItem
 from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
-from dynamiq.nodes.types import Behavior, InferenceMode
+from dynamiq.nodes.types import ActionType, Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.llm_tool import Tool
@@ -357,11 +357,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         batch_tool_run_id = self._streaming_tool_run_id or generate_uuid()
         self._streaming_tool_run_id = None
-        parallel_tool = self.tool_by_names.get(self.sanitize_tool_name(PARALLEL_TOOL_NAME))
         batch_tool_data = AgentToolData(
             name=PARALLEL_TOOL_NAME,
-            type=parallel_tool.type if parallel_tool else "tool",
-            action_type=parallel_tool.action_type.value if parallel_tool and parallel_tool.action_type else None,
+            type="tool",
+            action_type=ActionType.PARALLEL_EXECUTION.value,
         )
         self._stream_agent_event(
             AgentReasoningEventMessageData(
@@ -423,17 +422,18 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 ).model_dump()
             )
 
-        parallel_tool = self.tool_by_names.get(self.sanitize_tool_name(PARALLEL_TOOL_NAME))
         batch_tool_data = AgentToolData(
             name=PARALLEL_TOOL_NAME,
-            type=parallel_tool.type if parallel_tool else "tool",
-            action_type=parallel_tool.action_type.value if parallel_tool and parallel_tool.action_type else None,
+            type="tool",
+            action_type=ActionType.PARALLEL_EXECUTION.value,
         )
+
         overall_status = (
             RunnableStatus.SUCCESS
             if all(s.get("status") == RunnableStatus.SUCCESS for s in per_tool_summary)
             else RunnableStatus.FAILURE
         )
+
         self._stream_agent_event(
             AgentToolResultEventMessageData(
                 tool_run_id=batch_tool_run_id,
@@ -545,7 +545,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             for tc in tool_calls:
                 tc_name = tc["function"]["name"].strip()
                 tc_args = tc["function"]["arguments"]
-                tc_input = tc_args.get("action_input", tc_args)
+                tc_input = tc_args["action_input"]
                 if isinstance(tc_input, str):
                     try:
                         tc_input = json.loads(tc_input)
