@@ -540,9 +540,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
 
-        if len(tool_calls) > 1 and self.parallel_tool_calls_enabled:
+        actual_tool_calls = [tc for tc in tool_calls if tc["function"]["name"].strip() != "provide_final_answer"]
+
+        if len(actual_tool_calls) > 1 and self.parallel_tool_calls_enabled:
             tool_items = []
-            for tc in tool_calls:
+            for tc in actual_tool_calls:
                 tc_name = tc["function"]["name"].strip()
                 tc_args = tc["function"]["arguments"]
                 tc_input = tc_args["action_input"]
