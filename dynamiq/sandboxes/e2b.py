@@ -265,7 +265,7 @@ class E2BSandbox(Sandbox):
                     api_key=self.connection.api_key,
                     timeout=self.timeout,
                     domain=getattr(self.connection, "domain", None),
-                    envs=self.envs or {},
+                    envs=self.envs,
                     metadata=metadata,
                 )
             except E2BRateLimitException:
