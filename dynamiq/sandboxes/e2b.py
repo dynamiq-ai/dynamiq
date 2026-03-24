@@ -60,6 +60,20 @@ class E2BSandbox(Sandbox):
         return super().to_dict_exclude_params | {"envs": True}
 
     def to_dict(self, **kwargs) -> dict[str, Any]:
+        """Convert the E2BSandbox instance to a dictionary.
+
+        Extends the base serialization to conditionally include the ``envs``
+        field.  When ``for_tracing`` is True the field is omitted to prevent
+        secrets from leaking into tracing/callback output.
+
+        Args:
+            **kwargs: Keyword arguments forwarded to ``Sandbox.to_dict``.
+                Accepts ``for_tracing`` (bool, default False) to control
+                whether sensitive fields are included.
+
+        Returns:
+            dict[str, Any]: Dictionary representation of the sandbox.
+        """
         for_tracing = kwargs.get("for_tracing", False)
         data = super().to_dict(**kwargs)
         if not for_tracing and self.envs is not None:
@@ -242,13 +256,17 @@ class E2BSandbox(Sandbox):
         )
         def create():
             try:
+                from datetime import UTC, datetime
+
+                metadata = self.metadata.copy() if self.metadata else {}
+                metadata.setdefault("created_at", datetime.now(UTC).isoformat())
                 return self._sdk_class.create(
                     template=self.template,
                     api_key=self.connection.api_key,
                     timeout=self.timeout,
                     domain=getattr(self.connection, "domain", None),
                     envs=self.envs or {},
-                    metadata=self.metadata or {},
+                    metadata=metadata,
                 )
             except E2BRateLimitException:
                 logger.warning("E2B sandbox creation rate-limited. Retrying with exponential backoff.")
