@@ -81,7 +81,11 @@ class LlamaGuardDetector(ConnectionNode):
                 if result is None:
                     raise ValueError("Llama Guard returned no output")
                 is_safe = result == "safe"
-                violated_policies = result.split("\n", 1)[1].split(",") if not is_safe else []
+                if not is_safe:
+                    parts = result.split("\n", 1)
+                    violated_policies = parts[1].split(",") if len(parts) > 1 else [parts[0]]
+                else:
+                    violated_policies = []
                 return {"is_safe": is_safe, "violated_policies": violated_policies}
             elif response.status_code == 401:
                 raise ValueError("Invalid API key.")

@@ -201,7 +201,7 @@ class Pipedream(ConnectionNode):
             response = self.client.request(
                 method="POST",
                 url=url,
-                headers=self.connection.conn_params(),
+                headers=self.connection.conn_params,
                 json=payload,
                 timeout=self.timeout,
             )

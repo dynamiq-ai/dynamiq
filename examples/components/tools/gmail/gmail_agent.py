@@ -16,7 +16,7 @@ from dynamiq.nodes.tools.gmail import (
     SendDraft,
     SendEmail,
 )
-from examples.utils import setup_llm
+from examples.components.tools.extra_utils import setup_llm
 
 AGENT_ROLE = (
     "An AI-powered productivity assistant for managing Gmail: "

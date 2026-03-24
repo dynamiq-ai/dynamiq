@@ -367,7 +367,7 @@ class MistralOCR(ConnectionNode):
         }
 
         for key, value in additional_params.items():
-            if value:
+            if value is not None:
                 payload[key] = value
 
         headers = {"Authorization": f"Bearer {self.connection.api_key}", "Content-Type": "application/json"}
@@ -416,7 +416,7 @@ class MistralOCR(ConnectionNode):
         }
 
         for key, value in additional_params.items():
-            if value:
+            if value is not None:
                 payload[key] = value
 
         headers = {"Authorization": f"Bearer {self.connection.api_key}", "Content-Type": "application/json"}

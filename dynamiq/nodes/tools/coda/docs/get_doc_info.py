@@ -66,4 +66,4 @@ class GetDocInfo(BaseCoda):
                 )
             }
 
-        return doc_info
+        return {"content": doc_info}

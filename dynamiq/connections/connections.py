@@ -1629,6 +1629,7 @@ class PipedreamOAuth2(BaseConnection):
 
         return requests
 
+    @property
     def conn_params(self) -> dict:
         return {
             "Authorization": f"Bearer {self.access_token}",

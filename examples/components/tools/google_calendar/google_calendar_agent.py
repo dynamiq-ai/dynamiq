@@ -14,7 +14,7 @@ from dynamiq.nodes.tools.google_calendar import (
     SearchEvents,
     UpdateEvent,
 )
-from examples.utils import setup_llm
+from examples.components.tools.extra_utils import setup_llm
 
 AGENT_ROLE = (
     "An AI-powered productivity assistant for managing Gmail: "

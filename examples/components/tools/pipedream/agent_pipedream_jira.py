@@ -10,8 +10,8 @@ from dynamiq.utils.logger import logger
 
 from dynamiq.connections import PipedreamOAuth2 as PipedreamConnection
 from dynamiq.nodes.tools import Pipedream
-from examples.pipedream.configurable_props_templates import JIRA_CREATE_ISSUE_PROPS
-from examples.utils import setup_llm
+from examples.components.tools.extra_utils import setup_llm
+from examples.components.tools.pipedream.configurable_props_templates import JIRA_CREATE_ISSUE_PROPS
 
 AGENT_ROLE = """
 Project Manager with experience in agile development teams.

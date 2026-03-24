@@ -305,7 +305,9 @@ class CuaDesktopToolInputSchema(BaseModel):
     @classmethod
     def files_validator(cls, input_data: Any):
         """Validate and process files."""
-        if isinstance(input_data, str) or isinstance(input_data, list[str]):
+        if isinstance(input_data, str) or (
+            isinstance(input_data, list) and all(isinstance(item, str) for item in input_data)
+        ):
             raise ToolExecutionException(
                 "File path provided for upload action. Please provide a file to upload.", recoverable=True
             )

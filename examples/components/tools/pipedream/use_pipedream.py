@@ -3,12 +3,14 @@ import os
 
 from dynamiq import Workflow, runnables
 from dynamiq.callbacks import TracingCallbackHandler
-from dynamiq.connections.managers import get_connection_manager
-from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
-
 from dynamiq.connections import PipedreamOAuth2 as PipedreamConnection
+from dynamiq.connections.managers import get_connection_manager
 from dynamiq.nodes.tools import Pipedream
-from examples.pipedream.configurable_props_templates import GOOGLE_DRIVE_EXRACT_FILES_PROPS, JIRA_CREATE_ISSUE_PROPS
+from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
+from examples.components.tools.pipedream.configurable_props_templates import (
+    GOOGLE_DRIVE_EXRACT_FILES_PROPS,
+    JIRA_CREATE_ISSUE_PROPS,
+)
 
 JIRA_AUTH_PROVISION_ID = ""
 JIRA_DYNAMIC_PROPS_ID = ""

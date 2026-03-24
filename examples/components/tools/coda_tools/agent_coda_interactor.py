@@ -16,7 +16,7 @@ from dynamiq.nodes.tools.coda.tables import (
     ListTables,
     UpdateRow,
 )
-from examples.utils import setup_llm
+from examples.components.tools.extra_utils import setup_llm
 
 if __name__ == "__main__":
     coda_connection = Coda()

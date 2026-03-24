@@ -8,7 +8,7 @@ from dynamiq.nodes.agents import Agent
 
 from dynamiq.connections import Composio as ComposioConnection
 from dynamiq.nodes.tools import Composio
-from examples.utils.utils_llm import setup_llm
+from examples.components.tools.extra_utils import setup_llm
 
 
 def require_env(name: str) -> str:
