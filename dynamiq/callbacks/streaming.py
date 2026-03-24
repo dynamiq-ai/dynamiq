@@ -339,6 +339,9 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._answer_started: bool = False
         self._tool_input_started: bool = False
         self._current_action_name: str | None = None
+        self._fc_object_tool_input: bool = False
+        self._brace_depth: int = 0
+        self._brace_scan_index: int = 0
         self._state_has_emitted: dict[str, bool] = {
             StreamingState.REASONING: False,
             StreamingState.ANSWER: False,
@@ -367,6 +370,10 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
             if function_name and function_name == FINAL_ANSWER_FUNCTION_NAME:
                 self._answer_started = True
+            elif function_name:
+                self._tool_input_started = True
+                self._current_action_name = self.agent.sanitize_tool_name(function_name)
+                self.agent._streaming_tool_run_id = generate_uuid()
         else:
             text_delta = self._extract_text_delta(chunk)
 
@@ -769,6 +776,35 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             return -1
         return index + 1
 
+    def _find_field_object_value_start(self, input_string: str, field_name: str, start_index: int = 0) -> int:
+        """
+        Find the index of the opening brace of an object field value.
+        Returns -1 if field or opening brace is not fully present yet.
+
+        Args:
+            input_string: The string to search in.
+            field_name: The name of the field to search for.
+            start_index: The index to start searching from.
+
+        Returns:
+            int: The index of the opening brace, or -1 if not found.
+        """
+        key = f'"{field_name}"'
+        position = input_string.find(key, start_index)
+        if position == -1:
+            return -1
+
+        colon_index = input_string.find(":", position + len(key))
+        if colon_index == -1:
+            return -1
+
+        index = colon_index + 1
+        while index < len(input_string) and input_string[index] in WHITESPACE_PATTERNS:
+            index += 1
+        if index >= len(input_string) or input_string[index] != "{":
+            return -1
+        return index
+
     def _initialize_json_field_state(
         self, buf: str, field_name: str, state: str, final_answer_only: bool = False
     ) -> bool:
@@ -800,6 +836,35 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             self._current_state = state
             self._state_start_index = field_start
             self._state_last_emit_index = max(self._state_last_emit_index, field_start)
+            return True
+        return False
+
+    def _initialize_json_object_field_state(self, buf: str, field_name: str, state: str) -> bool:
+        """
+        Initialize streaming state for a JSON object field (brace-delimited).
+
+        Args:
+            buf: Buffer containing JSON content
+            field_name: Name of the JSON field to look for
+            state: State to set if field is found
+
+        Returns:
+            bool: True if state was initialized, False otherwise
+        """
+        if self._current_state is not None:
+            return False
+
+        field_start = self._find_field_object_value_start(
+            buf, field_name, max(0, self._state_last_emit_index - FIND_JSON_FIELD_MAX_OFFSET)
+        )
+
+        if field_start != -1:
+            self._current_state = state
+            self._state_start_index = field_start
+            self._state_last_emit_index = max(self._state_last_emit_index, field_start)
+            self._fc_object_tool_input = True
+            self._brace_depth = 1
+            self._brace_scan_index = field_start + 1
             return True
         return False
 
@@ -858,14 +923,23 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             self._initialize_json_field_state(buf, answer_field, StreamingState.ANSWER)
 
         if self._tool_input_started and not self._answer_started:
-            self._initialize_json_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT)
+            if not self._initialize_json_field_state(
+                buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT
+            ):
+                if self._current_state is None and is_function_calling:
+                    self._initialize_json_object_field_state(
+                        buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT
+                    )
 
         if self._current_state == StreamingState.REASONING:
             self._emit_json_field_content(buf, StreamingState.REASONING)
         elif self._current_state == StreamingState.ANSWER:
             self._emit_json_field_content(buf, StreamingState.ANSWER)
         elif self._current_state == StreamingState.TOOL_INPUT:
-            self._emit_json_field_content(buf, StreamingState.TOOL_INPUT)
+            if self._fc_object_tool_input:
+                self._emit_json_object_field_content(buf, StreamingState.TOOL_INPUT)
+            else:
+                self._emit_json_field_content(buf, StreamingState.TOOL_INPUT)
 
     def _skip_whitespace(self, text: str, start: int) -> int:
         """Skip whitespace characters starting from the given position."""
@@ -910,6 +984,56 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             self._state_last_emit_index = segment_end_target
         return False
 
+    def _emit_json_object_field_content(self, buf: str, step: str) -> bool:
+        """
+        Emit JSON object field content using brace counting to find the object boundary.
+        Handles nested objects and strings correctly by tracking brace depth across calls.
+
+        Args:
+            buf: Buffer containing the JSON content
+            step: The streaming step (e.g. "tool_input")
+
+        Returns:
+            bool: True if the object is complete, False otherwise.
+        """
+        i = self._brace_scan_index
+        while i < len(buf):
+            ch = buf[i]
+            if ch == '"':
+                end = self._find_unescaped_quote_end(buf, i)
+                if end == -1:
+                    break
+                i = end + 1
+                continue
+            if ch == "{":
+                self._brace_depth += 1
+            elif ch == "}":
+                self._brace_depth -= 1
+                if self._brace_depth == 0:
+                    end_pos = i + 1
+                    if end_pos > self._state_last_emit_index:
+                        segment_start = self._state_last_emit_index
+                        while segment_start < end_pos:
+                            segment_end = min(end_pos, segment_start + STREAMING_SEGMENT_SIZE)
+                            self._emit(buf[segment_start:segment_end], step=step)
+                            segment_start = segment_end
+                        self._state_last_emit_index = end_pos
+                    self._current_state = None
+                    self._brace_scan_index = end_pos
+                    return True
+            i += 1
+        self._brace_scan_index = i
+
+        safe_end = max(self._state_last_emit_index, len(buf) - self._tail_guard)
+        if safe_end > self._state_last_emit_index:
+            segment_start = self._state_last_emit_index
+            while segment_start < safe_end:
+                segment_end = min(safe_end, segment_start + STREAMING_SEGMENT_SIZE)
+                self._emit(buf[segment_start:segment_end], step=step)
+                segment_start = segment_end
+            self._state_last_emit_index = safe_end
+        return False
+
     def _trim_buffer(self, force: bool = False) -> None:
         """Trim already-emitted prefix of buffer to prevent re-detection."""
         if not self._buffer:
@@ -935,3 +1059,4 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         # Rebase the indices
         self._state_start_index = max(0, self._state_start_index - keep_from)
         self._state_last_emit_index = max(0, self._state_last_emit_index - keep_from)
+        self._brace_scan_index = max(0, self._brace_scan_index - keep_from)
