@@ -533,7 +533,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
         action = first_call["function"]["name"].strip()
         first_args = first_call["function"]["arguments"]
 
-        thought = first_args.get("thought", "")
+        thoughts = [tc["function"]["arguments"].get("thought", "") for tc in tool_calls]
+        thought = "\n".join(t for t in thoughts if t)
         if action == "provide_final_answer":
             final_answer = first_args["answer"]
             self._requested_output_files = self._parse_output_files_csv(first_args.get("output_files") or "")
