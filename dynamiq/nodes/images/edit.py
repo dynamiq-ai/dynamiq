@@ -78,9 +78,8 @@ class ImageEditInputSchema(BaseModel):
         description="Optional mask image indicating areas to edit.",
     )
     n: int | None = None
-    output_file_name: str = Field(
-        ...,
-        min_length=1,
+    output_file_name: str | None = Field(
+        default="edited_image.png",
         description="Output filename for edited image file(s). "
         "When multiple images are generated, an index suffix is added.",
     )

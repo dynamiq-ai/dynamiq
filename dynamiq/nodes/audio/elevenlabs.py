@@ -51,9 +51,8 @@ def format_url(method: str, url: str, voice_id: str) -> str:
 
 class ElevenLabsTTSInputSchema(BaseModel):
     text: str = Field(..., description="Parameter to provide text for vocalization.")
-    output_file_name: str = Field(
-        ...,
-        min_length=1,
+    output_file_name: str | None = Field(
+        default="audio.mp3",
         description="Output filename for generated audio file.",
     )
 
@@ -155,9 +154,8 @@ class ElevenLabsTTS(ConnectionNode):
 
 class ElevenLabsSTSInputSchema(BaseModel):
     audio: io.BytesIO | bytes = Field(..., description="Parameter to provide input audio for audio generation.")
-    output_file_name: str = Field(
-        ...,
-        min_length=1,
+    output_file_name: str | None = Field(
+        default="audio.mp3",
         description="Output filename for generated audio file.",
     )
     model_config = ConfigDict(arbitrary_types_allowed=True)
