@@ -22,7 +22,7 @@ classifiers = [
 [tool.poetry.dependencies]
 python = ">=3.10,<3.14"
 jinja2 = "~3.1.6"
-pydantic = {version = "~2.11.7", extras = ["email"]}
+pydantic = "~2.11.7"
 openai = ">=1.83.0"
 boto3 = "~1.34.34"
 redis = "~5.0.0"
@@ -81,17 +81,8 @@ markdown = "~3.7"
 inscriptis = "2.5.0"
 stagehand = "~0.4.0"
 pyOpenSSL = "~24.3.0"
-google-api-python-client = "~2.170.0"
-google-auth = "~2.35.0"
-google-auth-httplib2 = "~0.2.0"
-google-auth-oauthlib = "~1.2.2"
-mistune = "~3.1.4"
 steel-sdk = "0.15.0"
 reportlab = "~4.3.0"
-cua-computer = { version = "0.4.19", python = ">=3.12,<3.14", optional = true }
-
-[tool.poetry.extras]
-cua = ["cua-computer"]
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~78.1.1"
