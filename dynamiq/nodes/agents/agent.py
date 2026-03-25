@@ -111,6 +111,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
     _response_format: dict[str, Any] | None = None
     _requested_output_files: list[str] = []
     _streaming_tool_run_id: str | None = None
+    _streaming_tool_run_ids: list[str] = []
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
@@ -137,6 +138,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         super().reset_run_state()
         self.state.reset()
         self._streaming_tool_run_id = None
+        self._streaming_tool_run_ids = []
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -335,8 +337,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             str: The batch tool_run_id used for the run_parallel event.
         """
         per_tool_reasoning = []
-        for tp in prepared_tools:
-            tid = generate_uuid()
+        for i, tp in enumerate(prepared_tools):
+            tid = self._streaming_tool_run_ids[i] if i < len(self._streaming_tool_run_ids) else generate_uuid()
             tp["tool_run_id"] = tid
             resolved = self.tool_by_names.get(self.sanitize_tool_name(tp["name"]))
             tool_data = AgentToolData(
@@ -357,6 +359,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         batch_tool_run_id = self._streaming_tool_run_id or generate_uuid()
         self._streaming_tool_run_id = None
+        self._streaming_tool_run_ids = []
         batch_tool_data = AgentToolData(
             name=PARALLEL_TOOL_NAME,
             type="tool",

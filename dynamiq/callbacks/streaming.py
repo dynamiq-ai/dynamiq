@@ -351,6 +351,9 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         # Set a tail guard to avoid streaming parts of the next tag that may arrive in next chunk
         self._tail_guard: int = TAIL_GUARD_SIZE
 
+        # Tracks current tool call index for parallel function calling
+        self._fc_current_index: int = -1
+
         self.mode_name = getattr(self.agent.inference_mode, "name", str(self.agent.inference_mode)).upper()
 
     def on_node_execute_stream(self, serialized: dict[str, Any], chunk: dict[str, Any] | None = None, **kwargs: Any):
@@ -366,14 +369,21 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             return
 
         if self.mode_name == InferenceMode.FUNCTION_CALLING.value:
-            text_delta, function_name = self._extract_function_calling_text(chunk)
+            text_delta, function_name, tc_index = self._extract_function_calling_text(chunk)
+            print(chunk)
+            if tc_index != self._fc_current_index:
+                if self._fc_current_index != -1:
+                    self._reset_tool_call_state()
+                self._fc_current_index = tc_index
 
             if function_name and function_name == FINAL_ANSWER_FUNCTION_NAME:
                 self._answer_started = True
             elif function_name:
                 self._tool_input_started = True
                 self._current_action_name = self.agent.sanitize_tool_name(function_name)
-                self.agent._streaming_tool_run_id = generate_uuid()
+                new_id = generate_uuid()
+                self.agent._streaming_tool_run_id = new_id
+                self.agent._streaming_tool_run_ids.append(new_id)
         else:
             text_delta = self._extract_text_delta(chunk)
 
@@ -418,6 +428,23 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                 self._emit(remaining_content, step=self._current_state)
                 self._state_last_emit_index = len(self._buffer)
 
+    def _reset_tool_call_state(self) -> None:
+        """Reset parser state for a new tool call in parallel function calling."""
+        self._flush_buffer()
+        self._buffer = ""
+        self._current_state = None
+        self._state_start_index = 0
+        self._state_last_emit_index = 0
+        self._tool_input_started = False
+        self._fc_object_tool_input = False
+        self._brace_depth = 0
+        self._brace_scan_index = 0
+        self._state_has_emitted = {
+            StreamingState.REASONING: False,
+            StreamingState.ANSWER: False,
+            StreamingState.TOOL_INPUT: False,
+        }
+
     def _extract_text_delta(self, chunk: dict[str, Any]) -> str:
         """Extract textual content from streaming chunk received from the LLM.
 
@@ -438,16 +465,17 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
         return extracted_content
 
-    def _extract_function_calling_text(self, chunk: dict[str, Any]) -> tuple[str, str | None]:
+    def _extract_function_calling_text(self, chunk: dict[str, Any]) -> tuple[str, str | None, int]:
         """
-        Extract incremental JSON values (arguments) and function name
+        Extract incremental JSON values (arguments), function name, and tool call index
         from the LLM streaming chunks in FUNCTION_CALLING inference mode.
 
         Returns:
-            tuple[str, str | None]: (arguments_text, function_name)
+            tuple[str, str | None, int]: (arguments_text, function_name, tool_call_index)
         """
         arguments_text = ""
         function_name = None
+        tc_index = 0
 
         choices = chunk.get("choices") or []
         if choices:
@@ -456,6 +484,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
             if tool_calls and len(tool_calls) > 0:
                 tool_call = tool_calls[0]
+                tc_index = tool_call.get("index", 0)
                 if tool_call.get("type") == "function" and "function" in tool_call:
                     function_data = tool_call["function"]
 
@@ -465,7 +494,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                     if function_data.get("arguments"):
                         arguments_text = function_data["arguments"]
 
-        return arguments_text, function_name
+        return arguments_text, function_name, tc_index
 
     def _resolve_tool_data(self) -> AgentToolData:
         """Resolve the current action name to an AgentToolData instance."""
