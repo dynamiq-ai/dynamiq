@@ -546,6 +546,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         actual_tool_calls = [tc for tc in tool_calls if tc["function"]["name"].strip() != "provide_final_answer"]
 
+        if len(actual_tool_calls) > 1 and not self.parallel_tool_calls_enabled:
+            logger.warning(
+                f"Agent {self.name} - {self.id}: LLM returned {len(actual_tool_calls)} tool calls "
+                f"but parallel_tool_calls_enabled is False. Only the first tool call will be executed, "
+                f"remaining {len(actual_tool_calls) - 1} call(s) will be dropped."
+            )
+
         if len(actual_tool_calls) > 1 and self.parallel_tool_calls_enabled:
             tool_items = []
             for tc in actual_tool_calls:

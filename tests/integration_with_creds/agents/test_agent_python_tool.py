@@ -34,15 +34,24 @@ class FilterOptions(BaseModel):
     tags: list[str] = Field(default_factory=list, description="Tags to filter by.")
 
 
+class ActionType(str, Enum):
+    """Required enum (no default) -- mirrors Stagehand's action_type."""
+
+    ANALYZE = "analyze"
+    SUMMARIZE = "summarize"
+    EXTRACT = "extract"
+
+
 class ComprehensiveInputSchema(BaseModel):
     """Single schema covering all type patterns found in real tool schemas.
 
-    Non-nullable (from TextAnalysisInputSchema):
-        str (required), str (default), Enum (default), int (default),
-        list[str] (default_factory), bool (default)
-    Nullable (from Firecrawl/Exa/ImageGen/Stagehand):
-        int|None (with ge/le), str|None, bool|None, Enum|None,
-        list[str]|None, Model|None
+    Non-nullable:
+        str (required), str (default), Enum (default), Enum (required, no default),
+        int (default), list[str] (default_factory), bool (default),
+        str (required + min_length)
+    Nullable:
+        int|None (with ge/le), int|None (bare, no Field), str|None, bool|None,
+        Enum|None, list[str]|None, Model|None
     Special:
         is_accessible_to_agent=False, ConfigDict(extra='allow')
     """
@@ -50,11 +59,14 @@ class ComprehensiveInputSchema(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     text: str = Field(..., description="Text to analyze.")
+    action_type: ActionType = Field(..., description="Type of analysis to perform.")
+    output_name: str = Field(..., min_length=1, description="Output identifier for the result.")
     language: str = Field(default="en", description="ISO-639 language code.")
     format: OutputFormat = Field(default=OutputFormat.SUMMARY, description="Output format.")
     max_length: int = Field(default=500, description="Maximum output length in characters.")
     keywords: list[str] = Field(default_factory=list, description="Keywords to focus on.")
     include_stats: bool = Field(default=False, description="Include word/char statistics.")
+    count: int | None = None
     limit: int | None = Field(default=None, ge=1, le=100, description="Max results to return.")
     label: str | None = Field(default=None, description="Optional label.")
     verbose: bool | None = Field(default=None, description="Enable verbose output.")
@@ -69,12 +81,14 @@ class ComprehensiveInputSchema(BaseModel):
 
 
 class ComprehensiveTool(Node):
-    """Tool whose schema exercises both non-nullable and nullable type patterns."""
+    """Tool whose schema exercises all major type patterns from real tools."""
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Comprehensive Tool"
     description: str = (
-        "Analyzes text and optionally filters results. " "Provide 'text' (required). All other parameters are optional."
+        "Analyzes text with a specified action type. "
+        "Required: 'text', 'action_type' (analyze/summarize/extract), 'output_name'. "
+        "All other parameters are optional."
     )
     input_schema: ClassVar[type[ComprehensiveInputSchema]] = ComprehensiveInputSchema
 
@@ -96,10 +110,14 @@ class ComprehensiveTool(Node):
         else:
             body = f"Summary: {word_count} words, {char_count} chars in {input_data.language}."
 
+        body = f"[{input_data.action_type.value}][{input_data.output_name}] {body}"
+
         if input_data.include_stats:
             body += f" Stats: {word_count}w, {char_count}c."
 
         extras = []
+        if input_data.count is not None:
+            extras.append(f"count={input_data.count}")
         if input_data.limit is not None:
             extras.append(f"limit={input_data.limit}")
         if input_data.label is not None:
