@@ -370,7 +370,6 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
         if self.mode_name == InferenceMode.FUNCTION_CALLING.value:
             text_delta, function_name, tc_index = self._extract_function_calling_text(chunk)
-            print(chunk)
             if tc_index != self._fc_current_index:
                 if self._fc_current_index != -1:
                     self._reset_tool_call_state()
