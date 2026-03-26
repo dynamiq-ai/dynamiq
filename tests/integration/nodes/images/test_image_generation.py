@@ -161,6 +161,36 @@ def test_image_generation_custom_output_filename(
     assert node_output["output"]["files"][0].name == "poster.png"
 
 
+def test_image_generation_uses_default_output_filename_when_omitted(
+    mock_image_generation_executor,
+    mock_image_b64,
+):
+    """Regression: omitted output_file_name uses schema default."""
+    openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")
+
+    image_node = ImageGeneration(
+        name="Image Generator Default Filename",
+        model="gpt-image-1",
+        connection=openai_connection,
+        response_format=ImageResponseFormat.B64_JSON,
+    )
+
+    wf = Workflow(
+        id=str(uuid.uuid4()),
+        flow=Flow(nodes=[image_node]),
+    )
+
+    response = wf.run(
+        input_data={"prompt": "A serene lake at dawn"},
+        config=RunnableConfig(callbacks=[]),
+    )
+
+    assert response.status == RunnableStatus.SUCCESS
+    node_output = response.output[image_node.id]
+    assert node_output["output"]["content"][0] == "generated_image.png created"
+    assert node_output["output"]["files"][0].name == "generated_image.png"
+
+
 def test_image_generation_with_tracing(
     mock_image_generation_executor,
     mock_requests_get,

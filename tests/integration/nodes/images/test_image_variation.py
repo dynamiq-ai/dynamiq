@@ -165,6 +165,36 @@ def test_image_variation_custom_output_filename(
     assert node_output["output"]["files"][0].name == "variation_asset.png"
 
 
+def test_image_variation_uses_default_output_filename_when_omitted(
+    mock_image_file,
+    mock_image_variation_executor,
+):
+    """Regression: omitted output_file_name uses schema default."""
+    openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")
+
+    image_node = ImageVariation(
+        name="Image Variation Default Filename",
+        model="gpt-image-1",
+        connection=openai_connection,
+        response_format=ImageResponseFormat.B64_JSON,
+    )
+
+    wf = Workflow(
+        id=str(uuid.uuid4()),
+        flow=Flow(nodes=[image_node]),
+    )
+
+    response = wf.run(
+        input_data={"files": mock_image_file},
+        config=RunnableConfig(callbacks=[]),
+    )
+
+    assert response.status == RunnableStatus.SUCCESS
+    node_output = response.output[image_node.id]
+    assert node_output["output"]["content"][0] == "variation_image.png created"
+    assert node_output["output"]["files"][0].name == "variation_image.png"
+
+
 def test_image_variation_with_tracing(
     mock_image_file,
     mock_image_variation_executor,

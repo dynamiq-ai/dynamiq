@@ -202,6 +202,36 @@ def test_image_edit_custom_output_filename(
     assert node_output["output"]["files"][0].name == "edited_asset.png"
 
 
+def test_image_edit_uses_default_output_filename_when_omitted(
+    mock_image_file,
+    mock_image_edit_executor,
+):
+    """Regression: omitted output_file_name uses schema default."""
+    openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")
+
+    node = ImageEdit(
+        name="Image Editor Default Filename",
+        model="gpt-image-1",
+        connection=openai_connection,
+        response_format=ImageResponseFormat.B64_JSON,
+    )
+
+    wf = Workflow(
+        id=str(uuid.uuid4()),
+        flow=Flow(nodes=[node]),
+    )
+
+    response = wf.run(
+        input_data={"prompt": "Add a sunset background", "files": mock_image_file},
+        config=RunnableConfig(callbacks=[]),
+    )
+
+    assert response.status == RunnableStatus.SUCCESS
+    node_output = response.output[node.id]
+    assert node_output["output"]["content"][0] == "edited_image.png created"
+    assert node_output["output"]["files"][0].name == "edited_image.png"
+
+
 @pytest.mark.parametrize(
     ("image_input", "expected_type"),
     [
