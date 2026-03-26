@@ -1,0 +1,83 @@
+connections:
+    unstructured-connection:
+        type: dynamiq.connections.Unstructured
+        api_key: ${oc.env:UNSTRUCTURED_API_KEY}
+
+nodes:
+    input:
+        id: input
+        name: input
+        type: dynamiq.nodes.utils.Input
+        error_handling: {}
+        schema:
+            properties:
+                files:
+                    deletable: true
+                    required: false
+                    type: list[file]
+                input:
+                    deletable: true
+                    required: false
+                    type: Any
+    output:
+        id: output
+        name: output
+        type: dynamiq.nodes.utils.Output
+        input_transformer:
+            selector:
+                output: $.multi-file-type-converter.output.documents
+        error_handling: {}
+        depends:
+            - node: multi-file-type-converter
+        schema:
+            properties:
+                output:
+                    deletable: true
+                    required: true
+                    type: Any
+    multi-file-type-converter:
+        id: multi-file-type-converter
+        name: multi-file-type-converter
+        type: dynamiq.nodes.converters.MultiFileTypeConverter
+        input_transformer:
+            selector:
+                files: $.input.output.files
+        output_transformer: {}
+        caching:
+            enabled: false
+        streaming:
+            enabled: false
+        error_handling: {}
+        depends:
+            node: input
+        converters:
+            id: custom-pdf-converter
+            name: custom-pdf-converter
+            type: dynamiq.nodes.converters.PyPDFConverter
+            caching:
+                enabled: true
+            error_handling:
+                timeout_seconds: 120
+                max_retries: 2
+                retry_interval_seconds: 5
+        fallback_converter:
+            id: unstructured-converter
+            name: unstructured-converter
+            type: dynamiq.nodes.converters.UnstructuredFileConverter
+            connection: unstructured-connection
+            caching:
+                enabled: true
+            error_handling:
+                timeout_seconds: 120
+                max_retries: 2
+                retry_interval_seconds: 5
+
+flows:
+    multi-file-type-converter-flow:
+        nodes:
+            - input
+            - output
+            - multi-file-type-converter
+workflows:
+    multi-file-type-converter-workflow:
+        flow: multi-file-type-converter-flow
