@@ -1728,3 +1728,80 @@ class SteelBrowser(BaseConnection):
 
     def connect(self):
         pass
+
+
+class CuaOperatingSystemType(enum.Enum):
+    """Operating system types supported by CUA."""
+
+    LINUX = "linux"
+    WINDOWS = "windows"
+    MACOS = "macos"
+
+
+class CuaProviderType(enum.Enum):
+    """Provider types supported by CUA."""
+
+    CLOUD = "cloud"
+    DOCKER = "docker"
+
+
+class CuaDockerImage(enum.Enum):
+    XFCE = "trycua/cua-xfce:latest"
+    UBUNTU = "trycua/cua-ubuntu:latest"
+
+
+class CuaDesktop(BaseConnection):
+    """
+    Represents a connection to Cua desktop environment.
+    Supports both cloud-based and local Docker-based computer instances
+    to interact with a desktop environment.
+    """
+
+    api_key: str = Field(
+        default_factory=partial(get_env_var, "CUA_API_KEY"),
+        description="API key for cloud provider (required for `provider_type='cloud'`)",
+    )
+    os_type: CuaOperatingSystemType = Field(
+        default=CuaOperatingSystemType.LINUX, description="Operating system type for the computer"
+    )
+    provider_type: CuaProviderType = Field(
+        default=CuaProviderType.CLOUD, description="Provider type: `cloud` or `docker`"
+    )
+    computer_name: str | None = Field(default=None, description="Name of the sandbox to use")
+    image: CuaDockerImage | None = Field(
+        default=None,
+        description="Docker image name (required for `provider_type='docker'`). ",
+    )
+
+    def model_post_init(self, __context):
+        """Validate configuration after initialization."""
+        super().model_post_init(__context)
+
+        if self.provider_type == CuaProviderType.CLOUD and not self.api_key:
+            raise ValueError("api_key is required when provider_type is `cloud`")
+
+        if self.provider_type == CuaProviderType.DOCKER and self.image is None:
+            raise ValueError("image is required when provider_type is `docker`.")
+
+    def connect(self):
+        """
+        Connects to the CUA desktop environment.
+        Returns:
+            Computer: The CUA Computer client instance configured for the specified provider.
+        """
+        from computer import Computer
+
+        connection_params = {
+            "os_type": self.os_type.value,
+            "provider_type": self.provider_type.value,
+        }
+
+        if self.computer_name:
+            connection_params["name"] = self.computer_name
+
+        if self.provider_type == CuaProviderType.DOCKER and self.image is not None:
+            connection_params["image"] = self.image.value
+
+        computer = Computer(**connection_params)
+
+        return computer
