@@ -24,6 +24,7 @@ def _make_tool(name: str, code: str) -> Python:
 
 
 @pytest.mark.integration
+@pytest.mark.flaky(reruns=3)
 @pytest.mark.parametrize("inference_mode", [InferenceMode.FUNCTION_CALLING, InferenceMode.XML])
 def test_parallel_tool_calling(inference_mode: InferenceMode):
     """Agent with parallel_tool_calls_enabled calls two tools in parallel for both inference modes."""

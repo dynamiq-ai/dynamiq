@@ -287,7 +287,7 @@ def _run_comprehensive_schema_test(llm, comprehensive_tool, run_config, inferenc
     )
     result = agent.run(
         input_data={
-            "input": "Analyze the text 'Hello world from Python testing' in summary format with limit"
+            "input": "Analyze the text 'Hello world from Python testing' in summary format with limit "
             "5 and high priority"
         },
         config=run_config,

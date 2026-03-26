@@ -559,11 +559,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 tc_name = tc["function"]["name"].strip()
                 tc_args = tc["function"]["arguments"]
                 tc_input = tc_args["action_input"]
-                if isinstance(tc_input, str):
-                    try:
-                        tc_input = json.loads(tc_input)
-                    except json.JSONDecodeError:
-                        pass
+                if not isinstance(tc_input, dict):
+                    tc_input = {"input": tc_input}
                 tool_items.append(ToolCallItem(name=tc_name, input=tc_input))
 
             validated = ParallelToolCallsInputSchema(tools=tool_items)
