@@ -438,6 +438,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._state_start_index = 0
         self._state_last_emit_index = 0
         self._tool_input_started = False
+        self._answer_started = False
         self._fc_object_tool_input = False
         self._brace_depth = 0
         self._brace_scan_index = 0
