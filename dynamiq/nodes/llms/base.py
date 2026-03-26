@@ -456,11 +456,11 @@ class BaseLLM(ConnectionNode):
         content = response.choices[0].message.content
         result = {"content": content}
         if tool_calls := response.choices[0].message.tool_calls:
-            tool_calls_parsed = {}
+            tool_calls_parsed = []
             for tc in tool_calls:
                 call = tc.model_dump()
                 call["function"]["arguments"] = json.loads(call["function"]["arguments"])
-                tool_calls_parsed[call["function"]["name"]] = call
+                tool_calls_parsed.append(call)
             result["tool_calls"] = tool_calls_parsed
 
         usage_data = self.get_usage_data(model=self.model, completion=response).model_dump()
@@ -566,6 +566,7 @@ class BaseLLM(ConnectionNode):
         prompt: Prompt | None = None,
         tools: list[Tool | dict] | None = None,
         response_format: dict[str, Any] | None = None,
+        parallel_tool_calls: bool | None = None,
         **kwargs,
     ):
         """Execute the LLM node.
@@ -579,6 +580,8 @@ class BaseLLM(ConnectionNode):
             prompt (Prompt, optional): The prompt to use for this execution. Defaults to None.
             tools (list[Tool|dict]): List of tools that llm can call.
             response_format (dict[str, Any]): JSON schema that specifies the structure of the llm's output
+            parallel_tool_calls (bool | None): Whether to allow the LLM to return multiple tool calls
+                in a single response. None means provider decides.
             **kwargs: Additional keyword arguments.
 
         Returns:
@@ -626,6 +629,8 @@ class BaseLLM(ConnectionNode):
             "drop_params": True,
             **params,
         }
+        if parallel_tool_calls is not None:
+            common_params["parallel_tool_calls"] = parallel_tool_calls
 
         common_params = self.update_completion_params(common_params)
 
