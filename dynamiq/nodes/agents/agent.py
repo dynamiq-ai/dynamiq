@@ -3,7 +3,7 @@ from concurrent.futures import as_completed
 from typing import Any, Callable, Mapping
 
 from litellm import get_supported_openai_params, supports_function_calling
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
@@ -111,7 +111,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
     _response_format: dict[str, Any] | None = None
     _requested_output_files: list[str] = []
     _streaming_tool_run_id: str | None = None
-    _streaming_tool_run_ids: list[str] = []
+    _streaming_tool_run_ids: list[str] = PrivateAttr(default_factory=list)
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
@@ -349,7 +349,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             per_tool_reasoning.append(
                 AgentReasoningEventMessageData(
                     tool_run_id=tid,
-                    thought=thought or "",
+                    thought="",
                     action=tp["name"],
                     tool=tool_data,
                     action_input=tp["input"],
@@ -357,7 +357,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 ).model_dump()
             )
 
-        batch_tool_run_id = generate_uuid()
+        batch_tool_run_id = generate_uuid() if self._streaming_tool_run_ids else self._streaming_tool_run_id
         self._streaming_tool_run_id = None
         self._streaming_tool_run_ids = []
         batch_tool_data = AgentToolData(
