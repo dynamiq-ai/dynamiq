@@ -357,7 +357,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 ).model_dump()
             )
 
-        batch_tool_run_id = generate_uuid() if self._streaming_tool_run_ids else self._streaming_tool_run_id or generate_uuid()
+        batch_tool_run_id = (
+            generate_uuid() if self._streaming_tool_run_ids else self._streaming_tool_run_id or generate_uuid()
+        )
         self._streaming_tool_run_id = None
         self._streaming_tool_run_ids = []
         batch_tool_data = AgentToolData(
