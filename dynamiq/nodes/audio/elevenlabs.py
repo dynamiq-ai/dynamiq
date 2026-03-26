@@ -51,9 +51,9 @@ def format_url(method: str, url: str, voice_id: str) -> str:
 
 class ElevenLabsTTSInputSchema(BaseModel):
     text: str = Field(..., description="Parameter to provide text for vocalization.")
-    output_file_name: str = Field(
-        default="audio.mp3",
-        description="Output filename for generated audio file.",
+    output_file_name: str | None = Field(
+        default=None,
+        description="Optional output filename for generated audio file.",
     )
 
 
@@ -140,7 +140,11 @@ class ElevenLabsTTS(ConnectionNode):
         if response.status_code != 200:
             response.raise_for_status()
 
-        output_file_name = input_data.output_file_name or self.output_file_name or "audio.mp3"
+        output_file_name = (
+            input_data.output_file_name
+            if input_data.output_file_name is not None
+            else (self.output_file_name or "audio.mp3")
+        )
         audio_bytes = response.content
         audio_file = io.BytesIO(audio_bytes)
         audio_file.name = output_file_name
@@ -154,9 +158,9 @@ class ElevenLabsTTS(ConnectionNode):
 
 class ElevenLabsSTSInputSchema(BaseModel):
     audio: io.BytesIO | bytes = Field(..., description="Parameter to provide input audio for audio generation.")
-    output_file_name: str = Field(
-        default="audio.mp3",
-        description="Output filename for generated audio file.",
+    output_file_name: str | None = Field(
+        default=None,
+        description="Optional output filename for generated audio file.",
     )
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -247,7 +251,11 @@ class ElevenLabsSTS(ConnectionNode):
         if response.status_code != 200:
             response.raise_for_status()
 
-        output_file_name = input_data.output_file_name or self.output_file_name or "audio.mp3"
+        output_file_name = (
+            input_data.output_file_name
+            if input_data.output_file_name is not None
+            else (self.output_file_name or "audio.mp3")
+        )
         audio_bytes = response.content
         audio_file = io.BytesIO(audio_bytes)
         audio_file.name = output_file_name
