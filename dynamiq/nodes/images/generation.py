@@ -105,7 +105,7 @@ class ImageGenerationInputSchema(BaseModel):
 
     prompt: str = Field(..., description="Text prompt describing the image to generate.")
     n: int | None = None
-    output_file_name: str = Field(
+    output_file_name: str | None = Field(
         default="generated_image.png",
         description="Output filename for generated image file(s). "
         "When multiple images are generated, an index suffix is added.",

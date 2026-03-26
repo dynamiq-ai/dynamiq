@@ -25,7 +25,7 @@ class ImageVariationInputSchema(BaseModel):
         json_schema_extra={"map_from_storage": True, "is_accessible_to_agent": False},
     )
     n: int | None = None
-    output_file_name: str = Field(
+    output_file_name: str | None = Field(
         default="variation_image.png",
         description="Output filename for variation file(s). "
         "When multiple images are generated, an index suffix is added.",
