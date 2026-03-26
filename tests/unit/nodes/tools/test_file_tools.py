@@ -606,3 +606,14 @@ def test_file_read_tool_page_on_non_pdf_warns(monkeypatch, file_store, llm_model
     assert result.status == RunnableStatus.SUCCESS
     assert "only supported for PDF" in result.output["content"]
     assert "Full docx text" in result.output["content"]
+
+
+def test_file_read_tool_line_range_binary_fallback(file_store, llm_model):
+    """Line slicing works on the binary fallback path for unknown file types."""
+    file_store.store("data.xyz", b"alpha\nbeta\ngamma\ndelta\n")
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+    result = tool.run({"file_path": "data.xyz", "start_line": 2, "end_line": 3, "brief": "Read lines"})
+    assert result.status == RunnableStatus.SUCCESS
+    assert "beta" in result.output["content"]
+    assert "gamma" in result.output["content"]
+    assert "alpha" not in result.output["content"]
