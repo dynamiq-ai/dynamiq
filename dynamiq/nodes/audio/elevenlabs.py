@@ -140,11 +140,7 @@ class ElevenLabsTTS(ConnectionNode):
         if response.status_code != 200:
             response.raise_for_status()
 
-        output_file_name = (
-            input_data.output_file_name
-            if input_data.output_file_name is not None
-            else (self.output_file_name or "audio.mp3")
-        )
+        output_file_name = input_data.output_file_name or self.output_file_name or "audio.mp3"
         audio_bytes = response.content
         audio_file = io.BytesIO(audio_bytes)
         audio_file.name = output_file_name
@@ -251,11 +247,7 @@ class ElevenLabsSTS(ConnectionNode):
         if response.status_code != 200:
             response.raise_for_status()
 
-        output_file_name = (
-            input_data.output_file_name
-            if input_data.output_file_name is not None
-            else (self.output_file_name or "audio.mp3")
-        )
+        output_file_name = input_data.output_file_name or self.output_file_name or "audio.mp3"
         audio_bytes = response.content
         audio_file = io.BytesIO(audio_bytes)
         audio_file.name = output_file_name
