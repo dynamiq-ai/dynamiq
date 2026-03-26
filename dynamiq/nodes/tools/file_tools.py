@@ -154,6 +154,26 @@ class FileReadInputSchema(BaseModel):
         default="file",
         description="For PDF-like documents, 'page' keeps content separated per page (with metadata).",
     )
+    start_line: int | None = Field(
+        default=None,
+        description="1-based inclusive start line for text content. "
+        "When set, only lines from start_line to end_line are returned.",
+    )
+    end_line: int | None = Field(
+        default=None,
+        description="1-based inclusive end line for text content. "
+        "If omitted while start_line is set, reads to end of file.",
+    )
+    start_page: int | None = Field(
+        default=None,
+        description="1-based inclusive start page for PDF documents. "
+        "When set, only pages from start_page to end_page are returned. Implies document_mode='page'.",
+    )
+    end_page: int | None = Field(
+        default=None,
+        description="1-based inclusive end page for PDF documents. "
+        "If omitted while start_page is set, reads to last page. Implies document_mode='page'.",
+    )
     brief: str = Field(
         default="Reading a file",
         description="Very brief description of the action being performed. "
@@ -166,6 +186,30 @@ class FileReadInputSchema(BaseModel):
         """Validate file_path to prevent path traversal attacks."""
         allow_absolute = bool((info.context or {}).get("absolute_file_paths_allowed"))
         return validate_file_path(v, allow_absolute=allow_absolute)
+
+    @model_validator(mode="after")
+    def validate_line_and_page_params(self) -> "FileReadInputSchema":
+        if self.start_line is not None and self.start_line < 1:
+            raise ValueError("start_line must be >= 1")
+        if self.end_line is not None:
+            if self.end_line < 1:
+                raise ValueError("end_line must be >= 1")
+            if self.start_line is not None and self.end_line < self.start_line:
+                raise ValueError("end_line must be >= start_line")
+        if self.start_page is not None and self.start_page < 1:
+            raise ValueError("start_page must be >= 1")
+        if self.end_page is not None:
+            if self.end_page < 1:
+                raise ValueError("end_page must be >= 1")
+            if self.start_page is not None and self.end_page < self.start_page:
+                raise ValueError("end_page must be >= start_page")
+        has_line_params = self.start_line is not None or self.end_line is not None
+        has_page_params = self.start_page is not None or self.end_page is not None
+        if has_line_params and has_page_params:
+            raise ValueError("Line params and page params are mutually exclusive")
+        if has_page_params:
+            self.document_mode = "page"
+        return self
 
 
 class FileWriteAction(str, enum.Enum):
@@ -281,6 +325,7 @@ class FileReadTool(Node):
         Automatically detects file types (PDF, DOCX, PPTX, HTML, TXT, IMAGE, etc.) and extracts text content.
         For large files (configurable threshold), returns first, middle, and last chunks as bytes with separators.
         For images and PDFs with instructions, uses LLM processing if the model supports vision/PDF input.
+        Supports reading specific line ranges (text files) or specific page ranges (PDFs).
 
         Usage Examples:
             - Read text file: {"file_path": "config.txt"}
@@ -292,6 +337,10 @@ class FileReadTool(Node):
             - Force summary preview: {"file_path": "report.pdf", "mode": "summary", "max_preview_bytes": 800}
             - Always chunk: {"file_path": "server.log", "mode": "chunked", "chunk_size_override": 4000}
             - Read image with instructions: {"file_path": "image.png", "instructions": "Describe the image in detail"}
+            - Read specific lines: {"file_path": "server.log", "start_line": 100, "end_line": 200}
+            - Read from a line to end: {"file_path": "app.py", "start_line": 50}
+            - Read specific PDF pages: {"file_path": "report.pdf", "start_page": 2, "end_page": 5}
+            - Read single PDF page: {"file_path": "report.pdf", "start_page": 3, "end_page": 3}
 
         Parameters:
             - file_path: Path of the file to read
@@ -300,11 +349,18 @@ class FileReadTool(Node):
             - chunk_size_override: Optional override for chunk sizes in bytes/chars
             - max_preview_bytes: Optional cap for summary previews
             - document_mode: "file" (default) or "page" for per-page PDF extraction
+            - start_line: 1-based inclusive start line (text files). Returns lines start_line..end_line.
+            - end_line: 1-based inclusive end line. If omitted with start_line set, reads to end of file.
+            - start_page: 1-based inclusive start page (PDFs). Implies document_mode="page".
+            - end_page: 1-based inclusive end page. If omitted with start_page set, reads to last page.
 
         Notes:
             - Whenever text is extracted from non-text sources (PDF, PPTX, spreadsheets, etc.), it is cached as
               "<original_path>.extracted.txt" inside the same file store so FileSearchTool can reuse it without
               re-running converters.
+            - When start_line/end_line are used, the response includes total_lines and line_range metadata.
+            - When start_page/end_page are used, the response includes total_pages and page_range metadata.
+            - Line params and page params are mutually exclusive.
     """
     llm: BaseLLM = Field(..., description="LLM used for image-aware file processing.")
     file_store: FileStore | Sandbox = Field(..., description="File storage to read from.")
@@ -653,19 +709,29 @@ class FileReadTool(Node):
 
             if cached_text:
                 self._log_text_preview(cached_text, "cached extracted text")
+                result_payload: dict[str, Any] = {"file_info": file_info, "cached_text_path": cached_path}
+                render_text = cached_text
+                render_mode = mode
+
+                if input_data.start_line is not None or input_data.end_line is not None:
+                    sliced, total, a_start, a_end = self._slice_lines(
+                        cached_text, input_data.start_line, input_data.end_line, input_data.file_path
+                    )
+                    render_text = sliced
+                    render_mode = "full"
+                    result_payload["total_lines"] = total
+                    result_payload["line_range"] = [a_start, a_end]
+
                 processed = self._render_text_content(
-                    text_content=cached_text,
-                    mode=mode,
+                    text_content=render_text,
+                    mode=render_mode,
                     chunk_size=chunk_size,
                     preview_limit=preview_limit,
                     file_path=input_data.file_path,
                 )
                 processed = self._append_cache_hint(processed, cached_path, hint_enabled=False)
-                return {
-                    "content": processed,
-                    "file_info": file_info,
-                    "cached_text_path": cached_path,
-                }
+                result_payload["content"] = processed
+                return result_payload
 
             try:
                 file_io = BytesIO(content)
@@ -696,15 +762,48 @@ class FileReadTool(Node):
                             cached_path = self._persist_extracted_text(input_data.file_path, text_content)
                             hint_enabled = detected_type not in {FileType.TEXT, FileType.MARKDOWN}
 
+                        render_text = text_content
+                        render_mode = mode
+                        result_payload: dict[str, Any] = {"file_info": file_info}
+                        has_page_params = input_data.start_page is not None or input_data.end_page is not None
+
+                        if has_page_params and page_entries:
+                            render_text, page_entries, total_pages, a_start, a_end = self._filter_page_range(
+                                page_entries,
+                                input_data.start_page,
+                                input_data.end_page,
+                                input_data.file_path,
+                            )
+                            render_mode = "full"
+                            result_payload["total_pages"] = total_pages
+                            result_payload["page_range"] = [a_start, a_end]
+                        elif has_page_params and not page_entries:
+                            warning = (
+                                f"--- Warning: 'start_page'/'end_page' is only supported for "
+                                f"PDF documents. File '{input_data.file_path}' "
+                                f"(detected type: {detected_type}) does not support "
+                                f"per-page extraction. Returning full content. ---\n\n"
+                            )
+                            render_text = warning + text_content
+
+                        if input_data.start_line is not None or input_data.end_line is not None:
+                            sliced, total, a_start, a_end = self._slice_lines(
+                                render_text, input_data.start_line, input_data.end_line, input_data.file_path
+                            )
+                            render_text = sliced
+                            render_mode = "full"
+                            result_payload["total_lines"] = total
+                            result_payload["line_range"] = [a_start, a_end]
+
                         processed = self._render_text_content(
-                            text_content=text_content,
-                            mode=mode,
+                            text_content=render_text,
+                            mode=render_mode,
                             chunk_size=chunk_size,
                             preview_limit=preview_limit,
                             file_path=input_data.file_path,
                         )
                         processed = self._append_cache_hint(processed, cached_path, hint_enabled)
-                        result_payload = {"content": processed, "file_info": file_info}
+                        result_payload["content"] = processed
                         if page_entries:
                             result_payload["pages"] = page_entries
                         if cached_path:
@@ -724,6 +823,23 @@ class FileReadTool(Node):
                 logger.warning(
                     f"Tool {self.name} - {self.id}: file processing failed: {str(e)}, falling back to raw content"
                 )
+
+            if input_data.start_line is not None or input_data.end_line is not None:
+                try:
+                    text_fallback = content.decode("utf-8")
+                except UnicodeDecodeError:
+                    text_fallback = None
+
+                if text_fallback is not None:
+                    sliced, total, a_start, a_end = self._slice_lines(
+                        text_fallback, input_data.start_line, input_data.end_line, input_data.file_path
+                    )
+                    return {
+                        "content": sliced,
+                        "file_info": file_info,
+                        "total_lines": total,
+                        "line_range": [a_start, a_end],
+                    }
 
             rendered_content = self._render_binary_content(
                 content=content,
@@ -939,6 +1055,68 @@ class FileReadTool(Node):
         logger.info(
             f"Tool {self.name} - {self.id}: {context} preview ({min(len(preview), limit)} chars) => {preview}{suffix}"
         )
+
+    @staticmethod
+    def _slice_lines(
+        text: str, start_line: int | None, end_line: int | None, file_path: str
+    ) -> tuple[str, int, int, int]:
+        """Slice text to a 1-based inclusive line range.
+
+        Returns:
+            (sliced_text_with_header, total_lines, actual_start, actual_end)
+        """
+        lines = text.splitlines(keepends=True)
+        total = len(lines)
+
+        actual_start = max(start_line or 1, 1)
+        actual_end = min(end_line or total, total)
+
+        if actual_start > total:
+            header = (
+                f"--- Lines {actual_start}-{end_line or '?'} requested, "
+                f"but file only has {total} line(s) (file: {file_path}) ---\n"
+            )
+            return header, total, actual_start, total
+
+        selected = lines[actual_start - 1 : actual_end]
+        sliced = "".join(selected)
+
+        header = f"--- Lines {actual_start}-{actual_end} of {total} " f"(file: {file_path}) ---\n"
+        return header + sliced, total, actual_start, actual_end
+
+    @staticmethod
+    def _filter_page_range(
+        page_entries: list[dict[str, Any]],
+        start_page: int | None,
+        end_page: int | None,
+        file_path: str,
+    ) -> tuple[str, list[dict[str, Any]], int, int, int]:
+        """Filter page entries to a 1-based inclusive page range.
+
+        Returns:
+            (filtered_text_with_header, filtered_entries, total_pages, actual_start, actual_end)
+        """
+        total_pages = len(page_entries)
+        actual_start = max(start_page or 1, 1)
+        actual_end = min(end_page or total_pages, total_pages)
+
+        if actual_start > total_pages:
+            header = (
+                f"--- Pages {actual_start}-{end_page or '?'} requested, "
+                f"but document only has {total_pages} page(s) "
+                f"(file: {file_path}) ---\n"
+            )
+            return header, [], total_pages, actual_start, total_pages
+
+        filtered = [e for e in page_entries if actual_start <= e["page"] <= actual_end]
+
+        header = f"--- Pages {actual_start}-{actual_end} of {total_pages} " f"(file: {file_path}) ---\n"
+        segments = []
+        for entry in filtered:
+            segments.append(f"=== PAGE {entry['page']} ===\n{entry['content']}")
+        filtered_text = header + "\n\n".join(segments)
+
+        return filtered_text, filtered, total_pages, actual_start, actual_end
 
 
 class FileWriteTool(Node):
