@@ -1,3 +1,5 @@
+from unittest.mock import MagicMock
+
 import pytest
 
 from dynamiq.nodes.agents.components import parser
@@ -223,3 +225,48 @@ def test_extract_default_final_answer_output_files_in_thought_and_real_field():
     assert thought == "I noted the Output Files: field is important."
     assert answer == "Done."
     assert output_files == "/tmp/result.csv"
+
+
+def test_emit_tool_input_error_streams_event():
+    """_emit_tool_input_error should call stream_content with the correct payload
+    and clear _streaming_tool_run_id."""
+    from dynamiq.nodes.agents.agent import Agent
+    from dynamiq.types.streaming import StreamingMode
+
+    agent = MagicMock(spec=Agent)
+    agent.name = "test-agent"
+    agent.streaming.enabled = True
+    agent.streaming.mode = StreamingMode.ALL
+    agent._streaming_tool_run_id = "run-123"
+    agent.stream_content = MagicMock()
+
+    error = ActionParsingException("bad json")
+    Agent._emit_tool_input_error(agent, error, loop_num=2, config=MagicMock())
+
+    agent.stream_content.assert_called_once()
+    kwargs = agent.stream_content.call_args.kwargs
+    assert kwargs["step"] == "tool_input_error"
+    assert kwargs["source"] == "test-agent"
+    data = kwargs["content"]
+    assert data["tool_run_id"] == "run-123"
+    assert data["error"] == "bad json"
+    assert data["loop_num"] == 2
+    assert agent._streaming_tool_run_id is None
+
+
+def test_emit_tool_input_error_skipped_when_streaming_disabled():
+    """_emit_tool_input_error should not emit when streaming is disabled."""
+    from dynamiq.nodes.agents.agent import Agent
+    from dynamiq.types.streaming import StreamingMode
+
+    agent = MagicMock(spec=Agent)
+    agent.name = "test-agent"
+    agent.streaming.enabled = False
+    agent.streaming.mode = StreamingMode.ALL
+    agent._streaming_tool_run_id = "run-456"
+    agent.stream_content = MagicMock()
+
+    Agent._emit_tool_input_error(agent, ActionParsingException("x"), loop_num=1, config=MagicMock())
+
+    agent.stream_content.assert_not_called()
+    assert agent._streaming_tool_run_id is None

@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
-from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.agents.base import Agent as BaseAgent
 from dynamiq.nodes.agents.components import parser, schema_generator
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
@@ -22,6 +21,7 @@ from dynamiq.nodes.agents.exceptions import (
 )
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser, extract_message_text
 from dynamiq.nodes.node import Node, NodeDependency
+from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsInputSchema
 from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
@@ -32,6 +32,7 @@ from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import (
     AgentReasoningEventMessageData,
     AgentToolData,
+    AgentToolInputErrorEventMessageData,
     AgentToolResultEventMessageData,
     StreamingMode,
 )
@@ -172,6 +173,27 @@ class Agent(HistoryManagerMixin, BaseAgent):
             f"Final answer: {final_output}"
             "\n------------------------------------------\n"
         )
+
+    def _emit_tool_input_error(
+        self, error: Exception, loop_num: int, config: "RunnableConfig | None" = None, **kwargs
+    ) -> None:
+        """Emit a streaming event to signal that a tool input parse failed.
+
+        Consumers that received partial tool_input chunks can use the
+        tool_run_id in the event to discard them.
+        """
+        self._stream_agent_event(
+            AgentToolInputErrorEventMessageData(
+                tool_run_id=self._streaming_tool_run_id or "",
+                name=self.name,
+                error=str(error),
+                loop_num=loop_num,
+            ),
+            "tool_input_error",
+            config,
+            **kwargs,
+        )
+        self._streaming_tool_run_id = None
 
     def _should_delegate_final(
         self,
@@ -1226,6 +1248,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 continue
 
             except ActionParsingException as e:
+                self._emit_tool_input_error(e, loop_num, config, **kwargs)
+
                 extra_guidance = None
                 if self.inference_mode == InferenceMode.XML:
                     extra_guidance = (
