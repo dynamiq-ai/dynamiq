@@ -815,6 +815,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         tool_run_id = tool_run_id or self._streaming_tool_run_id or generate_uuid()
         self._streaming_tool_run_id = None
+        self._streaming_tool_run_ids = []
         tool_data = AgentToolData(
             name=tool.name,
             type=tool.type,
