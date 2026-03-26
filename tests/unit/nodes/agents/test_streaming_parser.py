@@ -17,6 +17,7 @@ def _make_callback():
     agent.inference_mode.name = InferenceMode.STRUCTURED_OUTPUT.value
     agent.name = "test-agent"
     agent._streaming_tool_run_id = None
+    agent._streaming_tool_run_ids = []
     agent.tool_by_names = {}
     agent.sanitize_tool_name = lambda name: name
     return AgentStreamingParserCallback(agent=agent, config=None, loop_num=1)
@@ -71,6 +72,7 @@ def _make_fc_callback(tool_input_started=False, answer_started=False, action_nam
     agent.inference_mode.name = InferenceMode.FUNCTION_CALLING.value
     agent.name = "test-agent"
     agent._streaming_tool_run_id = "test-run-id"
+    agent._streaming_tool_run_ids = []
     agent.tool_by_names = {}
     agent.sanitize_tool_name = lambda name: name
     cb = AgentStreamingParserCallback(agent=agent, config=None, loop_num=1)
@@ -134,3 +136,45 @@ def test_process_json_mode_function_calling(
 
     assert cb._current_state == expected_state
     assert cb._fc_object_tool_input is expected_fc_object
+
+
+def _make_fc_chunk(index=0, function_name=None, arguments=""):
+    """Build a minimal LLM streaming chunk for function calling mode."""
+    tc = {"index": index, "type": "function", "function": {}}
+    if function_name:
+        tc["function"]["name"] = function_name
+    if arguments:
+        tc["function"]["arguments"] = arguments
+    return {"choices": [{"delta": {"tool_calls": [tc]}}]}
+
+
+def test_parallel_tool_calls_get_unique_ids():
+    """Each parallel tool call must receive a distinct tool_run_id during streaming."""
+    agent = MagicMock()
+    agent.streaming.enabled = True
+    agent.streaming.mode = StreamingMode.ALL
+    agent.inference_mode.name = InferenceMode.FUNCTION_CALLING.value
+    agent.name = "test-agent"
+    agent._streaming_tool_run_id = None
+    agent._streaming_tool_run_ids = []
+    agent.tool_by_names = {}
+    agent.sanitize_tool_name = lambda name: name
+    agent.llm = MagicMock()
+    agent.llm.id = "llm-1"
+
+    cb = AgentStreamingParserCallback(agent=agent, config=None, loop_num=1)
+    serialized = {"group": "llms", "id": "llm-1"}
+
+    cb.on_node_execute_stream(serialized, _make_fc_chunk(index=0, function_name="exa_search"))
+    cb.on_node_execute_stream(serialized, _make_fc_chunk(index=0, arguments='{"query":"hello"}'))
+    id_tool_0 = agent._streaming_tool_run_id
+
+    cb.on_node_execute_stream(serialized, _make_fc_chunk(index=1, function_name="tavily_search"))
+    cb.on_node_execute_stream(serialized, _make_fc_chunk(index=1, arguments='{"query":"world"}'))
+    id_tool_1 = agent._streaming_tool_run_id
+
+    assert id_tool_0 is not None
+    assert id_tool_1 is not None
+    assert id_tool_0 != id_tool_1
+
+    assert agent._streaming_tool_run_ids == [id_tool_0, id_tool_1]

@@ -30,6 +30,7 @@ from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, Parallel
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.nodes.tools.skills_tool import SkillsTool
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox, SandboxConfig
@@ -340,9 +341,11 @@ class Agent(Node):
                 self.tools.append(FileWriteTool(file_store=self.file_store_backend))
 
         if self.parallel_tool_calls_enabled:
-            # Filter out any user tools with the reserved parallel tool name
-            self.tools = [t for t in self.tools if t.name != PARALLEL_TOOL_NAME]
-            self.tools.append(ParallelToolCallsTool())
+            inference_mode = getattr(self, "inference_mode", None)
+            use_native_parallel = inference_mode == InferenceMode.FUNCTION_CALLING
+            if not use_native_parallel:
+                self.tools = [t for t in self.tools if t.name != PARALLEL_TOOL_NAME]
+                self.tools.append(ParallelToolCallsTool())
 
         if self._skills_should_init():
             self._init_skills()
