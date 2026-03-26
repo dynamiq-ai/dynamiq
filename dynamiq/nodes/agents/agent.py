@@ -32,6 +32,7 @@ from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import (
     AgentReasoningEventMessageData,
     AgentToolData,
+    AgentToolInputErrorEventMessageData,
     AgentToolResultEventMessageData,
     StreamingMode,
 )
@@ -175,6 +176,27 @@ class Agent(HistoryManagerMixin, BaseAgent):
             "\n------------------------------------------\n"
         )
 
+    def _emit_tool_input_error(
+        self, error: Exception, loop_num: int, config: "RunnableConfig | None" = None, **kwargs
+    ) -> None:
+        """Emit a streaming event to signal that a tool input parse failed.
+
+        Consumers that received partial tool_input chunks can use the
+        tool_run_id in the event to discard them.
+        """
+        self._stream_agent_event(
+            AgentToolInputErrorEventMessageData(
+                tool_run_id=self._streaming_tool_run_id or "",
+                name=self.name,
+                error=str(error),
+                loop_num=loop_num,
+            ),
+            "tool_input_error",
+            config,
+            **kwargs,
+        )
+        self._streaming_tool_run_id = None
+
     def _should_delegate_final(
         self,
         tool: Node | None,
@@ -281,7 +303,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     def _stream_agent_event(
         self,
-        content: AgentReasoningEventMessageData | AgentToolResultEventMessageData,
+        content: AgentReasoningEventMessageData | AgentToolResultEventMessageData | AgentToolInputErrorEventMessageData,
         step: str,
         config: RunnableConfig,
         **kwargs,
@@ -1266,6 +1288,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 continue
 
             except ActionParsingException as e:
+                self._emit_tool_input_error(e, loop_num, config, **kwargs)
+
                 extra_guidance = None
                 if self.inference_mode == InferenceMode.XML:
                     extra_guidance = (

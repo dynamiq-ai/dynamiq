@@ -138,6 +138,19 @@ class AgentToolResultEventMessageData(BaseModel):
         return data
 
 
+class AgentToolInputErrorEventMessageData(BaseModel):
+    """Model for agent tool input error streaming event data.
+
+    Emitted when action parsing fails after tool input was already
+    partially streamed, so consumers can discard the invalid chunks.
+    """
+
+    tool_run_id: str
+    name: str
+    error: str
+    loop_num: int
+
+
 class StreamingConfig(BaseModel):
     """Configuration for streaming.
 
