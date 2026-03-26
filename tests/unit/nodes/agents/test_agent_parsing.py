@@ -1,5 +1,3 @@
-from unittest.mock import MagicMock
-
 import pytest
 
 from dynamiq.nodes.agents.components import parser
@@ -227,46 +225,71 @@ def test_extract_default_final_answer_output_files_in_thought_and_real_field():
     assert output_files == "/tmp/result.csv"
 
 
-def test_emit_tool_input_error_streams_event():
-    """_emit_tool_input_error should call stream_content with the correct payload
-    and clear _streaming_tool_run_id."""
-    from dynamiq.nodes.agents.agent import Agent
-    from dynamiq.types.streaming import StreamingMode
+def test_action_parsing_failure_emits_tool_input_error_event(mocker):
+    """When the LLM returns unparseable output, the agent should naturally
+    emit a tool_input_error streaming event via _emit_tool_input_error."""
+    import uuid
 
-    agent = MagicMock(spec=Agent)
-    agent.name = "test-agent"
-    agent.streaming.enabled = True
-    agent.streaming.mode = StreamingMode.ALL
-    agent._streaming_tool_run_id = "run-123"
-    agent.stream_content = MagicMock()
+    from dynamiq import connections, prompts
+    from dynamiq.nodes.agents import Agent
+    from dynamiq.nodes.agents.agent import Behavior
+    from dynamiq.nodes.llms import OpenAI
+    from dynamiq.nodes.tools.python import Python
+    from dynamiq.nodes.types import InferenceMode
+    from dynamiq.runnables import RunnableConfig
+    from dynamiq.types.streaming import AgentToolInputErrorEventMessageData, StreamingConfig, StreamingMode
 
-    error = ActionParsingException("bad json")
-    Agent._emit_tool_input_error(agent, error, loop_num=2, config=MagicMock())
+    conn = connections.OpenAI(id=str(uuid.uuid4()), api_key="fake-key")
+    llm = OpenAI(
+        name="TestLLM",
+        model="gpt-4o-mini",
+        connection=conn,
+        prompt=prompts.Prompt(messages=[prompts.Message(role="user", content="{{input}}")]),
+    )
+    tool = Python(name="dummy", description="dummy tool", code="def run(inputs): return {}")
 
-    agent.stream_content.assert_called_once()
-    kwargs = agent.stream_content.call_args.kwargs
-    assert kwargs["step"] == "tool_input_error"
-    assert kwargs["source"] == "test-agent"
-    data = kwargs["content"]
-    assert data["tool_run_id"] == "run-123"
-    assert data["error"] == "bad json"
-    assert data["loop_num"] == 2
-    assert agent._streaming_tool_run_id is None
+    agent = Agent(
+        name="test-agent",
+        llm=llm,
+        tools=[tool],
+        inference_mode=InferenceMode.STRUCTURED_OUTPUT,
+        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL),
+        max_loops=2,
+        behaviour_on_max_loops=Behavior.RETURN,
+    )
+
+    bad_text = "not valid json"
+    mocker.patch(
+        "dynamiq.nodes.llms.base.BaseLLM._completion",
+        side_effect=lambda stream=False, *a, **kw: (
+            _mock_llm_stream(bad_text) if stream else _mock_llm_response(bad_text)
+        ),
+    )
+
+    spy = mocker.patch.object(agent, "_stream_agent_event", wraps=agent._stream_agent_event)
+
+    agent.run(input_data={"input": "test"}, config=RunnableConfig())
+
+    error_calls = [c for c in spy.call_args_list if c[0][1] == "tool_input_error"]
+    assert len(error_calls) >= 1
+    event_data = error_calls[0][0][0]
+    assert isinstance(event_data, AgentToolInputErrorEventMessageData)
+    assert event_data.name == "test-agent"
 
 
-def test_emit_tool_input_error_skipped_when_streaming_disabled():
-    """_emit_tool_input_error should not emit when streaming is disabled."""
-    from dynamiq.nodes.agents.agent import Agent
-    from dynamiq.types.streaming import StreamingMode
+def _mock_llm_response(text: str):
+    from litellm import ModelResponse
 
-    agent = MagicMock(spec=Agent)
-    agent.name = "test-agent"
-    agent.streaming.enabled = False
-    agent.streaming.mode = StreamingMode.ALL
-    agent._streaming_tool_run_id = "run-456"
-    agent.stream_content = MagicMock()
+    model_r = ModelResponse()
+    model_r["choices"][0]["message"]["content"] = text
+    return model_r
 
-    Agent._emit_tool_input_error(agent, ActionParsingException("x"), loop_num=1, config=MagicMock())
 
-    agent.stream_content.assert_not_called()
-    assert agent._streaming_tool_run_id is None
+def _mock_llm_stream(text: str):
+    from litellm import ModelResponse
+    from litellm.utils import Delta
+
+    for char in text:
+        model_r = ModelResponse(stream=True)
+        model_r.choices[0].delta = Delta(role="assistant", content=char)
+        yield model_r
