@@ -303,7 +303,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     def _stream_agent_event(
         self,
-        content: AgentReasoningEventMessageData | AgentToolResultEventMessageData,
+        content: AgentReasoningEventMessageData | AgentToolResultEventMessageData | AgentToolInputErrorEventMessageData,
         step: str,
         config: RunnableConfig,
         **kwargs,
