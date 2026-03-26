@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Any, ClassVar, Literal
 
 import pytest
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
@@ -21,24 +21,64 @@ class OutputFormat(str, Enum):
     BULLET_POINTS = "bullet_points"
 
 
-class TextAnalysisInputSchema(BaseModel):
+class Priority(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class FilterOptions(BaseModel):
+    """Nested model -- tests Model | None union in the parent schema."""
+
+    min_score: float = Field(default=0.0, description="Minimum score threshold.")
+    tags: list[str] = Field(default_factory=list, description="Tags to filter by.")
+
+
+class ComprehensiveInputSchema(BaseModel):
+    """Single schema covering all type patterns found in real tool schemas.
+
+    Non-nullable (from TextAnalysisInputSchema):
+        str (required), str (default), Enum (default), int (default),
+        list[str] (default_factory), bool (default)
+    Nullable (from Firecrawl/Exa/ImageGen/Stagehand):
+        int|None (with ge/le), str|None, bool|None, Enum|None,
+        list[str]|None, Model|None
+    Special:
+        is_accessible_to_agent=False, ConfigDict(extra='allow')
+    """
+
+    model_config = ConfigDict(extra="allow")
+
     text: str = Field(..., description="Text to analyze.")
     language: str = Field(default="en", description="ISO-639 language code.")
     format: OutputFormat = Field(default=OutputFormat.SUMMARY, description="Output format.")
     max_length: int = Field(default=500, description="Maximum output length in characters.")
     keywords: list[str] = Field(default_factory=list, description="Keywords to focus on.")
     include_stats: bool = Field(default=False, description="Include word/char statistics.")
+    limit: int | None = Field(default=None, ge=1, le=100, description="Max results to return.")
+    label: str | None = Field(default=None, description="Optional label.")
+    verbose: bool | None = Field(default=None, description="Enable verbose output.")
+    priority: Priority | None = Field(default=None, description="Optional priority level.")
+    domains: list[str] | None = Field(default=None, description="Whitelist of domains.")
+    filters: FilterOptions | None = Field(default=None, description="Optional filter configuration.")
+    internal_trace_id: str | None = Field(
+        default=None,
+        description="Internal tracing ID.",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
 
 
-class TextAnalysisTool(Node):
-    """Lightweight tool with a complex typed input schema for schema-generation tests."""
+class ComprehensiveTool(Node):
+    """Tool whose schema exercises both non-nullable and nullable type patterns."""
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Text Analysis Tool"
-    description: str = "Analyzes text and returns a summary, detailed breakdown, or bullet points."
-    input_schema: ClassVar[type[TextAnalysisInputSchema]] = TextAnalysisInputSchema
+    name: str = "Comprehensive Tool"
+    description: str = (
+        "Analyzes text and optionally filters results. " "Provide 'text' (required). All other parameters are optional."
+    )
+    input_schema: ClassVar[type[ComprehensiveInputSchema]] = ComprehensiveInputSchema
 
-    def execute(self, input_data: TextAnalysisInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
+    def execute(self, input_data: ComprehensiveInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         text = input_data.text
         words = text.split()
         word_count = len(words)
@@ -50,17 +90,30 @@ class TextAnalysisTool(Node):
             body = "Bullet-point analysis:\n" + "\n".join(f"- {w}" for w in words[:10])
         elif input_data.format == OutputFormat.DETAILED:
             body = (
-                f"Detailed analysis: the text contains {word_count} words and {char_count} characters. "
+                f"Detailed analysis: {word_count} words, {char_count} chars. "
                 f"Keywords found: {keyword_hits or 'none'}."
             )
         else:
-            body = (
-                f"Summary analysis: the provided text contains {word_count} words "
-                f"and {char_count} characters in {input_data.language} language."
-            )
+            body = f"Summary: {word_count} words, {char_count} chars in {input_data.language}."
 
         if input_data.include_stats:
-            body += f" Statistics: {word_count} words, {char_count} chars."
+            body += f" Stats: {word_count}w, {char_count}c."
+
+        extras = []
+        if input_data.limit is not None:
+            extras.append(f"limit={input_data.limit}")
+        if input_data.label is not None:
+            extras.append(f"label={input_data.label!r}")
+        if input_data.verbose is not None:
+            extras.append(f"verbose={input_data.verbose}")
+        if input_data.priority is not None:
+            extras.append(f"priority={input_data.priority.value}")
+        if input_data.domains is not None:
+            extras.append(f"domains={input_data.domains}")
+        if input_data.filters is not None:
+            extras.append(f"filters(min_score={input_data.filters.min_score}, tags={input_data.filters.tags})")
+        if extras:
+            body += " Options: " + ", ".join(extras) + "."
 
         return {"content": body[: input_data.max_length]}
 
@@ -136,8 +189,8 @@ def anthropic_llm():
 
 
 @pytest.fixture(scope="module")
-def text_analysis_tool():
-    return TextAnalysisTool()
+def comprehensive_tool():
+    return ComprehensiveTool()
 
 
 def run_and_assert_agent(agent: Agent, agent_input, expected_length, run_config):
@@ -200,19 +253,25 @@ def test_react_agent_inference_modes(
     run_and_assert_agent(agent, agent_input, expected_length, run_config)
 
 
-def _run_complex_schema_test(llm, text_analysis_tool, run_config, inference_mode, label):
-    """Helper: run an agent with TextAnalysisTool and assert success."""
+def _run_comprehensive_schema_test(llm, comprehensive_tool, run_config, inference_mode, label):
+    """Helper: run agent with ComprehensiveTool and assert success."""
     agent = Agent(
-        name=f"Complex Schema Test ({label})",
+        name=f"Comprehensive Schema Test ({label})",
         llm=llm,
-        tools=[text_analysis_tool],
-        role="You are a helpful text analysis assistant. Use the Text Analysis Tool to analyze text.",
+        tools=[comprehensive_tool],
+        role=(
+            "You are a helpful assistant. Use the Comprehensive Tool to analyze text. "
+            "Pass only the parameters that are relevant; leave nullable ones as null."
+        ),
         inference_mode=inference_mode,
         max_loops=5,
         verbose=True,
     )
     result = agent.run(
-        input_data={"input": "Analyze the text 'Hello world from Python testing' in summary format"},
+        input_data={
+            "input": "Analyze the text 'Hello world from Python testing' in summary format with limit"
+            "5 and high priority"
+        },
         config=run_config,
     )
     assert result.status == RunnableStatus.SUCCESS, f"Agent run failed for {label}: {result.output}"
@@ -232,8 +291,10 @@ def _run_complex_schema_test(llm, text_analysis_tool, run_config, inference_mode
     ["llm_instance", "anthropic_llm"],
     ids=["openai", "anthropic"],
 )
-def test_complex_schema_tool_schema_modes(llm_fixture, text_analysis_tool, run_config, inference_mode, request):
-    """Complex typed schema with both OpenAI and Anthropic in STRUCTURED_OUTPUT and FUNCTION_CALLING modes."""
+def test_comprehensive_schema_tool_modes(llm_fixture, comprehensive_tool, run_config, inference_mode, request):
+    """Comprehensive typed schema (non-nullable + nullable + hidden fields) with OpenAI and Anthropic."""
     llm = request.getfixturevalue(llm_fixture)
     provider = "openai" if "llm_instance" in llm_fixture else "anthropic"
-    _run_complex_schema_test(llm, text_analysis_tool, run_config, inference_mode, f"{provider}-{inference_mode.value}")
+    _run_comprehensive_schema_test(
+        llm, comprehensive_tool, run_config, inference_mode, f"{provider}-{inference_mode.value}"
+    )

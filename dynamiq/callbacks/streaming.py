@@ -342,9 +342,6 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._fc_object_tool_input: bool = False
         self._brace_depth: int = 0
         self._brace_scan_index: int = 0
-        self._fc_object_tool_input: bool = False
-        self._brace_depth: int = 0
-        self._brace_scan_index: int = 0
         self._state_has_emitted: dict[str, bool] = {
             StreamingState.REASONING: False,
             StreamingState.ANSWER: False,
@@ -478,7 +475,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         """
         arguments_text = ""
         function_name = None
-        tc_index = 0
+        tc_index = self._fc_current_index if self._fc_current_index != -1 else 0
 
         choices = chunk.get("choices") or []
         if choices:
@@ -954,23 +951,12 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                     self._initialize_json_object_field_state(
                         buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT
                     )
-            if not self._initialize_json_field_state(
-                buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT
-            ):
-                if self._current_state is None and is_function_calling:
-                    self._initialize_json_object_field_state(
-                        buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT
-                    )
 
         if self._current_state == StreamingState.REASONING:
             self._emit_json_field_content(buf, StreamingState.REASONING)
         elif self._current_state == StreamingState.ANSWER:
             self._emit_json_field_content(buf, StreamingState.ANSWER)
         elif self._current_state == StreamingState.TOOL_INPUT:
-            if self._fc_object_tool_input:
-                self._emit_json_object_field_content(buf, StreamingState.TOOL_INPUT)
-            else:
-                self._emit_json_field_content(buf, StreamingState.TOOL_INPUT)
             if self._fc_object_tool_input:
                 self._emit_json_object_field_content(buf, StreamingState.TOOL_INPUT)
             else:
@@ -1094,5 +1080,4 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         # Rebase the indices
         self._state_start_index = max(0, self._state_start_index - keep_from)
         self._state_last_emit_index = max(0, self._state_last_emit_index - keep_from)
-        self._brace_scan_index = max(0, self._brace_scan_index - keep_from)
         self._brace_scan_index = max(0, self._brace_scan_index - keep_from)
