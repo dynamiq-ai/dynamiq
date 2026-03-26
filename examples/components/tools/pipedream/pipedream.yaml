@@ -1,0 +1,166 @@
+connections:
+  pipedream-conn:
+    type: dynamiq.connections.PipedreamOAuth2
+    access_token: ${oc.env:PIPEDREAM_ACCESS_TOKEN}
+    project_id: ${oc.env:PIPEDREAM_PROJECT_ID}
+
+nodes:
+  pipedream-tool:
+    type: dynamiq.nodes.tools.pipedream.Pipedream
+    connection: pipedream-conn
+    dynamic_props_id: ${oc.env:JIRA_DYNAMIC_PROPS_ID}
+    external_user_id: ${oc.env:JIRA_EXTERNAL_USER_ID}
+    action_id: jira-create-issue
+    configurable_props:
+      app:
+        authProvisionId: ${oc.env:JIRA_AUTH_PROVISION_ID}
+      summary: test
+    input_props:
+      configurableProps:
+        - name: app
+          type_: app
+          app: jira
+        - name: cloudId
+          type_: string
+          label: Cloud ID
+          description: The cloud ID.
+          useQuery: true
+          remoteOptions: true
+        - name: historyMetadata
+          type_: object
+          label: History Metadata
+          description: Additional issue history details.
+          optional: true
+        - name: properties
+          type_: string
+          label: Properties
+          description: >-
+            Details of issue properties to be add or update, please provide an array
+            of objects with keys and values.
+          optional: true
+        - name: update
+          type_: object
+          label: Update
+          description: >-
+            A Map containing the field name and a list of operations to perform on the
+            issue screen field. Note that fields included in here cannot be included
+            in `fields`.
+          optional: true
+        - name: additionalProperties
+          type_: object
+          label: Additional properties
+          description: Extra properties of any type may be provided to this object.
+          optional: true
+        - name: updateHistory
+          type_: boolean
+          label: Update history
+          description: >-
+            Whether the project in which the issue is created is added to the user's
+            **Recently viewed** project list, as shown under **Projects** in Jira.
+          optional: true
+        - name: projectId
+          type_: string
+          label: Project ID
+          description: The project ID.
+          useQuery: true
+          remoteOptions: true
+        - name: issueTypeId
+          type_: string
+          label: Issue Type
+          description: >-
+            An ID identifying the type of issue, [Check the API docs](https://developer.atlassian.com/cloud/jira/platform/rest/v3/#api-rest-api-3-issue-post)
+            to see available options
+          remoteOptions: true
+          reloadProps: true
+        - name: summary
+          type_: string
+          label: Summary
+          description: Set your field value
+          optional: false
+        - name: issuerestriction
+          type_: object
+          label: Restrict to
+          description: Set your field value
+          optional: true
+        - name: parent
+          type_: string
+          label: Parent
+          description: Set your field value
+          optional: true
+          remoteOptions: true
+        - name: description
+          type_: string
+          label: Description
+          description: Set your field value
+          optional: true
+        - name: customfield_10020_gh-sprint
+          type_: string[]
+          label: Sprint
+          description: Set your field value
+          optional: true
+        - name: customfield_10021_multicheckboxes
+          type_: string[]
+          label: Flagged
+          description: Set your field value
+          optional: true
+        - name: customfield_10000_devsummarycf
+          type_: object
+          label: development
+          description: Set your field value
+          optional: true
+        - name: customfield_10001_atlassian-team
+          type_: object
+          label: Team
+          description: Set your field value
+          optional: true
+        - name: customfield_10034_vulnerabilitycf
+          type_: object
+          label: Vulnerability
+          description: Set your field value
+          optional: true
+        - name: customfield_10035_designcf
+          type_: string[]
+          label: Design
+          description: Set your field value
+          optional: true
+        - name: labels
+          type_: string[]
+          label: Labels
+          description: Set your field value
+          optional: true
+          remoteOptions: true
+        - name: customfield_10016_jsw-story-points
+          type_: object
+          label: Story point estimate
+          description: Set your field value
+          optional: true
+        - name: customfield_10019_gh-lexo-rank
+          type_: object
+          label: Rank
+          description: Set your field value
+          optional: true
+        - name: attachment
+          type_: string[]
+          label: Attachment
+          description: Set your field value
+          optional: true
+        - name: issuelinks
+          type_: string[]
+          label: Linked Issues
+          description: Set your field value
+          optional: true
+        - name: assignee
+          type_: string
+          label: Assignee
+          description: Set your field value
+          optional: true
+flows:
+  pipedream-tool-flow:
+    name: Pipedream tool Flow
+    nodes:
+      - pipedream-tool
+
+workflows:
+  pipedream-tool-workflow:
+    flow: pipedream-tool-flow
+    version: 1

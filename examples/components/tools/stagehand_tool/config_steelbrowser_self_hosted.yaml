@@ -1,0 +1,45 @@
+connections:
+    anthropic-conn:
+        type: dynamiq.connections.Anthropic
+        api_key: ${oc.env:ANTHROPIC_API_KEY}
+    stagehand-conn:
+        type: dynamiq.connections.SteelBrowser
+        environment: SELF_HOSTED
+        model_api_key: ${oc.env:ANTHROPIC_API_KEY}
+nodes:
+    agent:
+        id: agent
+        name: agent
+        type: dynamiq.nodes.agents.Agent
+        error_handling: {}
+        depends: []
+        llm:
+            id: anthropic-llm
+            name: anthropic-llm
+            type: dynamiq.nodes.llms.Anthropic
+            connection: anthropic-conn
+            model: claude-sonnet-4-20250514
+            temperature: 0.3
+            max_tokens: 8192
+            inference_mode: DEFAULT
+        tools:
+            - id: stagehand-tool
+              name: stagehand
+              type: dynamiq.nodes.tools.Stagehand
+              description: "## Stagehand Tool\n### Description\nA headless browser automation and observation tool designed to navigate, interact with,\nand extract structured data from web pages using natural language instructions.\n\n### Parameters\n- `action_type`: Must be one of the following:\n  - `goto`: Navigate to the specified URL.\n  - `observe`: Return a list of candidate DOM elements based on the instruction.\n  - `extract`: Extract structured data as described in the instruction.\n  - `act`: Perform a user-specified action (e.g., click a button, select an option).\n  - `go_back`: Go to the previous page.\n- `instruction`: A natural language prompt specifying the action to perform. Required for all actions except `goto`.\n- `url`: The web address to navigate to. Required only when `action_type` is `goto`.\n\n### Usage Examples\n1. Navigate to a web page:\n   ```json\n   {\n     \"action_type\": \"goto\",\n     \"url\": \"https://example.com\"\n   }\n    ````\n\n2. Observe candidate elements:\n\n   ```json\n   {\n     \"action_type\": \"observe\",\n     \"instruction\": \"Find all clickable links on the homepage\"\n   }\n   ```\n\n3. Extract data:\n\n   ```json\n   {\n     \"action_type\": \"extract\",\n     \"instruction\": \"Get the list of product names and prices\"\n   }\n   ```\n\n4. Perform an action:\n\n   ```json\n   {\n     \"action_type\": \"act\",\n     \"instruction\": \"Click the 'Add to Cart' button for the first product\"\n   }\n   ```\n   \n5. Perform an action whey you expect to open file chooser:\n\n   ```json\n   {\n     \"action_type\": \"upload\",\n     \"instruction\": \"Click the 'Upload Report' button for the first product\"\n     \"files\": \"test.csv\"\n   }\n   ```\n   \n   \n### Tips\n\n- !!! Always divide complex tasks into clear, isolated actions. For example:\na. Wait for the page to load\nb. Enter text into the input field\nc. Click the search button\nd. Extract data from the results\n- Example:\n    - **Incorrect**: Enter `'text'` in the search bar and press Enter.\n    - **Correct**:\n      - **Call 1**: Enter `'text'` into the search bar.\n      - **Call 2**: Press `Enter` on the search bar.\n- Entering the text into search field and clicking the search button always should be two different steps.\n- Use clear, specific instructions.\n- `observe` is useful for debugging or when planning a follow-up action.\n- Make sure you use 'upload' action instead of 'act' when you expect that file chooser will be opened."
+              connection: stagehand-conn
+              model_name: anthropic/claude-sonnet-4-20250514
+        role: 'assistant'
+        max_loops: 50
+        behaviour_on_max_loops: return
+        inference_mode: XML
+flows:
+    flow-stagehand-tool:
+        nodes:
+            - agent
+workflows:
+    workflow-stagehand-tool:
+        name: workflow-stagehand-tool
+        id: workflow-stagehand-tool
+        type: dynamiq.workflows.Workflow
+        flow: flow-stagehand-tool
