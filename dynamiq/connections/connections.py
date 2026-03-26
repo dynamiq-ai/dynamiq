@@ -1728,25 +1728,3 @@ class SteelBrowser(BaseConnection):
 
     def connect(self):
         pass
-
-
-class Composio(BaseConnection):
-    """Minimal HTTP connection for the Composio REST API.
-
-    The public API only requires the `x-api-key` header (see
-    https://docs.composio.dev/api-reference/authentication/get-auth-session-info),
-    so the connection keeps the session configuration intentionally lean.
-    """
-
-    api_key: str = Field(default_factory=partial(get_env_var, "COMPOSIO_API_KEY"))
-    url: Literal["https://backend.composio.dev/api/v3"] = "https://backend.composio.dev/api/v3"
-    timeout: float = 30
-    entity_id: str | None = None
-    connected_account_id: str | None = None
-
-    def connect(self):
-        import requests
-
-        session = requests.Session()
-        session.headers.update({"x-api-key": self.api_key})
-        return session
