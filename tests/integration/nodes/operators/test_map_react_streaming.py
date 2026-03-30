@@ -29,9 +29,9 @@ def mock_llm_response_text():
         + PARALLEL_TOOL_NAME
         + """</action>
   <action_input>{"tools": [
-    {"name": "NoOp Tool", "input": {}},
-    {"name": "Exa Search Tool", "input": {"query": "test", "limit": 1}},
-    {"name": "Firecrawl Tool", "input": {"url": "https://example.com"}}
+    {"name": "noop-tool", "input": {}},
+    {"name": "exa-search", "input": {"query": "test", "limit": 1}},
+    {"name": "firecrawl-scrape", "input": {"url": "https://example.com"}}
   ]}</action_input>
 </output>"""
     )
