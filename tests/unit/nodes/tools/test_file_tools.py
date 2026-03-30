@@ -116,7 +116,7 @@ def test_file_read_tool(file_store, sample_file_path, llm_model):
     """Test FileReadTool functionality including initialization, successful read, and error handling."""
     # Test initialization
     tool = FileReadTool(file_store=file_store, llm=llm_model)
-    assert tool.name == "FileReadTool"
+    assert tool.name == "file-read"
     assert tool.group == "tools"
     assert tool.file_store == file_store
 
