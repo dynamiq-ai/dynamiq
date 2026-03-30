@@ -356,7 +356,7 @@ class FileReadTool(Node):
 
         Notes:
             - Whenever text is extracted from non-text sources (PDF, PPTX, spreadsheets, etc.), it is cached as
-              "<original_path>.extracted.txt" inside the same file store so FileSearchTool can reuse it without
+              "<original_path>.extracted.txt" inside the same file store so file-search tool can reuse it without
               re-running converters.
             - When start_line/end_line are used, the response includes total_lines and line_range metadata.
             - When start_page/end_page are used, the response includes total_pages and page_range metadata.
@@ -1040,7 +1040,7 @@ class FileReadTool(Node):
         if cache_path and hint_enabled:
             hint = (
                 f"\n\n[Extracted text cached at '{cache_path}'. "
-                "Use FileSearchTool to search this processed content without re-reading the original file.]"
+                "Use file-search tool to search this processed content without re-reading the original file.]"
             )
             return f"{content}{hint}"
         return content
