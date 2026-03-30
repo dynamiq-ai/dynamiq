@@ -15,7 +15,7 @@ class TextTemplateInputSchema(BaseModel):
 
 class TextTemplate(Node):
     group: Literal[NodeGroup.TRANSFORMERS] = NodeGroup.TRANSFORMERS
-    name: str = "Text Template"
+    name: str = "text-template"
     description: str = "Node that replaces placeholders in a text template with corresponding input values."
     template: str | None = None
 

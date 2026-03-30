@@ -20,7 +20,7 @@ class SortListInputSchema(BaseModel):
 
 class SortList(Node):
     group: Literal[NodeGroup.TRANSFORMERS] = NodeGroup.TRANSFORMERS
-    name: str = "Sort list"
+    name: str = "sort-list"
     description: str = "Node that returns sorted list"
     sort_by: SortOrder = SortOrder.DESC
 
