@@ -157,30 +157,25 @@ class FileReadInputSchema(BaseModel):
     start_line: int | None = Field(
         default=None,
         description="1-based inclusive start line for text content. "
+        "Must be >= 1 or None (omit to read from the beginning). "
         "When set, only lines from start_line to end_line are returned.",
     )
     end_line: int | None = Field(
         default=None,
         description="1-based inclusive end line for text content. "
-        "If omitted while start_line is set, reads to end of file.",
+        "Must be >= 1 and >= start_line, or None (omit to read to the end of file).",
     )
-
-    @field_validator("start_line", "end_line", mode="before")
-    @classmethod
-    def _clamp_line_number(cls, v: Any) -> Any:
-        if v is not None and isinstance(v, int) and v < 1:
-            return 1
-        return v
-
     start_page: int | None = Field(
         default=None,
         description="1-based inclusive start page for PDF documents. "
+        "Must be >= 1 or None (omit to read from the first page). "
         "When set, only pages from start_page to end_page are returned. Implies document_mode='page'.",
     )
     end_page: int | None = Field(
         default=None,
         description="1-based inclusive end page for PDF documents. "
-        "If omitted while start_page is set, reads to last page. Implies document_mode='page'.",
+        "Must be >= 1 and >= start_page, or None (omit to read to the last page). "
+        "Implies document_mode='page'.",
     )
     brief: str = Field(
         default="Reading a file",
