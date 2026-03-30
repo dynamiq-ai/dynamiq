@@ -164,6 +164,14 @@ class FileReadInputSchema(BaseModel):
         description="1-based inclusive end line for text content. "
         "If omitted while start_line is set, reads to end of file.",
     )
+
+    @field_validator("start_line", "end_line", mode="before")
+    @classmethod
+    def _clamp_line_number(cls, v: Any) -> Any:
+        if v is not None and isinstance(v, int) and v < 1:
+            return 1
+        return v
+
     start_page: int | None = Field(
         default=None,
         description="1-based inclusive start page for PDF documents. "
