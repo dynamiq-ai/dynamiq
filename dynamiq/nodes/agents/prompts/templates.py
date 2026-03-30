@@ -20,7 +20,7 @@ You are AI powered assistant.
 {%- endif %}
 
 {%- if skills %}
-# AVAILABLE SKILLS (SkillsTool)
+# AVAILABLE SKILLS (skills-tool)
 The list below is for orientation only.
 You must read full skill content before applying it;
 do not rely on the short descriptions.

@@ -138,7 +138,7 @@ def test_file_write_tool(file_store):
     """Test FileWriteTool functionality including initialization, successful writes, and error handling."""
     # Test initialization
     tool = FileWriteTool(file_store=file_store)
-    assert tool.name == "FileWriteTool"
+    assert tool.name == "file-write"
     assert tool.group == "tools"
     assert tool.file_store == file_store
 
