@@ -76,7 +76,7 @@ class JinaScrapeTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.WEB_SCRAPE
-    name: str = "jina-scraper"
+    name: str = "jina-scrape"
     description: str = DESCRIPTION_SCRAPE
     response_format: JinaResponseFormat = JinaResponseFormat.MARKDOWN
     connection: Jina
