@@ -247,7 +247,7 @@ class E2BDesktopToolInputSchema(BaseModel):
 
 class E2BDesktopTool(ConnectionNode):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "e2b-sandbox-tool"
+    name: str = "e2b-desktop"
     description: str = DESCRIPTION_E2B_DESKTOP
     connection: E2B
     input_schema: ClassVar[type[E2BDesktopToolInputSchema]] = E2BDesktopToolInputSchema
