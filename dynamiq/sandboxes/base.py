@@ -318,7 +318,7 @@ class Sandbox(abc.ABC, BaseModel):
         """Store a file in the sandbox filesystem.
 
         Provides FileStore-compatible write interface so tools like
-        FileWriteTool work transparently with both backends.
+        file-write work transparently with both backends.
 
         Args:
             file_path: Destination path (relative paths resolved against base_path).

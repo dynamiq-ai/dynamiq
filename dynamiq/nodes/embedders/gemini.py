@@ -80,7 +80,7 @@ class GeminiTextEmbedder(TextEmbedder):
         text_embedder (GeminiEmbedderComponent): The component for text embedding.
     """
 
-    name: str = "GeminiTextEmbedder"
+    name: str = "gemini-text-embedder"
     connection: GeminiConnection | None = None
     model: str = "gemini/gemini-embedding-exp-03-07"
     input_type: str = "search_query"

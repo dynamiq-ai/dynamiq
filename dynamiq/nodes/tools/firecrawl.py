@@ -171,7 +171,7 @@ class FirecrawlTool(ConnectionNode):
     """A tool for scraping web pages using the Firecrawl service."""
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.WEB_SCRAPE
-    name: str = "Firecrawl Tool"
+    name: str = "firecrawl-scraper"
     description: str = DESCRIPTION_FIRECRAWL
     is_parallel_execution_allowed: bool = True
     connection: Firecrawl

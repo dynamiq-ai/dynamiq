@@ -247,7 +247,7 @@ class E2BDesktopToolInputSchema(BaseModel):
 
 class E2BDesktopTool(ConnectionNode):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "E2B Sandbox Tool"
+    name: str = "e2b-sandbox-tool"
     description: str = DESCRIPTION_E2B_DESKTOP
     connection: E2B
     input_schema: ClassVar[type[E2BDesktopToolInputSchema]] = E2BDesktopToolInputSchema
@@ -499,7 +499,7 @@ class E2BDesktopTool(ConnectionNode):
             result = f"Launch executed for: {application}. Verify it opened in the screenshot."
         elif action_enum == E2BAction.TAKE_SCREENSHOT:
             files = self._append_screenshot(files, strict=True)
-            result = "Screenshot was taken. Interpret the screenshot with FileReadTool."
+            result = "Screenshot was taken. Interpret the screenshot with file-read tool."
         else:
             raise ToolExecutionException(
                 f"Unsupported action: {input_data.action}. Supported: move_mouse, click_mouse, wait",

@@ -30,7 +30,7 @@ class CohereReranker(Node):
     """
 
     group: Literal[NodeGroup.RANKERS] = NodeGroup.RANKERS
-    name: str = "CohereReranker"
+    name: str = "cohere-reranker"
     top_k: int = 5
     model: str = "cohere/rerank-v3.5"
     threshold: float = 0

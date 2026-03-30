@@ -15,7 +15,7 @@ class ListFilterInputSchema(BaseModel):
 
 class ListFilter(Node):
     group: Literal[NodeGroup.FILTERS] = NodeGroup.FILTERS
-    name: str = "List Filter"
+    name: str = "list-filter"
     description: str = "Node that returns filtered list"
     filters: ChoiceCondition
 

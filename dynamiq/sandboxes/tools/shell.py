@@ -46,7 +46,7 @@ class SandboxShellTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "SandboxShellTool"
+    name: str = "sandbox-shell"
     description: str = (
         "Execute shell commands in an isolated sandbox environment.\n\n"
         "Parameters:\n"

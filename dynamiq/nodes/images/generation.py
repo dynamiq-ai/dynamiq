@@ -136,7 +136,7 @@ class ImageGeneration(ConnectionNode):
     FILE_PREFIX: ClassVar[str] = "generated"
 
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
-    name: str = "Image Generation"
+    name: str = "image-generation"
     description: str = """Generate images from text prompt using image generation models.
 
 Key Capabilities:

@@ -180,7 +180,7 @@ class StagehandInputSchema(BaseModel):
 
 class Stagehand(ConnectionNode):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Stagehand Tool"
+    name: str = "stagehand-browser"
     description: str = DESCRIPTION_STAGEHAND
     connection: Browserbase | SteelBrowser
     model_name: str

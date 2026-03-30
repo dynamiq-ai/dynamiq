@@ -30,7 +30,7 @@ do not rely on the short descriptions.
 ## How to read skill content
 {%- if sandbox_skills_base_path %}
 - The list above includes the path to each skill in the sandbox.
-  Read content via SandboxShellTool.
+  Read content via sandbox-shell tool.
 - Keep reads targeted to avoid large content:
   Prefer grep and line ranges over dumping the whole file.
   (1) Use `grep -n "## Section title" <path>` to find line numbers of sections,
@@ -43,7 +43,7 @@ do not rely on the short descriptions.
   you have confirmed you need the full content.
 - Scripts are under {{ sandbox_skills_base_path }}/<skill_name>/scripts/ — run them via the sandbox.
 {%- else %}
-- Use SkillsTool: Call action="list" to see available skills, then action="get" with skill_name="..."
+- Use skills-tool: Call action="list" to see available skills, then action="get" with skill_name="..."
   to load the full skill instructions.
   For large skills use section="Section title" or line_start/line_end (1-based) to read only a part.
 {%- endif %}

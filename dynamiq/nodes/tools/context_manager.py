@@ -61,7 +61,7 @@ class ContextManagerTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Context Manager Tool"
+    name: str = "context-manager"
     description: str = (
         "Generates a conversation summary to help manage context.\n\n"
         "WARNING: This tool will trigger context compression. Before calling it,\n"

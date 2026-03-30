@@ -41,7 +41,7 @@ class SkillsTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "SkillsTool"
+    name: str = "skills-tool"
     description: str = (
         "Manages skills (instructions and optional scripts). Use this tool to:\n"
         "- List available skills: action='list' (use this to discover skill names and descriptions).\n"
@@ -49,7 +49,7 @@ class SkillsTool(Node):
         "— use only when skills are NOT available in the sandbox. "
         "When a sandbox is available and skills have been "
         "ingested (e.g. under /home/user/skills/), prefer reading "
-        "skill content from the sandbox via SandboxShellTool "
+        "skill content from the sandbox via sandbox-shell tool "
         "(e.g. cat /home/user/skills/<name>/SKILL.md or grep for a section) "
         "instead of calling get. For large skills use "
         "section='Section title' or line_start/line_end to read only a part.\n\n"

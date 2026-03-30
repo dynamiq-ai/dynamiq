@@ -40,7 +40,7 @@ class ZenRowsTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.WEB_SCRAPE
-    name: str = "Zenrows Scraper Tool"
+    name: str = "zenrows-scraper"
     description: str = DESCRIPTION_ZENROWS
     connection: ZenRows
     url: str | None = None

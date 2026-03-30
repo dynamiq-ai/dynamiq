@@ -76,7 +76,7 @@ class JinaScrapeTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.WEB_SCRAPE
-    name: str = "Jina Scraper Tool"
+    name: str = "jina-scraper"
     description: str = DESCRIPTION_SCRAPE
     response_format: JinaResponseFormat = JinaResponseFormat.MARKDOWN
     connection: Jina
@@ -317,7 +317,7 @@ class JinaSearchTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.WEB_SEARCH
-    name: str = "Jina Search Tool"
+    name: str = "jina-search"
     description: str = DESCRIPTION_SEARCH
     connection: Jina
     query: str | None = Field(None, description="Search query")

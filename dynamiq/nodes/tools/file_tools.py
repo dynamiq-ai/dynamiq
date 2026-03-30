@@ -318,7 +318,7 @@ class FileReadTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.FILE_OPERATION
-    name: str = "FileReadTool"
+    name: str = "file-read"
     is_parallel_execution_allowed: bool = True
     description: str = """
         Reads files from storage based on the provided file path with intelligent file processing.
@@ -1140,7 +1140,7 @@ class FileWriteTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.FILE_OPERATION
-    name: str = "FileWriteTool"
+    name: str = "file-write"
     description: str = (
         "Writes or edits files in storage.\n\n"
         "Actions:\n"
@@ -1323,7 +1323,7 @@ class FileWriteTool(Node):
         logger.info(f"Tool {self.name} - {self.id}: {summary}")
 
         return {
-            "content": f"{summary} Use FileReadTool to view the updated file.",
+            "content": f"{summary} Use file-read tool to view the updated file.",
             "file_info": file_info.to_bytesio(),
         }
 
@@ -1392,7 +1392,7 @@ class FileSearchTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.FILE_OPERATION
-    name: str = "FileSearchTool"
+    name: str = "file-search"
     description: str = """
         Searches stored files for substrings or regular expressions and returns contextual matches.
         Usage Examples:
@@ -1401,7 +1401,7 @@ class FileSearchTool(Node):
             - {"query": "error.+timeout", "mode": "regex", "case_sensitive": true}
             - {"query": "select", "context_chars": 300, "max_matches_per_file": 10}
         Notes:
-            - When the FileReadTool has already extracted text (e.g., from PDF/PPTX/XLSX/CSV), this tool automatically
+            - When the file-read tool has already extracted text (e.g., from PDF/PPTX/XLSX/CSV), this tool automatically
               searches the cached "<original>.extracted.txt" instead of re-reading the binary source.
             - Start with concrete phrases (e.g., "Global Drug Facility", "KPI tree") and widen or switch to regex
               only if needed; large, unfocused queries slow the agent down.
@@ -1601,7 +1601,7 @@ class FileListTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.FILE_OPERATION
-    name: str = "FileListTool"
+    name: str = "file-list"
     description: str = """Lists files in storage based on the provided file path."""
 
     file_store: FileStore = Field(..., description="File storage to list from.")

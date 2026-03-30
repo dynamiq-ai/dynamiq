@@ -106,7 +106,7 @@ class HumanFeedbackTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "message_sender"
+    name: str = "message-sender"
     description: str = """A tool for gathering approval, confirmation, clarification, or information from user and
   sending status updates.
 

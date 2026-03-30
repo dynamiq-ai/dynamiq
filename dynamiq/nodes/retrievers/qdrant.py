@@ -30,7 +30,7 @@ class QdrantDocumentRetriever(Retriever):
         document_retriever (QdrantDocumentRetrieverComponent): The document retriever component.
     """
 
-    name: str = "QdrantDocumentRetriever"
+    name: str = "qdrant-document-retriever"
     connection: Qdrant | None = None
     vector_store: QdrantVectorStore | None = None
     document_retriever: QdrantDocumentRetrieverComponent | None = None

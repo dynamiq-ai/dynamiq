@@ -17,7 +17,7 @@ class ByRegexExtractorInputSchema(BaseModel):
 
 class ByRegexExtractor(Node):
     group: Literal[NodeGroup.EXTRACTORS] = NodeGroup.EXTRACTORS
-    name: str = "By Regex Extractor"
+    name: str = "by-regex-extractor"
     description: str = "Node that extracts data using regular expressions."
     pattern: str | None = None
 
@@ -63,7 +63,7 @@ class ByIndexExtractorInputSchema(BaseModel):
 
 class ByIndexExtractor(Node):
     group: Literal[NodeGroup.EXTRACTORS] = NodeGroup.EXTRACTORS
-    name: str = "By index extractor"
+    name: str = "by-index-extractor"
     description: str = "Node that returns the element located at the given index in the list."
     index: int = 0
 
@@ -183,7 +183,7 @@ class FileTypeExtractorInputSchema(BaseModel):
 
 class FileTypeExtractor(Node):
     group: Literal[NodeGroup.EXTRACTORS] = NodeGroup.EXTRACTORS
-    name: str = "File Type Extractor"
+    name: str = "file-type-extractor"
     description: str = "Node that extract file category based on file extension"
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

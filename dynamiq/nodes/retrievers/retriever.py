@@ -48,7 +48,7 @@ class VectorStoreRetriever(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.SEMANTIC_SEARCH
-    name: str = "VectorStore Retriever"
+    name: str = "vector-store-retriever"
     description: str = "A node for retrieving relevant documents based on a query."
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     text_embedder: TextEmbedder
