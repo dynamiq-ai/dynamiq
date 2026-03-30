@@ -181,7 +181,7 @@ def test_file_list_tool(file_store):
     """Test FileListTool functionality including initialization, listing files, and empty directory."""
     # Test initialization
     tool = FileListTool(file_store=file_store)
-    assert tool.name == "FileListTool"
+    assert tool.name == "file-list"
     assert tool.group == "tools"
     assert tool.file_store == file_store
 
@@ -268,7 +268,7 @@ def test_file_read_tool_appends_hint_for_non_text(monkeypatch, file_store, llm_m
     assert result.output["cached_text_path"] == cache_path
     expected_hint = (
         f"\n\n[Extracted text cached at '{cache_path}'. "
-        "Use FileSearchTool to search this processed content without re-reading the original file.]"
+        "Use file-search tool to search this processed content without re-reading the original file.]"
     )
     assert result.output["content"].endswith(expected_hint)
 
