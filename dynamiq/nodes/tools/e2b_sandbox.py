@@ -406,6 +406,20 @@ class E2BInterpreterTool(ConnectionNode):
         self._update_description_with_files(upload_details)
         return "\n".join([f"{file['original_name']} -> {file['uploaded_path']}" for file in upload_details])
 
+    def _upload_param_files(
+        self, value: io.BytesIO | FileInfo | list[io.BytesIO | FileInfo], sandbox: Sandbox
+    ) -> str | list[str]:
+        """Upload param value (single file or list) to sandbox and return path(s)."""
+
+        def _to_bytesio(item: io.BytesIO | FileInfo) -> io.BytesIO:
+            if isinstance(item, FileInfo):
+                return item.to_bytesio()
+            return item
+
+        if isinstance(value, list):
+            return [self._upload_file(_to_bytesio(item), sandbox) for item in value]
+        return self._upload_file(_to_bytesio(value), sandbox)
+
     def _upload_file(self, file: io.BytesIO, sandbox: Sandbox | None = None) -> str:
         """
         Upload a single file to the specified sandbox and return the uploaded path.
@@ -481,7 +495,11 @@ class E2BInterpreterTool(ConnectionNode):
         if params:
             vars_code = "\n# Tool params variables injected by framework\n"
             for key, value in params.items():
-                if isinstance(value, str):
+                if isinstance(value, (io.BytesIO, FileInfo)) or (
+                    isinstance(value, list) and value and isinstance(value[0], (io.BytesIO, FileInfo))
+                ):
+                    vars_code += f"{key} = {repr(self._upload_param_files(value, sandbox))}\n"
+                elif isinstance(value, str):
                     vars_code += f"{key} = {repr(value)}\n"
                 elif isinstance(value, (int, float, bool)) or value is None:
                     vars_code += f"{key} = {value}\n"
