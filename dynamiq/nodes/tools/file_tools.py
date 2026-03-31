@@ -128,7 +128,7 @@ DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP = {
 class FileReadInputSchema(BaseModel):
     """Schema for file read input parameters."""
 
-    file_path: str = Field(default="", description="Path of the file to read")
+    file_path: str = Field(..., description="Path of the file to read")
     instructions: str | None = Field(
         default=None,
         description="Instructions for the file read. If not provided, the file will be read in its entirety.",

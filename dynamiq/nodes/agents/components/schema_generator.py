@@ -231,10 +231,12 @@ def _resolve_type_schema(param: Any, _seen: set | None = None) -> dict[str, Any]
 def _basemodel_to_schema(model: type[BaseModel], _seen: set | None = None) -> dict[str, Any]:
     """Build an object schema from a Pydantic model with explicit properties.
 
-    All fields are listed in ``required`` and ``additionalProperties`` is set
-    to ``False`` so the schema satisfies OpenAI strict-mode constraints.
+    Only fields without defaults are listed in ``required``.  When all fields
+    are required ``additionalProperties`` is set to ``False`` so the schema
+    can satisfy OpenAI strict-mode constraints.
     """
     properties: dict[str, Any] = {}
+    required_fields: list[str] = []
     for name, field in model.model_fields.items():
         schema = _resolve_type_schema(field.annotation, _seen)
         if schema is None:
@@ -242,12 +244,17 @@ def _basemodel_to_schema(model: type[BaseModel], _seen: set | None = None) -> di
         if field.description:
             schema["description"] = field.description
         properties[name] = schema
+        if field.is_required():
+            required_fields.append(name)
     result: dict[str, Any] = {
         "type": "object",
         "properties": properties,
-        "required": list(properties.keys()),
-        "additionalProperties": False,
     }
+    if len(required_fields) == len(properties):
+        result["required"] = list(properties.keys())
+        result["additionalProperties"] = False
+    elif required_fields:
+        result["required"] = required_fields
     return result
 
 
@@ -268,6 +275,14 @@ def _is_strict_compatible(schema: Any) -> bool:
     return True
 
 
+def _is_nullable(annotation: Any) -> bool:
+    """Return True if the annotation is a Union that includes NoneType."""
+    origin = get_origin(annotation)
+    if origin in (Union, types.UnionType):
+        return type(None) in get_args(annotation)
+    return False
+
+
 def generate_property_schema(properties: dict, name: str, field: Any) -> None:
     """
     Generate property schema for a field in function calling mode.
@@ -282,20 +297,28 @@ def generate_property_schema(properties: dict, name: str, field: Any) -> None:
 
         description += f" Defaults to: {field.default}." if field.default and not field.is_required() else ""
         params = filter_format_type(field.annotation)
+        nullable = _is_nullable(field.annotation)
 
         properties[name] = {"description": description}
         schemas = [s for p in params if (s := _resolve_type_schema(p)) is not None]
+        non_null = [s for s in schemas if s != {"type": "null"}]
 
-        if len(schemas) == 1:
+        if len(non_null) == 1:
+            properties[name].update(non_null[0])
+        elif len(non_null) > 1:
+            properties[name].update(non_null[0])
+        elif schemas:
             properties[name].update(schemas[0])
-        elif len(schemas) > 1:
-            non_null = [s for s in schemas if s != {"type": "null"}]
-            if len(non_null) == 1:
-                properties[name].update(non_null[0])
-            else:
-                properties[name].update(non_null[0] if non_null else schemas[0])
         else:
             properties[name]["type"] = "string"
+
+        if nullable and "type" in properties[name]:
+            current_type = properties[name]["type"]
+            if isinstance(current_type, list):
+                if "null" not in current_type:
+                    properties[name]["type"] = current_type + ["null"]
+            else:
+                properties[name]["type"] = [current_type, "null"]
 
 
 def generate_function_calling_schemas(
@@ -351,12 +374,28 @@ def generate_function_calling_schemas(
             continue
 
         properties = {}
+        required_fields = []
         input_params = tool.input_schema.model_fields.items()
         if list(input_params) and not isinstance(llm, Gemini):
             for name, field in tool.input_schema.model_fields.items():
                 generate_property_schema(properties, name, field)
+                if field.is_required():
+                    required_fields.append(name)
 
-            use_strict = _is_strict_compatible(properties)
+            has_optional = len(required_fields) < len(properties)
+            use_strict = _is_strict_compatible(properties) and not has_optional
+
+            action_input_schema: dict[str, Any] = {
+                "type": "object",
+                "description": "Input for the selected tool",
+                "properties": properties,
+            }
+            if use_strict:
+                action_input_schema["required"] = list(properties.keys())
+                action_input_schema["additionalProperties"] = False
+            else:
+                if required_fields:
+                    action_input_schema["required"] = required_fields
 
             schema = {
                 "type": "function",
@@ -370,13 +409,7 @@ def generate_function_calling_schemas(
                                 "type": "string",
                                 "description": "Your reasoning about using this tool.",
                             },
-                            "action_input": {
-                                "type": "object",
-                                "description": "Input for the selected tool",
-                                "properties": properties,
-                                "required": list(properties.keys()),
-                                "additionalProperties": False,
-                            },
+                            "action_input": action_input_schema,
                         },
                         "additionalProperties": False,
                         "required": ["thought", "action_input"],

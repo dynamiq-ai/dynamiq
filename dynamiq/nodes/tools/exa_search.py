@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Any, ClassVar, Literal
 from urllib.parse import urljoin
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections import Exa
 from dynamiq.nodes import NodeGroup
@@ -276,27 +276,6 @@ class ExaInputSchema(BaseModel):
         default=None,
         description="Only include links with a published date before this ISO 8601 date.",
     )
-
-    @field_validator(
-        "start_crawl_date",
-        "end_crawl_date",
-        "start_published_date",
-        "end_published_date",
-        mode="before",
-    )
-    @classmethod
-    def empty_str_to_none(cls, v: str | None) -> str | None:
-        if isinstance(v, str) and not v.strip():
-            return None
-        return v
-
-    @field_validator("include_domains", "exclude_domains", mode="before")
-    @classmethod
-    def empty_list_to_none(cls, v: list | None) -> list | None:
-        if isinstance(v, list) and len(v) == 0:
-            return None
-        return v
-
     context: bool | ContextOptions | None = Field(
         default=None,
         description=(
