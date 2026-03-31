@@ -268,7 +268,7 @@ def test_file_read_tool_appends_hint_for_non_text(monkeypatch, file_store, llm_m
     assert result.output["cached_text_path"] == cache_path
     expected_hint = (
         f"\n\n[Extracted text cached at '{cache_path}'. "
-        "Use file-search tool to search this processed content without re-reading the original file.]"
+        "Use file-search to search this processed content without re-reading the original file.]"
     )
     assert result.output["content"].endswith(expected_hint)
 

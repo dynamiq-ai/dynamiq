@@ -510,6 +510,8 @@ class LLMPDFConverter(LLMImageConverter):
 
     _convert_from_bytes: Any = PrivateAttr()
     _convert_from_path: Any = PrivateAttr()
+
+    name: str = "llm-pdf-converter"
     input_schema: ClassVar[type[LLMPDFConverterInputSchema]] = LLMPDFConverterInputSchema
 
     def __init__(self, **kwargs):

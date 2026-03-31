@@ -499,7 +499,7 @@ class E2BDesktopTool(ConnectionNode):
             result = f"Launch executed for: {application}. Verify it opened in the screenshot."
         elif action_enum == E2BAction.TAKE_SCREENSHOT:
             files = self._append_screenshot(files, strict=True)
-            result = "Screenshot was taken. Interpret the screenshot with file-read tool."
+            result = "Screenshot was taken. Interpret the screenshot with file-read."
         else:
             raise ToolExecutionException(
                 f"Unsupported action: {input_data.action}. Supported: move_mouse, click_mouse, wait",

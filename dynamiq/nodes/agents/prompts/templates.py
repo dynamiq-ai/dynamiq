@@ -30,7 +30,7 @@ do not rely on the short descriptions.
 ## How to read skill content
 {%- if sandbox_skills_base_path %}
 - The list above includes the path to each skill in the sandbox.
-  Read content via sandbox-shell tool.
+  Read content via sandbox-shell.
 - Keep reads targeted to avoid large content:
   Prefer grep and line ranges over dumping the whole file.
   (1) Use `grep -n "## Section title" <path>` to find line numbers of sections,

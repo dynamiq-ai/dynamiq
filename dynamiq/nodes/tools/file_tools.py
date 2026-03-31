@@ -356,7 +356,7 @@ class FileReadTool(Node):
 
         Notes:
             - Whenever text is extracted from non-text sources (PDF, PPTX, spreadsheets, etc.), it is cached as
-              "<original_path>.extracted.txt" inside the same file store so file-search tool can reuse it without
+              "<original_path>.extracted.txt" inside the same file store so file-search can reuse it without
               re-running converters.
             - When start_line/end_line are used, the response includes total_lines and line_range metadata.
             - When start_page/end_page are used, the response includes total_pages and page_range metadata.
@@ -1040,7 +1040,7 @@ class FileReadTool(Node):
         if cache_path and hint_enabled:
             hint = (
                 f"\n\n[Extracted text cached at '{cache_path}'. "
-                "Use file-search tool to search this processed content without re-reading the original file.]"
+                "Use file-search to search this processed content without re-reading the original file.]"
             )
             return f"{content}{hint}"
         return content
@@ -1323,7 +1323,7 @@ class FileWriteTool(Node):
         logger.info(f"Tool {self.name} - {self.id}: {summary}")
 
         return {
-            "content": f"{summary} Use file-read tool to view the updated file.",
+            "content": f"{summary} Use file-read to view the updated file.",
             "file_info": file_info.to_bytesio(),
         }
 
@@ -1401,7 +1401,7 @@ class FileSearchTool(Node):
             - {"query": "error.+timeout", "mode": "regex", "case_sensitive": true}
             - {"query": "select", "context_chars": 300, "max_matches_per_file": 10}
         Notes:
-            - When the file-read tool has already extracted text (e.g., from PDF/PPTX/XLSX/CSV), this tool automatically
+            - When the file-read has already extracted text (e.g., from PDF/PPTX/XLSX/CSV), this tool automatically
               searches the cached "<original>.extracted.txt" instead of re-reading the binary source.
             - Start with concrete phrases (e.g., "Global Drug Facility", "KPI tree") and widen or switch to regex
               only if needed; large, unfocused queries slow the agent down.
