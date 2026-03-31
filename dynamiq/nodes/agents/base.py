@@ -1596,6 +1596,12 @@ class Agent(Node):
         self._tool_cache: dict[ToolCacheEntry, Any] = {}
         self.system_prompt_manager.reset()
 
+        from dynamiq.nodes.tools.agent_tool import SubAgentTool
+
+        for tool in self.tools:
+            if isinstance(tool, SubAgentTool):
+                tool.reset_call_count()
+
     def generate_prompt(self, block_names: list[str] | None = None, **kwargs) -> str:
         """Generates the prompt using specified blocks and variables."""
         return self.system_prompt_manager.generate_prompt(block_names=block_names, **kwargs)

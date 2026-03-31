@@ -1079,3 +1079,98 @@ class TestSubAgentStreaming:
         assert delta["content"] == "sub-agent answer"
         assert delta["source"] == child_agent.name
         assert delta["step"] == "answer"
+
+
+class TestSubAgentMaxCalls:
+    """Tests for SubAgentTool.max_calls invocation limit."""
+
+    def test_max_calls_default_none(self, child_agent):
+        tool = SubAgentTool(agent=child_agent, name="Researcher", description="Research")
+        assert tool.max_calls is None
+        assert tool._call_count == 0
+
+    def test_check_subagent_limits_no_limit(self, test_llm, child_agent):
+        """When max_calls is None, _check_subagent_limits returns None (no error)."""
+        tool = SubAgentTool(agent=child_agent, name="Researcher", description="Research")
+        parent = Agent(
+            name="Manager",
+            llm=test_llm,
+            role="manager",
+            tools=[tool],
+            max_loops=3,
+        )
+        result = parent._check_subagent_limits(
+            [
+                {"name": "Researcher", "input": "q"},
+                {"name": "Researcher", "input": "q"},
+                {"name": "Researcher", "input": "q"},
+            ],
+            "Researcher",
+        )
+        assert result is None
+
+    def test_check_subagent_limits_within_budget(self, test_llm, child_agent):
+        """Single call within budget succeeds and increments counter."""
+        tool = SubAgentTool(agent=child_agent, name="Researcher", description="Research", max_calls=2)
+        parent = Agent(
+            name="Manager",
+            llm=test_llm,
+            role="manager",
+            tools=[tool],
+            max_loops=3,
+        )
+        result = parent._check_subagent_limits([{"name": "Researcher", "input": "q"}], "Researcher")
+        assert result is None
+        assert tool._call_count == 1
+
+    def test_check_subagent_limits_exceeded(self, test_llm, child_agent):
+        """Call rejected when budget exhausted."""
+        tool = SubAgentTool(agent=child_agent, name="Researcher", description="Research", max_calls=1)
+        parent = Agent(
+            name="Manager",
+            llm=test_llm,
+            role="manager",
+            tools=[tool],
+            max_loops=3,
+        )
+        result = parent._check_subagent_limits([{"name": "Researcher", "input": "q"}], "Researcher")
+        assert result is None
+        assert tool._call_count == 1
+        result = parent._check_subagent_limits([{"name": "Researcher", "input": "q2"}], "Researcher")
+        assert result is not None
+        assert "limit exceeded" in result.lower()
+        assert tool._call_count == 1
+
+    def test_check_subagent_limits_batch_exceeds(self, test_llm, child_agent):
+        """Parallel batch with more calls than remaining budget is fully rejected."""
+        tool = SubAgentTool(agent=child_agent, name="Researcher", description="Research", max_calls=2)
+        parent = Agent(
+            name="Manager",
+            llm=test_llm,
+            role="manager",
+            tools=[tool],
+            max_loops=3,
+        )
+        tools_data = [
+            {"name": "Researcher", "input": "q1"},
+            {"name": "Researcher", "input": "q2"},
+            {"name": "Researcher", "input": "q3"},
+        ]
+        result = parent._check_subagent_limits(tools_data, "parallel_tool")
+        assert result is not None
+        assert "limit exceeded" in result.lower()
+        assert tool._call_count == 0  # none incremented
+
+    def test_reset_run_state_resets_subagent_counters(self, test_llm, child_agent):
+        """Agent.reset_run_state resets all SubAgentTool counters."""
+        tool = SubAgentTool(agent=child_agent, name="Researcher", description="Research", max_calls=2)
+        parent = Agent(
+            name="Manager",
+            llm=test_llm,
+            role="manager",
+            tools=[tool],
+            max_loops=3,
+        )
+        tool._call_count = 2
+        parent.reset_run_state()
+        assert tool._call_count == 0

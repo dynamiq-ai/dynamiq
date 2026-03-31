@@ -118,9 +118,14 @@ class SubAgentTool(Node):
         default=True,
         description="If True, init_components creates a trial agent to validate the factory.",
     )
+    max_calls: int | None = Field(
+        default=None,
+        description="Maximum number of invocations allowed per agent run. None means unlimited.",
+    )
 
     is_postponed_component_init: bool = True
     _connection_manager: Any = PrivateAttr(default=None)
+    _call_count: int = PrivateAttr(default=0)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[SubAgentToolInputSchema]] = SubAgentToolInputSchema
@@ -231,6 +236,10 @@ class SubAgentTool(Node):
         agent = self._create_agent_from_factory()
         logger.info(f"SubAgentTool '{self.name}': created new agent from factory")
         return agent
+
+    def reset_call_count(self) -> None:
+        """Reset the per-run invocation counter."""
+        self._call_count = 0
 
     @staticmethod
     def cleanup_factory_agent(agent: Agent) -> None:

@@ -1020,6 +1020,43 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self._add_observation(error_message)
             return None
 
+    def _check_subagent_limits(self, tools_data: list[dict[str, Any]], action: str) -> str | None:
+        """Check if any SubAgentTool in the batch would exceed its max_calls.
+
+        Returns an error message if limit exceeded, None if all OK.
+        If OK, increments the call counters.
+        """
+        subagent_calls: dict[str, int] = {}
+
+        for td in tools_data:
+            name = td.get("name", action) if isinstance(td, dict) else action
+            sanitized = self.sanitize_tool_name(name)
+            tool = self.tool_by_names.get(sanitized)
+            if tool and isinstance(tool, SubAgentTool) and tool.max_calls is not None:
+                subagent_calls[sanitized] = subagent_calls.get(sanitized, 0) + 1
+
+        exceeded = []
+        for name, batch_count in subagent_calls.items():
+            tool = self.tool_by_names[name]
+            remaining = tool.max_calls - tool._call_count
+            if batch_count > remaining:
+                exceeded.append(
+                    f"'{tool.name}' needs {batch_count} call(s) but only {remaining} remaining "
+                    f"(limit: {tool.max_calls}, used: {tool._call_count})"
+                )
+
+        if exceeded:
+            return (
+                f"Sub-agent invocation limit exceeded. {'; '.join(exceeded)}. "
+                f"No sub-agent calls in this batch were executed. "
+                f"Use other tools or provide a final answer using information already gathered."
+            )
+
+        for name, batch_count in subagent_calls.items():
+            self.tool_by_names[name]._call_count += batch_count
+
+        return None
+
     def _should_skip_parallel_mode(
         self, action: str | None, action_input: Any
     ) -> tuple[bool, str | None, Any, list[str]]:
@@ -1104,6 +1141,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             # Handle XML parallel mode (only for multiple tools, not for ContextManagerTool)
             tools_data = action_input if isinstance(action_input, list) else [action_input]
+
+            # Check subagent invocation limits before executing
+            subagent_error = self._check_subagent_limits(tools_data, action)
+            if subagent_error:
+                self._add_observation(subagent_error)
+                return None
+
             if (
                 self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME
                 and self.parallel_tool_calls_enabled
