@@ -156,6 +156,8 @@ class StreamingConfig(BaseModel):
 
     Attributes:
         enabled (bool): Whether streaming is enabled. Defaults to False.
+        stream_tool_input (list[str] | None): Allowlist of tool names whose inputs should be
+            streamed. None means all tool inputs are streamed. Defaults to None.
         event (str): Event name. Defaults to "streaming".
         timeout (float | None): Timeout for streaming. Defaults to 600 seconds.
         input_queue (Queue | None): Input queue for streaming. Defaults to None.
