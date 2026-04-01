@@ -122,6 +122,7 @@ class TavilyTool(ConnectionNode):
     action_type: ActionType = ActionType.WEB_SEARCH
     name: str = "Tavily Search Tool"
     description: str = DESCRIPTION_TAVILY
+    is_parallel_execution_allowed: bool = True
     connection: Tavily
 
     auto_parameters: bool = Field(
