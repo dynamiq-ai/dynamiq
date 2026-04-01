@@ -524,6 +524,12 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         if self.agent.streaming.mode == StreamingMode.FINAL and step != StreamingState.ANSWER:
             return
 
+        # Skip tool input streaming if not in the allowlist
+        if step == StreamingState.TOOL_INPUT:
+            allowed = self.agent.streaming.stream_tool_input
+            if allowed is not None and (self._current_action_name or "") not in allowed:
+                return
+
         if step in self._state_has_emitted:
             if not self._state_has_emitted[step]:
                 trimmed = content.lstrip("\r\n ")

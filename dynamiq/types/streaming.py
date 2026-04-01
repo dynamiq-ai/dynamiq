@@ -166,6 +166,7 @@ class StreamingConfig(BaseModel):
         include_usage (bool): Whether to include usage information. Defaults to False.
     """
     enabled: bool = False
+    stream_tool_input: list[str] | None = None
     event: str = STREAMING_EVENT
     timeout: PositiveFloat | None = 600.0
     input_queue: Queue | None = None
