@@ -339,6 +339,7 @@ class ExaTool(ConnectionNode):
     description: str = DESCRIPTION_EXA
     action_type: ActionType = ActionType.WEB_SEARCH
     is_parallel_execution_allowed: bool = True
+    is_result_streaming_enabled: bool = False
     connection: Exa
 
     include_full_content: bool = Field(

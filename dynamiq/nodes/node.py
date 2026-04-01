@@ -263,6 +263,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         default=False,
         description="Whether output persistence to sandbox is allowed when this node is used as an agent tool.",
     )
+    is_result_streaming_enabled: bool = Field(
+        default=True,
+        description="Whether the full tool result content is included in streaming events.",
+    )
     action_type: ActionType | None = Field(default=None, description="Action type classification for streaming.")
 
     _output_references: NodeOutputReferences = PrivateAttr()
