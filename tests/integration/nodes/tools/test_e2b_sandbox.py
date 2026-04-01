@@ -54,7 +54,7 @@ def test_params_with_files_and_scalars(e2b_tool):
             "    with open(p) as f:\n"
             "        extra_sizes.append(len(f.read()))\n"
             "result = count * factor * multiplier\n"
-            "print(f'{label}: {result}, extras={extra_sizes}, mode={opts[\"mode\"]}')"
+            "print(json.dumps({'result': result, 'extras': extra_sizes, 'label': label, 'mode': opts['mode']}))"
         ),
         params={
             "scores": csv_file,
@@ -67,7 +67,8 @@ def test_params_with_files_and_scalars(e2b_tool):
     )
     result = e2b_tool.execute(input_data)
     output = result["content"]["code_execution"]
-    assert "100" in output
-    assert "Total" in output
-    assert "[3, 2]" in output
-    assert "mode=full" in output
+    assert isinstance(output, dict)
+    assert output["result"] == 100
+    assert output["label"] == "Total"
+    assert output["extras"] == [3, 2]
+    assert output["mode"] == "full"

@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 import shlex
 from pathlib import PurePosixPath
 from typing import Any, ClassVar, Literal
@@ -861,6 +862,15 @@ class E2BInterpreterTool(ConnectionNode):
 
             return {"content": result_text, "files": files_bytesio}
 
+        if code_execution := content.get("code_execution"):
+            try:
+                parsed = json.loads(code_execution)
+                if isinstance(parsed, (dict, list)):
+                    content["code_execution"] = parsed
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n" f"{str(content)[:200]}...")
         return {"content": content}
 
     def _create_sandbox_with_retry(self) -> Sandbox:
