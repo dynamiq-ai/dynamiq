@@ -407,19 +407,17 @@ class E2BInterpreterTool(ConnectionNode):
         self._update_description_with_files(upload_details)
         return "\n".join([f"{file['original_name']} -> {file['uploaded_path']}" for file in upload_details])
 
-    def _upload_param_files(
-        self, value: io.BytesIO | FileInfo | list[io.BytesIO | FileInfo], sandbox: Sandbox
-    ) -> str | list[str]:
-        """Upload param value (single file or list) to sandbox and return path(s)."""
-
-        def _to_bytesio(item: io.BytesIO | FileInfo) -> io.BytesIO:
-            if isinstance(item, FileInfo):
-                return item.to_bytesio()
-            return item
-
+    def _resolve_param_value(self, value: Any, sandbox: Sandbox) -> Any:
+        """Recursively walk a param value, uploading any files and replacing them with paths."""
+        if isinstance(value, FileInfo):
+            return self._upload_file(value.to_bytesio(), sandbox)
+        if isinstance(value, io.BytesIO):
+            return self._upload_file(value, sandbox)
         if isinstance(value, list):
-            return [self._upload_file(_to_bytesio(item), sandbox) for item in value]
-        return self._upload_file(_to_bytesio(value), sandbox)
+            return [self._resolve_param_value(item, sandbox) for item in value]
+        if isinstance(value, dict):
+            return {k: self._resolve_param_value(v, sandbox) for k, v in value.items()}
+        return value
 
     def _upload_file(self, file: io.BytesIO, sandbox: Sandbox | None = None) -> str:
         """
@@ -496,18 +494,8 @@ class E2BInterpreterTool(ConnectionNode):
         if params:
             vars_code = "\n# Tool params variables injected by framework\n"
             for key, value in params.items():
-                if isinstance(value, (io.BytesIO, FileInfo)) or (
-                    isinstance(value, list) and value and isinstance(value[0], (io.BytesIO, FileInfo))
-                ):
-                    vars_code += f"{key} = {repr(self._upload_param_files(value, sandbox))}\n"
-                elif isinstance(value, str):
-                    vars_code += f"{key} = {repr(value)}\n"
-                elif isinstance(value, (int, float, bool)) or value is None:
-                    vars_code += f"{key} = {value}\n"
-                elif isinstance(value, (list, dict)):
-                    vars_code += f"{key} = {repr(value)}\n"
-                else:
-                    vars_code += f"{key} = {repr(str(value))}\n"
+                resolved = self._resolve_param_value(value, sandbox)
+                vars_code += f"{key} = {repr(resolved)}\n"
 
             code = vars_code + "\n" + code
 

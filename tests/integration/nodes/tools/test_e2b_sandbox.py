@@ -54,7 +54,19 @@ def test_params_with_files_and_scalars(e2b_tool):
             "    with open(p) as f:\n"
             "        extra_sizes.append(len(f.read()))\n"
             "result = count * factor * multiplier\n"
-            "print(json.dumps({'result': result, 'extras': extra_sizes, 'label': label, 'mode': opts['mode']}))"
+            "# mixed_list: ['hello', '/path/to/e1.txt', 42]\n"
+            "assert isinstance(mixed_list, list) and len(mixed_list) == 3\n"
+            "assert mixed_list[0] == 'hello'\n"
+            "assert isinstance(mixed_list[1], str) and mixed_list[1].endswith('.txt')\n"
+            "assert mixed_list[2] == 42\n"
+            "# file_dict: {'data': '/path/to/scores.csv', 'threshold': 0.5}\n"
+            "assert isinstance(file_dict, dict)\n"
+            "assert isinstance(file_dict['data'], str) and file_dict['data'].endswith('.csv')\n"
+            "assert file_dict['threshold'] == 0.5\n"
+            "with open(file_dict['data']) as f:\n"
+            "    dict_file_lines = len(f.readlines())\n"
+            "print(json.dumps({'result': result, 'extras': extra_sizes, 'label': label, "
+            "'mode': opts['mode'], 'mixed_list': mixed_list, 'dict_file_lines': dict_file_lines}))"
         ),
         params={
             "scores": csv_file,
@@ -63,6 +75,8 @@ def test_params_with_files_and_scalars(e2b_tool):
             "multiplier": 5,
             "label": "Total",
             "opts": {"mode": "full", "verbose": True},
+            "mixed_list": ["hello", extra1, 42],
+            "file_dict": {"data": csv_file, "threshold": 0.5},
         },
     )
     result = e2b_tool.execute(input_data)
@@ -72,3 +86,7 @@ def test_params_with_files_and_scalars(e2b_tool):
     assert output["label"] == "Total"
     assert output["extras"] == [3, 2]
     assert output["mode"] == "full"
+    assert output["mixed_list"][0] == "hello"
+    assert output["mixed_list"][1].endswith(".txt")
+    assert output["mixed_list"][2] == 42
+    assert output["dict_file_lines"] == 3
