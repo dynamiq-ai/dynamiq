@@ -259,12 +259,16 @@ def _basemodel_to_schema(model: type[BaseModel], _seen: set | None = None) -> di
 
 
 def _is_strict_compatible(schema: Any) -> bool:
-    """Return ``False`` if the schema contains a bare ``{"type": "object"}``
-    without ``properties`` — which OpenAI strict mode rejects."""
+    """Return ``False`` if the schema contains an object that OpenAI strict mode
+    would reject — bare objects without ``properties``, or objects missing
+    ``additionalProperties: False``."""
     if not isinstance(schema, dict):
         return True
-    if schema.get("type") == "object" and "properties" not in schema:
-        return False
+    if schema.get("type") == "object":
+        if "properties" not in schema:
+            return False
+        if schema.get("additionalProperties") is not False:
+            return False
     for value in schema.values():
         if isinstance(value, dict) and not _is_strict_compatible(value):
             return False
@@ -379,7 +383,7 @@ def generate_function_calling_schemas(
         if list(input_params) and not isinstance(llm, Gemini):
             for name, field in tool.input_schema.model_fields.items():
                 generate_property_schema(properties, name, field)
-                if field.is_required():
+                if field.is_required() and name in properties:
                     required_fields.append(name)
 
             has_optional = len(required_fields) < len(properties)
