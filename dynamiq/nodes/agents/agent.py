@@ -1024,12 +1024,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """Check if any SubAgentTool in the batch would exceed its max_calls.
 
         Returns an error message if limit exceeded, None if all OK.
-        Does NOT increment counters — _run_tool increments on successful execution.
         """
         subagent_calls: dict[str, int] = {}
+        is_parallel = self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME
 
         for td in tools_data:
-            name = td.get("name", action) if isinstance(td, dict) else action
+            name = td.get("name", action) if (is_parallel and isinstance(td, dict)) else action
             sanitized = self.sanitize_tool_name(name)
             tool = self.tool_by_names.get(sanitized)
             if tool and isinstance(tool, SubAgentTool) and tool.max_calls is not None:
