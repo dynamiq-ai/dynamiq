@@ -205,6 +205,23 @@ class ConnectionManager:
         return self.serializer.loads(value)
 
 
+# Shared default ConnectionManager instance.
+# ConnectionManager is thread-safe (per-connection locks with double-checked locking),
+# so a single instance can be safely shared across multiple Flow instances.
+_default_connection_manager: ConnectionManager | None = None
+_default_connection_manager_lock = threading.Lock()
+
+
+def get_default_connection_manager() -> ConnectionManager:
+    """Return (and lazily create) the shared default ConnectionManager singleton."""
+    global _default_connection_manager
+    if _default_connection_manager is None:
+        with _default_connection_manager_lock:
+            if _default_connection_manager is None:
+                _default_connection_manager = ConnectionManager()
+    return _default_connection_manager
+
+
 @contextmanager
 def get_connection_manager():
     """

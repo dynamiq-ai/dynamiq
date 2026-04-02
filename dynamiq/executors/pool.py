@@ -10,7 +10,23 @@ from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
 from dynamiq.utils.logger import logger
 
-MAX_WORKERS_THREAD_POOL_EXECUTOR = 8
+
+def _default_thread_max_workers() -> int:
+    """Return the default max_workers for thread pool executors.
+
+    Resolution order:
+    1. ``DYNAMIQ_MAX_WORKERS`` environment variable (explicit deployment override).
+    2. ``min(32, os.cpu_count() + 4)`` — the same heuristic used by Python's
+       stdlib ``ThreadPoolExecutor`` since 3.8, well-suited for I/O-bound
+       workloads such as LLM API calls.
+    """
+    env_val = os.environ.get("DYNAMIQ_MAX_WORKERS")
+    if env_val is not None:
+        return int(env_val)
+    return min(32, (os.cpu_count() or 1) + 4)
+
+
+MAX_WORKERS_THREAD_POOL_EXECUTOR = _default_thread_max_workers()
 MAX_WORKERS_PROCESS_POOL_EXECUTOR = os.cpu_count()
 
 
@@ -44,6 +60,13 @@ class PoolExecutor(BaseExecutor):
             wait (bool, optional): Whether to wait for pending futures to complete. Defaults to True.
         """
         self.executor.shutdown(wait=wait)
+
+    def reset(self):
+        """
+        Resets per-run state so the executor can be reused across multiple flow runs
+        without creating a new thread pool.
+        """
+        self.node_by_future = {}
 
     def execute(
         self,

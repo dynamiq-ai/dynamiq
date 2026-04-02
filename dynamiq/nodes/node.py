@@ -990,11 +990,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         error = None
         n_attempt = self.error_handling.max_retries + 1
         executor = None
-        timed_out = False
 
         try:
             if timeout is not None:
-                executor = ContextAwareThreadPoolExecutor()
+                executor = ContextAwareThreadPoolExecutor(max_workers=1)
 
             for attempt in range(n_attempt):
                 merged_kwargs = merge(kwargs, {"execution_run_id": uuid4()})
@@ -1032,7 +1031,6 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
                     return output
                 except TimeoutError as e:
                     error = e
-                    timed_out = True
                     self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
                     logger.warning(f"Node {self.name} - {self.id}: timeout.")
                 except Exception as e:
@@ -1052,9 +1050,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             raise error
         finally:
             if executor is not None:
-                # Use cancel_futures=True and wait=False when timeout occurred to prevent
-                # blocking on threads that may be stuck waiting (e.g., on input_queue.get())
-                executor.shutdown(wait=not timed_out, cancel_futures=timed_out)
+                executor.shutdown(wait=False)
 
     def execute_with_timeout(
         self,
@@ -1087,8 +1083,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             return future.result(timeout=timeout)
         except TimeoutError:
             # Cancel the future to prevent further execution if possible.
-            # Note: cancel() only works if the task hasn't started yet.
-            # For running tasks, we rely on executor.shutdown(cancel_futures=True).
+            # Note: cancel() only prevents tasks that have not started yet.
+            # Already-running tasks will continue until they complete; this is
+            # a Python threading limitation.  The per-node executor is shut
+            # down (wait=False) in the finally block of execute_with_retry.
             future.cancel()
             raise
 
