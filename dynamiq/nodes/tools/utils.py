@@ -74,8 +74,11 @@ def guess_mime_type_from_bytes(data: bytes, filename: str = None) -> str:
     elif data.startswith(b"<?xml"):
         return "application/xml"
     elif data.startswith(b"{") or data.startswith(b"["):
-        json.loads(data.decode("utf-8"))
-        return "application/json"
+        try:
+            json.loads(data.decode("utf-8"))
+            return "application/json"
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
     elif data.startswith(b"Name,") or b"," in data[:100] and b"\n" in data[:100]:
         return "text/csv"
     elif data.startswith(b"#") or (b" " in data and b"\n" in data and len(data.split(b"\n")) > 1):
