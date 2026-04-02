@@ -808,8 +808,17 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             self._initialize_json_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT)
 
         if self._current_state == StreamingState.REASONING:
-            self._emit_json_field_content(buf, StreamingState.REASONING)
-        elif self._current_state == StreamingState.ANSWER:
+            if self._emit_json_field_content(buf, StreamingState.REASONING):
+                # Reasoning completed — immediately try to initialize ANSWER/TOOL_INPUT
+                # in the same call, in case this is the last chunk.
+                if self._answer_started:
+                    self._initialize_json_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.ANSWER)
+                elif self._tool_input_started:
+                    self._initialize_json_field_state(
+                        buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT
+                    )
+
+        if self._current_state == StreamingState.ANSWER:
             if self._emit_json_field_content(buf, StreamingState.ANSWER):
                 self._so_action_emitted = True
         elif self._current_state == StreamingState.TOOL_INPUT:
