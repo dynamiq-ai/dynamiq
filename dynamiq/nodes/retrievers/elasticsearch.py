@@ -60,7 +60,7 @@ class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
         **kwargs: Keyword arguments for initializing the node.
     """
 
-    name: str = "ElasticsearchDocumentRetriever"
+    name: str = "elasticsearch-document-retriever"
     connection: Elasticsearch | None = None
     vector_store: ElasticsearchVectorStore | None = None
     document_retriever: ElasticsearchDocumentRetrieverComponent | None = None

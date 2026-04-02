@@ -75,7 +75,7 @@ class MistralOCR(ConnectionNode):
     """
 
     group: Literal[NodeGroup.PARSERS] = NodeGroup.PARSERS
-    name: str = "Mistral OCR"
+    name: str = "mistral-ocr"
     description: str = "Node that extracts text from documents using Mistral OCR API"
     model: str = "mistral-ocr-latest"
     include_image_base64: bool = False

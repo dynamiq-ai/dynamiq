@@ -76,7 +76,7 @@ class LLMImageConverter(Node):
 
     Attributes:
         group (Literal[NodeGroup.CONVERTERS]): The group the node belongs to. Default is NodeGroup.CONVERTERS.
-        name (str): The name of the node. Default is "LLMImageConverter".
+        name (str): The name of the node. Default is "llm-image-converter".
         extraction_instruction (str): The instruction for text extraction.
             Default is DEFAULT_EXTRACTION_INSTRUCTION.
         document_creation_mode (DocumentCreationMode): The mode for document creation.
@@ -106,7 +106,7 @@ class LLMImageConverter(Node):
     """
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
-    name: str = "LLMImageConverter"
+    name: str = "llm-image-converter"
     extraction_instruction: str = DEFAULT_EXTRACTION_INSTRUCTION
     document_creation_mode: DocumentCreationMode = DocumentCreationMode.ONE_DOC_PER_FILE
     llm: Node
@@ -479,7 +479,7 @@ class LLMPDFConverter(LLMImageConverter):
 
     Attributes:
         group (Literal[NodeGroup.CONVERTERS]): The group the node belongs to. Default is NodeGroup.CONVERTERS.
-        name (str): The name of the node. Default is "LLMPDFConverter".
+        name (str): The name of the node. Default is "llm-pdf-converter".
         extraction_instruction (str): The instruction for text extraction.
             Default is DEFAULT_EXTRACTION_INSTRUCTION.
         document_creation_mode (DocumentCreationMode): The mode for document creation.
@@ -510,6 +510,8 @@ class LLMPDFConverter(LLMImageConverter):
 
     _convert_from_bytes: Any = PrivateAttr()
     _convert_from_path: Any = PrivateAttr()
+
+    name: str = "llm-pdf-converter"
     input_schema: ClassVar[type[LLMPDFConverterInputSchema]] = LLMPDFConverterInputSchema
 
     def __init__(self, **kwargs):

@@ -279,7 +279,7 @@ class Python(Node):
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.CODE_EXECUTION
-    name: str = "Python Code Executor Tool"
+    name: str = "python-tool"
     description: str = """Executes Python code in a secure sandbox with restricted imports for calculations,
     data processing, and API interactions."""  # noqa: E501
     code: str

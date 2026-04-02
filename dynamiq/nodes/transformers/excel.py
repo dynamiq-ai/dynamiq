@@ -16,7 +16,7 @@ class ExcelToListTransformerInputSchema(BaseModel):
 
 class ExcelToList(Node):
     group: Literal[NodeGroup.TRANSFORMERS] = NodeGroup.TRANSFORMERS
-    name: str = "ExcelToList"
+    name: str = "excel-to-list"
     description: str = "Node that transforms excel file into a list of dictionaries"
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

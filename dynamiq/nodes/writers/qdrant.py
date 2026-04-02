@@ -19,7 +19,7 @@ class QdrantDocumentWriter(Writer, QdrantWriterVectorStoreParams):
         vector_store (QdrantVectorStore | None): The Qdrant Vector Store instance.
     """
 
-    name: str = "QdrantDocumentWriter"
+    name: str = "qdrant-document-writer"
     connection: QdrantConnection | None = None
     vector_store: QdrantVectorStore | None = None
 

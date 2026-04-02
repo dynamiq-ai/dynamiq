@@ -1658,7 +1658,7 @@ class AgentManager(Agent):
     """Manager class that extends the Agent class to include specific actions."""
 
     _actions: dict[str, Callable] = PrivateAttr(default_factory=dict)
-    name: str = "Agent Manager"
+    name: str = "agent-manager"
     input_schema: ClassVar[type[AgentManagerInputSchema]] = AgentManagerInputSchema
 
     def __init__(self, **kwargs):

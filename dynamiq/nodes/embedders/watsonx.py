@@ -23,7 +23,7 @@ class WatsonXDocumentEmbedder(DocumentEmbedder):
         model (str): The model name to use for embedding. Defaults to 'watsonx/ibm/slate-30m-english-rtrvr'.
     """
 
-    name: str = "WatsonXDocumentEmbedder"
+    name: str = "watsonx-document-embedder"
     connection: WatsonXConnection | None = None
     model: str = "watsonx/ibm/slate-30m-english-rtrvr"
     document_embedder: WatsonXEmbedderComponent | None = None
@@ -80,7 +80,7 @@ class WatsonXTextEmbedder(TextEmbedder):
 
     """
 
-    name: str = "WatsonXTextEmbedder"
+    name: str = "watsonx-text-embedder"
     connection: WatsonXConnection | None = None
     model: str = "watsonx/ibm/slate-30m-english-rtrvr"
     text_embedder: WatsonXEmbedderComponent = None

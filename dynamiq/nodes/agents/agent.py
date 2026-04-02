@@ -91,7 +91,7 @@ UNKNOWN_TOOL_NAME = "unknown_tool"
 class Agent(HistoryManagerMixin, BaseAgent):
     """Unified Agent that uses a ReAct-style strategy for processing tasks by interacting with tools in a loop."""
 
-    name: str = "Agent"
+    name: str = "agent"
     max_loops: int = Field(default=15, ge=2)
     inference_mode: InferenceMode = Field(default=InferenceMode.DEFAULT)
     behaviour_on_max_loops: Behavior = Field(
