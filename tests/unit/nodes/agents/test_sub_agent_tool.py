@@ -8,10 +8,11 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections.managers import get_connection_manager
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.agents.base import ToolParams
 from dynamiq.nodes.agents.components import schema_generator
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.tools.agent_tool import SubAgentTool
+from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableResult, RunnableStatus
@@ -564,6 +565,7 @@ class TestYamlRoundtrip:
             agent=child_agent,
             name="Research Tool",
             description="Delegates to researcher",
+            max_calls=5,
         )
 
         parent = Agent(
@@ -597,6 +599,7 @@ class TestYamlRoundtrip:
         assert SubAgentTool.INITIALIZED_HINT in wrapper.description
         assert wrapper.agent.name == "Researcher Agent"
         assert wrapper.agent.description == "I am a research agent"
+        assert wrapper.max_calls == 5
 
         rt_path = tmp_path / "sub_agent_tool_rt.yaml"
         loaded.to_yaml_file(rt_path)
@@ -610,6 +613,7 @@ class TestYamlRoundtrip:
         rt_wrapper = rt_tools[0]
         assert rt_wrapper.name == "Research Tool"
         assert "Delegates to researcher" in rt_wrapper.description
+        assert rt_wrapper.max_calls == 5
         assert SubAgentTool.INITIALIZED_HINT in rt_wrapper.description
         assert rt_wrapper.agent.name == "Researcher Agent"
         assert rt_wrapper.agent.description == "I am a research agent"
@@ -697,6 +701,7 @@ class TestYamlRoundtrip:
         sub_agent_tool = SubAgentTool(
             name="Researcher",
             description="Performs web research",
+            max_calls=3,
             agent_factory={
                 "connections": {
                     "openai-conn": {
@@ -764,6 +769,7 @@ class TestYamlRoundtrip:
         assert wrapper.is_factory_mode is True
         assert wrapper.agent is None
         assert isinstance(wrapper.agent_factory, dict)
+        assert wrapper.max_calls == 3
 
         agent_a = wrapper.get_or_create_agent()
         agent_b = wrapper.get_or_create_agent()
@@ -800,6 +806,7 @@ class TestYamlRoundtrip:
         assert rt_wrapper.is_factory_mode is True
         assert rt_wrapper.agent is None
         assert isinstance(rt_wrapper.agent_factory, dict)
+        assert rt_wrapper.max_calls == 3
 
         rt_agent = rt_wrapper.get_or_create_agent()
         assert isinstance(rt_agent, Agent)
@@ -1079,3 +1086,94 @@ class TestSubAgentStreaming:
         assert delta["content"] == "sub-agent answer"
         assert delta["source"] == child_agent.name
         assert delta["step"] == "answer"
+
+
+class TestSubAgentMaxCalls:
+    """Tests for SubAgentTool.max_calls invocation limit."""
+
+    @pytest.fixture
+    def make_parent(self, test_llm, child_agent):
+        """Factory to create a parent agent with a limited SubAgentTool."""
+
+        def _make(max_calls=None, max_loops=3):
+            tool = SubAgentTool(agent=child_agent, name="Researcher", description="Research", max_calls=max_calls)
+            parent = Agent(name="Manager", llm=test_llm, role="manager", tools=[tool], max_loops=max_loops)
+            return parent, tool
+
+        return _make
+
+    def test_no_limit_allows_any(self, make_parent):
+        parent, tool = make_parent(max_calls=None)
+        result = parent._check_subagent_limits([{"input": "q"}], "Researcher")
+        assert result is None
+
+    def test_single_tool_within_budget(self, make_parent):
+        parent, tool = make_parent(max_calls=2)
+        assert parent._check_subagent_limits([{"input": "q"}], "Researcher") is None
+        assert tool._call_count == 0
+
+    def test_single_tool_exhausted(self, make_parent):
+        parent, tool = make_parent(max_calls=1)
+        tool._call_count = 1
+        result = parent._check_subagent_limits([{"input": "q"}], "Researcher")
+        assert result is not None
+        assert "limit exceeded" in result.lower()
+
+    def test_single_tool_name_collision_does_not_bypass(self, make_parent):
+        """Input with a 'name' data field must not bypass the limit."""
+        parent, tool = make_parent(max_calls=1)
+        tool._call_count = 1
+        result = parent._check_subagent_limits([{"input": "find John", "name": "John"}], "Researcher")
+        assert result is not None
+        assert "limit exceeded" in result.lower()
+
+    def test_parallel_batch_exceeds(self, make_parent):
+        parent, tool = make_parent(max_calls=2)
+        tools_data = [
+            {"name": "Researcher", "input": "q1"},
+            {"name": "Researcher", "input": "q2"},
+            {"name": "Researcher", "input": "q3"},
+        ]
+        result = parent._check_subagent_limits(tools_data, PARALLEL_TOOL_NAME)
+        assert result is not None
+        assert "limit exceeded" in result.lower()
+
+    def test_reset_run_state_resets_call_count(self, make_parent):
+        parent, tool = make_parent(max_calls=2)
+        tool._call_count = 2
+        parent.reset_run_state()
+        assert tool._call_count == 0
+
+    def test_structured_output_limit_blocks_and_agent_finishes(self, child_agent, make_parent):
+        """Full pipeline: sub-agent called once (max_calls=1), second call blocked, agent finishes."""
+        import json
+
+        from dynamiq.prompts import Message, MessageRole
+
+        parent, tool = make_parent(max_calls=1, max_loops=4)
+        parent.inference_mode = InferenceMode.STRUCTURED_OUTPUT
+        parent.init_components()
+
+        llm_responses = iter(
+            [
+                json.dumps({"thought": "Need research", "action": "Researcher", "action_input": {"input": "query 1"}}),
+                json.dumps({"thought": "More research", "action": "Researcher", "action_input": {"input": "query 2"}}),
+                json.dumps({"thought": "Done", "action": "finish", "action_input": "Final result"}),
+            ]
+        )
+
+        def mock_llm_run(**kwargs):
+            r = MagicMock(spec=RunnableResult)
+            r.status = RunnableStatus.SUCCESS
+            r.output = {"content": next(llm_responses)}
+            return r
+
+        with (
+            patch.object(parent.llm, "run", side_effect=mock_llm_run),
+            patch.object(type(child_agent), "run", return_value=_make_successful_run_result()) as child_run,
+        ):
+            result = parent._run_agent(input_message=Message(role=MessageRole.USER, content="Do research"))
+
+        assert result == "Final result"
+        assert child_run.call_count == 1
+        assert tool._call_count == 1
