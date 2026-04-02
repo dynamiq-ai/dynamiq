@@ -54,7 +54,7 @@ class ImageVariation(ConnectionNode):
     FILE_PREFIX: ClassVar[str] = "variation"
 
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
-    name: str = "Image Variation"
+    name: str = "image-variation"
     description: str = """Create AI-generated variations of existing images while preserving core composition.
 
 Key Capabilities:

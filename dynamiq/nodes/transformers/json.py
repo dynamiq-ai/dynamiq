@@ -15,7 +15,7 @@ class AnyToJSONTransformerInputSchema(BaseModel):
 
 class AnyToJSON(Node):
     group: Literal[NodeGroup.TRANSFORMERS] = NodeGroup.TRANSFORMERS
-    name: str = "AnyToJSON"
+    name: str = "any-to-json"
     description: str = "Node that transforms value to JSON"
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -57,7 +57,7 @@ class JSONToAnyTransformerInputSchema(BaseModel):
 
 class JSONToAny(Node):
     group: Literal[NodeGroup.TRANSFORMERS] = NodeGroup.TRANSFORMERS
-    name: str = "JSONToAny"
+    name: str = "json-to-any"
     description: str = "Node that transforms JSON to an object"
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

@@ -23,7 +23,7 @@ class BedrockDocumentEmbedder(DocumentEmbedder):
         model (str): The model name to use for embedding. Defaults to 'amazon.titan-embed-text-v1'.
     """
 
-    name: str = "AmazonBedrockDocumentEmbedder"
+    name: str = "bedrock-document-embedder"
     connection: BedrockConnection | None = None
     model: str = "amazon.titan-embed-text-v1"
     document_embedder: BedrockEmbedderComponent | None = None
@@ -80,7 +80,7 @@ class BedrockTextEmbedder(TextEmbedder):
 
     """
 
-    name: str = "BedrockTextEmbedder"
+    name: str = "bedrock-text-embedder"
     connection: BedrockConnection | None = None
     model: str = "amazon.titan-embed-text-v1"
     text_embedder: BedrockEmbedderComponent = None

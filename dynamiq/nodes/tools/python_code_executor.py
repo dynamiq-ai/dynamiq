@@ -249,7 +249,7 @@ class PythonCodeExecutor(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.CODE_EXECUTION
-    name: str = "PythonCodeExecutor"
+    name: str = "python-code-executor"
     description: str = (
         "Runs dynamic Python code safely via RestrictedPython. "
         "The tool injects file helpers so you can operate on the "

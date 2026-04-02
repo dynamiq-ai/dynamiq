@@ -74,7 +74,7 @@ class TimeWeightedDocumentRanker(Node):
     """
 
     group: Literal[NodeGroup.RANKERS] = NodeGroup.RANKERS
-    name: str = "Time Weighted Document Ranker"
+    name: str = "time-weighted-document-ranker"
     top_k: int = 5
     max_days: int = 3600
     min_coefficient: float = 0.9

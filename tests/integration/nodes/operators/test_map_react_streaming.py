@@ -29,9 +29,9 @@ def mock_llm_response_text():
         + PARALLEL_TOOL_NAME
         + """</action>
   <action_input>{"tools": [
-    {"name": "NoOp Tool", "input": {}},
-    {"name": "Exa Search Tool", "input": {"query": "test", "limit": 1}},
-    {"name": "Firecrawl Tool", "input": {"url": "https://example.com"}}
+    {"name": "noop-tool", "input": {}},
+    {"name": "exa-search", "input": {"query": "test", "limit": 1}},
+    {"name": "firecrawl-scrape", "input": {"url": "https://example.com"}}
   ]}</action_input>
 </output>"""
     )
@@ -74,7 +74,7 @@ def mock_tools_http(mocker):
 
 def test_map_react_agent_parallel_streams_isolated(mock_llm_executor, mock_tools_http):
     python_tool = Python(
-        name="NoOp Tool",
+        name="noop-tool",
         description="Simple tool returning static content",
         code="""
 def run(input_data):
@@ -86,7 +86,7 @@ def run(input_data):
     firecrawl_tool = FirecrawlTool(connection=connections.Firecrawl(api_key="test-api-key"))
 
     agent = Agent(
-        name="React Agent",
+        name="react-agent",
         llm=OpenAI(model="gpt-4o-mini", connection=connections.OpenAI(api_key="test-api-key")),
         inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=True,
@@ -146,6 +146,6 @@ def run(input_data):
             and is_tool_group(run.metadata.get("node", {}).get("group"))
         )
 
-    assert count_tool("NoOp Tool") >= 1
-    assert count_tool("Exa Search Tool") >= 1
-    assert count_tool("Firecrawl Tool") >= 1
+    assert count_tool("noop-tool") >= 1
+    assert count_tool("exa-search") >= 1
+    assert count_tool("firecrawl-scrape") >= 1

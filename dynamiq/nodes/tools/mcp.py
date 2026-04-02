@@ -193,7 +193,7 @@ class MCPServer(ConnectionNode):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "MCP Tool"
+    name: str = "mcp"
     description: str = """Model Context Server integration for
     dynamic tool discovery and external service connectivity.
 

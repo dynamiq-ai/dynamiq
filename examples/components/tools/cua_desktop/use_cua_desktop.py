@@ -96,7 +96,7 @@ def main():
         print("\nExample 3")
         result = wf.run(
             input_data={
-                "input": "Generate python script that prints 'hello world' using FileWriteTool"
+                "input": "Generate python script that prints 'hello world' using file-write tool."
                 " Upload the file to the CuaDesktop tool and run it using bash."
                 " List files in the folder to verify it is uploaded"
             }

@@ -31,7 +31,7 @@ class WeaviateDocumentRetriever(Retriever, WeaviateRetrieverVectorStoreParams):
         document_retriever (WeaviateDocumentRetrieverComponent): The document retriever component.
     """
 
-    name: str = "WeaviateDocumentRetriever"
+    name: str = "weaviate-document-retriever"
     connection: Weaviate | None = None
     vector_store: WeaviateVectorStore | None = None
     document_retriever: WeaviateDocumentRetrieverComponent | None = None
