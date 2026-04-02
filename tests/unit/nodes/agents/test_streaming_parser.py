@@ -14,6 +14,7 @@ def _make_callback():
     agent = MagicMock()
     agent.streaming.enabled = True
     agent.streaming.mode = StreamingMode.ALL
+    agent.streaming.min_chunk_chars = 0
     agent.inference_mode.name = InferenceMode.STRUCTURED_OUTPUT.value
     agent.name = "test-agent"
     agent._streaming_tool_run_id = None
@@ -69,6 +70,7 @@ def _make_fc_callback(tool_input_started=False, answer_started=False, action_nam
     agent = MagicMock()
     agent.streaming.enabled = True
     agent.streaming.mode = StreamingMode.ALL
+    agent.streaming.min_chunk_chars = 0
     agent.inference_mode.name = InferenceMode.FUNCTION_CALLING.value
     agent.name = "test-agent"
     agent._streaming_tool_run_id = "test-run-id"
@@ -153,6 +155,7 @@ def test_parallel_tool_calls_get_unique_ids():
     agent = MagicMock()
     agent.streaming.enabled = True
     agent.streaming.mode = StreamingMode.ALL
+    agent.streaming.min_chunk_chars = 0
     agent.inference_mode.name = InferenceMode.FUNCTION_CALLING.value
     agent.name = "test-agent"
     agent._streaming_tool_run_id = None

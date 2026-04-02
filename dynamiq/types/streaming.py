@@ -183,7 +183,7 @@ class StreamingConfig(BaseModel):
     input_queue_poll_interval: PositiveFloat = 5.0
     mode: StreamingMode = StreamingMode.FINAL
     include_usage: bool = False
-    min_chunk_chars: NonNegativeInt = 5
+    min_chunk_chars: NonNegativeInt = 0
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
