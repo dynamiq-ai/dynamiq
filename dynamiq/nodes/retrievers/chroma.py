@@ -29,7 +29,7 @@ class ChromaDocumentRetriever(Retriever):
         **kwargs: Keyword arguments for initializing the node.
     """
 
-    name: str = "ChromaDocumentRetriever"
+    name: str = "chroma-document-retriever"
     connection: Chroma | None = None
     vector_store: ChromaVectorStore | None = None
     document_retriever: ChromaDocumentRetrieverComponent | None = None

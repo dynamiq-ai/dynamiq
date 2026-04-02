@@ -21,7 +21,7 @@ class CSVToListTransformerInputSchema(BaseModel):
 
 class CSVToList(Node):
     group: Literal[NodeGroup.TRANSFORMERS] = NodeGroup.TRANSFORMERS
-    name: str = "CsvToList"
+    name: str = "csv-to-list"
     description: str = "Node that transforms csv to list of data in object format"
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -72,7 +72,7 @@ class JSONToCSVTransformerInputSchema(BaseModel):
 
 class JSONToCSV(Node):
     group: Literal[NodeGroup.TRANSFORMERS] = NodeGroup.TRANSFORMERS
-    name: str = "JSONToCsv"
+    name: str = "json-to-csv"
     description: str = "Node that transforms JSON to csv"
 
     input_schema: ClassVar[type[JSONToCSVTransformerInputSchema]] = JSONToCSVTransformerInputSchema

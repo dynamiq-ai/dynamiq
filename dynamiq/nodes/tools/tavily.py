@@ -120,7 +120,7 @@ class TavilyTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.WEB_SEARCH
-    name: str = "Tavily Search Tool"
+    name: str = "tavily-search"
     description: str = DESCRIPTION_TAVILY
     is_parallel_execution_allowed: bool = True
     connection: Tavily

@@ -31,7 +31,7 @@ class TextFileConverter(Node):
     """
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
-    name: str = "Text File Converter"
+    name: str = "text-file-converter"
     file_converter: TextFileConverterComponent | None = None
     input_schema: ClassVar[type[TextFileConverterInputSchema]] = TextFileConverterInputSchema
 

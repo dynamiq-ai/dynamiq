@@ -61,7 +61,7 @@ class SQLExecutor(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.DATABASE_QUERY
-    name: str = "SQL Executor Tool"
+    name: str = "sql-executor"
     description: str = DESCRIPTION_SQL
     connection: PostgreSQL | MySQL | Snowflake | AWSRedshift | DatabricksSQL
     query: str | None = None

@@ -70,7 +70,7 @@ class SummarizerTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Summarizer Tool"
+    name: str = "llm-summarizer"
     description: str = """Summarizes and cleans up text content using LLM with automatic chunking and noise removal.
 
 Key Capabilities:

@@ -73,7 +73,7 @@ class ThinkingTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Thinking Tool"
+    name: str = "thinking-tool"
     description: str = """Analyzes thoughts and reasoning processes to improve decision-making clarity and identify gaps in logic.
 
 Key Capabilities:

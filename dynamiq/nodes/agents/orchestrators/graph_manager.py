@@ -9,7 +9,7 @@ from dynamiq.nodes.agents.prompts.orchestrators.graph import (
 class GraphAgentManager(AgentManager):
     """A graph agent manager that coordinates graph flow execution."""
 
-    name: str = "Graph Manager"
+    name: str = "graph-manager"
 
     def __init__(self, **kwargs):
         """Initialize the GraphAgentManager and set up prompt templates."""
