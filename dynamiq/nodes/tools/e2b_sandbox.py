@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 import shlex
 from pathlib import PurePosixPath
 from typing import Any, ClassVar, Literal
@@ -299,7 +300,7 @@ class E2BInterpreterTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.CODE_EXECUTION
-    name: str = "E2B Code Interpreter Tool"
+    name: str = "e2b-code-interpreter-tool"
     description: str = DESCRIPTION_E2B
     connection: E2BConnection
     installed_packages: list = []
@@ -406,6 +407,20 @@ class E2BInterpreterTool(ConnectionNode):
         self._update_description_with_files(upload_details)
         return "\n".join([f"{file['original_name']} -> {file['uploaded_path']}" for file in upload_details])
 
+    def _resolve_param_value(self, value: Any, sandbox: Sandbox) -> Any:
+        """Recursively walk a param value, uploading any files and replacing them with paths."""
+        if isinstance(value, FileInfo):
+            return self._upload_file(value.to_bytesio(), sandbox)
+        if isinstance(value, io.BytesIO):
+            return self._upload_file(value, sandbox)
+        if isinstance(value, list):
+            return [self._resolve_param_value(item, sandbox) for item in value]
+        if isinstance(value, tuple):
+            return tuple(self._resolve_param_value(item, sandbox) for item in value)
+        if isinstance(value, dict):
+            return {k: self._resolve_param_value(v, sandbox) for k, v in value.items()}
+        return value
+
     def _upload_file(self, file: io.BytesIO, sandbox: Sandbox | None = None) -> str:
         """
         Upload a single file to the specified sandbox and return the uploaded path.
@@ -479,16 +494,10 @@ class E2BInterpreterTool(ConnectionNode):
             raise ValueError("Sandbox instance is required for code execution.")
 
         if params:
-            vars_code = "\n# Tool params variables injected by framework\n"
+            vars_code = "\n# Tool params variables\n"
             for key, value in params.items():
-                if isinstance(value, str):
-                    vars_code += f"{key} = {repr(value)}\n"
-                elif isinstance(value, (int, float, bool)) or value is None:
-                    vars_code += f"{key} = {value}\n"
-                elif isinstance(value, (list, dict)):
-                    vars_code += f"{key} = {repr(value)}\n"
-                else:
-                    vars_code += f"{key} = {repr(str(value))}\n"
+                resolved = self._resolve_param_value(value, sandbox)
+                vars_code += f"{key} = {repr(resolved)}\n"
 
             code = vars_code + "\n" + code
 
@@ -843,6 +852,15 @@ class E2BInterpreterTool(ConnectionNode):
 
             return {"content": result_text, "files": files_bytesio}
 
+        if code_execution := content.get("code_execution"):
+            try:
+                parsed = json.loads(code_execution)
+                if isinstance(parsed, (dict, list)):
+                    content["code_execution"] = parsed
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n" f"{str(content)[:200]}...")
         return {"content": content}
 
     def _create_sandbox_with_retry(self) -> Sandbox:

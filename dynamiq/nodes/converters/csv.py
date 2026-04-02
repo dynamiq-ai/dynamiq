@@ -74,7 +74,7 @@ class CSVConverter(Node):
         input_schema (type[CSVConverterInputSchema]): Schema for validating input parameters.
     """
 
-    name: str = "CSV File Converter"
+    name: str = "csv-file-converter"
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
     delimiter: str | None = Field(default=None, description="Delimiter used in the CSV files.")
     content_column: str | None = Field(

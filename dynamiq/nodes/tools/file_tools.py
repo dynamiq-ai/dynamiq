@@ -128,7 +128,7 @@ DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP = {
 class FileReadInputSchema(BaseModel):
     """Schema for file read input parameters."""
 
-    file_path: str = Field(default="", description="Path of the file to read")
+    file_path: str = Field(..., description="Path of the file to read")
     instructions: str | None = Field(
         default=None,
         description="Instructions for the file read. If not provided, the file will be read in its entirety.",
@@ -157,22 +157,25 @@ class FileReadInputSchema(BaseModel):
     start_line: int | None = Field(
         default=None,
         description="1-based inclusive start line for text content. "
+        "Must be >= 1 or None (omit to read from the beginning). "
         "When set, only lines from start_line to end_line are returned.",
     )
     end_line: int | None = Field(
         default=None,
         description="1-based inclusive end line for text content. "
-        "If omitted while start_line is set, reads to end of file.",
+        "Must be >= 1 and >= start_line, or None (omit to read to the end of file).",
     )
     start_page: int | None = Field(
         default=None,
         description="1-based inclusive start page for PDF documents. "
+        "Must be >= 1 or None (omit to read from the first page). "
         "When set, only pages from start_page to end_page are returned. Implies document_mode='page'.",
     )
     end_page: int | None = Field(
         default=None,
         description="1-based inclusive end page for PDF documents. "
-        "If omitted while start_page is set, reads to last page. Implies document_mode='page'.",
+        "Must be >= 1 and >= start_page, or None (omit to read to the last page). "
+        "Implies document_mode='page'.",
     )
     brief: str = Field(
         default="Reading a file",
@@ -318,7 +321,7 @@ class FileReadTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.FILE_OPERATION
-    name: str = "FileReadTool"
+    name: str = "file-read"
     is_parallel_execution_allowed: bool = True
     description: str = """
         Reads files from storage based on the provided file path with intelligent file processing.
@@ -356,7 +359,7 @@ class FileReadTool(Node):
 
         Notes:
             - Whenever text is extracted from non-text sources (PDF, PPTX, spreadsheets, etc.), it is cached as
-              "<original_path>.extracted.txt" inside the same file store so FileSearchTool can reuse it without
+              "<original_path>.extracted.txt" inside the same file store so file-search can reuse it without
               re-running converters.
             - When start_line/end_line are used, the response includes total_lines and line_range metadata.
             - When start_page/end_page are used, the response includes total_pages and page_range metadata.
@@ -1040,7 +1043,7 @@ class FileReadTool(Node):
         if cache_path and hint_enabled:
             hint = (
                 f"\n\n[Extracted text cached at '{cache_path}'. "
-                "Use FileSearchTool to search this processed content without re-reading the original file.]"
+                "Use file-search to search this processed content without re-reading the original file.]"
             )
             return f"{content}{hint}"
         return content
@@ -1140,7 +1143,7 @@ class FileWriteTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.FILE_OPERATION
-    name: str = "FileWriteTool"
+    name: str = "file-write"
     description: str = (
         "Writes or edits files in storage.\n\n"
         "Actions:\n"
@@ -1323,7 +1326,7 @@ class FileWriteTool(Node):
         logger.info(f"Tool {self.name} - {self.id}: {summary}")
 
         return {
-            "content": f"{summary} Use FileReadTool to view the updated file.",
+            "content": f"{summary} Use file-read to view the updated file.",
             "file_info": file_info.to_bytesio(),
         }
 
@@ -1392,7 +1395,7 @@ class FileSearchTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.FILE_OPERATION
-    name: str = "FileSearchTool"
+    name: str = "file-search"
     description: str = """
         Searches stored files for substrings or regular expressions and returns contextual matches.
         Usage Examples:
@@ -1401,7 +1404,7 @@ class FileSearchTool(Node):
             - {"query": "error.+timeout", "mode": "regex", "case_sensitive": true}
             - {"query": "select", "context_chars": 300, "max_matches_per_file": 10}
         Notes:
-            - When the FileReadTool has already extracted text (e.g., from PDF/PPTX/XLSX/CSV), this tool automatically
+            - When the file-read has already extracted text (e.g., from PDF/PPTX/XLSX/CSV), this tool automatically
               searches the cached "<original>.extracted.txt" instead of re-reading the binary source.
             - Start with concrete phrases (e.g., "Global Drug Facility", "KPI tree") and widen or switch to regex
               only if needed; large, unfocused queries slow the agent down.
@@ -1601,7 +1604,7 @@ class FileListTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.FILE_OPERATION
-    name: str = "FileListTool"
+    name: str = "file-list"
     description: str = """Lists files in storage based on the provided file path."""
 
     file_store: FileStore = Field(..., description="File storage to list from.")

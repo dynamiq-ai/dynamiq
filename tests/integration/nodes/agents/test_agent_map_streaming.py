@@ -28,9 +28,9 @@ def mock_llm_response_text():
         + PARALLEL_TOOL_NAME
         + """</action>
   <action_input>{"tools": [
-    {"name": "NoOp Tool", "input": {}},
-    {"name": "Exa Search Tool", "input": {"query": "test", "limit": 1}},
-    {"name": "Firecrawl Tool", "input": {"url": "https://example.com"}}
+    {"name": "noop-tool", "input": {}},
+    {"name": "exa-search", "input": {"query": "test", "limit": 1}},
+    {"name": "firecrawl-scrape", "input": {"url": "https://example.com"}}
   ]}</action_input>
 </output>"""
     )
@@ -74,7 +74,7 @@ def mock_tools_http(mocker):
 def test_react_agent_map_streaming_all_mode_isolated(mock_llm_executor, mock_tools_http):
     """Ensure parallel ReAct agents under Map stream independently in ALL mode (with tools)."""
     python_tool = Python(
-        name="NoOp Tool",
+        name="noop-tool",
         description="Simple tool returning static content",
         code="""
 def run(input_data):
@@ -121,9 +121,9 @@ def run(input_data):
             and is_tool_group(run.metadata.get("node", {}).get("group"))
         )
 
-    assert count_tool("NoOp Tool") >= 1
-    assert count_tool("Exa Search Tool") >= 1
-    assert count_tool("Firecrawl Tool") >= 1
+    assert count_tool("noop-tool") >= 1
+    assert count_tool("exa-search") >= 1
+    assert count_tool("firecrawl-scrape") >= 1
 
     llm_events_by_entity: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for event in streaming:
@@ -149,7 +149,7 @@ def run(input_data):
 def test_react_agent_map_streaming_final_mode_isolated(mock_llm_executor, mock_tools_http):
     """Ensure parallel ReAct agents under Map stream only final content in FINAL mode (with tools)."""
     python_tool = Python(
-        name="NoOp Tool",
+        name="noop-tool",
         description="Simple tool returning static content",
         code="""
 def run(input_data):
@@ -161,7 +161,7 @@ def run(input_data):
 
     agent = Agent(
         name="React Agent",
-        llm=OpenAI(model="gpt-4o-mini", connection=connections.OpenAI(api_key="test-api-key")),
+        llm=OpenAI(model="gpt-5-mini", connection=connections.OpenAI(api_key="test-api-key")),
         inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=True,
         tools=[python_tool, exa_tool, firecrawl_tool],
@@ -196,9 +196,9 @@ def run(input_data):
             and is_tool_group(run.metadata.get("node", {}).get("group"))
         )
 
-    assert count_tool("NoOp Tool") >= 1
-    assert count_tool("Exa Search Tool") >= 1
-    assert count_tool("Firecrawl Tool") >= 1
+    assert count_tool("noop-tool") >= 1
+    assert count_tool("exa-search") >= 1
+    assert count_tool("firecrawl-scrape") >= 1
 
     llm_events_by_entity: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for event in streaming:

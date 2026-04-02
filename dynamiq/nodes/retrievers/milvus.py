@@ -30,7 +30,7 @@ class MilvusDocumentRetriever(Retriever, MilvusVectorStoreParams):
         **kwargs: Keyword arguments for initializing the node.
     """
 
-    name: str = "MilvusDocumentRetriever"
+    name: str = "milvus-document-retriever"
     connection: Milvus | None = None
     vector_store: MilvusVectorStore | None = None
     document_retriever: MilvusDocumentRetrieverComponent | None = None

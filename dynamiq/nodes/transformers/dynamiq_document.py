@@ -38,7 +38,7 @@ class TextToDynamiqDocumentInputSchema(BaseModel):
 
 class TextToDynamiqDocument(Node):
     group: Literal[NodeGroup.TRANSFORMERS] = NodeGroup.TRANSFORMERS
-    name: str = "Text to Dynamiq Document"
+    name: str = "text-to-dynamiq-document"
     description: str = "Node that transforms text with optional metadata to Dynamiq Document type."
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

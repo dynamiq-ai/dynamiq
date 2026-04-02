@@ -19,7 +19,7 @@ class ChromaDocumentWriter(Writer, BaseWriterVectorStoreParams):
         vector_store (ChromaVectorStore | None): The Chroma Vector Store instance.
     """
 
-    name: str = "ChromaDocumentWriter"
+    name: str = "chroma-document-writer"
     connection: Chroma | None = None
     vector_store: ChromaVectorStore | None = None
 

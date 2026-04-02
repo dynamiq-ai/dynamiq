@@ -30,7 +30,7 @@ class PGVectorDocumentRetriever(Retriever, PGVectorStoreRetrieverParams):
         **kwargs: Keyword arguments for initializing the node.
     """
 
-    name: str = "PGVectorDocumentRetriever"
+    name: str = "pgvector-document-retriever"
     connection: PostgreSQL | None = None
     vector_store: PGVectorStore | None = None
     document_retriever: PGVectorDocumentRetrieverComponent | None = None

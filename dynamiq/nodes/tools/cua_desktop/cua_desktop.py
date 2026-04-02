@@ -314,7 +314,7 @@ class CuaDesktopToolInputSchema(BaseModel):
 
 class CuaDesktopTool(ConnectionNode):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "CUA Sandbox Tool"
+    name: str = "cua-sandbox"
     description: str = DESCRIPTION_CUA_DESKTOP
     connection: CuaDesktopConnection
     input_schema: ClassVar[type[CuaDesktopToolInputSchema]] = CuaDesktopToolInputSchema

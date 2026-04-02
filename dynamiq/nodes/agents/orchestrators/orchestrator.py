@@ -66,7 +66,7 @@ class Orchestrator(Node, ABC):
         setup_streaming: Configures streaming functionality for the orchestrator.
     """
 
-    name: str | None = "Orchestrator"
+    name: str | None = "orchestrator"
     group: NodeGroup = NodeGroup.AGENTS
     input_schema: ClassVar[type[OrchestratorInputSchema]] = OrchestratorInputSchema
     manager: AgentManager

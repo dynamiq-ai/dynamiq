@@ -22,7 +22,7 @@ class OpenSearchDocumentWriter(Writer, OpenSearchVectorStoreWriterParams):
         vector_store (Optional[OpenSearchVectorStore]): The OpenSearch Vector Store instance.
     """
 
-    name: str = "OpenSearchDocumentWriter"
+    name: str = "opensearch-document-writer"
     connection: AWSOpenSearch | str | None = None
     vector_store: OpenSearchVectorStore | None = None
 
