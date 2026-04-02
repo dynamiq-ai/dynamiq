@@ -9,6 +9,7 @@ from dynamiq.callbacks.base import get_run_id
 from dynamiq.types.streaming import (
     AgentReasoningEventMessageData,
     AgentToolData,
+    AgentToolInputDeltaData,
     StreamingEntitySource,
     StreamingEventMessage,
     StreamingMode,
@@ -72,6 +73,7 @@ class StreamingState(str, Enum):
     REASONING = "reasoning"
     ANSWER = "answer"
     TOOL_INPUT = "tool_input"
+    TOOL_INPUT_START = "tool_input_start"
 
 
 class InferenceMode(str, Enum):
@@ -348,6 +350,10 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             StreamingState.TOOL_INPUT: False,
         }
 
+        # Accumulation buffer for min_chunk_chars
+        self._chunk_buffer: str = ""
+        self._chunk_buffer_step: str | None = None
+
         # Set a tail guard to avoid streaming parts of the next tag that may arrive in next chunk
         self._tail_guard: int = TAIL_GUARD_SIZE
 
@@ -419,6 +425,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
     def _flush_buffer(self) -> None:
         """Flush the remaining buffer content by streaming it as one chunk."""
         if not self._buffer or len(self._buffer) <= self._state_last_emit_index:
+            self._flush_chunk_buffer()
             return
 
         if self._current_state in (StreamingState.REASONING, StreamingState.ANSWER, StreamingState.TOOL_INPUT):
@@ -426,6 +433,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             if remaining_content.strip():
                 self._emit(remaining_content, step=self._current_state)
                 self._state_last_emit_index = len(self._buffer)
+        self._flush_chunk_buffer()
 
     def _reset_tool_call_state(self) -> None:
         """Reset parser state for a new tool call in parallel function calling."""
@@ -510,12 +518,20 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             )
         return AgentToolData(name=action_name, type="unknown")
 
-    def _emit(self, content: str, step: str) -> None:
+    def _flush_chunk_buffer(self) -> None:
+        """Flush the accumulated chunk buffer, emitting whatever is buffered."""
+        if self._chunk_buffer and self._chunk_buffer_step:
+            self._emit(self._chunk_buffer, step=self._chunk_buffer_step, force=True)
+        self._chunk_buffer = ""
+        self._chunk_buffer_step = None
+
+    def _emit(self, content: str, step: str, force: bool = False) -> None:
         """Emit the parsed content using the agent's stream_content method.
 
         Args:
             content (str): The content to stream.
             step (str): The step to stream the content to.
+            force (bool): If True, skip min_chunk_chars accumulation.
         """
         if not content:
             return
@@ -531,21 +547,38 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                     return
                 content = trimmed
 
+        # Accumulate small chunks if min_chunk_chars is set
+        min_chars = self.agent.streaming.min_chunk_chars
+        if min_chars > 0 and not force:
+            # Flush previous step's buffer before starting a new step
+            if self._chunk_buffer_step and self._chunk_buffer_step != step:
+                self._flush_chunk_buffer()
+
+        # Emit tool_input_start after flushing previous step but before accumulation
+        if step == StreamingState.TOOL_INPUT and not self._state_has_emitted.get(StreamingState.TOOL_INPUT, False):
+            self._emit_tool_input_start()
+
+        if min_chars > 0 and not force:
+            self._chunk_buffer += content
+            self._chunk_buffer_step = step
+            if step in self._state_has_emitted:
+                self._state_has_emitted[step] = True
+            if len(self._chunk_buffer) < min_chars:
+                return
+            content = self._chunk_buffer
+            self._chunk_buffer = ""
+            self._chunk_buffer_step = None
+
         # Format content based on the step type
         if step == StreamingState.REASONING:
             thought_model = StreamingThought(thought=content, loop_num=self.loop_num)
             content_to_stream = thought_model.to_dict()
         elif step == StreamingState.TOOL_INPUT:
-            tool_data = self._resolve_tool_data()
-            tool_input_model = AgentReasoningEventMessageData(
+            delta_model = AgentToolInputDeltaData(
                 tool_run_id=self.agent._streaming_tool_run_id or "",
-                thought="",
-                action=self._current_action_name or "",
-                tool=tool_data,
                 action_input=content,
-                loop_num=self.loop_num,
             )
-            content_to_stream = tool_input_model.model_dump()
+            content_to_stream = delta_model.model_dump()
         elif step == StreamingState.ANSWER:
             content_to_stream = content
         else:
@@ -560,6 +593,25 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         )
         if step in self._state_has_emitted:
             self._state_has_emitted[step] = True
+
+    def _emit_tool_input_start(self) -> None:
+        """Emit a tool_input start event with full metadata before the first delta."""
+        tool_data = self._resolve_tool_data()
+        start_model = AgentReasoningEventMessageData(
+            tool_run_id=self.agent._streaming_tool_run_id or "",
+            thought="",
+            action=self._current_action_name or "",
+            tool=tool_data,
+            action_input="",
+            loop_num=self.loop_num,
+        )
+        self.agent.stream_content(
+            content=start_model.model_dump(),
+            source=self.agent.name,
+            step=StreamingState.TOOL_INPUT_START,
+            config=self.config,
+            **(self.kwargs | {"loop_num": self.loop_num}),
+        )
 
     def _process_default_mode(self, final_answer_only: bool) -> None:
         if self._current_state is None:
@@ -658,6 +710,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             elif idx_action_input != -1 and (idx_answer == -1 or idx_action_input < idx_answer):
                 self._current_state = StreamingState.TOOL_INPUT
                 self.agent._streaming_tool_run_id = generate_uuid()
+                self._state_has_emitted[StreamingState.TOOL_INPUT] = False
                 self._state_start_index = idx_action_input + len(XMLModeTag.OPEN_ACTION_INPUT)
                 self._state_last_emit_index = self._state_start_index
             elif idx_answer != -1:
@@ -926,6 +979,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                                 self._tool_input_started = True
                                 self._current_action_name = action_value.strip()
                                 self.agent._streaming_tool_run_id = generate_uuid()
+                                self._state_has_emitted[StreamingState.TOOL_INPUT] = False
                                 action_input_start = self._find_field_string_value_start(
                                     buf, JSONStreamingField.ACTION_INPUT.value, end_quote + 1
                                 )

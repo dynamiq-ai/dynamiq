@@ -5,7 +5,7 @@ from queue import Queue
 from threading import Event
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, field_validator
+from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt, PositiveFloat, field_validator
 
 from dynamiq.utils import generate_uuid, serialize_files_in_value
 
@@ -107,6 +107,13 @@ class AgentReasoningEventMessageData(BaseModel):
     loop_num: int
 
 
+class AgentToolInputDeltaData(BaseModel):
+    """Lean delta for tool_input streaming. Only tool_run_id and action_input change."""
+
+    tool_run_id: str
+    action_input: Any
+
+
 class AgentToolResultEventMessageData(BaseModel):
     """Model for agent tool result streaming event data."""
 
@@ -164,6 +171,9 @@ class StreamingConfig(BaseModel):
             Shorter interval allows faster response to cancellation. Defaults to 5.0 second.
         mode (StreamingMode): Streaming mode. Defaults to StreamingMode.ANSWER.
         include_usage (bool): Whether to include usage information. Defaults to False.
+        min_chunk_chars (int): Minimum number of characters to accumulate before emitting
+            a streaming event. Helps reduce event count by combining small fragments.
+            0 means no accumulation (emit immediately). Defaults to 0.
     """
     enabled: bool = False
     event: str = STREAMING_EVENT
@@ -173,6 +183,7 @@ class StreamingConfig(BaseModel):
     input_queue_poll_interval: PositiveFloat = 5.0
     mode: StreamingMode = StreamingMode.FINAL
     include_usage: bool = False
+    min_chunk_chars: NonNegativeInt = 5
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
