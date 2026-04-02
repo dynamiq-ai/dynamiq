@@ -56,10 +56,14 @@ class ScaleSerpInputSchema(BaseModel):
         default=SearchType.WEB, description="Type of search to perform (web, news, images, videos)"
     )
     output: str | None = Field(
-        default=None, description="Output format for the results (json, html, csv). Defaults to json if not specified."
+        default=None,
+        description="Output format for the results (json, html, csv). Defaults to json if not specified.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
-    include_html: bool = Field(
-        default=False, description="Whether to include HTML content in the results. Defaults to False."
+    include_html: bool | None = Field(
+        default=None,
+        description="Whether to include HTML content in the results. Defaults to False.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
 
     @model_validator(mode="after")

@@ -44,6 +44,7 @@ class TavilyInputSchema(BaseModel):
     auto_parameters: bool | None = Field(
         default=None,
         description="Let the tool automatically select topic/search_depth for the query (beta, costs extra credits).",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     search_depth: Literal["basic", "advanced"] | None = Field(
         default=None,
@@ -59,6 +60,7 @@ class TavilyInputSchema(BaseModel):
         ge=1,
         le=3,
         description="Max number of 500-character chunks returned per source (advanced-depth only).",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     time_range: Literal["day", "week", "month", "year", "d", "w", "m", "y"] | None = Field(
         default=None,
@@ -76,22 +78,27 @@ class TavilyInputSchema(BaseModel):
     include_images: bool | None = Field(
         default=None,
         description="Whether to include relevant images in the response.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_image_descriptions: bool | None = Field(
         default=None,
         description="When images are requested, also return short descriptions for each image.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_favicon: bool | None = Field(
         default=None,
         description="Include the favicon URL for each result.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_answer: bool | Literal["basic", "advanced"] | None = Field(
         default=None,
         description="Return an LLM-generated summary. `basic` is concise, `advanced` is more detailed.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_raw_content: bool | Literal["markdown", "text"] | None = Field(
         default=None,
         description="Return cleaned page content. `markdown` keeps rich formatting, `text` forces plaintext.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_domains: list[str] | None = Field(
         default=None,
@@ -108,6 +115,7 @@ class TavilyInputSchema(BaseModel):
     use_cache: bool | None = Field(
         default=None,
         description="Use cached search results when available.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
 
 

@@ -212,10 +212,7 @@ class ExaInputSchema(BaseModel):
     query: str = Field(description="Natural-language search query.")
     include_full_content: bool | None = Field(
         default=None,
-        description=(
-            "Shortcut flag: True requests default text/highlight/summary payloads for each result "
-            "(equivalent to ContentsRequest with simple booleans)."
-        ),
+        description=("Shortcut flag: True requests default text/highlight/summary payloads for each result."),
     )
     use_autoprompt: bool | None = Field(
         default=None,
@@ -228,6 +225,7 @@ class ExaInputSchema(BaseModel):
         description="Type of query to be used. Options are 'keyword', 'neural', or 'auto'."
         "Neural uses an embeddings-based model, keyword is google-like SERP. "
         "Default is auto, which automatically decides between keyword and neural.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     category: CategoryType | None = Field(
         default=None,
@@ -271,10 +269,12 @@ class ExaInputSchema(BaseModel):
     start_published_date: str | None = Field(
         default=None,
         description="Only include links with a published date after this ISO 8601 date.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     end_published_date: str | None = Field(
         default=None,
         description="Only include links with a published date before this ISO 8601 date.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     context: bool | ContextOptions | None = Field(
         default=None,
