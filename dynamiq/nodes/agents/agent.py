@@ -1233,9 +1233,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     llm_generated_output = llm_result.output.get("content", "")
 
                 llm_reasoning = (
-                    llm_generated_output[:200]
-                    if llm_generated_output
-                    else str(llm_result.output.get("tool_calls", ""))[:200]
+                    llm_generated_output if llm_generated_output else str(llm_result.output.get("tool_calls", ""))
                 )
                 logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num}, " f"reasoning:\n{llm_reasoning}...")
 
