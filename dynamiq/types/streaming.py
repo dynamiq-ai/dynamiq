@@ -80,7 +80,6 @@ class StreamingThought(BaseModel):
     """Model for reasoning/thought streaming chunks."""
 
     thought: str
-    loop_num: int
 
     model_config = ConfigDict(extra="forbid")
 

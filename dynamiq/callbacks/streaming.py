@@ -571,7 +571,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
         # Format content based on the step type
         if step == StreamingState.REASONING:
-            thought_model = StreamingThought(thought=content, loop_num=self.loop_num)
+            thought_model = StreamingThought(thought=content)
             content_to_stream = thought_model.to_dict()
         elif step == StreamingState.TOOL_INPUT:
             delta_model = AgentToolInputDeltaData(
