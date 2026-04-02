@@ -1263,6 +1263,10 @@ class Agent(Node):
                     raise ToolExecutionException(error_message)
                 else:
                     raise ValueError(error_message)
+
+            if is_child_agent and tool.max_calls is not None:
+                tool.increment_call_count()
+
             tool_result_output_content = tool_result.output.get("content")
 
             saved_files = self._handle_tool_generated_files(tool, tool_result)
@@ -1595,6 +1599,12 @@ class Agent(Node):
         self._run_depends = []
         self._tool_cache: dict[ToolCacheEntry, Any] = {}
         self.system_prompt_manager.reset()
+
+        from dynamiq.nodes.tools.agent_tool import SubAgentTool
+
+        for tool in self.tools:
+            if isinstance(tool, SubAgentTool):
+                tool.reset_call_count()
 
     def generate_prompt(self, block_names: list[str] | None = None, **kwargs) -> str:
         """Generates the prompt using specified blocks and variables."""
