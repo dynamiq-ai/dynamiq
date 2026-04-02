@@ -415,6 +415,8 @@ class E2BInterpreterTool(ConnectionNode):
             return self._upload_file(value, sandbox)
         if isinstance(value, list):
             return [self._resolve_param_value(item, sandbox) for item in value]
+        if isinstance(value, tuple):
+            return tuple(self._resolve_param_value(item, sandbox) for item in value)
         if isinstance(value, dict):
             return {k: self._resolve_param_value(v, sandbox) for k, v in value.items()}
         return value
@@ -492,7 +494,7 @@ class E2BInterpreterTool(ConnectionNode):
             raise ValueError("Sandbox instance is required for code execution.")
 
         if params:
-            vars_code = "\n# Tool params variables injected by framework\n"
+            vars_code = "\n# Tool params variables\n"
             for key, value in params.items():
                 resolved = self._resolve_param_value(value, sandbox)
                 vars_code += f"{key} = {repr(resolved)}\n"
