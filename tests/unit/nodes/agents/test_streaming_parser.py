@@ -202,6 +202,7 @@ def test_stream_tool_input_allowlist(stream_tool_input, action_name, should_stre
     cb._emit("some input content", step=StreamingState.TOOL_INPUT)
 
     if should_stream:
-        cb.agent.stream_content.assert_called_once()
+        # Two calls: tool_input_start event + tool_input delta
+        assert cb.agent.stream_content.call_count == 2
     else:
         cb.agent.stream_content.assert_not_called()
