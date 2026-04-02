@@ -128,7 +128,7 @@ DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP = {
 class FileReadInputSchema(BaseModel):
     """Schema for file read input parameters."""
 
-    file_path: str = Field(default="", description="Path of the file to read")
+    file_path: str = Field(..., description="Path of the file to read")
     instructions: str | None = Field(
         default=None,
         description="Instructions for the file read. If not provided, the file will be read in its entirety.",
@@ -157,22 +157,25 @@ class FileReadInputSchema(BaseModel):
     start_line: int | None = Field(
         default=None,
         description="1-based inclusive start line for text content. "
+        "Must be >= 1 or None (omit to read from the beginning). "
         "When set, only lines from start_line to end_line are returned.",
     )
     end_line: int | None = Field(
         default=None,
         description="1-based inclusive end line for text content. "
-        "If omitted while start_line is set, reads to end of file.",
+        "Must be >= 1 and >= start_line, or None (omit to read to the end of file).",
     )
     start_page: int | None = Field(
         default=None,
         description="1-based inclusive start page for PDF documents. "
+        "Must be >= 1 or None (omit to read from the first page). "
         "When set, only pages from start_page to end_page are returned. Implies document_mode='page'.",
     )
     end_page: int | None = Field(
         default=None,
         description="1-based inclusive end page for PDF documents. "
-        "If omitted while start_page is set, reads to last page. Implies document_mode='page'.",
+        "Must be >= 1 and >= start_page, or None (omit to read to the last page). "
+        "Implies document_mode='page'.",
     )
     brief: str = Field(
         default="Reading a file",
