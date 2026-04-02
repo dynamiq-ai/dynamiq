@@ -20,8 +20,6 @@ What it does:
 
 Examples:
 {"query": "firecrawl docs", "limit": 5}
-{"query": "openai funding", "sources": [{"type": "news"}], "limit": 3}
-{"query": "sunset wallpaper imagesize:1920x1080", "sources": [{"type": "images"}], "limit": 5}
 {"query": "langchain github", "categories": ["github"], "tbs": "qdr:w"}"""
 
 

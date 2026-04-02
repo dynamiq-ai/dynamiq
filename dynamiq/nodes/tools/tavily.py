@@ -29,14 +29,11 @@ Usage Strategy:
 - Turn on include_answer/include_raw_content/include_images when agents must summarize or embed
 
 Examples:
-- {"query": "React performance optimization", "search_depth": "advanced", "chunks_per_source": 2}
-- {"query": "latest AI developments", "topic": "news",
-"time_range": "week", "include_answer": "basic"}
-- {"query": "S&P 500 outlook", "topic": "finance", "auto_parameters": true}
-- {"query": "machine learning tutorials",
-"include_domains": ["coursera.org", "kaggle.com"], "include_raw_content": "markdown"}
-- {"query": "Python best practices", "include_answer": "advanced",
-"include_images": true, "include_image_descriptions": true}"""
+- {"query": "React performance optimization", "search_depth": "advanced"}
+- {"query": "latest AI developments", "topic": "news", "time_range": "week"}
+- {"query": "S&P 500 outlook", "topic": "finance"}
+- {"query": "machine learning tutorials", "include_domains": ["coursera.org", "kaggle.com"]}
+- {"query": "Python best practices"}"""
 
 
 class TavilyInputSchema(BaseModel):

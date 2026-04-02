@@ -26,8 +26,9 @@ Usage strategy:
 - Set `max_age` or `zero_data_retention` based on freshness vs. compliance needs
 - Combine `actions` with `wait_for` to ensure dynamic content loads before scraping/screenshotting
 
-Example:
-{"url": "https://example.com", "formats": ["markdown", "links"], "only_main_content": true, "proxy": "auto"}"""
+Examples:
+{"url": "https://example.com"}
+{"url": "https://blog.com", "exclude_tags": ["nav", "footer"]}"""
 
 
 class LocationSettings(BaseModel):

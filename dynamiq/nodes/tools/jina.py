@@ -37,8 +37,8 @@ Highlights:
 - Complete header access (`X-With-*`, `X-Retain-Images`, `X-No-Cache`, `X-Proxy-Url`, etc.) for advanced use cases
 
 Example Invocations:
-- {"query": "restaurants near downtown", "site": "yelp.com", "include_links": true}
-- {"query": "latest ML papers", "return_format": "markdown", "include_full_content": true, "include_images": "all"}
+- {"query": "restaurants near downtown", "site": "yelp.com"}
+- {"query": "latest ML papers"}
 - {"query": "Tokyo weather", "country": "JP", "language": "ja", "max_results": 5}"""
 
 

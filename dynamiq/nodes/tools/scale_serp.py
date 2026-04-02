@@ -21,14 +21,13 @@ Key Capabilities:
 
 Usage Strategy:
 - Web: General research, documentation, comprehensive results
-- News: Current events, recent developments with time_range
+- News: Current events and recent developments
 - Images/Videos: Visual content for presentations, analysis
-- Use num parameter for analysis depth
+- Use limit parameter for analysis depth
 
 Examples:
 - {"query": "coffee shops", "search_type": "web"}
-- {"query": "tech news", "search_type": "news", "time_range": "week"}
-- {"query": "data visualization", "search_type": "images", "num": 30}"""
+- {"query": "tech news", "search_type": "news", "limit": 5}"""
 
 
 class SearchType(str, enum.Enum):

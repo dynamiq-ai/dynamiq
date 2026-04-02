@@ -27,8 +27,8 @@ Usage strategy:
 - Request `contents` when the agent expects to quote passages, needs summaries, or requires subpages/extras
 
 Examples:
-- {"query": "AI research papers", "query_type": "neural", "limit": 10}
-- {"query": "pandas tutorial", "include_domains": ["medium.com"], "contents": {"text": true}}
+- {"query": "AI research papers", "limit": 10}
+- {"query": "pandas tutorial", "include_domains": ["medium.com"]}
 - {"query": "hydrogen fuel startups", "start_published_date": "2026-01-01T00:00:00.000Z", "limit": 5}
 """  # noqa: E501
 
