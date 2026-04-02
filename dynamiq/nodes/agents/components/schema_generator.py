@@ -264,7 +264,9 @@ def _is_strict_compatible(schema: Any) -> bool:
     ``additionalProperties: False``."""
     if not isinstance(schema, dict):
         return True
-    if schema.get("type") == "object":
+    schema_type = schema.get("type")
+    is_object = schema_type == "object" or (isinstance(schema_type, list) and "object" in schema_type)
+    if is_object:
         if "properties" not in schema:
             return False
         if schema.get("additionalProperties") is not False:
@@ -307,9 +309,7 @@ def generate_property_schema(properties: dict, name: str, field: Any) -> None:
         schemas = [s for p in params if (s := _resolve_type_schema(p)) is not None]
         non_null = [s for s in schemas if s != {"type": "null"}]
 
-        if len(non_null) == 1:
-            properties[name].update(non_null[0])
-        elif len(non_null) > 1:
+        if non_null:
             properties[name].update(non_null[0])
         elif schemas:
             properties[name].update(schemas[0])
@@ -321,7 +321,7 @@ def generate_property_schema(properties: dict, name: str, field: Any) -> None:
             if isinstance(current_type, list):
                 if "null" not in current_type:
                     properties[name]["type"] = current_type + ["null"]
-            else:
+            elif current_type != "null":
                 properties[name]["type"] = [current_type, "null"]
 
 
