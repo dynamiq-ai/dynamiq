@@ -42,6 +42,7 @@ class ZenRowsTool(ConnectionNode):
     action_type: ActionType = ActionType.WEB_SCRAPE
     name: str = "zenrows-scrape"
     description: str = DESCRIPTION_ZENROWS
+    is_parallel_execution_allowed: bool = True
     connection: ZenRows
     url: str | None = None
     markdown_response: bool = Field(

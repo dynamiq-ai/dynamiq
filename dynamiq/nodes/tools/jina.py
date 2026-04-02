@@ -78,6 +78,7 @@ class JinaScrapeTool(ConnectionNode):
     action_type: ActionType = ActionType.WEB_SCRAPE
     name: str = "jina-scrape"
     description: str = DESCRIPTION_SCRAPE
+    is_parallel_execution_allowed: bool = True
     response_format: JinaResponseFormat = JinaResponseFormat.MARKDOWN
     connection: Jina
     timeout: int = 60
@@ -319,6 +320,7 @@ class JinaSearchTool(ConnectionNode):
     action_type: ActionType = ActionType.WEB_SEARCH
     name: str = "jina-search"
     description: str = DESCRIPTION_SEARCH
+    is_parallel_execution_allowed: bool = True
     connection: Jina
     query: str | None = Field(None, description="Search query")
     max_results: int = Field(default=5, ge=1, le=100, description="Maximum number of search results")

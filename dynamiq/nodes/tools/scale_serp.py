@@ -95,6 +95,7 @@ class ScaleSerpTool(ConnectionNode):
     action_type: ActionType = ActionType.WEB_SEARCH
     name: str = "scale-serp-search"
     description: str = DESCRIPTION_SERP
+    is_parallel_execution_allowed: bool = True
     connection: ScaleSerp
 
     query: str = Field(default="", description="The default search query to use")
