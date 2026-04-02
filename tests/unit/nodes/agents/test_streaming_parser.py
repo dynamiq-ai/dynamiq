@@ -58,7 +58,7 @@ def test_process_json_mode_structured_output(
 ):
     cb = _make_callback()
     cb._buffer = buf
-    cb._process_json_mode(final_answer_only=False, is_function_calling=False)
+    cb._process_structured_output_mode(final_answer_only=False)
 
     assert cb._current_state == expected_state
     assert cb._answer_started is answer_started
@@ -134,7 +134,7 @@ def test_process_json_mode_function_calling(
         action_name=action_name,
     )
     cb._buffer = buf
-    cb._process_json_mode(final_answer_only=False, is_function_calling=True)
+    cb._process_json_mode(final_answer_only=False)
 
     assert cb._current_state == expected_state
     assert cb._fc_object_tool_input is expected_fc_object

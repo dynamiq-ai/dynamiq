@@ -344,6 +344,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._fc_object_tool_input: bool = False
         self._brace_depth: int = 0
         self._brace_scan_index: int = 0
+        self._so_action_emitted: bool = False
         self._state_has_emitted: dict[str, bool] = {
             StreamingState.REASONING: False,
             StreamingState.ANSWER: False,
@@ -797,12 +798,89 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                 self._state_last_emit_index = safe_end
 
     def _process_structured_output_mode(self, final_answer_only: bool) -> None:
-        """Process structured output mode."""
-        self._process_json_mode(final_answer_only, is_function_calling=False)
+        """Process structured output mode.
+
+        Structured output produces exactly one JSON object per LLM loop with a single
+        thought + action cycle.  Once the action field (tool_input or answer) has been
+        fully emitted, further content is ignored so that a malformed response containing
+        a second thought/action pair is not streamed.
+        """
+        if self._so_action_emitted:
+            return
+
+        buf = self._buffer
+
+        if not self._answer_started and not self._tool_input_started:
+            action_key_pos = buf.find(
+                f'"{JSONStreamingField.ACTION.value}"', max(0, self._state_last_emit_index - FIND_JSON_FIELD_MAX_OFFSET)
+            )
+            if action_key_pos != -1:
+                colon_pos = buf.find(":", action_key_pos)
+                if colon_pos != -1:
+                    v_start = self._skip_whitespace(buf, colon_pos + 1)
+                    if v_start < len(buf) and buf[v_start] == '"':
+                        end_quote = self._find_unescaped_quote_end(buf, v_start)
+                        if end_quote != -1:
+                            action_value = buf[v_start + 1 : end_quote]
+                            if action_value.strip().lower() == "finish":
+                                self._answer_started = True
+                                if self._current_state is None:
+                                    action_input_start = self._find_field_string_value_start(
+                                        buf, JSONStreamingField.ACTION_INPUT.value, end_quote + 1
+                                    )
+                                    if action_input_start != -1:
+                                        self._current_state = StreamingState.ANSWER
+                                        self._state_start_index = action_input_start
+                                        self._state_last_emit_index = max(
+                                            self._state_last_emit_index, action_input_start
+                                        )
+                            else:
+                                self._tool_input_started = True
+                                self._current_action_name = action_value.strip()
+                                self.agent._streaming_tool_run_id = generate_uuid()
+                                if self._current_state is None:
+                                    action_input_start = self._find_field_string_value_start(
+                                        buf, JSONStreamingField.ACTION_INPUT.value, end_quote + 1
+                                    )
+                                    if action_input_start != -1:
+                                        self._current_state = StreamingState.TOOL_INPUT
+                                        self._state_start_index = action_input_start
+                                        self._state_last_emit_index = max(
+                                            self._state_last_emit_index, action_input_start
+                                        )
+
+        if not self._state_has_emitted.get(StreamingState.REASONING, False):
+            self._initialize_json_field_state(
+                buf, JSONStreamingField.THOUGHT.value, StreamingState.REASONING, final_answer_only
+            )
+
+        if self._answer_started:
+            self._initialize_json_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.ANSWER)
+
+        if self._tool_input_started and not self._answer_started:
+            self._initialize_json_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT)
+
+        if self._current_state == StreamingState.REASONING:
+            if self._emit_json_field_content(buf, StreamingState.REASONING):
+                # Reasoning completed — immediately try to initialize ANSWER/TOOL_INPUT
+                # in the same call, in case this is the last chunk.
+                if self._answer_started:
+                    self._initialize_json_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.ANSWER)
+                elif self._tool_input_started:
+                    self._initialize_json_field_state(
+                        buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT
+                    )
+
+        if self._current_state == StreamingState.ANSWER:
+            if self._emit_json_field_content(buf, StreamingState.ANSWER):
+                self._so_action_emitted = True
+        elif self._current_state == StreamingState.TOOL_INPUT:
+            if self._emit_json_field_content(buf, StreamingState.TOOL_INPUT):
+                self._so_action_emitted = True
 
     def _process_function_calling_mode(self, final_answer_only: bool) -> None:
         """Process function calling mode."""
-        self._process_json_mode(final_answer_only, is_function_calling=True)
+        self._process_json_mode(final_answer_only)
 
     def _find_unescaped_quote_end(self, input_string: str, start_quote_index: int) -> int:
         """
@@ -952,66 +1030,30 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             return True
         return False
 
-    def _process_json_mode(self, final_answer_only: bool, is_function_calling: bool = False) -> None:
+    def _process_json_mode(self, final_answer_only: bool) -> None:
         """
-        Unified processing for JSON-like modes (structured output and function calling).
+        Processing for function calling mode.
+
+        Supports multiple tool calls (parallel function calling) — no single-cycle
+        constraint is enforced here, unlike structured output mode.
 
         Args:
             final_answer_only: Whether to stream only final answers
-            is_function_calling: Whether this is function calling mode (vs structured output)
         """
         buf = self._buffer
-
-        if not is_function_calling and not self._answer_started and not self._tool_input_started:
-            # If there is a "finish" action, enable answer streaming
-            action_key_pos = buf.find(
-                f'"{JSONStreamingField.ACTION.value}"', max(0, self._state_last_emit_index - FIND_JSON_FIELD_MAX_OFFSET)
-            )
-            if action_key_pos != -1:
-                colon_pos = buf.find(":", action_key_pos)
-                if colon_pos != -1:
-                    v_start = self._skip_whitespace(buf, colon_pos + 1)
-                    if v_start < len(buf) and buf[v_start] == '"':
-                        end_quote = self._find_unescaped_quote_end(buf, v_start)
-                        if end_quote != -1:
-                            action_value = buf[v_start + 1 : end_quote]
-                            if action_value.strip().lower() == "finish":
-                                self._answer_started = True
-                                action_input_start = self._find_field_string_value_start(
-                                    buf, JSONStreamingField.ACTION_INPUT.value, end_quote + 1
-                                )
-                                if action_input_start != -1:
-                                    self._current_state = StreamingState.ANSWER
-                                    self._state_start_index = action_input_start
-                                    self._state_last_emit_index = max(self._state_last_emit_index, action_input_start)
-                            else:
-                                self._tool_input_started = True
-                                self._current_action_name = action_value.strip()
-                                self.agent._streaming_tool_run_id = generate_uuid()
-                                self._state_has_emitted[StreamingState.TOOL_INPUT] = False
-                                action_input_start = self._find_field_string_value_start(
-                                    buf, JSONStreamingField.ACTION_INPUT.value, end_quote + 1
-                                )
-                                if action_input_start != -1:
-                                    self._current_state = StreamingState.TOOL_INPUT
-                                    self._state_start_index = action_input_start
-                                    self._state_last_emit_index = max(self._state_last_emit_index, action_input_start)
 
         self._initialize_json_field_state(
             buf, JSONStreamingField.THOUGHT.value, StreamingState.REASONING, final_answer_only
         )
 
         if self._answer_started:
-            answer_field = (
-                JSONStreamingField.ANSWER.value if is_function_calling else JSONStreamingField.ACTION_INPUT.value
-            )
-            self._initialize_json_field_state(buf, answer_field, StreamingState.ANSWER)
+            self._initialize_json_field_state(buf, JSONStreamingField.ANSWER.value, StreamingState.ANSWER)
 
         if self._tool_input_started and not self._answer_started:
             if not self._initialize_json_field_state(
                 buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT
             ):
-                if self._current_state is None and is_function_calling:
+                if self._current_state is None:
                     self._initialize_json_object_field_state(
                         buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT
                     )
