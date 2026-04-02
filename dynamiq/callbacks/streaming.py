@@ -417,8 +417,6 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._flush_buffer()
         self._trim_buffer(force=True)
 
-        logger.info(f"Agent {self.agent.name} - Raw streaming content ({self.mode_name}):\n{self.accumulated_content}")
-
     def _flush_buffer(self) -> None:
         """Flush the remaining buffer content by streaming it as one chunk."""
         if not self._buffer or len(self._buffer) <= self._state_last_emit_index:
