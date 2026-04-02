@@ -32,11 +32,10 @@ DESCRIPTION_SEARCH = """Searches the web with the Search API and returns LLM-rea
 
 Highlights:
 - Supports geo/language targeting plus per-domain searches for authoritative sources
-- Controls payload size with `include_full_content` and image/links summaries
 
 Example Invocations:
-- {"query": "restaurants near downtown", "site": "yelp.com", "include_links": true}
-- {"query": "latest ML papers", "include_full_content": true, "include_images": "all"}
+- {"query": "restaurants near downtown", "site": "yelp.com"}
+- {"query": "latest ML papers", "max_results": 10}
 - {"query": "Tokyo weather", "country": "JP", "language": "ja", "max_results": 5}"""
 
 

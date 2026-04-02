@@ -12,21 +12,18 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_FIRECRAWL_SEARCH = """Search the internet across web, news, and image verticals.
+DESCRIPTION_FIRECRAWL_SEARCH = """Search the internet and returns SERP results.
 
 Key capabilities:
-- Multi-vertical search: web, news, and images
 - Category biasing for focused searches (github, research, pdf)
 - Geo and time filtering with country, location, and tbs parameters
 
 Usage strategy:
-- Specify sources to target specific verticals (web/news/images)
 - Use categories to focus on GitHub repos, research papers, or PDFs
 - Use tbs for time-based filtering (e.g. qdr:d for past day, qdr:w for past week)
 
 Examples:
 {"query": "firecrawl docs", "limit": 5}
-{"query": "openai funding", "sources": [{"type": "news"}], "limit": 3}
 {"query": "langchain github", "categories": ["github"], "tbs": "qdr:w"}
 {"query": "coffee shops", "location": "San Francisco,California,United States", "country": "US"}"""
 

@@ -92,9 +92,9 @@ def test_firecrawl_search_basic(mock_firecrawl_search_requests, mock_firecrawl_s
 
     payload = call_args[1]["json"]
     assert payload["query"] == input_data["query"]
-    assert payload["limit"] == 5
+    assert payload["limit"] == 10
     assert payload["sources"] == [{"type": "web"}]
-    assert payload["country"] == "US"
+    assert "country" not in payload
     assert payload["ignoreInvalidURLs"] is False
     assert payload["timeout"] == 60000
 
