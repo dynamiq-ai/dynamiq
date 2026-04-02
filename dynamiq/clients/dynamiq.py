@@ -92,7 +92,7 @@ class DynamiqTracingClient(BaseTracingClient):
                 # No running loop - run synchronously in a fresh loop
                 try:
                     asyncio.run(client.aclose())
-                except Exception:
+                except Exception:  # nosec B110
                     pass
             self._async_client = None
 
@@ -164,7 +164,7 @@ class DynamiqTracingClient(BaseTracingClient):
                 if old_client is not None and not old_client.is_closed:
                     try:
                         await old_client.aclose()
-                    except Exception:
+                    except Exception:  # nosec B110
                         pass
                 self._async_client = None
                 self._async_client_lock = asyncio.Lock()
