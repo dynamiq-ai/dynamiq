@@ -78,7 +78,7 @@ class ElevenLabsTTS(ConnectionNode):
     """
 
     group: Literal[NodeGroup.AUDIO] = NodeGroup.AUDIO
-    name: str = "ElevenLabsTTS"
+    name: str = "elevenlabs-tts"
     voice_id: Voices | str | None = Voices.Rachel
     connection: ElevenLabsConnection | None = None
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
@@ -181,7 +181,7 @@ class ElevenLabsSTS(ConnectionNode):
     """
 
     group: Literal[NodeGroup.AUDIO] = NodeGroup.AUDIO
-    name: str = "ElevenLabsSTS"
+    name: str = "elevenlabs-sts"
     voice_id: Voices | str | None = Voices.Rachel
     connection: ElevenLabsConnection | None = None
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))

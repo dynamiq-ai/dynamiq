@@ -58,7 +58,7 @@ class UnstructuredFileConverter(ConnectionNode):
     """
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
-    name: str = "Unstructured File Converter"
+    name: str = "unstructured-file-converter"
     connection: Unstructured = None
     document_creation_mode: DocumentCreationMode = DocumentCreationMode.ONE_DOC_PER_FILE
     strategy: ConvertStrategy = ConvertStrategy.AUTO

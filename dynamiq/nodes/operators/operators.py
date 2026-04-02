@@ -31,7 +31,7 @@ class ChoiceInputSchema(BaseModel):
 class Choice(Node):
     """Represents a choice node in a flow."""
 
-    name: str | None = "Choice"
+    name: str | None = "choice"
     group: Literal[NodeGroup.OPERATORS] = NodeGroup.OPERATORS
     options: list[ChoiceOption] = []
     input_schema: ClassVar[type[ChoiceInputSchema]] = ChoiceInputSchema
@@ -169,7 +169,7 @@ class MapInputSchema(BaseModel):
 class Map(Node):
     """Represents a map node in a flow."""
 
-    name: str | None = "Map"
+    name: str | None = "map"
     group: Literal[NodeGroup.OPERATORS] = NodeGroup.OPERATORS
     node: Node
     behavior: Behavior | None = Behavior.RETURN

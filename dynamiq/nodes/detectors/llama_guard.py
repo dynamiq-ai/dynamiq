@@ -22,7 +22,7 @@ class LLamaGuardInputSchema(BaseModel):
 
 class LlamaGuardDetector(ConnectionNode):
     group: Literal[NodeGroup.DETECTORS] = NodeGroup.DETECTORS
-    name: str = "Llama Guard"
+    name: str = "llama-guard"
     description: str = "Guardrail node powered by special version of Llama"
     connection: Replicate
     model: LLamaGuardModels = LLamaGuardModels.llama_guard_2_8b

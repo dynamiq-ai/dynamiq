@@ -22,7 +22,7 @@ class ElasticsearchDocumentWriter(Writer, ElasticsearchVectorStoreWriterParams):
         vector_store (Optional[ElasticsearchVectorStore]): The Elasticsearch Vector Store instance.
     """
 
-    name: str = "ElasticsearchDocumentWriter"
+    name: str = "elasticsearch-document-writer"
     connection: Elasticsearch | str | None = None
     vector_store: ElasticsearchVectorStore | None = None
 

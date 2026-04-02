@@ -335,7 +335,7 @@ class ExaTool(ConnectionNode):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Exa Search Tool"
+    name: str = "exa-search"
     description: str = DESCRIPTION_EXA
     action_type: ActionType = ActionType.WEB_SEARCH
     is_parallel_execution_allowed: bool = True

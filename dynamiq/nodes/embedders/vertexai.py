@@ -21,7 +21,7 @@ class VertexAIDocumentEmbedder(DocumentEmbedder):
         document_embedder (VertexAIEmbedderComponent): The embedder component.
     """
 
-    name: str = "VertexAIDocumentEmbedder"
+    name: str = "vertexai-document-embedder"
     connection: VertexAIConnection
     model: str = "vertex_ai/text-embedding-005"
     input_type: str = "search_document"
@@ -84,7 +84,7 @@ class VertexAITextEmbedder(TextEmbedder):
         text_embedder (VertexAIEmbedderComponent): The embedder component.
     """
 
-    name: str = "VertexAITextEmbedder"
+    name: str = "vertexai-text-embedder"
     connection: VertexAIConnection
     model: str = "vertex_ai/text-embedding-005"
     input_type: str = "search_query"

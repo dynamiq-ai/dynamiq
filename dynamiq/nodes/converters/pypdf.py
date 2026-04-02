@@ -42,7 +42,7 @@ class PyPDFConverter(Node):
     """
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
-    name: str = "PyPDF File Converter"
+    name: str = "pypdf-file-converter"
     document_creation_mode: DocumentCreationMode = DocumentCreationMode.ONE_DOC_PER_FILE
     file_converter: PyPDFFileConverterComponent | None = None
     extraction_mode: ExtractionMode = ExtractionMode.PLAIN

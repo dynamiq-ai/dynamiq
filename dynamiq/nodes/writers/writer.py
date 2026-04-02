@@ -104,7 +104,7 @@ class VectorStoreWriter(Node):
 
     Attributes:
         group (Literal[NodeGroup.TOOLS]): Group for the node. Defaults to NodeGroup.TOOLS.
-        name (str): Name of the tool. Defaults to "VectorStore Writer".
+        name (str): Name of the tool. Defaults to "vector-store-writer".
         description (str): Description of the tool.
         error_handling (ErrorHandling): Error handling configuration.
         document_embedder (DocumentEmbedder): Document embedder node.
@@ -112,7 +112,7 @@ class VectorStoreWriter(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "VectorStore Writer"
+    name: str = "vector-store-writer"
     description: str = DESCRIPTION_VECTOR_STORE_WRITER
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     document_embedder: DocumentEmbedder
