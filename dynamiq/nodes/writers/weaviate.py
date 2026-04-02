@@ -20,7 +20,7 @@ class WeaviateDocumentWriter(Writer, WeaviateWriterVectorStoreParams):
         vector_store (WeaviateVectorStore | None): The Weaviate Vector Store instance.
     """
 
-    name: str = "WeaviateDocumentWriter"
+    name: str = "weaviate-document-writer"
     connection: Weaviate | None = None
     vector_store: WeaviateVectorStore | None = None
 

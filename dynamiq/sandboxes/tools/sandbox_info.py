@@ -30,7 +30,7 @@ class SandboxInfoTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "SandboxInfoTool"
+    name: str = "sandbox-info"
     description: str = (
         "Get information about the current sandbox (paths, sandbox id, and optional public URL).\n\n"
         "Call this when you need to report a URL to the user for a service you started in the sandbox "

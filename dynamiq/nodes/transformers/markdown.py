@@ -21,7 +21,7 @@ class HTMLMarkdownToTextInputSchema(BaseModel):
 
 class HTMLMarkdownToText(Node):
     group: Literal[NodeGroup.TRANSFORMERS] = NodeGroup.TRANSFORMERS
-    name: str = "HTML/Markdown to text"
+    name: str = "html-markdown-to-text"
     description: str = "Node that returns converts HTML/Markdown to string format"
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -67,7 +67,7 @@ class MarkdownToPDFInputSchema(BaseModel):
 
 class MarkdownToPDF(Node):
     group: Literal[NodeGroup.TRANSFORMERS] = NodeGroup.TRANSFORMERS
-    name: str = "Markdown To PDF"
+    name: str = "markdown-to-pdf"
     description: str = "Node that transforms markdown into a pdf data."
     cursor_x: int = 100
     cursor_y: int = 750

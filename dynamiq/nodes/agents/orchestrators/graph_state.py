@@ -36,7 +36,7 @@ class GraphState(Node):
     """
 
     id: str
-    name: str = "State"
+    name: str = "state"
     group: NodeGroup = NodeGroup.UTILS
     input_schema: ClassVar[type[StateInputSchema]] = StateInputSchema
     description: str = ""

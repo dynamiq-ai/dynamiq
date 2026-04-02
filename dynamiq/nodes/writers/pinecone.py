@@ -22,7 +22,7 @@ class PineconeDocumentWriter(Writer, PineconeWriterVectorStoreParams):
         vector_store (PineconeVectorStore | None): The Pinecone Vector Store object.
     """
 
-    name: str = "PineconeDocumentWriter"
+    name: str = "pinecone-document-writer"
     connection: Pinecone | None = None
     vector_store: PineconeVectorStore | None = None
 

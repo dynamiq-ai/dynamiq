@@ -93,7 +93,7 @@ class ScaleSerpTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.WEB_SEARCH
-    name: str = "Scale Serp Search Tool"
+    name: str = "scale-serp-search"
     description: str = DESCRIPTION_SERP
     connection: ScaleSerp
 

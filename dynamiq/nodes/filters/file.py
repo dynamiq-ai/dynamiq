@@ -17,7 +17,7 @@ class FileFilterInputSchema(BaseModel):
 
 class FileFilter(Node):
     group: Literal[NodeGroup.FILTERS] = NodeGroup.FILTERS
-    name: str = "File Filter"
+    name: str = "file-filter"
     description: str = "Node that returns filtered list of files"
     filters: ChoiceCondition
 

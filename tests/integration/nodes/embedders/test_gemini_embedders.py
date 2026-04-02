@@ -33,7 +33,7 @@ def gemini_model():
 def gemini_text_embedder(gemini_connection, gemini_model):
     return GeminiTextEmbedder(
         id="text_embedder",
-        name="GeminiTextEmbedder",
+        name="gemini-text-embedder",
         connection=gemini_connection,
         model=gemini_model,
         task_type="RETRIEVAL_QUERY",

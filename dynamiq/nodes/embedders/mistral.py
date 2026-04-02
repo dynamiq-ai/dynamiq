@@ -24,7 +24,7 @@ class MistralDocumentEmbedder(DocumentEmbedder):
             only by 'text-embedding-3' and later models. Defaults to None.
     """
 
-    name: str = "MistralDocumentEmbedder"
+    name: str = "mistral-document-embedder"
     connection: MistralConnection | None = None
     model: str = "mistral/mistral-embed"
     document_embedder: MistralEmbedderComponent | None = None
@@ -81,7 +81,7 @@ class MistralTextEmbedder(TextEmbedder):
 
     """
 
-    name: str = "MistralTextEmbedder"
+    name: str = "mistral-text-embedder"
     connection: MistralConnection | None = None
     model: str = "mistral/mistral-embed"
     text_embedder: MistralEmbedderComponent = None

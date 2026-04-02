@@ -18,7 +18,7 @@ class Input(Pass):
         schema (dict[str, Any] | None): The JSON schema for the input data.
     """
 
-    name: str | None = "Start"
+    name: str | None = "start"
     group: Literal[NodeGroup.UTILS] = NodeGroup.UTILS
     json_schema: dict[str, Any] | None = Field(
         default=None,
@@ -50,7 +50,7 @@ class Output(Pass):
         schema (dict[str, Any] | None): The JSON schema for the output data.
     """
 
-    name: str | None = "End"
+    name: str | None = "end"
     group: Literal[NodeGroup.UTILS] = NodeGroup.UTILS
     json_schema: dict[str, Any] | None = Field(
         default=None,

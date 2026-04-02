@@ -14,7 +14,7 @@ class ValidatorInputSchema(BaseModel):
 
 class BaseValidator(Node):
     group: Literal[NodeGroup.VALIDATORS] = NodeGroup.VALIDATORS
-    name: str | None = "Validator"
+    name: str | None = "validator"
     behavior: Behavior | None = Behavior.RETURN
 
     input_schema: ClassVar[type[ValidatorInputSchema]] = ValidatorInputSchema
