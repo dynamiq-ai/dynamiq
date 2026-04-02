@@ -27,7 +27,7 @@ class OpenAIDocumentEmbedder(DocumentEmbedder):
             only by 'text-embedding-3' and later models. Defaults to None.
     """
 
-    name: str = "OpenAIDocumentEmbedder"
+    name: str = "openai-document-embedder"
     connection: OpenAIConnection | None = None
     model: str = "text-embedding-3-small"
     dimensions: int | None = None
@@ -94,7 +94,7 @@ class OpenAITextEmbedder(TextEmbedder):
         The `dimensions` parameter is model-dependent and may not be supported by all models.
     """
 
-    name: str = "OpenAITextEmbedder"
+    name: str = "openai-text-embedder"
     connection: OpenAIConnection | None = None
     model: str = "text-embedding-3-small"
     dimensions: int | None = None

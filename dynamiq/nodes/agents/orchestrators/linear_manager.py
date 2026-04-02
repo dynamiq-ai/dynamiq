@@ -14,7 +14,7 @@ class LinearAgentManager(AgentManager):
     and compile the final result.
     """
 
-    name: str = "Linear Manager"
+    name: str = "linear-manager"
 
     def __init__(self, **kwargs):
         """

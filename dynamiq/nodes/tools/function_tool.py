@@ -17,7 +17,7 @@ class FunctionTool(Node, Generic[T]):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Function Tool"
+    name: str = "function-tool"
     description: str = Field(
         default="""Executes custom Python functions as workflow tools with automatic schema generation and parameter validation.
 

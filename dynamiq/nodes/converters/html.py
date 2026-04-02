@@ -31,7 +31,7 @@ class HTMLConverter(Node):
     """
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
-    name: str = "HTML File Converter"
+    name: str = "html-file-converter"
     file_converter: HTMLConverterComponent | None = None
     input_schema: ClassVar[type[HTMLConverterInputSchema]] = HTMLConverterInputSchema
 

@@ -162,7 +162,7 @@ class CypherExecutor(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.DATABASE_QUERY
-    name: str = "Cypher Executor"
+    name: str = "cypher-executor"
     description: str = BASE_CYPHER_DESCRIPTION
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     connection: Neo4j | ApacheAGE | AWSNeptune

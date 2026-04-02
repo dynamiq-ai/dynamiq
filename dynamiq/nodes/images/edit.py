@@ -108,7 +108,7 @@ class ImageEdit(ConnectionNode):
     FILE_PREFIX: ClassVar[str] = "edited"
 
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
-    name: str = "Image Edit"
+    name: str = "image-edit"
     description: str = """Edit and modify existing images with text prompt and optional masking.
 
 Key Capabilities:

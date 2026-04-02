@@ -52,7 +52,7 @@ class AdaptiveOrchestrator(Orchestrator):
         reflection_enabled (Optional[bool]): Enable reflection mode
     """
 
-    name: str | None = "AdaptiveOrchestrator"
+    name: str | None = "adaptive-orchestrator"
     group: NodeGroup = NodeGroup.AGENTS
     manager: AdaptiveAgentManager
     agents: list[Agent] = []

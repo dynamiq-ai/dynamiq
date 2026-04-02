@@ -25,7 +25,7 @@ class PineconeDocumentRetriever(Retriever, PineconeVectorStoreParams):
         **kwargs: Arbitrary keyword arguments.
     """
 
-    name: str = "PineconeDocumentRetriever"
+    name: str = "pinecone-document-retriever"
     connection: Pinecone | None = None
     vector_store: PineconeVectorStore | None = None
     document_retriever: PineconeDocumentRetrieverComponent | None = None

@@ -18,7 +18,7 @@ class PromptInjDetectorInputSchema(BaseModel):
 
 class PromptInjectionDetector(ConnectionNode):
     group: Literal[NodeGroup.DETECTORS] = NodeGroup.DETECTORS
-    name: str = "Prompt Injection Detector"
+    name: str = "prompt-injection-detector"
     description: str = "Node that detects prompt injection."
     connection: HuggingFace | Lakera | None = None
     model: str = "protectai/deberta-v3-base-prompt-injection-v2"

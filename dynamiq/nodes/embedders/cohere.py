@@ -23,7 +23,7 @@ class CohereDocumentEmbedder(DocumentEmbedder):
         model (str): The model name to use for embedding. Defaults to 'cohere/embed-english-v2.0'.
     """
 
-    name: str = "CohereDocumentEmbedder"
+    name: str = "cohere-document-embedder"
     connection: CohereConnection | None = None
     model: str = "cohere/embed-english-v2.0"
     document_embedder: CohereEmbedderComponent | None = None
@@ -80,7 +80,7 @@ class CohereTextEmbedder(TextEmbedder):
 
     """
 
-    name: str = "CohereTextEmbedder"
+    name: str = "cohere-text-embedder"
     connection: CohereConnection | None = None
     model: str = "cohere/embed-english-v2.0"
     text_embedder: CohereEmbedderComponent = None

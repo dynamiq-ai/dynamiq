@@ -18,7 +18,7 @@ class PIIDetectorInputSchema(BaseModel):
 
 class PIIDetector(ConnectionNode):
     group: Literal[NodeGroup.DETECTORS] = NodeGroup.DETECTORS
-    name: str = "PII Detector"
+    name: str = "pii-detector"
     description: str = "Node that detects PII"
     connection: HuggingFace | Lakera | None = None
     model: str = "iiiorg/piiranha-v1-detect-personal-information"
