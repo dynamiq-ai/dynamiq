@@ -34,7 +34,7 @@ class WhisperSTT(ConnectionNode):
     """
 
     group: Literal[NodeGroup.AUDIO] = NodeGroup.AUDIO
-    name: str = "Whisper"
+    name: str = "whisper"
     model: str
     connection: WhisperConnection | OpenAIConnection | None = None
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))

@@ -74,7 +74,7 @@ def mock_llm_sandbox_shell_response(mocker):
 
     xml_tool_call = """<output>
   <thought>I will run a shell command in the sandbox.</thought>
-  <action>SandboxShellTool</action>
+  <action>sandbox-shell</action>
   <action_input>{"command": "echo hello from sandbox", "brief": "Echo hello message"}</action_input>
 </output>"""
 
@@ -262,7 +262,7 @@ def test_agent_with_sandbox_returns_files(mocker):
 
     xml_tool_call = """<output>
   <thought>I will run a shell command in the sandbox.</thought>
-  <action>SandboxShellTool</action>
+  <action>sandbox-shell</action>
   <action_input>{"command": "echo hello from sandbox", "brief": "Echo hello message"}</action_input>
 </output>"""
 

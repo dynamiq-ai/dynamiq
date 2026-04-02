@@ -68,7 +68,7 @@ class MultiFileTypeConverter(Node):
     """
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
-    name: str = "MultiFileTypeConverter"
+    name: str = "multi-file-type-converter"
     description: str = "Meta converter that routes documents to appropriate converters based on file type."
     fallback_converter: Node | None = Field(
         default=None,

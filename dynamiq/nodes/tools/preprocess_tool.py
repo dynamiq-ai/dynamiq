@@ -52,7 +52,7 @@ class PreprocessTool(Node):
     """
 
     group: Literal[NodeGroup.SPLITTERS] = NodeGroup.SPLITTERS
-    name: str = "PreprocessTool"
+    name: str = "preprocess-document"
     description: str = PREPROCESS_TOOL_DESCRIPTION
     split_by: DocumentSplitBy = DocumentSplitBy.SENTENCE
     split_length: int = 10

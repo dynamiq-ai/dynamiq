@@ -41,7 +41,7 @@ class GraphOrchestrator(Orchestrator):
         input_analysis_enabled (bool): Enables initial input analysis.
     """
 
-    name: str | None = "GraphOrchestrator"
+    name: str | None = "graph-orchestrator"
     manager: GraphAgentManager
     initial_state: str = START
     context: dict[str, Any] = {}

@@ -22,7 +22,7 @@ class HuggingFaceDocumentEmbedder(DocumentEmbedder):
             is created if none is provided.
         model (str): The model name to use for embedding. Defaults to 'huggingface/microsoft/codebert-base'.
     """
-    name: str = "HuggingFaceDocumentEmbedder"
+    name: str = "huggingface-document-embedder"
     connection: HuggingFaceConnection | None = None
     model: str = "huggingface/BAAI/bge-large-zh"
     document_embedder: HuggingFaceEmbedderComponent | None = None
@@ -79,7 +79,7 @@ class HuggingFaceTextEmbedder(TextEmbedder):
 
     """
 
-    name: str = "HuggingFaceTextEmbedder"
+    name: str = "huggingface-text-embedder"
     connection: HuggingFaceConnection | None = None
     model: str = "huggingface/microsoft/codebert-base"
     text_embedder: HuggingFaceEmbedderComponent = None

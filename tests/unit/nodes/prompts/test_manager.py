@@ -198,8 +198,8 @@ def test_file_tools_persist_across_resets(test_llm):
     # Verify initially no file tools
     initial_tool_count = len(agent.tools)
     initial_tool_description = agent.tool_description
-    assert "FileReadTool" not in initial_tool_description
-    assert "FileSearchTool" not in initial_tool_description
+    assert "file-read" not in initial_tool_description
+    assert "file-search" not in initial_tool_description
 
     # Create a dummy file
     dummy_file = BytesIO(b"test content")
@@ -222,7 +222,7 @@ def test_file_tools_persist_across_resets(test_llm):
     # Verify file tools were added
     assert len(agent.tools) > initial_tool_count
     updated_tool_description = agent.tool_description
-    assert "FileReadTool" in updated_tool_description or "file" in updated_tool_description.lower()
+    assert "file-read" in updated_tool_description or "file" in updated_tool_description.lower()
 
     # Verify _initial_variables was updated (the fix)
     assert agent.system_prompt_manager._initial_variables["tool_description"] == updated_tool_description

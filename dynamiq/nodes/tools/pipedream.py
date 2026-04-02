@@ -51,7 +51,7 @@ class Pipedream(ConnectionNode):
         stash_id (str): Specified identification for file stash, used for actions with files
     """
 
-    name: str = "Pipedream"
+    name: str = "pipedream"
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     connection: PipedreamConnection
     timeout: float = 180

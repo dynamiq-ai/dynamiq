@@ -32,7 +32,7 @@ class DOCXFileConverter(Node):
     """
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
-    name: str = "DOCX File Converter"
+    name: str = "docx-file-converter"
     document_creation_mode: DocumentCreationMode = DocumentCreationMode.ONE_DOC_PER_FILE
     file_converter: DOCXConverterComponent | None = None
     input_schema: ClassVar[type[DOCXFileConverterInputSchema]] = DOCXFileConverterInputSchema
