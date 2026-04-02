@@ -796,9 +796,10 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                                             self._state_last_emit_index, action_input_start
                                         )
 
-        self._initialize_json_field_state(
-            buf, JSONStreamingField.THOUGHT.value, StreamingState.REASONING, final_answer_only
-        )
+        if not self._state_has_emitted.get(StreamingState.REASONING, False):
+            self._initialize_json_field_state(
+                buf, JSONStreamingField.THOUGHT.value, StreamingState.REASONING, final_answer_only
+            )
 
         if self._answer_started:
             self._initialize_json_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.ANSWER)
