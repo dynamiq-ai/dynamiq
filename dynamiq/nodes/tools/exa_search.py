@@ -255,6 +255,7 @@ class ExaInputSchema(BaseModel):
             "String(s) that must appear in the first ~1000 words of the page text. "
             "Supports one phrase up to 5 words."
         ),
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     exclude_text: list[str] | None = Field(
         default=None,
