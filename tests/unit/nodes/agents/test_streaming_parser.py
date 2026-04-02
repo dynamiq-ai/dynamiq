@@ -178,3 +178,27 @@ def test_parallel_tool_calls_get_unique_ids():
     assert id_tool_0 != id_tool_1
 
     assert agent._streaming_tool_run_ids == [id_tool_0, id_tool_1]
+
+
+@pytest.mark.parametrize(
+    "stream_tool_input, action_name, should_stream",
+    [
+        pytest.param(None, "search", True, id="none_allows_all"),
+        pytest.param(["search"], "search", True, id="in_allowlist"),
+        pytest.param(["search"], "calculator", False, id="not_in_allowlist"),
+        pytest.param([], "search", False, id="empty_list_blocks_all"),
+    ],
+)
+def test_stream_tool_input_allowlist(stream_tool_input, action_name, should_stream):
+    """stream_tool_input allowlist controls which tools get TOOL_INPUT events."""
+    cb = _make_callback()
+    cb.agent.streaming.stream_tool_input = stream_tool_input
+    cb._current_action_name = action_name
+    cb.agent._streaming_tool_run_id = "test-run-id"
+
+    cb._emit("some input content", step=StreamingState.TOOL_INPUT)
+
+    if should_stream:
+        cb.agent.stream_content.assert_called_once()
+    else:
+        cb.agent.stream_content.assert_not_called()
