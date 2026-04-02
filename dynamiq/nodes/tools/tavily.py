@@ -13,27 +13,21 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_TAVILY = """Search the web,
-including automatic parameter tuning, structured filters, and enriched responses.
+DESCRIPTION_TAVILY = """Search the web with structured filters and enriched responses.
 
 Key Capabilities:
-- Auto-parameterization toggles (let the tool infer best depth/topic) or manual control
 - Basic vs advanced search depth with chunked content snippets
 - Topic-specific queries (general/news/finance) plus country/time filters
-- Optional LLM answers, raw HTML/text content, favicons, and rich image metadata
 
 Usage Strategy:
-- Enable auto_parameters for broad queries, override specific knobs when precision matters
 - Prefer advanced depth with chunks_per_source for research-grade answers
 - Combine time_range/start_date/end_date with include/exclude_domains for curated monitoring
-- Turn on include_answer/include_raw_content/include_images when agents must summarize or embed
 
 Examples:
 - {"query": "React performance optimization", "search_depth": "advanced"}
 - {"query": "latest AI developments", "topic": "news", "time_range": "week"}
 - {"query": "S&P 500 outlook", "topic": "finance"}
-- {"query": "machine learning tutorials", "include_domains": ["coursera.org", "kaggle.com"]}
-- {"query": "Python best practices"}"""
+- {"query": "machine learning tutorials", "include_domains": ["coursera.org", "kaggle.com"]}"""
 
 
 class TavilyInputSchema(BaseModel):

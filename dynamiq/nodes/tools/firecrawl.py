@@ -12,23 +12,21 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_FIRECRAWL = """Scrapes web content with fully rendered pages, proxies, and automation.
+DESCRIPTION_FIRECRAWL = """Scrapes web content from a URL and returns cleaned content.
 
 Key capabilities:
-- Mix markdown/html/rawHtml/links/summary/screenshot/json/changeTracking/branding outputs in one call
-- Control scraping context: cache age, PDF parsers, TLS, viewport/mobile, headers, proxy tier, and location
-- Program actions (wait/click/write/press/scroll/screenshot/pdf/executeJavascript/scrape) before capture
-- Strip base64 blobs, block ads, or enforce zero-data-retention for sensitive workflows
+- Precise content targeting with CSS tag inclusion/exclusion filters
+- Optional geo-location for region-aware scraping
 
 Usage strategy:
-- Keep `only_main_content=True` for articles/blogs; disable when layout/menus matter
-- Pass `formats` as strings or typed dicts (e.g. `{'type': 'json', 'schema': {...}}`) to shape the response
-- Set `max_age` or `zero_data_retention` based on freshness vs. compliance needs
-- Combine `actions` with `wait_for` to ensure dynamic content loads before scraping/screenshotting
+- Use exclude_tags to strip navigation, ads, or footers from the output
+- Use include_tags to force-include specific HTML elements (e.g. tables, images)
+- Set location to emulate a specific country/language for region-aware pages
 
 Examples:
 {"url": "https://example.com"}
-{"url": "https://blog.com", "exclude_tags": ["nav", "footer"]}"""
+{"url": "https://blog.com", "exclude_tags": ["nav", "footer"]}
+{"url": "https://shop.com", "include_tags": ["table"], "location": {"country": "DE"}}"""
 
 
 class LocationSettings(BaseModel):

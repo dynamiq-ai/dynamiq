@@ -14,13 +14,21 @@ from dynamiq.utils.logger import logger
 
 DESCRIPTION_FIRECRAWL_SEARCH = """Search the internet across web, news, and image verticals.
 
-What it does:
-- Returns SERP results with geo/time filters and category biasing (github/research/pdf)
-- Lets you control result count, recency, geo bias, timeout, and URL validation in one call
+Key capabilities:
+- Multi-vertical search: web, news, and images
+- Category biasing for focused searches (github, research, pdf)
+- Geo and time filtering with country, location, and tbs parameters
+
+Usage strategy:
+- Specify sources to target specific verticals (web/news/images)
+- Use categories to focus on GitHub repos, research papers, or PDFs
+- Use tbs for time-based filtering (e.g. qdr:d for past day, qdr:w for past week)
 
 Examples:
 {"query": "firecrawl docs", "limit": 5}
-{"query": "langchain github", "categories": ["github"], "tbs": "qdr:w"}"""
+{"query": "openai funding", "sources": [{"type": "news"}], "limit": 3}
+{"query": "langchain github", "categories": ["github"], "tbs": "qdr:w"}
+{"query": "coffee shops", "location": "San Francisco,California,United States", "country": "US"}"""
 
 
 class SourceWeb(BaseModel):
@@ -62,7 +70,6 @@ class FirecrawlSearchInputSchema(BaseModel):
     categories: list[CategoryType] | None = Field(
         default=None,
         description="Optional category filters for GitHub/research/PDF focused searches.",
-        json_schema_extra={"is_accessible_to_agent": False},
     )
     tbs: str | None = Field(
         default=None,

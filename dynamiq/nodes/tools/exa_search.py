@@ -15,20 +15,17 @@ from dynamiq.utils.logger import logger
 DESCRIPTION_EXA = """Searches the web with semantic understanding and advanced filtering.
 
 Key capabilities:
-- Neural, keyword, auto, or fast modes to balance recall vs. precision
-- Domain/category/date/text filters plus user-location controls
-- Rich contents retrieval (text, highlights, summaries, subpages, context strings, extras)
-- Optional autoprompting and context-string construction for LLM-ready results
+- Domain/category/date/text filters for precise result steering
+- Full content retrieval with text, highlights, and summaries via include_full_content
 
 Usage strategy:
-- Neural for conceptual topics, keyword for literal lookups, auto when unsure
-- Use `limit` judiciously (keyword <=10, neural <=100) and tighten crawl/published windows for recency
+- Use `limit` judiciously and tighten crawl/published windows for recency
 - Provide `include_text` / `exclude_text` or domain allow/deny lists to steer SERP quality
-- Request `contents` when the agent expects to quote passages, needs summaries, or requires subpages/extras
+- Set include_full_content when the agent needs to quote passages or read summaries
 
 Examples:
 - {"query": "AI research papers", "limit": 10}
-- {"query": "pandas tutorial", "include_domains": ["medium.com"]}
+- {"query": "pandas tutorial", "include_domains": ["medium.com"], "include_full_content": true}
 - {"query": "hydrogen fuel startups", "start_published_date": "2026-01-01T00:00:00.000Z", "limit": 5}
 """  # noqa: E501
 
@@ -261,20 +258,20 @@ class ExaInputSchema(BaseModel):
     start_crawl_date: str | None = Field(
         default=None,
         description=("Only include links crawled after this ISO 8601 date. Expected format 2026-01-01T00:00:00.000Z."),
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     end_crawl_date: str | None = Field(
         default=None,
         description=("Only include links crawled before this ISO 8601 date. Expected format 2026-01-31T00:00:00.000Z."),
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     start_published_date: str | None = Field(
         default=None,
         description="Only include links with a published date after this ISO 8601 date.",
-        json_schema_extra={"is_accessible_to_agent": False},
     )
     end_published_date: str | None = Field(
         default=None,
         description="Only include links with a published date before this ISO 8601 date.",
-        json_schema_extra={"is_accessible_to_agent": False},
     )
     context: bool | ContextOptions | None = Field(
         default=None,
