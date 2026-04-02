@@ -564,6 +564,7 @@ class TestYamlRoundtrip:
             agent=child_agent,
             name="Research Tool",
             description="Delegates to researcher",
+            max_calls=5,
         )
 
         parent = Agent(
@@ -597,6 +598,7 @@ class TestYamlRoundtrip:
         assert SubAgentTool.INITIALIZED_HINT in wrapper.description
         assert wrapper.agent.name == "Researcher Agent"
         assert wrapper.agent.description == "I am a research agent"
+        assert wrapper.max_calls == 5
 
         rt_path = tmp_path / "sub_agent_tool_rt.yaml"
         loaded.to_yaml_file(rt_path)
@@ -610,6 +612,7 @@ class TestYamlRoundtrip:
         rt_wrapper = rt_tools[0]
         assert rt_wrapper.name == "Research Tool"
         assert "Delegates to researcher" in rt_wrapper.description
+        assert rt_wrapper.max_calls == 5
         assert SubAgentTool.INITIALIZED_HINT in rt_wrapper.description
         assert rt_wrapper.agent.name == "Researcher Agent"
         assert rt_wrapper.agent.description == "I am a research agent"
@@ -697,6 +700,7 @@ class TestYamlRoundtrip:
         sub_agent_tool = SubAgentTool(
             name="Researcher",
             description="Performs web research",
+            max_calls=3,
             agent_factory={
                 "connections": {
                     "openai-conn": {
@@ -764,6 +768,7 @@ class TestYamlRoundtrip:
         assert wrapper.is_factory_mode is True
         assert wrapper.agent is None
         assert isinstance(wrapper.agent_factory, dict)
+        assert wrapper.max_calls == 3
 
         agent_a = wrapper.get_or_create_agent()
         agent_b = wrapper.get_or_create_agent()
@@ -800,6 +805,7 @@ class TestYamlRoundtrip:
         assert rt_wrapper.is_factory_mode is True
         assert rt_wrapper.agent is None
         assert isinstance(rt_wrapper.agent_factory, dict)
+        assert rt_wrapper.max_calls == 3
 
         rt_agent = rt_wrapper.get_or_create_agent()
         assert isinstance(rt_agent, Agent)
@@ -1084,11 +1090,6 @@ class TestSubAgentStreaming:
 class TestSubAgentMaxCalls:
     """Tests for SubAgentTool.max_calls invocation limit."""
 
-    def test_max_calls_default_none(self, child_agent):
-        tool = SubAgentTool(agent=child_agent, name="Researcher", description="Research")
-        assert tool.max_calls is None
-        assert tool._call_count == 0
-
     def test_check_subagent_limits_no_limit(self, test_llm, child_agent):
         """When max_calls is None, _check_subagent_limits returns None (no error)."""
         tool = SubAgentTool(agent=child_agent, name="Researcher", description="Research")
@@ -1109,20 +1110,6 @@ class TestSubAgentMaxCalls:
         )
         assert result is None
 
-    def test_check_subagent_limits_within_budget(self, test_llm, child_agent):
-        """Single call within budget succeeds and increments counter."""
-        tool = SubAgentTool(agent=child_agent, name="Researcher", description="Research", max_calls=2)
-        parent = Agent(
-            name="Manager",
-            llm=test_llm,
-            role="manager",
-            tools=[tool],
-            max_loops=3,
-        )
-        result = parent._check_subagent_limits([{"name": "Researcher", "input": "q"}], "Researcher")
-        assert result is None
-        assert tool._call_count == 1
-
     def test_check_subagent_limits_exceeded(self, test_llm, child_agent):
         """Call rejected when budget exhausted."""
         tool = SubAgentTool(agent=child_agent, name="Researcher", description="Research", max_calls=1)
@@ -1133,9 +1120,8 @@ class TestSubAgentMaxCalls:
             tools=[tool],
             max_loops=3,
         )
-        result = parent._check_subagent_limits([{"name": "Researcher", "input": "q"}], "Researcher")
-        assert result is None
-        assert tool._call_count == 1
+        # Simulate one successful execution having incremented the counter
+        tool._call_count = 1
         result = parent._check_subagent_limits([{"name": "Researcher", "input": "q2"}], "Researcher")
         assert result is not None
         assert "limit exceeded" in result.lower()
@@ -1159,10 +1145,9 @@ class TestSubAgentMaxCalls:
         result = parent._check_subagent_limits(tools_data, "parallel_tool")
         assert result is not None
         assert "limit exceeded" in result.lower()
-        assert tool._call_count == 0  # none incremented
 
-    def test_reset_run_state_resets_subagent_counters(self, test_llm, child_agent):
-        """Agent.reset_run_state resets all SubAgentTool counters."""
+    def test_reset_run_state_resets_call_count(self, test_llm, child_agent):
+        """Agent.reset_run_state zeroes all SubAgentTool counters."""
         tool = SubAgentTool(agent=child_agent, name="Researcher", description="Research", max_calls=2)
         parent = Agent(
             name="Manager",

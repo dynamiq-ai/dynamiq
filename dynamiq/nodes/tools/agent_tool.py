@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import threading
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
@@ -120,12 +121,14 @@ class SubAgentTool(Node):
     )
     max_calls: int | None = Field(
         default=None,
+        ge=1,
         description="Maximum number of invocations allowed per agent run. None means unlimited.",
     )
 
     is_postponed_component_init: bool = True
     _connection_manager: Any = PrivateAttr(default=None)
     _call_count: int = PrivateAttr(default=0)
+    _call_count_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[SubAgentToolInputSchema]] = SubAgentToolInputSchema
@@ -237,9 +240,15 @@ class SubAgentTool(Node):
         logger.info(f"SubAgentTool '{self.name}': created new agent from factory")
         return agent
 
+    def increment_call_count(self) -> None:
+        """Thread-safe increment of the per-run invocation counter."""
+        with self._call_count_lock:
+            self._call_count += 1
+
     def reset_call_count(self) -> None:
         """Reset the per-run invocation counter."""
-        self._call_count = 0
+        with self._call_count_lock:
+            self._call_count = 0
 
     @staticmethod
     def cleanup_factory_agent(agent: Agent) -> None:

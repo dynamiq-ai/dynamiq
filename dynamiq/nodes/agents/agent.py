@@ -1024,7 +1024,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """Check if any SubAgentTool in the batch would exceed its max_calls.
 
         Returns an error message if limit exceeded, None if all OK.
-        If OK, increments the call counters.
+        Does NOT increment counters — _run_tool increments on successful execution.
         """
         subagent_calls: dict[str, int] = {}
 
@@ -1051,9 +1051,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 f"No sub-agent calls in this batch were executed. "
                 f"Use other tools or provide a final answer using information already gathered."
             )
-
-        for name, batch_count in subagent_calls.items():
-            self.tool_by_names[name]._call_count += batch_count
 
         return None
 
