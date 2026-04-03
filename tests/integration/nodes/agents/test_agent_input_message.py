@@ -122,6 +122,29 @@ def test_custom_agent_workflow(model, inference_mode):
 
 
 @pytest.mark.parametrize(
+    "inference_mode",
+    [
+        InferenceMode.DEFAULT,
+        InferenceMode.XML,
+        InferenceMode.STRUCTURED_OUTPUT,
+        InferenceMode.FUNCTION_CALLING,
+    ],
+)
+def test_agent_input_with_jinja_like_syntax(model, inference_mode):
+    """User input containing Jinja2-like syntax (e.g. JSX code) must not crash the agent."""
+    jinja_inputs = [
+        'Fix this: style={{ fontSize: "1.2rem" }}',
+        "Code: {{ variable }}",
+        "Template {% if true %}yes{% endif %}",
+        "{# comment #}",
+    ]
+    for user_input in jinja_inputs:
+        agent = create_react_agent(model, inference_mode)
+        agent.run(input_data={"input": user_input})
+        assert agent._prompt.messages[1].content == user_input
+
+
+@pytest.mark.parametrize(
     ("inference_mode"),
     [
         (InferenceMode.DEFAULT),
