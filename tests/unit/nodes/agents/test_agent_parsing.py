@@ -277,6 +277,35 @@ def test_action_parsing_failure_emits_tool_input_error_event(mocker):
     assert event_data.name == "test-agent"
 
 
+def test_structured_output_multiple_jsons_takes_first(mocker):
+    """When LLM returns multiple JSON objects, only the first should be parsed."""
+    import uuid
+
+    from dynamiq import connections, prompts
+    from dynamiq.nodes.agents import Agent
+    from dynamiq.nodes.llms import OpenAI
+    from dynamiq.nodes.types import InferenceMode
+
+    conn = connections.OpenAI(id=str(uuid.uuid4()), api_key="fake-key")
+    llm = OpenAI(
+        name="TestLLM",
+        model="gpt-4o-mini",
+        connection=conn,
+        prompt=prompts.Prompt(messages=[prompts.Message(role="user", content="{{input}}")]),
+    )
+    agent = Agent(name="test-agent", llm=llm, tools=[], inference_mode=InferenceMode.STRUCTURED_OUTPUT)
+
+    output = (
+        '{"thought": "run shell", "action": "SandboxShellTool", '
+        '"action_input": "{\\"command\\": \\"ls\\"}", "output_files": ""}\n'
+        '{"thought": "wait", "action": "finish", "action_input": "done", "output_files": ""}'
+    )
+    thought, action, action_input = agent._handle_structured_output_mode(output, loop_num=1)
+    assert thought == "run shell"
+    assert action == "SandboxShellTool"
+    assert action_input == {"command": "ls"}
+
+
 def _mock_llm_response(text: str):
     from litellm import ModelResponse
 
