@@ -589,7 +589,7 @@ class Agent(Node):
         if extra_fields:
             input_message = input_message.format_message(**extra_fields)
         else:
-            input_message = Message(role=input_message.role, content=input_message.content)
+            input_message = input_message.model_copy()
         input_message.static = True
 
         use_memory = self.memory and (input_data.user_id or input_data.session_id)
