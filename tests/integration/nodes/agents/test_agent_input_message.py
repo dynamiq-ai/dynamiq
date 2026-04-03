@@ -69,7 +69,7 @@ def test_simple_agent_workflow(model, inference_mode):
     react_agent.run(
         input_data={"input": REQUEST},
     )
-    expected_result = Message(content=REQUEST, role=MessageRole.USER)
+    expected_result = Message(content=REQUEST, role=MessageRole.USER, static=True)
     assert react_agent._prompt.messages[1] == expected_result
 
     simple_agent = create_simple_agent(model, inference_mode)
@@ -103,6 +103,7 @@ def test_custom_agent_workflow(model, inference_mode):
         input_data={"request": REQUEST, "context": CONTEXT},
     )
     expected_result = input_message.format_message(request=REQUEST)
+    expected_result.static = True
     assert react_agent._prompt.messages[1] == expected_result
     assert CONTEXT in react_agent._prompt.messages[0].content
 
@@ -168,6 +169,7 @@ def test_custom_vision_agent_workflow(model, inference_mode):
         input_data={"request": REQUEST, "url": URL},
     )
     expected_result = input_message.format_message(request=REQUEST, url=URL)
+    expected_result.static = True
     assert agent._prompt.messages[1] == expected_result
 
     simple_agent = create_simple_agent(model, inference_mode, input_message)
