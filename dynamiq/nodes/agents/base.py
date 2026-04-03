@@ -586,9 +586,7 @@ class Agent(Node):
         # (binary data like files/images, complex objects like tool_params, and input which is already handled)
         standard_fields = set(AgentInputSchema.model_fields.keys())
         extra_fields = input_data.model_dump(exclude=standard_fields)
-        if extra_fields:
-            input_message = input_message.format_message(**extra_fields)
-        input_message.static = True
+        input_message = input_message.format_message(**extra_fields)
 
         use_memory = self.memory and (input_data.user_id or input_data.session_id)
 

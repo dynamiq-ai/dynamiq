@@ -170,7 +170,6 @@ output_files: [comma-separated file paths to return, or empty string if none]}
 
 IMPORTANT RULES:
 - You MUST ALWAYS include "thought" as the FIRST field in your JSON
-- ALWAYS populate the "thought" field FIRST before "action_input" in your response.
 - Each tool has a specific input format you must strictly follow
 - In action_input field, provide properly formatted JSON with double quotes
 - Avoid using extra backslashes
@@ -198,7 +197,6 @@ Only after utilizing the necessary tools and gathering the required information 
 you call `provide_final_answer` to deliver the final response.
 
 FUNCTION CALLING GUIDELINES:
-- ALWAYS populate the "thought" field FIRST before "action_input" in your function calls
 - Analyze the request carefully to determine if tools are needed
 - Call functions with properly formatted arguments
 - Handle tool responses appropriately before providing final answer
