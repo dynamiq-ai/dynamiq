@@ -13,30 +13,21 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_TAVILY = """Search the web,
-including automatic parameter tuning, structured filters, and enriched responses.
+DESCRIPTION_TAVILY = """Search the web with structured filters and enriched responses.
 
 Key Capabilities:
-- Auto-parameterization toggles (let the tool infer best depth/topic) or manual control
 - Basic vs advanced search depth with chunked content snippets
 - Topic-specific queries (general/news/finance) plus country/time filters
-- Optional LLM answers, raw HTML/text content, favicons, and rich image metadata
 
 Usage Strategy:
-- Enable auto_parameters for broad queries, override specific knobs when precision matters
 - Prefer advanced depth with chunks_per_source for research-grade answers
 - Combine time_range/start_date/end_date with include/exclude_domains for curated monitoring
-- Turn on include_answer/include_raw_content/include_images when agents must summarize or embed
 
 Examples:
-- {"query": "React performance optimization", "search_depth": "advanced", "chunks_per_source": 2}
-- {"query": "latest AI developments", "topic": "news",
-"time_range": "week", "include_answer": "basic"}
-- {"query": "S&P 500 outlook", "topic": "finance", "auto_parameters": true}
-- {"query": "machine learning tutorials",
-"include_domains": ["coursera.org", "kaggle.com"], "include_raw_content": "markdown"}
-- {"query": "Python best practices", "include_answer": "advanced",
-"include_images": true, "include_image_descriptions": true}"""
+- {"query": "React performance optimization", "search_depth": "advanced"}
+- {"query": "latest AI developments", "topic": "news", "time_range": "week"}
+- {"query": "S&P 500 outlook", "topic": "finance"}
+- {"query": "machine learning tutorials", "include_domains": ["coursera.org", "kaggle.com"]}"""
 
 
 class TavilyInputSchema(BaseModel):
@@ -44,6 +35,7 @@ class TavilyInputSchema(BaseModel):
     auto_parameters: bool | None = Field(
         default=None,
         description="Let the tool automatically select topic/search_depth for the query (beta, costs extra credits).",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     search_depth: Literal["basic", "advanced"] | None = Field(
         default=None,
@@ -59,6 +51,7 @@ class TavilyInputSchema(BaseModel):
         ge=1,
         le=3,
         description="Max number of 500-character chunks returned per source (advanced-depth only).",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     time_range: Literal["day", "week", "month", "year", "d", "w", "m", "y"] | None = Field(
         default=None,
@@ -76,22 +69,27 @@ class TavilyInputSchema(BaseModel):
     include_images: bool | None = Field(
         default=None,
         description="Whether to include relevant images in the response.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_image_descriptions: bool | None = Field(
         default=None,
         description="When images are requested, also return short descriptions for each image.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_favicon: bool | None = Field(
         default=None,
         description="Include the favicon URL for each result.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_answer: bool | Literal["basic", "advanced"] | None = Field(
         default=None,
         description="Return an LLM-generated summary. `basic` is concise, `advanced` is more detailed.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_raw_content: bool | Literal["markdown", "text"] | None = Field(
         default=None,
         description="Return cleaned page content. `markdown` keeps rich formatting, `text` forces plaintext.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_domains: list[str] | None = Field(
         default=None,
@@ -108,6 +106,7 @@ class TavilyInputSchema(BaseModel):
     use_cache: bool | None = Field(
         default=None,
         description="Use cached search results when available.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
 
 

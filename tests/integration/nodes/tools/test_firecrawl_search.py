@@ -92,16 +92,17 @@ def test_firecrawl_search_basic(mock_firecrawl_search_requests, mock_firecrawl_s
 
     payload = call_args[1]["json"]
     assert payload["query"] == input_data["query"]
-    assert payload["limit"] == 5
+    assert payload["limit"] == 10
     assert payload["sources"] == [{"type": "web"}]
-    assert payload["country"] == "US"
+    assert "country" not in payload
     assert payload["ignoreInvalidURLs"] is False
     assert payload["timeout"] == 60000
 
 
 def test_firecrawl_search_with_overrides(mock_firecrawl_search_requests_scrape, mock_firecrawl_scrape_search_response):
     connection = Firecrawl(api_key="test_key")
-    tool = FirecrawlSearchTool(connection=connection, limit=10, timeout=20000)
+    # timeout and ignore_invalid_urls are operator-level config set on the node, not agent input
+    tool = FirecrawlSearchTool(connection=connection, limit=10, timeout=45000, ignore_invalid_urls=True)
 
     input_data = {
         "query": "firecrawl web scraping",
@@ -110,8 +111,6 @@ def test_firecrawl_search_with_overrides(mock_firecrawl_search_requests_scrape, 
         "categories": ["github"],
         "location": "Germany",
         "tbs": "qdr:d",
-        "timeout": 45000,
-        "ignoreInvalidURLs": True,
         "country": "DE",
     }
 
@@ -135,8 +134,8 @@ def test_firecrawl_search_with_overrides(mock_firecrawl_search_requests_scrape, 
     assert payload["categories"] == ["github"]
     assert payload["location"] == input_data["location"]
     assert payload["tbs"] == input_data["tbs"]
-    assert payload["timeout"] == input_data["timeout"]
-    assert payload["ignoreInvalidURLs"] is True
+    assert payload["timeout"] == 45000  # from node-level operator config
+    assert payload["ignoreInvalidURLs"] is True  # from node-level operator config
     assert payload["country"] == "DE"
 
 

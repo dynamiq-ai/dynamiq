@@ -220,7 +220,8 @@ def test_jina_search_with_additional_parameters(mock_search_requests, mock_jina_
 def test_jina_scrape_with_selectors(mock_scrape_requests, mock_jina_scrape_response):
     """Test scraping with CSS selectors."""
     jina_connection = Jina(api_key="test_key")
-    jina_tool = JinaScrapeTool(connection=jina_connection)
+    # engine is operator-level config set on the node, not agent input
+    jina_tool = JinaScrapeTool(connection=jina_connection, engine="browser")
 
     input_data = {
         "url": "https://example.com",
@@ -228,7 +229,6 @@ def test_jina_scrape_with_selectors(mock_scrape_requests, mock_jina_scrape_respo
         "remove_selector": "header, footer, .ads",
         "include_links": True,
         "include_images": True,
-        "engine": "browser",
     }
 
     result = jina_tool.run(input_data, None)
@@ -244,7 +244,7 @@ def test_jina_scrape_with_selectors(mock_scrape_requests, mock_jina_scrape_respo
     assert headers["X-Remove-Selector"] == "header, footer, .ads"
     assert headers["X-With-Links-Summary"] == "true"
     assert headers["X-With-Images-Summary"] == "true"
-    assert headers["X-Engine"] == "browser"
+    assert headers["X-Engine"] == "browser"  # set via node-level operator config
 
 
 def test_jina_scrape_screenshot_format(mock_scrape_requests):
