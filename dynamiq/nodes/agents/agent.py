@@ -617,10 +617,16 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         try:
             if isinstance(llm_generated_output, str):
-                llm_generated_output_json = json.loads(llm_generated_output)
+                try:
+                    llm_generated_output_json = json.loads(llm_generated_output)
+                except json.JSONDecodeError:
+                    # Handle known LLM bug where multiple JSON objects are returned.
+                    # Use raw_decode to parse only the first valid JSON object.
+                    decoder = json.JSONDecoder()
+                    llm_generated_output_json, _ = decoder.raw_decode(llm_generated_output.strip())
             else:
                 llm_generated_output_json = llm_generated_output
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, ValueError) as e:
             raise ActionParsingException(f"Error parsing action. {e}", recoverable=True)
 
         if "action" not in llm_generated_output_json or "thought" not in llm_generated_output_json:
