@@ -12,22 +12,21 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_FIRECRAWL = """Scrapes web content with fully rendered pages, proxies, and automation.
+DESCRIPTION_FIRECRAWL = """Scrapes web content from a URL and returns cleaned content.
 
 Key capabilities:
-- Mix markdown/html/rawHtml/links/summary/screenshot/json/changeTracking/branding outputs in one call
-- Control scraping context: cache age, PDF parsers, TLS, viewport/mobile, headers, proxy tier, and location
-- Program actions (wait/click/write/press/scroll/screenshot/pdf/executeJavascript/scrape) before capture
-- Strip base64 blobs, block ads, or enforce zero-data-retention for sensitive workflows
+- Precise content targeting with CSS tag inclusion/exclusion filters
+- Optional geo-location for region-aware scraping
 
 Usage strategy:
-- Keep `only_main_content=True` for articles/blogs; disable when layout/menus matter
-- Pass `formats` as strings or typed dicts (e.g. `{'type': 'json', 'schema': {...}}`) to shape the response
-- Set `max_age` or `zero_data_retention` based on freshness vs. compliance needs
-- Combine `actions` with `wait_for` to ensure dynamic content loads before scraping/screenshotting
+- Use exclude_tags to strip navigation, ads, or footers from the output
+- Use include_tags to force-include specific HTML elements (e.g. tables, images)
+- Set location to emulate a specific country/language for region-aware pages
 
-Example:
-{"url": "https://example.com", "formats": ["markdown", "links"], "only_main_content": true, "proxy": "auto"}"""
+Examples:
+{"url": "https://example.com"}
+{"url": "https://blog.com", "exclude_tags": ["nav", "footer"]}
+{"url": "https://shop.com", "include_tags": ["table"], "location": {"country": "DE"}}"""
 
 
 class LocationSettings(BaseModel):
@@ -69,11 +68,13 @@ class FirecrawlInputSchema(BaseModel):
             "Tool output formats. Accepts plain strings (markdown/html/rawHtml/links/summary/"
             "screenshot/json/changeTracking/branding) or objects with format-specific options."
         ),
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     only_main_content: bool | None = Field(
         default=None,
         alias="onlyMainContent",
         description="True trims boilerplate (nav/footer) for article-style pages; False keeps the full DOM.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_tags: list[str] | None = Field(
         default=None,
@@ -94,28 +95,37 @@ class FirecrawlInputSchema(BaseModel):
     headers: dict[str, Any] | None = Field(
         default=None,
         description="Custom HTTP headers (cookies, user-agent, auth tokens) to forward with the scrape.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     wait_for: int | None = Field(
         default=None,
         alias="waitFor",
         description="Delay in ms before scraping to let dynamic content render (default 0).",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     mobile: bool | None = Field(
         default=None,
         description="True emulates a mobile device viewport + UA, useful for responsive layouts/screenshots.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     skip_tls_verification: bool | None = Field(
         default=None,
         alias="skipTlsVerification",
         description="True disables TLS verification (default), set False for strict cert checks.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
-    timeout: int | None = Field(default=None, description="Request timeout in ms for the upstream fetch.")
+    timeout: int | None = Field(
+        default=None,
+        description="Request timeout in ms for the upstream fetch.",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
     parsers: list[str | dict[str, Any]] | None = Field(
         default=None,
         description=(
             "Controls file parsers. Defaults to ['pdf']; pass [] to disable auto PDF parsing or "
             "objects like {'type': 'pdf', 'maxPages': 5} to limit cost."
         ),
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     actions: list[Action] | None = Field(
         default=None,
@@ -123,6 +133,7 @@ class FirecrawlInputSchema(BaseModel):
             "Optional automation instructions executed before scraping. Supports wait/screenshot/click/write/"
             "press/scroll/scrape/executeJavascript/pdf actions following the tool's schema."
         ),
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     location: LocationSettings | None = Field(
         default=None,
@@ -183,12 +194,14 @@ class FirecrawlTool(ConnectionNode):
     include_tags: list[str] | None = Field(default=None, alias="includeTags")
     exclude_tags: list[str] | None = Field(default=None, alias="excludeTags")
     max_age: int | None = Field(default=None, alias="maxAge")
-    headers: dict[str, Any] | None = None
+    headers: dict[str, Any] | None = Field(default=None, description="Custom HTTP headers to forward with the scrape.")
     wait_for: int = Field(default=0, alias="waitFor")
-    mobile: bool = False
+    mobile: bool = Field(default=False, description="Emulate a mobile device viewport and user-agent.")
     skip_tls_verification: bool = Field(default=True, alias="skipTlsVerification")
-    timeout: int = 30000
-    parsers: list[str | dict[str, Any]] | None = None
+    timeout: int = Field(default=30000, description="Request timeout in milliseconds for the upstream fetch.")
+    parsers: list[str | dict[str, Any]] | None = Field(
+        default=None, description="File parsers to apply. Defaults to ['pdf'] when None."
+    )
     actions: list[Action] | None = None
     location: LocationSettings | None = None
     remove_base64_images: bool = Field(default=True, alias="removeBase64Images")

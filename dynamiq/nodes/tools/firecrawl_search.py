@@ -12,17 +12,20 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_FIRECRAWL_SEARCH = """Search the internet across web, news, and image verticals.
+DESCRIPTION_FIRECRAWL_SEARCH = """Search the internet and returns SERP results.
 
-What it does:
-- Returns SERP results with geo/time filters and category biasing (github/research/pdf)
-- Lets you control result count, recency, geo bias, timeout, and URL validation in one call
+Key capabilities:
+- Category biasing for focused searches (github, research, pdf)
+- Geo and time filtering with country, location, and tbs parameters
+
+Usage strategy:
+- Use categories to focus on GitHub repos, research papers, or PDFs
+- Use tbs for time-based filtering (e.g. qdr:d for past day, qdr:w for past week)
 
 Examples:
 {"query": "firecrawl docs", "limit": 5}
-{"query": "openai funding", "sources": [{"type": "news"}], "limit": 3}
-{"query": "sunset wallpaper imagesize:1920x1080", "sources": [{"type": "images"}], "limit": 5}
-{"query": "langchain github", "categories": ["github"], "tbs": "qdr:w"}"""
+{"query": "langchain github", "categories": ["github"], "tbs": "qdr:w"}
+{"query": "coffee shops", "location": "San Francisco,California,United States", "country": "US"}"""
 
 
 class SourceWeb(BaseModel):
@@ -49,7 +52,7 @@ SourceType = SourceWeb | SourceImages | SourceNews
 CategoryType = Literal["github", "research", "pdf"]
 
 
-class FirecrawlSearchInput(BaseModel):
+class FirecrawlSearchInputSchema(BaseModel):
     """Schema exposed to agents using the Firecrawl search tool."""
 
     model_config = ConfigDict(populate_by_name=True)
@@ -57,7 +60,9 @@ class FirecrawlSearchInput(BaseModel):
     query: str = Field(..., description="Search query to execute on Firecrawl.")
     limit: int | None = Field(default=None, ge=1, le=100, description="Maximum number of search results to return.")
     sources: list[SourceType] | None = Field(
-        default=None, description="Result types to fetch: web/news/images with optional per-source options."
+        default=None,
+        description="Result types to fetch: web/news/images with optional per-source options.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     categories: list[CategoryType] | None = Field(
         default=None,
@@ -73,11 +78,16 @@ class FirecrawlSearchInput(BaseModel):
         description="Location string for search results (e.g., 'San Francisco,California,United States').",
     )
     country: str | None = Field(default=None, description="ISO country code for geo-targeting (e.g., 'US').")
-    timeout: int | None = Field(default=None, description="Request timeout in milliseconds.")
+    timeout: int | None = Field(
+        default=None,
+        description="Request timeout in milliseconds.",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
     ignore_invalid_urls: bool | None = Field(
         default=None,
         alias="ignoreInvalidURLs",
         description="Exclude invalid URLs from search results when piping into other endpoints.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     brief: str = Field(
         default="Searching the web for information.",
@@ -96,19 +106,19 @@ class FirecrawlSearchTool(ConnectionNode):
     connection: Firecrawl
     query: str | None = None
 
-    limit: int = Field(default=5, ge=1, le=100, description="Number of results to request.")
+    limit: int = Field(default=10, ge=1, le=100, description="Number of results to request.")
     sources: list[SourceType] = Field(default_factory=lambda: [SourceWeb()], description="Result verticals to include.")
     categories: list[CategoryType] = Field(default_factory=list, description="Optional category filters.")
     tbs: str | None = Field(default=None, description="Time-based search filter passed to the tool.")
     location: str | None = Field(default=None, description="Geographic bias for the search query.")
-    country: str = Field(default="US", description="ISO country code for geo-targeting.")
+    country: str | None = Field(default=None, description="ISO country code for geo-targeting.")
     timeout: int = Field(default=60000, description="Request timeout in milliseconds.")
     ignore_invalid_urls: bool = Field(
         default=False,
         alias="ignoreInvalidURLs",
         description="Exclude invalid URLs from results to reduce downstream errors.",
     )
-    input_schema: ClassVar[type[FirecrawlSearchInput]] = FirecrawlSearchInput
+    input_schema: ClassVar[type[FirecrawlSearchInputSchema]] = FirecrawlSearchInputSchema
     model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
 
     MAX_DESCRIPTION_CHARS: ClassVar[int] = 300
@@ -123,7 +133,7 @@ class FirecrawlSearchTool(ConnectionNode):
             return text
         return text[:limit].rsplit(" ", 1)[0].rstrip("\n") + "..."
 
-    def _build_search_payload(self, query: str, overrides: FirecrawlSearchInput) -> dict[str, Any]:
+    def _build_search_payload(self, query: str, overrides: FirecrawlSearchInputSchema) -> dict[str, Any]:
         """Construct the payload for the Firecrawl search API."""
 
         def resolve(field_name: str) -> Any:
@@ -219,7 +229,7 @@ class FirecrawlSearchTool(ConnectionNode):
         return f'## Search Results for "{query}"\nNo results returned.'
 
     def execute(
-        self, input_data: FirecrawlSearchInput, config: RunnableConfig | None = None, **kwargs
+        self, input_data: FirecrawlSearchInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Execute the search tool with the provided input data."""
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
