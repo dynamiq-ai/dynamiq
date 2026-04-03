@@ -69,7 +69,7 @@ def test_simple_agent_workflow(model, inference_mode):
     react_agent.run(
         input_data={"input": REQUEST},
     )
-    expected_result = Message(content=REQUEST, role=MessageRole.USER)
+    expected_result = Message(content=REQUEST, role=MessageRole.USER, static=True)
     assert react_agent._prompt.messages[1] == expected_result
 
     simple_agent = create_simple_agent(model, inference_mode)
@@ -103,6 +103,7 @@ def test_custom_agent_workflow(model, inference_mode):
         input_data={"request": REQUEST, "context": CONTEXT},
     )
     expected_result = input_message.format_message(request=REQUEST)
+    expected_result.static = True
     assert react_agent._prompt.messages[1] == expected_result
     assert CONTEXT in react_agent._prompt.messages[0].content
 
@@ -119,6 +120,29 @@ def test_custom_agent_workflow(model, inference_mode):
     )
     assert reflection_agent._prompt.messages[1] == expected_result
     assert CONTEXT in reflection_agent._prompt.messages[0].content
+
+
+@pytest.mark.parametrize(
+    "inference_mode",
+    [
+        InferenceMode.DEFAULT,
+        InferenceMode.XML,
+        InferenceMode.STRUCTURED_OUTPUT,
+        InferenceMode.FUNCTION_CALLING,
+    ],
+)
+def test_agent_input_with_jinja_like_syntax(model, inference_mode):
+    """User input containing Jinja2-like syntax (e.g. JSX code) must not crash the agent."""
+    jinja_inputs = [
+        'Fix this: style={{ fontSize: "1.2rem" }}',
+        "Code: {{ variable }}",
+        "Template {% if true %}yes{% endif %}",
+        "{# comment #}",
+    ]
+    for user_input in jinja_inputs:
+        agent = create_react_agent(model, inference_mode)
+        agent.run(input_data={"input": user_input})
+        assert agent._prompt.messages[1].content == user_input
 
 
 @pytest.mark.parametrize(
@@ -145,6 +169,7 @@ def test_custom_vision_agent_workflow(model, inference_mode):
         input_data={"request": REQUEST, "url": URL},
     )
     expected_result = input_message.format_message(request=REQUEST, url=URL)
+    expected_result.static = True
     assert agent._prompt.messages[1] == expected_result
 
     simple_agent = create_simple_agent(model, inference_mode, input_message)
