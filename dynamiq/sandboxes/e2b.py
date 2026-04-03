@@ -407,7 +407,7 @@ class E2BSandbox(Sandbox):
         """Read file bytes from sandbox filesystem."""
         sandbox = self._ensure_sandbox()
         resolved_path = self._resolve_path(file_path)
-        return bytes(sandbox.files.read(resolved_path, "bytes"))
+        return sandbox.files.read(resolved_path, "bytes")
 
     def get_tools(self, llm: Any = None) -> list[Node]:
         """Return tools this sandbox provides for agent use.
