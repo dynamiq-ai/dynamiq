@@ -1,5 +1,7 @@
 import asyncio
+import contextvars
 import copy
+import functools
 import inspect
 import time
 from abc import ABC, abstractmethod
@@ -943,7 +945,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             )
             return result
 
-    async def run_async(
+    async def _run_async_native(
         self,
         input_data: dict,
         config: RunnableConfig = None,
@@ -951,21 +953,129 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         **kwargs,
     ) -> RunnableResult:
         """
+        Run the node asynchronously using native async execute.
+        Mirrors run_sync() lifecycle but calls execute_async_with_retry().
+        """
+        from dynamiq.nodes.agents.exceptions import RecoverableAgentException
+
+        logger.info(f"Node {self.name} - {self.id}: async execution started.")
+        transformed_input = input_data
+        time_start = datetime.now()
+
+        config = ensure_config(config)
+
+        run_id = uuid4()
+        merged_kwargs = merge(kwargs, {"run_id": run_id, "parent_run_id": kwargs.get("parent_run_id", None)})
+        if depends_result is None:
+            depends_result = {}
+
+        try:
+            try:
+                self.validate_depends(depends_result)
+                input_data = self.get_approved_data_or_origin(input_data, config=config, **merged_kwargs)
+            except NodeException as e:
+                transformed_input = input_data | {
+                    k: result.to_tracing_depend_dict() for k, result in depends_result.items()
+                }
+                skip_data = {"failed_dependency": e.failed_depend.to_dict(for_tracing=True)}
+                self.run_on_node_skip(
+                    callbacks=config.callbacks,
+                    skip_data=skip_data,
+                    input_data=transformed_input,
+                    human_feedback=getattr(e, "human_feedback", None),
+                    **merged_kwargs,
+                )
+                logger.info(f"Node {self.name} - {self.id}: execution skipped.")
+                return RunnableResult(
+                    status=RunnableStatus.SKIP,
+                    input=transformed_input,
+                    output=None,
+                    error=RunnableResultError.from_exception(e, recoverable=e.recoverable),
+                )
+
+            transformed_input = self.validate_input_schema(
+                self.transform_input(input_data=input_data, depends_result=depends_result, config=config, **kwargs),
+                **kwargs,
+            )
+            self.run_on_node_start(config.callbacks, dict(transformed_input), **merged_kwargs)
+            cache = cache_wf_entity(
+                entity_id=self.id,
+                cache_enabled=self.caching.enabled,
+                cache_config=config.cache,
+            )
+
+            # When caching is enabled, fall back to sync execute (cache is sync)
+            if self.caching.enabled:
+                output, from_cache = cache(self.execute_with_retry)(transformed_input, config, **merged_kwargs)
+            else:
+                output = await self.execute_async_with_retry(transformed_input, config, **merged_kwargs)
+                from_cache = False
+
+            merged_kwargs["is_output_from_cache"] = from_cache
+            transformed_output = self.transform_output(output, config=config, **kwargs)
+
+            self.run_on_node_end(config.callbacks, transformed_output, **merged_kwargs)
+
+            logger.info(
+                f"Node {self.name} - {self.id}: async execution succeeded in "
+                f"{format_duration(time_start, datetime.now())}."
+            )
+            return RunnableResult(
+                status=RunnableStatus.SUCCESS, input=dict(transformed_input), output=transformed_output
+            )
+        except Exception as e:
+            self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
+            logger.error(
+                f"Node {self.name} - {self.id}: async execution failed in "
+                f"{format_duration(time_start, datetime.now())}. {e}"
+            )
+
+            recoverable = isinstance(e, RecoverableAgentException)
+            result = RunnableResult(
+                status=RunnableStatus.FAILURE,
+                input=transformed_input,
+                output=None,
+                error=RunnableResultError.from_exception(e, recoverable=recoverable),
+            )
+            return result
+
+    async def run_async(
+        self,
+        input_data: dict,
+        config: RunnableConfig = None,
+        depends_result: dict = None,
+        executor: "ThreadPoolExecutor | None" = None,
+        **kwargs,
+    ) -> RunnableResult:
+        """
         Run the node asynchronously with given input data and configuration.
-        This runs the synchronous implementation in a thread pool to avoid blocking the event loop.
+
+        If the node has a native async execute implementation (has_native_async),
+        runs directly on the event loop. Otherwise, offloads sync execution to
+        the provided executor (or the default asyncio executor if None).
 
         Args:
             input_data (Any): Input data for the node.
-            config (RunnableConfig, optional): Configuration for the run. Defaults to None.
-            depends_result (dict, optional): Results of dependent nodes. Defaults to None.
+            config (RunnableConfig, optional): Configuration for the run.
+            depends_result (dict, optional): Results of dependent nodes.
+            executor (ThreadPoolExecutor, optional): Thread pool executor for sync fallback.
             **kwargs: Additional keyword arguments.
 
         Returns:
             RunnableResult: Result of the node execution.
         """
-        return await asyncio.to_thread(
-            self.run_sync, input_data=input_data, config=config, depends_result=depends_result, **kwargs
-        )
+        if self.has_native_async:
+            return await self._run_async_native(
+                input_data=input_data, config=config, depends_result=depends_result, **kwargs
+            )
+        else:
+            loop = asyncio.get_running_loop()
+            ctx = contextvars.copy_context()
+            fn = functools.partial(
+                self.run_sync, input_data=input_data, config=config,
+                depends_result=depends_result, **kwargs
+            )
+            return await loop.run_in_executor(executor, ctx.run, fn)
 
     def ensure_client(self) -> None:
         """

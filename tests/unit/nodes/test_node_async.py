@@ -1,4 +1,6 @@
 import asyncio
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -102,3 +104,39 @@ class TestExecuteAsyncWithRetry:
         config = RunnableConfig(callbacks=[])
         with pytest.raises(asyncio.TimeoutError):
             await node.execute_async_with_retry(input_data={}, config=config)
+
+
+class TestRunAsyncRouting:
+    @pytest.mark.asyncio
+    async def test_sync_node_uses_executor(self):
+        """Sync-only node should offload to the provided executor."""
+        node = SyncOnlyNode()
+        executor = ThreadPoolExecutor(max_workers=2)
+        try:
+            result = await node.run_async(
+                input_data={"input": "test"}, config=RunnableConfig(callbacks=[]), executor=executor
+            )
+            assert result.status == RunnableStatus.SUCCESS
+            assert result.output == {"result": "sync"}
+        finally:
+            executor.shutdown(wait=False)
+
+    @pytest.mark.asyncio
+    async def test_async_node_runs_on_event_loop(self):
+        """Async-native node should NOT use executor — runs directly on event loop."""
+        node = NativeAsyncNode()
+        result = await node.run_async(
+            input_data={"input": "test"}, config=RunnableConfig(callbacks=[]), executor=None
+        )
+        assert result.status == RunnableStatus.SUCCESS
+        assert result.output == {"result": "async"}
+
+    @pytest.mark.asyncio
+    async def test_sync_node_without_executor_falls_back_to_default(self):
+        """Sync-only node with executor=None should use default executor (backward compat)."""
+        node = SyncOnlyNode()
+        result = await node.run_async(
+            input_data={"input": "test"}, config=RunnableConfig(callbacks=[])
+        )
+        assert result.status == RunnableStatus.SUCCESS
+        assert result.output == {"result": "sync"}
