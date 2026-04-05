@@ -28,6 +28,8 @@ from dynamiq.types.llm_tool import Tool
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
+    from concurrent.futures import ThreadPoolExecutor
+
     from litellm import CustomStreamWrapper, ModelResponse
 
 
@@ -878,6 +880,81 @@ class BaseLLM(ConnectionNode):
         if fallback_result.status == RunnableStatus.SUCCESS:
             logger.info(f"LLM {self.name} - {self.id}: Fallback LLM ({fallback_llm.model}) succeeded")
             # Apply primary node's output_transformer to fallback result
+            transformed_output = self.transform_output(fallback_result.output, config=config, **kwargs)
+            return RunnableResult(
+                status=RunnableStatus.SUCCESS,
+                input=result.input,
+                output=transformed_output,
+            )
+
+        logger.error(f"LLM {self.name} - {self.id}: Fallback LLM ({fallback_llm.model}) failed.")
+        return result
+
+    async def run_async(
+        self,
+        input_data: dict,
+        config: RunnableConfig = None,
+        depends_result: dict = None,
+        executor: "ThreadPoolExecutor | None" = None,
+        **kwargs,
+    ) -> RunnableResult:
+        """Run the LLM asynchronously with fallback support.
+
+        If the primary LLM fails and a fallback is configured, the primary failure
+        is traced first, then the fallback LLM is executed separately.
+
+        The fallback receives the same transformed input that the primary received,
+        and the primary's output_transformer is applied to the fallback's output.
+
+        Args:
+            input_data: Input data for the LLM.
+            config: Configuration for the run.
+            depends_result: Results of dependent nodes.
+            executor: Optional thread pool executor for sync fallback.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            RunnableResult: Result of the LLM execution.
+        """
+        result = await super().run_async(
+            input_data=input_data, config=config, depends_result=depends_result,
+            executor=executor, **kwargs
+        )
+
+        if result.status != RunnableStatus.FAILURE:
+            return result
+
+        if not self.fallback or not self.fallback.llm:
+            return result
+
+        if not result.error:
+            return result
+
+        if not self._should_trigger_fallback(result.error.type, result.error.message):
+            return result
+
+        fallback_llm = self.fallback.llm
+        fallback_llm._is_fallback_run = True
+        logger.warning(
+            f"LLM {self.name} - {self.id}: Primary LLM ({self.model}) failed. "
+            f"Error: {result.error.type.__name__}: {result.error.message}. "
+            f"Attempting fallback to {fallback_llm.name} - {fallback_llm.id}"
+        )
+
+        fallback_kwargs = {k: v for k, v in kwargs.items() if k != "run_depends"}
+        fallback_kwargs["parent_run_id"] = kwargs.get("parent_run_id")
+
+        fallback_input = result.input.model_dump() if hasattr(result.input, "model_dump") else result.input
+        fallback_result = await fallback_llm.run_async(
+            input_data=fallback_input,
+            config=config,
+            depends_result=None,
+            executor=executor,
+            **fallback_kwargs,
+        )
+
+        if fallback_result.status == RunnableStatus.SUCCESS:
+            logger.info(f"LLM {self.name} - {self.id}: Fallback LLM ({fallback_llm.model}) succeeded")
             transformed_output = self.transform_output(fallback_result.output, config=config, **kwargs)
             return RunnableResult(
                 status=RunnableStatus.SUCCESS,

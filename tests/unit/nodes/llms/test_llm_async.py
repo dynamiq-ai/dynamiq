@@ -6,7 +6,8 @@ import pytest
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.prompts import Prompt
-from dynamiq.runnables import RunnableConfig
+from dynamiq.nodes.llms.base import FallbackConfig
+from dynamiq.runnables import RunnableConfig, RunnableStatus
 
 
 def make_mock_response(content="test response"):
@@ -88,3 +89,59 @@ class TestBaseLLMAsync:
 
             assert result["content"] == "hello"
             node._stream_chunk_builder.assert_called_once()
+
+
+class TestBaseLLMAsyncFallback:
+    @pytest.mark.asyncio
+    async def test_run_async_no_fallback_on_success(self):
+        """Successful run should not trigger fallback."""
+        mock_response = make_mock_response("primary response")
+
+        node = OpenAI(
+            model="gpt-4o-mini",
+            connection=OpenAIConnection(api_key="test-key"),
+            prompt=Prompt(messages=[{"role": "user", "content": "Hello"}]),
+        )
+        node._acompletion = AsyncMock(return_value=mock_response)
+
+        result = await node.run_async(
+            input_data={"input": "test"},
+            config=RunnableConfig(callbacks=[]),
+        )
+        assert result.status == RunnableStatus.SUCCESS
+
+    @pytest.mark.asyncio
+    async def test_run_async_triggers_fallback_on_rate_limit(self):
+        """Failed primary with rate limit should trigger fallback LLM via async path."""
+        mock_fallback_response = make_mock_response("fallback response")
+
+        primary = OpenAI(
+            model="gpt-4o-mini",
+            connection=OpenAIConnection(api_key="test-key"),
+            prompt=Prompt(messages=[{"role": "user", "content": "Hello"}]),
+        )
+        fallback_llm = OpenAI(
+            model="gpt-4o",
+            connection=OpenAIConnection(api_key="test-key"),
+            prompt=Prompt(messages=[{"role": "user", "content": "Hello"}]),
+        )
+        primary.fallback = FallbackConfig(llm=fallback_llm, enabled=True)
+
+        # Primary raises a rate limit error
+        from litellm.exceptions import RateLimitError
+        primary._acompletion = AsyncMock(
+            side_effect=RateLimitError(
+                message="Rate limit exceeded",
+                model="gpt-4o-mini",
+                llm_provider="openai",
+            )
+        )
+        # Fallback succeeds
+        fallback_llm._acompletion = AsyncMock(return_value=mock_fallback_response)
+
+        result = await primary.run_async(
+            input_data={"input": "test"},
+            config=RunnableConfig(callbacks=[]),
+        )
+        assert result.status == RunnableStatus.SUCCESS
+        assert result.output["content"] == "fallback response"
