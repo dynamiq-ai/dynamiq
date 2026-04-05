@@ -210,6 +210,7 @@ class BaseLLM(ConnectionNode):
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     _completion: Callable = PrivateAttr()
+    _acompletion: Callable = PrivateAttr()
     _stream_chunk_builder: Callable = PrivateAttr()
     _is_fallback_run: bool = PrivateAttr(default=False)
     _json_schema_fields: ClassVar[list[str]] = ["model", "temperature", "max_tokens", "prompt"]
@@ -261,10 +262,11 @@ class BaseLLM(ConnectionNode):
         super().__init__(**kwargs)
 
         # Save a bit of loading time as litellm is slow
-        from litellm import completion, stream_chunk_builder
+        from litellm import acompletion, completion, stream_chunk_builder
 
         # Avoid the same imports multiple times and for future usage in execute
         self._completion = completion
+        self._acompletion = acompletion
         self._stream_chunk_builder = stream_chunk_builder
 
     def init_components(self, connection_manager=None):
@@ -499,6 +501,36 @@ class BaseLLM(ConnectionNode):
         full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
 
+    async def _handle_streaming_completion_response_async(
+        self,
+        response: Union["ModelResponse", "CustomStreamWrapper"],
+        messages: list[dict],
+        config: RunnableConfig = None,
+        **kwargs,
+    ):
+        """Handle async streaming completion response.
+
+        Args:
+            response (ModelResponse | CustomStreamWrapper): The async streaming response from the LLM.
+            messages (list[dict]): The messages used for the LLM.
+            config (RunnableConfig, optional): The configuration for the execution. Defaults to None.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            dict: A dictionary containing the generated content and tool calls.
+        """
+        chunks = []
+        async for chunk in response:
+            chunks.append(chunk)
+            self.run_on_node_execute_stream(
+                config.callbacks,
+                chunk.model_dump(),
+                **kwargs,
+            )
+
+        full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
+        return self._handle_completion_response(response=full_response, config=config, **kwargs)
+
     def _get_response_format_and_tools(
         self,
         prompt: Prompt | None = None,
@@ -643,6 +675,89 @@ class BaseLLM(ConnectionNode):
 
         return handle_completion(
             response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
+        )
+
+    async def execute_async(
+        self,
+        input_data: BaseLLMInputSchema,
+        config: RunnableConfig = None,
+        prompt: Prompt | None = None,
+        tools: list[Tool | dict] | None = None,
+        response_format: dict[str, Any] | None = None,
+        parallel_tool_calls: bool | None = None,
+        **kwargs,
+    ):
+        """Execute the LLM node asynchronously using litellm.acompletion.
+
+        This method mirrors execute() but uses await self._acompletion(...)
+        and async streaming iteration.
+
+        Args:
+            input_data (BaseLLMInputSchema): The input data for the LLM.
+            config (RunnableConfig, optional): The configuration for the execution. Defaults to None.
+            prompt (Prompt, optional): The prompt to use for this execution. Defaults to None.
+            tools (list[Tool|dict]): List of tools that llm can call.
+            response_format (dict[str, Any]): JSON schema that specifies the structure of the llm's output.
+            parallel_tool_calls (bool | None): Whether to allow the LLM to return multiple tool calls
+                in a single response. None means provider decides.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            dict: A dictionary containing the generated content and tool calls.
+        """
+        config = ensure_config(config)
+        self.reset_run_state()
+        prompt = prompt or self.prompt or Prompt(messages=[], tools=None, response_format=None)
+        messages = self.get_messages(prompt, input_data)
+        self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=messages, **kwargs)
+
+        extra = copy.deepcopy(self.__pydantic_extra__)
+        params = self.connection.conn_params.copy()
+        if self.client and not isinstance(self.connection, HttpApiKey):
+            params.update({"client": self.client})
+        if self.thinking_enabled:
+            params.update({"thinking": {"type": "enabled", "budget_tokens": self.budget_tokens}})
+        if extra:
+            params.update(extra)
+
+        response_format, tools = self._get_response_format_and_tools(
+            prompt=prompt,
+            tools=tools,
+            response_format=response_format,
+        )
+        is_streaming_callback_available = any(
+            isinstance(callback, BaseStreamingCallbackHandler) for callback in config.callbacks
+        )
+        common_params: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": self.streaming.enabled and is_streaming_callback_available,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "tools": tools,
+            "tool_choice": self.tool_choice,
+            "stop": self.stop if self.stop else None,
+            "top_p": self.top_p,
+            "seed": self.seed,
+            "presence_penalty": self.presence_penalty,
+            "frequency_penalty": self.frequency_penalty,
+            "response_format": response_format,
+            "drop_params": True,
+            **params,
+        }
+        if parallel_tool_calls is not None:
+            common_params["parallel_tool_calls"] = parallel_tool_calls
+
+        common_params = self.update_completion_params(common_params)
+
+        response = await self._acompletion(**common_params)
+
+        if self.streaming.enabled and is_streaming_callback_available:
+            return await self._handle_streaming_completion_response_async(
+                response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
+            )
+        return self._handle_completion_response(
+            response=response, config=config, input_data=dict(input_data), **kwargs
         )
 
     def _is_rate_limit_error(self, exception_type: type[Exception], error_str: str) -> bool:
