@@ -316,8 +316,10 @@ class Flow(BaseFlow):
                     self._results.update(results)
                     self._ts.done(*results.keys())
 
-                    # Wait for ready nodes to be processed and reduce CPU usage
-                    time.sleep(0.003)
+                    if not results:
+                        # Yield CPU only when no futures completed; futures.wait
+                        # already blocks when work is in progress.
+                        time.sleep(0.003)
 
                 run_executor.shutdown()
 
