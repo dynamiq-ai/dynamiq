@@ -267,6 +267,11 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
     _output_references: NodeOutputReferences = PrivateAttr()
 
+    @property
+    def has_native_async(self) -> bool:
+        """Check if the subclass provides a native async execute implementation."""
+        return type(self).execute_async is not Node.execute_async
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: type[BaseModel] | None = None
     callbacks: list[NodeCallbackHandler] = []
@@ -1395,6 +1400,15 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             Any: Result of the execution.
         """
         pass
+
+    async def execute_async(
+        self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs
+    ) -> Any:
+        """
+        Async execution of the node. Override in subclasses for native async support.
+        Returns NotImplemented to signal fallback to sync execute() in a thread.
+        """
+        return NotImplemented
 
     def depends_on(self, nodes: Union["Node", list["Node"]], condition: ChoiceCondition | None = None) -> "Node":
         """
