@@ -715,8 +715,8 @@ class BaseLLM(ConnectionNode):
 
         extra = copy.deepcopy(self.__pydantic_extra__)
         params = self.connection.conn_params.copy()
-        if self.client and not isinstance(self.connection, HttpApiKey):
-            params.update({"client": self.client})
+        # Do not pass the sync client to acompletion — litellm will create
+        # its own async HTTP client using the connection params (api_key, api_base).
         if self.thinking_enabled:
             params.update({"thinking": {"type": "enabled", "budget_tokens": self.budget_tokens}})
         if extra:
