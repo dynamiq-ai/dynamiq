@@ -44,3 +44,61 @@ class TestNodeAsyncProtocol:
             node.execute_async(input_data={})
         )
         assert result is NotImplemented
+
+
+class FailThenSucceedAsyncNode(Node):
+    """Test node that fails N times then succeeds."""
+    group: NodeGroup = NodeGroup.UTILS
+    name: str = "FailThenSucceed"
+    attempt_count: int = 0
+    fail_times: int = 2
+    error_handling: ErrorHandling = ErrorHandling(
+        max_retries=3, retry_interval_seconds=0.01, backoff_rate=1
+    )
+
+    def execute(self, input_data, config=None, **kwargs):
+        return {"result": "sync"}
+
+    async def execute_async(self, input_data, config=None, **kwargs):
+        self.attempt_count += 1
+        if self.attempt_count <= self.fail_times:
+            raise ValueError(f"Attempt {self.attempt_count} failed")
+        return {"result": "success", "attempts": self.attempt_count}
+
+
+class TimeoutAsyncNode(Node):
+    """Test node that takes too long."""
+    group: NodeGroup = NodeGroup.UTILS
+    name: str = "TimeoutAsync"
+    error_handling: ErrorHandling = ErrorHandling(timeout_seconds=0.05)
+
+    def execute(self, input_data, config=None, **kwargs):
+        return {"result": "sync"}
+
+    async def execute_async(self, input_data, config=None, **kwargs):
+        await asyncio.sleep(10)  # Way longer than timeout
+        return {"result": "should not reach"}
+
+
+class TestExecuteAsyncWithRetry:
+    @pytest.mark.asyncio
+    async def test_retry_succeeds_after_failures(self):
+        node = FailThenSucceedAsyncNode()
+        config = RunnableConfig(callbacks=[])
+        result = await node.execute_async_with_retry(input_data={}, config=config)
+        assert result == {"result": "success", "attempts": 3}
+        assert node.attempt_count == 3
+
+    @pytest.mark.asyncio
+    async def test_retry_exhausted_raises(self):
+        node = FailThenSucceedAsyncNode(fail_times=10)
+        config = RunnableConfig(callbacks=[])
+        with pytest.raises(ValueError, match="Attempt .* failed"):
+            await node.execute_async_with_retry(input_data={}, config=config)
+
+    @pytest.mark.asyncio
+    async def test_timeout_raises(self):
+        node = TimeoutAsyncNode()
+        config = RunnableConfig(callbacks=[])
+        with pytest.raises(asyncio.TimeoutError):
+            await node.execute_async_with_retry(input_data={}, config=config)

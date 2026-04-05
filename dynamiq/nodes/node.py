@@ -1097,6 +1097,73 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             future.cancel()
             raise
 
+    async def execute_async_with_retry(
+        self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs
+    ):
+        """
+        Execute the node asynchronously with retry logic.
+        Uses asyncio.wait_for for timeout instead of thread-based timeout.
+        Uses asyncio.sleep for non-blocking retry backoff.
+        """
+        config = ensure_config(config)
+        timeout = self.error_handling.timeout_seconds
+        error = None
+        n_attempt = self.error_handling.max_retries + 1
+
+        for attempt in range(n_attempt):
+            merged_kwargs = merge(kwargs, {"execution_run_id": uuid4()})
+
+            try:
+                self.ensure_client()
+            except Exception as conn_error:
+                logger.error(
+                    f"Node {self.name} - {self.id}: Failed to ensure client connection: {conn_error}"
+                )
+                error = conn_error
+                if attempt < n_attempt - 1:
+                    time_to_sleep = self.error_handling.retry_interval_seconds * (
+                        self.error_handling.backoff_rate ** attempt
+                    )
+                    logger.info(
+                        f"Node {self.name} - {self.id}: retrying connection in {time_to_sleep} seconds."
+                    )
+                    await asyncio.sleep(time_to_sleep)
+                    continue
+                else:
+                    raise
+
+            self.run_on_node_execute_start(config.callbacks, input_data, **merged_kwargs)
+
+            try:
+                if timeout is not None:
+                    output = await asyncio.wait_for(
+                        self.execute_async(input_data=input_data, config=config, **merged_kwargs),
+                        timeout=timeout,
+                    )
+                else:
+                    output = await self.execute_async(input_data=input_data, config=config, **merged_kwargs)
+
+                self.run_on_node_execute_end(config.callbacks, output, **merged_kwargs)
+                return output
+            except asyncio.TimeoutError as e:
+                error = e
+                self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
+                logger.warning(f"Node {self.name} - {self.id}: timeout.")
+            except Exception as e:
+                error = e
+                self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
+                logger.error(f"Node {self.name} - {self.id}: execution error: {e}")
+
+            if attempt < n_attempt - 1:
+                time_to_sleep = self.error_handling.retry_interval_seconds * (
+                    self.error_handling.backoff_rate ** attempt
+                )
+                logger.info(f"Node {self.name} - {self.id}: retrying in {time_to_sleep} seconds.")
+                await asyncio.sleep(time_to_sleep)
+
+        logger.error(f"Node {self.name} - {self.id}: execution failed after {n_attempt} attempts.")
+        raise error
+
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""
         return {}
