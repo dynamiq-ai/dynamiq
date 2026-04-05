@@ -11,6 +11,7 @@ from pydantic import Field, computed_field, field_validator
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.executors.base import BaseExecutor
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.executors.pool import ThreadExecutor
 from dynamiq.flows.base import BaseFlow
 from dynamiq.nodes.node import Node, NodeReadyToRun
@@ -360,13 +361,8 @@ class Flow(BaseFlow):
         """
         Run the flow asynchronously with the given input data and configuration.
 
-        Args:
-            input_data (Any): Input data for the flow.
-            config (RunnableConfig, optional): Configuration for the run. Defaults to None.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            RunnableResult: Result of the flow execution.
+        Creates a dedicated ContextAwareThreadPoolExecutor for this flow run,
+        isolating it from other concurrent flow executions.
         """
         self.reset_run_state()
         run_id = uuid4()
@@ -374,6 +370,9 @@ class Flow(BaseFlow):
             "run_id": run_id,
             "parent_run_id": kwargs.get("parent_run_id", run_id),
         }
+
+        max_workers = (config.max_node_workers if config else None) or self.max_node_workers
+        executor = ContextAwareThreadPoolExecutor(max_workers=max_workers)
 
         logger.info(f"Flow {self.id}: execution started.")
         self.run_on_flow_start(input_data, config, **merged_kwargs)
@@ -391,6 +390,7 @@ class Flow(BaseFlow):
                                 input_data=node.input_data,
                                 depends_result=node.depends_result,
                                 config=config,
+                                executor=executor,
                                 **(merged_kwargs | {"parent_run_id": run_id}),
                             )
                             for node in nodes_to_run
@@ -403,8 +403,8 @@ class Flow(BaseFlow):
                         self._results.update(results)
                         self._ts.done(*results.keys())
 
-                    # Wait for ready nodes to be processed and reduce CPU usage by yielding control to the event loop
-                    await asyncio.sleep(0.003)
+                    # Yield to event loop without artificial delay
+                    await asyncio.sleep(0)
 
             output = self._get_output()
             failed_nodes = self._get_failed_nodes_with_raise_behavior()
@@ -435,6 +435,8 @@ class Flow(BaseFlow):
                 error=RunnableResultError.from_exception(e, failed_nodes=failed_nodes),
             )
         finally:
+            # wait=False is safe: all node tasks have been awaited via asyncio.gather()
+            executor.shutdown(wait=False)
             try:
                 await self._cleanup_dry_run_async(config)
             except Exception as e:
