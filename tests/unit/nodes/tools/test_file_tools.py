@@ -116,7 +116,7 @@ def test_file_read_tool(file_store, sample_file_path, llm_model):
     """Test FileReadTool functionality including initialization, successful read, and error handling."""
     # Test initialization
     tool = FileReadTool(file_store=file_store, llm=llm_model)
-    assert tool.name == "FileReadTool"
+    assert tool.name == "file-read"
     assert tool.group == "tools"
     assert tool.file_store == file_store
 
@@ -138,7 +138,7 @@ def test_file_write_tool(file_store):
     """Test FileWriteTool functionality including initialization, successful writes, and error handling."""
     # Test initialization
     tool = FileWriteTool(file_store=file_store)
-    assert tool.name == "FileWriteTool"
+    assert tool.name == "file-write"
     assert tool.group == "tools"
     assert tool.file_store == file_store
 
@@ -181,7 +181,7 @@ def test_file_list_tool(file_store):
     """Test FileListTool functionality including initialization, listing files, and empty directory."""
     # Test initialization
     tool = FileListTool(file_store=file_store)
-    assert tool.name == "FileListTool"
+    assert tool.name == "file-list"
     assert tool.group == "tools"
     assert tool.file_store == file_store
 
@@ -268,7 +268,7 @@ def test_file_read_tool_appends_hint_for_non_text(monkeypatch, file_store, llm_m
     assert result.output["cached_text_path"] == cache_path
     expected_hint = (
         f"\n\n[Extracted text cached at '{cache_path}'. "
-        "Use FileSearchTool to search this processed content without re-reading the original file.]"
+        "Use file-search to search this processed content without re-reading the original file.]"
     )
     assert result.output["content"].endswith(expected_hint)
 
@@ -448,3 +448,172 @@ def test_file_info_model_dump_json_serializes_bytes_as_base64():
     none_dumped = none_info.model_dump(mode="json")
     assert none_dumped["content"] is None
     json.dumps(none_dumped)
+
+
+@pytest.mark.parametrize(
+    "kwargs,error_match",
+    [
+        ({"start_line": 0}, "start_line must be >= 1"),
+        ({"end_line": 0}, "end_line must be >= 1"),
+        ({"start_line": 10, "end_line": 5}, "end_line must be >= start_line"),
+        ({"start_page": 0}, "start_page must be >= 1"),
+        ({"end_page": 0}, "end_page must be >= 1"),
+        ({"start_page": 5, "end_page": 2}, "end_page must be >= start_page"),
+        ({"start_page": 1, "start_line": 1}, "mutually exclusive"),
+    ],
+)
+def test_input_schema_rejects_invalid_line_page_params(kwargs, error_match):
+    with pytest.raises(ValueError, match=error_match):
+        FileReadInputSchema(file_path="f.txt", brief="read", **kwargs)
+
+
+def test_input_schema_valid_line_and_page_ranges():
+    """Valid ranges are accepted; start_page forces document_mode='page'."""
+    line_schema = FileReadInputSchema(file_path="f.txt", start_line=5, end_line=10, brief="read")
+    assert line_schema.start_line == 5
+    assert line_schema.end_line == 10
+
+    page_schema = FileReadInputSchema(file_path="f.pdf", start_page=3, brief="read")
+    assert page_schema.start_page == 3
+    assert page_schema.end_page is None
+    assert page_schema.document_mode == "page"
+
+
+def test_slice_lines_partial_range_and_header():
+    text = "line1\nline2\nline3\nline4\nline5\n"
+    sliced, total, start, end = FileReadTool._slice_lines(text, 2, 4, "test.txt")
+    assert total == 5
+    assert (start, end) == (2, 4)
+    assert "--- Lines 2-4 of 5" in sliced
+    assert "line2" in sliced
+    assert "line4" in sliced
+    assert "line1" not in sliced
+    assert "line5" not in sliced
+
+
+def test_slice_lines_defaults_and_clamping():
+    """start_line=None defaults to 1, end_line beyond total is clamped."""
+    text = "a\nb\nc\n"
+    sliced, total, start, end = FileReadTool._slice_lines(text, None, 999, "t.txt")
+    assert (start, end) == (1, 3)
+    assert "a" in sliced and "c" in sliced
+
+
+def test_slice_lines_out_of_bounds():
+    text = "line1\nline2\n"
+    sliced, total, _, _ = FileReadTool._slice_lines(text, 100, None, "small.txt")
+    assert total == 2
+    assert "only has 2 line(s)" in sliced
+    assert "line1" not in sliced
+
+
+def test_filter_page_range_selects_and_clamps():
+    """Selects requested range, clamps end, includes header with totals."""
+    entries = [{"page": i, "content": f"Page {i}", "metadata": {}} for i in range(1, 5)]
+
+    text, filtered, total, start, end = FileReadTool._filter_page_range(entries, 2, 3, "d.pdf")
+    assert (total, start, end) == (4, 2, 3)
+    assert len(filtered) == 2
+    assert "Pages 2-3 of 4" in text
+    assert "Page 2" in text and "Page 3" in text
+    assert "Page 1" not in text and "Page 4" not in text
+
+    text2, _, _, _, end2 = FileReadTool._filter_page_range(entries, 1, 999, "d.pdf")
+    assert end2 == 4 and len(text2) > 0
+
+
+def test_filter_page_range_out_of_bounds():
+    entries = [{"page": 1, "content": "Only", "metadata": {}}]
+    text, filtered, total, _, _ = FileReadTool._filter_page_range(entries, 10, 12, "d.pdf")
+    assert total == 1
+    assert filtered == []
+    assert "only has 1 page(s)" in text
+
+
+def test_file_read_tool_line_range(file_store, llm_model):
+    """Line range returns correct slice with metadata."""
+    content = "".join(f"line {i}\n" for i in range(1, 21))
+    file_store.store("data.txt", content.encode())
+
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+    result = tool.run({"file_path": "data.txt", "start_line": 5, "end_line": 8, "brief": "Read lines"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "line 5" in result.output["content"]
+    assert "line 8" in result.output["content"]
+    assert "line 4" not in result.output["content"]
+    assert result.output["total_lines"] == 20
+    assert result.output["line_range"] == [5, 8]
+
+
+def test_file_read_tool_line_range_skips_chunking(file_store, llm_model):
+    """Line range on a large file returns full slice, never chunked."""
+    content = "".join(f"{'x' * 200} line {i}\n" for i in range(1, 101))
+    file_store.store("big.txt", content.encode())
+
+    tool = FileReadTool(file_store=file_store, llm=llm_model, max_size=500)
+    result = tool.run({"file_path": "big.txt", "start_line": 10, "end_line": 20, "brief": "Read lines"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "CHUNKED" not in result.output["content"]
+    assert "line 10" in result.output["content"]
+
+
+def test_file_read_tool_line_range_out_of_bounds(file_store, llm_model):
+    """Lines beyond file length produce a clear message."""
+    file_store.store("tiny.txt", b"one\ntwo\n")
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+    result = tool.run({"file_path": "tiny.txt", "start_line": 50, "brief": "Read past end"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "only has 2 line(s)" in result.output["content"]
+
+
+def test_file_read_tool_page_range(monkeypatch, file_store, llm_model):
+    """Page range filters converter output and includes header."""
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+    file_store.store("report.pdf", b"%PDF-FAKE%")
+
+    page_entries = [
+        {"page": 1, "content": "First page", "metadata": {}},
+        {"page": 2, "content": "Second page", "metadata": {}},
+        {"page": 3, "content": "Third page", "metadata": {}},
+    ]
+    full_text = "\n\n".join(f"=== PAGE {e['page']} ===\n{e['content']}" for e in page_entries)
+
+    monkeypatch.setattr(tool, "_detect_file_type", lambda *a, **kw: FileType.PDF)
+    monkeypatch.setattr(tool, "_process_file_with_converter", lambda *a, **kw: (full_text, page_entries))
+
+    result = tool.run({"file_path": "report.pdf", "start_page": 2, "end_page": 2, "brief": "Read p2"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "Second page" in result.output["content"]
+    assert "First page" not in result.output["content"]
+    assert "Pages 2-2 of 3" in result.output["content"]
+    assert result.output["total_pages"] == 3
+
+
+def test_file_read_tool_page_on_non_pdf_warns(monkeypatch, file_store, llm_model):
+    """start_page on non-PDF warns and returns full content."""
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+    file_store.store("doc.docx", b"FAKE-DOCX")
+
+    monkeypatch.setattr(tool, "_detect_file_type", lambda *a, **kw: FileType.DOCX_DOCUMENT)
+    monkeypatch.setattr(tool, "_process_file_with_converter", lambda *a, **kw: ("Full docx text", None))
+
+    result = tool.run({"file_path": "doc.docx", "start_page": 1, "brief": "Read page of docx"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "only supported for PDF" in result.output["content"]
+    assert "Full docx text" in result.output["content"]
+
+
+def test_file_read_tool_line_range_binary_fallback(file_store, llm_model):
+    """Line slicing works on the binary fallback path for unknown file types."""
+    file_store.store("data.xyz", b"alpha\nbeta\ngamma\ndelta\n")
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+    result = tool.run({"file_path": "data.xyz", "start_line": 2, "end_line": 3, "brief": "Read lines"})
+    assert result.status == RunnableStatus.SUCCESS
+    assert "beta" in result.output["content"]
+    assert "gamma" in result.output["content"]
+    assert "alpha" not in result.output["content"]

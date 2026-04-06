@@ -29,7 +29,7 @@ def test_workflow_with_elevenlabstts(mock_elevenlabs_response_text, requests_moc
         ),
     )
 
-    data = {"text": "Mock text"}
+    data = {"text": "Mock text", "output_file_name": "audio.mp3"}
     call_mock = requests_mock.post(
         url=connection.url + Voices.Dave, content=mock_elevenlabs_response_text
     )
@@ -73,6 +73,111 @@ def test_workflow_with_elevenlabstts(mock_elevenlabs_response_text, requests_moc
         assert call_mock.last_request.headers.get(header) == value
 
 
+def test_workflow_with_elevenlabstts_custom_output_filename(mock_elevenlabs_response_text, requests_mock):
+    connection = connections.ElevenLabs(
+        url="https://api.elevenlabs.io/v1/text-to-speech/",
+        api_key="api-key",
+        headers={"Accept": "audio/mpeg", "Content-Type": "application/json"},
+    )
+    wf_elevenlabs = Workflow(
+        flow=Flow(
+            nodes=[
+                ElevenLabsTTS(
+                    name="elevenlabs",
+                    connection=connection,
+                    voice_id=Voices.Dave,
+                    output_file_name="custom_tts_audio.mp3",
+                )
+            ]
+        ),
+    )
+
+    data = {"text": "Mock text", "output_file_name": "custom_tts_audio.mp3"}
+    requests_mock.post(url=connection.url + Voices.Dave, content=mock_elevenlabs_response_text)
+    response = wf_elevenlabs.run(input_data=data)
+
+    audio_file = response.output[wf_elevenlabs.flow.nodes[0].id]["output"]["files"][0]
+    assert audio_file.name == "custom_tts_audio.mp3"
+
+
+def test_workflow_with_elevenlabstts_uses_default_output_filename(mock_elevenlabs_response_text, requests_mock):
+    connection = connections.ElevenLabs(
+        url="https://api.elevenlabs.io/v1/text-to-speech/",
+        api_key="api-key",
+        headers={"Accept": "audio/mpeg", "Content-Type": "application/json"},
+    )
+    wf_elevenlabs = Workflow(
+        flow=Flow(
+            nodes=[
+                ElevenLabsTTS(
+                    name="elevenlabs",
+                    connection=connection,
+                    voice_id=Voices.Dave,
+                )
+            ]
+        ),
+    )
+
+    requests_mock.post(url=connection.url + Voices.Dave, content=mock_elevenlabs_response_text)
+    response = wf_elevenlabs.run(input_data={"text": "Mock text"})
+    audio_file = response.output[wf_elevenlabs.flow.nodes[0].id]["output"]["files"][0]
+    assert audio_file.name == "audio.mp3"
+
+
+def test_workflow_with_elevenlabstts_uses_node_level_output_filename_when_input_is_none(
+    mock_elevenlabs_response_text, requests_mock
+):
+    connection = connections.ElevenLabs(
+        url="https://api.elevenlabs.io/v1/text-to-speech/",
+        api_key="api-key",
+        headers={"Accept": "audio/mpeg", "Content-Type": "application/json"},
+    )
+    wf_elevenlabs = Workflow(
+        flow=Flow(
+            nodes=[
+                ElevenLabsTTS(
+                    name="elevenlabs",
+                    connection=connection,
+                    voice_id=Voices.Dave,
+                    output_file_name="node_level_tts.mp3",
+                )
+            ]
+        ),
+    )
+
+    requests_mock.post(url=connection.url + Voices.Dave, content=mock_elevenlabs_response_text)
+    response = wf_elevenlabs.run(input_data={"text": "Mock text", "output_file_name": None})
+    audio_file = response.output[wf_elevenlabs.flow.nodes[0].id]["output"]["files"][0]
+    assert audio_file.name == "node_level_tts.mp3"
+
+
+def test_workflow_with_elevenlabstts_uses_node_level_output_filename_when_input_omitted(
+    mock_elevenlabs_response_text, requests_mock
+):
+    connection = connections.ElevenLabs(
+        url="https://api.elevenlabs.io/v1/text-to-speech/",
+        api_key="api-key",
+        headers={"Accept": "audio/mpeg", "Content-Type": "application/json"},
+    )
+    wf_elevenlabs = Workflow(
+        flow=Flow(
+            nodes=[
+                ElevenLabsTTS(
+                    name="elevenlabs",
+                    connection=connection,
+                    voice_id=Voices.Dave,
+                    output_file_name="node_level_tts.mp3",
+                )
+            ]
+        ),
+    )
+
+    requests_mock.post(url=connection.url + Voices.Dave, content=mock_elevenlabs_response_text)
+    response = wf_elevenlabs.run(input_data={"text": "Mock text"})
+    audio_file = response.output[wf_elevenlabs.flow.nodes[0].id]["output"]["files"][0]
+    assert audio_file.name == "node_level_tts.mp3"
+
+
 @pytest.mark.parametrize("audio", [b"bytes_data", BytesIO(b"bytes_data"), b"\xff\xfb\x90\xc4\x00\x00\n\xddu"])
 def test_workflow_with_elevenlabssts(
     mock_elevenlabs_response_text, requests_mock, audio
@@ -96,7 +201,7 @@ def test_workflow_with_elevenlabssts(
         ),
     )
 
-    data = {"audio": audio}
+    data = {"audio": audio, "output_file_name": "audio.mp3"}
     call_mock = requests_mock.post(
         url=connection.url + Voices.Dave, content=mock_elevenlabs_response_text
     )
@@ -127,3 +232,162 @@ def test_workflow_with_elevenlabssts(
     assert call_mock.last_request.url == connection.url + Voices.Dave
     for header, value in expected_headers.items():
         assert call_mock.last_request.headers.get(header) == value
+
+
+def test_workflow_with_elevenlabssts_custom_output_filename(mock_elevenlabs_response_text, requests_mock):
+    connection = connections.ElevenLabs(
+        url="https://api.elevenlabs.io/v1/speech-to-speech/",
+        api_key="api-key",
+        headers={"Accept": "audio/mpeg", "Content-Type": "application/json"},
+    )
+    wf_elevenlabs = Workflow(
+        flow=Flow(
+            nodes=[
+                ElevenLabsSTS(
+                    name="elevenlabs",
+                    connection=connection,
+                    voice_id=Voices.Dave,
+                    output_file_name="custom_sts_audio.mp3",
+                )
+            ]
+        ),
+    )
+
+    data = {"audio": b"bytes_data", "output_file_name": "custom_sts_audio.mp3"}
+    requests_mock.post(url=connection.url + Voices.Dave, content=mock_elevenlabs_response_text)
+    response = wf_elevenlabs.run(input_data=data)
+
+    audio_file = response.output[wf_elevenlabs.flow.nodes[0].id]["output"]["files"][0]
+    assert audio_file.name == "custom_sts_audio.mp3"
+
+
+def test_workflow_with_elevenlabssts_uses_default_output_filename(mock_elevenlabs_response_text, requests_mock):
+    connection = connections.ElevenLabs(
+        url="https://api.elevenlabs.io/v1/speech-to-speech/",
+        api_key="api-key",
+        headers={"Accept": "audio/mpeg", "Content-Type": "application/json"},
+    )
+    wf_elevenlabs = Workflow(
+        flow=Flow(
+            nodes=[
+                ElevenLabsSTS(
+                    name="elevenlabs",
+                    connection=connection,
+                    voice_id=Voices.Dave,
+                )
+            ]
+        ),
+    )
+
+    requests_mock.post(url=connection.url + Voices.Dave, content=mock_elevenlabs_response_text)
+    response = wf_elevenlabs.run(input_data={"audio": b"bytes_data"})
+    audio_file = response.output[wf_elevenlabs.flow.nodes[0].id]["output"]["files"][0]
+    assert audio_file.name == "audio.mp3"
+
+
+def test_workflow_with_elevenlabssts_uses_node_level_output_filename_when_input_is_none(
+    mock_elevenlabs_response_text, requests_mock
+):
+    connection = connections.ElevenLabs(
+        url="https://api.elevenlabs.io/v1/speech-to-speech/",
+        api_key="api-key",
+        headers={"Accept": "audio/mpeg", "Content-Type": "application/json"},
+    )
+    wf_elevenlabs = Workflow(
+        flow=Flow(
+            nodes=[
+                ElevenLabsSTS(
+                    name="elevenlabs",
+                    connection=connection,
+                    voice_id=Voices.Dave,
+                    output_file_name="node_level_sts.mp3",
+                )
+            ]
+        ),
+    )
+
+    requests_mock.post(url=connection.url + Voices.Dave, content=mock_elevenlabs_response_text)
+    response = wf_elevenlabs.run(input_data={"audio": b"bytes_data", "output_file_name": None})
+    audio_file = response.output[wf_elevenlabs.flow.nodes[0].id]["output"]["files"][0]
+    assert audio_file.name == "node_level_sts.mp3"
+
+
+def test_workflow_with_elevenlabssts_uses_node_level_output_filename_when_input_omitted(
+    mock_elevenlabs_response_text, requests_mock
+):
+    connection = connections.ElevenLabs(
+        url="https://api.elevenlabs.io/v1/speech-to-speech/",
+        api_key="api-key",
+        headers={"Accept": "audio/mpeg", "Content-Type": "application/json"},
+    )
+    wf_elevenlabs = Workflow(
+        flow=Flow(
+            nodes=[
+                ElevenLabsSTS(
+                    name="elevenlabs",
+                    connection=connection,
+                    voice_id=Voices.Dave,
+                    output_file_name="node_level_sts.mp3",
+                )
+            ]
+        ),
+    )
+
+    requests_mock.post(url=connection.url + Voices.Dave, content=mock_elevenlabs_response_text)
+    response = wf_elevenlabs.run(input_data={"audio": b"bytes_data"})
+    audio_file = response.output[wf_elevenlabs.flow.nodes[0].id]["output"]["files"][0]
+    assert audio_file.name == "node_level_sts.mp3"
+
+
+def test_workflow_with_elevenlabstts_input_schema_output_filename(mock_elevenlabs_response_text, requests_mock):
+    connection = connections.ElevenLabs(
+        url="https://api.elevenlabs.io/v1/text-to-speech/",
+        api_key="api-key",
+        headers={"Accept": "audio/mpeg", "Content-Type": "application/json"},
+    )
+    wf_elevenlabs = Workflow(
+        flow=Flow(
+            nodes=[
+                ElevenLabsTTS(
+                    name="elevenlabs",
+                    connection=connection,
+                    voice_id=Voices.Dave,
+                    output_file_name="node_level_name.mp3",
+                )
+            ]
+        ),
+    )
+
+    data = {"text": "Mock text", "output_file_name": "input_level_name.mp3"}
+    requests_mock.post(url=connection.url + Voices.Dave, content=mock_elevenlabs_response_text)
+    response = wf_elevenlabs.run(input_data=data)
+
+    audio_file = response.output[wf_elevenlabs.flow.nodes[0].id]["output"]["files"][0]
+    assert audio_file.name == "input_level_name.mp3"
+
+
+def test_workflow_with_elevenlabssts_input_schema_output_filename(mock_elevenlabs_response_text, requests_mock):
+    connection = connections.ElevenLabs(
+        url="https://api.elevenlabs.io/v1/speech-to-speech/",
+        api_key="api-key",
+        headers={"Accept": "audio/mpeg", "Content-Type": "application/json"},
+    )
+    wf_elevenlabs = Workflow(
+        flow=Flow(
+            nodes=[
+                ElevenLabsSTS(
+                    name="elevenlabs",
+                    connection=connection,
+                    voice_id=Voices.Dave,
+                    output_file_name="node_level_name.mp3",
+                )
+            ]
+        ),
+    )
+
+    data = {"audio": b"bytes_data", "output_file_name": "input_level_name.mp3"}
+    requests_mock.post(url=connection.url + Voices.Dave, content=mock_elevenlabs_response_text)
+    response = wf_elevenlabs.run(input_data=data)
+
+    audio_file = response.output[wf_elevenlabs.flow.nodes[0].id]["output"]["files"][0]
+    assert audio_file.name == "input_level_name.mp3"

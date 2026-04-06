@@ -20,7 +20,7 @@ class MilvusDocumentWriter(Writer, MilvusWriterVectorStoreParams):
         vector_store (MilvusVectorStore | None): The Milvus Vector Store instance.
     """
 
-    name: str = "MilvusDocumentWriter"
+    name: str = "milvus-document-writer"
     connection: Milvus | None = None
     vector_store: MilvusVectorStore | None = None
 

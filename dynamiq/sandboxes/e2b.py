@@ -2,10 +2,11 @@
 
 import shlex
 import threading
-from typing import Any
+from typing import Any, ClassVar
 
 from e2b.exceptions import RateLimitException as E2BRateLimitException
-from e2b_desktop import Sandbox as E2BDesktopSandbox
+from e2b.sandbox.commands.command_handle import CommandExitException
+from e2b_code_interpreter import Sandbox as E2BCodeInterpreterSandbox
 from pydantic import ConfigDict, Field, PrivateAttr
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
@@ -26,12 +27,21 @@ class E2BSandbox(Sandbox):
     Supports reconnecting to existing sandboxes by providing sandbox_id.
     """
 
+    DEFAULT_E2B_DOMAIN: ClassVar[str] = "e2b.app"
     model_config = ConfigDict(arbitrary_types_allowed=True)
     connection: E2B
     timeout: int = 3600
 
     template: str | None = Field(
         default=None, description="Template to use for sandbox creation. " "If None, the default template is used."
+    )
+    envs: dict[str, str] | None = Field(
+        default=None,
+        description="Custom environment variables passed to the sandbox on creation.",
+    )
+    metadata: dict[str, str] | None = Field(
+        default=None,
+        description="Custom metadata attached to the sandbox on creation.",
     )
     sandbox_id: str | None = Field(
         default=None,
@@ -41,12 +51,42 @@ class E2BSandbox(Sandbox):
         default_factory=SandboxCreationErrorHandling,
         description="Retry and backoff config for sandbox creation and reconnection (rate-limit and transient errors).",
     )
-    _sandbox: E2BDesktopSandbox | None = PrivateAttr(default=None)
+    _sandbox: E2BCodeInterpreterSandbox | None = PrivateAttr(default=None)
     _sandbox_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
-    def __init__(self, **kwargs):
-        """Initialize the E2B sandbox storage."""
-        super().__init__(**kwargs)
+    @property
+    def to_dict_exclude_params(self) -> dict[str, bool]:
+        """Exclude sensitive fields from model_dump; re-added manually in to_dict when not tracing."""
+        return super().to_dict_exclude_params | {"envs": True}
+
+    def to_dict(self, **kwargs) -> dict[str, Any]:
+        """Convert the E2BSandbox instance to a dictionary.
+
+        Extends the base serialization to conditionally include the ``envs``
+        field.  When ``for_tracing`` is True the field is omitted to prevent
+        secrets from leaking into tracing/callback output.
+
+        Args:
+            **kwargs: Keyword arguments forwarded to ``Sandbox.to_dict``.
+                Accepts ``for_tracing`` (bool, default False) to control
+                whether sensitive fields are included.
+
+        Returns:
+            dict[str, Any]: Dictionary representation of the sandbox.
+        """
+        for_tracing = kwargs.get("for_tracing", False)
+        data = super().to_dict(**kwargs)
+        if not for_tracing and self.envs is not None:
+            data["envs"] = self.envs
+        return data
+
+    @property
+    def _sdk_class(self) -> type:
+        """Return the E2B SDK Sandbox class used for .create() and .connect().
+
+        Subclasses override this to swap the underlying SDK (e.g. e2b_desktop).
+        """
+        return E2BCodeInterpreterSandbox
 
     @property
     def current_sandbox_id(self) -> str | None:
@@ -74,8 +114,34 @@ class E2BSandbox(Sandbox):
                 return get_host(port)
             except Exception as e:
                 logger.debug("E2B get_host(port) failed, using URL pattern: %s", e)
-        domain = getattr(self.connection, "domain", None) or "e2b.app"
+        domain = getattr(self.connection, "domain", None) or self.DEFAULT_E2B_DOMAIN
         return f"{port}-{self.sandbox_id}.{domain}"
+
+    def apply_public_preview_branding(
+        self, public_host: str | None, public_url: str | None
+    ) -> tuple[str | None, str | None]:
+        """Rewrite E2B public preview URLs to a custom branded domain.
+
+        When public preview domain is configured, hosts that end with
+        the active E2B domain are rewritten to the configured suffix
+        while preserving the host prefix.
+
+        Args:
+            public_host: Original public host returned by E2B.
+            public_url: Original public URL associated with public_host.
+
+        Returns:
+            Tuple of (public_host, public_url). Returns rewritten values only
+            when public preview is configured and the host matches the E2B domain,
+            otherwise returns the input values unchanged.
+        """
+        suffix = (self.connection.public_preview_domain or "").strip().lstrip(".")
+        domain = getattr(self.connection, "domain", None) or self.DEFAULT_E2B_DOMAIN
+        tail = f".{domain}"
+        if not suffix or not public_host or not public_host.endswith(tail):
+            return public_host, public_url
+        host = f"{public_host.removesuffix(tail)}.{suffix}"
+        return host, f"https://{host}"
 
     def get_sandbox_info(self, port: int | None = None) -> SandboxInfo:
         """Return sandbox metadata including optional public URL for a port."""
@@ -89,6 +155,7 @@ class E2BSandbox(Sandbox):
             except Exception as e:
                 logger.debug("get_public_host failed: %s", e)
                 public_url_error = str(e)
+        public_host, public_url = self.apply_public_preview_branding(public_host, public_url)
         return SandboxInfo(
             base_path=self.base_path,
             sandbox_id=self.sandbox_id,
@@ -97,7 +164,7 @@ class E2BSandbox(Sandbox):
             public_url_error=public_url_error,
         )
 
-    def _ensure_sandbox(self) -> E2BDesktopSandbox:
+    def _ensure_sandbox(self) -> E2BCodeInterpreterSandbox:
         """Lazily initialize or reconnect to E2B sandbox, with retries on rate-limit and transient errors.
 
         Uses double-checked locking so concurrent threads (e.g. parallel tool
@@ -115,6 +182,12 @@ class E2BSandbox(Sandbox):
                 try:
                     self._sandbox = self._reconnect_with_retry()
                     logger.debug(f"E2B sandbox reconnected: {self.sandbox_id}")
+                    # Call set_timeout explicitly to ensure the sandbox timeout
+                    # is set to the proper value after reconnect.
+                    try:
+                        self._sandbox.set_timeout(self.timeout)
+                    except Exception as e:
+                        logger.debug("set_timeout after reconnect failed: %s", e)
                     self._ensure_directories()
                     return self._sandbox
                 except Exception as e:
@@ -137,7 +210,7 @@ class E2BSandbox(Sandbox):
         except Exception as e:
             logger.warning(f"E2BSandbox failed to create directory: {e}")
 
-    def _reconnect_with_retry(self) -> E2BDesktopSandbox:
+    def _reconnect_with_retry(self) -> E2BCodeInterpreterSandbox:
         """Reconnect to existing sandbox with exponential backoff on rate-limit."""
         cfg = self.creation_error_handling
 
@@ -152,17 +225,21 @@ class E2BSandbox(Sandbox):
             ),
             reraise=True,
         )
-        def connect() -> E2BDesktopSandbox:
+        def connect():
             logger.debug(f"Reconnecting to E2B sandbox: {self.sandbox_id}")
-            return E2BDesktopSandbox.connect(
+            # Always pass timeout explicitly to avoid resetting
+            # the sandbox timeout to the 5-minute default
+            # if connect() is called without a timeout value.
+            return self._sdk_class.connect(
                 sandbox_id=self.sandbox_id,
                 api_key=self.connection.api_key,
                 domain=getattr(self.connection, "domain", None),
+                timeout=self.timeout,
             )
 
         return connect()
 
-    def _create_with_retry(self) -> E2BDesktopSandbox:
+    def _create_with_retry(self) -> E2BCodeInterpreterSandbox:
         """Create a new sandbox with exponential backoff on rate-limit."""
         cfg = self.creation_error_handling
 
@@ -177,13 +254,19 @@ class E2BSandbox(Sandbox):
             ),
             reraise=True,
         )
-        def create() -> E2BDesktopSandbox:
+        def create():
             try:
-                return E2BDesktopSandbox.create(
+                from datetime import datetime, timezone
+
+                metadata = self.metadata.copy() if self.metadata else {}
+                metadata.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+                return self._sdk_class.create(
                     template=self.template,
                     api_key=self.connection.api_key,
                     timeout=self.timeout,
                     domain=getattr(self.connection, "domain", None),
+                    envs=self.envs,
+                    metadata=metadata,
                 )
             except E2BRateLimitException:
                 logger.warning("E2B sandbox creation rate-limited. Retrying with exponential backoff.")
@@ -213,25 +296,24 @@ class E2BSandbox(Sandbox):
         try:
             if run_in_background_enabled:
                 sandbox.commands.run(command, background=True)
-                return ShellCommandResult(
-                    stdout=f"Command started in background: {command}",
-                    stderr="",
-                    exit_code=0,
-                )
+                return ShellCommandResult(background=True)
 
             result = sandbox.commands.run(command, timeout=timeout)
             return ShellCommandResult(
-                stdout=result.stdout or "",
-                stderr=result.stderr or "",
-                exit_code=getattr(result, "exit_code", None),
+                stdout=result.stdout,
+                stderr=result.stderr,
+                exit_code=result.exit_code,
+            )
+        except CommandExitException as e:
+            logger.debug(f"Command exited with non-zero code: {e.exit_code}, stderr: {e.stderr}")
+            return ShellCommandResult(
+                stdout=e.stdout,
+                stderr=e.stderr,
+                exit_code=e.exit_code,
             )
         except Exception as e:
             logger.error(f"Command execution failed: {e}")
-            return ShellCommandResult(
-                stdout="",
-                stderr=str(e),
-                exit_code=1,
-            )
+            return ShellCommandResult(error=str(e))
 
     def upload_file(
         self,
@@ -325,7 +407,7 @@ class E2BSandbox(Sandbox):
         """Read file bytes from sandbox filesystem."""
         sandbox = self._ensure_sandbox()
         resolved_path = self._resolve_path(file_path)
-        return sandbox.files.read(resolved_path, "bytes")
+        return bytes(sandbox.files.read(resolved_path, "bytes"))
 
     def get_tools(self, llm: Any = None) -> list[Node]:
         """Return tools this sandbox provides for agent use.

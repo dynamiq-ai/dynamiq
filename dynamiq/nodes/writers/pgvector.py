@@ -20,7 +20,7 @@ class PGVectorDocumentWriter(Writer, PGVectorStoreWriterParams):
         vector_store (PGVectorStore | None): The PGVector Vector Store instance.
     """
 
-    name: str = "PGVectorDocumentWriter"
+    name: str = "pgvector-document-writer"
     connection: PostgreSQL | str | None = None
     vector_store: PGVectorStore | None = None
 

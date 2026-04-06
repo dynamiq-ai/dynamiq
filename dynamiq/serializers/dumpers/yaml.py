@@ -48,6 +48,17 @@ class WorkflowYAMLDumper:
                 )[param_id]
                 updated_node_init_data[param_name] = param_data["id"]
 
+            elif param_name == "agent_factory":
+                # Leave connections inside agent_factory to be serialized
+                factory_connections: dict[str, dict] = {}
+                processed = cls.get_updated_node_data(
+                    node_data={None: param_data},
+                    connections_data=factory_connections,
+                )[None]
+                if factory_connections:
+                    processed["connections"] = factory_connections
+                updated_node_init_data[param_name] = processed
+
             elif isinstance(param_data, dict):
                 updated_param_data = {}
                 for param_name_inner, param_data_inner in param_data.items():

@@ -51,6 +51,10 @@ def format_url(method: str, url: str, voice_id: str) -> str:
 
 class ElevenLabsTTSInputSchema(BaseModel):
     text: str = Field(..., description="Parameter to provide text for vocalization.")
+    output_file_name: str | None = Field(
+        default=None,
+        description="Optional output filename for generated audio file.",
+    )
 
 
 class ElevenLabsTTS(ConnectionNode):
@@ -74,7 +78,7 @@ class ElevenLabsTTS(ConnectionNode):
     """
 
     group: Literal[NodeGroup.AUDIO] = NodeGroup.AUDIO
-    name: str = "ElevenLabsTTS"
+    name: str = "elevenlabs-tts"
     voice_id: Voices | str | None = Voices.Rachel
     connection: ElevenLabsConnection | None = None
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
@@ -83,6 +87,7 @@ class ElevenLabsTTS(ConnectionNode):
     similarity_boost: float = 0.5
     style: float = 0
     use_speaker_boost: bool = True
+    output_file_name: str | None = None
     input_schema: ClassVar[type[ElevenLabsTTSInputSchema]] = ElevenLabsTTSInputSchema
 
     def __init__(self, **kwargs):
@@ -135,9 +140,10 @@ class ElevenLabsTTS(ConnectionNode):
         if response.status_code != 200:
             response.raise_for_status()
 
+        output_file_name = input_data.output_file_name or self.output_file_name or "audio.mp3"
         audio_bytes = response.content
         audio_file = io.BytesIO(audio_bytes)
-        audio_file.name = "audio.mp3"
+        audio_file.name = output_file_name
         audio_file.content_type = "audio/mpeg"
 
         return {
@@ -148,6 +154,10 @@ class ElevenLabsTTS(ConnectionNode):
 
 class ElevenLabsSTSInputSchema(BaseModel):
     audio: io.BytesIO | bytes = Field(..., description="Parameter to provide input audio for audio generation.")
+    output_file_name: str | None = Field(
+        default=None,
+        description="Optional output filename for generated audio file.",
+    )
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
@@ -171,7 +181,7 @@ class ElevenLabsSTS(ConnectionNode):
     """
 
     group: Literal[NodeGroup.AUDIO] = NodeGroup.AUDIO
-    name: str = "ElevenLabsSTS"
+    name: str = "elevenlabs-sts"
     voice_id: Voices | str | None = Voices.Rachel
     connection: ElevenLabsConnection | None = None
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
@@ -180,6 +190,7 @@ class ElevenLabsSTS(ConnectionNode):
     similarity_boost: float = 0.5
     style: float = 0
     use_speaker_boost: bool = True
+    output_file_name: str | None = None
     input_schema: ClassVar[type[ElevenLabsSTSInputSchema]] = ElevenLabsSTSInputSchema
 
     def __init__(self, **kwargs):
@@ -236,9 +247,10 @@ class ElevenLabsSTS(ConnectionNode):
         if response.status_code != 200:
             response.raise_for_status()
 
+        output_file_name = input_data.output_file_name or self.output_file_name or "audio.mp3"
         audio_bytes = response.content
         audio_file = io.BytesIO(audio_bytes)
-        audio_file.name = "audio.mp3"
+        audio_file.name = output_file_name
         audio_file.content_type = "audio/mpeg"
 
         return {

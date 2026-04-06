@@ -1,4 +1,6 @@
 import uuid
+from io import BytesIO
+from unittest.mock import PropertyMock, patch
 
 import pytest
 
@@ -16,11 +18,13 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
     XMLParsingError,
 )
-from dynamiq.nodes.agents.utils import XMLParser
+from dynamiq.nodes.agents.utils import SummarizationConfig, XMLParser
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.prompts import Message, MessageRole
+from dynamiq.prompts.prompts import Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.storages.file.base import FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
@@ -624,6 +628,150 @@ def test_agent_state_updates_with_todos(openai_node):
     assert state.todos == []
 
 
+def test_execute_file_store_file_upload_flow(openai_node, mocker):
+    """Regression: full execute() with file store — deduplicates batch and pre-existing
+    names, stores files correctly, and injects saved paths into the LLM message."""
+    backend = InMemoryFileStore()
+    backend.store(
+        file_path="report.pdf",
+        content=b"existing content",
+        content_type="application/octet-stream",
+        metadata={"source": "seed"},
+        overwrite=True,
+    )
+    agent = Agent(
+        name="FileStore Upload Agent",
+        llm=openai_node,
+        tools=[],
+        file_store=FileStoreConfig(enabled=True, backend=backend),
+        inference_mode=InferenceMode.DEFAULT,
+    )
+
+    answer_result = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        output={"content": "Thought: Files received.\nAnswer: Analysis complete."},
+    )
+    mock_run_llm = mocker.patch.object(agent, "_run_llm", return_value=answer_result)
+
+    file_a = BytesIO(b"first content")
+    file_a.name = "report.pdf"
+    file_a.description = "Q1 report"
+    file_b = BytesIO(b"second content")
+    file_b.name = "report.pdf"
+
+    result = agent.run(input_data={"input": "Analyze these files", "files": [file_a, file_b]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == "Analysis complete."
+
+    assert backend.retrieve("report.pdf") == b"existing content"
+    assert backend.retrieve("report_1.pdf") == b"first content"
+    assert backend.retrieve("report_2.pdf") == b"second content"
+
+    messages = mock_run_llm.call_args.kwargs["messages"]
+    user_message = next(m for m in messages if m.role == "user")
+    assert "Attached files available to you:" in user_message.content
+    assert "report.pdf (saved as: report_1.pdf): Q1 report" in user_message.content
+    assert "report.pdf (saved as: report_2.pdf)" in user_message.content
+
+
+def test_execute_sandbox_file_upload_flow(openai_node, mocker):
+    """Regression: full execute() with sandbox — deduplicates batch and pre-existing
+    names, uploads with unique names, and injects saved sandbox paths into the LLM message."""
+    agent = Agent(
+        name="Sandbox Upload Agent",
+        llm=openai_node,
+        tools=[],
+        inference_mode=InferenceMode.DEFAULT,
+    )
+
+    sandbox_mock = mocker.Mock()
+    sandbox_mock.base_path = "/home/user"
+    sandbox_mock.list_files.return_value = ["/home/user/report.pdf"]
+    sandbox_mock.upload_file.side_effect = lambda name, content, **kwargs: kwargs.get(
+        "destination_path", f"/home/user/{name}"
+    )
+    mocker.patch.object(Agent, "sandbox_backend", new_callable=PropertyMock, return_value=sandbox_mock)
+
+    answer_result = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        output={"content": "Thought: Files received.\nAnswer: Sandbox analysis done."},
+    )
+    mock_run_llm = mocker.patch.object(agent, "_run_llm", return_value=answer_result)
+
+    file_a = BytesIO(b"alpha")
+    file_a.name = "report.pdf"
+    file_a.description = "Q1 report"
+    file_b = BytesIO(b"beta")
+    file_b.name = "report.pdf"
+
+    result = agent.run(input_data={"input": "Check sandbox files", "files": [file_a, file_b]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == "Sandbox analysis done."
+
+    assert sandbox_mock.upload_file.call_count == 2
+    assert sandbox_mock.upload_file.call_args_list[0].args[0] == "report_1.pdf"
+    assert sandbox_mock.upload_file.call_args_list[1].args[0] == "report_2.pdf"
+
+    messages = mock_run_llm.call_args.kwargs["messages"]
+    user_message = next(m for m in messages if m.role == "user")
+    assert "Attached files available to you:" in user_message.content
+    assert "/home/user/input/report_1.pdf" in user_message.content
+    assert "/home/user/input/report_2.pdf" in user_message.content
+
+
+def test_file_upload_failures_return_empty_paths(openai_node, mock_llm_executor, mocker):
+    """Upload failures for both file-store and sandbox backends produce empty path strings."""
+    backend = InMemoryFileStore()
+    mocker.patch.object(InMemoryFileStore, "store", side_effect=RuntimeError("store failed"))
+    fs_agent = Agent(
+        name="FileStore Failure Agent",
+        llm=openai_node,
+        tools=[],
+        file_store=FileStoreConfig(enabled=True, backend=backend),
+        inference_mode=InferenceMode.DEFAULT,
+    )
+
+    fs_file = BytesIO(b"content")
+    fs_file.name = "report.pdf"
+    assert fs_agent._upload_files_to_file_store([fs_file]) == [""]
+
+    mocker.stopall()
+
+    sandbox_agent = Agent(
+        name="Sandbox Failure Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT
+    )
+    sandbox_mock = mocker.Mock()
+    sandbox_mock.base_path = "/home/user"
+    sandbox_mock.list_files.return_value = []
+    sandbox_mock.upload_file.side_effect = RuntimeError("upload failed")
+    mocker.patch.object(Agent, "sandbox_backend", new_callable=PropertyMock, return_value=sandbox_mock)
+
+    sb_file = BytesIO(b"content")
+    sb_file.name = "report.pdf"
+    assert sandbox_agent._upload_files_to_sandbox([sb_file]) == [""]
+
+
+def test_inject_attached_files_skips_vision_message(openai_node, mock_llm_executor):
+    """VisionMessage inputs are returned unmodified — file metadata is not injected."""
+    agent = Agent(name="Vision Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    input_message = prompts.VisionMessage(
+        role="user",
+        content=[prompts.VisionMessageTextContent(text="Analyze the uploads.")],
+    )
+
+    file_obj = BytesIO(b"data")
+    file_obj.name = "notes.txt"
+
+    result = agent._inject_attached_files_into_message(
+        input_message, [file_obj], file_paths=["/home/user/notes.txt"]
+    )
+
+    assert result is input_message
+    assert result.content == [prompts.VisionMessageTextContent(text="Analyze the uploads.")]
+
+
 class TestParallelToolCloning:
     """Test parallel tool cloning."""
 
@@ -725,3 +873,93 @@ class TestParallelToolCloning:
             assert (
                 call.kwargs.get("is_parallel") is True
             ), "Concurrent dispatch must set is_parallel=True for every tool"
+
+
+class TestContextManagerEarlyReturn:
+    """Regression tests for _execute_single_tool early return when nothing needs summarizing."""
+
+    @pytest.fixture
+    def context_agent(self, openai_node, mock_llm_executor):
+        """Agent with summarization enabled (auto-adds ContextManagerTool)."""
+        return Agent(
+            name="ContextTestAgent",
+            llm=openai_node,
+            tools=[],
+            inference_mode=InferenceMode.XML,
+            summarization_config=SummarizationConfig(enabled=True, max_preserved_tokens=100_000),
+        )
+
+    def test_skips_tool_when_history_fits_in_context(self, context_agent):
+        """When all conversation messages fit within max_preserved_tokens,
+        _split_history returns an empty to_summarize list and
+        _execute_single_tool must return early without invoking the tool."""
+        context_agent._prompt = Prompt(
+            messages=[
+                Message(role=MessageRole.SYSTEM, content="You are a helpful assistant.", static=True),
+                Message(role=MessageRole.USER, content="Hello", static=True),
+                Message(role=MessageRole.ASSISTANT, content="Hi there!", static=True),
+            ]
+        )
+        context_agent._history_offset = 1
+
+        tool_result, tool_files, is_delegated, success, dependency = context_agent._execute_single_tool(
+            action="context-manager",
+            action_input={},
+            thought="I should compact context",
+            loop_num=1,
+            config=RunnableConfig(),
+        )
+
+        assert "Nothing was summarized" in tool_result
+        assert tool_files == []
+        assert is_delegated is False
+        assert success is True
+        assert dependency is None
+
+    def test_prompt_unchanged_after_early_return(self, context_agent):
+        """The agent's prompt must not be modified when the early return fires."""
+        messages = [
+            Message(role=MessageRole.SYSTEM, content="System prompt.", static=True),
+            Message(role=MessageRole.USER, content="Question?", static=True),
+            Message(role=MessageRole.ASSISTANT, content="Answer.", static=True),
+        ]
+        context_agent._prompt = Prompt(messages=list(messages))
+        context_agent._history_offset = 1
+        original_count = len(context_agent._prompt.messages)
+
+        context_agent._execute_single_tool(
+            action="context-manager",
+            action_input={},
+            thought="compact",
+            loop_num=1,
+            config=RunnableConfig(),
+        )
+
+        assert len(context_agent._prompt.messages) == original_count
+        for original, current in zip(messages, context_agent._prompt.messages):
+            assert original.content == current.content
+
+    def test_early_return_streams_tool_result_event(self, context_agent):
+        """The early-return path must stream a tool-result event to pair with the reasoning event."""
+        context_agent._prompt = Prompt(
+            messages=[
+                Message(role=MessageRole.SYSTEM, content="You are a helpful assistant.", static=True),
+                Message(role=MessageRole.USER, content="Hello", static=True),
+                Message(role=MessageRole.ASSISTANT, content="Hi there!", static=True),
+            ]
+        )
+        context_agent._history_offset = 1
+
+        with patch.object(context_agent, "_stream_agent_event", wraps=context_agent._stream_agent_event) as spy:
+            context_agent._execute_single_tool(
+                action="context-manager",
+                action_input={},
+                thought="compact",
+                loop_num=1,
+                config=RunnableConfig(),
+            )
+
+            steps = [call.args[1] for call in spy.call_args_list]
+            assert steps == ["reasoning", "tool"], (
+                "Early return must stream both a reasoning event and a tool-result event"
+            )

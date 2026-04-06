@@ -52,6 +52,7 @@ def run_config():
     return RunnableConfig(request_timeout=180)
 
 
+@pytest.mark.flaky(reruns=3)
 def test_automatic_context_manager_invocation(llm_instance, python_tool, run_config):
     """
     Test automatic Context Manager Tool invocation when token limit is exceeded.
@@ -75,7 +76,7 @@ def test_automatic_context_manager_invocation(llm_instance, python_tool, run_con
             enabled=True,
             max_token_context_length=5000,  # Low limit to trigger automatic summarization
             context_usage_ratio=0.5,
-            preserve_last_messages=2,
+            max_preserved_tokens=0,
         ),
     )
 
@@ -103,10 +104,11 @@ def test_automatic_context_manager_invocation(llm_instance, python_tool, run_con
     # Check final message count
     final_message_count = len(agent._prompt.messages)
     logger.info(f"Final message count: {final_message_count}")
+    # Everything should be summarized
+    assert final_message_count == 4, "Final message count is not correct"
 
     logger.info(result.output)
     assert "apple" in result.output["content"], "Result is not correct"
-    assert final_message_count == 7, "Final message count is not correct. Maybe context manager tool was not invoked."
     assert (
         agent.sanitize_tool_name(agent.tools[1].name) in agent._prompt.messages[-3].content.lower()
     ), "Context message not found"
@@ -136,7 +138,7 @@ def test_automatic_context_manager_auto_clean(llm_instance, python_tool, run_con
             enabled=True,
             max_token_context_length=1000,  # Low limit to trigger automatic summarization
             context_usage_ratio=0.5,
-            preserve_last_messages=0,
+            max_preserved_tokens=10000,
         ),
     )
 

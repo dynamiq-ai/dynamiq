@@ -47,6 +47,11 @@ IMPORTANT RULES:
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
+SINGLE ACTION PER TURN:
+- Execute exactly ONE action per response, then wait for its Observation before continuing
+- Do NOT chain multiple Action/Action Input pairs in the same response
+- After receiving an Observation, decide the next single action based on the result
+
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - If you want to return files, include an "Output Files:" line before "Answer:" listing file paths (comma-separated). This line is optional — omit it if there are no files to return.
@@ -121,6 +126,11 @@ CRITICAL XML FORMAT RULES:
 - Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
+
+SINGLE ACTION PER TURN:
+- Execute exactly ONE <action>/<action_input> pair per response, then wait for its Observation before continuing
+- Do NOT include multiple action blocks or answer blocks in the same response
+- After receiving an Observation, decide the next single action based on the result
 
 JSON FORMATTING REQUIREMENTS:
 - Put JSON on single line within tags

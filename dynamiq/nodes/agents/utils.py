@@ -3,6 +3,7 @@ import html
 import io
 import json
 import re
+from datetime import datetime
 from typing import Any, Sequence
 
 import filetype
@@ -25,6 +26,23 @@ from dynamiq.utils.utils import CHARS_PER_TOKEN
 TOOL_MAX_TOKENS = 64000
 
 
+class ToolOutputSandboxPersistenceConfig(BaseModel):
+    """Configuration for persisting large tool outputs to sandbox files."""
+
+    enabled: bool = True
+    dump_threshold_chars: int = 7000
+    preview_chars: int = 7000
+    sandbox_tool_output_dir: str = "/home/user/.tools"
+
+
+def extract_message_text(message: Message | VisionMessage) -> str:
+    """Extract plain text from a Message or VisionMessage."""
+    if isinstance(message, Message):
+        return message.content
+    text_parts = [c.text for c in message.content if isinstance(c, VisionMessageTextContent)]
+    return " ".join(text_parts) if text_parts else "Image input"
+
+
 def convert_bytesio_to_file_info(bytesio_obj: io.BytesIO, key: str, index: int = None) -> FileInfo:
     """Convert a BytesIO object to a FileInfo object with base64 encoded content."""
     content_bytes = bytesio_obj.getvalue()
@@ -32,20 +50,24 @@ def convert_bytesio_to_file_info(bytesio_obj: io.BytesIO, key: str, index: int =
     encoded = base64.b64encode(content_bytes).decode("utf-8")
 
     name = getattr(bytesio_obj, "name", f"file_{key}" if index is None else f"file_{key}_{index}")
+    path = getattr(bytesio_obj, "path", f"/{name}" if not name.startswith("/") else name)
     content_type = getattr(bytesio_obj, "content_type", "unknown")
     description = getattr(bytesio_obj, "description", "")
+    size = getattr(bytesio_obj, "size", len(content_bytes))
+    created_at = getattr(bytesio_obj, "created_at", None)
 
-    # Create a path based on the name
-    path = f"/{name}" if not name.startswith("/") else name
+    file_info_kwargs: dict[str, Any] = {
+        "content": encoded,
+        "path": path,
+        "name": name,
+        "content_type": content_type,
+        "metadata": {"description": description},
+        "size": size,
+    }
+    if created_at is not None:
+        file_info_kwargs["created_at"] = created_at
 
-    return FileInfo(
-        content=encoded,
-        path=path,
-        name=name,
-        content_type=content_type,
-        metadata={"description": description},
-        size=len(content_bytes),
-    )
+    return FileInfo(**file_info_kwargs)
 
 
 class FileMappedInput(BaseModel):
@@ -943,6 +965,156 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
     return content
 
 
+def normalize_tool_segment(value: str, fallback: str = "default", max_length: int = 80) -> str:
+    """
+    Normalize arbitrary text into a safe path/file name.
+
+    Args:
+        value (str): Text to normalize.
+        fallback (str): Value to return if normalization yields empty string.
+        max_length (int): Maximum length of the normalized segment.
+
+    Returns:
+        str: Normalized string for path/file name or fallback.
+    """
+    raw = (value or "").strip()
+    camel_split = re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", raw)
+    normalized = re.sub(r"[^a-z0-9]+", "-", camel_split.lower()).strip("-")
+    if not normalized:
+        normalized = fallback
+    return normalized[:max_length].strip("-") or fallback
+
+
+def infer_tool_action_segment(tool_input: dict | str | None) -> str:
+    """
+    Infer an action segment (subdirectory) from tool input payload.
+
+    Args:
+        tool_input (dict | str | None): The tool input which may include 'action' or 'command'.
+
+    Returns:
+        str: Inferred action segment derived from the input.
+    """
+    if isinstance(tool_input, dict):
+        action_value = tool_input.get("action")
+        if isinstance(action_value, str) and action_value.strip():
+            return normalize_tool_segment(action_value, fallback="default")
+
+        command_value = tool_input.get("command")
+        if isinstance(command_value, str) and command_value.strip():
+            parts = [p for p in command_value.strip().split() if p][:3]
+            return normalize_tool_segment("-".join(parts), fallback="default")
+
+    if isinstance(tool_input, str) and tool_input.strip():
+        parts = [p for p in tool_input.strip().split() if p][:3]
+        return normalize_tool_segment("-".join(parts), fallback="default")
+
+    return "default"
+
+
+def infer_tool_file_context_segment(tool_name: str, tool_input: dict | str | None) -> str:
+    """
+    Infer a concise context segment for output file names.
+    Args:
+        tool_name (str): The name of the tool.
+        tool_input (dict | str | None): Tool input that may contain context.
+
+    Returns:
+        str: Normalized context segment for filename or tool name.
+    """
+    text_candidates: list[str] = []
+    if isinstance(tool_input, dict):
+        for key in ("command", "query", "path", "url", "input", "prompt", "text"):
+            value = tool_input.get(key)
+            if isinstance(value, str) and value.strip():
+                text_candidates.append(value)
+    elif isinstance(tool_input, str) and tool_input.strip():
+        text_candidates.append(tool_input)
+
+    for candidate in text_candidates:
+        token_match = re.search(r"\b[a-z0-9]+(?:-[a-z0-9]+)+\b", candidate.lower())
+        if token_match:
+            return normalize_tool_segment(f"{token_match.group(0)}-tools", fallback=normalize_tool_segment(tool_name))
+
+    if text_candidates:
+        words = re.findall(r"[a-z0-9]+", text_candidates[0].lower())
+        if words:
+            return normalize_tool_segment("-".join(words[-3:]), fallback=normalize_tool_segment(tool_name))
+
+    return normalize_tool_segment(tool_name)
+
+
+def process_tool_output_with_sandbox_persistence(
+    content: Any,
+    tool_name: str,
+    tool_input: dict | str | None,
+    sandbox: Any | None = None,
+    *,
+    save_tool_output_to_sandbox: bool = False,
+    sandbox_persistence_config: ToolOutputSandboxPersistenceConfig | None = None,
+    max_tokens: int = TOOL_MAX_TOKENS,
+    truncate: bool = True,
+) -> str:
+    """
+    Process tool output and persist large payloads to sandbox files when available.
+
+    If the processed output exceeds a threshold, the full content is stored in the given sandbox
+    and a preview is returned.
+
+    Args:
+        content (Any): Tool output, any type.
+        tool_name (str): The tool's name.
+        tool_input (dict | str | None): Tool input context.
+        sandbox (Any | None): Optional sandbox object with 'store' method.
+        save_tool_output_to_sandbox (bool): Whether this tool output should be persisted in sandbox
+            if available.
+        sandbox_persistence_config (ToolOutputSandboxPersistenceConfig | None): Persistence behavior config.
+        max_tokens (int): Max allowed tokens for returned string.
+        truncate (bool): Whether to truncate if over threshold and no sandbox persistence.
+
+    Returns:
+        str: Content, possibly a preview and sandbox path if large.
+    """
+    config = sandbox_persistence_config or ToolOutputSandboxPersistenceConfig()
+    prepared = process_tool_output_for_agent(content=content, max_tokens=max_tokens, truncate=False)
+
+    # Do not replace output with a sandbox summary if truncate is False.
+    if not truncate:
+        return prepared
+
+    if len(prepared) <= config.dump_threshold_chars:
+        return process_tool_output_for_agent(content=prepared, max_tokens=max_tokens, truncate=truncate)
+
+    if not config.enabled or not save_tool_output_to_sandbox or sandbox is None:
+        return process_tool_output_for_agent(content=prepared, max_tokens=max_tokens, truncate=truncate)
+
+    tool_segment = normalize_tool_segment(tool_name, fallback="tool")
+    action_segment = infer_tool_action_segment(tool_input)
+    context_segment = infer_tool_file_context_segment(tool_name=tool_name, tool_input=tool_input)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
+    file_name = f"{timestamp}_{context_segment}.txt"
+    target_path = f"{config.sandbox_tool_output_dir}/{tool_segment}/{action_segment}/{file_name}"
+
+    try:
+        sandbox.store(
+            file_path=target_path,
+            content=prepared,
+            content_type="text/plain",
+            metadata={"source": "agent_tool_output", "tool_name": tool_name, "action": action_segment},
+            overwrite=True,
+        )
+    except Exception as exc:
+        logger.warning("Failed to persist large tool output to sandbox at %s: %s", target_path, exc)
+        return process_tool_output_for_agent(content=prepared, max_tokens=max_tokens, truncate=truncate)
+
+    if config.preview_chars <= 0:
+        preview_result = f"Tool output saved to: {target_path}"
+    else:
+        preview = prepared[: config.preview_chars]
+        preview_result = f"Tool output saved to: {target_path}\n\nTool output preview:\n{preview}"
+    return process_tool_output_for_agent(content=preview_result, max_tokens=max_tokens, truncate=truncate)
+
+
 class ToolCacheEntry(BaseModel):
     """Single key entry in tool cache."""
 
@@ -967,16 +1139,18 @@ class SummarizationConfig(BaseModel):
         max_token_context_length (int | None): Maximum number of tokens in prompt after
           which summarization will be applied. Defaults to None.
         context_usage_ratio (float): Relative percentage of tokens in prompt after which summarization will be applied.
-        preserve_last_messages (int): Number of most recent messages to keep verbatim
-          (not summarized). These are excluded from summarization and re-appended after
-          the older history is replaced with a summary. 0 means all messages are summarized.
+        max_preserved_tokens (int): Maximum total tokens for preserved messages.
+          When splitting history, recent messages are kept only up to this token budget.
+          Defaults to 10000.
         token_budget_ratio (float): Fraction of the LLM context window used for input
           messages during summarization. The remainder is reserved for the summarization
           prompt and generated output. Defaults to 0.75.
     """
 
+    model_config = ConfigDict(extra="ignore")
+
     enabled: bool = False
     max_token_context_length: int | None = None
     context_usage_ratio: float = Field(default=0.8, gt=0, le=1)
-    preserve_last_messages: int = Field(default=4, ge=0)
+    max_preserved_tokens: int = Field(default=10000, ge=0)
     token_budget_ratio: float = Field(default=0.75, gt=0, lt=1)

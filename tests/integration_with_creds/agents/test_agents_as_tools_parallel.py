@@ -30,7 +30,7 @@ def _child_researcher(llm: OpenAI) -> Agent:
         "- Provide a concise factual summary based on the provided input.\n"
     )
     return Agent(
-        name="Researcher",
+        name="researcher",
         description=(
             "Sub-agent that summarizes research for a given topic. "
             "IMPORTANT: Accepts only {'input': '<topic>'} when invoked as a tool."
@@ -52,7 +52,7 @@ def _child_writer(llm: OpenAI) -> Agent:
         "- Based on the 'input' topic, produce a clean, concise brief.\n"
     )
     return Agent(
-        name="Writer",
+        name="writer",
         description=(
             "Sub-agent that drafts a concise brief based on a topic. "
             "IMPORTANT: Accepts only {'input': '<topic>'} when invoked as a tool."
@@ -91,7 +91,7 @@ def test_manager_with_subagents_parallel_calls():
         "- Prefer parallel calls when multiple subtasks are obvious.\n"
     )
     manager = Agent(
-        name="Manager",
+        name="manager",
         description=("Manager that delegates to Researcher and Writer. Tools expect {'input': '<topic>'}."),
         role=manager_role,
         llm=llm,
@@ -134,10 +134,10 @@ def test_manager_with_subagents_parallel_calls():
             sources.add(src.name)
     assert received > 0
 
-    if not any(name in sources for name in ("Researcher", "Writer", "Manager")):
+    if not any(name in sources for name in ("researcher", "writer", "manager")):
         node_runs = [run for run in tracing.runs.values() if getattr(run, "metadata", None)]
         node_names = [getattr(run, "name", "") for run in node_runs]
-        assert any(n in node_names for n in ("Researcher", "Writer", "Manager"))
+        assert any(n in node_names for n in ("researcher", "writer", "manager"))
 
 
 @pytest.mark.integration
@@ -161,7 +161,7 @@ def test_agents_as_tools_with_map_parallel_streaming_tracing_memory():
         "- Prefer parallel calls when multiple subtasks are obvious.\n"
     )
     manager = Agent(
-        name="Manager",
+        name="manager",
         description=("Manager that delegates to Researcher and Writer. Tools expect {'input': '<topic>'}."),
         role=manager_role,
         llm=llm,
@@ -198,10 +198,10 @@ def test_agents_as_tools_with_map_parallel_streaming_tracing_memory():
     node_runs = [run for run in tracing.runs.values() if getattr(run, "metadata", None)]
     node_meta = [getattr(run, "metadata", {}).get("node", {}) for run in node_runs]
     names = [m.get("name") for m in node_meta if isinstance(m, dict)]
-    assert "Map" in names
-    assert "Manager" in names
+    assert "map" in names
+    assert "manager" in names
 
-    assert any(n in ("Researcher", "Writer") for n in names)
+    assert any(n in ("researcher", "writer") for n in names)
 
     received = 0
     for _ in streaming:
@@ -221,9 +221,54 @@ def test_agents_as_tools_with_map_parallel_streaming_tracing_memory():
     manager_runs_with_ids = [
         run
         for run in tracing.runs.values()
-        if getattr(run, "metadata", {}).get("node", {}).get("name") == "Manager"
+        if getattr(run, "metadata", {}).get("node", {}).get("name") == "manager"
         and isinstance(getattr(run, "input", None), dict)
         and run.input.get("user_id") in (None, user_id)
         and run.input.get("session_id") in (None, session_id)
     ]
     assert len(manager_runs_with_ids) >= 1
+
+
+@pytest.mark.integration
+def test_sub_agent_tool_yaml_roundtrip_and_execution(tmp_path):
+    """YAML roundtrip: serialize workflow with SubAgentTool, reload with real connections, execute."""
+    if not os.getenv("OPENAI_API_KEY"):
+        pytest.skip("OPENAI_API_KEY is not set")
+
+    conn = connections.OpenAI(id="shared-openai")
+    llm = OpenAI(id="shared-llm", model="gpt-4o-mini", connection=conn)
+
+    child = Agent(
+        id="child-agent",
+        name="researcher",
+        description="Answers factual questions concisely.",
+        role="You are a concise research assistant. Answer in one sentence.",
+        llm=llm,
+        tools=[],
+        inference_mode=InferenceMode.XML,
+        max_loops=3,
+    )
+    parent = Agent(
+        id="parent-agent",
+        name="manager",
+        role="Delegate all questions to the Researcher tool. Return its answer.",
+        llm=llm,
+        tools=[child],
+        inference_mode=InferenceMode.XML,
+        max_loops=5,
+    )
+    wf = Workflow(id="roundtrip-wf", flow=Flow(id="roundtrip-flow", nodes=[parent]))
+
+    yaml_path = tmp_path / "sub_agent_roundtrip.yaml"
+    wf.to_yaml_file(yaml_path)
+
+    loaded = Workflow.from_yaml_file(str(yaml_path), init_components=True)
+    result = loaded.run(
+        input_data={"input": "What is the capital of France?"},
+        config=RunnableConfig(),
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = str(result.output.get("parent-agent", {}).get("output", {}).get("content", ""))
+    assert len(content.strip()) > 0
+    assert "paris" in content.lower()

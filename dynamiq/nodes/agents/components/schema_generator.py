@@ -2,22 +2,22 @@
 
 import types
 from enum import Enum
-from typing import Any, Callable, Union, get_args, get_origin
+from typing import Any, Callable, Literal, Union, get_args, get_origin
 
-from dynamiq.nodes.agents.base import Agent as BaseAgent
+from pydantic import BaseModel
+
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node
+from dynamiq.nodes.tools.agent_tool import SubAgentTool
 
-# Type mapping for schema generation
 TYPE_MAPPING = {
     int: "integer",
-    float: "float",
+    float: "number",
     bool: "boolean",
     str: "string",
     dict: "object",
 }
 
-# Final answer function schema for function calling mode
 FINAL_ANSWER_FUNCTION_SCHEMA = {
     "type": "function",
     "strict": True,
@@ -44,6 +44,16 @@ FINAL_ANSWER_FUNCTION_SCHEMA = {
 }
 
 
+PRIORITY_FIELDS = ("brief",)
+
+
+def _reorder_fields(fields: dict) -> list[tuple[str, Any]]:
+    """Reorder fields so that priority fields (e.g. brief) come first."""
+    priority = [(k, v) for k, v in fields.items() if k in PRIORITY_FIELDS]
+    rest = [(k, v) for k, v in fields.items() if k not in PRIORITY_FIELDS]
+    return priority + rest
+
+
 def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str], str]) -> str:
     """
     Generate formatted input descriptions for each tool.
@@ -58,7 +68,7 @@ def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str]
     input_formats = []
     for tool in tools:
         params = []
-        for name, field in tool.input_schema.model_fields.items():
+        for name, field in _reorder_fields(tool.input_schema.model_fields):
             if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
                 args = get_args(field.annotation)
                 if get_origin(field.annotation) in (Union, types.UnionType):
@@ -99,7 +109,7 @@ def generate_structured_output_schemas(
 
     action_input_description = "Input for chosen action."
 
-    if delegation_allowed and any(isinstance(tool, BaseAgent) for tool in tools):
+    if delegation_allowed and any(isinstance(tool, SubAgentTool) for tool in tools):
         action_input_description += (
             ' For agent tools, include {"input": "<subtask>", "delegate_final": true} '
             "to return that agent's response directly as the final answer."
@@ -129,7 +139,7 @@ def generate_structured_output_schemas(
                     "output_files": {
                         "type": "string",
                         "description": (
-                            "Comma-separated file paths to return when action is finish." " Empty string otherwise."
+                            "Comma-separated file paths to return when action is finish. Empty string otherwise."
                         ),
                     },
                 },
@@ -157,6 +167,128 @@ def filter_format_type(param_annotation: Any) -> list[str]:
     return [param_annotation]
 
 
+def _resolve_type_schema(param: Any, _seen: set | None = None) -> dict[str, Any] | None:
+    """Return a JSON Schema fragment for a single type.
+
+    ``BaseModel`` subclasses are expanded into proper object schemas with
+    ``properties`` so the LLM produces correctly structured output.
+    Generic ``dict`` types become bare ``{"type": "object"}``.
+
+    Tools whose schemas contain bare objects automatically get
+    ``strict: false`` via ``_is_strict_compatible``.
+    """
+    if param is type(None):
+        return {"type": "null"}
+
+    if param_type := TYPE_MAPPING.get(param):
+        return {"type": param_type}
+
+    if isinstance(param, type) and issubclass(param, Enum):
+        element_type = TYPE_MAPPING.get(
+            filter_format_type(type(list(param.__members__.values())[0].value))[0],
+            "string",
+        )
+        return {"type": element_type, "enum": [m.value for m in param.__members__.values()]}
+
+    origin = get_origin(param)
+
+    if origin in (Union, types.UnionType):
+        args = [a for a in get_args(param) if a is not type(None)]
+        for arg in args:
+            resolved = _resolve_type_schema(arg, _seen)
+            if resolved is not None:
+                return resolved
+        return {"type": "string"}
+
+    if origin is Literal:
+        values = list(get_args(param))
+        lit_type = type(values[0]) if values else str
+        return {"type": TYPE_MAPPING.get(lit_type, "string"), "enum": values}
+
+    if origin is list:
+        inner_args = get_args(param)
+        if not inner_args:
+            return {"type": "array", "items": {"type": "string"}}
+        inner_schema = _resolve_type_schema(inner_args[0], _seen)
+        return {"type": "array", "items": inner_schema or {"type": "string"}}
+
+    if origin is dict:
+        return {"type": "object"}
+
+    if isinstance(param, type) and issubclass(param, BaseModel):
+        if _seen is None:
+            _seen = set()
+        if param in _seen:
+            raise ValueError(f"Self-referencing model {param.__name__} is not supported in tool input schemas.")
+        _seen.add(param)
+        result = _basemodel_to_schema(param, _seen)
+        _seen.discard(param)
+        return result
+
+    return None
+
+
+def _basemodel_to_schema(model: type[BaseModel], _seen: set | None = None) -> dict[str, Any]:
+    """Build an object schema from a Pydantic model with explicit properties.
+
+    Only fields without defaults are listed in ``required``.  When all fields
+    are required ``additionalProperties`` is set to ``False`` so the schema
+    can satisfy OpenAI strict-mode constraints.
+    """
+    properties: dict[str, Any] = {}
+    required_fields: list[str] = []
+    for name, field in model.model_fields.items():
+        schema = _resolve_type_schema(field.annotation, _seen)
+        if schema is None:
+            schema = {"type": "string"}
+        if field.description:
+            schema["description"] = field.description
+        properties[name] = schema
+        if field.is_required():
+            required_fields.append(name)
+    result: dict[str, Any] = {
+        "type": "object",
+        "properties": properties,
+    }
+    if len(required_fields) == len(properties):
+        result["required"] = list(properties.keys())
+        result["additionalProperties"] = False
+    elif required_fields:
+        result["required"] = required_fields
+    return result
+
+
+def _is_strict_compatible(schema: Any) -> bool:
+    """Return ``False`` if the schema contains an object that OpenAI strict mode
+    would reject — bare objects without ``properties``, or objects missing
+    ``additionalProperties: False``."""
+    if not isinstance(schema, dict):
+        return True
+    schema_type = schema.get("type")
+    is_object = schema_type == "object" or (isinstance(schema_type, list) and "object" in schema_type)
+    if is_object:
+        if "properties" not in schema:
+            return False
+        if schema.get("additionalProperties") is not False:
+            return False
+    for value in schema.values():
+        if isinstance(value, dict) and not _is_strict_compatible(value):
+            return False
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict) and not _is_strict_compatible(item):
+                    return False
+    return True
+
+
+def _is_nullable(annotation: Any) -> bool:
+    """Return True if the annotation is a Union that includes NoneType."""
+    origin = get_origin(annotation)
+    if origin in (Union, types.UnionType):
+        return type(None) in get_args(annotation)
+    return False
+
+
 def generate_property_schema(properties: dict, name: str, field: Any) -> None:
     """
     Generate property schema for a field in function calling mode.
@@ -171,35 +303,26 @@ def generate_property_schema(properties: dict, name: str, field: Any) -> None:
 
         description += f" Defaults to: {field.default}." if field.default and not field.is_required() else ""
         params = filter_format_type(field.annotation)
+        nullable = _is_nullable(field.annotation)
 
         properties[name] = {"description": description}
-        types = []
+        schemas = [s for p in params if (s := _resolve_type_schema(p)) is not None]
+        non_null = [s for s in schemas if s != {"type": "null"}]
 
-        for param in params:
-            if param is type(None):
-                types.append("null")
-
-            elif param_type := TYPE_MAPPING.get(param):
-                types.append(param_type)
-
-            elif isinstance(param, type) and issubclass(param, Enum):
-                element_type = TYPE_MAPPING.get(filter_format_type(type(list(param.__members__.values())[0].value))[0])
-                types.append(element_type)
-                properties[name]["enum"] = [field.value for field in param.__members__.values()]
-
-            elif getattr(param, "__origin__", None) is list:
-                types.append("array")
-                properties[name]["items"] = {"type": TYPE_MAPPING.get(param.__args__[0])}
-
-            elif getattr(param, "__origin__", None) is dict:
-                types.append("object")
-
-        if len(types) == 1:
-            properties[name]["type"] = types[0]
-        elif len(types) > 1:
-            properties[name]["type"] = types
+        if non_null:
+            properties[name].update(non_null[0])
+        elif schemas:
+            properties[name].update(schemas[0])
         else:
             properties[name]["type"] = "string"
+
+        if nullable and "type" in properties[name]:
+            current_type = properties[name]["type"]
+            if isinstance(current_type, list):
+                if "null" not in current_type:
+                    properties[name]["type"] = current_type + ["null"]
+            elif current_type != "null":
+                properties[name]["type"] = [current_type, "null"]
 
 
 def generate_function_calling_schemas(
@@ -220,8 +343,7 @@ def generate_function_calling_schemas(
     schemas = [FINAL_ANSWER_FUNCTION_SCHEMA]
 
     for tool in tools:
-        # Agent tools: accept action_input as a JSON string to avoid nested schema issues.
-        if isinstance(tool, BaseAgent):
+        if isinstance(tool, SubAgentTool):
             agent_action_input_description = "JSON string containing the agent's inputs "
             if delegation_allowed:
                 agent_action_input_description += '(e.g., {"input": "<subtask>", "delegate_final": true}).'
@@ -256,10 +378,28 @@ def generate_function_calling_schemas(
             continue
 
         properties = {}
+        required_fields = []
         input_params = tool.input_schema.model_fields.items()
         if list(input_params) and not isinstance(llm, Gemini):
             for name, field in tool.input_schema.model_fields.items():
                 generate_property_schema(properties, name, field)
+                if field.is_required() and name in properties:
+                    required_fields.append(name)
+
+            has_optional = len(required_fields) < len(properties)
+            use_strict = _is_strict_compatible(properties) and not has_optional
+
+            action_input_schema: dict[str, Any] = {
+                "type": "object",
+                "description": "Input for the selected tool",
+                "properties": properties,
+            }
+            if use_strict:
+                action_input_schema["required"] = list(properties.keys())
+                action_input_schema["additionalProperties"] = False
+            else:
+                if required_fields:
+                    action_input_schema["required"] = required_fields
 
             schema = {
                 "type": "function",
@@ -273,18 +413,12 @@ def generate_function_calling_schemas(
                                 "type": "string",
                                 "description": "Your reasoning about using this tool.",
                             },
-                            "action_input": {
-                                "type": "object",
-                                "description": "Input for the selected tool",
-                                "properties": properties,
-                                "required": list(properties.keys()),
-                                "additionalProperties": False,
-                            },
+                            "action_input": action_input_schema,
                         },
                         "additionalProperties": False,
                         "required": ["thought", "action_input"],
                     },
-                    "strict": True,
+                    "strict": use_strict,
                 },
             }
 

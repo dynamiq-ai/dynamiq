@@ -14,7 +14,7 @@ from dynamiq.types.streaming import StreamingMode
 class AdaptiveAgentManager(AgentManager):
     """An adaptive agent manager that coordinates specialized agents to complete complex tasks."""
 
-    name: str = "Adaptive Manager"
+    name: str = "adaptive-manager"
 
     def __init__(self, **kwargs):
         """Initialize the AdaptiveAgentManager and set up prompt templates."""

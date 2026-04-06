@@ -34,7 +34,7 @@ class LLMDocumentRanker(Node):
 
     Attributes:
         group (Literal[NodeGroup.RANKERS]): The group the node belongs to. Default is NodeGroup.RANKERS.
-        name (str): The name of the node. Default is "LLMDocumentRanker".
+        name (str): The name of the node. Default is "llm-document-ranker".
         prompt_template (str): The template for the prompt to be used with the LLM. Default is DEFAULT_PROMPT.
         top_k (int): The number of top documents to return. Default is 5.
         llm (BaseLLM): The LLM instance used for ranking. Default is None.
@@ -64,7 +64,7 @@ class LLMDocumentRanker(Node):
     """
 
     group: Literal[NodeGroup.RANKERS] = NodeGroup.RANKERS
-    name: str = "LLMDocumentRanker"
+    name: str = "llm-document-ranker"
     prompt_template: str = DEFAULT_PROMPT
     top_k: int = 5
     llm: Node

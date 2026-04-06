@@ -8,6 +8,7 @@ from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.connections import OpenRouter as OpenRouterConnection
 from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
@@ -77,6 +78,11 @@ class ImageEditInputSchema(BaseModel):
         description="Optional mask image indicating areas to edit.",
     )
     n: int | None = None
+    output_file_name: str | None = Field(
+        default="edited_image.png",
+        description="Output filename for edited image file(s). "
+        "When multiple images are generated, an index suffix is added.",
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -102,7 +108,7 @@ class ImageEdit(ConnectionNode):
     FILE_PREFIX: ClassVar[str] = "edited"
 
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
-    name: str = "Image Edit"
+    name: str = "image-edit"
     description: str = """Edit and modify existing images with text prompt and optional masking.
 
 Key Capabilities:
@@ -130,7 +136,7 @@ Examples:
 - {"prompt": "Change the shirt color to blue", "files": <source_image>, "mask": <mask_image>}
 - {"prompt": "Make the image more vibrant and colorful", "n": 3, "files": <source_image>}"""
     model: str = "gpt-image-1"
-    connection: OpenAIConnection | None = None
+    connection: OpenAIConnection | OpenRouterConnection | None = None
     n: int | None = None
     size: ImageSize | str = ImageSize.SIZE_1024x1024
     response_format: ImageResponseFormat | str | None = Field(
@@ -259,6 +265,7 @@ Examples:
 
         content = []
         files = []
+        total_images = len(response.data)
 
         try:
             file_idx = 0
@@ -269,7 +276,12 @@ Examples:
                     content.append(img_url)
                     image_bytes = download_image_from_url(img_url)
                     file = create_image_file(
-                        image_bytes, file_idx, original_name=original_name, prefix=self.FILE_PREFIX
+                        image_bytes,
+                        file_idx,
+                        original_name=original_name,
+                        prefix=self.FILE_PREFIX,
+                        output_file_name=input_data.output_file_name,
+                        total_images=total_images,
                     )
                     files.append(file)
                     file_idx += 1
@@ -277,7 +289,12 @@ Examples:
                 elif img_b64 := getattr(img_data, ImageResponseFormat.B64_JSON.value, None):
                     image_bytes = base64.b64decode(img_b64)
                     file = create_image_file(
-                        image_bytes, file_idx, original_name=original_name, prefix=self.FILE_PREFIX
+                        image_bytes,
+                        file_idx,
+                        original_name=original_name,
+                        prefix=self.FILE_PREFIX,
+                        output_file_name=input_data.output_file_name,
+                        total_images=total_images,
                     )
                     content.append(f"{file.name} created")
                     files.append(file)

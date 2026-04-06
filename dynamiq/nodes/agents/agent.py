@@ -3,7 +3,7 @@ from concurrent.futures import as_completed
 from typing import Any, Callable, Mapping
 
 from litellm import get_supported_openai_params, supports_function_calling
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
@@ -19,22 +19,24 @@ from dynamiq.nodes.agents.exceptions import (
     RecoverableAgentException,
     TagNotFoundError,
 )
-from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
+from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser, extract_message_text
 from dynamiq.nodes.node import Node, NodeDependency
+from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
-from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsInputSchema
+from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsInputSchema, ToolCallItem
 from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
-from dynamiq.nodes.types import Behavior, InferenceMode
+from dynamiq.nodes.types import ActionType, Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
-from dynamiq.runnables import RunnableConfig
+from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import (
     AgentReasoningEventMessageData,
     AgentToolData,
+    AgentToolInputErrorEventMessageData,
     AgentToolResultEventMessageData,
     StreamingMode,
 )
-from dynamiq.utils import generate_uuid
+from dynamiq.utils import generate_uuid, serialize_files_in_value
 from dynamiq.utils.logger import logger
 
 
@@ -89,7 +91,7 @@ UNKNOWN_TOOL_NAME = "unknown_tool"
 class Agent(HistoryManagerMixin, BaseAgent):
     """Unified Agent that uses a ReAct-style strategy for processing tasks by interacting with tools in a loop."""
 
-    name: str = "Agent"
+    name: str = "agent"
     max_loops: int = Field(default=15, ge=2)
     inference_mode: InferenceMode = Field(default=InferenceMode.DEFAULT)
     behaviour_on_max_loops: Behavior = Field(
@@ -109,6 +111,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
     _requested_output_files: list[str] = []
+    _streaming_tool_run_id: str | None = None
+    _streaming_tool_run_ids: list[str] = PrivateAttr(default_factory=list)
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
@@ -139,6 +143,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
         super().reset_run_state()
         if not self.is_resumed:
             self.state.reset()
+        self._streaming_tool_run_id = None
+        self._streaming_tool_run_ids = []
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -175,6 +181,27 @@ class Agent(HistoryManagerMixin, BaseAgent):
             "\n------------------------------------------\n"
         )
 
+    def _emit_tool_input_error(
+        self, error: Exception, loop_num: int, config: "RunnableConfig | None" = None, **kwargs
+    ) -> None:
+        """Emit a streaming event to signal that a tool input parse failed.
+
+        Consumers that received partial tool_input chunks can use the
+        tool_run_id in the event to discard them.
+        """
+        self._stream_agent_event(
+            AgentToolInputErrorEventMessageData(
+                tool_run_id=self._streaming_tool_run_id or "",
+                name=self.name,
+                error=str(error),
+                loop_num=loop_num,
+            ),
+            "tool_input_error",
+            config,
+            **kwargs,
+        )
+        self._streaming_tool_run_id = None
+
     def _should_delegate_final(
         self,
         tool: Node | None,
@@ -184,7 +211,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if not self.delegation_allowed:
             return False
 
-        if not isinstance(tool, Agent):
+        if not isinstance(tool, SubAgentTool):
             return False
 
         if isinstance(action_input, str):
@@ -281,7 +308,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     def _stream_agent_event(
         self,
-        content: AgentReasoningEventMessageData | AgentToolResultEventMessageData,
+        content: AgentReasoningEventMessageData | AgentToolResultEventMessageData | AgentToolInputErrorEventMessageData,
         step: str,
         config: RunnableConfig,
         **kwargs,
@@ -298,11 +325,159 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return
 
         source = content.tool.name if step == "reasoning" else content.name
+        try:
+            stream_content = content.to_dict() if hasattr(content, "to_dict") else content.model_dump()
+        except Exception as e:
+            logger.error(f"Failed to serialize stream agent event via to_dict, applying fallback: {e}")
+            stream_content = serialize_files_in_value(content.model_dump())
         self.stream_content(
-            content=content.model_dump(),
+            content=stream_content,
             source=source,
             step=step,
             config=config,
+            **kwargs,
+        )
+
+    def _stream_batch_reasoning_event(
+        self,
+        prepared_tools: list[dict[str, Any]],
+        thought: str | None,
+        loop_num: int,
+        config: RunnableConfig,
+        **kwargs,
+    ) -> str:
+        """Stream a single batch reasoning event for parallel tool calls.
+
+        Builds per-tool reasoning objects (assigning a ``tool_run_id`` to each
+        prepared tool payload) and emits one ``run_parallel`` reasoning event
+        whose ``action_input`` is the list of per-tool reasoning dicts.
+
+        Args:
+            prepared_tools: Mutable list of tool payloads; each dict gets a
+                ``tool_run_id`` key added in-place.
+            thought: The agent's reasoning text.
+            loop_num: Current loop iteration number.
+            config: Configuration for the runnable.
+            **kwargs: Additional keyword arguments forwarded to streaming.
+
+        Returns:
+            str: The batch tool_run_id used for the run_parallel event.
+        """
+        per_tool_reasoning = []
+        for i, tp in enumerate(prepared_tools):
+            tid = self._streaming_tool_run_ids[i] if i < len(self._streaming_tool_run_ids) else generate_uuid()
+            tp["tool_run_id"] = tid
+            resolved = self.tool_by_names.get(self.sanitize_tool_name(tp["name"]))
+            tool_data = AgentToolData(
+                name=resolved.name if resolved else tp["name"],
+                type=resolved.type if resolved else "unknown",
+                action_type=resolved.action_type.value if resolved and resolved.action_type else None,
+            )
+            per_tool_reasoning.append(
+                AgentReasoningEventMessageData(
+                    tool_run_id=tid,
+                    thought="",
+                    action=tp["name"],
+                    tool=tool_data,
+                    action_input=tp["input"],
+                    loop_num=loop_num,
+                ).model_dump()
+            )
+
+        batch_tool_run_id = (
+            generate_uuid() if self._streaming_tool_run_ids else self._streaming_tool_run_id or generate_uuid()
+        )
+        self._streaming_tool_run_id = None
+        self._streaming_tool_run_ids = []
+        batch_tool_data = AgentToolData(
+            name=PARALLEL_TOOL_NAME,
+            type="tool",
+            action_type=ActionType.PARALLEL_EXECUTION.value,
+        )
+        self._stream_agent_event(
+            AgentReasoningEventMessageData(
+                tool_run_id=batch_tool_run_id,
+                thought=thought or "",
+                action=PARALLEL_TOOL_NAME,
+                tool=batch_tool_data,
+                action_input=per_tool_reasoning,
+                loop_num=loop_num,
+            ),
+            "reasoning",
+            config,
+            **kwargs,
+        )
+        return batch_tool_run_id
+
+    def _stream_batch_tool_result_event(
+        self,
+        batch_tool_run_id: str,
+        prepared_tools: list[dict[str, Any]],
+        all_results: list[dict[str, Any]],
+        loop_num: int,
+        config: RunnableConfig,
+        **kwargs,
+    ) -> None:
+        """Stream a completion event after all parallel tools have finished.
+
+        Emits a single ``run_parallel`` tool-result event summarizing which
+        tools were executed and their status, without including the actual results.
+
+        Args:
+            batch_tool_run_id: The tool_run_id from the batch reasoning event.
+            prepared_tools: The tool payloads (with ``tool_run_id`` assigned).
+            all_results: Collected results from all tool executions.
+            loop_num: Current loop iteration number.
+            config: Configuration for the runnable.
+            **kwargs: Additional keyword arguments forwarded to streaming.
+        """
+        results_by_run_id = {r.get("tool_run_id"): r for r in all_results if r.get("tool_run_id")}
+        per_tool_summary = []
+        for tp in prepared_tools:
+            tool_name = tp["name"]
+            result_entry = results_by_run_id.get(tp.get("tool_run_id"), {})
+            resolved = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
+            tool_data = AgentToolData(
+                name=resolved.name if resolved else tool_name,
+                type=resolved.type if resolved else "unknown",
+                action_type=resolved.action_type.value if resolved and resolved.action_type else None,
+            )
+            per_tool_summary.append(
+                AgentToolResultEventMessageData(
+                    tool_run_id=tp.get("tool_run_id", ""),
+                    name=tool_name,
+                    tool=tool_data,
+                    input=tp["input"],
+                    result=None,
+                    loop_num=loop_num,
+                    status=RunnableStatus.SUCCESS if result_entry.get("success") else RunnableStatus.FAILURE,
+                ).model_dump()
+            )
+
+        batch_tool_data = AgentToolData(
+            name=PARALLEL_TOOL_NAME,
+            type="tool",
+            action_type=ActionType.PARALLEL_EXECUTION.value,
+        )
+
+        overall_status = (
+            RunnableStatus.SUCCESS
+            if all(s.get("status") == RunnableStatus.SUCCESS for s in per_tool_summary)
+            else RunnableStatus.FAILURE
+        )
+
+        self._stream_agent_event(
+            AgentToolResultEventMessageData(
+                tool_run_id=batch_tool_run_id,
+                name=PARALLEL_TOOL_NAME,
+                tool=batch_tool_data,
+                input=[{"name": tp["name"], "input": tp["input"]} for tp in prepared_tools],
+                result=per_tool_summary,
+                loop_num=loop_num,
+                status=overall_status,
+            ),
+            "tool",
+            config,
             **kwargs,
         )
 
@@ -315,13 +490,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
             llm_generated_output: The generated text output from the LLM.
         """
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
-            # For function calling, construct a message that includes the tool call
             if "tool_calls" in dict[Any, Any](llm_result.output):
                 try:
-                    tool_call = list(llm_result.output["tool_calls"].values())[0]
-                    function_name = tool_call["function"]["name"]
-                    function_args = json.dumps(tool_call["function"]["arguments"])
-                    message_content = f"Function call: {function_name}({function_args})"
+                    tool_calls = llm_result.output["tool_calls"]
+                    parts = []
+                    for tc in tool_calls:
+                        function_name = tc["function"]["name"]
+                        function_args = json.dumps(tc["function"]["arguments"])
+                        parts.append(f"Function call: {function_name}({function_args})")
+                    message_content = "\n".join(parts)
                     self._prompt.messages.append(
                         Message(role=MessageRole.ASSISTANT, content=message_content, static=True)
                     )
@@ -335,7 +512,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         )
                     )
         elif llm_generated_output:
-            # For other modes, use the generated text output
             self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output, static=True))
 
     def _handle_default_mode(
@@ -369,6 +545,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
     ) -> tuple[str | None, str | None, dict | list | None] | tuple[str, str, str]:
         """Handle FUNCTION_CALLING inference mode parsing.
 
+        When the LLM returns multiple tool_calls (native parallel tool calling),
+        all calls are collected and routed through the existing parallel execution
+        path using PARALLEL_TOOL_NAME, preserving identical streaming events.
+
         Returns:
             tuple: (thought, action, action_input) for normal actions
                    (thought, "final_answer", final_answer) for final answers
@@ -380,19 +560,44 @@ class Agent(HistoryManagerMixin, BaseAgent):
             logger.error("Error: No function called.")
             raise ActionParsingException("Error: No function called, you need to call the correct function.")
 
-        action = list(llm_result.output["tool_calls"].values())[0]["function"]["name"].strip()
-        llm_generated_output_json = list(llm_result.output["tool_calls"].values())[0]["function"]["arguments"]
+        tool_calls = llm_result.output["tool_calls"]
+        first_call = tool_calls[0]
+        action = first_call["function"]["name"].strip()
+        first_args = first_call["function"]["arguments"]
 
-        thought = llm_generated_output_json["thought"]
+        thoughts = [tc["function"]["arguments"].get("thought", "") for tc in tool_calls]
+        thought = "\n".join(t for t in thoughts if t)
         if action == "provide_final_answer":
-            final_answer = llm_generated_output_json["answer"]
-            self._requested_output_files = self._parse_output_files_csv(
-                llm_generated_output_json.get("output_files") or ""
-            )
+            final_answer = first_args["answer"]
+            self._requested_output_files = self._parse_output_files_csv(first_args.get("output_files") or "")
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
 
-        action_input = llm_generated_output_json["action_input"]
+        actual_tool_calls = [tc for tc in tool_calls if tc["function"]["name"].strip() != "provide_final_answer"]
+
+        if len(actual_tool_calls) > 1 and not self.parallel_tool_calls_enabled:
+            logger.warning(
+                f"Agent {self.name} - {self.id}: LLM returned {len(actual_tool_calls)} tool calls "
+                f"but parallel_tool_calls_enabled is False. Only the first tool call will be executed, "
+                f"remaining {len(actual_tool_calls) - 1} call(s) will be dropped."
+            )
+
+        if len(actual_tool_calls) > 1 and self.parallel_tool_calls_enabled:
+            tool_items = []
+            for tc in actual_tool_calls:
+                tc_name = tc["function"]["name"].strip()
+                tc_args = tc["function"]["arguments"]
+                tc_input = tc_args["action_input"]
+                if not isinstance(tc_input, dict):
+                    tc_input = {"input": tc_input}
+                tool_items.append(ToolCallItem(name=tc_name, input=tc_input))
+
+            validated = ParallelToolCallsInputSchema(tools=tool_items)
+            action_input = validated.model_dump()
+            self.log_reasoning(thought, PARALLEL_TOOL_NAME, action_input["tools"], loop_num)
+            return thought, PARALLEL_TOOL_NAME, action_input
+
+        action_input = first_args["action_input"]
 
         if isinstance(action_input, str):
             try:
@@ -417,10 +622,16 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         try:
             if isinstance(llm_generated_output, str):
-                llm_generated_output_json = json.loads(llm_generated_output)
+                try:
+                    llm_generated_output_json = json.loads(llm_generated_output)
+                except json.JSONDecodeError:
+                    # Handle known LLM bug where multiple JSON objects are returned.
+                    # Use raw_decode to parse only the first valid JSON object.
+                    decoder = json.JSONDecoder()
+                    llm_generated_output_json, _ = decoder.raw_decode(llm_generated_output.strip())
             else:
                 llm_generated_output_json = llm_generated_output
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, ValueError) as e:
             raise ActionParsingException(f"Error parsing action. {e}", recoverable=True)
 
         if "action" not in llm_generated_output_json or "thought" not in llm_generated_output_json:
@@ -553,7 +764,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
         else:
             self._prompt.messages = [system_message, input_message]
 
-        self._history_offset = len(self._prompt.messages)
+        self._history_offset = 1
+        self._pinned_input = input_message
         self._setup_stop_sequences()
 
     def _setup_streaming_callback(
@@ -603,6 +815,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         update_run_depends: bool = True,
         collect_dependency: bool = False,
         is_parallel: bool = False,
+        tool_run_id: str | None = None,
         **kwargs,
     ) -> tuple[Any, list, bool, bool, dict | None]:
         """Execute a single tool with caching support.
@@ -612,6 +825,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             collect_dependency: Whether to collect and return the dependency dict.
             is_parallel: Whether this tool is being executed in parallel with other tools.
                 When True, the tool will be cloned for thread-safe execution.
+            tool_run_id: Pre-generated tool run ID. When provided, reuses it instead of
+                generating a new one, so tool result events match the batch reasoning event.
 
         Returns:
             tuple: (tool_result, tool_files, is_delegated, success, dependency)
@@ -626,7 +841,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
             return error_message, [], False, False, None
 
-        tool_run_id = generate_uuid()
+        tool_run_id = tool_run_id or self._streaming_tool_run_id or generate_uuid()
+        self._streaming_tool_run_id = None
+        self._streaming_tool_run_ids = []
         tool_data = AgentToolData(
             name=tool.name,
             type=tool.type,
@@ -646,11 +863,32 @@ class Agent(HistoryManagerMixin, BaseAgent):
             config,
             **kwargs,
         )
-
         try:
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
-                to_summarize, _ = self._split_history()
+                to_summarize, to_preserve = self._split_history()
+                if not to_summarize:
+                    logger.info(f"Agent {self.name} - {self.id}: Nothing to summarize, skipping context compaction.")
+                    skip_message = (
+                        "Nothing was summarized because the conversation history is small enough to fit in context."
+                    )
+                    self._stream_agent_event(
+                        AgentToolResultEventMessageData(
+                            tool_run_id=tool_run_id,
+                            name=tool.name,
+                            tool=tool_data,
+                            input=action_input,
+                            result=skip_message,
+                            files=[],
+                            loop_num=loop_num,
+                            output={},
+                            status=RunnableStatus.SKIP,
+                        ),
+                        "tool",
+                        config,
+                        **kwargs,
+                    )
+                    return skip_message, [], False, True, None
                 tool_input = {**(action_input if isinstance(action_input, dict) else {}), "messages": to_summarize}
             else:
                 tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
@@ -671,6 +909,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     update_run_depends=update_run_depends,
                     collect_dependency=collect_dependency,
                     is_parallel=is_parallel,
+                    tool_run_id=tool_run_id,
                     **tool_kwargs,
                 )
                 if collect_dependency:
@@ -712,7 +951,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 return tool_result, tool_files, True, True, dependency
 
             if isinstance(tool, ContextManagerTool):
-                self._compact_history(summary=tool_output_meta.get("summary", tool_result))
+                self._compact_history(
+                    summary=tool_output_meta.get("summary", tool_result),
+                    pinned_content=extract_message_text(self._pinned_input) if self._pinned_input else None,
+                    preserved=to_preserve,
+                )
 
             # Stream the result
             self._stream_agent_event(
@@ -746,6 +989,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     files=[],
                     loop_num=loop_num,
                     output={},
+                    status=RunnableStatus.FAILURE,
                 ),
                 "tool",
                 config,
@@ -781,6 +1025,40 @@ class Agent(HistoryManagerMixin, BaseAgent):
             logger.error(error_message)
             self._add_observation(error_message)
             return None
+
+    def _check_subagent_limits(self, tools_data: list[dict[str, Any]], action: str) -> str | None:
+        """Check if any SubAgentTool in the batch would exceed its max_calls.
+
+        Returns an error message if limit exceeded, None if all OK.
+        """
+        subagent_calls: dict[str, int] = {}
+        is_parallel = self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME
+
+        for td in tools_data:
+            name = td.get("name", action) if (is_parallel and isinstance(td, dict)) else action
+            sanitized = self.sanitize_tool_name(name)
+            tool = self.tool_by_names.get(sanitized)
+            if tool and isinstance(tool, SubAgentTool) and tool.max_calls is not None:
+                subagent_calls[sanitized] = subagent_calls.get(sanitized, 0) + 1
+
+        exceeded = []
+        for name, batch_count in subagent_calls.items():
+            tool = self.tool_by_names[name]
+            remaining = tool.max_calls - tool._call_count
+            if batch_count > remaining:
+                exceeded.append(
+                    f"'{tool.name}' needs {batch_count} call(s) but only {remaining} remaining "
+                    f"(limit: {tool.max_calls}, used: {tool._call_count})"
+                )
+
+        if exceeded:
+            return (
+                f"Sub-agent invocation limit exceeded. {'; '.join(exceeded)}. "
+                f"No sub-agent calls in this batch were executed. "
+                f"Use other tools or provide a final answer using information already gathered."
+            )
+
+        return None
 
     def _should_skip_parallel_mode(
         self, action: str | None, action_input: Any
@@ -866,6 +1144,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             # Handle XML parallel mode (only for multiple tools, not for ContextManagerTool)
             tools_data = action_input if isinstance(action_input, list) else [action_input]
+
+            # Check subagent invocation limits before executing
+            subagent_error = self._check_subagent_limits(tools_data, action)
+            if subagent_error:
+                self._add_observation(subagent_error)
+                return None
+
             if (
                 self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME
                 and self.parallel_tool_calls_enabled
@@ -979,14 +1264,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     config, loop_num, **kwargs
                 )
 
+                # Append state to the last user message before LLM call
                 messages = self._inject_state_into_messages(self._prompt.messages)
 
                 try:
+                    native_parallel = (
+                        self.parallel_tool_calls_enabled and self.inference_mode == InferenceMode.FUNCTION_CALLING
+                    )
                     llm_result = self._run_llm(
                         messages=messages,
                         tools=self._tools,
                         response_format=self._response_format,
                         config=llm_config,
+                        parallel_tool_calls=True if native_parallel else None,
                         **kwargs,
                     )
                 finally:
@@ -1026,10 +1316,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     case InferenceMode.XML:
                         result = self._handle_xml_mode(llm_generated_output, loop_num, config, **kwargs)
 
+                # Handle final answer
                 if result[1] == "final_answer":
                     self._resolve_requested_output_files(strict=True)
                     return result[2]
 
+                # Handle recovery (for modes that support it)
+                # Check if action is None, which indicates (None, None, None) recovery
                 if result[1] is None:
                     continue
 
@@ -1062,6 +1355,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 continue
 
             except ActionParsingException as e:
+                self._emit_tool_input_error(e, loop_num, config, **kwargs)
+
                 extra_guidance = None
                 if self.inference_mode == InferenceMode.XML:
                     extra_guidance = (
@@ -1082,9 +1377,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     extra_guidance=extra_guidance,
                 )
                 continue
-            except Exception as e:
-                logger.error(f"Agent {self.name} - {self.id}: Error during agent execution: {e}")
-                raise e
 
             # Inject automatic summarization if token limit exceeded (like Context Manager Tool)
             self._try_summarize_history(config=config, **kwargs)
@@ -1301,6 +1593,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
             or bool(self.sandbox_backend),
             sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
+            has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
         )
 
         # Only auto-wrap the entire role in a raw block if the user did not
@@ -1413,16 +1706,24 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return {
                 "order": tool_payload["order"],
                 "tool_name": tool_payload["name"],
+                "tool_run_id": tool_payload.get("tool_run_id"),
                 "success": success,
                 "result": tool_result,
                 "files": tool_files,
                 "dependency": dependency,
             }
 
+        sequential_group: list[dict[str, Any]] = []
+
         if prepared_tools:
+
             if len(prepared_tools) == 1:
                 all_results.append(_execute_single_tool_to_result(prepared_tools[0], update_run_depends=True))
             else:
+                batch_tool_run_id = self._stream_batch_reasoning_event(
+                    prepared_tools, thought, loop_num, config, **kwargs
+                )
+
                 parallel_group = [tp for tp in prepared_tools if self._is_tool_parallel_eligible(tp["name"])]
                 sequential_group = [tp for tp in prepared_tools if not self._is_tool_parallel_eligible(tp["name"])]
 
@@ -1444,17 +1745,41 @@ class Agent(HistoryManagerMixin, BaseAgent):
                                 tool_payload,
                                 is_parallel=True,
                                 update_run_depends=False,
+                                tool_run_id=tool_payload["tool_run_id"],
                             )
                             future_map[future] = tool_payload
 
                         for future in as_completed(future_map.keys()):
                             all_results.append(future.result())
                 elif len(parallel_group) == 1:
-                    all_results.append(_execute_single_tool_to_result(parallel_group[0], update_run_depends=False))
+                    all_results.append(
+                        _execute_single_tool_to_result(
+                            parallel_group[0],
+                            update_run_depends=False,
+                            tool_run_id=parallel_group[0]["tool_run_id"],
+                        )
+                    )
+
+                # Update run_depends from parallel results before sequential phase
+                # so the first sequential tool depends on all parallel tools.
+                if parallel_group:
+                    parallel_deps = [r.get("dependency") for r in all_results if r.get("dependency")]
+                    if parallel_deps:
+                        self._run_depends = parallel_deps
 
                 # Phase 2: run sequential-only tools one-by-one
                 for tool_payload in sequential_group:
-                    all_results.append(_execute_single_tool_to_result(tool_payload, update_run_depends=False))
+                    all_results.append(
+                        _execute_single_tool_to_result(
+                            tool_payload,
+                            update_run_depends=True,
+                            tool_run_id=tool_payload["tool_run_id"],
+                        )
+                    )
+
+                self._stream_batch_tool_result_event(
+                    batch_tool_run_id, prepared_tools, all_results, loop_num, config, **kwargs
+                )
 
         observation_parts: list[str] = []
         aggregated_files: dict[str, Any] = {}
@@ -1469,12 +1794,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             self._merge_tool_files(aggregated_files, tool_name, result.get("files"))
 
-        # Collect dependencies from results (for tracing)
-        dependencies = [result.get("dependency") for result in ordered_results if result.get("dependency")]
-
-        # Set run_depends after parallel execution completes
-        if dependencies:
-            self._run_depends = dependencies
+        # For parallel-only batches, set run_depends from collected results.
+        # For batches with sequential tools, run_depends is already correct
+        # (chained by update_run_depends=True in the sequential loop).
+        if not sequential_group:
+            dependencies = [result.get("dependency") for result in ordered_results if result.get("dependency")]
+            if dependencies:
+                self._run_depends = dependencies
 
         combined_observation = "\n\n".join(observation_parts)
 

@@ -25,9 +25,16 @@ class SandboxTool(str, Enum):
 class ShellCommandResult(BaseModel):
     """Result of a shell command execution."""
 
-    stdout: str
-    stderr: str
-    exit_code: int | None
+    stdout: str | None = None
+    stderr: str | None = None
+    exit_code: int | None = None
+    background: bool = False
+    error: str | None = None
+
+    @property
+    def is_success(self) -> bool:
+        """Determine if the command execution was successful."""
+        return (self.exit_code == 0 or (self.exit_code is None and not self.stderr)) and self.error is None
 
 
 class SandboxInfo(BaseModel):
@@ -276,6 +283,12 @@ class Sandbox(abc.ABC, BaseModel):
             "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
         )
 
+    def apply_public_preview_branding(
+        self, public_host: str | None, public_url: str | None
+    ) -> tuple[str | None, str | None]:
+        """Map public host/URL to a proxied preview domain when the backend overrides this."""
+        return public_host, public_url
+
     def get_sandbox_info(self, port: int | None = None) -> SandboxInfo:
         """Return sandbox metadata for the agent (e.g. base_path, optional public URL for a port).
 
@@ -305,7 +318,7 @@ class Sandbox(abc.ABC, BaseModel):
         """Store a file in the sandbox filesystem.
 
         Provides FileStore-compatible write interface so tools like
-        FileWriteTool work transparently with both backends.
+        file-write work transparently with both backends.
 
         Args:
             file_path: Destination path (relative paths resolved against base_path).

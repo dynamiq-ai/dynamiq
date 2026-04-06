@@ -25,6 +25,11 @@ class ImageVariationInputSchema(BaseModel):
         json_schema_extra={"map_from_storage": True, "is_accessible_to_agent": False},
     )
     n: int | None = None
+    output_file_name: str | None = Field(
+        default="variation_image.png",
+        description="Output filename for variation file(s). "
+        "When multiple images are generated, an index suffix is added.",
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -49,7 +54,7 @@ class ImageVariation(ConnectionNode):
     FILE_PREFIX: ClassVar[str] = "variation"
 
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
-    name: str = "Image Variation"
+    name: str = "image-variation"
     description: str = """Create AI-generated variations of existing images while preserving core composition.
 
 Key Capabilities:
@@ -166,6 +171,7 @@ Examples:
         n = input_data.n or self.n
         if n:
             api_params["n"] = n
+
         try:
             response = self._image_variation(**api_params)
         except Exception as e:
@@ -178,18 +184,33 @@ Examples:
 
         content = []
         files = []
+        total_images = len(response.data)
 
         try:
             for idx, img_data in enumerate(response.data):
                 if img_url := getattr(img_data, ImageResponseFormat.URL.value, None):
                     content.append(img_url)
                     image_bytes = download_image_from_url(img_url)
-                    file = create_image_file(image_bytes, idx, original_name=original_filename, prefix=self.FILE_PREFIX)
+                    file = create_image_file(
+                        image_bytes,
+                        idx,
+                        original_name=original_filename,
+                        prefix=self.FILE_PREFIX,
+                        output_file_name=input_data.output_file_name,
+                        total_images=total_images,
+                    )
                     files.append(file)
 
                 elif img_b64 := getattr(img_data, ImageResponseFormat.B64_JSON.value, None):
                     image_bytes = base64.b64decode(img_b64)
-                    file = create_image_file(image_bytes, idx, original_name=original_filename, prefix=self.FILE_PREFIX)
+                    file = create_image_file(
+                        image_bytes,
+                        idx,
+                        original_name=original_filename,
+                        prefix=self.FILE_PREFIX,
+                        output_file_name=input_data.output_file_name,
+                        total_images=total_images,
+                    )
                     content.append(f"{file.name} created")
                     files.append(file)
         except Exception as e:

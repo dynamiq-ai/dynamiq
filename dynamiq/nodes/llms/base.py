@@ -4,7 +4,7 @@ import warnings
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
 
-from litellm import get_max_tokens, supports_vision
+from litellm import get_max_tokens, get_model_info, supports_vision
 from litellm.exceptions import (
     APIConnectionError,
     BudgetExceededError,
@@ -20,6 +20,7 @@ from dynamiq.callbacks.streaming import BaseStreamingCallbackHandler
 from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 from dynamiq.connections import BaseConnection, HttpApiKey
 from dynamiq.nodes import ErrorHandling, NodeGroup
+from dynamiq.nodes.llms.registry import model_registry
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Prompt
@@ -41,6 +42,8 @@ LLM_RATE_LIMIT_ERROR_INDICATORS = (
     "capacity",
     "resource_exhausted",
 )
+
+LLM_DEFAULT_MAX_TOKENS = 4096
 
 LLM_CONNECTION_ERROR_INDICATORS = (
     "connection",
@@ -109,6 +112,8 @@ class BaseLLMUsageData(BaseModel):
         completion_tokens_cost_usd (float | None): Cost of completion tokens in USD.
         total_tokens (int): Total number of tokens.
         total_tokens_cost_usd (float | None): Total cost of tokens in USD.
+        cache_read_input_tokens (int | None): Number of cache read input tokens.
+        cache_creation_input_tokens (int | None): Number of cache creation input tokens.
     """
     prompt_tokens: int
     prompt_tokens_cost_usd: float | None
@@ -116,6 +121,8 @@ class BaseLLMUsageData(BaseModel):
     completion_tokens_cost_usd: float | None
     total_tokens: int
     total_tokens_cost_usd: float | None
+    cache_read_input_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
 
 
 class BaseLLMInputSchema(BaseModel):
@@ -316,23 +323,58 @@ class BaseLLM(ConnectionNode):
         """Provides context for input schema that is required for proper validation."""
         return {"instance_prompt": self.prompt}
 
+    def _get_litellm_model_info(self) -> dict[str, Any] | None:
+        """Return litellm model info dict, or ``None`` if the model is unknown to litellm."""
+        try:
+            return get_model_info(model=self.model)
+        except Exception:
+            return None
+
     def get_token_limit(self) -> int:
         """Returns token limits of a llm.
 
         Returns:
             int: Number of tokens.
         """
-        return get_max_tokens(self.model)
+        info = self._get_litellm_model_info()
+        if info is not None:
+            max_input = info.get("max_input_tokens")
+            if max_input:
+                return max_input
+
+        try:
+            return get_max_tokens(self.model)
+        except Exception:
+            logger.debug("Model %s not found in litellm, falling back to custom registry.", self.model)
+
+        custom_max = model_registry.get_max_tokens(self.model)
+        if custom_max is not None:
+            return custom_max
+
+        logger.warning(f"Model {self.model} not found in litellm or custom registry. Using default token limit.")
+        return LLM_DEFAULT_MAX_TOKENS
 
     @property
     def is_vision_supported(self) -> bool:
         """Check if the LLM supports vision/image processing."""
-        return supports_vision(self.model)
+        if self._get_litellm_model_info() is not None:
+            try:
+                return supports_vision(self.model)
+            except Exception:
+                return False
+        custom = model_registry.supports_vision(self.model)
+        return custom if custom is not None else False
 
     @property
     def is_pdf_input_supported(self) -> bool:
         """Check if the LLM supports PDF input."""
-        return supports_pdf_input(self.model)
+        if self._get_litellm_model_info() is not None:
+            try:
+                return supports_pdf_input(self.model)
+            except Exception:
+                return False
+        custom = model_registry.supports_pdf_input(self.model)
+        return custom if custom is not None else False
 
     def get_messages(
         self,
@@ -345,6 +387,22 @@ class BaseLLM(ConnectionNode):
         """
         messages = prompt.format_messages(**dict(input_data))
         return messages
+
+    @staticmethod
+    def _extract_usage(completion: "ModelResponse") -> Any:
+        """Extract usage payload from completion across response shapes."""
+        model_extra = getattr(completion, "model_extra", None) or {}
+        usage = getattr(completion, "usage", None) or model_extra.get("usage")
+        if usage is None and hasattr(completion, "get"):
+            usage = completion.get("usage")
+        return usage
+
+    @staticmethod
+    def _usage_value(usage: Any, key: str, default: Any = None) -> Any:
+        """Read a usage value from dict-like or object-like usage payloads."""
+        if isinstance(usage, dict):
+            return usage.get(key, default)
+        return getattr(usage, key, default)
 
     @classmethod
     def get_usage_data(
@@ -365,15 +423,28 @@ class BaseLLM(ConnectionNode):
         """
         from litellm import cost_per_token
 
-        usage = completion.model_extra["usage"]
-        prompt_tokens = usage.prompt_tokens
-        completion_tokens = usage.completion_tokens
-        total_tokens = usage.total_tokens
+        usage = cls._extract_usage(completion=completion)
+        prompt_tokens = cls._usage_value(usage, "prompt_tokens", 0) or 0
+        completion_tokens = cls._usage_value(usage, "completion_tokens", 0) or 0
+        total_tokens = (
+            cls._usage_value(usage, "total_tokens", prompt_tokens + completion_tokens)
+            or prompt_tokens + completion_tokens
+        )
+        cache_read_input_tokens = cls._usage_value(usage, "cache_read_input_tokens")
+        cache_creation_input_tokens = cls._usage_value(usage, "cache_creation_input_tokens")
 
         try:
-            prompt_tokens_cost_usd, completion_tokens_cost_usd = cost_per_token(
-                model=model, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens
-            )
+            cost_kwargs: dict[str, Any] = {
+                "model": model,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+            }
+            if cache_read_input_tokens is not None:
+                cost_kwargs["cache_read_input_tokens"] = cache_read_input_tokens
+            if cache_creation_input_tokens is not None:
+                cost_kwargs["cache_creation_input_tokens"] = cache_creation_input_tokens
+
+            prompt_tokens_cost_usd, completion_tokens_cost_usd = cost_per_token(**cost_kwargs)
             total_tokens_cost_usd = prompt_tokens_cost_usd + completion_tokens_cost_usd
         except Exception:
             prompt_tokens_cost_usd, completion_tokens_cost_usd, total_tokens_cost_usd = None, None, None
@@ -385,6 +456,8 @@ class BaseLLM(ConnectionNode):
             completion_tokens_cost_usd=completion_tokens_cost_usd,
             total_tokens=total_tokens,
             total_tokens_cost_usd=total_tokens_cost_usd,
+            cache_read_input_tokens=cache_read_input_tokens,
+            cache_creation_input_tokens=cache_creation_input_tokens,
         )
 
     def _handle_completion_response(
@@ -406,11 +479,11 @@ class BaseLLM(ConnectionNode):
         content = response.choices[0].message.content
         result = {"content": content}
         if tool_calls := response.choices[0].message.tool_calls:
-            tool_calls_parsed = {}
+            tool_calls_parsed = []
             for tc in tool_calls:
                 call = tc.model_dump()
                 call["function"]["arguments"] = json.loads(call["function"]["arguments"])
-                tool_calls_parsed[call["function"]["name"]] = call
+                tool_calls_parsed.append(call)
             result["tool_calls"] = tool_calls_parsed
 
         usage_data = self.get_usage_data(model=self.model, completion=response).model_dump()
@@ -516,6 +589,7 @@ class BaseLLM(ConnectionNode):
         prompt: Prompt | None = None,
         tools: list[Tool | dict] | None = None,
         response_format: dict[str, Any] | None = None,
+        parallel_tool_calls: bool | None = None,
         **kwargs,
     ):
         """Execute the LLM node.
@@ -529,6 +603,8 @@ class BaseLLM(ConnectionNode):
             prompt (Prompt, optional): The prompt to use for this execution. Defaults to None.
             tools (list[Tool|dict]): List of tools that llm can call.
             response_format (dict[str, Any]): JSON schema that specifies the structure of the llm's output
+            parallel_tool_calls (bool | None): Whether to allow the LLM to return multiple tool calls
+                in a single response. None means provider decides.
             **kwargs: Additional keyword arguments.
 
         Returns:
@@ -576,6 +652,8 @@ class BaseLLM(ConnectionNode):
             "drop_params": True,
             **params,
         }
+        if parallel_tool_calls is not None:
+            common_params["parallel_tool_calls"] = parallel_tool_calls
 
         common_params = self.update_completion_params(common_params)
 

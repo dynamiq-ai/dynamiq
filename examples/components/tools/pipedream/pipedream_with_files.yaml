@@ -1,0 +1,198 @@
+vars:
+  authProvisionId: &authProvisionId <apn_id>
+  stash_id: &stash_id true # can be NEW, specific id, empty string or boolean
+  external_user_id: &external_user_id <user_id>
+connections:
+    667abff4-0e4c-4dc1-8d1f-cf9320846e6d:
+        id: 667abff4-0e4c-4dc1-8d1f-cf9320846e6d
+        type: dynamiq.connections.PipedreamOAuth2
+        access_token: ${oc.env:PIPEDREAM_ACCESS_TOKEN}
+        project_id: ${oc.env:PIPEDREAM_PROJECT_ID}
+        environment: production
+    9a57c7de-20ed-4370-a8bd-a44a58b58b42:
+        id: 9a57c7de-20ed-4370-a8bd-a44a58b58b42
+        type: dynamiq.connections.Anthropic
+        api_key: ${oc.env:ANTHROPIC_API_KEY}
+nodes:
+    agent:
+        id: agent
+        name: agent
+        type: dynamiq.nodes.agents.Agent
+        input_transformer:
+            selector:
+                input: $.input.output.input
+        output_transformer: {}
+        caching:
+            enabled: false
+        streaming:
+            enabled: true
+            event: data
+            mode: all
+            by_tokens: false
+        error_handling: {}
+        depends:
+            - node: input
+        llm:
+            id: eb7afca9-324d-4b57-8713-f98e48abf962
+            name: anthropic
+            type: dynamiq.nodes.llms.Anthropic
+            input_transformer: {}
+            output_transformer: {}
+            streaming:
+                enabled: false
+            error_handling: {}
+            model: claude-sonnet-4-5
+            connection: 9a57c7de-20ed-4370-a8bd-a44a58b58b42
+            temperature: 0
+            max_tokens: 64000
+            inference_mode: DEFAULT
+        tools:
+            - id: d481034c-5f9c-4acf-bdbb-a6e913ab43cf
+              name: gmail-download-attachment
+              type: dynamiq.nodes.tools.Pipedream
+              description: Gmail - Download Attachment, Download an attachment by attachmentId to the /tmp directory. [See the documentation](https://developers.google.com/gmail/api/reference/rest/v1/users.messages.attachments/get)
+              input_transformer: {}
+              approval:
+                enabled: false
+              is_optimized_for_agents: true
+              connection: 667abff4-0e4c-4dc1-8d1f-cf9320846e6d
+              stash_id: *stash_id
+              input_props:
+                configurableProps:
+                    - app: gmail
+                      name: gmail
+                      type_: app
+                    - description: The identifier of a message
+                      label: Message
+                      name: messageId
+                      remoteOptions: true
+                      type_: string
+                      useQuery: true
+                    - description: Identifier of the attachment to download
+                      label: Attachment
+                      name: attachmentId
+                      remoteOptions: true
+                      type_: string
+                      withLabel: true
+                    - description: 'Name of the new file. Example: `test.jpg`'
+                      label: Filename
+                      name: filename
+                      optional: true
+                      type_: string
+                    - accessMode: write
+                      name: syncDir
+                      sync: true
+                      type_: dir
+              external_user_id: *external_user_id
+              action_id: gmail-download-attachment
+              configurable_props:
+                gmail:
+                    authProvisionId: *authProvisionId
+            - id: 63a11464-4ba3-4e95-8b72-6027538dd7b4
+              name: gmail-find-email
+              type: dynamiq.nodes.tools.Pipedream
+              description: Gmail - Find Email, Find an email using Google's Search Engine. [See the docs](https://developers.google.com/gmail/api/reference/rest/v1/users.messages/list)
+              input_transformer: {}
+              approval:
+                enabled: false
+              is_optimized_for_agents: true
+              connection: 667abff4-0e4c-4dc1-8d1f-cf9320846e6d
+              input_props:
+                configurableProps:
+                    - app: gmail
+                      name: gmail
+                      type_: app
+                    - description: Apply a search filter using Gmail's [standard search operators](https://support.google.com/mail/answer/7190)
+                      label: Search Query
+                      name: q
+                      optional: true
+                      type_: string
+                    - default: false
+                      description: Convert the payload response into a single text field. **This reduces the size of the payload and makes it easier for LLMs work with.**
+                      label: Return payload as plaintext
+                      name: withTextPayload
+                      type_: boolean
+                    - default: false
+                      description: Only return metadata for the messages. This reduces the size of the payload and makes it easier for LLMs work with.
+                      label: Metadata Only
+                      name: metadataOnly
+                      optional: true
+                      type_: boolean
+                    - description: Only return messages with labels that match all of the specified labels.
+                      label: Labels
+                      name: labels
+                      optional: true
+                      remoteOptions: true
+                      type_: string[]
+                    - default: false
+                      description: Include messages from `SPAM` and `TRASH` in the results. Defaults to `false`.
+                      label: Include Spam and Trash?
+                      name: includeSpamTrash
+                      optional: true
+                      type_: boolean
+                    - default: 20
+                      description: Maximum number of messages to return. Defaults to `20`.
+                      label: Max Results
+                      name: maxResults
+                      optional: true
+                      type_: integer
+              external_user_id: *external_user_id
+              action_id: gmail-find-email
+              configurable_props:
+                gmail:
+                    authProvisionId: *authProvisionId
+                withTextPayload: true
+        role: |-
+            helpful AI assistant that extracts email and download and attachment from it
+            {% raw %}
+            {% endraw %}
+        file_store:
+            enabled: true
+            backend:
+                type: dynamiq.storages.file.InMemoryFileStore
+            agent_file_write_enabled: true
+        max_loops: 50
+        behaviour_on_max_loops: return
+        inference_mode: XML
+    input:
+        id: input
+        name: input
+        type: dynamiq.nodes.utils.Input
+        error_handling: {}
+        schema:
+            properties:
+                files:
+                    deletable: true
+                    required: false
+                    type: list[file]
+                input:
+                    deletable: true
+                    required: false
+                    type: Any
+    output:
+        id: output
+        name: output
+        type: dynamiq.nodes.utils.Output
+        input_transformer:
+            selector:
+                output: $.agent.output.files
+        error_handling: {}
+        depends:
+            - node: agent
+        schema:
+            properties:
+                output:
+                    deletable: true
+                    required: true
+                    type: Any
+flows:
+    pipedream-files-flow:
+        name: Pipedream Agent Flow with files
+        nodes:
+            - input
+            - output
+            - agent
+workflows:
+  pipedream-files-workflow:
+    flow: pipedream-files-flow
+    version: 1

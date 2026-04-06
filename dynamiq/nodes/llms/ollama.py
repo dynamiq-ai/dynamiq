@@ -43,10 +43,13 @@ class Ollama(BaseLLM):
         Returns:
             BaseLLMUsageData: A model containing the usage data for the LLM.
         """
-        usage = completion.model_extra.get("usage", {})
-        prompt_tokens = usage.get("prompt_eval_count", 0)
-        completion_tokens = usage.get("eval_count", 0)
-        total_tokens = prompt_tokens + completion_tokens
+        usage = cls._extract_usage(completion=completion)
+        prompt_tokens = cls._usage_value(usage, "prompt_eval_count", cls._usage_value(usage, "prompt_tokens", 0)) or 0
+        completion_tokens = cls._usage_value(usage, "eval_count", cls._usage_value(usage, "completion_tokens", 0)) or 0
+        total_tokens = (
+            cls._usage_value(usage, "total_tokens", prompt_tokens + completion_tokens)
+            or prompt_tokens + completion_tokens
+        )
 
         return BaseLLMUsageData(
             prompt_tokens=prompt_tokens,

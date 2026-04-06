@@ -10,5 +10,7 @@ from .utils import (
     is_called_from_async_context,
     merge,
     serialize,
+    serialize_file,
+    serialize_files_in_value,
     truncate_text_for_embedding,
 )

@@ -26,6 +26,11 @@ class NodeGroup(str, Enum):
     AUDIO = "audio"
     VALIDATORS = "validators"
     IMAGES = "images"
+    DETECTORS = "detectors"
+    TRANSFORMERS = "transformers"
+    EXTRACTORS = "extractors"
+    FILTERS = "filters"
+    PARSERS = "parsers"
 
 
 class InferenceMode(str, Enum):
@@ -55,6 +60,7 @@ class ActionType(str, Enum):
     DATABASE_QUERY = "database_query"
     COMPUTER_USE = "computer_use"
     SEMANTIC_SEARCH = "semantic_search"
+    PARALLEL_EXECUTION = "parallel_execution"
 
 
 class Behavior(str, Enum):

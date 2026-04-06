@@ -74,7 +74,7 @@ def mock_llm_sandbox_shell_response(mocker):
 
     xml_tool_call = """<output>
   <thought>I will run a shell command in the sandbox.</thought>
-  <action>SandboxShellTool</action>
+  <action>sandbox-shell</action>
   <action_input>{"command": "echo hello from sandbox", "brief": "Echo hello message"}</action_input>
 </output>"""
 
@@ -182,7 +182,7 @@ def test_agent_e2b_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
             connection=openai_conn,
             model="gpt-4o",
         ),
-        summarization_config=SummarizationConfig(enabled=True, preserve_last_messages=4, token_budget_ratio=0.65),
+        summarization_config=SummarizationConfig(enabled=True, token_budget_ratio=0.65),
         role="a helpful assistant that can execute shell commands in a sandbox.",
         sandbox=sandbox_config,
         max_loops=15,
@@ -262,7 +262,7 @@ def test_agent_with_sandbox_returns_files(mocker):
 
     xml_tool_call = """<output>
   <thought>I will run a shell command in the sandbox.</thought>
-  <action>SandboxShellTool</action>
+  <action>sandbox-shell</action>
   <action_input>{"command": "echo hello from sandbox", "brief": "Echo hello message"}</action_input>
 </output>"""
 

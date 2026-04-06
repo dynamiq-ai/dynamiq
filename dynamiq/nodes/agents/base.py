@@ -22,8 +22,10 @@ from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     ToolCacheEntry,
+    ToolOutputSandboxPersistenceConfig,
     convert_bytesio_to_file_info,
-    process_tool_output_for_agent,
+    extract_message_text,
+    process_tool_output_with_sandbox_persistence,
 )
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
@@ -34,7 +36,8 @@ from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, Parallel
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.nodes.tools.skills_tool import SkillsTool
-from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
+from dynamiq.nodes.types import InferenceMode
+from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox, SandboxConfig
 from dynamiq.skills.config import SkillsConfig
@@ -131,7 +134,11 @@ class AgentInputSchema(BaseModel):
     images: list[str | bytes | io.BytesIO] | None = Field(
         default=None, description="Image inputs (URLs, bytes, or file objects)."
     )
-    files: list[io.BytesIO | bytes] | None = Field(default=None, description="Parameter to provide files to the agent.")
+    files: list[io.BytesIO | bytes] | None = Field(
+        default=None,
+        description="List of file paths to pass to the agent.",
+        json_schema_extra={"map_from_storage": True, "is_accessible_to_agent": False},
+    )
 
     user_id: str | None = Field(default=None, description="Parameter to provide user ID.")
     session_id: str | None = Field(default=None, description="Parameter to provide session ID.")
@@ -223,11 +230,16 @@ class Agent(IterativeCheckpointMixin, Node):
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=3600))
     tools: list[Node] = []
     files: list[io.BytesIO | bytes] | None = None
+    is_files_allowed: bool = True
     images: list[str | bytes | io.BytesIO] = None
     name: str = "Agent"
     max_loops: int = 1
     tool_output_max_length: int = TOOL_MAX_TOKENS
     tool_output_truncate_enabled: bool = True
+    tool_output_sandbox_persistence: ToolOutputSandboxPersistenceConfig = Field(
+        default_factory=ToolOutputSandboxPersistenceConfig,
+        description="Configuration for saving large tool outputs to sandbox files.",
+    )
     delegation_allowed: bool = Field(
         default=False,
         description="Allow returning a child agent tool's output directly via delegate_final flag.",
@@ -246,10 +258,6 @@ class Agent(IterativeCheckpointMixin, Node):
         description="Configuration for file storage used by the agent.",
     )
     sandbox: SandboxConfig | None = Field(default=None, description="Configuration for sandbox used by the agent.")
-    file_attachment_preview_bytes: int = Field(
-        default=512,
-        description="Maximum number of bytes/characters from each uploaded file to surface as an inline preview.",
-    )
     skills: SkillsConfig = Field(
         default_factory=SkillsConfig,
         description="Skills config. When enabled and source registry is set, skills are on (Dynamiq or FileSystem).",
@@ -266,7 +274,11 @@ class Agent(IterativeCheckpointMixin, Node):
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
     _excluded_tool_ids: set[str] = PrivateAttr(default_factory=set)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
-    _history_offset: int = PrivateAttr(default=DEFAULT_HISTORY_OFFSET)
+    _history_offset: int = PrivateAttr(
+        default=DEFAULT_HISTORY_OFFSET,
+    )
+    # Original user input message preserved from compaction and used for memory fallback.
+    _pinned_input: Message | VisionMessage | None = PrivateAttr(default=None)
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
     _completed_loops: int = PrivateAttr(default=0)
@@ -317,8 +329,19 @@ class Agent(IterativeCheckpointMixin, Node):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        from dynamiq.nodes.tools.agent_tool import SubAgentTool
         self._run_depends: list[dict] = []
         self._prompt = Prompt(messages=[])
+        # Added for backward compatibility with old Agent tools
+
+        self.tools = [
+            (
+                SubAgentTool(agent=t, name=t.name, description=t.description or "")
+                if isinstance(t, Agent) and not isinstance(t, SubAgentTool)
+                else t
+            )
+            for t in self.tools
+        ]
 
         expanded_tools = []
         for tool in self.tools:
@@ -353,9 +376,11 @@ class Agent(IterativeCheckpointMixin, Node):
                 self.tools.append(FileWriteTool(file_store=self.file_store_backend))
 
         if self.parallel_tool_calls_enabled:
-            # Filter out any user tools with the reserved parallel tool name
-            self.tools = [t for t in self.tools if t.name != PARALLEL_TOOL_NAME]
-            self.tools.append(ParallelToolCallsTool())
+            inference_mode = getattr(self, "inference_mode", None)
+            use_native_parallel = inference_mode == InferenceMode.FUNCTION_CALLING
+            if not use_native_parallel:
+                self.tools = [t for t in self.tools if t.name != PARALLEL_TOOL_NAME]
+                self.tools.append(ParallelToolCallsTool())
 
         if self._skills_should_init():
             self._init_skills()
@@ -668,7 +693,11 @@ class Agent(IterativeCheckpointMixin, Node):
         # (binary data like files/images, complex objects like tool_params, and input which is already handled)
         standard_fields = set(AgentInputSchema.model_fields.keys())
         extra_fields = input_data.model_dump(exclude=standard_fields)
-        input_message = input_message.format_message(**extra_fields)
+        if extra_fields:
+            input_message = input_message.format_message(**extra_fields)
+        else:
+            input_message = input_message.model_copy()
+        input_message.static = True
 
         use_memory = self.memory and (input_data.user_id or input_data.session_id)
 
@@ -681,30 +710,26 @@ class Agent(IterativeCheckpointMixin, Node):
                         role=MessageRole.SYSTEM,
                         content="Below is the previous conversation history. "
                         "Use this context to inform your response.",
+                        static=True,
                     ),
                 )
-            if isinstance(input_message, Message):
-                memory_content = input_message.content
-            else:
-                text_parts = [
-                    content.text for content in input_message.content if isinstance(content, VisionMessageTextContent)
-                ]
-                memory_content = " ".join(text_parts) if text_parts else "Image input"
-            self.memory.add(role=MessageRole.USER, content=memory_content, metadata=custom_metadata)
         else:
             history_messages = None
 
         files = input_data.files
         if files:
             normalized_files = self._ensure_named_files(files)
+            file_paths = []
             if self.sandbox_backend:
-                self._upload_files_to_sandbox(normalized_files)
+                file_paths = self._upload_files_to_sandbox(normalized_files)
             else:
                 if not self.file_store_backend:
                     self._setup_in_memory_file_store_and_tools()
                 if self.file_store_backend:
-                    self._upload_files_to_file_store(normalized_files)
-            input_message = self._inject_attached_files_into_message(input_message, normalized_files)
+                    file_paths = self._upload_files_to_file_store(normalized_files)
+            input_message = self._inject_attached_files_into_message(
+                input_message, normalized_files, file_paths=file_paths
+            )
 
         if input_data.tool_params:
             kwargs["tool_params"] = input_data.tool_params
@@ -715,11 +740,29 @@ class Agent(IterativeCheckpointMixin, Node):
 
         try:
             result = self._run_agent(input_message, history_messages, config=config, **kwargs)
+        except Exception:
+            if use_memory:
+                try:
+                    self._append_user_input_to_memory(custom_metadata)
+                except Exception as save_error:
+                    logger.error(
+                        f"Agent {self.name} - {self.id}: failed to save user input to memory "
+                        f"after agent error: {save_error}",
+                    )
+            raise
         finally:
             self._current_call_context = None
 
         if use_memory:
-            self.memory.add(role=MessageRole.ASSISTANT, content=result, metadata=custom_metadata)
+            try:
+                self._save_history_to_memory(custom_metadata)
+            except Exception as save_error:
+                logger.error(
+                    "Agent %s - %s: failed to save history to memory: %s",
+                    self.name,
+                    self.id,
+                    save_error,
+                )
 
         execution_result = {
             "content": result,
@@ -820,6 +863,94 @@ class Agent(IterativeCheckpointMixin, Node):
         logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
         return history_messages
 
+    def _save_history_to_memory(
+        self,
+        metadata: dict,
+    ) -> None:
+        """Snapshot prompt state into memory for current user/session scope.
+
+        Replaces only the messages matching current ``user_id``/``session_id``
+        filters, then writes every non-system message from ``self._prompt.messages``.
+        This avoids wiping unrelated users/sessions when a backend is shared.
+
+        Args:
+            metadata: Metadata dict forwarded to each ``memory.add`` call.
+        """
+        user_id = metadata.get("user_id")
+        session_id = metadata.get("session_id")
+        if not user_id and not session_id:
+            logger.warning(
+                f"Agent {self.name} - {self.id}: skipping memory snapshot save "
+                f"because at least one of user_id or session_id is required",
+            )
+            return
+
+        fully_scoped = bool(user_id and session_id)
+
+        saved = 0
+        snapshot_messages: list[Message] = []
+        for msg in self._prompt.messages:
+            if msg.role == MessageRole.SYSTEM:
+                continue
+            content = extract_message_text(msg)
+            snapshot_messages.append(Message(role=msg.role, content=content, metadata=metadata.copy()))
+            saved += 1
+
+        if fully_scoped:
+            scope_filters = {"user_id": user_id, "session_id": session_id}
+            try:
+                self.memory.replace_messages(filters=scope_filters, messages=snapshot_messages)
+            except NotImplementedError:
+                logger.warning(
+                    f"Agent {self.name} - {self.id}: backend does not support scoped delete, "
+                    "falling back to appending user input and assistant response.",
+                )
+                self._append_fallback_messages(metadata, snapshot_messages)
+                return
+        else:
+            logger.info(
+                f"Agent {self.name} - {self.id}: only one of user_id/session_id provided, "
+                "using append-only save to avoid cross-scope data loss.",
+            )
+            self._append_fallback_messages(metadata, snapshot_messages)
+            return
+
+        logger.info(
+            f"Agent {self.name} - {self.id}: saved {saved} message(s) to memory",
+        )
+
+    def _append_user_input_to_memory(self, metadata: dict) -> None:
+        """Append only the user input to memory (used on agent failure).
+
+        Unlike ``_save_history_to_memory`` this never deletes existing data,
+        making it safe to call when the agent errored before producing a response.
+        """
+        if self._pinned_input is None:
+            return
+        pinned_content = extract_message_text(self._pinned_input)
+        self.memory.add(role=MessageRole.USER, content=pinned_content, metadata=metadata.copy())
+        logger.info(f"Agent {self.name} - {self.id}: saved user input to memory after agent error")
+
+    def _append_fallback_messages(self, metadata: dict, snapshot_messages: list[Message]) -> None:
+        """Append only the user input and last assistant response to memory (safe fallback)."""
+        saved = 0
+        if self._pinned_input is not None:
+            pinned_content = extract_message_text(self._pinned_input)
+            self.memory.add(role=MessageRole.USER, content=pinned_content, metadata=metadata.copy())
+            saved += 1
+        last_assistant = next(
+            (m for m in reversed(snapshot_messages) if m.role == MessageRole.ASSISTANT),
+            None,
+        )
+        if last_assistant:
+            self.memory.add(
+                role=last_assistant.role,
+                content=last_assistant.content,
+                metadata=metadata.copy(),
+            )
+            saved += 1
+        logger.info(f"Agent {self.name} - {self.id}: saved {saved} message(s) to memory (fallback)")
+
     def _run_llm(
         self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs
     ) -> RunnableResult:
@@ -844,7 +975,7 @@ class Agent(IterativeCheckpointMixin, Node):
             self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
             if llm_result.status != RunnableStatus.SUCCESS:
                 error_message = f"LLM '{self.llm.name}' failed: {llm_result.error.message}"
-                raise ValueError({error_message})
+                raise ValueError(error_message)
 
             return llm_result
 
@@ -915,6 +1046,8 @@ class Agent(IterativeCheckpointMixin, Node):
         else:
             self._prompt.messages = [system_message, input_message]
 
+        self._pinned_input = input_message
+
         try:
             llm_result = self._run_llm(self._prompt.messages, config=config, **kwargs).output["content"]
             self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_result))
@@ -978,28 +1111,48 @@ class Agent(IterativeCheckpointMixin, Node):
             return {k: self._regenerate_node_ids(v) for k, v in obj.items()}
         return obj
 
-    def _clone_tool_for_execution(self, tool: Node, config: RunnableConfig | None) -> tuple[Node, RunnableConfig]:
-        """Clone tool and align config overrides so each execution is isolated."""
+    def _clone_tool_for_execution(
+        self,
+        tool: Node,
+        config: RunnableConfig | None,
+        *,
+        clone: bool = True,
+        override_source_ids: list[str] | None = None,
+        target_id: str | None = None,
+    ) -> tuple[Node, RunnableConfig]:
+        """Prepare a tool for isolated execution: optionally clone, regenerate IDs, align config overrides."""
         base_config = ensure_config(config)
-        try:
-            tool_copy = self._regenerate_node_ids(tool.clone())
-        except Exception as e:
-            logger.warning(f"Agent {self.name} - {self.id}: failed to clone tool {tool.name}: {e}")
-            return tool, base_config
+        original_id = tool.id
+        if clone:
+            try:
+                tool = self._regenerate_node_ids(tool.clone())
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: failed to clone tool {tool.name}: {e}")
+                return tool, base_config
+        else:
+            try:
+                self._regenerate_node_ids(tool)
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: failed to regenerate IDs for tool {tool.name}: {e}")
+                return tool, base_config
 
-        local_config = base_config
-        try:
-            local_config = base_config.model_copy(deep=False)
-            original_override = base_config.nodes_override.get(tool.id)
-            if original_override:
-                local_config.nodes_override[tool_copy.id] = original_override
-        except Exception as e:
-            logger.warning(
-                f"Agent {self.name} - {self.id}: failed to prepare config override for cloned tool {tool.name}: {e}"
-            )
-            local_config = base_config
+        if target_id:
+            tool.id = target_id
 
-        return tool_copy, local_config
+        try:
+            lookup_ids = [original_id] + (override_source_ids or [])
+            override = None
+            for oid in lookup_ids:
+                override = base_config.nodes_override.get(oid)
+                if override:
+                    break
+            if override and tool.id != original_id:
+                base_config = base_config.model_copy(deep=False)
+                base_config.nodes_override[tool.id] = override
+        except Exception as e:
+            logger.warning(f"Agent {self.name} - {self.id}: failed to align config override for tool {tool.name}: {e}")
+
+        return tool, base_config
 
     @staticmethod
     def _extract_file_paths_from_input(tool: Node, merged_input: dict[str, Any]) -> list[str] | None:
@@ -1082,9 +1235,11 @@ class Agent(IterativeCheckpointMixin, Node):
         collect_dependency: bool = False,
         delegate_final: bool = False,
         is_parallel: bool = False,
+        tool_run_id: str | None = None,
         **kwargs,
     ) -> Any:
         """Runs a specific tool with the given input."""
+        from dynamiq.nodes.tools.agent_tool import SubAgentTool
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
 
         if not self.delegation_allowed:
@@ -1109,120 +1264,154 @@ class Agent(IterativeCheckpointMixin, Node):
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
         )
 
-        self._inject_files_into_tool(tool, merged_input)
+        is_child_agent = isinstance(tool, SubAgentTool)
+        resolved_agent = None
+        try:
+            resolved_agent = tool.get_or_create_agent() if is_child_agent else None
 
-        if tool_params:
-            debug_info = []
-            if self.verbose:
-                debug_info.append(f"Tool parameter merging for {tool.name} (ID: {tool.id}):")
-                debug_info.append(f"Starting with input: {merged_input}")
+            self._inject_files_into_tool(resolved_agent or tool, merged_input)
 
-            # 1. Apply global parameters (lowest priority)
-            global_params = tool_params.global_params
-            if global_params:
-                self._apply_parameters(merged_input, global_params, "global", debug_info)
+            if tool_params:
+                debug_info = []
+                if self.verbose:
+                    debug_info.append(f"Tool parameter merging for {tool.name} (ID: {tool.id}):")
+                    debug_info.append(f"Starting with input: {merged_input}")
 
-            # 2. Apply parameters by tool name (medium priority)
-            name_params_any = tool_params.by_name_params.get(tool.name) or tool_params.by_name_params.get(
-                self.sanitize_tool_name(tool.name)
+                # 1. Apply global parameters (lowest priority)
+                global_params = tool_params.global_params
+                if global_params:
+                    self._apply_parameters(merged_input, global_params, "global", debug_info)
+
+                # 2. Apply parameters by tool name (medium priority)
+                name_params_any = (
+                    tool_params.by_name_params.get(tool.name)
+                    or tool_params.by_name_params.get(self.sanitize_tool_name(tool.name))
+                    or (resolved_agent and tool_params.by_name_params.get(resolved_agent.name))
+                    or (resolved_agent and tool_params.by_name_params.get(self.sanitize_tool_name(resolved_agent.name)))
+                )
+                if name_params_any:
+                    if isinstance(name_params_any, ToolParams):
+                        if self.verbose:
+                            detail = "will apply to child agent" if is_child_agent else "ignored for non-agent tool"
+                            debug_info.append(f"  - From name:{tool.name}: encountered nested ToolParams ({detail})")
+                    elif isinstance(name_params_any, dict):
+                        self._apply_parameters(merged_input, name_params_any, f"name:{tool.name}", debug_info)
+
+                # 3. Apply parameters by tool ID (highest priority)
+                id_params_any = tool_params.by_id_params.get(tool.id) or (
+                    resolved_agent and tool_params.by_id_params.get(resolved_agent.id)
+                )
+                if id_params_any:
+                    if isinstance(id_params_any, ToolParams):
+                        if self.verbose:
+                            detail = "will apply to child agent" if is_child_agent else "ignored for non-agent tool"
+                            debug_info.append(f"  - From id:{tool.id}: encountered nested ToolParams ({detail})")
+                    elif isinstance(id_params_any, dict):
+                        self._apply_parameters(merged_input, id_params_any, f"id:{tool.id}", debug_info)
+
+                if self.verbose and debug_info:
+                    logger.debug("\n".join(debug_info))
+
+            child_kwargs = kwargs | {"recoverable_error": True}
+
+            if is_child_agent and self._current_call_context:
+                child_context = self._build_child_agent_context(resolved_agent)
+                for ctx_key in ("user_id", "session_id"):
+                    if ctx_key not in merged_input and child_context.get(ctx_key):
+                        merged_input[ctx_key] = child_context[ctx_key]
+                if "metadata" not in merged_input and child_context.get("metadata"):
+                    merged_input["metadata"] = child_context["metadata"]
+
+            if is_child_agent and tool_params:
+                nested_any = (
+                    tool_params.by_id_params.get(tool.id)
+                    or tool_params.by_id_params.get(getattr(resolved_agent, "id", ""))
+                    or tool_params.by_name_params.get(tool.name)
+                    or tool_params.by_name_params.get(self.sanitize_tool_name(tool.name))
+                    or tool_params.by_name_params.get(getattr(resolved_agent, "name", ""))
+                    or tool_params.by_name_params.get(self.sanitize_tool_name(getattr(resolved_agent, "name", "")))
+                )
+                if nested_any:
+                    if isinstance(nested_any, ToolParams):
+                        nested_tp = nested_any
+                    elif isinstance(nested_any, dict):
+                        nested_tp = ToolParams.model_validate(nested_any)
+                    else:
+                        nested_tp = None
+                    if nested_tp:
+                        child_kwargs = child_kwargs | {"tool_params": nested_tp}
+
+            effective_delegate_final = delegate_final and is_child_agent
+            if is_child_agent and isinstance(merged_input, dict) and "delegate_final" in merged_input:
+                effective_delegate_final = effective_delegate_final or bool(merged_input.pop("delegate_final"))
+
+            tool_to_run = resolved_agent if resolved_agent is not None else tool
+            tool_config = ensure_config(config)
+            if is_parallel and not is_child_agent:
+                tool_to_run, tool_config = self._clone_tool_for_execution(tool_to_run, tool_config)
+            if is_child_agent and tool.is_factory_mode:
+                tool_to_run, tool_config = self._clone_tool_for_execution(
+                    resolved_agent,
+                    tool_config,
+                    clone=False,
+                    override_source_ids=[tool.id],
+                    target_id=tool_run_id,
+                )
+
+            tool_result = tool_to_run.run(
+                input_data=merged_input,
+                config=tool_config,
+                run_depends=deepcopy(self._run_depends),
+                **child_kwargs,
             )
-            if name_params_any:
-                if isinstance(name_params_any, ToolParams):
-                    if self.verbose:
-                        debug_info.append(
-                            f"  - From name:{tool.name}: encountered nested ToolParams (ignored for non-agent tool)"
-                        )
-                elif isinstance(name_params_any, dict):
-                    self._apply_parameters(merged_input, name_params_any, f"name:{tool.name}", debug_info)
-
-            # 3. Apply parameters by tool ID (highest priority)
-            id_params_any = tool_params.by_id_params.get(tool.id)
-            if id_params_any:
-                if isinstance(id_params_any, ToolParams):
-                    if self.verbose:
-                        debug_info.append(
-                            f"  - From id:{tool.id}: encountered nested ToolParams (ignored for non-agent tool)"
-                        )
-                elif isinstance(id_params_any, dict):
-                    self._apply_parameters(merged_input, id_params_any, f"id:{tool.id}", debug_info)
-
-            if self.verbose and debug_info:
-                logger.debug("\n".join(debug_info))
-
-        child_kwargs = kwargs | {"recoverable_error": True}
-        is_child_agent = isinstance(tool, Agent)
-
-        if is_child_agent and self._current_call_context:
-            child_context = self._build_child_agent_context(tool)
-            for ctx_key in ("user_id", "session_id"):
-                if ctx_key not in merged_input and child_context.get(ctx_key):
-                    merged_input[ctx_key] = child_context[ctx_key]
-            if "metadata" not in merged_input and child_context.get("metadata"):
-                merged_input["metadata"] = child_context["metadata"]
-
-        if is_child_agent and tool_params:
-            nested_any = (
-                tool_params.by_id_params.get(getattr(tool, "id", ""))
-                or tool_params.by_name_params.get(getattr(tool, "name", ""))
-                or tool_params.by_name_params.get(self.sanitize_tool_name(getattr(tool, "name", "")))
-            )
-            if nested_any:
-                if isinstance(nested_any, ToolParams):
-                    nested_tp = nested_any
-                elif isinstance(nested_any, dict):
-                    nested_tp = ToolParams.model_validate(nested_any)
+            dependency_node = tool_to_run if tool_to_run is not tool else tool
+            dependency_dict = NodeDependency(node=dependency_node).to_dict(for_tracing=True)
+            if update_run_depends:
+                self._run_depends = [dependency_dict]
+            if tool_result.status != RunnableStatus.SUCCESS:
+                error_message = f"Tool '{tool.name}' failed: {tool_result.error.to_dict()}"
+                if tool_result.error.recoverable:
+                    raise ToolExecutionException(error_message)
                 else:
-                    nested_tp = None
-                if nested_tp:
-                    child_kwargs = child_kwargs | {"tool_params": nested_tp}
+                    raise ValueError(error_message)
 
-        effective_delegate_final = delegate_final and is_child_agent
-        if is_child_agent and isinstance(merged_input, dict) and "delegate_final" in merged_input:
-            effective_delegate_final = effective_delegate_final or bool(merged_input.pop("delegate_final"))
+            if is_child_agent and tool.max_calls is not None:
+                tool.increment_call_count()
 
-        tool_to_run = tool
-        tool_config = ensure_config(config)
-        if is_parallel:
-            tool_to_run, tool_config = self._clone_tool_for_execution(tool, tool_config)
+            tool_result_output_content = tool_result.output.get("content")
 
-        tool_result = tool_to_run.run(
-            input_data=merged_input,
-            config=tool_config,
-            run_depends=deepcopy(self._run_depends),
-            **child_kwargs,
-        )
-        dependency_node = tool_to_run if tool_to_run is not tool else tool
-        dependency_dict = NodeDependency(node=dependency_node).to_dict(for_tracing=True)
-        if update_run_depends:
-            self._run_depends = [dependency_dict]
-        if tool_result.status != RunnableStatus.SUCCESS:
-            error_message = f"Tool '{tool.name}' failed: {tool_result.error.to_dict()}"
-            if tool_result.error.recoverable:
-                raise ToolExecutionException({error_message})
-            else:
-                raise ValueError({error_message})
-        tool_result_output_content = tool_result.output.get("content")
+            saved_files = self._handle_tool_generated_files(tool, tool_result)
 
-        self._handle_tool_generated_files(tool, tool_result)
-
-        tool_result_content_processed = process_tool_output_for_agent(
-            content=tool_result_output_content,
-            max_tokens=self.tool_output_max_length,
-            truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
-        )
-
-        output_files = tool_result.output.get("files", [])
-        tool_output_meta = {k: v for k, v in tool_result.output.items() if k not in ("content", "files")}
-
-        if not isinstance(tool, ContextManagerTool):
-            self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = (
-                tool_result_content_processed,
-                tool_output_meta,
+            tool_result_content_processed = process_tool_output_with_sandbox_persistence(
+                content=tool_result_output_content,
+                tool_name=tool.name,
+                tool_input=tool_input,
+                sandbox=self.sandbox_backend,
+                save_tool_output_to_sandbox=bool(self.sandbox_backend and tool.is_output_persisted_in_sandbox_allowed),
+                sandbox_persistence_config=self.tool_output_sandbox_persistence,
+                max_tokens=self.tool_output_max_length,
+                truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
             )
-        if collect_dependency:
-            return tool_result_content_processed, output_files, tool_output_meta, dependency_dict
 
-        return tool_result_content_processed, output_files, tool_output_meta
+            if saved_files:
+                paths = ", ".join(saved_files)
+                tool_result_content_processed = f"{tool_result_content_processed}\n\nFiles saved: {paths}"
+
+            output_files = tool_result.output.get("files", [])
+            tool_output_meta = {k: v for k, v in tool_result.output.items() if k not in ("content", "files")}
+
+            if not isinstance(tool, ContextManagerTool):
+                self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = (
+                    tool_result_content_processed,
+                    tool_output_meta,
+                )
+            if collect_dependency:
+                return tool_result_content_processed, output_files, tool_output_meta, dependency_dict
+
+            return tool_result_content_processed, output_files, tool_output_meta
+        finally:
+            if is_child_agent and tool.is_factory_mode and resolved_agent is not None:
+                SubAgentTool.cleanup_factory_agent(resolved_agent)
 
     def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> list[io.BytesIO | bytes]:
         """Ensure all uploaded files have name and description attributes and store them in storage backend."""
@@ -1243,23 +1432,70 @@ class Agent(IterativeCheckpointMixin, Node):
                 named.append(f)
         return named
 
-    def _handle_tool_generated_files(self, tool: Node, tool_result: RunnableResult) -> None:
+    @staticmethod
+    def _split_upload_filename(file_name: str) -> tuple[str, str]:
+        """Split a file name into stem and extension for suffixing."""
+        stem, dot, extension = file_name.rpartition(".")
+        if not dot or not stem:
+            return file_name, ""
+        return stem, f".{extension}"
+
+    def _get_unique_upload_filename(
+        self,
+        file_name: str,
+        seen_names: set[str],
+        exists_check: Callable[[str], bool] | None = None,
+    ) -> str:
+        """Return a collision-free file name, preserving extension."""
+        candidate = file_name
+        stem, extension = self._split_upload_filename(file_name)
+        suffix = 1
+
+        while candidate in seen_names or (exists_check is not None and exists_check(candidate)):
+            candidate = f"{stem}_{suffix}{extension}"
+            suffix += 1
+
+        seen_names.add(candidate)
+        return candidate
+
+    def _list_existing_sandbox_file_names(self) -> set[str]:
+        """Best-effort list of existing sandbox file names for collision checks."""
+        if not self.sandbox_backend:
+            return set()
+
+        try:
+            existing_paths = self.sandbox_backend.list_files(target_dir=self.sandbox_backend.base_path)
+        except Exception:
+            return set()
+
+        existing_names = set()
+        for path in existing_paths:
+            if isinstance(path, str):
+                file_name = path.rsplit("/", 1)[-1]
+                if file_name:
+                    existing_names.add(file_name)
+        return existing_names
+
+    def _handle_tool_generated_files(self, tool: Node, tool_result: RunnableResult) -> list[str]:
         """
         Handle files generated by tools and store them in the file store and/or sandbox.
 
         Args:
             tool: The tool that generated the files
             tool_result: The result from the tool execution
+
+        Returns:
+            List of saved file paths (full sandbox paths or file-store keys).
         """
         if not self.file_store_backend and not self.sandbox_backend:
-            return
+            return []
 
         if not (isinstance(tool_result.output, dict) and "files" in tool_result.output):
-            return
+            return []
 
         tool_files = tool_result.output.get("files", [])
         if not tool_files:
-            return
+            return []
 
         stored_files = []
         for file in tool_files:
@@ -1275,7 +1511,7 @@ class Agent(IterativeCheckpointMixin, Node):
                     try:
                         dest = f"{self.sandbox_backend.base_path}/{file_name}"
                         self.sandbox_backend.upload_file(file_name, content, destination_path=dest)
-                        stored_files.append(file_name)
+                        stored_files.append(dest)
                     except Exception as e:
                         logger.warning(f"Failed to upload tool file '{file_name}' to sandbox: {e}")
                 elif self.file_store_backend:
@@ -1297,7 +1533,7 @@ class Agent(IterativeCheckpointMixin, Node):
                     try:
                         dest = f"{self.sandbox_backend.base_path}/{file_name}"
                         self.sandbox_backend.upload_file(file_name, file, destination_path=dest)
-                        stored_files.append(file_name)
+                        stored_files.append(dest)
                     except Exception as e:
                         logger.warning(f"Failed to upload tool file '{file_name}' to sandbox: {e}")
                 elif self.file_store_backend:
@@ -1314,10 +1550,13 @@ class Agent(IterativeCheckpointMixin, Node):
 
         if stored_files:
             logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
+        return stored_files
 
-    def _upload_files_to_sandbox(self, normalized_files: list) -> None:
+    def _upload_files_to_sandbox(self, normalized_files: list) -> list[str]:
         """Upload file-like objects to the sandbox backend."""
-        for file_obj in normalized_files:
+        file_paths = [""] * len(normalized_files)
+        seen_names = self._list_existing_sandbox_file_names()
+        for index, file_obj in enumerate(normalized_files):
             file_name = getattr(file_obj, "name", None)
             if file_name and hasattr(file_obj, "read"):
                 try:
@@ -1326,13 +1565,28 @@ class Agent(IterativeCheckpointMixin, Node):
                     content = file_obj.read()
                     if isinstance(content, str):
                         content = content.encode("utf-8")
-                    self.sandbox_backend.upload_file(file_name, content)
+                    unique_file_name = self._get_unique_upload_filename(file_name, seen_names)
+                    input_path = f"{self.sandbox_backend.base_path.rstrip('/')}/input/{unique_file_name}"
+                    destination_path = self.sandbox_backend.upload_file(
+                        unique_file_name, content, destination_path=input_path
+                    )
+                    file_paths[index] = destination_path
                 except Exception as e:
                     logger.warning(f"Failed to upload file {file_name} to sandbox: {e}")
+        return file_paths
 
-    def _upload_files_to_file_store(self, normalized_files: list) -> None:
+    def _upload_files_to_file_store(self, normalized_files: list) -> list[str]:
         """Store file-like objects in the file store backend."""
-        for file_obj in normalized_files:
+        file_paths = [""] * len(normalized_files)
+        seen_names: set[str] = set()
+
+        def file_exists(candidate: str) -> bool:
+            try:
+                return bool(self.file_store_backend.exists(candidate))
+            except Exception:
+                return False
+
+        for index, file_obj in enumerate(normalized_files):
             file_name = getattr(file_obj, "name", None)
             if not file_name or not hasattr(file_obj, "read"):
                 continue
@@ -1343,15 +1597,18 @@ class Agent(IterativeCheckpointMixin, Node):
                 if isinstance(content, str):
                     content = content.encode("utf-8")
                 description = getattr(file_obj, "description", "User-provided file")
+                unique_file_name = self._get_unique_upload_filename(file_name, seen_names, exists_check=file_exists)
                 self.file_store_backend.store(
-                    file_path=file_name,
+                    file_path=unique_file_name,
                     content=content,
                     content_type="application/octet-stream",
                     metadata={"description": description, "source": "user_upload"},
-                    overwrite=True,
+                    overwrite=False,
                 )
+                file_paths[index] = unique_file_name
             except Exception as e:
                 logger.warning(f"Failed to store file {file_name} in file store: {e}")
+        return file_paths
 
     def _setup_in_memory_file_store_and_tools(self) -> None:
         """Create in-memory file store and file tools when files are uploaded and no sandbox/file store exists."""
@@ -1369,6 +1626,8 @@ class Agent(IterativeCheckpointMixin, Node):
             from dynamiq.nodes.agents.agent import Agent
 
             if isinstance(self, Agent):
+                from dynamiq.nodes.tools.agent_tool import SubAgentTool
+
                 self.system_prompt_manager.setup_for_react_agent(
                     inference_mode=self.inference_mode,
                     parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
@@ -1377,10 +1636,14 @@ class Agent(IterativeCheckpointMixin, Node):
                     context_compaction_enabled=self.summarization_config.enabled,
                     todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
                     or bool(self.sandbox_backend),
+                    has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
                 )
 
     def _inject_attached_files_into_message(
-        self, input_message: Message | VisionMessage, files: list[io.BytesIO]
+        self,
+        input_message: Message | VisionMessage,
+        files: list[io.BytesIO],
+        file_paths: list[str] | None = None,
     ) -> Message | VisionMessage:
         if not files:
             return input_message
@@ -1390,22 +1653,25 @@ class Agent(IterativeCheckpointMixin, Node):
 
         file_lines = []
 
-        for f in files:
+        normalized_paths = file_paths or []
+        for index, f in enumerate(files):
             name = getattr(f, "name", None) or "unnamed_file"
             description = getattr(f, "description", "") or ""
             description = description.strip()
+            saved_path = normalized_paths[index] if index < len(normalized_paths) else ""
+            if not saved_path:
+                saved_path = "File is not stored."
+
+            saved_suffix = f" (saved as: {saved_path})"
             if description:
-                file_lines.append(f"- {name}: {description}")
+                file_lines.append(f"- {name}{saved_suffix}: {description}")
             else:
-                file_lines.append(f"- {name}")
+                file_lines.append(f"- {name}{saved_suffix}")
 
         if not file_lines:
             return input_message
 
         file_section = "\n".join(["\nAttached files available to you:"] + file_lines) + "\n"
-        preview_section = self._build_file_previews_section(files)
-        if preview_section:
-            file_section = f"{file_section}{preview_section}"
 
         if isinstance(input_message.content, str):
             input_message.content = f"{input_message.content.rstrip()}{file_section}"
@@ -1413,66 +1679,6 @@ class Agent(IterativeCheckpointMixin, Node):
             input_message.content = input_message.content + file_section
 
         return input_message
-
-    def _build_file_previews_section(self, files: list[io.BytesIO]) -> str:
-        """Build a short, truncated preview section for uploaded files."""
-        if not files or self.file_attachment_preview_bytes <= 0:
-            return ""
-
-        previews: list[str] = []
-        max_bytes = max(1, self.file_attachment_preview_bytes)
-        for file_obj in files:
-            preview = self._extract_file_preview(file_obj, max_bytes)
-            if preview:
-                previews.append(preview)
-
-        if not previews:
-            return ""
-
-        return "\n".join(["File previews (truncated, may be incomplete):", *previews]) + "\n"
-
-    @staticmethod
-    def _extract_file_preview(file_obj: io.BytesIO, max_bytes: int) -> str:
-        """Extract a textual/hex preview from a BytesIO without consuming it."""
-        if not hasattr(file_obj, "read"):
-            return ""
-
-        seekable = hasattr(file_obj, "seek")
-        position = 0
-        if seekable:
-            try:
-                position = file_obj.tell()
-            except Exception:
-                seekable = False
-
-        try:
-            if seekable:
-                file_obj.seek(0)
-            snippet = file_obj.read(max_bytes)
-        except Exception:
-            return ""
-        finally:
-            if seekable:
-                try:
-                    file_obj.seek(position)
-                except Exception as exc:
-                    logger.debug(
-                        "Failed to restore file pointer for preview on %s: %s", getattr(file_obj, "name", ""), exc
-                    )
-
-        if not snippet:
-            return ""
-
-        try:
-            preview_text = snippet.decode("utf-8")
-            descriptor = "text"
-        except UnicodeDecodeError:
-            preview_text = snippet.hex()
-            descriptor = "hex"
-
-        suffix = "..." if len(snippet) >= max_bytes else ""
-        name = getattr(file_obj, "name", "uploaded_file")
-        return f"- {name} ({descriptor} preview): {preview_text}{suffix}"
 
     @property
     def file_store_backend(self) -> FileStore | None:
@@ -1509,6 +1715,12 @@ class Agent(IterativeCheckpointMixin, Node):
         self._tool_cache: dict[ToolCacheEntry, Any] = {}
         self._completed_loops = 0
         self.system_prompt_manager.reset()
+
+        from dynamiq.nodes.tools.agent_tool import SubAgentTool
+
+        for tool in self.tools:
+            if isinstance(tool, SubAgentTool):
+                tool.reset_call_count()
 
     def generate_prompt(self, block_names: list[str] | None = None, **kwargs) -> str:
         """Generates the prompt using specified blocks and variables."""
@@ -1566,7 +1778,7 @@ class AgentManager(Agent):
     """Manager class that extends the Agent class to include specific actions."""
 
     _actions: dict[str, Callable] = PrivateAttr(default_factory=dict)
-    name: str = "Agent Manager"
+    name: str = "agent-manager"
     input_schema: ClassVar[type[AgentManagerInputSchema]] = AgentManagerInputSchema
 
     def __init__(self, **kwargs):

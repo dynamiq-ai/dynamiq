@@ -11,7 +11,7 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_SCRAPE = """Scrapes web content from URLs using Jina with CSS selector targeting and content filtering.
+DESCRIPTION_SCRAPE = """Scrapes web content from URLs with CSS selector targeting and content filtering.
 
 Key Capabilities:
 - Clean text extraction with CSS selector precision
@@ -19,57 +19,46 @@ Key Capabilities:
 - Optional link and image extraction
 - Selective targeting for specific page sections
 
-Usage Strategy:
-- Use target_selector for specific content areas
-- Use remove_selector to filter out ads, navigation
-- Enable include_links/include_images based on analysis needs
-
-Parameter Guide:
-- url: URL to scrape (e.g., "https://example.com")
-- target_selector: CSS selector for specific content (".content", "#main")
-- remove_selector: Filter unwanted elements (".ads", ".nav")
-- include_links/include_images: Additional content extraction
-- engine: "browser" for JS-heavy sites, "direct" for speed
+Parameters Overview:
+- In special cases, use `target_selector` to focus on specific content areas (e.g., '.content')
+- When needed, use `remove_selector` to filter out ads or navigation (e.g., '.ads, .nav').
 
 Examples:
 - {"url": "https://example.com", "target_selector": ".content"}
 - {"url": "https://news.com", "remove_selector": ".ads"}
-- {"url": "https://blog.com", "include_images": true}"""
+- {"url": "https://blog.com"}"""
 
-DESCRIPTION_SEARCH = """Searches the web with the Jina Search API and returns LLM-ready SERP data.
+DESCRIPTION_SEARCH = """Searches the web with the Search API and returns LLM-ready SERP data.
 
 Highlights:
 - Supports geo/language targeting plus per-domain searches for authoritative sources
-- Controls payload size with `include_full_content`, `X-Respond-With`, and image/links summaries
-- Flexible renderers (markdown/html/text/screenshot/pageshot) and browser engines
-- Complete header access (`X-With-*`, `X-Retain-Images`, `X-No-Cache`, `X-Proxy-Url`, etc.) for advanced use cases
-
-Common Parameters:
-- query (required): What to search for
-- max_results (1-100), page: Tune breadth and pagination
-- country, location, language, locale: Localize SERP responses
-- site: Lock search scope to a domain
-- return_format: markdown, html, text, screenshot, or pageshot
-- include_links / include_images: Summaries (`true`) or exhaustive lists (`all`)
-- include_favicons / include_favicon: Surface favicons per SERP result or per page
-- include_full_content: Pull full article text (switches engine to browser automatically unless overridden)
-- no_cache, timeout, cookies, proxy_url: Reliability controls
-- retain_images, respond_with, engine: Low-level knobs for payload control
 
 Example Invocations:
-- {"query": "restaurants near downtown", "site": "yelp.com", "include_links": true}
-- {"query": "latest ML papers", "return_format": "markdown", "include_full_content": true, "include_images": "all"}
+- {"query": "restaurants near downtown", "site": "yelp.com"}
+- {"query": "latest ML papers", "max_results": 10}
 - {"query": "Tokyo weather", "country": "JP", "language": "ja", "max_results": 5}"""
 
 
 class JinaScrapeInputSchema(BaseModel):
     url: str | None = Field(None, description="URL of the page to scrape")
-    target_selector: str | None = Field(None, description="CSS selector to focus on specific elements")
-    remove_selector: str | None = Field(None, description="CSS selector to exclude elements")
+    target_selector: str | None = Field(
+        None, description="CSS selector to focus on specific elements ('.content', '#main')"
+    )
+    remove_selector: str | None = Field(None, description="CSS selector to exclude elements ('.ads', '.nav')")
     include_links: bool | None = Field(None, description="Include links summary")
-    include_images: bool | None = Field(None, description="Include images summary")
-    generate_alt_text: bool | None = Field(None, description="Generate alt text for images")
-    engine: str | None = Field(None, description="Engine: 'browser' for JS-heavy sites, 'direct' for speed")
+    include_images: bool | None = Field(
+        None, description="Include images summary", json_schema_extra={"is_accessible_to_agent": False}
+    )
+    generate_alt_text: bool | None = Field(
+        None,
+        description="Generate alt text for images",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
+    engine: str | None = Field(
+        None,
+        description="Engine: 'browser' for JS-heavy sites, 'direct' for speed",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
 
 
 class JinaResponseFormat(str, enum.Enum):
@@ -93,8 +82,9 @@ class JinaScrapeTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.WEB_SCRAPE
-    name: str = "Jina Scraper Tool"
+    name: str = "jina-scrape"
     description: str = DESCRIPTION_SCRAPE
+    is_parallel_execution_allowed: bool = True
     response_format: JinaResponseFormat = JinaResponseFormat.MARKDOWN
     connection: Jina
     timeout: int = 60
@@ -268,31 +258,83 @@ class JinaSearchInputSchema(BaseModel):
     country: str | None = Field(None, description="Two-letter country code for search region")
     location: str | None = Field(None, description="Geographic location for search origin")
     language: str | None = Field(None, description="Two-letter language code for results")
-    page: int | None = Field(None, description="Page offset for pagination")
+    page: int | None = Field(
+        None, description="Page offset for pagination", json_schema_extra={"is_accessible_to_agent": False}
+    )
     site: str | None = Field(None, description="Limit search to specific domain")
     return_format: JinaResponseFormat | None = Field(
-        None, description="Response format (markdown, html, text, screenshot, pageshot)"
+        None,
+        description="Response format (markdown, html, text, screenshot, pageshot)",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_images: SummaryPreference | None = Field(
-        None, description="Include image summaries (True) or 'all' images per SERP entry"
+        None,
+        description="Include image summaries (True) or 'all' images per SERP entry",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_links: SummaryPreference | None = Field(
-        None, description="Include link summaries (True) or 'all' links per SERP entry"
+        None,
+        description="Include link summaries (True) or 'all' links per SERP entry",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
-    include_favicons: bool | None = Field(None, description="Include SERP favicons")
-    include_favicon: bool | None = Field(None, description="Include individual page favicon")
-    include_full_content: bool | None = Field(None, description="Include full content of search results")
+    include_favicons: bool | None = Field(
+        None,
+        description="Include SERP favicons",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
+    include_favicon: bool | None = Field(
+        None,
+        description="Include individual page favicon",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
+    include_full_content: bool | None = Field(
+        None, description="Include full content of search results", json_schema_extra={"is_accessible_to_agent": False}
+    )
     retain_images: RetainImagesPreference | None = Field(
-        None, description="Controls X-Retain-Images header (e.g., 'none' to strip images)"
+        None,
+        description="Controls X-Retain-Images header (e.g., 'none' to strip images)",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
-    respond_with: str | None = Field(None, description="Explicit X-Respond-With value")
-    engine: EnginePreference | None = Field(None, description="Engine override ('browser', 'direct')")
-    no_cache: bool | None = Field(None, description="Bypass cache for real-time data")
-    generate_alt_text: bool | None = Field(None, description="Generate alt text for images without alt tags")
-    timeout: int | None = Field(None, description="Request timeout in seconds")
-    locale: str | None = Field(None, description="Browser locale setting")
-    cookies: str | None = Field(None, description="Custom cookie settings")
-    proxy_url: str | None = Field(None, description="Proxy URL for requests")
+    respond_with: str | None = Field(
+        None,
+        description="Explicit X-Respond-With value",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
+    engine: EnginePreference | None = Field(
+        None,
+        description="Engine override ('browser', 'direct', 'cf-browser-rendering')",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
+    no_cache: bool | None = Field(
+        None,
+        description="Bypass cache for real-time data",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
+    generate_alt_text: bool | None = Field(
+        None,
+        description="Generate alt text for images without alt tags",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
+    timeout: int | None = Field(
+        None,
+        description="Request timeout in seconds",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
+    locale: str | None = Field(
+        None,
+        description="Browser locale setting",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
+    cookies: str | None = Field(
+        None,
+        description="Custom cookie settings",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
+    proxy_url: str | None = Field(
+        None,
+        description="Proxy URL for requests",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
 
 
 class JinaSearchTool(ConnectionNode):
@@ -334,11 +376,12 @@ class JinaSearchTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.WEB_SEARCH
-    name: str = "Jina Search Tool"
+    name: str = "jina-search"
     description: str = DESCRIPTION_SEARCH
+    is_parallel_execution_allowed: bool = True
     connection: Jina
     query: str | None = Field(None, description="Search query")
-    max_results: int = Field(default=5, ge=1, le=100, description="Maximum number of search results")
+    max_results: int = Field(default=10, ge=1, le=100, description="Maximum number of search results")
 
     country: str | None = Field(None, description="Two-letter country code (e.g., 'US', 'GB')")
     location: str | None = Field(None, description="Geographic location for search origin")
@@ -579,7 +622,7 @@ class JinaSearchTool(ConnectionNode):
 
         if self.is_optimized_for_agents:
             result_sections = [
-                f"## Jina Search Results for '{request_body['q']}'",
+                f"## Search Results for '{request_body['q']}'",
                 "",
             ]
             if sources_with_url:
@@ -587,7 +630,7 @@ class JinaSearchTool(ConnectionNode):
             if formatted_results:
                 result_sections.append(formatted_results)
             else:
-                result_sections.append("No results were returned by Jina Search.")
+                result_sections.append("No results were returned by the tool.")
             result = "\n".join(result_sections).strip()
         else:
             images = {}

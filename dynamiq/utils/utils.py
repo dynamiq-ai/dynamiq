@@ -107,6 +107,52 @@ def merge(a: Any, b: Any) -> dict[str, Any]:
     return {**a, **b}
 
 
+def serialize_file(file_obj: Any) -> Any:
+    """Serialize a file-like object (BytesIO, bytes) to a JSON-safe dict with base64 content.
+
+    Args:
+        file_obj: A BytesIO, bytes, or other object to serialize.
+
+    Returns:
+        A dict with base64-encoded content and metadata, or the original object if not binary.
+    """
+    if isinstance(file_obj, BytesIO):
+        name = getattr(file_obj, "name", None)
+        content_type = getattr(file_obj, "content_type", None)
+        file_bytes = file_obj.getvalue()
+        result = {"content": base64.b64encode(file_bytes).decode("utf-8"), "size": len(file_bytes)}
+        if name:
+            result["name"] = name
+        if content_type:
+            result["mime_type"] = content_type
+        return result
+    if isinstance(file_obj, bytes):
+        return {"content": base64.b64encode(file_obj).decode("utf-8"), "size": len(file_obj)}
+    return file_obj
+
+
+def serialize_files_in_value(value: Any) -> Any:
+    """Recursively walk a value and serialize any BytesIO/bytes objects found in dicts or lists.
+
+    Args:
+        value: Any Python value — dicts, lists, BytesIO, bytes, or primitives.
+
+    Returns:
+        The same structure with all BytesIO/bytes replaced by JSON-safe dicts.
+    """
+    if isinstance(value, (BytesIO, bytes)):
+        return serialize_file(value)
+    if isinstance(value, dict):
+        return {k: serialize_files_in_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [serialize_files_in_value(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(serialize_files_in_value(v) for v in value)
+    if isinstance(value, BaseModel):
+        return {k: serialize_files_in_value(getattr(value, k)) for k in value.model_fields}
+    return value
+
+
 def encode_bytes(value: bytes) -> str:
     """
     Encode a bytes object to an encoded string (lossy - for display/tracing).

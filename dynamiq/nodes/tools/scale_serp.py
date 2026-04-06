@@ -12,30 +12,22 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_SERP = """Performs web search using Scale SERP with support for web, news, images, and video results.
+DESCRIPTION_SERP = """Performs web search with support for web, news, images, and video results.
 
 Key Capabilities:
 - Multi-format search: web, news, images, videos
-- Geographic targeting with location and country filtering
 - Language preferences and safe search filtering
 - Customizable result counts (1-100) and time-based filtering
 
 Usage Strategy:
 - Web: General research, documentation, comprehensive results
-- News: Current events, recent developments with time_range
+- News: Current events and recent developments
 - Images/Videos: Visual content for presentations, analysis
-- Use location for local results, num parameter for analysis depth
-
-Parameter Guide:
-- search_type: web/news/images/videos for content type
-- location: Geographic targeting ("New York", "London")
-- num: Result count based on analysis needs (1-100)
-- time_range: Recent results (day, week, month, year)
+- Use limit parameter for analysis depth
 
 Examples:
-- {"query": "coffee shops", "search_type": "web", "location": "New York"}
-- {"query": "tech news", "search_type": "news", "time_range": "week"}
-- {"query": "data visualization", "search_type": "images", "num": 30}"""
+- {"query": "coffee shops", "search_type": "web"}
+- {"query": "tech news", "search_type": "news", "limit": 5}"""
 
 
 class SearchType(str, enum.Enum):
@@ -63,10 +55,14 @@ class ScaleSerpInputSchema(BaseModel):
         default=SearchType.WEB, description="Type of search to perform (web, news, images, videos)"
     )
     output: str | None = Field(
-        default=None, description="Output format for the results (json, html, csv). Defaults to json if not specified."
+        default=None,
+        description="Output format for the results (json, html, csv). Defaults to json if not specified.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
-    include_html: bool = Field(
-        default=False, description="Whether to include HTML content in the results. Defaults to False."
+    include_html: bool | None = Field(
+        default=None,
+        description="Whether to include HTML content in the results. Defaults to False.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
 
     @model_validator(mode="after")
@@ -100,8 +96,9 @@ class ScaleSerpTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.WEB_SEARCH
-    name: str = "Scale Serp Search Tool"
+    name: str = "scale-serp-search"
     description: str = DESCRIPTION_SERP
+    is_parallel_execution_allowed: bool = True
     connection: ScaleSerp
 
     query: str = Field(default="", description="The default search query to use")

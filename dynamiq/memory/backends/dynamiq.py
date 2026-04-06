@@ -110,7 +110,27 @@ class Dynamiq(MemoryBackend):
 
     def clear(self) -> None:
         """Not supported by the Dynamiq API."""
-        raise DynamiqMemoryError("Clearing remote memories is not supported by the Dynamiq backend.")
+        raise DynamiqMemoryError("Clearing all remote memories is not supported by the Dynamiq backend.")
+
+    def delete(self, session_id: str | None = None, user_id: str | None = None) -> None:
+        """Delete memory items scoped by session and/or user via the remote API."""
+        effective_user_id = user_id or self.user_id
+        effective_session_id = session_id or self.session_id
+
+        if not effective_user_id and not effective_session_id:
+            raise DynamiqMemoryError("At least user_id or session_id is required to delete memory items.")
+
+        params: dict[str, str] = {}
+        if effective_user_id:
+            params["user_id"] = effective_user_id
+        if effective_session_id:
+            params["session_id"] = effective_session_id
+
+        self._request(
+            HTTPMethod.DELETE,
+            f"{self._base_path}/{self.memory_id}/items",
+            params=params,
+        )
 
     def _filter_messages(self, messages: list[Message], filters: dict[str, Any]) -> list[Message]:
         """Filter messages by metadata."""

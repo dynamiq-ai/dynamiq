@@ -10,7 +10,7 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_ZENROWS = """Scrapes web content from URLs using ZenRows with advanced anti-bot protection and JavaScript rendering. Handles complex websites with proxy rotation, CAPTCHA solving, and browser automation for reliable data extraction.
+DESCRIPTION_ZENROWS = """Scrapes web content from URLs with advanced anti-bot protection and JavaScript rendering. Handles complex websites with proxy rotation, CAPTCHA solving, and browser automation for reliable data extraction.
 
 Key Capabilities:
 - Bypass anti-bot protection and access blocked websites
@@ -20,9 +20,6 @@ Key Capabilities:
 
 Usage Strategy:
 Use for websites that block standard scrapers or require JavaScript execution.
-
-Parameter Guide:
-- url: Target website URL to scrape
 
 Examples:
 - Basic scraping: {"url": "https://example.com"}
@@ -36,15 +33,16 @@ class ZenRowsInputSchema(BaseModel):
 
 class ZenRowsTool(ConnectionNode):
     """
-    A tool for scraping web pages, powered by ZenRows.
+    A tool for scraping web pages.
 
-    This class is responsible for scraping the content of a web page using ZenRows.
+    This class is responsible for scraping the content of a web page.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.WEB_SCRAPE
-    name: str = "Zenrows Scraper Tool"
+    name: str = "zenrows-scrape"
     description: str = DESCRIPTION_ZENROWS
+    is_parallel_execution_allowed: bool = True
     connection: ZenRows
     url: str | None = None
     markdown_response: bool = Field(

@@ -68,14 +68,14 @@ class ContextManagerTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Context Manager Tool"
+    name: str = "context-manager"
     description: str = (
         "Generates a conversation summary to help manage context.\n\n"
         "WARNING: This tool will trigger context compression. Before calling it,\n"
         "save any necessary information because previous messages will be removed.\n"
     )
 
-    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=60))
+    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=3600))
     token_budget_ratio: float = Field(default=0.75, gt=0, lt=1)
     llm: Node = Field(..., description="LLM instance for generating summaries")
 

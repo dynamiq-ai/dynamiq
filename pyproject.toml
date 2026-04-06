@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "dynamiq"
-version = "0.40.0"
+version = "0.46.0"
 description = "Dynamiq is an orchestration framework for agentic AI and LLM applications"
 authors = ["Dynamiq Team <hello@getdynamiq.ai>"]
 license = "Apache License 2.0"
@@ -27,7 +27,7 @@ openai = ">=1.83.0"
 boto3 = "~1.34.34"
 redis = "~5.0.0"
 google-cloud-aiplatform = "~1.93.0"
-litellm = "1.81.8"
+litellm = "1.82.4"
 requests = "^2.32.5"
 RestrictedPython = "~8.0"
 jsonpath-ng = "~1.6.1"
@@ -76,6 +76,17 @@ e2b = "2.8.0"
 tiktoken = "0.12.0"
 neo4j = "^6.0.3"
 e2b-desktop = "^2.2.0"
+beautifulsoup4 = "~4.12.3"
+markdown = "~3.7"
+inscriptis = "2.5.0"
+stagehand = "~0.4.0"
+pyOpenSSL = "~24.3.0"
+steel-sdk = "0.15.0"
+reportlab = "~4.3.0"
+cua-computer = { version = "0.4.19", python = ">=3.12,<3.14", optional = true }
+
+[tool.poetry.extras]
+cua = ["cua-computer"]
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~78.1.1"
@@ -90,8 +101,9 @@ mkdocs = "~1.6.0"
 mkdocs-material = "~9.5.27"
 mkdocstrings = "~0.25.1"
 mkdocstrings-python = "~1.10.4"
+mkdocs-autorefs = "<1.4.0"
+griffe = "<2.0.0"
 requests-mock = "~1.12.1"
-reportlab="4.3.1"
 pytest-rerunfailures = "^16.1"
 
 [tool.poetry.group.examples]
@@ -111,8 +123,6 @@ streamlit-date-picker = "~0.0.3"
 streamlit-image-select = "~0.6.0"
 streamlit-pdf-viewer = "~0.0.14"
 weasyprint = "~62.3"
-markdown = "~3.6"
-beautifulsoup4 = "~4.12.3"
 selenium = "~4.21.0"
 tqdm = "~4.66.4"
 sympy = "~1.13.1"

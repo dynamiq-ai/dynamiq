@@ -33,6 +33,11 @@ IMPORTANT RULES:
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
+SINGLE ACTION PER TURN:
+- Execute exactly ONE action per response, then wait for its Observation before continuing
+- Do NOT chain multiple Action/Action Input pairs in the same response
+- After receiving an Observation, decide the next single action based on the result
+
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - If you want to return files, include an "Output Files:" line before "Answer:" listing file paths (comma-separated). This line is optional — omit it if there are no files to return.
@@ -100,6 +105,11 @@ CRITICAL XML FORMAT RULES:
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
+SINGLE ACTION PER TURN:
+- Execute exactly ONE <action>/<action_input> pair per response, then wait for its Observation before continuing
+- Do NOT include multiple action blocks or answer blocks in the same response
+- After receiving an Observation, decide the next single action based on the result
+
 JSON FORMATTING REQUIREMENTS:
 - Put JSON on single line within tags
 - Use double quotes for all strings
@@ -135,11 +145,6 @@ them in any order you choose to complete the task:\n
 {{ tool_description }}
 """
 
-REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
-- Avoid phrases like 'based on the information gathered or provided.'
-- Clearly mention any files that were generated during the process.
-- Provide file names and brief descriptions of their contents.
-"""
 
 REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """Always structure your responses in this JSON format:
 
@@ -165,6 +170,7 @@ output_files: [comma-separated file paths to return, or empty string if none]}
 
 IMPORTANT RULES:
 - You MUST ALWAYS include "thought" as the FIRST field in your JSON
+- ALWAYS populate the "thought" field FIRST before "action_input" in your response.
 - Each tool has a specific input format you must strictly follow
 - In action_input field, provide properly formatted JSON with double quotes
 - Avoid using extra backslashes
@@ -192,6 +198,7 @@ Only after utilizing the necessary tools and gathering the required information 
 you call `provide_final_answer` to deliver the final response.
 
 FUNCTION CALLING GUIDELINES:
+- ALWAYS populate the "thought" field FIRST before "action_input" in your function calls
 - Analyze the request carefully to determine if tools are needed
 - Call functions with properly formatted arguments
 - Handle tool responses appropriately before providing final answer
@@ -246,8 +253,30 @@ listing absolute file paths (comma-separated). This tag is optional — omit it 
 """
 
 
-REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
-- Avoid phrases like 'based on the information gathered or provided.'
+REACT_BLOCK_OUTPUT_FORMAT = """
+
+In your answers, adhere to the following formatting and stylistic guidelines:
+
+- Use GitHub-flavored Markdown as the default format for all responses and generated documents.
+- Write in a professional, academic tone using complete, well-structured paragraphs.
+- Avoid excessive bullet points; prioritize fully developed prose.
+- When appropriate, alternate between explanatory paragraphs and structured tables
+  to improve clarity, comparison, or organization of key information.
+- Use bold formatting to emphasize essential concepts, distinctions, terminology, or conclusions.
+- Use blockquotes to highlight formal definitions, cited statements, or especially important excerpts.
+- Include inline hyperlinks when referencing websites, platforms, or external resources.
+- When making factual claims, support them with inline numeric citations using Markdown reference-style links.
+- CRITICAL: Only use emojis if the user explicitly requests it.
+You MUST AVOID using emojis in all communication unless asked.
+
+IMPORTANT:
+- Formatting must enhance readability and analytical clarity.
+- Tables should only be used when they materially improve organization or comparison.
+- Do not over-format; maintain a professional and academically consistent presentation style.
+- In your final answer:
+    - Avoid phrases like 'based on the information gathered or provided'.
+    - Clearly mention any files that were generated during the process
+    - Provide file names and brief descriptions of their contents.
 """
 
 REACT_MAX_LOOPS_PROMPT = """

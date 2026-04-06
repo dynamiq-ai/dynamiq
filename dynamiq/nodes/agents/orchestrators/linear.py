@@ -68,7 +68,7 @@ class LinearOrchestrator(Orchestrator):
         max_user_analyze_retries (int): Maximum number of retries for analyzing user input.
     """
 
-    name: str | None = "LinearOrchestrator"
+    name: str | None = "linear-orchestrator"
     group: NodeGroup = NodeGroup.AGENTS
     manager: LinearAgentManager
     agents: list[Agent] = []

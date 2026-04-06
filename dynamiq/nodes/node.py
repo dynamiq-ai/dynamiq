@@ -268,6 +268,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         default=False,
         description="Whether this node can be executed in parallel with other nodes inside an agent.",
     )
+    is_output_persisted_in_sandbox_allowed: bool = Field(
+        default=False,
+        description="Whether output persistence to sandbox is allowed when this node is used as an agent tool.",
+    )
     action_type: ActionType | None = Field(default=None, description="Action type classification for streaming.")
 
     _output_references: NodeOutputReferences = PrivateAttr()

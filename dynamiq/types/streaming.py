@@ -5,9 +5,9 @@ from queue import Queue
 from threading import Event
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, field_validator
+from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt, PositiveFloat, field_validator
 
-from dynamiq.utils import generate_uuid
+from dynamiq.utils import generate_uuid, serialize_files_in_value
 
 
 class StreamingMode(str, Enum):
@@ -80,7 +80,6 @@ class StreamingThought(BaseModel):
     """Model for reasoning/thought streaming chunks."""
 
     thought: str
-    loop_num: int
 
     model_config = ConfigDict(extra="forbid")
 
@@ -107,6 +106,13 @@ class AgentReasoningEventMessageData(BaseModel):
     loop_num: int
 
 
+class AgentToolInputDeltaData(BaseModel):
+    """Lean delta for tool_input streaming. Only tool_run_id and action_input change."""
+
+    tool_run_id: str
+    action_input: Any
+
+
 class AgentToolResultEventMessageData(BaseModel):
     """Model for agent tool result streaming event data."""
 
@@ -119,6 +125,36 @@ class AgentToolResultEventMessageData(BaseModel):
     loop_num: int
     output: dict[str, Any] | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    status: str = "success"
+
+    def to_dict(self, **kwargs) -> dict:
+        """Convert to dictionary with file objects serialized as base64.
+
+        Returns:
+            dict: Dictionary representation with all BytesIO/bytes values
+                in files, result, input, and output converted to
+                ``{"content": "<base64>", "size": ..., "name": ..., "mime_type": ...}``.
+        """
+        data = super().model_dump(**kwargs)
+        data["files"] = serialize_files_in_value(self.files)
+        data["result"] = serialize_files_in_value(self.result)
+        data["input"] = serialize_files_in_value(self.input)
+        if self.output is not None:
+            data["output"] = serialize_files_in_value(self.output)
+        return data
+
+
+class AgentToolInputErrorEventMessageData(BaseModel):
+    """Model for agent tool input error streaming event data.
+
+    Emitted when action parsing fails after tool input was already
+    partially streamed, so consumers can discard the invalid chunks.
+    """
+
+    tool_run_id: str
+    name: str
+    error: str
+    loop_num: int
 
 
 class StreamingConfig(BaseModel):
@@ -126,6 +162,8 @@ class StreamingConfig(BaseModel):
 
     Attributes:
         enabled (bool): Whether streaming is enabled. Defaults to False.
+        stream_tool_input (list[str] | None): Allowlist of tool names whose inputs should be
+            streamed. None means all tool inputs are streamed. Defaults to None.
         event (str): Event name. Defaults to "streaming".
         timeout (float | None): Timeout for streaming. Defaults to 600 seconds.
         input_queue (Queue | None): Input queue for streaming. Defaults to None.
@@ -134,8 +172,12 @@ class StreamingConfig(BaseModel):
             Shorter interval allows faster response to cancellation. Defaults to 5.0 second.
         mode (StreamingMode): Streaming mode. Defaults to StreamingMode.ANSWER.
         include_usage (bool): Whether to include usage information. Defaults to False.
+        min_chunk_chars (int): Minimum number of characters to accumulate before emitting
+            a streaming event. Helps reduce event count by combining small fragments.
+            0 means no accumulation (emit immediately). Defaults to 0.
     """
     enabled: bool = False
+    stream_tool_input: list[str] | None = None
     event: str = STREAMING_EVENT
     timeout: PositiveFloat | None = 600.0
     input_queue: Queue | None = None
@@ -143,6 +185,7 @@ class StreamingConfig(BaseModel):
     input_queue_poll_interval: PositiveFloat = 5.0
     mode: StreamingMode = StreamingMode.FINAL
     include_usage: bool = False
+    min_chunk_chars: NonNegativeInt = 0
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

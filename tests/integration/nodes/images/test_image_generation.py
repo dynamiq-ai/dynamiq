@@ -30,7 +30,7 @@ def test_image_generation_with_url_response(
         flow=Flow(nodes=[image_node]),
     )
 
-    input_data = {"prompt": "A beautiful sunset over mountains"}
+    input_data = {"prompt": "A beautiful sunset over mountains", "output_file_name": "generated_image.png"}
 
     response = wf.run(
         input_data=input_data,
@@ -73,7 +73,7 @@ def test_image_generation_with_b64_response(
         flow=Flow(nodes=[image_node]),
     )
 
-    input_data = {"prompt": "A serene lake at dawn"}
+    input_data = {"prompt": "A serene lake at dawn", "output_file_name": "generated_image.png"}
 
     response = wf.run(
         input_data=input_data,
@@ -82,7 +82,8 @@ def test_image_generation_with_b64_response(
 
     assert response.status == RunnableStatus.SUCCESS
     node_output = response.output[image_node.id]
-    assert node_output["output"]["content"] == ["generated_image_0.png created"]
+    created_file_entry = node_output["output"]["content"][0]
+    assert created_file_entry == "generated_image.png created"
     assert len(node_output["output"]["files"]) == 1
     assert isinstance(node_output["output"]["files"][0], io.BytesIO)
 
@@ -111,7 +112,7 @@ def test_image_generation_multiple_images(
         flow=Flow(nodes=[image_node]),
     )
 
-    input_data = {"prompt": "Three variations of a cat"}
+    input_data = {"prompt": "Three variations of a cat", "output_file_name": "generated_image.png"}
 
     response = wf.run(
         input_data=input_data,
@@ -126,6 +127,68 @@ def test_image_generation_multiple_images(
 
     call_kwargs = mock_image_generation_executor.call_args[1]
     assert call_kwargs["n"] == 3
+
+
+def test_image_generation_custom_output_filename(
+    mock_image_generation_executor,
+    mock_image_b64,
+):
+    """Test image generation supports custom output filename from input schema."""
+    openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")
+
+    image_node = ImageGeneration(
+        name="Image Generator Custom Filename",
+        model="gpt-image-1",
+        connection=openai_connection,
+        response_format=ImageResponseFormat.B64_JSON,
+    )
+
+    wf = Workflow(
+        id=str(uuid.uuid4()),
+        flow=Flow(nodes=[image_node]),
+    )
+
+    input_data = {"prompt": "A serene lake at dawn", "output_file_name": "poster.png"}
+
+    response = wf.run(
+        input_data=input_data,
+        config=RunnableConfig(callbacks=[]),
+    )
+
+    assert response.status == RunnableStatus.SUCCESS
+    node_output = response.output[image_node.id]
+    assert node_output["output"]["content"][0] == "poster.png created"
+    assert node_output["output"]["files"][0].name == "poster.png"
+
+
+def test_image_generation_uses_default_output_filename_when_omitted(
+    mock_image_generation_executor,
+    mock_image_b64,
+):
+    """Regression: omitted output_file_name uses schema default."""
+    openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")
+
+    image_node = ImageGeneration(
+        name="Image Generator Default Filename",
+        model="gpt-image-1",
+        connection=openai_connection,
+        response_format=ImageResponseFormat.B64_JSON,
+    )
+
+    wf = Workflow(
+        id=str(uuid.uuid4()),
+        flow=Flow(nodes=[image_node]),
+    )
+
+    response = wf.run(
+        input_data={"prompt": "A serene lake at dawn"},
+        config=RunnableConfig(callbacks=[]),
+    )
+
+    assert response.status == RunnableStatus.SUCCESS
+    node_output = response.output[image_node.id]
+    assert node_output["output"]["content"][0] == "generated_image.png created"
+    assert node_output["output"]["files"][0].name == "generated_image.png"
 
 
 def test_image_generation_with_tracing(
@@ -148,7 +211,7 @@ def test_image_generation_with_tracing(
         flow=Flow(nodes=[image_node]),
     )
 
-    input_data = {"prompt": "A futuristic city"}
+    input_data = {"prompt": "A futuristic city", "output_file_name": "generated_image.png"}
 
     response = wf.run(
         input_data=input_data,
@@ -191,6 +254,7 @@ def test_image_generation_optimized_for_agents_with_tracing(
     )
 
     input_data = {"prompt": "A beautiful landscape"}
+    input_data["output_file_name"] = "agent_generated_image.png"
 
     response = wf.run(
         input_data=input_data,
