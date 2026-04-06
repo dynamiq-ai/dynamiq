@@ -22,7 +22,7 @@ classifiers = [
 [tool.poetry.dependencies]
 python = ">=3.10,<3.14"
 jinja2 = "~3.1.6"
-pydantic = "~2.11.7"
+pydantic = "~2.12.5"
 openai = ">=1.83.0"
 boto3 = "~1.34.34"
 redis = "~5.0.0"
@@ -36,7 +36,7 @@ pinecone-client = "~3.2.2"
 chromadb-client = "~0.5.5.dev0"
 unstructured-client = "^0.42.3"
 omegaconf = "~2.3.0"
-weaviate-client = "~4.7.1"
+weaviate-client = "~4.20.4"
 filetype = "~1.2.0"
 more-itertools = "~10.3.0"
 pdf2image = "~1.17.0"
@@ -84,6 +84,7 @@ pyOpenSSL = "~24.3.0"
 steel-sdk = "0.15.0"
 reportlab = "~4.3.0"
 cua-computer = { version = "0.4.19", python = ">=3.12,<3.14", optional = true }
+daytona = "^0.161.0"
 
 [tool.poetry.extras]
 cua = ["cua-computer"]
@@ -112,9 +113,9 @@ optional = true
 [tool.poetry.group.examples.dependencies]
 fastapi = "~0.115.12"
 uvicorn = "~0.25.0"
-websockets = "~14.2"
+websockets = "~15.0.0"
 sse-starlette = "~2.1.0"
-httpx = "~0.27.0"
+httpx = "~0.28.0"
 httpx-sse = "~0.4.0"
 chainlit = "~2.5.5"
 typer = "~0.12.3"
