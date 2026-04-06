@@ -1710,17 +1710,19 @@ class Agent(IterativeCheckpointMixin, Node):
 
         IterativeCheckpointMixin fields (_iteration_state, _has_restored_iteration)
         are preserved — they are consumed once by _run_agent() via get_start_iteration().
+        SubAgentTool call counts are preserved on resume so the per-run limit stays correct.
         """
         self._run_depends = []
         self._tool_cache: dict[ToolCacheEntry, Any] = {}
         self._completed_loops = 0
         self.system_prompt_manager.reset()
 
-        from dynamiq.nodes.tools.agent_tool import SubAgentTool
+        if not self.is_resumed:
+            from dynamiq.nodes.tools.agent_tool import SubAgentTool
 
-        for tool in self.tools:
-            if isinstance(tool, SubAgentTool):
-                tool.reset_call_count()
+            for tool in self.tools:
+                if isinstance(tool, SubAgentTool):
+                    tool.reset_call_count()
 
     def generate_prompt(self, block_names: list[str] | None = None, **kwargs) -> str:
         """Generates the prompt using specified blocks and variables."""

@@ -123,7 +123,7 @@ class FileSystem(CheckpointBackend):
 
         fd, tmp_path = tempfile.mkstemp(dir=run_dir, suffix=".tmp")
         try:
-            with os.fdopen(fd, "w") as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(copy.to_dict(), f, default=encode_reversible, ensure_ascii=False)
             os.replace(tmp_path, target)
         except BaseException:
@@ -140,7 +140,7 @@ class FileSystem(CheckpointBackend):
         if not path:
             return None
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f, object_hook=decode_reversible)
         except (FileNotFoundError, json.JSONDecodeError):
             return None
@@ -243,7 +243,7 @@ class FileSystem(CheckpointBackend):
         from dynamiq.checkpoints.checkpoint import FlowCheckpoint  # deferred: avoids import cycle at package init
 
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f, object_hook=decode_reversible)
             return FlowCheckpoint(**data)
         except (json.JSONDecodeError, FileNotFoundError, Exception):

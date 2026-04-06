@@ -1247,6 +1247,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
             if not self._prompt.messages:
                 self._setup_prompt_and_stop_sequences(input_message, history_messages)
+            else:
+                self._pinned_input = input_message
             self._setup_stop_sequences()
             self.state.max_loops = self.max_loops
             self._refresh_agent_state(start_loop)

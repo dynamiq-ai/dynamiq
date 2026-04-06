@@ -432,6 +432,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                     wf_run_id=wf_run_id,
                     original_input=input_data,
                     original_config=config.to_checkpoint_dict() if config else None,
+                    pending_node_ids=[n.id for n in self.nodes],
                 )
                 self._save_checkpoint()
 
@@ -590,6 +591,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                     wf_run_id=wf_run_id,
                     original_input=input_data,
                     original_config=config.to_checkpoint_dict() if config else None,
+                    pending_node_ids=[n.id for n in self.nodes],
                 )
                 await self._save_checkpoint_async()
 
