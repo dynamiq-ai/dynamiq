@@ -6,8 +6,9 @@ from e2b_code_interpreter import Sandbox
 
 from dynamiq.connections import E2B as E2BConnection
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
-from dynamiq.nodes.tools.code_interpreter import DESCRIPTION_SANDBOX_INTERPRETER as DESCRIPTION_E2B  # noqa: F401
+from dynamiq.nodes.tools.code_interpreter import DESCRIPTION_SANDBOX_INTERPRETER as DESCRIPTION_E2B
 from dynamiq.nodes.tools.code_interpreter import BaseCodeInterpreterTool
+from dynamiq.nodes.tools.code_interpreter import CodeInterpreterInputSchema as E2BInterpreterInputSchema  # noqa: F401
 from dynamiq.utils.logger import logger
 
 
