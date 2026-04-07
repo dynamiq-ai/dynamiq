@@ -217,5 +217,3 @@ class TestAsyncCachingPath:
         assert result.status == RunnableStatus.SUCCESS
         assert node.async_called is True
         assert node.sync_called is False
-
-
