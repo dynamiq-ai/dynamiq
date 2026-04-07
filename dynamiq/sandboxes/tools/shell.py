@@ -81,7 +81,7 @@ class SandboxShellTool(Node):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         if self.sandbox and hasattr(self.sandbox, "base_path"):
-            self.description = self.description.format(base_path=self.sandbox.base_path)
+            self.description = self.description.replace("{base_path}", self.sandbox.base_path)
 
     @property
     def to_dict_exclude_params(self):

@@ -61,7 +61,7 @@ df.to_csv('{home_dir}/output/result.csv')\\nprint('File saved to {home_dir}/outp
   * "data/file.csv" → saved as {home_dir}/input/data/file.csv
   * "/file.csv" → saved as /file.csv (root directory)"""
 
-DESCRIPTION_SANDBOX_INTERPRETER = _DESCRIPTION_TEMPLATE.format(home_dir="/home/user")
+DESCRIPTION_SANDBOX_INTERPRETER = _DESCRIPTION_TEMPLATE.replace("{home_dir}", "/home/user")
 
 
 def detect_mime_type(file_content: bytes, file_path: str) -> str:
@@ -388,7 +388,7 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
         """Initialize the sandbox interpreter tool."""
         super().__init__(**kwargs)
         if self.base_path != "/home/user":
-            self.description = _DESCRIPTION_TEMPLATE.format(home_dir=self.base_path)
+            self.description = _DESCRIPTION_TEMPLATE.replace("{home_dir}", self.base_path)
         if self.persistent_sandbox and self.connection.api_key:
             self._initialize_persistent_sandbox()
         else:
