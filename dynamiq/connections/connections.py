@@ -841,6 +841,31 @@ class E2B(BaseApiKeyConnection):
         pass
 
 
+class Daytona(BaseApiKeyConnection):
+    api_key: str = Field(default_factory=partial(get_env_var, "DAYTONA_API_KEY"))
+    api_url: str = Field(default_factory=partial(get_env_var, "DAYTONA_API_URL", "https://app.daytona.io/api"))
+    target: str | None = Field(default_factory=partial(get_env_var, "DAYTONA_TARGET", None))
+
+    _client: Any = None
+
+    def connect(self):
+        pass
+
+    def get_client(self):
+        """Get or create a cached Daytona SDK client instance."""
+        if self._client is None:
+            from daytona import Daytona as DaytonaSDK
+            from daytona import DaytonaConfig
+
+            config = DaytonaConfig(
+                api_key=self.api_key,
+                api_url=self.api_url,
+                target=self.target,
+            )
+            self._client = DaytonaSDK(config)
+        return self._client
+
+
 class HuggingFace(BaseApiKeyConnection):
     api_key: str = Field(default_factory=partial(get_env_var, "HUGGINGFACE_API_KEY"))
 
