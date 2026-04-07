@@ -27,6 +27,7 @@ def _make_tool(name: str, code: str) -> Python:
 
 
 @pytest.mark.integration
+@pytest.mark.flaky(reruns=3)
 @pytest.mark.parametrize(
     "inference_mode", [InferenceMode.XML, InferenceMode.STRUCTURED_OUTPUT, InferenceMode.FUNCTION_CALLING]
 )
