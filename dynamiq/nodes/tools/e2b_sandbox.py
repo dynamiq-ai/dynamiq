@@ -101,7 +101,7 @@ class E2BInterpreterTool(BaseCodeInterpreterTool):
                 logger.warning(f"Failed to set shell command timeout: {e}")
 
         try:
-            process = sandbox.commands.run(command, background=True, envs=env or {}, cwd=cwd or "/home/user")
+            process = sandbox.commands.run(command, background=True, envs=env or {}, cwd=cwd)
         except Exception as e:
             raise ToolExecutionException(f"Error during shell command execution: {e}", recoverable=True)
 

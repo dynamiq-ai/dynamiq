@@ -259,7 +259,7 @@ class CodeInterpreterInputSchema(BaseModel):
         description="Environment variables for shell commands.",
         json_schema_extra={"is_accessible_to_agent": False},
     )
-    cwd: str = Field(default="/home/user/output", description="Working directory for shell commands.")
+    cwd: str | None = Field(default=None, description="Working directory for shell commands.")
     timeout: int | None = Field(default=None, description="Override sandbox timeout for this execution (seconds)")
 
     @model_validator(mode="after")
@@ -690,7 +690,7 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
                     shell_command,
                     sandbox=sandbox,
                     env=input_data.env,
-                    cwd=input_data.cwd,
+                    cwd=input_data.cwd or self.output_dir,
                     timeout=input_data.timeout,
                 )
 

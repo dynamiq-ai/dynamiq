@@ -5,8 +5,7 @@ from daytona import DaytonaRateLimitError
 
 from dynamiq.connections import Daytona as DaytonaConnection
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
-from dynamiq.nodes.tools.code_interpreter import DESCRIPTION_SANDBOX_INTERPRETER as DESCRIPTION_DAYTONA
-from dynamiq.nodes.tools.code_interpreter import BaseCodeInterpreterTool
+from dynamiq.nodes.tools.code_interpreter import DESCRIPTION_SANDBOX_INTERPRETER, BaseCodeInterpreterTool
 from dynamiq.utils.logger import logger
 
 
@@ -14,7 +13,7 @@ class DaytonaInterpreterTool(BaseCodeInterpreterTool):
     """Daytona implementation of the sandbox interpreter tool."""
 
     name: str = "daytona-code-interpreter-tool"
-    description: str = DESCRIPTION_DAYTONA
+    description: str = DESCRIPTION_SANDBOX_INTERPRETER
     base_path: str = "/home/daytona"
     connection: DaytonaConnection
     _sandbox: Any = None
@@ -80,7 +79,7 @@ class DaytonaInterpreterTool(BaseCodeInterpreterTool):
             raise ValueError("Sandbox instance is required for command execution.")
 
         try:
-            result = sandbox.process.exec(command, cwd=cwd or "/home/daytona", env=env or {}, timeout=timeout)
+            result = sandbox.process.exec(command, cwd=cwd, env=env or {}, timeout=timeout)
         except Exception as e:
             raise ToolExecutionException(f"Error during shell command execution: {e}", recoverable=True)
 

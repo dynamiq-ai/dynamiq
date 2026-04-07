@@ -70,11 +70,6 @@ class SandboxShellTool(Node):
     )
 
     sandbox: Sandbox = Field(..., description="Sandbox backend to execute commands in.")
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        if self.sandbox and hasattr(self.sandbox, "base_path"):
-            self.description = self.description.format(base_path=self.sandbox.base_path)
     blocked_commands: list[str] | None = Field(
         default=None,
         description="Optional list of blocked substrings. A command is blocked if"
@@ -82,6 +77,11 @@ class SandboxShellTool(Node):
     )
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[SandboxShellInputSchema]] = SandboxShellInputSchema
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if self.sandbox and hasattr(self.sandbox, "base_path"):
+            self.description = self.description.format(base_path=self.sandbox.base_path)
 
     @property
     def to_dict_exclude_params(self):
