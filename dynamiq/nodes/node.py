@@ -821,7 +821,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             if feature_name in approval_result.data
         }
         approval_result.data = {**input_data, **update_params}
-        self._pending_approval_response = None
 
         if approval_result.is_approved is None:
             if approval_result.feedback == approval_config.accept_pattern:

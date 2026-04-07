@@ -351,22 +351,21 @@ class CheckpointFlowMixin(BaseModel):
                 cfg = self._effective_checkpoint_config or self.checkpoint
                 if self._checkpoint and cfg.checkpoint_mid_agent_loop_enabled:
                     node = self._node_by_id.get(node_id)
-                    if node and isinstance(node, CheckpointNodeMixin):
-                        checkpoint_state = node.to_checkpoint_state()
-                        internal_state = (
-                            checkpoint_state.model_dump()
-                            if hasattr(checkpoint_state, "model_dump")
-                            else checkpoint_state
+                    if not node or not isinstance(node, CheckpointNodeMixin):
+                        return
+                    checkpoint_state = node.to_checkpoint_state()
+                    internal_state = (
+                        checkpoint_state.model_dump() if hasattr(checkpoint_state, "model_dump") else checkpoint_state
+                    )
+                    if node_id in self._checkpoint.node_states:
+                        self._checkpoint.node_states[node_id].internal_state = internal_state
+                    else:
+                        self._checkpoint.node_states[node_id] = NodeCheckpointState(
+                            node_id=node_id,
+                            node_type=node.type,
+                            status=CheckpointStatus.ACTIVE.value,
+                            internal_state=internal_state,
                         )
-                        if node_id in self._checkpoint.node_states:
-                            self._checkpoint.node_states[node_id].internal_state = internal_state
-                        else:
-                            self._checkpoint.node_states[node_id] = NodeCheckpointState(
-                                node_id=node_id,
-                                node_type=node.type,
-                                status=CheckpointStatus.ACTIVE.value,
-                                internal_state=internal_state,
-                            )
                     self._save_checkpoint_unlocked()
                     logger.debug(f"Flow {self.id}: mid-run checkpoint saved for node {node_id}")
 

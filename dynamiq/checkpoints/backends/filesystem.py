@@ -246,5 +246,10 @@ class FileSystem(CheckpointBackend):
             with open(path, encoding="utf-8") as f:
                 data = json.load(f, object_hook=decode_reversible)
             return FlowCheckpoint(**data)
-        except (json.JSONDecodeError, FileNotFoundError, Exception):
+        except (json.JSONDecodeError, FileNotFoundError):
+            return None
+        except Exception:
+            from dynamiq.utils.logger import logger
+
+            logger.warning("FileSystem: failed to load checkpoint from %s", path, exc_info=True)
             return None
