@@ -593,6 +593,70 @@ class BaseLLM(ConnectionNode):
             params["stream_options"]["include_usage"] = True
         return params
 
+    def _build_completion_params(
+        self,
+        messages: list[dict],
+        config: RunnableConfig,
+        prompt: Prompt | None = None,
+        tools: list[Tool | dict] | None = None,
+        response_format: dict[str, Any] | None = None,
+        parallel_tool_calls: bool | None = None,
+        include_sync_client: bool = True,
+    ) -> dict[str, Any]:
+        """Build the common parameter dict for litellm completion/acompletion calls.
+
+        Args:
+            messages: Formatted prompt messages.
+            config: Runnable configuration (used to detect streaming callbacks).
+            prompt: Prompt with optional tools/response_format overrides.
+            tools: Explicit tool list override.
+            response_format: Explicit response format override.
+            parallel_tool_calls: Whether to allow parallel tool calls.
+            include_sync_client: If True and self.client exists, include it in params.
+                Set to False for async calls that should not receive the sync client.
+
+        Returns:
+            Dict of params ready to pass to _completion or _acompletion.
+        """
+        extra = copy.deepcopy(self.__pydantic_extra__)
+        params = self.connection.conn_params.copy()
+        if include_sync_client and self.client and not isinstance(self.connection, HttpApiKey):
+            params.update({"client": self.client})
+        if self.thinking_enabled:
+            params.update({"thinking": {"type": "enabled", "budget_tokens": self.budget_tokens}})
+        if extra:
+            params.update(extra)
+
+        response_format, tools = self._get_response_format_and_tools(
+            prompt=prompt,
+            tools=tools,
+            response_format=response_format,
+        )
+        is_streaming_callback_available = any(
+            isinstance(callback, BaseStreamingCallbackHandler) for callback in config.callbacks
+        )
+        common_params: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": self.streaming.enabled and is_streaming_callback_available,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "tools": tools,
+            "tool_choice": self.tool_choice,
+            "stop": self.stop if self.stop else None,
+            "top_p": self.top_p,
+            "seed": self.seed,
+            "presence_penalty": self.presence_penalty,
+            "frequency_penalty": self.frequency_penalty,
+            "response_format": response_format,
+            "drop_params": True,
+            **params,
+        }
+        if parallel_tool_calls is not None:
+            common_params["parallel_tool_calls"] = parallel_tool_calls
+
+        return self.update_completion_params(common_params)
+
     def execute(
         self,
         input_data: BaseLLMInputSchema,
@@ -627,51 +691,20 @@ class BaseLLM(ConnectionNode):
         messages = self.get_messages(prompt, input_data)
         self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=messages, **kwargs)
 
-        extra = copy.deepcopy(self.__pydantic_extra__)
-        params = self.connection.conn_params.copy()
-        if self.client and not isinstance(self.connection, HttpApiKey):
-            params.update({"client": self.client})
-        if self.thinking_enabled:
-            params.update({"thinking": {"type": "enabled", "budget_tokens": self.budget_tokens}})
-        if extra:
-            params.update(extra)
-
-        response_format, tools = self._get_response_format_and_tools(
+        common_params = self._build_completion_params(
+            messages=messages,
+            config=config,
             prompt=prompt,
             tools=tools,
             response_format=response_format,
+            parallel_tool_calls=parallel_tool_calls,
+            include_sync_client=True,
         )
-        # Check if a streaming callback is available in the config and enable streaming only if it is
-        # This is to avoid unnecessary streaming to reduce CPU usage
-        is_streaming_callback_available = any(
-            isinstance(callback, BaseStreamingCallbackHandler) for callback in config.callbacks
-        )
-        common_params: dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "stream": self.streaming.enabled and is_streaming_callback_available,
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-            "tools": tools,
-            "tool_choice": self.tool_choice,
-            "stop": self.stop if self.stop else None,
-            "top_p": self.top_p,
-            "seed": self.seed,
-            "presence_penalty": self.presence_penalty,
-            "frequency_penalty": self.frequency_penalty,
-            "response_format": response_format,
-            "drop_params": True,
-            **params,
-        }
-        if parallel_tool_calls is not None:
-            common_params["parallel_tool_calls"] = parallel_tool_calls
-
-        common_params = self.update_completion_params(common_params)
 
         response = self._completion(**common_params)
         handle_completion = (
             self._handle_streaming_completion_response
-            if self.streaming.enabled and is_streaming_callback_available
+            if common_params.get("stream")
             else self._handle_completion_response
         )
 
@@ -713,48 +746,19 @@ class BaseLLM(ConnectionNode):
         messages = self.get_messages(prompt, input_data)
         self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=messages, **kwargs)
 
-        extra = copy.deepcopy(self.__pydantic_extra__)
-        params = self.connection.conn_params.copy()
-        # Do not pass the sync client to acompletion — litellm will create
-        # its own async HTTP client using the connection params (api_key, api_base).
-        if self.thinking_enabled:
-            params.update({"thinking": {"type": "enabled", "budget_tokens": self.budget_tokens}})
-        if extra:
-            params.update(extra)
-
-        response_format, tools = self._get_response_format_and_tools(
+        common_params = self._build_completion_params(
+            messages=messages,
+            config=config,
             prompt=prompt,
             tools=tools,
             response_format=response_format,
+            parallel_tool_calls=parallel_tool_calls,
+            include_sync_client=False,
         )
-        is_streaming_callback_available = any(
-            isinstance(callback, BaseStreamingCallbackHandler) for callback in config.callbacks
-        )
-        common_params: dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "stream": self.streaming.enabled and is_streaming_callback_available,
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-            "tools": tools,
-            "tool_choice": self.tool_choice,
-            "stop": self.stop if self.stop else None,
-            "top_p": self.top_p,
-            "seed": self.seed,
-            "presence_penalty": self.presence_penalty,
-            "frequency_penalty": self.frequency_penalty,
-            "response_format": response_format,
-            "drop_params": True,
-            **params,
-        }
-        if parallel_tool_calls is not None:
-            common_params["parallel_tool_calls"] = parallel_tool_calls
-
-        common_params = self.update_completion_params(common_params)
 
         response = await self._acompletion(**common_params)
 
-        if self.streaming.enabled and is_streaming_callback_available:
+        if common_params.get("stream"):
             return await self._handle_streaming_completion_response_async(
                 response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
             )

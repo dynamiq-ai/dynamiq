@@ -90,6 +90,59 @@ class TestBaseLLMAsync:
             node._stream_chunk_builder.assert_called_once()
 
 
+class TestBuildCompletionParams:
+    def test_build_completion_params_returns_expected_keys(self):
+        """_build_completion_params should return dict with model, messages, stream, etc."""
+        with patch("litellm.completion"), \
+             patch("litellm.stream_chunk_builder"):
+            node = OpenAI(
+                model="gpt-4o-mini",
+                connection=OpenAIConnection(api_key="test-key"),
+                prompt=Prompt(messages=[{"role": "user", "content": "Hello"}]),
+            )
+            input_data = MagicMock(messages=None, files=None)
+            config = RunnableConfig(callbacks=[])
+            prompt = node.prompt or Prompt(messages=[], tools=None, response_format=None)
+            messages = node.get_messages(prompt, input_data)
+
+            params = node._build_completion_params(
+                messages=messages,
+                config=config,
+                prompt=prompt,
+                include_sync_client=True,
+            )
+
+            assert params["model"] == "openai/gpt-4o-mini"
+            assert params["messages"] == messages
+            assert "stream" in params
+            assert "temperature" in params
+            assert "drop_params" in params
+
+    def test_build_completion_params_excludes_client_when_not_sync(self):
+        """When include_sync_client=False, client should not be in params."""
+        with patch("litellm.completion"), \
+             patch("litellm.stream_chunk_builder"):
+            node = OpenAI(
+                model="gpt-4o-mini",
+                connection=OpenAIConnection(api_key="test-key"),
+                prompt=Prompt(messages=[{"role": "user", "content": "Hello"}]),
+            )
+            node.client = MagicMock()  # Simulate a sync client
+            input_data = MagicMock(messages=None, files=None)
+            config = RunnableConfig(callbacks=[])
+            prompt = node.prompt or Prompt(messages=[], tools=None, response_format=None)
+            messages = node.get_messages(prompt, input_data)
+
+            params = node._build_completion_params(
+                messages=messages,
+                config=config,
+                prompt=prompt,
+                include_sync_client=False,
+            )
+
+            assert "client" not in params
+
+
 class TestBaseLLMAsyncFallback:
     @pytest.mark.asyncio
     async def test_run_async_no_fallback_on_success(self):
