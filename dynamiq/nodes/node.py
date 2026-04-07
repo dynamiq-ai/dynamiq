@@ -10,7 +10,7 @@ from datetime import datetime
 from functools import cached_property
 from queue import Empty
 from types import FunctionType, ModuleType
-from typing import Any, Callable, ClassVar, Union
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Union
 from uuid import uuid4
 
 from jinja2 import Template
@@ -21,6 +21,7 @@ from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingC
 from dynamiq.connections import BaseConnection
 from dynamiq.connections.managers import ConnectionManager, ConnectionManagerException
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
+from dynamiq.nodes.agents.exceptions import RecoverableAgentException
 from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.nodes.exceptions import (
     NodeConditionFailedException,
@@ -48,6 +49,9 @@ from dynamiq.utils.jsonpath import filter as jsonpath_filter
 from dynamiq.utils.jsonpath import mapper as jsonpath_mapper
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import clear_annotation
+
+if TYPE_CHECKING:
+    from concurrent.futures import ThreadPoolExecutor
 
 
 def ensure_config(config: RunnableConfig = None) -> RunnableConfig:
@@ -483,8 +487,6 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         Raises:
             NodeException: If input data does not match the input schema.
         """
-        from dynamiq.nodes.agents.exceptions import RecoverableAgentException
-
         if self.input_schema:
             try:
                 return self.input_schema.model_validate(

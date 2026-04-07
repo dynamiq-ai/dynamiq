@@ -1,12 +1,11 @@
 import asyncio
-import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
 from dynamiq.nodes.node import Node, ErrorHandling
 from dynamiq.nodes.types import NodeGroup
-from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.runnables import RunnableConfig, RunnableStatus
 
 
 class SyncOnlyNode(Node):

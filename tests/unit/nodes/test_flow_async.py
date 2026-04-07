@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from dynamiq.flows.flow import Flow
-from dynamiq.nodes.node import Node, ErrorHandling
+from dynamiq.nodes.node import Node
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 
@@ -48,9 +48,7 @@ class TestFlowAsyncExecutor:
             mock_executor_cls.return_value = real_executor
 
             try:
-                result = await flow.run_async(
-                    input_data={}, config=RunnableConfig(callbacks=[])
-                )
+                _ = await flow.run_async(input_data={}, config=RunnableConfig(callbacks=[]))
             finally:
                 real_executor.shutdown(wait=False)
 
