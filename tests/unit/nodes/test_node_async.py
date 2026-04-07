@@ -1,8 +1,10 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch, MagicMock
 
 import pytest
 
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.node import Node, ErrorHandling
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -154,6 +156,47 @@ class CachingAsyncNode(Node):
     async def execute_async(self, input_data, config=None, **kwargs):
         self.async_called = True
         return {"result": "async"}
+
+
+class TestRunAsyncContextPropagation:
+    @pytest.mark.asyncio
+    async def test_context_aware_executor_does_not_double_copy(self):
+        """When executor is ContextAwareThreadPoolExecutor, run_async should not
+        wrap with ctx.run since the executor handles context propagation."""
+        node = SyncOnlyNode()
+        executor = ContextAwareThreadPoolExecutor(max_workers=2)
+        try:
+            with patch("dynamiq.nodes.node.contextvars") as mock_contextvars:
+                result = await node.run_async(
+                    input_data={"input": "test"},
+                    config=RunnableConfig(callbacks=[]),
+                    executor=executor,
+                )
+                mock_contextvars.copy_context.assert_not_called()
+                assert result.status == RunnableStatus.SUCCESS
+        finally:
+            executor.shutdown(wait=False)
+
+    @pytest.mark.asyncio
+    async def test_regular_executor_still_copies_context(self):
+        """When executor is a regular ThreadPoolExecutor, run_async should
+        still copy context explicitly."""
+        node = SyncOnlyNode()
+        executor = ThreadPoolExecutor(max_workers=2)
+        try:
+            with patch("dynamiq.nodes.node.contextvars") as mock_contextvars:
+                mock_ctx = MagicMock()
+                mock_ctx.run = lambda fn, *a, **kw: fn(*a, **kw)
+                mock_contextvars.copy_context.return_value = mock_ctx
+                result = await node.run_async(
+                    input_data={"input": "test"},
+                    config=RunnableConfig(callbacks=[]),
+                    executor=executor,
+                )
+                mock_contextvars.copy_context.assert_called_once()
+                assert result.status == RunnableStatus.SUCCESS
+        finally:
+            executor.shutdown(wait=False)
 
 
 class TestAsyncCachingPath:

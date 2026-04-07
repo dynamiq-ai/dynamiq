@@ -1088,12 +1088,17 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             )
         else:
             loop = asyncio.get_running_loop()
-            ctx = contextvars.copy_context()
             fn = functools.partial(
                 self.run_sync, input_data=input_data, config=config,
                 depends_result=depends_result, **kwargs
             )
-            return await loop.run_in_executor(executor, ctx.run, fn)
+            # ContextAwareThreadPoolExecutor already propagates contextvars
+            # in its submit() method — no need to copy context again.
+            if isinstance(executor, ContextAwareThreadPoolExecutor):
+                return await loop.run_in_executor(executor, fn)
+            else:
+                ctx = contextvars.copy_context()
+                return await loop.run_in_executor(executor, ctx.run, fn)
 
     def ensure_client(self) -> None:
         """
