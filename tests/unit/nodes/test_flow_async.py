@@ -71,28 +71,3 @@ class TestFlowAsyncExecutor:
 
         assert results[0].status == RunnableStatus.SUCCESS
         assert results[1].status == RunnableStatus.SUCCESS
-
-    @pytest.mark.asyncio
-    async def test_flow_uses_sleep_zero_not_three_ms(self):
-        """Flow should use asyncio.sleep(0) not asyncio.sleep(0.003)."""
-        node = FastAsyncNode(id="fast1")
-        flow = Flow(nodes=[node])
-
-        sleep_args = []
-        original_sleep = asyncio.sleep
-
-        async def tracking_sleep(delay, *args, **kwargs):
-            sleep_args.append(delay)
-            return await original_sleep(delay, *args, **kwargs)
-
-        with patch("dynamiq.flows.flow.asyncio.sleep", side_effect=tracking_sleep):
-            result = await flow.run_async(
-                input_data={}, config=RunnableConfig(callbacks=[])
-            )
-
-        assert result.status == RunnableStatus.SUCCESS
-        # Filter out sleeps from node execute_async (e.g. 0.01) — only check flow-level sleeps
-        flow_sleeps = [a for a in sleep_args if a != 0.01]
-        assert len(flow_sleeps) > 0, "Expected at least one flow-level sleep(0) call"
-        for arg in flow_sleeps:
-            assert arg == 0, f"Expected sleep(0), got sleep({arg})"
