@@ -403,8 +403,8 @@ class Flow(BaseFlow):
                         self._results.update(results)
                         self._ts.done(*results.keys())
 
-                    # Yield to event loop without artificial delay
-                    await asyncio.sleep(0)
+                    # Wait for ready nodes to be processed and reduce CPU usage by yielding control to the event loop
+                    await asyncio.sleep(0.003)
 
             output = self._get_output()
             failed_nodes = self._get_failed_nodes_with_raise_behavior()
