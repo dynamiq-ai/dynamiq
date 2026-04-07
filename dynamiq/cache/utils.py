@@ -82,3 +82,69 @@ def cache_wf_entity(
         return wrapper
 
     return _cache
+
+
+def cache_wf_entity_async(
+    entity_id: str,
+    cache_enabled: bool = False,
+    cache_manager_cls: type[WorkflowCacheManager] | None = None,
+    cache_config: CacheConfig | None = None,
+    func_kwargs_to_remove: tuple[str] = FUNC_KWARGS_TO_REMOVE,
+) -> Callable:
+    """Async decorator to cache workflow entity outputs.
+
+    Like cache_wf_entity but wraps an async function. Cache I/O (Redis get/set)
+    is offloaded to threads via asyncio.to_thread to avoid blocking the event loop.
+
+    Args:
+        entity_id (str): Identifier for the entity.
+        cache_enabled (bool): Flag to enable caching.
+        cache_manager_cls (type[WorkflowCacheManager] | None): Cache manager class.
+            Defaults to WorkflowCacheManager when None.
+        cache_config (CacheConfig | None): Cache configuration.
+        func_kwargs_to_remove (tuple[str]): List of params to remove from callable function kwargs.
+
+    Returns:
+        Callable: Wrapped async function with caching.
+    """
+    import asyncio
+
+    def _cache(func: Callable) -> Callable:
+        @wraps(func)
+        async def wrapper(*args: Any, **kwargs: Any) -> tuple[Any, bool]:
+            cache_manager = None
+            from_cache = False
+            input_data = kwargs.pop("input_data", args[0] if args else {})
+            input_data = dict(input_data) if isinstance(input_data, BaseModel) else input_data
+
+            resolved_cls = cache_manager_cls if cache_manager_cls is not None else WorkflowCacheManager
+            cleaned_kwargs = {k: v for k, v in kwargs.items() if k not in func_kwargs_to_remove}
+            if cache_enabled and cache_config:
+                logger.debug(f"Entity_id {entity_id}: async cache used")
+                cache_manager = resolved_cls(config=cache_config)
+                output = await asyncio.to_thread(
+                    cache_manager.get_entity_output,
+                    entity_id=entity_id,
+                    input_data=input_data,
+                    **cleaned_kwargs,
+                )
+                if output:
+                    from_cache = True
+                    return output, from_cache
+
+            output = await func(*args, **kwargs)
+
+            if cache_manager:
+                await asyncio.to_thread(
+                    cache_manager.set_entity_output,
+                    entity_id=entity_id,
+                    input_data=input_data,
+                    output_data=output,
+                    **cleaned_kwargs,
+                )
+
+            return output, from_cache
+
+        return wrapper
+
+    return _cache
