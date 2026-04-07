@@ -272,9 +272,16 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
     _output_references: NodeOutputReferences = PrivateAttr()
 
+    # Set to True in subclasses that manage their own background event loop
+    # (e.g. CuaDesktopTool, E2BDesktopTool) to force run_async to offload
+    # via run_in_executor instead of calling execute_async on the main loop.
+    _force_thread_executor: ClassVar[bool] = False
+
     @property
     def has_native_async(self) -> bool:
         """Check if the subclass provides a native async execute implementation."""
+        if self._force_thread_executor:
+            return False
         return type(self).execute_async is not Node.execute_async
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

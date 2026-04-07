@@ -253,6 +253,7 @@ class E2BDesktopTool(ConnectionNode):
     input_schema: ClassVar[type[E2BDesktopToolInputSchema]] = E2BDesktopToolInputSchema
     timeout: int = 3600
     is_files_allowed: bool = True
+    _force_thread_executor: ClassVar[bool] = True
 
     _desktop: Sandbox | None = PrivateAttr(default=None)
     _sandbox_id: str | None = PrivateAttr(default=None)
