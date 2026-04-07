@@ -759,7 +759,7 @@ class BaseLLM(ConnectionNode):
                 response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
             )
         return self._handle_completion_response(
-            response=response, config=config, input_data=dict(input_data), **kwargs
+            response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
         )
 
     def _is_rate_limit_error(self, exception_type: type[Exception], error_str: str) -> bool:
