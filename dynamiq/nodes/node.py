@@ -1006,9 +1006,11 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
                 cache_config=config.cache,
             )
 
-            # When caching is enabled, fall back to sync execute (cache is sync)
+            # When caching is enabled, offload sync execute to a thread to avoid blocking the event loop
             if self.caching.enabled:
-                output, from_cache = cache(self.execute_with_retry)(transformed_input, config, **merged_kwargs)
+                output, from_cache = await asyncio.to_thread(
+                    cache(self.execute_with_retry), transformed_input, config, **merged_kwargs
+                )
             else:
                 output = await self.execute_async_with_retry(transformed_input, config, **merged_kwargs)
                 from_cache = False
