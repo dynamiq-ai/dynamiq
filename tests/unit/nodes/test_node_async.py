@@ -138,3 +138,41 @@ class TestRunAsyncRouting:
         )
         assert result.status == RunnableStatus.SUCCESS
         assert result.output == {"result": "sync"}
+
+
+class CachingAsyncNode(Node):
+    """Test node that tracks whether sync or async execute was called."""
+    group: NodeGroup = NodeGroup.UTILS
+    name: str = "CachingAsync"
+    sync_called: bool = False
+    async_called: bool = False
+
+    def execute(self, input_data, config=None, **kwargs):
+        self.sync_called = True
+        return {"result": "sync"}
+
+    async def execute_async(self, input_data, config=None, **kwargs):
+        self.async_called = True
+        return {"result": "async"}
+
+
+class TestAsyncCachingPath:
+    @pytest.mark.asyncio
+    async def test_cached_async_path_uses_execute_async(self):
+        """When caching is enabled in _run_async_native, it should still use
+        execute_async_with_retry (async path), not execute_with_retry (sync path)."""
+        from dynamiq.nodes.node import CachingConfig
+
+        node = CachingAsyncNode(
+            caching=CachingConfig(enabled=True),
+        )
+        # Run without actual cache config so cache decorator is a passthrough
+        result = await node.run_async(
+            input_data={"input": "test"},
+            config=RunnableConfig(callbacks=[]),
+        )
+        assert result.status == RunnableStatus.SUCCESS
+        assert node.async_called is True
+        assert node.sync_called is False
+
+

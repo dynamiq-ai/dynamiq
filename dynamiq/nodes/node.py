@@ -16,7 +16,7 @@ from uuid import uuid4
 from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, create_model, model_validator
 
-from dynamiq.cache.utils import cache_wf_entity
+from dynamiq.cache.utils import cache_wf_entity, cache_wf_entity_async
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingCallbackHandler
 from dynamiq.connections import BaseConnection
 from dynamiq.connections.managers import ConnectionManager, ConnectionManagerException
@@ -858,6 +858,102 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
         return input_data
 
+    def _prepare_execution(
+        self,
+        input_data: dict,
+        config: RunnableConfig,
+        depends_result: dict | None,
+        **kwargs,
+    ) -> tuple[RunnableConfig, dict, dict]:
+        """Shared pre-execution setup for run_sync and _run_async_native.
+
+        Returns:
+            Tuple of (config, merged_kwargs, depends_result).
+        """
+        config = ensure_config(config)
+        run_id = uuid4()
+        merged_kwargs = merge(kwargs, {"run_id": run_id, "parent_run_id": kwargs.get("parent_run_id", None)})
+        if depends_result is None:
+            depends_result = {}
+        return config, merged_kwargs, depends_result
+
+    def _handle_skip(
+        self,
+        e: "NodeException",
+        input_data: dict,
+        depends_result: dict,
+        config: RunnableConfig,
+        **merged_kwargs,
+    ) -> RunnableResult:
+        """Handle node skip due to failed dependency or approval rejection."""
+        transformed_input = input_data | {
+            k: result.to_tracing_depend_dict() for k, result in depends_result.items()
+        }
+        skip_data = {"failed_dependency": e.failed_depend.to_dict(for_tracing=True)}
+        self.run_on_node_skip(
+            callbacks=config.callbacks,
+            skip_data=skip_data,
+            input_data=transformed_input,
+            human_feedback=getattr(e, "human_feedback", None),
+            **merged_kwargs,
+        )
+        logger.info(f"Node {self.name} - {self.id}: execution skipped.")
+        return RunnableResult(
+            status=RunnableStatus.SKIP,
+            input=transformed_input,
+            output=None,
+            error=RunnableResultError.from_exception(e, recoverable=e.recoverable),
+        )
+
+    def _handle_success(
+        self,
+        output: Any,
+        from_cache: bool,
+        transformed_input: dict,
+        config: RunnableConfig,
+        time_start: datetime,
+        log_prefix: str,
+        merged_kwargs: dict,
+        **kwargs,
+    ) -> RunnableResult:
+        """Handle successful execution — transform output, fire callbacks, return result."""
+        callback_kwargs = {**merged_kwargs, "is_output_from_cache": from_cache}
+        # transform_output uses original kwargs; run_on_node_end needs merged_kwargs with run_id
+        transformed_output = self.transform_output(output, config=config, **kwargs)
+        self.run_on_node_end(config.callbacks, transformed_output, **callback_kwargs)
+        logger.info(
+            f"Node {self.name} - {self.id}: {log_prefix}execution succeeded in "
+            f"{format_duration(time_start, datetime.now())}."
+        )
+        return RunnableResult(
+            status=RunnableStatus.SUCCESS, input=dict(transformed_input), output=transformed_output
+        )
+
+    def _handle_failure(
+        self,
+        e: Exception,
+        transformed_input: dict,
+        config: RunnableConfig,
+        time_start: datetime,
+        log_prefix: str,
+        **merged_kwargs,
+    ) -> RunnableResult:
+        """Handle execution failure — fire error callbacks, return failure result."""
+        from dynamiq.nodes.agents.exceptions import RecoverableAgentException
+
+        self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
+        logger.error(
+            f"Node {self.name} - {self.id}: {log_prefix}execution failed in "
+            f"{format_duration(time_start, datetime.now())}. {e}"
+        )
+        recoverable = isinstance(e, RecoverableAgentException)
+        return RunnableResult(
+            status=RunnableStatus.FAILURE,
+            input=transformed_input,
+            output=None,
+            error=RunnableResultError.from_exception(e, recoverable=recoverable),
+        )
+
     def run_sync(
         self,
         input_data: dict,
@@ -877,42 +973,19 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         Returns:
             RunnableResult: Result of the node execution.
         """
-        from dynamiq.nodes.agents.exceptions import RecoverableAgentException
-
         logger.info(f"Node {self.name} - {self.id}: execution started.")
         transformed_input = input_data
         time_start = datetime.now()
-
-        config = ensure_config(config)
-
-        run_id = uuid4()
-        merged_kwargs = merge(kwargs, {"run_id": run_id, "parent_run_id": kwargs.get("parent_run_id", None)})
-        if depends_result is None:
-            depends_result = {}
+        config, merged_kwargs, depends_result = self._prepare_execution(
+            input_data, config, depends_result, **kwargs
+        )
 
         try:
             try:
                 self.validate_depends(depends_result)
                 input_data = self.get_approved_data_or_origin(input_data, config=config, **merged_kwargs)
             except NodeException as e:
-                transformed_input = input_data | {
-                    k: result.to_tracing_depend_dict() for k, result in depends_result.items()
-                }
-                skip_data = {"failed_dependency": e.failed_depend.to_dict(for_tracing=True)}
-                self.run_on_node_skip(
-                    callbacks=config.callbacks,
-                    skip_data=skip_data,
-                    input_data=transformed_input,
-                    human_feedback=getattr(e, "human_feedback", None),
-                    **merged_kwargs,
-                )
-                logger.info(f"Node {self.name} - {self.id}: execution skipped.")
-                return RunnableResult(
-                    status=RunnableStatus.SKIP,
-                    input=transformed_input,
-                    output=None,
-                    error=RunnableResultError.from_exception(e, recoverable=e.recoverable),
-                )
+                return self._handle_skip(e, input_data, depends_result, config, **merged_kwargs)
 
             transformed_input = self.validate_input_schema(
                 self.transform_input(input_data=input_data, depends_result=depends_result, config=config, **kwargs),
@@ -927,33 +1000,12 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
             output, from_cache = cache(self.execute_with_retry)(transformed_input, config, **merged_kwargs)
 
-            merged_kwargs["is_output_from_cache"] = from_cache
-            transformed_output = self.transform_output(output, config=config, **kwargs)
-
-            self.run_on_node_end(config.callbacks, transformed_output, **merged_kwargs)
-
-            logger.info(
-                f"Node {self.name} - {self.id}: execution succeeded in "
-                f"{format_duration(time_start, datetime.now())}."
-            )
-            return RunnableResult(
-                status=RunnableStatus.SUCCESS, input=dict(transformed_input), output=transformed_output
+            return self._handle_success(
+                output, from_cache, transformed_input, config, time_start, "",
+                merged_kwargs=merged_kwargs, **kwargs
             )
         except Exception as e:
-            self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
-            logger.error(
-                f"Node {self.name} - {self.id}: execution failed in "
-                f"{format_duration(time_start, datetime.now())}. {e}"
-            )
-
-            recoverable = isinstance(e, RecoverableAgentException)
-            result = RunnableResult(
-                status=RunnableStatus.FAILURE,
-                input=transformed_input,
-                output=None,
-                error=RunnableResultError.from_exception(e, recoverable=recoverable),
-            )
-            return result
+            return self._handle_failure(e, transformed_input, config, time_start, "", **merged_kwargs)
 
     async def _run_async_native(
         self,
@@ -966,18 +1018,12 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         Run the node asynchronously using native async execute.
         Mirrors run_sync() lifecycle but calls execute_async_with_retry().
         """
-        from dynamiq.nodes.agents.exceptions import RecoverableAgentException
-
         logger.info(f"Node {self.name} - {self.id}: async execution started.")
         transformed_input = input_data
         time_start = datetime.now()
-
-        config = ensure_config(config)
-
-        run_id = uuid4()
-        merged_kwargs = merge(kwargs, {"run_id": run_id, "parent_run_id": kwargs.get("parent_run_id", None)})
-        if depends_result is None:
-            depends_result = {}
+        config, merged_kwargs, depends_result = self._prepare_execution(
+            input_data, config, depends_result, **kwargs
+        )
 
         try:
             try:
@@ -987,72 +1033,29 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
                     self.get_approved_data_or_origin, input_data, config=config, **merged_kwargs
                 )
             except NodeException as e:
-                transformed_input = input_data | {
-                    k: result.to_tracing_depend_dict() for k, result in depends_result.items()
-                }
-                skip_data = {"failed_dependency": e.failed_depend.to_dict(for_tracing=True)}
-                self.run_on_node_skip(
-                    callbacks=config.callbacks,
-                    skip_data=skip_data,
-                    input_data=transformed_input,
-                    human_feedback=getattr(e, "human_feedback", None),
-                    **merged_kwargs,
-                )
-                logger.info(f"Node {self.name} - {self.id}: execution skipped.")
-                return RunnableResult(
-                    status=RunnableStatus.SKIP,
-                    input=transformed_input,
-                    output=None,
-                    error=RunnableResultError.from_exception(e, recoverable=e.recoverable),
-                )
+                return self._handle_skip(e, input_data, depends_result, config, **merged_kwargs)
 
             transformed_input = self.validate_input_schema(
                 self.transform_input(input_data=input_data, depends_result=depends_result, config=config, **kwargs),
                 **kwargs,
             )
             self.run_on_node_start(config.callbacks, dict(transformed_input), **merged_kwargs)
-            cache = cache_wf_entity(
+
+            cache = cache_wf_entity_async(
                 entity_id=self.id,
                 cache_enabled=self.caching.enabled,
                 cache_config=config.cache,
             )
-
-            # When caching is enabled, offload sync execute to a thread to avoid blocking the event loop
-            if self.caching.enabled:
-                output, from_cache = await asyncio.to_thread(
-                    cache(self.execute_with_retry), transformed_input, config, **merged_kwargs
-                )
-            else:
-                output = await self.execute_async_with_retry(transformed_input, config, **merged_kwargs)
-                from_cache = False
-
-            merged_kwargs["is_output_from_cache"] = from_cache
-            transformed_output = self.transform_output(output, config=config, **kwargs)
-
-            self.run_on_node_end(config.callbacks, transformed_output, **merged_kwargs)
-
-            logger.info(
-                f"Node {self.name} - {self.id}: async execution succeeded in "
-                f"{format_duration(time_start, datetime.now())}."
+            output, from_cache = await cache(self.execute_async_with_retry)(
+                transformed_input, config, **merged_kwargs
             )
-            return RunnableResult(
-                status=RunnableStatus.SUCCESS, input=dict(transformed_input), output=transformed_output
+
+            return self._handle_success(
+                output, from_cache, transformed_input, config, time_start, "async ",
+                merged_kwargs=merged_kwargs, **kwargs
             )
         except Exception as e:
-            self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
-            logger.error(
-                f"Node {self.name} - {self.id}: async execution failed in "
-                f"{format_duration(time_start, datetime.now())}. {e}"
-            )
-
-            recoverable = isinstance(e, RecoverableAgentException)
-            result = RunnableResult(
-                status=RunnableStatus.FAILURE,
-                input=transformed_input,
-                output=None,
-                error=RunnableResultError.from_exception(e, recoverable=recoverable),
-            )
-            return result
+            return self._handle_failure(e, transformed_input, config, time_start, "async ", **merged_kwargs)
 
     async def run_async(
         self,
