@@ -1,5 +1,3 @@
-"""E2B sandbox implementation."""
-
 import shlex
 import threading
 from typing import Any, ClassVar
