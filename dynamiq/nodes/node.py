@@ -21,7 +21,6 @@ from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingC
 from dynamiq.connections import BaseConnection
 from dynamiq.connections.managers import ConnectionManager, ConnectionManagerException
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
-from dynamiq.nodes.agents.exceptions import RecoverableAgentException
 from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.nodes.exceptions import (
     NodeConditionFailedException,
@@ -494,6 +493,8 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
                 )
             except Exception as e:
                 if kwargs.get("recoverable_error", False):
+                    from dynamiq.nodes.agents.exceptions import RecoverableAgentException
+
                     raise RecoverableAgentException(f"Input data validation failed: {e}")
                 raise e
 
