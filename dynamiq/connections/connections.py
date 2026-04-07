@@ -7,7 +7,7 @@ from functools import cached_property, partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, field_validator, model_validator
 from pydantic_core.core_schema import ValidationInfo
 
 from dynamiq.utils import generate_uuid
@@ -846,7 +846,7 @@ class Daytona(BaseApiKeyConnection):
     api_url: str = Field(default_factory=partial(get_env_var, "DAYTONA_API_URL", "https://app.daytona.io/api"))
     target: str | None = Field(default_factory=partial(get_env_var, "DAYTONA_TARGET", None))
 
-    _client: Any = None
+    _client: Any = PrivateAttr(default=None)
 
     def connect(self):
         pass
