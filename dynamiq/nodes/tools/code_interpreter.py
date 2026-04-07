@@ -6,7 +6,7 @@ import shlex
 from pathlib import PurePosixPath
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
 from dynamiq.nodes import NodeGroup
@@ -304,14 +304,14 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
     name: str = "sandbox-interpreter-tool"
     description: str = DESCRIPTION_SANDBOX_INTERPRETER
     base_path: str = Field(default="/home/user", description="Base path in the sandbox filesystem.")
-    installed_packages: list = []
+    installed_packages: list = Field(default_factory=list, description="Pre-installed packages in the sandbox.")
     files: list[io.BytesIO] | None = None
     persistent_sandbox: bool = True
     timeout: int = Field(default=600, description="Sandbox timeout in seconds (default: 600 seconds)")
     is_files_allowed: bool = True
     creation_error_handling: SandboxCreationErrorHandling = Field(default_factory=SandboxCreationErrorHandling)
 
-    _sandbox: Any = None
+    _sandbox: Any = PrivateAttr(default=None)
 
     @property
     def input_dir(self) -> str:
