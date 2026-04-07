@@ -1,5 +1,4 @@
-import asyncio
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, AsyncMock
 
 import pytest
 
@@ -30,15 +29,16 @@ class TestCacheWfEntityAsync:
 
         mock_cache_manager = MagicMock()
         mock_cache_manager.get_entity_output.return_value = {"result": "cached"}
+        mock_cls = MagicMock(return_value=mock_cache_manager)
 
-        with patch("dynamiq.cache.utils.WorkflowCacheManager", return_value=mock_cache_manager):
-            cache = cache_wf_entity_async(
-                entity_id="node-1",
-                cache_enabled=True,
-                cache_config=MagicMock(),
-            )
-            wrapped = cache(mock_func)
-            output, from_cache = await wrapped({"key": "val"}, config=None)
+        cache = cache_wf_entity_async(
+            entity_id="node-1",
+            cache_enabled=True,
+            cache_manager_cls=mock_cls,
+            cache_config=MagicMock(),
+        )
+        wrapped = cache(mock_func)
+        output, from_cache = await wrapped({"key": "val"}, config=None)
 
         assert output == {"result": "cached"}
         assert from_cache is True
@@ -52,15 +52,16 @@ class TestCacheWfEntityAsync:
 
         mock_cache_manager = MagicMock()
         mock_cache_manager.get_entity_output.return_value = None
+        mock_cls = MagicMock(return_value=mock_cache_manager)
 
-        with patch("dynamiq.cache.utils.WorkflowCacheManager", return_value=mock_cache_manager):
-            cache = cache_wf_entity_async(
-                entity_id="node-1",
-                cache_enabled=True,
-                cache_config=MagicMock(),
-            )
-            wrapped = cache(my_async_func)
-            output, from_cache = await wrapped({"key": "val"}, config=None)
+        cache = cache_wf_entity_async(
+            entity_id="node-1",
+            cache_enabled=True,
+            cache_manager_cls=mock_cls,
+            cache_config=MagicMock(),
+        )
+        wrapped = cache(my_async_func)
+        output, from_cache = await wrapped({"key": "val"}, config=None)
 
         assert output == {"result": "computed"}
         assert from_cache is False
