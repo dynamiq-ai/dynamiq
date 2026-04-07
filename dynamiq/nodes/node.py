@@ -975,7 +975,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         try:
             try:
                 self.validate_depends(depends_result)
-                input_data = self.get_approved_data_or_origin(input_data, config=config, **merged_kwargs)
+                # Offload blocking approval queue read to a thread to avoid blocking the event loop
+                input_data = await asyncio.to_thread(
+                    self.get_approved_data_or_origin, input_data, config=config, **merged_kwargs
+                )
             except NodeException as e:
                 transformed_input = input_data | {
                     k: result.to_tracing_depend_dict() for k, result in depends_result.items()
@@ -1229,7 +1232,8 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             merged_kwargs = merge(kwargs, {"execution_run_id": uuid4()})
 
             try:
-                self.ensure_client()
+                # Offload blocking client initialization to a thread to avoid blocking the event loop
+                await asyncio.to_thread(self.ensure_client)
             except Exception as conn_error:
                 logger.error(
                     f"Node {self.name} - {self.id}: Failed to ensure client connection: {conn_error}"
