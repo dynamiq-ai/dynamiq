@@ -632,6 +632,8 @@ class BaseLLM(ConnectionNode):
             tools=tools,
             response_format=response_format,
         )
+        # Check if a streaming callback is available in the config and enable streaming only if it is.
+        # This is to avoid unnecessary streaming to reduce CPU usage.
         is_streaming_callback_available = any(
             isinstance(callback, BaseStreamingCallbackHandler) for callback in config.callbacks
         )
