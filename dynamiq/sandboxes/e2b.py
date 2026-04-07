@@ -10,7 +10,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from dynamiq.connections import E2B
 from dynamiq.nodes import Node
-from dynamiq.nodes.tools.e2b_sandbox import SandboxCreationErrorHandling
+from dynamiq.nodes.tools.code_interpreter import SandboxCreationErrorHandling
 from dynamiq.sandboxes.base import Sandbox, SandboxInfo, ShellCommandResult
 from dynamiq.sandboxes.exceptions import SandboxConnectionError
 from dynamiq.utils.logger import logger
