@@ -373,12 +373,12 @@ class Flow(BaseFlow):
 
         max_workers = (config.max_node_workers if config else None) or self.max_node_workers
         executor = ContextAwareThreadPoolExecutor(max_workers=max_workers)
-
-        logger.info(f"Flow {self.id}: execution started.")
-        self.run_on_flow_start(input_data, config, **merged_kwargs)
         time_start = datetime.now()
 
         try:
+            logger.info(f"Flow {self.id}: execution started.")
+            self.run_on_flow_start(input_data, config, **merged_kwargs)
+
             if self.nodes:
                 while self._ts.is_active():
                     ready_nodes = self._get_nodes_ready_to_run(input_data=input_data)
