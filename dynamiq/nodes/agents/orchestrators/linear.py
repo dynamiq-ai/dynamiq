@@ -114,7 +114,7 @@ class LinearOrchestrator(Orchestrator):
     def restore_iteration_state(self, state: IterationState) -> None:
         data = LinearOrchestratorIterationData(**state.iteration_data)
         self._chat_history = list(data.chat_history)
-        self._results = dict(data.results)
+        self._results = {int(k): v for k, v in data.results.items()}
         self._saved_tasks = [Task(**t) for t in data.tasks] if data.tasks else []
 
     def init_components(self, connection_manager: ConnectionManager | None = None):

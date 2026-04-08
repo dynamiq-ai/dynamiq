@@ -398,6 +398,7 @@ class GraphOrchestrator(Orchestrator):
         super().reset_run_state()
         if not self.is_resumed:
             self._current_state_id = None
+            self.context = {}
 
     def get_iteration_state(self) -> IterationState:
         data = GraphOrchestratorIterationData(

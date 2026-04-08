@@ -195,7 +195,7 @@ class AgentInputSchema(BaseModel):
 # Default prompt prefix length: [system_message, user_message].
 # At runtime, _history_offset is recalculated to len(prompt.messages) before the ReAct loop,
 # which may be larger when memory history messages are injected.
-DEFAULT_HISTORY_OFFSET = 2
+DEFAULT_HISTORY_OFFSET = 1
 
 
 class AgentIterationData(BaseModel):
