@@ -622,7 +622,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 except json.JSONDecodeError:
                     # Handle known LLM bug where multiple JSON objects are returned.
                     # Use raw_decode to parse only the first valid JSON object.
-                    decoder = json.JSONDecoder()
+                    decoder = json.JSONDecoder(strict=False)
                     llm_generated_output_json, _ = decoder.raw_decode(llm_generated_output.strip())
             else:
                 llm_generated_output_json = llm_generated_output
