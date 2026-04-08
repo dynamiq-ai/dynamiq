@@ -393,6 +393,8 @@ class GraphOrchestrator(Orchestrator):
                 state = self._get_next_state(state, config=config, **kwargs)
                 self._current_state_id = state.id
                 self._completed_iterations = i + 1
+                if config and config.checkpoint and config.checkpoint.context:
+                    config.checkpoint.context.save_mid_run(self.id)
 
     def reset_run_state(self) -> None:
         super().reset_run_state()

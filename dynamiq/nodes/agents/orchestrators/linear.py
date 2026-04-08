@@ -320,6 +320,8 @@ class LinearOrchestrator(Orchestrator):
 
             if success_flag:
                 self._completed_iterations = count
+                if config and config.checkpoint and config.checkpoint.context:
+                    config.checkpoint.context.save_mid_run(self.id)
                 continue
             else:
                 raise ValueError(

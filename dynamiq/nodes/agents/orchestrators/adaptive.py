@@ -205,6 +205,8 @@ class AdaptiveOrchestrator(Orchestrator):
                 if action.command == ActionCommand.DELEGATE:
                     self._handle_delegation(action=action, config=config, **kwargs)
                     self._completed_iterations = i + 1
+                    if config and config.checkpoint and config.checkpoint.context:
+                        config.checkpoint.context.save_mid_run(self.id)
 
                 elif action.command == ActionCommand.RESPOND:
                     respond_result = self._handle_respond(action=action)
