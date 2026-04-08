@@ -618,7 +618,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         try:
             if isinstance(llm_generated_output, str):
                 try:
-                    llm_generated_output_json = json.loads(llm_generated_output)
+                    llm_generated_output_json = json.loads(llm_generated_output, strict=False)
                 except json.JSONDecodeError:
                     # Handle known LLM bug where multiple JSON objects are returned.
                     # Use raw_decode to parse only the first valid JSON object.
@@ -645,7 +645,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         try:
             if isinstance(action_input, str):
-                action_input = json.loads(action_input)
+                action_input = json.loads(action_input, strict=False)
         except json.JSONDecodeError as e:
             raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
 
