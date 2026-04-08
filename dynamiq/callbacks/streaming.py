@@ -1075,20 +1075,14 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
         if self._current_state == StreamingState.REASONING:
             field_complete = self._emit_json_field_content(buf, StreamingState.REASONING)
-            # When reasoning completes, the buffer may already contain the next field
-            # (e.g. action_input). Re-run initialization so it's detected immediately,
-            # before _reset_tool_call_state could clear the buffer on the next chunk.
             if field_complete:
-                self._try_initialize_next_json_field(buf, final_answer_only)
+                # Reasoning completed — the buffer may already contain the next field
+                # (e.g. action_input). Re-run to detect and process it in the same chunk,
+                # before _reset_tool_call_state clears the buffer on the next parallel call.
+                self._process_json_mode(final_answer_only)
         elif self._current_state == StreamingState.ANSWER:
             self._emit_json_field_content(buf, StreamingState.ANSWER)
         elif self._current_state == StreamingState.TOOL_INPUT:
-            self._emit_tool_input_state(buf)
-
-        # If a new state was just initialized (e.g. tool_input after reasoning completed
-        # above), process it within the same chunk to avoid data loss when
-        # _reset_tool_call_state clears the buffer on the next parallel tool call.
-        if self._current_state == StreamingState.TOOL_INPUT:
             self._emit_tool_input_state(buf)
 
     def _skip_whitespace(self, text: str, start: int) -> int:

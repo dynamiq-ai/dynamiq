@@ -1,5 +1,4 @@
 import json
-import os
 from enum import Enum, auto
 
 from dynamiq.nodes.types import InferenceMode
@@ -34,11 +33,7 @@ def collect_streaming_events(streaming_iterator, agent_id):
         if step is not None:
             ordered_events.append((step, content))
 
-    # Dump raw events to file for debugging
-    dump_path = os.path.join(os.path.dirname(__file__), "streaming_events_dump.json")
-    with open(dump_path, "w") as f:
-        json.dump(raw_events, f, indent=2, default=str)
-    logger.info(f"Dumped {len(raw_events)} raw streaming events to {dump_path}")
+    logger.info(f"Collected {len(ordered_events)} streaming events from {len(raw_events)} raw events")
 
     return ordered_events
 
@@ -512,7 +507,6 @@ def _run_fsm_blob(ordered_events, streaming_mode):
 
     for idx, (step, content) in enumerate(ordered_events):
         event_name = _classify_event(step, content)
-        print(event_name)
         _log_event(idx, step, event_name, state, content)
         next_state = _fsm_step_transition(event_name, state, transitions, idx, step, content)
 
