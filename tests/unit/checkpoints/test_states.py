@@ -8,7 +8,7 @@ from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig, Che
 from dynamiq.checkpoints.types import CheckpointStatus
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.agents.base import AgentCheckpointState
+from dynamiq.nodes.agents.base import DEFAULT_HISTORY_OFFSET, AgentCheckpointState
 from dynamiq.nodes.tools import Python
 from dynamiq.nodes.tools.llm_summarizer import SummarizerTool
 from dynamiq.nodes.tools.thinking_tool import ThinkingTool
@@ -44,7 +44,7 @@ class TestAgentCheckpointState:
         state = agent_node.to_checkpoint_state()
 
         assert isinstance(state, AgentCheckpointState)
-        assert state.history_offset == 2
+        assert state.history_offset == DEFAULT_HISTORY_OFFSET
         assert state.llm_state is not None
         assert "is_fallback_run" in state.llm_state
 
@@ -63,7 +63,7 @@ class TestAgentCheckpointState:
     def test_restore_with_empty_state_uses_defaults(self, agent_node):
         agent_node.from_checkpoint_state({})
 
-        assert agent_node._history_offset == 2
+        assert agent_node._history_offset == DEFAULT_HISTORY_OFFSET
         assert agent_node._is_resumed is True
 
     def test_checkpoint_state_roundtrip(self):
