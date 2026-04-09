@@ -266,3 +266,26 @@ def test_jina_scrape_screenshot_format(mock_scrape_requests):
     call_args = mock_scrape_requests.call_args
     headers = call_args.kwargs["headers"]
     assert headers["X-Return-Format"] == "screenshot"
+
+
+def test_jina_scrape_error_includes_response_body(mocker):
+    """Test that HTTP error messages include the response body text."""
+    from requests.exceptions import HTTPError
+
+    mock_response = mocker.Mock()
+    mock_response.text = "No content available for URL https://example.com with target selector #main"
+    mock_response.status_code = 422
+    http_error = HTTPError("422 Client Error: Unprocessable Entity", response=mock_response)
+    mock_response.raise_for_status.side_effect = http_error
+
+    mocker.patch("requests.request", return_value=mock_response)
+
+    jina_connection = Jina(api_key="test_key")
+    jina_tool = JinaScrapeTool(connection=jina_connection)
+
+    result = jina_tool.run({"url": "https://example.com"}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+    assert result.error.recoverable
+    assert "422 Client Error" in result.error.message
+    assert "No content available" in result.error.message
