@@ -1,5 +1,3 @@
-"""Base sandbox interface and common data structures."""
-
 import abc
 import io
 import logging

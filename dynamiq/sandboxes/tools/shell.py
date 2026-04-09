@@ -53,20 +53,20 @@ class SandboxShellTool(Node):
         "- command (str, required): The shell command to execute.\n"
         "- timeout (int, default 60): Max seconds to wait for completion.\n"
         "- run_in_background_enabled (bool, default false): Run without waiting for output.\n\n"
-        "Paths: Input files are under /home/user/input. Write outputs to /home/user/output; "
+        "Paths: Input files are under {base_path}/input. Write outputs to {base_path}/output; "
         "files there are automatically collected and returned after the run. "
         "If you start a dev server (e.g. npm run dev), "
         "use sandbox-info tool with the server port to get the public URL to share with the user.\n\n"
         "Examples:\n"
-        '- {"command": "ls -la /home/user/input"}\n'
-        '- {"command": "python3 /home/user/input/script.py /home/user/input/data.txt /home/user/output"}\n'
-        '- {"command": "cp result.csv /home/user/output/"}\n'
-        '- {"command": "cat <<\'EOF\' > script.py && python3 script.py\\nimport csv\\n'
+        '- {{"command": "ls -la {base_path}/input"}}\n'
+        '- {{"command": "python3 {base_path}/input/script.py {base_path}/input/data.txt {base_path}/output"}}\n'
+        '- {{"command": "cp result.csv {base_path}/output/"}}\n'
+        '- {{"command": "cat <<\'EOF\' > script.py && python3 script.py\\nimport csv\\n'
         "with open('data.csv') as f:\\n"
         "    reader = csv.reader(f)\\n"
         "    print(list(reader))\\n"
         "print('Done')\\n"
-        'EOF"}'
+        'EOF"}}'
     )
 
     sandbox: Sandbox = Field(..., description="Sandbox backend to execute commands in.")
@@ -77,6 +77,11 @@ class SandboxShellTool(Node):
     )
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[SandboxShellInputSchema]] = SandboxShellInputSchema
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if self.sandbox and hasattr(self.sandbox, "base_path"):
+            self.description = self.description.replace("{base_path}", self.sandbox.base_path)
 
     @property
     def to_dict_exclude_params(self):
