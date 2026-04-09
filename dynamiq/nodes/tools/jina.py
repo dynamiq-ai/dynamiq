@@ -217,7 +217,7 @@ class JinaScrapeTool(ConnectionNode):
                 except Exception as parse_err:
                     logger.debug(f"Tool {self.name} - {self.id}: could not parse error response: {parse_err}")
                 if error_body:
-                    error_detail = f"{error_detail}. {error_body[:500]}"
+                    error_detail = f"{error_detail}. {str(error_body)[:500]}"
             logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {error_detail}")
             raise ToolExecutionException(
                 f"Tool '{self.name}' failed to execute the requested action. "
