@@ -596,7 +596,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         if isinstance(action_input, str):
             try:
-                action_input = json.loads(action_input)
+                action_input = json.loads(action_input, strict=False)
             except json.JSONDecodeError as e:
                 raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
 
