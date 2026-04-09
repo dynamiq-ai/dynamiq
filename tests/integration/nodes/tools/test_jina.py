@@ -273,8 +273,10 @@ def test_jina_scrape_error_includes_response_body(mocker):
     from requests.exceptions import HTTPError
 
     mock_response = mocker.Mock()
-    mock_response.text = "No content available for URL https://example.com with target selector #main"
     mock_response.status_code = 422
+    mock_response.json.return_value = {
+        "message": "No content available for URL https://example.com with target selector #main"
+    }
     http_error = HTTPError("422 Client Error: Unprocessable Entity", response=mock_response)
     mock_response.raise_for_status.side_effect = http_error
 
