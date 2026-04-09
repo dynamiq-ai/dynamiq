@@ -28,6 +28,8 @@ from dynamiq.types.llm_tool import Tool
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
+    from concurrent.futures import ThreadPoolExecutor
+
     from litellm import CustomStreamWrapper, ModelResponse
 
 
@@ -210,6 +212,7 @@ class BaseLLM(ConnectionNode):
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     _completion: Callable = PrivateAttr()
+    _acompletion: Callable = PrivateAttr()
     _stream_chunk_builder: Callable = PrivateAttr()
     _is_fallback_run: bool = PrivateAttr(default=False)
     _json_schema_fields: ClassVar[list[str]] = ["model", "temperature", "max_tokens", "prompt"]
@@ -261,10 +264,11 @@ class BaseLLM(ConnectionNode):
         super().__init__(**kwargs)
 
         # Save a bit of loading time as litellm is slow
-        from litellm import completion, stream_chunk_builder
+        from litellm import acompletion, completion, stream_chunk_builder
 
         # Avoid the same imports multiple times and for future usage in execute
         self._completion = completion
+        self._acompletion = acompletion
         self._stream_chunk_builder = stream_chunk_builder
 
     def init_components(self, connection_manager=None):
@@ -499,6 +503,36 @@ class BaseLLM(ConnectionNode):
         full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
 
+    async def _handle_streaming_completion_response_async(
+        self,
+        response: Union["ModelResponse", "CustomStreamWrapper"],
+        messages: list[dict],
+        config: RunnableConfig = None,
+        **kwargs,
+    ):
+        """Handle async streaming completion response.
+
+        Args:
+            response (ModelResponse | CustomStreamWrapper): The async streaming response from the LLM.
+            messages (list[dict]): The messages used for the LLM.
+            config (RunnableConfig, optional): The configuration for the execution. Defaults to None.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            dict: A dictionary containing the generated content and tool calls.
+        """
+        chunks = []
+        async for chunk in response:
+            chunks.append(chunk)
+            self.run_on_node_execute_stream(
+                config.callbacks,
+                chunk.model_dump(),
+                **kwargs,
+            )
+
+        full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
+        return self._handle_completion_response(response=full_response, config=config, **kwargs)
+
     def _get_response_format_and_tools(
         self,
         prompt: Prompt | None = None,
@@ -559,6 +593,72 @@ class BaseLLM(ConnectionNode):
             params["stream_options"]["include_usage"] = True
         return params
 
+    def _build_completion_params(
+        self,
+        messages: list[dict],
+        config: RunnableConfig,
+        prompt: Prompt | None = None,
+        tools: list[Tool | dict] | None = None,
+        response_format: dict[str, Any] | None = None,
+        parallel_tool_calls: bool | None = None,
+        include_sync_client: bool = True,
+    ) -> dict[str, Any]:
+        """Build the common parameter dict for litellm completion/acompletion calls.
+
+        Args:
+            messages: Formatted prompt messages.
+            config: Runnable configuration (used to detect streaming callbacks).
+            prompt: Prompt with optional tools/response_format overrides.
+            tools: Explicit tool list override.
+            response_format: Explicit response format override.
+            parallel_tool_calls: Whether to allow parallel tool calls.
+            include_sync_client: If True and self.client exists, include it in params.
+                Set to False for async calls that should not receive the sync client.
+
+        Returns:
+            Dict of params ready to pass to _completion or _acompletion.
+        """
+        extra = copy.deepcopy(self.__pydantic_extra__)
+        params = self.connection.conn_params.copy()
+        if include_sync_client and self.client and not isinstance(self.connection, HttpApiKey):
+            params.update({"client": self.client})
+        if self.thinking_enabled:
+            params.update({"thinking": {"type": "enabled", "budget_tokens": self.budget_tokens}})
+        if extra:
+            params.update(extra)
+
+        response_format, tools = self._get_response_format_and_tools(
+            prompt=prompt,
+            tools=tools,
+            response_format=response_format,
+        )
+        # Check if a streaming callback is available in the config and enable streaming only if it is.
+        # This is to avoid unnecessary streaming to reduce CPU usage.
+        is_streaming_callback_available = any(
+            isinstance(callback, BaseStreamingCallbackHandler) for callback in config.callbacks
+        )
+        common_params: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": self.streaming.enabled and is_streaming_callback_available,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "tools": tools,
+            "tool_choice": self.tool_choice,
+            "stop": self.stop if self.stop else None,
+            "top_p": self.top_p,
+            "seed": self.seed,
+            "presence_penalty": self.presence_penalty,
+            "frequency_penalty": self.frequency_penalty,
+            "response_format": response_format,
+            "drop_params": True,
+            **params,
+        }
+        if parallel_tool_calls is not None:
+            common_params["parallel_tool_calls"] = parallel_tool_calls
+
+        return self.update_completion_params(common_params)
+
     def execute(
         self,
         input_data: BaseLLMInputSchema,
@@ -593,55 +693,78 @@ class BaseLLM(ConnectionNode):
         messages = self.get_messages(prompt, input_data)
         self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=messages, **kwargs)
 
-        extra = copy.deepcopy(self.__pydantic_extra__)
-        params = self.connection.conn_params.copy()
-        if self.client and not isinstance(self.connection, HttpApiKey):
-            params.update({"client": self.client})
-        if self.thinking_enabled:
-            params.update({"thinking": {"type": "enabled", "budget_tokens": self.budget_tokens}})
-        if extra:
-            params.update(extra)
-
-        response_format, tools = self._get_response_format_and_tools(
+        common_params = self._build_completion_params(
+            messages=messages,
+            config=config,
             prompt=prompt,
             tools=tools,
             response_format=response_format,
+            parallel_tool_calls=parallel_tool_calls,
+            include_sync_client=True,
         )
-        # Check if a streaming callback is available in the config and enable streaming only if it is
-        # This is to avoid unnecessary streaming to reduce CPU usage
-        is_streaming_callback_available = any(
-            isinstance(callback, BaseStreamingCallbackHandler) for callback in config.callbacks
-        )
-        common_params: dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "stream": self.streaming.enabled and is_streaming_callback_available,
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-            "tools": tools,
-            "tool_choice": self.tool_choice,
-            "stop": self.stop if self.stop else None,
-            "top_p": self.top_p,
-            "seed": self.seed,
-            "presence_penalty": self.presence_penalty,
-            "frequency_penalty": self.frequency_penalty,
-            "response_format": response_format,
-            "drop_params": True,
-            **params,
-        }
-        if parallel_tool_calls is not None:
-            common_params["parallel_tool_calls"] = parallel_tool_calls
-
-        common_params = self.update_completion_params(common_params)
 
         response = self._completion(**common_params)
         handle_completion = (
             self._handle_streaming_completion_response
-            if self.streaming.enabled and is_streaming_callback_available
+            if common_params.get("stream")
             else self._handle_completion_response
         )
 
         return handle_completion(
+            response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
+        )
+
+    async def execute_async(
+        self,
+        input_data: BaseLLMInputSchema,
+        config: RunnableConfig = None,
+        prompt: Prompt | None = None,
+        tools: list[Tool | dict] | None = None,
+        response_format: dict[str, Any] | None = None,
+        parallel_tool_calls: bool | None = None,
+        **kwargs,
+    ):
+        """Execute the LLM node asynchronously using litellm.acompletion.
+
+        This method mirrors execute() but uses await self._acompletion(...)
+        and async streaming iteration.
+
+        Args:
+            input_data (BaseLLMInputSchema): The input data for the LLM.
+            config (RunnableConfig, optional): The configuration for the execution. Defaults to None.
+            prompt (Prompt, optional): The prompt to use for this execution. Defaults to None.
+            tools (list[Tool|dict]): List of tools that llm can call.
+            response_format (dict[str, Any]): JSON schema that specifies the structure of the llm's output.
+            parallel_tool_calls (bool | None): Whether to allow the LLM to return multiple tool calls
+                in a single response. None means provider decides.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            dict: A dictionary containing the generated content and tool calls.
+        """
+        config = ensure_config(config)
+        self.reset_run_state()
+        prompt = prompt or self.prompt or Prompt(messages=[], tools=None, response_format=None)
+        messages = self.get_messages(prompt, input_data)
+        self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=messages, **kwargs)
+
+        common_params = self._build_completion_params(
+            messages=messages,
+            config=config,
+            prompt=prompt,
+            tools=tools,
+            response_format=response_format,
+            parallel_tool_calls=parallel_tool_calls,
+            include_sync_client=False,
+        )
+
+        response = await self._acompletion(**common_params)
+
+        if common_params.get("stream"):
+            return await self._handle_streaming_completion_response_async(
+                response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
+            )
+        return self._handle_completion_response(
             response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
         )
 
@@ -763,6 +886,81 @@ class BaseLLM(ConnectionNode):
         if fallback_result.status == RunnableStatus.SUCCESS:
             logger.info(f"LLM {self.name} - {self.id}: Fallback LLM ({fallback_llm.model}) succeeded")
             # Apply primary node's output_transformer to fallback result
+            transformed_output = self.transform_output(fallback_result.output, config=config, **kwargs)
+            return RunnableResult(
+                status=RunnableStatus.SUCCESS,
+                input=result.input,
+                output=transformed_output,
+            )
+
+        logger.error(f"LLM {self.name} - {self.id}: Fallback LLM ({fallback_llm.model}) failed.")
+        return result
+
+    async def run_async(
+        self,
+        input_data: dict,
+        config: RunnableConfig = None,
+        depends_result: dict = None,
+        executor: "ThreadPoolExecutor | None" = None,
+        **kwargs,
+    ) -> RunnableResult:
+        """Run the LLM asynchronously with fallback support.
+
+        If the primary LLM fails and a fallback is configured, the primary failure
+        is traced first, then the fallback LLM is executed separately.
+
+        The fallback receives the same transformed input that the primary received,
+        and the primary's output_transformer is applied to the fallback's output.
+
+        Args:
+            input_data: Input data for the LLM.
+            config: Configuration for the run.
+            depends_result: Results of dependent nodes.
+            executor: Optional thread pool executor for sync fallback.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            RunnableResult: Result of the LLM execution.
+        """
+        result = await super().run_async(
+            input_data=input_data, config=config, depends_result=depends_result,
+            executor=executor, **kwargs
+        )
+
+        if result.status != RunnableStatus.FAILURE:
+            return result
+
+        if not self.fallback or not self.fallback.llm:
+            return result
+
+        if not result.error:
+            return result
+
+        if not self._should_trigger_fallback(result.error.type, result.error.message):
+            return result
+
+        fallback_llm = self.fallback.llm
+        fallback_llm._is_fallback_run = True
+        logger.warning(
+            f"LLM {self.name} - {self.id}: Primary LLM ({self.model}) failed. "
+            f"Error: {result.error.type.__name__}: {result.error.message}. "
+            f"Attempting fallback to {fallback_llm.name} - {fallback_llm.id}"
+        )
+
+        fallback_kwargs = {k: v for k, v in kwargs.items() if k != "run_depends"}
+        fallback_kwargs["parent_run_id"] = kwargs.get("parent_run_id")
+
+        fallback_input = result.input.model_dump() if hasattr(result.input, "model_dump") else result.input
+        fallback_result = await fallback_llm.run_async(
+            input_data=fallback_input,
+            config=config,
+            depends_result=None,
+            executor=executor,
+            **fallback_kwargs,
+        )
+
+        if fallback_result.status == RunnableStatus.SUCCESS:
+            logger.info(f"LLM {self.name} - {self.id}: Fallback LLM ({fallback_llm.model}) succeeded")
             transformed_output = self.transform_output(fallback_result.output, config=config, **kwargs)
             return RunnableResult(
                 status=RunnableStatus.SUCCESS,
