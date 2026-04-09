@@ -223,8 +223,11 @@ def _track_reasoning(event_name, state, next_state, content, reasoning_blocks):
     """Track reasoning block lifecycle. Call on every FSM step."""
     if next_state == State.REASONING and state != State.REASONING:
         reasoning_blocks.append("")
-    if event_name == "reasoning" and isinstance(content, str) and reasoning_blocks:
-        reasoning_blocks[-1] += content
+    if event_name == "reasoning" and reasoning_blocks:
+        if isinstance(content, str):
+            reasoning_blocks[-1] += content
+        elif isinstance(content, dict) and "thought" in content:
+            reasoning_blocks[-1] += content["thought"]
 
 
 def _track_tool_input(event_name, content, tool_blocks):
@@ -296,12 +299,29 @@ def _match_action_input(accumulated: str, expected) -> bool:
             return True
         attempts.append(f"wrapped: {accumulated!r} == {inner!r} -> False")
 
-    # 3. Decode accumulated (JSON-escaped streaming) and compare
+    # 3. Decode accumulated (JSON-escaped streaming) and compare.
+    #    Structured output streams action_input as a JSON string field, so the
+    #    accumulated text is the raw string body with escape sequences (e.g.
+    #    {\"key\":\"val\"}).  Wrap in quotes to form a valid JSON string literal
+    #    before decoding.
     decoded = None
     try:
         decoded = json.loads(accumulated)
     except (json.JSONDecodeError, TypeError):
+        try:
+            decoded = json.loads(f'"{accumulated}"')
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if decoded is None:
         attempts.append("json.loads(accumulated) -> FAILED")
+
+    # If decoded is itself a JSON string (structured output double-encoding),
+    # unwrap one more level.
+    if isinstance(decoded, str):
+        try:
+            decoded = json.loads(decoded)
+        except (json.JSONDecodeError, TypeError):
+            pass
 
     if decoded is not None:
         if decoded == expected:
@@ -361,7 +381,11 @@ def _validate_single_post_parse(content, tool_blocks, reasoning_blocks):
     expected_thought = content.get("thought")
     if reasoning_blocks and expected_thought:
         accumulated_thought = reasoning_blocks[0]
-        assert accumulated_thought == expected_thought, (
+        # Streaming emits raw JSON string content (e.g. \n as two chars),
+        # while post_parse decodes via json.loads (real newline).
+        # Encode expected to raw JSON form for a fair comparison.
+        expected_thought_raw = json.dumps(expected_thought)[1:-1]
+        assert accumulated_thought == expected_thought or accumulated_thought == expected_thought_raw, (
             f"tool_run_id {tid} ({tool_name}): accumulated reasoning "
             f"({len(accumulated_thought)} chars) does not match post_parse thought. "
             f"Accumulated: {accumulated_thought!r}\n"
@@ -468,9 +492,12 @@ def _run_fsm_fc(ordered_events, streaming_mode):
                                     f"Expected:    {entry_input!r}"
                                 )
 
-                        # Validate thought against reasoning_blocks[i]
+                        # Validate thought against reasoning_blocks[i].
+                        # Streaming may emit raw JSON escapes (e.g. \n as two chars),
+                        # so also compare against the JSON-encoded form.
                         accumulated_thought = reasoning_blocks[i]
-                        assert accumulated_thought == entry_thought, (
+                        expected_thought_raw = json.dumps(entry_thought)[1:-1]
+                        assert accumulated_thought == entry_thought or accumulated_thought == expected_thought_raw, (
                             f"run-parallel tool[{i}] {entry_tid} "
                             f"({tool_label}): reasoning_blocks[{i}] "
                             f"does not match per-tool thought. "

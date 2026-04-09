@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Iterator
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.callbacks.base import get_run_id
 from dynamiq.types.streaming import (
-    AgentReasoningEventMessageData,
     AgentToolData,
     AgentToolInputDeltaData,
+    AgentToolInputStartData,
     StreamingEntitySource,
     StreamingEventMessage,
     StreamingMode,
@@ -607,12 +607,10 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
     def _emit_tool_input_start(self) -> None:
         """Emit a tool_input start event with full metadata before the first delta."""
         tool_data = self._resolve_tool_data()
-        start_model = AgentReasoningEventMessageData(
+        start_model = AgentToolInputStartData(
             tool_run_id=self.agent._streaming_tool_run_id or "",
-            thought="",
             action=self._current_action_name or "",
             tool=tool_data,
-            action_input="",
             loop_num=self.loop_num,
         )
         self.agent.stream_content(
@@ -1036,9 +1034,10 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         Each initializer is a no-op when _current_state is already set, so this is safe
         to call multiple times within a single chunk processing cycle.
         """
-        self._initialize_json_field_state(
-            buf, JSONStreamingField.THOUGHT.value, StreamingState.REASONING, final_answer_only
-        )
+        if not self._state_has_emitted.get(StreamingState.REASONING, False):
+            self._initialize_json_field_state(
+                buf, JSONStreamingField.THOUGHT.value, StreamingState.REASONING, final_answer_only
+            )
 
         if self._answer_started:
             self._initialize_json_field_state(buf, JSONStreamingField.ANSWER.value, StreamingState.ANSWER)
@@ -1113,7 +1112,9 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                     self._emit(buf[segment_start:segment_end], step=step)
                     segment_start = segment_end
                 self._state_last_emit_index = end_quote
-            # Reset the state
+            # Mark the field as emitted and reset the state
+            if step in self._state_has_emitted:
+                self._state_has_emitted[step] = True
             self._current_state = None
             return True
 

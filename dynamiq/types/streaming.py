@@ -106,11 +106,41 @@ class AgentReasoningEventMessageData(BaseModel):
     loop_num: int
 
 
+# ---------------------------------------------------------------------------
+# Tool input streaming models
+# ---------------------------------------------------------------------------
+
+
+class AgentToolInputStartData(BaseModel):
+    """Emitted once when tool_input streaming begins for a tool call."""
+
+    tool_run_id: str
+    action: str
+    tool: AgentToolData
+    loop_num: int
+
+
 class AgentToolInputDeltaData(BaseModel):
     """Lean delta for tool_input streaming. Only tool_run_id and action_input change."""
 
     tool_run_id: str
     action_input: Any
+
+
+class AgentToolInputErrorEventMessageData(BaseModel):
+    """Emitted when action parsing fails after tool input was already
+    partially streamed, so consumers can discard the invalid chunks.
+    """
+
+    tool_run_id: str
+    name: str
+    error: str
+    loop_num: int
+
+
+# ---------------------------------------------------------------------------
+# Tool result streaming model
+# ---------------------------------------------------------------------------
 
 
 class AgentToolResultEventMessageData(BaseModel):
@@ -142,19 +172,6 @@ class AgentToolResultEventMessageData(BaseModel):
         if self.output is not None:
             data["output"] = serialize_files_in_value(self.output)
         return data
-
-
-class AgentToolInputErrorEventMessageData(BaseModel):
-    """Model for agent tool input error streaming event data.
-
-    Emitted when action parsing fails after tool input was already
-    partially streamed, so consumers can discard the invalid chunks.
-    """
-
-    tool_run_id: str
-    name: str
-    error: str
-    loop_num: int
 
 
 class StreamingConfig(BaseModel):
