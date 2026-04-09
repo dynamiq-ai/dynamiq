@@ -38,8 +38,7 @@ class SkillsTool(Node):
     name: str = "skills-tool"
     description: str = (
         "Manages skills (instructions and optional scripts). "
-        "Available skills are already listed in the system prompt — "
-        "do not call 'list' to re-discover them unless that list is missing. Use this tool to:\n"
+        "Available skills are already listed in the system prompt. Use this tool to:\n"
         "- Get skill content: action='get', skill_name='...' "
         "— use only when skills are NOT available in the sandbox. "
         "When a sandbox is available and skills have been "
