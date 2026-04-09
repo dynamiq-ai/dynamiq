@@ -255,14 +255,25 @@ class Stagehand(ConnectionNode):
         files = {"file": (file_name, io.BytesIO(file_bytes))}
         response = requests.post(url, headers=self._get_steel_browser_headers(), files=files, timeout=self.timeout)
         response.raise_for_status()
-        return response.json()
+        try:
+            return response.json()
+        except ValueError as e:
+            logger.error(f"Failed to parse JSON from Steel Browser upload response: {e}")
+            raise ToolExecutionException(
+                f"Steel Browser API returned invalid JSON after file upload: {e}",
+                recoverable=True,
+            )
 
     def _list_steel_browser_session_files(self, session_id: str) -> list[dict]:
         """List all files in the Steel Browser session's filesystem."""
         url = f"{self._get_steel_browser_base_url()}/sessions/{session_id}/files"
         response = requests.get(url, headers=self._get_steel_browser_headers(), timeout=self.timeout)
         response.raise_for_status()
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError as e:
+            logger.error(f"Failed to parse JSON from Steel Browser files response: {e}")
+            return []
         if isinstance(payload, dict):
             logger.info(f"Steel session files: {payload.get('data') or []}")
             return payload.get("data") or []
