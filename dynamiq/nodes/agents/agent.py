@@ -371,7 +371,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             per_tool_reasoning.append(
                 AgentReasoningEventMessageData(
                     tool_run_id=tid,
-                    thought="",
+                    thought=tp.get("thought", ""),
                     action=tp["name"],
                     tool=tool_data,
                     action_input=tp["input"],
@@ -585,7 +585,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 tc_input = tc_args["action_input"]
                 if not isinstance(tc_input, dict):
                     tc_input = {"input": tc_input}
-                tool_items.append(ToolCallItem(name=tc_name, input=tc_input))
+                tool_items.append(ToolCallItem(name=tc_name, input=tc_input, thought=tc_args.get("thought", "")))
 
             validated = ParallelToolCallsInputSchema(tools=tool_items)
             action_input = validated.model_dump()
@@ -850,19 +850,20 @@ class Agent(HistoryManagerMixin, BaseAgent):
             action_type=tool.action_type.value if tool.action_type else None,
         )
 
-        self._stream_agent_event(
-            AgentReasoningEventMessageData(
-                tool_run_id=tool_run_id,
-                thought=thought or "",
-                action=action,
-                tool=tool_data,
-                action_input=action_input,
-                loop_num=loop_num,
-            ),
-            "reasoning",
-            config,
-            **kwargs,
-        )
+        if not is_parallel:
+            self._stream_agent_event(
+                AgentReasoningEventMessageData(
+                    tool_run_id=tool_run_id,
+                    thought=thought or "",
+                    action=action,
+                    tool=tool_data,
+                    action_input=action_input,
+                    loop_num=loop_num,
+                ),
+                "reasoning",
+                config,
+                **kwargs,
+            )
         try:
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
@@ -1669,7 +1670,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     }
                 )
                 continue
-            prepared_tools.append({"order": idx, "name": tool_name, "input": tool_input})
+            prepared_tools.append(
+                {"order": idx, "name": tool_name, "input": tool_input, "thought": td.get("thought", "")}
+            )
 
         def _execute_single_tool_to_result(tool_payload: dict[str, Any], **extra) -> dict[str, Any]:
             """Execute a single tool and wrap the result as a dict."""
