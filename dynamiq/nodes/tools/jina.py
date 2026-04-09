@@ -208,10 +208,20 @@ class JinaScrapeTool(ConnectionNode):
                 scrape_result, links, images = self._parse_response(response_data)
 
         except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {e}")
+            error_detail = str(e)
+            error_response = getattr(e, "response", None)
+            if error_response is not None:
+                error_body = None
+                try:
+                    error_body = error_response.json().get("message")
+                except Exception as parse_err:
+                    logger.debug(f"Tool {self.name} - {self.id}: could not parse error response: {parse_err}")
+                if error_body:
+                    error_detail = f"{error_detail}. {str(error_body)[:500]}"
+            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {error_detail}")
             raise ToolExecutionException(
                 f"Tool '{self.name}' failed to execute the requested action. "
-                f"Error: {str(e)}. Please analyze the error and take appropriate action.",
+                f"Error: {error_detail}. Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
 
