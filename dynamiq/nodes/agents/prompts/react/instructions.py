@@ -17,7 +17,7 @@ Thought: [Your reasoning about the question]
 Output Files: [Optional: comma-separated file paths to return, omit this line if there are no files]
 Answer: [Your direct response]
 
-## Important Rules
+IMPORTANT RULES:
 - ALWAYS start with "Thought:" even for simple responses
 - Keep the explanation on the same line as the label (e.g., Thought: I should...), without leading spaces or blank lines
 - Avoid starting the thought with phrases like "The user..." or "The model..."; refer to yourself in the first person (e.g., "I should...")
@@ -145,6 +145,11 @@ them in any order you choose to complete the task:\n
 {{ tool_description }}
 """
 
+REACT_BLOCK_TOOLS_BRIEF = """
+Available tools: [{{ tools_name }}]
+Refer to each tool's function schema for detailed usage.
+"""
+
 
 REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """Always structure your responses in this JSON format:
 
@@ -168,7 +173,7 @@ action: finish,
 action_input: [Your direct response],
 output_files: [comma-separated file paths to return, or empty string if none]}
 
-## Important Rules
+IMPORTANT RULES:
 - You MUST ALWAYS include "thought" as the FIRST field in your JSON
 - ALWAYS populate the "thought" field FIRST before "action_input" in your response.
 - Each tool has a specific input format you must strictly follow
@@ -217,7 +222,7 @@ Thought: [Your detailed reasoning about the user's question]
 Output Files: [Optional: comma-separated file paths to return, omit this line if there are no files]
 Answer: [Your complete response to the user's question]
 
-## Important Rules
+IMPORTANT RULES:
 - ALWAYS begin with "Thought:" to show your reasoning process
 - Keep the explanation on the same line as the label, avoiding leading spaces or blank lines
 - Write your reasoning in first person (e.g., "I should...", "I know...")
@@ -241,7 +246,7 @@ REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS = """Always use this exact XML format in y
     <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 </output>
 
-## Important Rules
+IMPORTANT RULES:
 - ALWAYS include <thought> tags with detailed reasoning
 - Place text immediately after each opening tag without leading newlines or indentation
 - Only use thought and answer tags

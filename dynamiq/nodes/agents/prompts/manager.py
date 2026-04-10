@@ -14,7 +14,7 @@ from dynamiq.nodes.agents.prompts.react import (
     REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT,
     REACT_BLOCK_OUTPUT_FORMAT,
     REACT_BLOCK_TOOLS,
-    REACT_BLOCK_TOOLS_NO_FORMATS,
+    REACT_BLOCK_TOOLS_BRIEF,
     REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS,
     REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
     REACT_MAX_LOOPS_PROMPT,
@@ -321,7 +321,7 @@ def get_model_specific_prompts(
             )
             if has_tools:
                 prompt_blocks["tools"] = get_prompt_constant(
-                    model_name, "REACT_BLOCK_TOOLS_NO_FORMATS", REACT_BLOCK_TOOLS_NO_FORMATS
+                    model_name, "REACT_BLOCK_TOOLS_BRIEF", REACT_BLOCK_TOOLS_BRIEF
                 )
 
         case InferenceMode.STRUCTURED_OUTPUT:
