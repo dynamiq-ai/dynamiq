@@ -236,6 +236,10 @@ class Agent(Node):
             Can be used to provide additional context or instructions to the agent.
             Accepts Jinja templates to provide additional parameters.""",
     )
+    instructions: str | None = Field(
+        default=None,
+        description="Additional operational instructions appended to the operational instructions block.",
+    )
     description: str | None = Field(default=None, description="Short human-readable description of the agent.")
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
     _excluded_tool_ids: set[str] = PrivateAttr(default_factory=set)

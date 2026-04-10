@@ -1576,6 +1576,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
             has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
         )
 
+        # Append user-provided instructions to operational_instructions block
+        if self.instructions:
+            existing = self.system_prompt_manager._prompt_blocks.get("operational_instructions", "")
+            self.system_prompt_manager.set_block(
+                "operational_instructions",
+                f"{existing}\n\n{self.instructions}" if existing else self.instructions,
+            )
+
         # Only auto-wrap the entire role in a raw block if the user did not
         # provide explicit raw/endraw markers. This allows roles to mix
         # literal sections (via raw) with Jinja variables like {{ input }}

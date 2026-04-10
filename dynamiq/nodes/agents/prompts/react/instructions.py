@@ -17,7 +17,7 @@ Thought: [Your reasoning about the question]
 Output Files: [Optional: comma-separated file paths to return, omit this line if there are no files]
 Answer: [Your direct response]
 
-IMPORTANT RULES:
+## Important Rules
 - ALWAYS start with "Thought:" even for simple responses
 - Keep the explanation on the same line as the label (e.g., Thought: I should...), without leading spaces or blank lines
 - Avoid starting the thought with phrases like "The user..." or "The model..."; refer to yourself in the first person (e.g., "I should...")
@@ -33,12 +33,12 @@ IMPORTANT RULES:
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
-SINGLE ACTION PER TURN:
+## Single Action Per Turn
 - Execute exactly ONE action per response, then wait for its Observation before continuing
 - Do NOT chain multiple Action/Action Input pairs in the same response
 - After receiving an Observation, decide the next single action based on the result
 
-FILE HANDLING:
+## File Handling
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - If you want to return files, include an "Output Files:" line before "Answer:" listing file paths (comma-separated). This line is optional — omit it if there are no files to return.
 """  # noqa: E501
@@ -82,7 +82,7 @@ For questions that don't require tools:
     <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 </output>
 
-CRITICAL XML FORMAT RULES:
+## Critical XML Format Rules
 - ALWAYS include <thought> tags with detailed reasoning
 - Start the text immediately after each opening tag; do not add leading newlines or indentation inside the tags
 - Write thoughts in the first person (e.g., "I will...", "I should...")
@@ -105,19 +105,19 @@ CRITICAL XML FORMAT RULES:
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
-SINGLE ACTION PER TURN:
+## Single Action Per Turn
 - Execute exactly ONE <action>/<action_input> pair per response, then wait for its Observation before continuing
 - Do NOT include multiple action blocks or answer blocks in the same response
 - After receiving an Observation, decide the next single action based on the result
 
-JSON FORMATTING REQUIREMENTS:
+## JSON Formatting Requirements
 - Put JSON on single line within tags
 - Use double quotes for all strings
 - Escape newlines as \\n, quotes as \\"
 - NO multi-line JSON formatting
 - For tools that accept code (e.g. python), the code must be one JSON string with \\n for line breaks, not literal newlines
 
-FILE HANDLING:
+## File Handling
 - Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
 - If you want to return files, include an <output_files> tag after </answer> (but still inside <output>) listing absolute file paths (comma-separated). This tag is optional — omit it if there are no files to return.
 """  # noqa: E501
@@ -168,7 +168,7 @@ action: finish,
 action_input: [Your direct response],
 output_files: [comma-separated file paths to return, or empty string if none]}
 
-IMPORTANT RULES:
+## Important Rules
 - You MUST ALWAYS include "thought" as the FIRST field in your JSON
 - ALWAYS populate the "thought" field FIRST before "action_input" in your response.
 - Each tool has a specific input format you must strictly follow
@@ -179,7 +179,7 @@ IMPORTANT RULES:
 - Ensure proper JSON syntax with quoted keys and values
 - To return an agent tool's response as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call finish yourself afterward; the system will return the agent's result directly.
 
-FILE HANDLING:
+## File Handling
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - When using action "finish", include an "output_files" field with comma-separated file paths to return. Use an empty string if there are no files to return.
 - Never return empty response.
@@ -197,7 +197,7 @@ If the user's request requires the use of specific tools, such as [{{ tools_name
 Only after utilizing the necessary tools and gathering the required information should
 you call `provide_final_answer` to deliver the final response.
 
-FUNCTION CALLING GUIDELINES:
+## Function Calling Guidelines
 - ALWAYS populate the "thought" field FIRST before "action_input" in your function calls
 - Analyze the request carefully to determine if tools are needed
 - Call functions with properly formatted arguments
@@ -205,7 +205,7 @@ FUNCTION CALLING GUIDELINES:
 - Chain multiple tool calls when necessary for complex tasks
 - If you want an agent tool's response returned verbatim as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.
 
-FILE HANDLING:
+## File Handling
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - When calling `provide_final_answer`, include an `output_files` argument with comma-separated file paths to return. Pass an empty string if there are no files to return.
 """  # noqa: E501
@@ -217,7 +217,7 @@ Thought: [Your detailed reasoning about the user's question]
 Output Files: [Optional: comma-separated file paths to return, omit this line if there are no files]
 Answer: [Your complete response to the user's question]
 
-IMPORTANT RULES:
+## Important Rules
 - ALWAYS begin with "Thought:" to show your reasoning process
 - Keep the explanation on the same line as the label, avoiding leading spaces or blank lines
 - Write your reasoning in first person (e.g., "I should...", "I know...")
@@ -241,7 +241,7 @@ REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS = """Always use this exact XML format in y
     <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 </output>
 
-IMPORTANT RULES:
+## Important Rules
 - ALWAYS include <thought> tags with detailed reasoning
 - Place text immediately after each opening tag without leading newlines or indentation
 - Only use thought and answer tags

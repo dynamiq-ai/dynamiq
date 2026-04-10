@@ -341,7 +341,7 @@ def get_model_specific_prompts(
                 logger.debug(f"Using model-specific REACT_BLOCK_XML_INSTRUCTIONS_SINGLE for '{model_name}'")
             prompt_blocks["instructions"] = xml_instructions_no_tools if not has_tools else instructions_xml
 
-    # Build secondary_instructions from enabled features
+    # Build operational_instructions from enabled features
     secondary_parts = []
     if parallel_tool_calls_enabled:
         secondary_parts.append(REACT_BLOCK_MULTI_TOOL_PLANNING)
@@ -354,16 +354,15 @@ def get_model_specific_prompts(
         secondary_parts.append(CONTEXT_MANAGER_INSTRUCTIONS)
     if todo_management_enabled:
         secondary_parts.append(TODO_TOOLS_INSTRUCTIONS)
-    if sandbox_base_path:
-        secondary_parts.append(
-            SANDBOX_INSTRUCTIONS_TEMPLATE.format(
-                base_path=sandbox_base_path,
-            )
-        )
     if has_sub_agent_tools:
         secondary_parts.append(SUB_AGENT_INSTRUCTIONS)
 
     if secondary_parts:
-        prompt_blocks["secondary_instructions"] = "\n\n".join(secondary_parts)
+        prompt_blocks["operational_instructions"] = "\n\n".join(secondary_parts)
+
+    if sandbox_base_path:
+        prompt_blocks["environment"] = SANDBOX_INSTRUCTIONS_TEMPLATE.format(
+            base_path=sandbox_base_path,
+        )
 
     return prompt_blocks, agent_template
