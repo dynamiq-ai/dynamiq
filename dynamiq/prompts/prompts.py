@@ -3,7 +3,7 @@ import enum
 import io
 import mimetypes
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, ClassVar
 
 import filetype
 from jinja2 import Environment, meta
@@ -18,6 +18,11 @@ class MessageRole(str, enum.Enum):
     USER = "user"
     SYSTEM = "system"
     ASSISTANT = "assistant"
+
+
+class MessageType(str, enum.Enum):
+    MESSAGE = "message"
+    VISION = "vision"
 
 
 class VisionMessageType(str, enum.Enum):
@@ -66,9 +71,10 @@ class Message(BaseModel):
     metadata: dict | None = None
     static: bool = Field(default=False, exclude=True)
 
+    message_type: ClassVar[MessageType] = MessageType.MESSAGE
+
     def __init__(self, **data):
         super().__init__(**data)
-        # Import and initialize Jinja2 Template here
         from jinja2 import Template
 
         self._Template = Template
@@ -79,6 +85,18 @@ class Message(BaseModel):
             role=self.role,
             content=self._Template(self.content).render(**kwargs),
         )
+
+    def to_dict(self) -> dict:
+        return {
+            "type": self.message_type.value,
+            "content": self.content,
+            "role": self.role.value,
+            "static": self.static,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Message":
+        return cls(content=data["content"], role=MessageRole(data["role"]), static=data.get("static", False))
 
 
 class VisionMessageTextContent(BaseModel):
@@ -156,6 +174,8 @@ class VisionMessage(BaseModel):
     content: list[VisionMessageTextContent | VisionMessageImageContent | VisionMessageFileContent]
     role: MessageRole = MessageRole.USER
     static: bool = Field(default=False, exclude=True)
+
+    message_type: ClassVar[MessageType] = MessageType.VISION
 
     def parse_bytes_to_base64(self, file_bytes: bytes) -> str:
         """
@@ -266,14 +286,17 @@ class VisionMessage(BaseModel):
 
         self._Template = Template
 
-    def to_dict(self, **kwargs) -> dict:
-        """
-        Converts the message to a dictionary.
+    def to_dict(self) -> dict:
+        return {
+            "type": self.message_type.value,
+            "content": [c.model_dump() for c in self.content],
+            "role": self.role.value,
+            "static": self.static,
+        }
 
-        Returns:
-            dict: The message as a dictionary.
-        """
-        return self.model_dump(**kwargs)
+    @classmethod
+    def from_dict(cls, data: dict) -> "VisionMessage":
+        return cls(content=data["content"], role=MessageRole(data["role"]), static=data.get("static", False))
 
 
 class BasePrompt(ABC, BaseModel):
@@ -401,6 +424,21 @@ class Prompt(BasePrompt):
                 raise ValueError(f"Invalid message type: {type(msg)}")
 
         return out
+
+    def serialize_messages(self) -> list[dict]:
+        """Serialize messages to dicts preserving type discriminator and static flag."""
+        return [msg.to_dict() for msg in self.messages if isinstance(msg, (Message, VisionMessage))]
+
+    @staticmethod
+    def deserialize_messages(data: list[dict]) -> list[Message | VisionMessage]:
+        """Reconstruct messages from dicts produced by serialize_messages()."""
+        result = []
+        for m in data:
+            if m.get("type", MessageType.MESSAGE.value) == MessageType.VISION.value:
+                result.append(VisionMessage.from_dict(m))
+            else:
+                result.append(Message.from_dict(m))
+        return result
 
     def format_tools(self, **kwargs) -> list[dict] | None:
         out = None

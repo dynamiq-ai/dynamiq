@@ -490,6 +490,75 @@ If a PR modifies prompt handling in nodes:
 
 ---
 
+## Checkpoint & Durability
+
+### Checkpoint state must call super().to_checkpoint_state()
+
+If a PR adds or modifies `to_checkpoint_state()` in any node subclass without calling `super()`:
+- Add a blocking Bug titled "to_checkpoint_state() must call super()"
+- Body: "Node subclasses overriding `to_checkpoint_state()` must call `super().to_checkpoint_state()` and merge the result. Otherwise `approval_response` and `iteration` fields from the base `Node` are lost. Pattern:
+  ```python
+  def to_checkpoint_state(self) -> MyCheckpointState:
+      base_fields = super().to_checkpoint_state().model_dump(exclude_none=True)
+      return MyCheckpointState(my_field=self._my_data, **base_fields)
+  ```"
+
+### Guard state reset on resume
+
+If a PR modifies `reset_run_state()` in agents or orchestrators without checking `is_resumed`:
+- Add a blocking Bug titled "reset_run_state() must guard against wiping resumed state"
+- Body: "When an agent/orchestrator resumes from a checkpoint, `reset_run_state()` is called before `get_start_iteration()` restores state. Internal state (e.g., `self.state`, `self.manager`) must NOT be reset if `self.is_resumed` is `True`:
+  ```python
+  def reset_run_state(self):
+      if not self.is_resumed:
+          self.state.reset()
+      super().reset_run_state()
+  ```"
+
+### Increment _completed_iterations after work succeeds
+
+If a PR modifies orchestrator execution loops and sets `_completed_iterations` before the action completes:
+- Add a blocking Bug titled "_completed_iterations set before action completion"
+- Body: "In orchestrator loops, `_completed_iterations` must be incremented AFTER the work succeeds (delegation, task execution, state transition), not before. If the action fails mid-execution, the iteration would be incorrectly counted as completed, and on resume the orchestrator would skip it instead of retrying."
+
+### Use IterativeCheckpointMixin for iterative nodes
+
+If a PR adds a new node with iterative/looping execution without implementing `IterativeCheckpointMixin`:
+- Add a Bug titled "Consider IterativeCheckpointMixin for loop-level durability"
+- Body: "Nodes with iterative execution (loops, multi-step processing) should implement `IterativeCheckpointMixin` to enable mid-loop resume. Implement `get_iteration_state()` and `restore_iteration_state()` with a typed Pydantic model for iteration data."
+
+### Use Prompt.serialize_messages/deserialize_messages for message persistence
+
+If a PR serializes prompt messages using `model_dump()` or manual dict construction:
+- Add a Bug titled "Use Prompt serialization methods for messages"
+- Body: "Use `Prompt.serialize_messages()` and `Prompt.deserialize_messages()` for checkpoint persistence. These handle `Message` vs `VisionMessage` discrimination via the `MessageType` enum and preserve the `static` attribute that `model_dump()` excludes."
+
+### CheckpointConfig.to_dict() must use mode='json'
+
+If a PR modifies `CheckpointConfig.to_dict()` without `mode='json'`:
+- Add a blocking Bug titled "CheckpointConfig.to_dict() must use mode='json'"
+- Body: "Pydantic's `model_dump()` in default Python mode returns enum objects even with `use_enum_values=True`. Use `model_dump(mode='json')` to ensure enums serialize as string values for YAML/JSON compatibility. Exclude `backend` (serialize via `backend.to_dict()`), `context` (runtime closures), and `resume_from` (per-run parameter)."
+
+### Filesystem backend must use atomic writes
+
+If a PR modifies `FileSystem.save()` to use `open()` + `write()` instead of atomic write:
+- Add a blocking Bug titled "Filesystem checkpoint writes must be atomic"
+- Body: "Use `tempfile.mkstemp()` + `os.replace()` for atomic writes. Never use `open(path, 'w')` directly — it truncates the file before writing, creating a race window where concurrent readers see empty/corrupted data."
+
+### Filesystem backend must reuse run directories
+
+If a PR modifies `FileSystem.save()` without checking for existing run directories:
+- Add a Bug titled "Filesystem backend must reuse existing run directories"
+- Body: "When saving a checkpoint with the same `wf_run_id`, reuse the existing run directory instead of creating a new one. Use `_find_existing_run_dir()` with glob suffix matching (`*__{safe_id}`) to find existing directories. This groups all checkpoints from the same logical execution together."
+
+### Use UTC-aware datetimes for checkpoint timestamps
+
+If a PR uses `datetime.now()` (timezone-naive) in checkpoint-related code:
+- Add a blocking Bug titled "Use utc_now() for checkpoint timestamps"
+- Body: "All checkpoint timestamps must use `utc_now()` which returns `datetime.now(timezone.utc)`. Mixing timezone-aware and timezone-naive datetimes causes `TypeError` on comparison and produces inconsistent data."
+
+---
+
 ## Connection Management
 
 ### New connection nodes must extend ConnectionNode
