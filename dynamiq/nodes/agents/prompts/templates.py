@@ -15,7 +15,7 @@ Do not stop until the task is complete.
 
 {%- if role %}
 ---
-[1] ROLE
+[1] AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES
 {{role}}
 {%- endif %}
 

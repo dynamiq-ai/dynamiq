@@ -138,13 +138,6 @@ refer to their descriptions in the
 AVAILABLE TOOLS section for usage instructions.
 """
 
-REACT_BLOCK_TOOLS_NO_FORMATS = """
-You have access to a variety of tools,
-and you are responsible for using
-them in any order you choose to complete the task:\n
-{{ tool_description }}
-"""
-
 REACT_BLOCK_TOOLS_BRIEF = """
 Available tools: [{{ tools_name }}]
 Refer to each tool's function schema for detailed usage.
