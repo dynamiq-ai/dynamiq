@@ -306,6 +306,104 @@ def test_structured_output_multiple_jsons_takes_first(mocker):
     assert action_input == {"command": "ls"}
 
 
+def test_structured_output_action_input_with_literal_newlines():
+    """strict=False allows action_input containing literal newlines (common LLM mistake)."""
+    import uuid
+
+    from dynamiq import connections, prompts
+    from dynamiq.nodes.agents import Agent
+    from dynamiq.nodes.llms import OpenAI
+    from dynamiq.nodes.types import InferenceMode
+
+    conn = connections.OpenAI(id=str(uuid.uuid4()), api_key="fake-key")
+    llm = OpenAI(
+        name="TestLLM",
+        model="gpt-4o-mini",
+        connection=conn,
+        prompt=prompts.Prompt(messages=[prompts.Message(role="user", content="{{input}}")]),
+    )
+    agent = Agent(name="test-agent", llm=llm, tools=[], inference_mode=InferenceMode.STRUCTURED_OUTPUT)
+
+    # action_input is a JSON string with a literal newline inside (not escaped as \\n).
+    # This is what LLMs produce for multi-line shell commands / code.
+    output = (
+        '{"thought": "run script", "action": "SandboxShellTool", '
+        '"action_input": "{\\"command\\": \\"echo hello\\necho world\\"}", "output_files": ""}'
+    )
+    thought, action, action_input = agent._handle_structured_output_mode(output, loop_num=1)
+    assert thought == "run script"
+    assert action == "SandboxShellTool"
+    assert action_input == {"command": "echo hello\necho world"}
+
+
+def test_structured_output_fallback_decoder_with_literal_newlines():
+    """Fallback JSONDecoder(strict=False) handles multiple concatenated JSONs with literal newlines."""
+    import uuid
+
+    from dynamiq import connections, prompts
+    from dynamiq.nodes.agents import Agent
+    from dynamiq.nodes.llms import OpenAI
+    from dynamiq.nodes.types import InferenceMode
+
+    conn = connections.OpenAI(id=str(uuid.uuid4()), api_key="fake-key")
+    llm = OpenAI(
+        name="TestLLM",
+        model="gpt-4o-mini",
+        connection=conn,
+        prompt=prompts.Prompt(messages=[prompts.Message(role="user", content="{{input}}")]),
+    )
+    agent = Agent(name="test-agent", llm=llm, tools=[], inference_mode=InferenceMode.STRUCTURED_OUTPUT)
+
+    # Two concatenated JSON objects where the first has a literal newline in action_input.
+    # json.loads fails (extra data), fallback raw_decode must also use strict=False.
+    output = (
+        '{"thought": "write file", "action": "SandboxShellTool", '
+        '"action_input": "{\\"command\\": \\"cat > f.py\\nprint(1)\\"}", "output_files": ""}'
+        '\n{"thought": "done", "action": "finish", "action_input": "ok", "output_files": ""}'
+    )
+    thought, action, action_input = agent._handle_structured_output_mode(output, loop_num=1)
+    assert thought == "write file"
+    assert action == "SandboxShellTool"
+    assert action_input == {"command": "cat > f.py\nprint(1)"}
+
+
+def test_function_calling_action_input_with_literal_newlines(mocker):
+    """FC mode: strict=False allows action_input with literal newlines."""
+    import uuid
+
+    from dynamiq import connections, prompts
+    from dynamiq.nodes.agents import Agent
+    from dynamiq.nodes.llms import OpenAI
+    from dynamiq.nodes.types import InferenceMode
+
+    conn = connections.OpenAI(id=str(uuid.uuid4()), api_key="fake-key")
+    llm = OpenAI(
+        name="TestLLM",
+        model="gpt-4o-mini",
+        connection=conn,
+        prompt=prompts.Prompt(messages=[prompts.Message(role="user", content="{{input}}")]),
+    )
+    agent = Agent(name="test-agent", llm=llm, tools=[], inference_mode=InferenceMode.FUNCTION_CALLING)
+
+    # Simulate an LLM result with a tool_call whose action_input has a literal newline
+    mock_result = mocker.MagicMock()
+    mock_result.output = {
+        "tool_calls": [
+            {
+                "function": {
+                    "name": "SandboxShellTool",
+                    "arguments": {"thought": "run it", "action_input": '{"cmd": "ls\nls -la"}'},
+                }
+            }
+        ]
+    }
+
+    thought, action, action_input = agent._handle_function_calling_mode(mock_result, loop_num=1)
+    assert thought == "run it"
+    assert action == "SandboxShellTool"
+    assert action_input == {"cmd": "ls\nls -la"}
+
+
 def _mock_llm_response(text: str):
     from litellm import ModelResponse
 

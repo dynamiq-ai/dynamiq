@@ -209,9 +209,15 @@ class JinaScrapeTool(ConnectionNode):
 
         except Exception as e:
             error_detail = str(e)
-            response_text = getattr(getattr(e, "response", None), "text", None)
-            if response_text:
-                error_detail = f"{error_detail}. Response: {response_text[:500]}"
+            error_response = getattr(e, "response", None)
+            if error_response is not None:
+                error_body = None
+                try:
+                    error_body = error_response.json().get("message")
+                except Exception as parse_err:
+                    logger.debug(f"Tool {self.name} - {self.id}: could not parse error response: {parse_err}")
+                if error_body:
+                    error_detail = f"{error_detail}. {str(error_body)[:500]}"
             logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {error_detail}")
             raise ToolExecutionException(
                 f"Tool '{self.name}' failed to execute the requested action. "
