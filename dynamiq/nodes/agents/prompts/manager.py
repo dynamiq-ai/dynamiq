@@ -2,11 +2,11 @@
 
 import re
 import textwrap
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from jinja2 import Template
+from pydantic import BaseModel
 
 from dynamiq.nodes.agents.prompts.react import (
     REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING,
@@ -35,8 +35,7 @@ from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
 
 
-@dataclass
-class ReactPromptConfig:
+class ReactPromptConfig(BaseModel):
     """Configuration for building a ReAct agent prompt."""
 
     inference_mode: InferenceMode
