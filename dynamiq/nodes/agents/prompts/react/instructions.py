@@ -271,8 +271,7 @@ In your answers, adhere to the following formatting and stylistic guidelines:
 - Use blockquotes to highlight formal definitions, cited statements, or especially important excerpts.
 - Include inline hyperlinks when referencing websites, platforms, or external resources.
 - When making factual claims, support them with inline numeric citations using Markdown reference-style links.
-- CRITICAL: Only use emojis if the user explicitly requests it.
-You MUST AVOID using emojis in all communication unless asked.
+- NEVER use emojis unless the user explicitly requests it.
 
 IMPORTANT:
 - Formatting must enhance readability and analytical clarity.

@@ -78,7 +78,6 @@ Example:
 
 
 REACT_BLOCK_MULTI_TOOL_PLANNING = """## Multi-Tool Planning
-
 - Scale tool usage to task complexity: answer directly when possible, use 1-2 tools for simple lookups,
   3-5 for multi-source research, more for comprehensive analysis.
 - Use PARALLEL calls for independent queries; SEQUENTIAL only when results feed into the next call.
