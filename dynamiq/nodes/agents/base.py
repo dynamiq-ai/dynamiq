@@ -1523,17 +1523,23 @@ class Agent(Node):
             from dynamiq.nodes.agents.agent import Agent
 
             if isinstance(self, Agent):
+                from dynamiq.nodes.agents.prompts.manager import ReactPromptConfig
                 from dynamiq.nodes.tools.agent_tool import SubAgentTool
 
-                self.system_prompt_manager.setup_for_react_agent(
-                    inference_mode=self.inference_mode,
-                    parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
-                    has_tools=True,
-                    delegation_allowed=self.delegation_allowed,
-                    context_compaction_enabled=self.summarization_config.enabled,
-                    todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
-                    or bool(self.sandbox_backend),
-                    has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
+                self.system_prompt_manager.build_react_prompt(
+                    ReactPromptConfig(
+                        inference_mode=self.inference_mode,
+                        has_tools=True,
+                        parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
+                        delegation_allowed=self.delegation_allowed,
+                        context_compaction_enabled=self.summarization_config.enabled,
+                        todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
+                        or bool(self.sandbox_backend),
+                        sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
+                        has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
+                        role=self.role,
+                        instructions=self.instructions,
+                    )
                 )
 
     def _inject_attached_files_into_message(
