@@ -38,12 +38,12 @@ IMPORTANT RULES:
 - Some tools are other agents. When calling an agent tool, provide JSON matching that agent's inputs; at minimum include {"input": "your subtask"}. Keep action_input to inputs only (no reasoning).
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
-SINGLE ACTION PER TURN:
+## Single Action Per Turn
 - Execute exactly ONE action per response, then wait for its Observation before continuing
 - Do NOT chain multiple Action/Action Input pairs in the same response
 - After receiving an Observation, decide the next single action based on the result
 
-PERSISTENCE & TOOL-DRIVEN PROGRESS:
+## Persistence & Tool-Driven Progress
 - Be proactive in tool calls, do not wait for the user to ask you to do something.
 - After every Observation, your next response MUST be another tool call unless every requirement is satisfied
 - In each Thought, explicitly state: "[DONE] step X — [NEXT] step Y using tool Z"
@@ -52,7 +52,7 @@ PERSISTENCE & TOOL-DRIVEN PROGRESS:
 - Never produce an Answer until ALL task requirements are verified complete through tool results
 - For multi-step tasks, number the steps in your first Thought and check them off as you go
 
-FILE HANDLING:
+## File Handling
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - If you want to return files, include an "Output Files:" line before "Answer:" listing file paths (comma-separated). This line is optional — omit it if there are no files to return.
 """  # noqa: E501
@@ -110,7 +110,7 @@ IMPORTANT RULES:
 - For direct answers without tools, only include thought and answer tags
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
-CRITICAL XML FORMAT RULES:
+## Critical XML Format Rules
 - Start the text immediately after each opening tag; do not add leading newlines or indentation inside the tags
 - Tool names go as PLAIN TEXT inside <action> tags, NOT as XML tags.
 - JSON in <action_input> MUST be on single line with proper escaping
@@ -125,12 +125,12 @@ CRITICAL XML FORMAT RULES:
 - You may receive "Observation (shortened)" indicating that tool output was truncated
 - Some tools are other agents. When you choose an agent tool, the <action_input> must match the agent's inputs; minimally include {"input": "your subtask"}. Keep only inputs inside <action_input>.
 
-SINGLE ACTION PER TURN:
+## Single Action Per Turn
 - Execute exactly ONE <action>/<action_input> pair per response, then wait for its Observation before continuing
 - Do NOT include multiple action blocks or answer blocks in the same response
 - After receiving an Observation, decide the next single action based on the result
 
-PERSISTENCE & TOOL-DRIVEN PROGRESS:
+## Persistence & Tool-Driven Progress
 - Be proactive in tool calls, do not wait for the user to ask you to do something.
 - After every Observation, your next response MUST be another tool call unless every requirement is satisfied
 - In each <thought>, explicitly state: "[DONE] step X — [NEXT] step Y using tool Z"
@@ -139,13 +139,13 @@ PERSISTENCE & TOOL-DRIVEN PROGRESS:
 - Never produce <answer> until ALL task requirements are verified complete through tool results
 - For multi-step tasks, number the steps in your first <thought> and check them off as you go
 
-JSON FORMATTING REQUIREMENTS:
+## JSON Formatting Requirements
 - Put JSON on single line within tags
 - Use double quotes for all strings
 - Escape newlines as \\n, quotes as \\"
 - NO multi-line JSON formatting
 
-FILE HANDLING:
+## File Handling
 - Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
 - If you want to return files, include an <output_files> tag after </answer> (but still inside <output>) listing absolute file paths (comma-separated). This tag is optional — omit it if there are no files to return.
 """  # noqa: E501
