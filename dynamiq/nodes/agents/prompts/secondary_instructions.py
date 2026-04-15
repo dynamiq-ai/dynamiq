@@ -30,8 +30,10 @@ TODO_TOOLS_INSTRUCTIONS = """## Todo Management
 
 
 SANDBOX_INSTRUCTIONS_TEMPLATE = """## Sandbox Environment
-You operate inside a persistent sandbox filesystem.
-The sandbox directory is your working memory.
+- You operate inside a persistent sandbox filesystem.
+- The sandbox directory is your working memory.
+- The sandbox is only visible to you — the user cannot see files in it.
+- Always return requested files as output files so the user can access them.
 
 - Use {base_path}/ for ALL files: scripts, research, logs, intermediate artifacts, data, and final output.
 - Files returned from other tools are also placed in {base_path}/.

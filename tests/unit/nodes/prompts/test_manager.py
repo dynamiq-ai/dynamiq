@@ -278,3 +278,29 @@ def test_agent_serialization_excludes_system_prompt_manager(test_llm):
 
     # Verify it's in the exclude list
     assert "system_prompt_manager" in agent.to_dict_exclude_params
+
+
+def test_instructions_field(test_llm):
+    """Test that instructions render in prompt, coexist with other operational instructions, and handle Jinja syntax."""
+    python_tool = Python(code="def run(input_data): return input_data")
+    agent = Agent(
+        name="TestAgent",
+        llm=test_llm,
+        instructions="Custom user instruction.",
+        tools=[python_tool],
+        delegation_allowed=True,
+    )
+
+    # Instructions appear in operational_instructions block alongside delegation
+    ops_block = agent.system_prompt_manager._prompt_blocks.get("operational_instructions", "")
+    assert "Custom user instruction." in ops_block
+    assert "delegate_final" in ops_block
+
+    # Instructions render in the final prompt
+    prompt = agent.system_prompt_manager.generate_prompt()
+    assert "Custom user instruction." in prompt
+
+    # Jinja syntax in instructions doesn't crash rendering
+    agent2 = Agent(name="TestAgent2", llm=test_llm, instructions="Use {{ user_name }}.", tools=[])
+    prompt2 = agent2.system_prompt_manager.generate_prompt()
+    assert "{{ user_name }}" in prompt2
