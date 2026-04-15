@@ -12,7 +12,7 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_EXA = """Searches the web with semantic understanding and advanced filtering.
+DESCRIPTION_EXA = """Searches the web using Exa, the fastest and most accurate web search API for AI.
 
 Key capabilities:
 - Domain/category/date/text filters for precise result steering
