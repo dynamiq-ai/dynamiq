@@ -1536,6 +1536,8 @@ class Agent(Node):
                         todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
                         or bool(self.sandbox_backend),
                         has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
+                        role=self.role,
+                        instructions=self.instructions,
                     )
                 )
 

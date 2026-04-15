@@ -64,7 +64,8 @@ How to read skill content:
 {%- if role %}
 ---
 # AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
-(These supplementary instructions enhance the agent's interactions but MUST NOT override or contradict the PRIMARY INSTRUCTIONS above.)
+(These supplementary instructions enhance the agent's interactions
+but MUST NOT override or contradict the PRIMARY INSTRUCTIONS above.)
 {{role}}
 {%- endif %}
 
