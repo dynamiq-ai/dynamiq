@@ -2,8 +2,6 @@ import ast
 import asyncio
 from typing import Any, ClassVar, Literal
 
-from pydantic import ConfigDict
-
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
@@ -57,15 +55,16 @@ class PythonMonty(Node):
     input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
     is_files_allowed: bool = False
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
     def execute(self, input_data: PythonInputSchema, config: RunnableConfig = None, **kwargs) -> Any:
         return asyncio.run(self.execute_async(input_data, config, **kwargs))
 
     async def execute_async(
         self, input_data: PythonInputSchema, config: RunnableConfig = None, **kwargs
     ) -> Any:
-        logger.info(f"Tool {self.name} - {self.id}: started")
+        logger.info(
+            f"Tool {self.name} - {self.id}: started with INPUT DATA:\n"
+            f"{input_data.model_dump() if hasattr(input_data, 'model_dump') else input_data}"
+        )
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
@@ -78,24 +77,23 @@ class PythonMonty(Node):
                 recoverable=False,
             ) from e
 
-        inputs_dict = dict(input_data) if not isinstance(input_data, dict) else dict(input_data)
+        inputs_dict = dict(input_data)
         wrapped_code = _wrap_user_code(self.code, self.use_multiple_params)
 
         try:
-            m = pydantic_monty.Monty(
+            monty = pydantic_monty.Monty(
                 wrapped_code,
                 inputs=[_INPUTS_VAR],
                 script_name="python_monty.py",
                 type_check=self.type_check,
             )
-            result = await m.run_async(inputs={_INPUTS_VAR: inputs_dict})
-        except ToolExecutionException:
-            raise
+            result = await monty.run_async(inputs={_INPUTS_VAR: inputs_dict})
         except Exception as e:
             error_msg = f"Code execution error: {str(e)}"
             logger.error(error_msg)
             raise ToolExecutionException(error_msg, recoverable=True) from e
 
+        logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
         return self._format_result(result)
 
     def _format_result(self, result: Any) -> Any:
