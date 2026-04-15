@@ -2,13 +2,17 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.runnables import RunnableStatus
 
 
 def _mock_tool(outputs):
-    llm = MagicMock()
+    llm = MagicMock(spec=BaseLLM)
+    llm.id = "mock-llm"
+    llm.name = "mock-llm"
+    llm.type = "mock-llm"
     llm.model = "gpt-4o-mini"
     llm.get_token_limit.return_value = 128_000
     llm.is_postponed_component_init = False
