@@ -128,7 +128,7 @@ class ContextManagerTool(Node):
         return max(raw_budget - prompt_overhead, 1)
 
     def _flatten_messages_to_single(self, messages: list[Message | VisionMessage]) -> Message:
-        """Combine a list of conversation messages into one user message.
+        """Combine a list of conversation messages into one assistant message.
 
         Some providers (e.g. MiniMax via Together) return empty content when
         sent multi-turn assistant/tool histories without proper tool_call_id
@@ -254,7 +254,8 @@ class ContextManagerTool(Node):
             if summary.strip():
                 return summary
 
-            logger.warning(f"Context Manager Tool: empty summary on attempt {attempt}/{self.max_retries}. Retrying.")
+            suffix = " Retrying." if attempt < self.max_retries else ""
+            logger.warning(f"Context Manager Tool: empty summary on attempt {attempt}/{self.max_retries}.{suffix}")
 
         raise ValueError(f"Context Manager Tool: LLM returned empty summary after {self.max_retries} attempts.")
 
