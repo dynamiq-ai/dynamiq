@@ -72,3 +72,17 @@ def test_missing_run_raises_tool_execution_exception():
     with pytest.raises(ToolExecutionException) as excinfo:
         node.execute({})
     assert excinfo.value.recoverable is True
+
+
+def test_unsupported_class_definition_raises():
+    code = """
+class Foo:
+    pass
+
+def run(inputs):
+    return Foo()
+"""
+    node = PythonMonty(code=code)
+    with pytest.raises(ToolExecutionException) as excinfo:
+        node.execute({})
+    assert excinfo.value.recoverable is True
