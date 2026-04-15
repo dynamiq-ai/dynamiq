@@ -74,6 +74,19 @@ def test_missing_run_raises_tool_execution_exception():
     assert excinfo.value.recoverable is True
 
 
+def test_disallowed_third_party_import_raises():
+    code = """
+import pandas
+
+def run(inputs):
+    return {"v": pandas.DataFrame().shape}
+"""
+    node = PythonMonty(code=code)
+    with pytest.raises(ToolExecutionException) as excinfo:
+        node.execute({})
+    assert excinfo.value.recoverable is True
+
+
 def test_unsupported_class_definition_raises():
     code = """
 class Foo:
