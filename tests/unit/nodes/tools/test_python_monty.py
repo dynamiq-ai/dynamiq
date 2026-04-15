@@ -34,3 +34,13 @@ def run(inputs):
     node = PythonMonty(code=code, is_optimized_for_agents=True)
     output = node.execute({})
     assert output == {"content": str({"n": 7})}
+
+
+def test_non_dict_return_wrapped_in_content():
+    code = """
+def run(inputs):
+    return 42
+"""
+    node = PythonMonty(code=code)
+    output = node.execute({})
+    assert output == {"content": 42}
