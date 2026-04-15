@@ -44,3 +44,13 @@ def run(inputs):
     node = PythonMonty(code=code)
     output = node.execute({})
     assert output == {"content": 42}
+
+
+def test_dict_with_content_passthrough():
+    code = """
+def run(inputs):
+    return {"content": {"nested": True}, "meta": "ok"}
+"""
+    node = PythonMonty(code=code, is_optimized_for_agents=False)
+    output = node.execute({})
+    assert output == {"content": {"nested": True}, "meta": "ok"}
