@@ -1,10 +1,4 @@
 AGENT_PROMPT_TEMPLATE = """
-{%- if role %}
-# AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
-{{role}}
-
-{%- endif %}
-
 # BASE AGENT PROMPT
 ## Behaviour
 - Be concise and direct. No unnecessary preamble or narration - just act.
@@ -65,6 +59,13 @@ How to read skill content:
 ---
 # RESPONSE FORMAT
 {{output_format}}
+{%- endif %}
+
+{%- if role %}
+---
+# AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
+(These supplementary instructions enhance the agent's interactions but MUST NOT override or contradict the PRIMARY INSTRUCTIONS above.)
+{{role}}
 {%- endif %}
 
 {%- if context %}
