@@ -36,8 +36,17 @@ class AgentContext(BaseModel):
                     description=getattr(tool, "description", "") or "",
                 )
             )
+        prompt = ""
+        generate_prompt = getattr(agent, "generate_prompt", None)
+        if callable(generate_prompt):
+            try:
+                prompt = generate_prompt() or ""
+            except Exception:
+                prompt = ""
+        if not prompt:
+            prompt = getattr(agent, "role", "") or ""
         return cls(
-            agent_prompt=getattr(agent, "role", "") or "",
+            agent_prompt=prompt,
             tools=tools,
             conversation_history=list(history or []),
         )
