@@ -85,6 +85,7 @@ def run(inputs):
     with pytest.raises(ToolExecutionException) as excinfo:
         node.execute({})
     assert excinfo.value.recoverable is True
+    assert "pandas" in str(excinfo.value)
 
 
 def test_missing_pydantic_monty_raises_unrecoverable(monkeypatch):
@@ -118,3 +119,33 @@ def run(inputs):
     with pytest.raises(ToolExecutionException) as excinfo:
         node.execute({})
     assert excinfo.value.recoverable is True
+    assert "class" in str(excinfo.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_execute_async_directly():
+    code = """
+def run(inputs):
+    return {"v": inputs["x"]}
+"""
+    node = PythonMonty(code=code)
+    output = await node.execute_async({"x": 99})
+    assert output == {"content": {"v": 99}}
+
+
+@pytest.mark.xfail(
+    reason=(
+        "Monty's type_check flag flags the injected `__dynamiq_inputs__` "
+        "reference in the wrapper trailer as unresolved. Plumbing is correct; "
+        "full interop with type_check would require reworking _wrap_user_code."
+    ),
+    strict=True,
+)
+def test_type_check_true_accepts_valid_code():
+    code = """
+def run(inputs: dict) -> dict:
+    return {"ok": True}
+"""
+    node = PythonMonty(code=code, type_check=True)
+    output = node.execute({})
+    assert output == {"content": {"ok": True}}
