@@ -1553,7 +1553,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         # Generate inference-mode schemas
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
             self._tools = schema_generator.generate_function_calling_schemas(
-                self.tools, self.delegation_allowed, self.sanitize_tool_name, self.llm
+                self.tools, self.delegation_allowed, self.sanitize_tool_name
             )
         elif self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
             self._response_format = schema_generator.generate_structured_output_schemas(

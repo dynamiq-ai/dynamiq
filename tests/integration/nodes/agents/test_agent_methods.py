@@ -518,7 +518,7 @@ def test_generate_function_calling_schemas(openai_node, mock_tool):
     agent = Agent(name="Test Agent", llm=openai_node, tools=[mock_tool], inference_mode=InferenceMode.FUNCTION_CALLING)
 
     schemas = generate_function_calling_schemas(
-        tools=[mock_tool], delegation_allowed=False, sanitize_tool_name=agent.sanitize_tool_name, llm=openai_node
+        tools=[mock_tool], delegation_allowed=False, sanitize_tool_name=agent.sanitize_tool_name
     )
 
     # Should have at least final answer function + mock tool
