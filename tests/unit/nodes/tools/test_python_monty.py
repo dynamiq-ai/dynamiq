@@ -54,3 +54,13 @@ def run(inputs):
     node = PythonMonty(code=code, is_optimized_for_agents=False)
     output = node.execute({})
     assert output == {"content": {"nested": True}, "meta": "ok"}
+
+
+def test_async_run_awaited():
+    code = """
+async def run(inputs):
+    return {"doubled": inputs["x"] * 2}
+"""
+    node = PythonMonty(code=code)
+    output = node.execute({"x": 21})
+    assert output == {"content": {"doubled": 42}}
