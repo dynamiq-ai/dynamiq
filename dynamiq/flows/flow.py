@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from pydantic import Field, computed_field, field_validator
 
-from dynamiq.connections.managers import ConnectionManager
+from dynamiq.connections.managers import ConnectionManager, get_default_connection_manager
 from dynamiq.executors.base import BaseExecutor
 from dynamiq.executors.pool import ThreadExecutor
 from dynamiq.flows.base import BaseFlow
@@ -44,7 +44,7 @@ class Flow(BaseFlow):
     nodes: list[Node] = []
     executor: type[BaseExecutor] = ThreadExecutor
     max_node_workers: int | None = None
-    connection_manager: ConnectionManager = Field(default_factory=ConnectionManager)
+    connection_manager: ConnectionManager = Field(default_factory=get_default_connection_manager)
 
     def __init__(self, **kwargs):
         """
@@ -56,6 +56,7 @@ class Flow(BaseFlow):
         super().__init__(**kwargs)
         self._node_by_id = {node.id: node for node in self.nodes}
         self._ts = None
+        self._run_executor = None
 
         self._init_components()
         self.reset_run_state()
@@ -222,6 +223,42 @@ class Flow(BaseFlow):
         }
         self._ts = self.init_node_topological_sorter(nodes=self.nodes)
 
+    def _get_run_executor(self, max_workers: int | None = None) -> BaseExecutor:
+        """Return the cached run executor, creating it lazily on first use.
+
+        The underlying thread pool is reused across multiple ``run_sync`` calls
+        to avoid the overhead of creating and destroying threads on every request.
+
+        If *max_workers* differs from the cached executor's value the old
+        executor is shut down and a fresh one is created.
+        """
+        if self._run_executor is not None and max_workers is not None and self._run_executor.max_workers != max_workers:
+            self._run_executor.shutdown(wait=True)
+            self._run_executor = None
+        if self._run_executor is None:
+            self._run_executor = self.executor(max_workers=max_workers)
+        return self._run_executor
+
+    def close(self):
+        """Shut down the cached executor and release resources.
+
+        Call this when the Flow instance will no longer be used (e.g. at
+        application shutdown) or use the Flow as a context manager::
+
+            with Flow(nodes=[...]) as flow:
+                flow.run_sync(data)
+        """
+        if self._run_executor is not None:
+            self._run_executor.shutdown(wait=True)
+            self._run_executor = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
     def _cleanup_dry_run(self, config: RunnableConfig = None):
         """
         Clean up resources created during dry run.
@@ -304,7 +341,7 @@ class Flow(BaseFlow):
                 max_workers = (
                     config.max_node_workers if config else self.max_node_workers
                 )
-                run_executor = self.executor(max_workers=max_workers)
+                run_executor = self._get_run_executor(max_workers=max_workers)
 
                 while self._ts.is_active():
                     ready_nodes = self._get_nodes_ready_to_run(input_data=input_data)
@@ -318,8 +355,6 @@ class Flow(BaseFlow):
 
                     # Wait for ready nodes to be processed and reduce CPU usage
                     time.sleep(0.003)
-
-                run_executor.shutdown()
 
             output = self._get_output()
             failed_nodes = self._get_failed_nodes_with_raise_behavior()
@@ -354,6 +389,8 @@ class Flow(BaseFlow):
                 error=RunnableResultError.from_exception(e, failed_nodes=failed_nodes),
             )
         finally:
+            if self._run_executor is not None:
+                self._run_executor.reset()
             self._cleanup_dry_run(config)
 
     async def run_async(self, input_data: Any, config: RunnableConfig = None, **kwargs) -> RunnableResult:
@@ -402,9 +439,10 @@ class Flow(BaseFlow):
 
                         self._results.update(results)
                         self._ts.done(*results.keys())
-
-                    # Wait for ready nodes to be processed and reduce CPU usage by yielding control to the event loop
-                    await asyncio.sleep(0.003)
+                    else:
+                        # Only sleep when no nodes were dispatched to reduce
+                        # CPU usage while waiting for dependencies to complete.
+                        await asyncio.sleep(0.003)
 
             output = self._get_output()
             failed_nodes = self._get_failed_nodes_with_raise_behavior()

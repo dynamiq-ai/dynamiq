@@ -34,6 +34,14 @@ class BaseExecutor(ABC):
         """
         raise NotImplementedError
 
+    def reset(self):
+        """Reset per-run state so the executor can be reused for the next run.
+
+        Subclasses that maintain per-run bookkeeping should override this.
+        The default implementation is a no-op.
+        """
+        pass
+
     @abstractmethod
     def execute(
         self,
