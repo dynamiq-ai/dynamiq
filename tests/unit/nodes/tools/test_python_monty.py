@@ -87,6 +87,25 @@ def run(inputs):
     assert excinfo.value.recoverable is True
 
 
+def test_missing_pydantic_monty_raises_unrecoverable(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "pydantic_monty":
+            raise ImportError("simulated: pydantic_monty not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    node = PythonMonty(code="def run(inputs):\n    return 1\n")
+    with pytest.raises(ToolExecutionException) as excinfo:
+        node.execute({})
+    assert excinfo.value.recoverable is False
+    assert "pydantic-monty" in str(excinfo.value)
+
+
 def test_unsupported_class_definition_raises():
     code = """
 class Foo:
