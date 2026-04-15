@@ -64,3 +64,11 @@ async def run(inputs):
     node = PythonMonty(code=code)
     output = node.execute({"x": 21})
     assert output == {"content": {"doubled": 42}}
+
+
+def test_missing_run_raises_tool_execution_exception():
+    code = "x = 1\n"
+    node = PythonMonty(code=code)
+    with pytest.raises(ToolExecutionException) as excinfo:
+        node.execute({})
+    assert excinfo.value.recoverable is True
