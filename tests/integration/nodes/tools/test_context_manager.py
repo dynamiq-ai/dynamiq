@@ -25,6 +25,6 @@ def test_retry_returns_summary_after_empty_attempts():
 
 def test_retry_raises_when_all_attempts_empty():
     tool, llm = _mock_tool([{"content": ""}] * 3)
-    with pytest.raises(ValueError, match="empty summary after 3 attempts"):
+    with pytest.raises(ValueError, match="failed to generate summary after 3 attempts"):
         tool._call_llm_for_summary([Message(role=MessageRole.USER, content="x")])
     assert llm.run.call_count == 3

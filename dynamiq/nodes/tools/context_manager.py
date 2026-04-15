@@ -233,10 +233,12 @@ class ContextManagerTool(Node):
     ) -> str:
         """Send *messages* to the LLM and return the generated text.
 
-        Retries on empty content since reasoning-heavy models and safety
-        filters can occasionally return content="" on an otherwise-successful
-        call.
+        Retries on LLM failure and on empty content since reasoning-heavy
+        models and safety filters can occasionally return content="" on an
+        otherwise-successful call, and transient provider errors can surface
+        as failed runs.
         """
+        last_error: str | None = None
         for attempt in range(1, self.max_retries + 1):
             llm_result = self.llm.run(
                 input_data={},
@@ -247,17 +249,26 @@ class ContextManagerTool(Node):
             self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
 
             if llm_result.status != RunnableStatus.SUCCESS:
-                error_msg = llm_result.error.message if llm_result.error else "Unknown error"
-                raise ValueError(f"Context Manager Tool: LLM failed to generate summary: {error_msg}")
+                last_error = llm_result.error.message if llm_result.error else "Unknown error"
+                suffix = " Retrying." if attempt < self.max_retries else ""
+                logger.warning(
+                    f"Context Manager Tool: LLM failed on attempt {attempt}/{self.max_retries}: "
+                    f"{last_error}.{suffix}"
+                )
+                continue
 
             summary = (llm_result.output or {}).get("content", "") or ""
             if summary.strip():
                 return summary
 
+            last_error = "empty summary"
             suffix = " Retrying." if attempt < self.max_retries else ""
             logger.warning(f"Context Manager Tool: empty summary on attempt {attempt}/{self.max_retries}.{suffix}")
 
-        raise ValueError(f"Context Manager Tool: LLM returned empty summary after {self.max_retries} attempts.")
+        raise ValueError(
+            f"Context Manager Tool: LLM failed to generate summary after {self.max_retries} attempts "
+            f"(last error: {last_error})."
+        )
 
     def _summarize_replace_history(
         self,
