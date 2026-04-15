@@ -178,6 +178,10 @@ class BaseLLM(ConnectionNode):
     group: Literal[NodeGroup.LLMS] = NodeGroup.LLMS
     temperature: float | None = None
     max_tokens: int | None = None
+    model_info: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional model metadata overrides (e.g. max_input_tokens, supports_vision, supports_pdf_input).",
+    )
     stop: list[str] | None = None
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     top_p: float | None = None
@@ -313,6 +317,9 @@ class BaseLLM(ConnectionNode):
         Returns:
             int: Number of tokens.
         """
+        if self.model_info and self.model_info.get("max_input_tokens"):
+            return self.model_info["max_input_tokens"]
+
         info = self._get_litellm_model_info()
         if info is not None:
             max_input = info.get("max_input_tokens")
@@ -334,6 +341,8 @@ class BaseLLM(ConnectionNode):
     @property
     def is_vision_supported(self) -> bool:
         """Check if the LLM supports vision/image processing."""
+        if self.model_info and "supports_vision" in self.model_info:
+            return self.model_info["supports_vision"]
         if self._get_litellm_model_info() is not None:
             try:
                 return supports_vision(self.model)
@@ -345,6 +354,8 @@ class BaseLLM(ConnectionNode):
     @property
     def is_pdf_input_supported(self) -> bool:
         """Check if the LLM supports PDF input."""
+        if self.model_info and "supports_pdf_input" in self.model_info:
+            return self.model_info["supports_pdf_input"]
         if self._get_litellm_model_info() is not None:
             try:
                 return supports_pdf_input(self.model)
