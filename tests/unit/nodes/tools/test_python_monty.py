@@ -14,3 +14,13 @@ def run(inputs):
     node = PythonMonty(code=code)
     output = node.execute({"a": 2, "b": 3})
     assert output == {"content": {"result": 5}}
+
+
+def test_use_multiple_params_true_unpacks_kwargs():
+    code = """
+def run(a, b):
+    return {"sum": a + b}
+"""
+    node = PythonMonty(code=code, use_multiple_params=True)
+    output = node.execute({"a": 10, "b": 32})
+    assert output == {"content": {"sum": 42}}
