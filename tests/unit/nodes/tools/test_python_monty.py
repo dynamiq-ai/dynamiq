@@ -24,3 +24,13 @@ def run(a, b):
     node = PythonMonty(code=code, use_multiple_params=True)
     output = node.execute({"a": 10, "b": 32})
     assert output == {"content": {"sum": 42}}
+
+
+def test_is_optimized_for_agents_stringifies_content():
+    code = """
+def run(inputs):
+    return {"content": {"n": 7}}
+"""
+    node = PythonMonty(code=code, is_optimized_for_agents=True)
+    output = node.execute({})
+    assert output == {"content": str({"n": 7})}
