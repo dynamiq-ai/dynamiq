@@ -570,7 +570,7 @@ def _run_fsm_fc(ordered_events, streaming_mode):
         state = next_state
         visited.add(state)
 
-    _assert_fsm_end(tool_blocks, reasoning_blocks, run_parallel_count)
+    _assert_fsm_end(tool_blocks, reasoning_blocks, run_parallel_count, parallel_post_parse_tids)
     return state, visited, reasoning_blocks
 
 
@@ -651,7 +651,7 @@ def _run_fsm_blob(ordered_events, streaming_mode):
         state = next_state
         visited.add(state)
 
-    _assert_fsm_end(tool_blocks, reasoning_blocks, run_parallel_count)
+    _assert_fsm_end(tool_blocks, reasoning_blocks, run_parallel_count, parallel_post_parse_tids)
     return state, visited, reasoning_blocks
 
 
