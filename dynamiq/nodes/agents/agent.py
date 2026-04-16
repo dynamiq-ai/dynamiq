@@ -229,7 +229,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         match self.inference_mode:
             case InferenceMode.FUNCTION_CALLING:
                 if isinstance(self.llm, Gemini):
-                    raise ValueError(f"Model {self.llm.model} does not support structured output")
+                    raise ValueError(f"Model {self.llm.model} does not support function calling")
                 elif not supports_function_calling(model=self.llm.model):
                     raise ValueError(f"Model {self.llm.model} does not support function calling")
 
