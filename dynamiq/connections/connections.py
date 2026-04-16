@@ -843,7 +843,7 @@ class E2B(BaseApiKeyConnection):
 
 class Daytona(BaseApiKeyConnection):
     api_key: str = Field(default_factory=partial(get_env_var, "DAYTONA_API_KEY"))
-    api_url: str = Field(default_factory=partial(get_env_var, "DAYTONA_API_URL", "https://app.daytona.io/api"))
+    url: str = Field(default_factory=partial(get_env_var, "DAYTONA_API_URL", "https://app.daytona.io/api"))
     target: str | None = Field(default_factory=partial(get_env_var, "DAYTONA_TARGET", None))
 
     _client: Any = PrivateAttr(default=None)
@@ -859,7 +859,7 @@ class Daytona(BaseApiKeyConnection):
 
             config = DaytonaConfig(
                 api_key=self.api_key,
-                api_url=self.api_url,
+                api_url=self.url,
                 target=self.target,
             )
             self._client = DaytonaSDK(config)
