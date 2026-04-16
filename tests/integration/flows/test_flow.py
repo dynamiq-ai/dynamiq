@@ -382,40 +382,39 @@ async def test_workflow_with_depend_nodes_with_tracing_async(
     assert mock_llm_executor.call_count == 2
     assert mock_llm_executor.call_args_list == [
         mock.call(
-            tools=None,
-            tool_choice=None,
             model=openai_node.model,
             messages=expected_openai_messages,
             stream=False,
             temperature=openai_node.temperature,
             max_tokens=None,
+            tools=None,
+            tool_choice=None,
             stop=None,
+            top_p=None,
             seed=None,
             presence_penalty=None,
             frequency_penalty=None,
-            top_p=None,
-            api_key=openai_node.connection.api_key,
-            client=ANY,
             response_format=None,
             drop_params=True,
             api_base="https://api.openai.com/v1",
+            api_key=openai_node.connection.api_key,
         ),
         mock.call(
-            tools=None,
-            tool_choice=None,
             model=anthropic_node_with_dependency.model,
             messages=expected_anthropic_messages,
             stream=False,
             temperature=anthropic_node_with_dependency.temperature,
             max_tokens=None,
+            tools=None,
+            tool_choice=None,
             stop=None,
+            top_p=None,
             seed=None,
             presence_penalty=None,
             frequency_penalty=None,
-            top_p=None,
-            api_key=anthropic_node_with_dependency.connection.api_key,
             response_format=None,
             drop_params=True,
+            api_key=anthropic_node_with_dependency.connection.api_key,
         ),
     ]
 
@@ -701,25 +700,25 @@ async def test_workflow_with_depend_nodes_and_depend_fail_async(
     assert response.error.failed_nodes[0].name == openai_node.name
 
     assert mock_llm_executor.call_count == 1
+    # Async path uses _acompletion which does not pass `client`
     assert mock_llm_executor.call_args_list == [
         mock.call(
-            tools=None,
-            tool_choice=None,
             model=openai_node.model,
             messages=expected_openai_messages,
             stream=False,
             temperature=openai_node.temperature,
-            api_key=openai_node.connection.api_key,
-            client=ANY,
             max_tokens=None,
+            tools=None,
+            tool_choice=None,
             stop=None,
+            top_p=None,
             seed=None,
             presence_penalty=None,
             frequency_penalty=None,
-            top_p=None,
             response_format=None,
             drop_params=True,
             api_base="https://api.openai.com/v1",
+            api_key=openai_node.connection.api_key,
         )
     ]
 
@@ -988,42 +987,42 @@ async def test_workflow_with_conditional_depend_nodes_with_tracing_async(
 
     assert response == RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=expected_output)
     assert mock_llm_executor.call_count == 2
+    # Async path uses _acompletion which does not pass `client`
     assert mock_llm_executor.call_args_list == [
         mock.call(
-            tools=None,
-            tool_choice=None,
             model=openai_node_with_return_behavior.model,
             messages=expected_openai_messages,
             stream=False,
             temperature=openai_node_with_return_behavior.temperature,
             max_tokens=None,
+            tools=None,
+            tool_choice=None,
             stop=None,
+            top_p=None,
             seed=None,
             presence_penalty=None,
             frequency_penalty=None,
-            top_p=None,
-            api_key=openai_node_with_return_behavior.connection.api_key,
-            client=ANY,
             response_format=None,
             drop_params=True,
             api_base="https://api.openai.com/v1",
+            api_key=openai_node_with_return_behavior.connection.api_key,
         ),
         mock.call(
-            tools=None,
-            tool_choice=None,
             model=anthropic_node_with_success_status_conditional_depend.model,
             messages=expected_anthropic_messages,
             stream=False,
             temperature=anthropic_node_with_success_status_conditional_depend.temperature,
             max_tokens=None,
+            tools=None,
+            tool_choice=None,
             stop=None,
+            top_p=None,
             seed=None,
             presence_penalty=None,
             frequency_penalty=None,
-            top_p=None,
-            api_key=anthropic_node_with_success_status_conditional_depend.connection.api_key,
             response_format=None,
             drop_params=True,
+            api_key=anthropic_node_with_success_status_conditional_depend.connection.api_key,
         ),
     ]
 
