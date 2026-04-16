@@ -229,14 +229,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         match self.inference_mode:
             case InferenceMode.FUNCTION_CALLING:
                 if isinstance(self.llm, Gemini):
-                    logger.warning(
-                        f"Agent {self.name}: Function calling is not currently supported for Gemini models. "
-                        "Falling back to structured output mode."
-                    )
-                    self.inference_mode = InferenceMode.STRUCTURED_OUTPUT
-                    params = get_supported_openai_params(model=self.llm.model)
-                    if "response_format" not in params:
-                        raise ValueError(f"Model {self.llm.model} does not support structured output")
+                    raise ValueError(f"Model {self.llm.model} does not support structured output")
                 elif not supports_function_calling(model=self.llm.model):
                     raise ValueError(f"Model {self.llm.model} does not support function calling")
 
