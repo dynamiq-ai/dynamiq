@@ -306,7 +306,7 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
     base_path: str = Field(default="/home/user", description="Base path in the sandbox filesystem.")
     installed_packages: list = Field(default_factory=list, description="Pre-installed packages in the sandbox.")
     files: list[io.BytesIO] | None = None
-    persistent_sandbox: bool = True
+    persistent_sandbox: bool = False
     timeout: int = Field(default=600, description="Sandbox timeout in seconds (default: 600 seconds)")
     is_files_allowed: bool = True
     creation_error_handling: SandboxCreationErrorHandling = Field(default_factory=SandboxCreationErrorHandling)
