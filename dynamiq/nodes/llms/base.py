@@ -64,6 +64,16 @@ LLM_CONNECTION_ERROR_INDICATORS = (
 )
 
 
+class ModelInfo(BaseModel):
+    """Structured model metadata overrides."""
+
+    model_config = ConfigDict(extra="allow")
+
+    max_input_tokens: int | None = None
+    supports_vision: bool | None = None
+    supports_pdf_input: bool | None = None
+
+
 class FallbackTrigger(str, Enum):
     ANY = "any"
     RATE_LIMIT = "rate_limit"
@@ -178,7 +188,7 @@ class BaseLLM(ConnectionNode):
     group: Literal[NodeGroup.LLMS] = NodeGroup.LLMS
     temperature: float | None = None
     max_tokens: int | None = None
-    model_info: dict[str, Any] | None = Field(
+    model_info: ModelInfo | None = Field(
         default=None,
         description="Optional model metadata overrides (e.g. max_input_tokens, supports_vision, supports_pdf_input).",
     )
@@ -317,8 +327,8 @@ class BaseLLM(ConnectionNode):
         Returns:
             int: Number of tokens.
         """
-        if self.model_info and self.model_info.get("max_input_tokens"):
-            return self.model_info["max_input_tokens"]
+        if self.model_info and self.model_info.max_input_tokens is not None:
+            return self.model_info.max_input_tokens
 
         info = self._get_litellm_model_info()
         if info is not None:
@@ -341,8 +351,8 @@ class BaseLLM(ConnectionNode):
     @property
     def is_vision_supported(self) -> bool:
         """Check if the LLM supports vision/image processing."""
-        if self.model_info and "supports_vision" in self.model_info:
-            return self.model_info["supports_vision"]
+        if self.model_info and self.model_info.supports_vision is not None:
+            return self.model_info.supports_vision
         if self._get_litellm_model_info() is not None:
             try:
                 return supports_vision(self.model)
@@ -354,8 +364,8 @@ class BaseLLM(ConnectionNode):
     @property
     def is_pdf_input_supported(self) -> bool:
         """Check if the LLM supports PDF input."""
-        if self.model_info and "supports_pdf_input" in self.model_info:
-            return self.model_info["supports_pdf_input"]
+        if self.model_info and self.model_info.supports_pdf_input is not None:
+            return self.model_info.supports_pdf_input
         if self._get_litellm_model_info() is not None:
             try:
                 return supports_pdf_input(self.model)

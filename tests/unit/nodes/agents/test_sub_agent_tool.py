@@ -11,6 +11,7 @@ from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.base import ToolParams
 from dynamiq.nodes.agents.components import schema_generator
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.llms.base import ModelInfo
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME
 from dynamiq.nodes.tools.python import Python
@@ -549,7 +550,7 @@ class TestYamlRoundtrip:
         serialization and is not duplicated after reload.
         """
         openai_conn = OpenAIConnection(id="openai-conn", api_key="test-key")
-        model_info = {"max_input_tokens": 99_999, "supports_vision": True, "supports_pdf_input": True}
+        model_info = ModelInfo(max_input_tokens=99_999, supports_vision=True, supports_pdf_input=True)
         parent_llm = OpenAI(id="parent-llm", connection=openai_conn, model="gpt-4o", model_info=model_info)
         child_llm = OpenAI(id="child-llm", connection=openai_conn, model="gpt-4o")
 
