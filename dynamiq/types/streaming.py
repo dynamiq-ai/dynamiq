@@ -106,11 +106,6 @@ class AgentReasoningEventMessageData(BaseModel):
     loop_num: int
 
 
-# ---------------------------------------------------------------------------
-# Tool input streaming models
-# ---------------------------------------------------------------------------
-
-
 class AgentToolInputStartData(BaseModel):
     """Emitted once when tool_input streaming begins for a tool call."""
 
@@ -136,11 +131,6 @@ class AgentToolInputErrorEventMessageData(BaseModel):
     name: str
     error: str
     loop_num: int
-
-
-# ---------------------------------------------------------------------------
-# Tool result streaming model
-# ---------------------------------------------------------------------------
 
 
 class AgentToolResultEventMessageData(BaseModel):
