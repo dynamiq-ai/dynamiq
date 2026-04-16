@@ -320,6 +320,7 @@ class CuaDesktopTool(ConnectionNode):
     input_schema: ClassVar[type[CuaDesktopToolInputSchema]] = CuaDesktopToolInputSchema
     timeout: int = 3600
     is_files_allowed: bool = True
+    _force_thread_executor: ClassVar[bool] = True
 
     _computer: Any | None = PrivateAttr(default=None)
     _loop = PrivateAttr(default=None)
