@@ -224,13 +224,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
     @model_validator(mode="after")
     def validate_inference_mode(self):
         """Validate whether specified model can be inferenced in provided mode."""
-        from dynamiq.nodes.llms.gemini import Gemini
-
         match self.inference_mode:
             case InferenceMode.FUNCTION_CALLING:
-                if isinstance(self.llm, Gemini):
-                    raise ValueError(f"Model {self.llm.model} does not support function calling")
-                elif not supports_function_calling(model=self.llm.model):
+                if not supports_function_calling(model=self.llm.model):
                     raise ValueError(f"Model {self.llm.model} does not support function calling")
 
             case InferenceMode.STRUCTURED_OUTPUT:
