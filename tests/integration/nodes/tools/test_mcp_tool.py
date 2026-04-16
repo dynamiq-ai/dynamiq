@@ -146,7 +146,7 @@ async def test_mock_tool_execute(mcp_server_tool):
         mock_exec.assert_called_once()
         assert result == mocked_result
 
-    with patch("dynamiq.nodes.tools.mcp.MCPTool.execute", return_value=mocked_result) as mock_exec:
+    with patch.object(MCPTool, "execute_async", new_callable=AsyncMock, return_value=mocked_result) as mock_exec:
         result = await tool.run(input_data={"a": 20, "b": 22})
         mock_exec.assert_called_once()
         assert result.output == mocked_result
