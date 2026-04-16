@@ -58,15 +58,15 @@ class SandboxShellTool(Node):
         "If you start a dev server (e.g. npm run dev), "
         "use sandbox-info tool with the server port to get the public URL to share with the user.\n\n"
         "Examples:\n"
-        '- {{"command": "ls -la {base_path}/input"}}\n'
-        '- {{"command": "python3 {base_path}/input/script.py {base_path}/input/data.txt {base_path}/output"}}\n'
-        '- {{"command": "cp result.csv {base_path}/output/"}}\n'
-        '- {{"command": "cat <<\'EOF\' > script.py && python3 script.py\\nimport csv\\n'
+        '- {"command": "ls -la {base_path}/input"}\n'
+        '- {"command": "python3 {base_path}/input/script.py {base_path}/input/data.txt {base_path}/output"}\n'
+        '- {"command": "cp result.csv {base_path}/output/"}\n'
+        '- {"command": "cat <<\'EOF\' > script.py && python3 script.py\\nimport csv\\n'
         "with open('data.csv') as f:\\n"
         "    reader = csv.reader(f)\\n"
         "    print(list(reader))\\n"
         "print('Done')\\n"
-        'EOF"}}'
+        'EOF"}'
     )
 
     sandbox: Sandbox = Field(..., description="Sandbox backend to execute commands in.")

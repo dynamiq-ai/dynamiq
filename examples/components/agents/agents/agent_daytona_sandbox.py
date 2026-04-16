@@ -122,7 +122,6 @@ def run_workflow(
     finally:
         if sandbox:
             try:
-                logger.info(f"Sandbox user: {sandbox._sandbox.user}")
                 sandbox.close(kill=True)
                 print("\nDaytona sandbox closed successfully.")
             except Exception as e:

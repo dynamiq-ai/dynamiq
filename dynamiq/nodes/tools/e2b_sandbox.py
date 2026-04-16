@@ -57,7 +57,7 @@ class E2BInterpreterTool(BaseCodeInterpreterTool):
 
         try:
             logger.info(f"Executing Python code: {code}")
-            execution = sandbox.run_code(code)
+            execution = sandbox.run_code(code, timeout=timeout)
             output_parts = []
 
             if execution.text:

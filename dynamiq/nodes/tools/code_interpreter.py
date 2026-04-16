@@ -49,13 +49,13 @@ Specify required packages in the 'packages' parameter.
 - files: Binary files to upload for processing (saved to {home_dir}/input)
 
 -Examples:-
-- Data analysis: {{"python": "import pandas as pd\\ndf = pd.read_csv('{home_dir}/input/data.csv')\\nprint(df.head())"}}
-- Next execution: {{"python": "print(df.describe())"}}
-- File processing: {{"packages": "requests",
-"python": "import requests\\nresponse = requests.get('https://api.example.com')\\nprint(response.json())"}}
-- System operations: {{"shell_command": "ls -la {home_dir}/input && ls -la {home_dir}/output"}}
-- File generation: {{"python": "import pandas as pd\\ndf = pd.DataFrame({{'A': [1,2,3], 'B': [4,5,6]}})\\n\
-df.to_csv('{home_dir}/output/result.csv')\\nprint('File saved to {home_dir}/output/result.csv')"}}
+- Data analysis: {"python": "import pandas as pd\\ndf = pd.read_csv('{home_dir}/input/data.csv')\\nprint(df.head())"}
+- Next execution: {"python": "print(df.describe())"}
+- File processing: {"packages": "requests",
+"python": "import requests\\nresponse = requests.get('https://api.example.com')\\nprint(response.json())"}
+- System operations: {"shell_command": "ls -la {home_dir}/input && ls -la {home_dir}/output"}
+- File generation: {"python": "import pandas as pd\\ndf = pd.DataFrame({'A': [1,2,3], 'B': [4,5,6]})\\n\
+df.to_csv('{home_dir}/output/result.csv')\\nprint('File saved to {home_dir}/output/result.csv')"}
 - File upload scenarios:
   * "file.csv" → saved as {home_dir}/input/file.csv
   * "data/file.csv" → saved as {home_dir}/input/data/file.csv
