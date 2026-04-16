@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
+from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
@@ -15,6 +16,12 @@ from dynamiq.utils.logger import logger
 if TYPE_CHECKING:
     from dynamiq.connections.managers import ConnectionManager
     from dynamiq.nodes.agents.base import Agent
+
+
+class SubAgentToolCheckpointState(BaseCheckpointState):
+    """Checkpoint state for SubAgentTool nodes."""
+
+    call_count: int = Field(default=0, description="Number of invocations consumed in this run")
 
 
 class SubAgentToolInputSchema(BaseModel):
@@ -259,6 +266,21 @@ class SubAgentTool(Node):
                 logger.info(f"SubAgentTool '{agent.id}': successfully cleaned up factory agent sandbox")
             except Exception as e:
                 logger.warning("Factory agent sandbox cleanup failed: %s", e)
+
+    def to_checkpoint_state(self) -> SubAgentToolCheckpointState:
+        """Persist the per-run invocation counter so checkpoint resume enforces the limit correctly."""
+        base_fields = super().to_checkpoint_state().model_dump(exclude_none=True)
+        return SubAgentToolCheckpointState(
+            call_count=self._call_count,
+            **base_fields,
+        )
+
+    def from_checkpoint_state(self, state: SubAgentToolCheckpointState | dict[str, Any]) -> None:
+        """Restore the per-run invocation counter from a checkpoint."""
+        super().from_checkpoint_state(state)
+        state_dict = state if isinstance(state, dict) else state.model_dump()
+        with self._call_count_lock:
+            self._call_count = state_dict.get("call_count", 0)
 
     @property
     def to_dict_exclude_params(self):
