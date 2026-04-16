@@ -94,14 +94,12 @@ class E2BInterpreterTool(BaseCodeInterpreterTool):
         if not sandbox:
             raise ValueError("Sandbox instance is required for command execution.")
 
+        run_kwargs: dict[str, Any] = {"background": True, "envs": env or {}, "cwd": cwd}
         if timeout:
-            try:
-                sandbox.set_timeout(timeout)
-            except Exception as e:
-                logger.warning(f"Failed to set shell command timeout: {e}")
+            run_kwargs["timeout"] = timeout
 
         try:
-            process = sandbox.commands.run(command, background=True, envs=env or {}, cwd=cwd)
+            process = sandbox.commands.run(command, **run_kwargs)
         except Exception as e:
             raise ToolExecutionException(f"Error during shell command execution: {e}", recoverable=True)
 

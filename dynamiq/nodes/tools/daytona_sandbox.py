@@ -113,6 +113,17 @@ class DaytonaInterpreterTool(BaseCodeInterpreterTool):
     def _destroy_sandbox(self, sandbox: Any) -> None:
         self.connection.get_client().delete(sandbox)
 
+    def set_timeout(self, timeout: int) -> None:
+        """Update the tool-level timeout and propagate to the live sandbox."""
+        super().set_timeout(timeout)
+        if self._sandbox and self.persistent_sandbox:
+            interval_minutes = max(1, (timeout + 59) // 60)
+            try:
+                self._sandbox.set_autostop_interval(interval_minutes)
+                logger.debug(f"Tool {self.name} - {self.id}: Updated sandbox auto-stop to {interval_minutes}min")
+            except Exception as e:
+                logger.warning(f"Tool {self.name} - {self.id}: Failed to update sandbox timeout: {e}")
+
     def close(self) -> None:
         """Close the persistent sandbox if it exists."""
         if self._sandbox and self.persistent_sandbox:
