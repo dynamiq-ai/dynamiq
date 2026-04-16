@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Iterator
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.callbacks.base import get_run_id
 from dynamiq.types.streaming import (
-    AgentReasoningEventMessageData,
     AgentToolData,
     AgentToolInputDeltaData,
+    AgentToolInputStartData,
     StreamingEntitySource,
     StreamingEventMessage,
     StreamingMode,
@@ -607,12 +607,10 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
     def _emit_tool_input_start(self) -> None:
         """Emit a tool_input start event with full metadata before the first delta."""
         tool_data = self._resolve_tool_data()
-        start_model = AgentReasoningEventMessageData(
+        start_model = AgentToolInputStartData(
             tool_run_id=self.agent._streaming_tool_run_id or "",
-            thought="",
             action=self._current_action_name or "",
             tool=tool_data,
-            action_input="",
             loop_num=self.loop_num,
         )
         self.agent.stream_content(
@@ -1030,21 +1028,16 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             return True
         return False
 
-    def _process_json_mode(self, final_answer_only: bool) -> None:
+    def _try_initialize_next_json_field(self, buf: str, final_answer_only: bool) -> None:
+        """Try to initialize the next JSON field state (thought, answer, or action_input).
+
+        Each initializer is a no-op when _current_state is already set, so this is safe
+        to call multiple times within a single chunk processing cycle.
         """
-        Processing for function calling mode.
-
-        Supports multiple tool calls (parallel function calling) — no single-cycle
-        constraint is enforced here, unlike structured output mode.
-
-        Args:
-            final_answer_only: Whether to stream only final answers
-        """
-        buf = self._buffer
-
-        self._initialize_json_field_state(
-            buf, JSONStreamingField.THOUGHT.value, StreamingState.REASONING, final_answer_only
-        )
+        if not self._state_has_emitted.get(StreamingState.REASONING, False):
+            self._initialize_json_field_state(
+                buf, JSONStreamingField.THOUGHT.value, StreamingState.REASONING, final_answer_only
+            )
 
         if self._answer_started:
             self._initialize_json_field_state(buf, JSONStreamingField.ANSWER.value, StreamingState.ANSWER)
@@ -1058,15 +1051,38 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                         buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT
                     )
 
+    def _emit_tool_input_state(self, buf: str) -> None:
+        """Emit content for the current TOOL_INPUT state."""
+        if self._fc_object_tool_input:
+            self._emit_json_object_field_content(buf, StreamingState.TOOL_INPUT)
+        else:
+            self._emit_json_field_content(buf, StreamingState.TOOL_INPUT)
+
+    def _process_json_mode(self, final_answer_only: bool) -> None:
+        """
+        Processing for function calling mode.
+
+        Supports multiple tool calls (parallel function calling) — no single-cycle
+        constraint is enforced here, unlike structured output mode.
+
+        Args:
+            final_answer_only: Whether to stream only final answers
+        """
+        buf = self._buffer
+
+        self._try_initialize_next_json_field(buf, final_answer_only)
+
         if self._current_state == StreamingState.REASONING:
-            self._emit_json_field_content(buf, StreamingState.REASONING)
+            field_complete = self._emit_json_field_content(buf, StreamingState.REASONING)
+            if field_complete:
+                # Reasoning completed — the buffer may already contain the next field
+                # (e.g. action_input). Re-run to detect and process it in the same chunk,
+                # before _reset_tool_call_state clears the buffer on the next parallel call.
+                self._process_json_mode(final_answer_only)
         elif self._current_state == StreamingState.ANSWER:
             self._emit_json_field_content(buf, StreamingState.ANSWER)
         elif self._current_state == StreamingState.TOOL_INPUT:
-            if self._fc_object_tool_input:
-                self._emit_json_object_field_content(buf, StreamingState.TOOL_INPUT)
-            else:
-                self._emit_json_field_content(buf, StreamingState.TOOL_INPUT)
+            self._emit_tool_input_state(buf)
 
     def _skip_whitespace(self, text: str, start: int) -> int:
         """Skip whitespace characters starting from the given position."""
@@ -1096,7 +1112,9 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                     self._emit(buf[segment_start:segment_end], step=step)
                     segment_start = segment_end
                 self._state_last_emit_index = end_quote
-            # Reset the state
+            # Mark the field as emitted and reset the state
+            if step in self._state_has_emitted:
+                self._state_has_emitted[step] = True
             self._current_state = None
             return True
 
