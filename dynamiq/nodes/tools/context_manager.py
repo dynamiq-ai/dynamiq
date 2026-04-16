@@ -70,6 +70,11 @@ class ContextManagerTool(Node):
 
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=3600))
     token_budget_ratio: float = Field(default=0.75, gt=0, lt=1)
+    max_retries: int = Field(
+        default=3,
+        ge=1,
+        description="Number of attempts to retry when the LLM failed or returns empty content for a summary call.",
+    )
     llm: Node = Field(..., description="LLM instance for generating summaries")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -121,6 +126,26 @@ class ContextManagerTool(Node):
             ]
         )
         return max(raw_budget - prompt_overhead, 1)
+
+    def _flatten_messages_to_single(self, messages: list[Message | VisionMessage]) -> Message:
+        """Combine a list of conversation messages into one assistant message.
+
+        Some providers (e.g. MiniMax via Together) return empty content when
+        sent multi-turn assistant/tool histories without proper tool_call_id
+        threading. Flattening to a single user message with role-tagged blocks
+        avoids that failure mode for summarization, where strict turn structure
+        isn't needed.
+        """
+        parts: list[str] = []
+        for m in messages:
+            role = getattr(m, "role", None)
+            role_str = role.value if hasattr(role, "value") else str(role)
+            content = getattr(m, "content", "") or ""
+            if isinstance(content, str):
+                parts.append(f"[{role_str}]\n{content}")
+            else:
+                parts.append(f"[{role_str}]\n{content!r}")
+        return Message(content="\n\n".join(parts), role=MessageRole.ASSISTANT, static=True)
 
     def _count_message_tokens(self, messages: list[Message | VisionMessage]) -> int:
         """Count tokens for a list of messages using the summarization LLM's tokenizer."""
@@ -206,23 +231,44 @@ class ContextManagerTool(Node):
         config: RunnableConfig | None = None,
         **kwargs,
     ) -> str:
-        """Send *messages* to the LLM and return the generated text."""
-        llm_result = self.llm.run(
-            input_data={},
-            prompt=Prompt(messages=messages),
-            config=config,
-            **(kwargs | {"parent_run_id": kwargs.get("run_id"), "run_depends": []}),
+        """Send *messages* to the LLM and return the generated text.
+
+        Retries on LLM failure and on empty content since reasoning-heavy
+        models and safety filters can occasionally return content="" on an
+        otherwise-successful call, and transient provider errors can surface
+        as failed runs.
+        """
+        last_error: str | None = None
+        for attempt in range(1, self.max_retries + 1):
+            llm_result = self.llm.run(
+                input_data={},
+                prompt=Prompt(messages=messages),
+                config=config,
+                **(kwargs | {"parent_run_id": kwargs.get("run_id"), "run_depends": []}),
+            )
+            self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
+
+            if llm_result.status != RunnableStatus.SUCCESS:
+                last_error = llm_result.error.message if llm_result.error else "Unknown error"
+                suffix = " Retrying." if attempt < self.max_retries else ""
+                logger.warning(
+                    f"Context Manager Tool: LLM failed on attempt {attempt}/{self.max_retries}: "
+                    f"{last_error}.{suffix}"
+                )
+                continue
+
+            summary = (llm_result.output or {}).get("content", "") or ""
+            if summary.strip():
+                return summary
+
+            last_error = "empty summary"
+            suffix = " Retrying." if attempt < self.max_retries else ""
+            logger.warning(f"Context Manager Tool: empty summary on attempt {attempt}/{self.max_retries}.{suffix}")
+
+        raise ValueError(
+            f"Context Manager Tool: LLM failed to generate summary after {self.max_retries} attempts "
+            f"(last error: {last_error})."
         )
-        self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
-
-        if llm_result.status != RunnableStatus.SUCCESS:
-            error_msg = llm_result.error.message if llm_result.error else "Unknown error"
-            raise ValueError(f"Context Manager Tool: LLM failed to generate summary: {error_msg}")
-
-        summary = llm_result.output.get("content", "")
-        if not summary:
-            raise ValueError("Context Manager Tool: LLM returned empty summary.")
-        return summary
 
     def _summarize_replace_history(
         self,
@@ -251,7 +297,8 @@ class ContextManagerTool(Node):
 
         if message_tokens <= budget:
             logger.info("Context Manager Tool: History fits in context, single-pass summary.")
-            summary_messages = messages + [
+            summary_messages = [
+                self._flatten_messages_to_single(messages),
                 Message(content=HISTORY_SUMMARIZATION_PROMPT_REPLACE, role=MessageRole.USER, static=True),
             ]
             summary = self._call_llm_for_summary(summary_messages, config, **kwargs)
@@ -267,7 +314,8 @@ class ContextManagerTool(Node):
         chunk_summaries: list[str] = []
         for idx, chunk in enumerate(chunks):
             logger.info(f"Context Manager Tool: Summarizing chunk {idx + 1}/{len(chunks)}.")
-            chunk_messages = chunk + [
+            chunk_messages = [
+                self._flatten_messages_to_single(chunk),
                 Message(content=HISTORY_SUMMARIZATION_PROMPT_REPLACE, role=MessageRole.USER, static=True),
             ]
             chunk_summaries.append(self._call_llm_for_summary(chunk_messages, config, **kwargs))
