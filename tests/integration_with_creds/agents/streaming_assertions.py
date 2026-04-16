@@ -276,6 +276,43 @@ def _handle_answer(event_name, reasoning_blocks):
         reasoning_blocks.pop(0)
 
 
+def _track_parallel_individual_post_parse(content, idx, parallel_post_parse_tids):
+    """Record an individual post_parse tid seen during a parallel batch.
+
+    Asserts the tid is present and not a duplicate within the current batch.
+    """
+    tid = content.get("tool_run_id")
+    assert tid, f"Event {idx}: individual post_parse during parallel batch missing tool_run_id"
+    assert (
+        tid not in parallel_post_parse_tids
+    ), f"Event {idx}: duplicate individual post_parse for tool_run_id {tid} in parallel batch"
+    parallel_post_parse_tids.add(tid)
+
+
+def _verify_parallel_tool_result(event_name, content, idx, parallel_post_parse_tids, run_parallel_count):
+    """Enforce 1:1 pairing between individual post_parse and per-tool tool_result.
+
+    - Per-tool tool_result during a parallel batch: tid must be in the set; remove it.
+    - run-parallel tool_result: the set must be empty (all per-tool results paired).
+    """
+    if event_name != "tool_result" or not isinstance(content, dict):
+        return
+    name = content.get("name")
+    tid = content.get("tool_run_id")
+    if name == "run-parallel":
+        assert not parallel_post_parse_tids, (
+            f"Event {idx}: run-parallel tool_result but {len(parallel_post_parse_tids)} "
+            f"individual post_parse event(s) have no matching tool_result: "
+            f"{parallel_post_parse_tids}"
+        )
+    elif run_parallel_count > 0:
+        assert tid in parallel_post_parse_tids, (
+            f"Event {idx}: tool_result for tool_run_id {tid} during parallel batch "
+            f"without matching individual post_parse. Seen: {parallel_post_parse_tids}"
+        )
+        parallel_post_parse_tids.discard(tid)
+
+
 def _match_action_input(accumulated: str, expected) -> bool:
     """Check if accumulated tool_input string matches expected action_input.
 
@@ -394,7 +431,7 @@ def _validate_single_post_parse(content, tool_blocks, reasoning_blocks):
         logger.debug(f"[reasoning_block] {tool_name} ({tid}): thought matched " f"({len(accumulated_thought)} chars)")
 
 
-def _assert_fsm_end(tool_blocks, reasoning_blocks, run_parallel_count):
+def _assert_fsm_end(tool_blocks, reasoning_blocks, run_parallel_count, parallel_post_parse_tids=None):
     """Assert clean end state: no in-flight tool blocks, reasoning, or parallel batches."""
     assert len(tool_blocks) == 0, (
         f"Unresolved tool blocks at end of stream: " f"{[{tid: b['name']} for tid, b in tool_blocks.items()]}"
@@ -407,6 +444,11 @@ def _assert_fsm_end(tool_blocks, reasoning_blocks, run_parallel_count):
         f"Unresolved run-parallel events: run_parallel_count={run_parallel_count} "
         f"(post_parse_reasoning without matching tool_result or vice versa)"
     )
+    if parallel_post_parse_tids:
+        raise AssertionError(
+            f"Unresolved individual post_parse events at end of stream: "
+            f"{parallel_post_parse_tids} (no matching per-tool tool_result)"
+        )
 
 
 def _log_event(idx, step, event_name, state, content):
@@ -428,8 +470,10 @@ def _run_fsm_fc(ordered_events, streaming_mode):
     """FSM for FUNCTION_CALLING mode.
 
     FC streams per-tool (reasoning → tool_input_start → tool_input) blocks,
-    then a single run-parallel post_parse_reasoning (no individual post_parses
-    for parallel tools). Validates per-tool action_input inside run-parallel.
+    then a single run-parallel post_parse_reasoning. Individual per-tool
+    post_parse_reasoning events emitted during a parallel batch are tracked
+    (tid-only) and paired 1:1 with per-tool tool_result events. Validates
+    per-tool action_input inside run-parallel.
     """
     transitions = _TRANSITIONS_FINAL if streaming_mode == StreamingMode.FINAL else _TRANSITIONS_FC
     state = State.INIT
@@ -437,10 +481,23 @@ def _run_fsm_fc(ordered_events, streaming_mode):
     reasoning_blocks: list[str] = []
     tool_blocks: dict[str, dict] = {}
     run_parallel_count = 0
+    parallel_post_parse_tids: set[str] = set()
 
     for idx, (step, content) in enumerate(ordered_events):
         event_name = _classify_event(step, content)
         _log_event(idx, step, event_name, state, content)
+
+        if (
+            event_name == "post_parse_reasoning"
+            and isinstance(content, dict)
+            and content.get("action") != "run-parallel"
+            and run_parallel_count > 0
+        ):
+            _track_parallel_individual_post_parse(content, idx, parallel_post_parse_tids)
+            continue
+
+        _verify_parallel_tool_result(event_name, content, idx, parallel_post_parse_tids, run_parallel_count)
+
         next_state = _fsm_step_transition(event_name, state, transitions, idx, step, content)
 
         _track_reasoning(event_name, state, next_state, content, reasoning_blocks)
@@ -523,7 +580,9 @@ def _run_fsm_blob(ordered_events, streaming_mode):
     SO/XML stream a single run-parallel blob:
       tool_input_start(action=run-parallel) → tool_input chunks → post_parse → tool results
 
-    No per-tool tool_input_start events inside a parallel batch.
+    No per-tool tool_input_start events inside a parallel batch. Individual
+    per-tool post_parse_reasoning events emitted during a parallel batch are
+    tracked (tid-only) and paired 1:1 with per-tool tool_result events.
     """
     transitions = _TRANSITIONS_FINAL if streaming_mode == StreamingMode.FINAL else _TRANSITIONS_WITH_TOOL_INPUT
     state = State.INIT
@@ -531,10 +590,23 @@ def _run_fsm_blob(ordered_events, streaming_mode):
     reasoning_blocks: list[str] = []
     tool_blocks: dict[str, dict] = {}
     run_parallel_count = 0
+    parallel_post_parse_tids: set[str] = set()
 
     for idx, (step, content) in enumerate(ordered_events):
         event_name = _classify_event(step, content)
         _log_event(idx, step, event_name, state, content)
+
+        if (
+            event_name == "post_parse_reasoning"
+            and isinstance(content, dict)
+            and content.get("action") != "run-parallel"
+            and run_parallel_count > 0
+        ):
+            _track_parallel_individual_post_parse(content, idx, parallel_post_parse_tids)
+            continue
+
+        _verify_parallel_tool_result(event_name, content, idx, parallel_post_parse_tids, run_parallel_count)
+
         next_state = _fsm_step_transition(event_name, state, transitions, idx, step, content)
 
         _track_reasoning(event_name, state, next_state, content, reasoning_blocks)

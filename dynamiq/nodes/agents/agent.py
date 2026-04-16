@@ -850,20 +850,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
             action_type=tool.action_type.value if tool.action_type else None,
         )
 
-        if not is_parallel:
-            self._stream_agent_event(
-                AgentReasoningEventMessageData(
-                    tool_run_id=tool_run_id,
-                    thought=thought or "",
-                    action=action,
-                    tool=tool_data,
-                    action_input=action_input,
-                    loop_num=loop_num,
-                ),
-                "reasoning",
-                config,
-                **kwargs,
-            )
+        self._stream_agent_event(
+            AgentReasoningEventMessageData(
+                tool_run_id=tool_run_id,
+                thought=thought or "",
+                action=action,
+                tool=tool_data,
+                action_input=action_input,
+                loop_num=loop_num,
+            ),
+            "reasoning",
+            config,
+            **kwargs,
+        )
         try:
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
