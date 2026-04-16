@@ -6,12 +6,15 @@ import pytest
 
 from dynamiq import Workflow, connections
 from dynamiq.callbacks import TracingCallbackHandler
+from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.streaming import StreamingConfig, StreamingMode
+from tests.integration_with_creds.agents.streaming_assertions import assert_streaming_events, collect_streaming_events
 
 
 def _make_tool(name: str, code: str) -> Python:
@@ -25,7 +28,9 @@ def _make_tool(name: str, code: str) -> Python:
 
 @pytest.mark.integration
 @pytest.mark.flaky(reruns=3)
-@pytest.mark.parametrize("inference_mode", [InferenceMode.FUNCTION_CALLING, InferenceMode.XML])
+@pytest.mark.parametrize(
+    "inference_mode", [InferenceMode.XML, InferenceMode.STRUCTURED_OUTPUT, InferenceMode.FUNCTION_CALLING]
+)
 def test_parallel_tool_calling(inference_mode: InferenceMode):
     """Agent with parallel_tool_calls_enabled calls two tools in parallel for both inference modes."""
     if not os.getenv("OPENAI_API_KEY"):
@@ -33,25 +38,28 @@ def test_parallel_tool_calling(inference_mode: InferenceMode):
 
     llm = OpenAI(model="gpt-5.4-mini", connection=connections.OpenAI())
 
-    tool_a = _make_tool("CatFacts", 'output = "Cats sleep 12-16 hours per day."')
-    tool_b = _make_tool("DogFacts", 'output = "Dogs have a sense of smell 40x better than humans."')
+    tool_a = _make_tool("CatFacts", 'def run(input_data):\n    return "Cats sleep 12-16 hours per day."')
+    tool_b = _make_tool(
+        "DogFacts", 'def run(input_data):\n    return "Dogs have a sense of smell 40x better than humans."'
+    )
 
     agent = Agent(
-        name="ParallelAgent",
-        role="You have two fact tools. When asked about multiple animals, call both tools simultaneously.",
+        name="parallel_tools_agent",
+        role="Researcher agent.",
         llm=llm,
         tools=[tool_a, tool_b],
-        inference_mode=inference_mode,
         parallel_tool_calls_enabled=True,
-        max_loops=5,
+        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL),
+        inference_mode=inference_mode,
     )
 
     tracing = TracingCallbackHandler()
+    streaming_handler = StreamingIteratorCallbackHandler()
     wf = Workflow(flow=Flow(nodes=[agent]))
 
     result = wf.run(
-        input_data={"input": "Tell me a fact about cats and a fact about dogs."},
-        config=RunnableConfig(callbacks=[tracing]),
+        input_data={"input": "Call a cat tool and dog tool in parallel"},
+        config=RunnableConfig(callbacks=[tracing, streaming_handler]),
     )
 
     assert result.status == RunnableStatus.SUCCESS
@@ -63,3 +71,6 @@ def test_parallel_tool_calling(inference_mode: InferenceMode):
         run for run in tracing.runs.values() if getattr(run, "metadata", {}).get("node", {}).get("name") == "OpenAI"
     ]
     assert len(llm_runs) <= 2, f"Expected at most 2 LLM loops (parallel tools + final answer), got {len(llm_runs)}"
+
+    ordered_events = collect_streaming_events(streaming_handler, agent.id)
+    assert_streaming_events(ordered_events, inference_mode)
