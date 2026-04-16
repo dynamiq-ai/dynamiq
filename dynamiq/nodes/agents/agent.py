@@ -1678,7 +1678,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             tool_result, tool_files, _, success, dependency = self._execute_single_tool(
                 tool_payload["name"],
                 tool_payload["input"],
-                thought or "",
+                tool_payload.get("thought") or thought or "",
                 loop_num,
                 config,
                 collect_dependency=True,
