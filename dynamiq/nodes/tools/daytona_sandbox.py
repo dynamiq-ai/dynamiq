@@ -1,7 +1,8 @@
 import io
 from typing import Any, ClassVar
 
-from daytona import DaytonaRateLimitError
+from daytona import CreateSandboxFromSnapshotParams, DaytonaRateLimitError
+from pydantic import Field
 
 from dynamiq.connections import Daytona as DaytonaConnection
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -16,11 +17,25 @@ class DaytonaInterpreterTool(BaseCodeInterpreterTool):
     description: str = DESCRIPTION_SANDBOX_INTERPRETER
     base_path: str = "/home/daytona"
     connection: DaytonaConnection
+    auto_stop_interval: int | None = Field(
+        default=None,
+        description=(
+            "Daytona auto-stop interval in minutes. If None, derived from "
+            "``timeout`` so persistent sandboxes stop themselves on idle."
+        ),
+    )
     _sandbox: Any = None
     _rate_limit_exception: ClassVar[type[Exception]] = DaytonaRateLimitError
 
+    def _resolve_auto_stop_interval(self) -> int:
+        """Return the auto-stop interval (minutes) to attach at creation."""
+        if self.auto_stop_interval is not None:
+            return self.auto_stop_interval
+        return max(1, (self.timeout + 59) // 60)
+
     def _create_sandbox(self) -> Any:
-        return self.connection.get_client().create(timeout=self.timeout)
+        params = CreateSandboxFromSnapshotParams(auto_stop_interval=self._resolve_auto_stop_interval())
+        return self.connection.get_client().create(params, timeout=self.timeout)
 
     def _get_sandbox_id(self, sandbox: Any) -> str:
         return sandbox.id
