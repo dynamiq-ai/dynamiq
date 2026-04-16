@@ -4,15 +4,21 @@ from typing import Any, ClassVar, Literal
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
+from dynamiq import Workflow
+from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.flows import Flow
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import Anthropic, OpenAI
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from dynamiq.utils.logger import logger
+
+from .streaming_assertions import assert_streaming_events, collect_streaming_events
 
 
 class OutputFormat(str, Enum):
@@ -176,7 +182,7 @@ def llm_instance():
     connection = OpenAIConnection()
     llm = OpenAI(
         connection=connection,
-        model="gpt-5-mini",
+        model="gpt-5.4-mini",
         max_tokens=5000,
         temperature=0,
     )
@@ -212,28 +218,29 @@ def comprehensive_tool():
 
 
 def run_and_assert_agent(agent: Agent, agent_input, expected_length, run_config):
-    """Helper function to run agent and perform common assertions."""
+    """Helper function to run agent and perform common assertions including streaming validation."""
     logger.info(f"\n--- Running Agent: {agent.name} (Mode: {agent.inference_mode.value}) ---")
-    agent_output = None
-    try:
-        result = agent.run(input_data=agent_input, config=run_config)
-        logger.info(f"Agent raw result object: {result}")
 
-        if result.status != RunnableStatus.SUCCESS:
-            pytest.fail(f"Agent run failed with status '{result.status}'. Output: {result.output}.")
+    streaming = StreamingIteratorCallbackHandler()
+    wf = Workflow(flow=Flow(nodes=[agent]))
+    result = wf.run(
+        input_data=agent_input,
+        config=RunnableConfig(callbacks=[streaming], request_timeout=120),
+    )
 
-        if isinstance(result.output, dict) and "content" in result.output:
-            agent_output = result.output["content"]
-        else:
-            agent_output = result.output
-            logger.info(f"Warning: Agent output structure unexpected: {type(result.output)}")
+    assert (
+        result.status == RunnableStatus.SUCCESS
+    ), f"Agent run failed with status '{result.status}'. Output: {result.output}."
 
-        logger.info(f"Agent final output content: {agent_output}")
+    agent_result = result.output.get(agent.id, {}).get("output", {})
+    if isinstance(agent_result, dict) and "content" in agent_result:
+        agent_output = agent_result["content"]
+    else:
+        agent_output = agent_result
+        logger.info(f"Warning: Agent output structure unexpected: {type(agent_result)}")
 
-    except Exception as e:
-        pytest.fail(f"Agent run failed with exception: {e}")
+    logger.info(f"Agent final output content: {agent_output}")
 
-    logger.info("Asserting results...")
     assert agent_output is not None, "Agent output content should not be None"
     assert isinstance(agent_output, str), f"Agent output content should be a string, got {type(agent_output)}"
 
@@ -241,6 +248,9 @@ def run_and_assert_agent(agent: Agent, agent_input, expected_length, run_config)
     assert (
         expected_length_str in agent_output
     ), f"Expected length '{expected_length_str}' not found in agent output: '{agent_output}'"
+
+    ordered_events = collect_streaming_events(streaming, agent.id)
+    assert_streaming_events(ordered_events, agent.inference_mode, agent.streaming.mode)
 
     logger.info(f"--- Test Passed for Mode: {agent.inference_mode.value} ---")
 
@@ -267,12 +277,16 @@ def test_react_agent_inference_modes(
         role=agent_role,
         inference_mode=inference_mode,
         verbose=True,
+        streaming=StreamingConfig(
+            enabled=True,
+            mode=StreamingMode.ALL,
+        ),
     )
     run_and_assert_agent(agent, agent_input, expected_length, run_config)
 
 
 def _run_comprehensive_schema_test(llm, comprehensive_tool, run_config, inference_mode, label):
-    """Helper: run agent with ComprehensiveTool and assert success."""
+    """Helper: run agent with ComprehensiveTool and assert success with streaming validation."""
     agent = Agent(
         name=f"Comprehensive Schema Test ({label})",
         llm=llm,
@@ -284,17 +298,29 @@ def _run_comprehensive_schema_test(llm, comprehensive_tool, run_config, inferenc
         inference_mode=inference_mode,
         max_loops=5,
         verbose=True,
+        streaming=StreamingConfig(
+            enabled=True,
+            mode=StreamingMode.ALL,
+        ),
     )
-    result = agent.run(
+
+    streaming = StreamingIteratorCallbackHandler()
+    wf = Workflow(flow=Flow(nodes=[agent]))
+    result = wf.run(
         input_data={
             "input": "Analyze the text 'Hello world from Python testing' in summary format with limit "
             "5 and high priority"
         },
-        config=run_config,
+        config=RunnableConfig(callbacks=[streaming], request_timeout=120),
     )
+
     assert result.status == RunnableStatus.SUCCESS, f"Agent run failed for {label}: {result.output}"
-    content = result.output.get("content", "")
+    agent_result = result.output.get(agent.id, {}).get("output", {})
+    content = agent_result.get("content", "") if isinstance(agent_result, dict) else agent_result
     assert isinstance(content, str) and len(content) > 0, f"Expected non-empty string for {label}, got: {content!r}"
+
+    ordered_events = collect_streaming_events(streaming, agent.id)
+    assert_streaming_events(ordered_events, inference_mode, agent.streaming.mode)
 
 
 @pytest.mark.integration
