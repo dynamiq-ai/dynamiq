@@ -22,7 +22,6 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.sandboxes import SandboxConfig
 from dynamiq.sandboxes.daytona import DaytonaSandbox
 
-# from tests.unit.sandboxes.test_daytona_sandbox_provider import daytona_sandbox
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 

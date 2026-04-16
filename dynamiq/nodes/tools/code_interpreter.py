@@ -387,7 +387,7 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
     def __init__(self, **kwargs):
         """Initialize the sandbox interpreter tool."""
         super().__init__(**kwargs)
-        if self.base_path != "/home/user":
+        if self.base_path != "/home/user" and self.description == DESCRIPTION_SANDBOX_INTERPRETER:
             self.description = _DESCRIPTION_TEMPLATE.replace("{home_dir}", self.base_path)
         if self.persistent_sandbox and self.connection.api_key:
             self._initialize_persistent_sandbox()
