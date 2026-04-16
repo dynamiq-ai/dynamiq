@@ -1012,11 +1012,16 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         input_data: dict,
         config: RunnableConfig = None,
         depends_result: dict = None,
+        executor: "ThreadPoolExecutor | None" = None,
         **kwargs,
     ) -> RunnableResult:
         """
         Run the node asynchronously using native async execute.
         Mirrors run_sync() lifecycle but calls execute_async_with_retry().
+
+        Blocking sync calls (approval queue read, client init) are offloaded to
+        the provided executor when supplied, otherwise to the default asyncio
+        thread pool via asyncio.to_thread.
         """
         logger.info(f"Node {self.name} - {self.id}: async execution started.")
         transformed_input = input_data
@@ -1029,8 +1034,8 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             try:
                 self.validate_depends(depends_result)
                 # Offload blocking approval queue read to a thread to avoid blocking the event loop
-                input_data = await asyncio.to_thread(
-                    self.get_approved_data_or_origin, input_data, config=config, **merged_kwargs
+                input_data = await self._offload_to_executor(
+                    executor, self.get_approved_data_or_origin, input_data, config=config, **merged_kwargs
                 )
             except NodeException as e:
                 return self._handle_skip(e, input_data, depends_result, config, **merged_kwargs)
@@ -1047,7 +1052,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
                 cache_config=config.cache,
             )
             output, from_cache = await cache(self.execute_async_with_retry)(
-                transformed_input, config, **merged_kwargs
+                transformed_input, config, executor=executor, **merged_kwargs
             )
 
             return self._handle_success(
@@ -1056,6 +1061,14 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             )
         except Exception as e:
             return self._handle_failure(e, transformed_input, config, time_start, "async ", **merged_kwargs)
+
+    @staticmethod
+    async def _offload_to_executor(executor: "ThreadPoolExecutor | None", func: Callable, *args, **kwargs) -> Any:
+        """Run a blocking callable on the given executor (or default thread pool if None)."""
+        if executor is None:
+            return await asyncio.to_thread(func, *args, **kwargs)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(executor, functools.partial(func, *args, **kwargs))
 
     async def run_async(
         self,
@@ -1084,7 +1097,11 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         if self.has_native_async:
             return await self._run_async_native(
-                input_data=input_data, config=config, depends_result=depends_result, **kwargs
+                input_data=input_data,
+                config=config,
+                depends_result=depends_result,
+                executor=executor,
+                **kwargs,
             )
         else:
             loop = asyncio.get_running_loop()
@@ -1231,12 +1248,20 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             raise
 
     async def execute_async_with_retry(
-        self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs
+        self,
+        input_data: dict[str, Any] | BaseModel,
+        config: RunnableConfig = None,
+        executor: "ThreadPoolExecutor | None" = None,
+        **kwargs,
     ):
         """
         Execute the node asynchronously with retry logic.
         Uses asyncio.wait_for for timeout instead of thread-based timeout.
         Uses asyncio.sleep for non-blocking retry backoff.
+
+        Blocking client initialization is offloaded to the provided executor
+        when supplied (typically the per-flow ContextAwareThreadPoolExecutor),
+        otherwise to the default asyncio thread pool.
         """
         config = ensure_config(config)
         timeout = self.error_handling.timeout_seconds
@@ -1248,7 +1273,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
             try:
                 # Offload blocking client initialization to a thread to avoid blocking the event loop
-                await asyncio.to_thread(self.ensure_client)
+                await self._offload_to_executor(executor, self.ensure_client)
             except Exception as conn_error:
                 logger.error(
                     f"Node {self.name} - {self.id}: Failed to ensure client connection: {conn_error}"
@@ -1607,9 +1632,13 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
     ) -> Any:
         """
         Async execution of the node. Override in subclasses for native async support.
-        Returns NotImplemented to signal fallback to sync execute() in a thread.
+        Raises NotImplementedError to fail loudly if invoked on a node that does not
+        provide a native async implementation (run_async routes to the sync execute()
+        via a thread executor when has_native_async is False).
         """
-        return NotImplemented
+        raise NotImplementedError(
+            f"Node {type(self).__name__} does not provide a native async execute_async() implementation."
+        )
 
     def depends_on(self, nodes: Union["Node", list["Node"]], condition: ChoiceCondition | None = None) -> "Node":
         """

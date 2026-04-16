@@ -14,6 +14,7 @@ FUNC_KWARGS_TO_REMOVE = (
     "run_id",
     "parent_run_id",
     "wf_run_id",
+    "executor",
 )
 
 
@@ -65,9 +66,8 @@ def cache_wf_entity(
             if cache_enabled and cache_config:
                 logger.debug(f"Entity_id {entity_id}: cache used")
                 cache_manager = cache_manager_cls(config=cache_config)
-                if output := cache_manager.get_entity_output(
-                    entity_id=entity_id, input_data=input_data, **cleaned_kwargs
-                ):
+                output = cache_manager.get_entity_output(entity_id=entity_id, input_data=input_data, **cleaned_kwargs)
+                if output is not None:
                     from_cache = True
                     return output, from_cache
 

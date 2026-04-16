@@ -42,10 +42,10 @@ class TestNodeAsyncProtocol:
         assert node.has_native_async is True
 
     @pytest.mark.asyncio
-    async def test_base_execute_async_returns_not_implemented(self):
+    async def test_base_execute_async_raises_not_implemented(self):
         node = SyncOnlyNode()
-        result = await node.execute_async(input_data={})
-        assert result is NotImplemented
+        with pytest.raises(NotImplementedError):
+            await node.execute_async(input_data={})
 
 
 class FailThenSucceedAsyncNode(Node):
