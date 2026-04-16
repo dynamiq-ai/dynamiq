@@ -55,6 +55,11 @@ def mock_llm_executor(mocker, mock_llm_response_text):
         return model_r
 
     mock_llm = mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=response)
+
+    async def async_response(*args, **kwargs):
+        return mock_llm(*args, **kwargs)
+
+    mocker.patch("dynamiq.nodes.llms.base.BaseLLM._acompletion", side_effect=async_response)
     yield mock_llm
 
 
