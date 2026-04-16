@@ -45,7 +45,22 @@
         "output_cost_per_token": 0.0000032
     },
     "MiniMaxAI/MiniMax-M2.5": {
-        "max_input_tokens": 192000,
+        "max_input_tokens": 228700,
+        "max_output_tokens": 128000,
+        "max_tokens": 128000,
+        "mode": "chat",
+        "litellm_provider": "minimax",
+        "supports_vision": true,
+        "supports_pdf_input": false,
+        "supports_function_calling": true,
+        "supports_parallel_function_calling": true,
+        "supports_response_schema": true,
+        "supports_system_messages": true,
+        "input_cost_per_token": 0.0000003,
+        "output_cost_per_token": 0.0000012
+    },
+    "MiniMaxAI/MiniMax-M2.7": {
+        "max_input_tokens": 202752,
         "max_output_tokens": 128000,
         "max_tokens": 128000,
         "mode": "chat",
