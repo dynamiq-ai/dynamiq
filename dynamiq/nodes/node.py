@@ -1065,10 +1065,14 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
     @staticmethod
     async def _offload_to_executor(executor: "ThreadPoolExecutor | None", func: Callable, *args, **kwargs) -> Any:
         """Run a blocking callable on the given executor (or default thread pool if None)."""
+        fn = functools.partial(func, *args, **kwargs)
         if executor is None:
-            return await asyncio.to_thread(func, *args, **kwargs)
+            return await asyncio.to_thread(fn)
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(executor, functools.partial(func, *args, **kwargs))
+        if isinstance(executor, ContextAwareThreadPoolExecutor):
+            return await loop.run_in_executor(executor, fn)
+        ctx = contextvars.copy_context()
+        return await loop.run_in_executor(executor, ctx.run, fn)
 
     async def run_async(
         self,
