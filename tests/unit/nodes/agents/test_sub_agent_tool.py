@@ -11,6 +11,7 @@ from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.base import ToolParams
 from dynamiq.nodes.agents.components import schema_generator
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.llms.base import ModelInfo
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME
 from dynamiq.nodes.tools.python import Python
@@ -549,7 +550,8 @@ class TestYamlRoundtrip:
         serialization and is not duplicated after reload.
         """
         openai_conn = OpenAIConnection(id="openai-conn", api_key="test-key")
-        parent_llm = OpenAI(id="parent-llm", connection=openai_conn, model="gpt-4o")
+        model_info = ModelInfo(max_input_tokens=99_999, supports_vision=True, supports_pdf_input=True)
+        parent_llm = OpenAI(id="parent-llm", connection=openai_conn, model="gpt-4o", model_info=model_info)
         child_llm = OpenAI(id="child-llm", connection=openai_conn, model="gpt-4o")
 
         child_agent = Agent(
@@ -600,6 +602,7 @@ class TestYamlRoundtrip:
         assert wrapper.agent.name == "Researcher Agent"
         assert wrapper.agent.description == "I am a research agent"
         assert wrapper.max_calls == 5
+        assert loaded_agent.llm.model_info == model_info
 
         rt_path = tmp_path / "sub_agent_tool_rt.yaml"
         loaded.to_yaml_file(rt_path)
@@ -617,6 +620,7 @@ class TestYamlRoundtrip:
         assert SubAgentTool.INITIALIZED_HINT in rt_wrapper.description
         assert rt_wrapper.agent.name == "Researcher Agent"
         assert rt_wrapper.agent.description == "I am a research agent"
+        assert rt_agent.llm.model_info == model_info
 
     def test_agent_as_tool_yaml_roundtrip_backward_compat(self, tmp_path):
         """Roundtrip with a raw Agent passed as a tool (backward-compatible auto-wrap).
