@@ -36,6 +36,7 @@ from dynamiq.nodes.types import ActionType, Behavior, ChoiceCondition, NodeGroup
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
 from dynamiq.storages.vector.base import BaseVectorStoreParams
+from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.types.feedback import (
     ApprovalConfig,
@@ -933,6 +934,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             depends_result = {}
 
         try:
+            check_cancellation(config)
             try:
                 self.validate_depends(depends_result)
                 input_data = self.get_approved_data_or_origin(input_data, config=config, **merged_kwargs)
@@ -984,6 +986,18 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             return RunnableResult(
                 status=RunnableStatus.SUCCESS, input=dict(transformed_input), output=transformed_output
             )
+        except CanceledException:
+            self.run_on_node_canceled(callbacks=config.callbacks, **merged_kwargs)
+            logger.info(
+                f"Node {self.name} - {self.id}: execution canceled in "
+                f"{format_duration(time_start, datetime.now())}."
+            )
+            return RunnableResult(
+                status=RunnableStatus.CANCELED,
+                input=None,
+                output=None,
+                error=None,
+            )
         except Exception as e:
             self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
             logger.error(
@@ -1011,6 +1025,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         Run the node asynchronously with given input data and configuration.
         This runs the synchronous implementation in a thread pool to avoid blocking the event loop.
 
+        When the asyncio task is canceled (``task.cancel()``), the CancelledError is caught,
+        the CancellationToken is signalled (so the background thread stops at the next check),
+        and a CANCELED result is returned.
+
         Args:
             input_data (Any): Input data for the node.
             config (RunnableConfig, optional): Configuration for the run. Defaults to None.
@@ -1020,9 +1038,21 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         Returns:
             RunnableResult: Result of the node execution.
         """
-        return await asyncio.to_thread(
-            self.run_sync, input_data=input_data, config=config, depends_result=depends_result, **kwargs
-        )
+        try:
+            return await asyncio.to_thread(
+                self.run_sync, input_data=input_data, config=config, depends_result=depends_result, **kwargs
+            )
+        except asyncio.CancelledError:
+            # Signal the CancellationToken so the background thread stops at its next check
+            if config and config.cancellation and config.cancellation.token:
+                config.cancellation.token.cancel()
+            logger.info(f"Node {self.name} - {self.id}: asyncio task canceled.")
+            return RunnableResult(
+                status=RunnableStatus.CANCELED,
+                input=None,
+                output=None,
+                error=None,
+            )
 
     def ensure_client(self) -> None:
         """
@@ -1060,6 +1090,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
             for attempt in range(n_attempt):
                 merged_kwargs = merge(kwargs, {"execution_run_id": uuid4()})
+                check_cancellation(config)
 
                 try:
                     self.ensure_client()
@@ -1092,6 +1123,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
                     self.run_on_node_execute_end(config.callbacks, output, **merged_kwargs)
                     return output
+                except CanceledException:
+                    raise
                 except TimeoutError as e:
                     error = e
                     timed_out = True
@@ -1188,14 +1221,20 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             return streaming.input_queue_done_event is not None and streaming.input_queue_done_event.is_set()
 
         poll_interval = streaming.input_queue_poll_interval
+        # When cancellation is wired, use shorter poll intervals for responsiveness
+        cancellation_active = config and config.cancellation and config.cancellation.token is not None
+        cancellation_poll = 0.5
         elapsed = 0.0
 
         while not is_done():
+            check_cancellation(config)
             if streaming.timeout is not None and elapsed >= streaming.timeout:
                 raise ValueError(f"Input streaming timeout: {streaming.timeout} seconds exceeded.")
 
             remaining = streaming.timeout - elapsed if streaming.timeout is not None else poll_interval
             wait_time = min(poll_interval, remaining)
+            if cancellation_active:
+                wait_time = min(wait_time, cancellation_poll)
 
             try:
                 data = streaming.input_queue.get(timeout=wait_time)
@@ -1320,6 +1359,27 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 callback.on_node_skip(
                     self.to_dict(**dict_kwargs), skip_data, input_data, human_feedback=human_feedback, **kwargs
                 )
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
+
+    def run_on_node_canceled(
+        self,
+        callbacks: list[BaseCallbackHandler],
+        **kwargs,
+    ) -> None:
+        """
+        Run callbacks on node cancellation.
+
+        Args:
+            callbacks (list[BaseCallbackHandler]): List of callback handlers.
+            **kwargs: Additional keyword arguments.
+        """
+        for callback in callbacks + self.callbacks:
+            try:
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_canceled(self.to_dict(**dict_kwargs), **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 

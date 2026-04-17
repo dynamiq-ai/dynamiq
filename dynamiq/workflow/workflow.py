@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime
 from functools import cached_property
 from os import PathLike
@@ -187,6 +188,10 @@ class Workflow(BaseModel, Runnable):
         if result.status == RunnableStatus.SUCCESS:
             self.run_on_workflow_end(result.output, config, **merged_kwargs)
             logger.info(f"Workflow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
+        elif result.status == RunnableStatus.CANCELED:
+            self.run_on_workflow_canceled(config, **merged_kwargs)
+            logger.info(f"Workflow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
+            return RunnableResult(status=RunnableStatus.CANCELED, input=None, output=None, error=None)
         else:
             error = result.error.type(result.error.message)
             failed_nodes: list[RunnableFailedNodeInfo] = result.error.failed_nodes
@@ -222,12 +227,22 @@ class Workflow(BaseModel, Runnable):
         time_start = datetime.now()
 
         flow_kwargs = merge(merged_kwargs, {"parent_run_id": run_id})
-        result = await self.flow.run_async(input_data, config, resume_from=resume_from, **flow_kwargs)
+        try:
+            result = await self.flow.run_async(input_data, config, resume_from=resume_from, **flow_kwargs)
+        except asyncio.CancelledError:
+            if config and config.cancellation and config.cancellation.token:
+                config.cancellation.token.cancel()
+            self.run_on_workflow_canceled(config, **merged_kwargs)
+            logger.info(f"Workflow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
+            return RunnableResult(status=RunnableStatus.CANCELED, input=None, output=None, error=None)
+
         if result.status == RunnableStatus.SUCCESS:
             self.run_on_workflow_end(result.output, config, **merged_kwargs)
-            logger.info(
-                f"Workflow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}."
-            )
+            logger.info(f"Workflow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
+        elif result.status == RunnableStatus.CANCELED:
+            self.run_on_workflow_canceled(config, **merged_kwargs)
+            logger.info(f"Workflow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
+            return RunnableResult(status=RunnableStatus.CANCELED, input=None, output=None, error=None)
         else:
             if result.error:
                 error = result.error.type(result.error.message)
@@ -290,3 +305,17 @@ class Workflow(BaseModel, Runnable):
                 if isinstance(callback, TracingCallbackHandler):
                     dict_kwargs["for_tracing"] = True
                 callback.on_workflow_error(self.to_dict(**dict_kwargs), error, **kwargs)
+
+    def run_on_workflow_canceled(self, config: RunnableConfig = None, **kwargs: Any):
+        """Run callbacks on workflow cancellation.
+
+        Args:
+            config (RunnableConfig, optional): Configuration for the run. Defaults to None.
+            **kwargs: Additional keyword arguments.
+        """
+        if config and config.callbacks:
+            for callback in config.callbacks:
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_workflow_canceled(self.to_dict(**dict_kwargs), **kwargs)

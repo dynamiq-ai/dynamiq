@@ -11,6 +11,7 @@ from dynamiq.nodes import Behavior, Node, NodeGroup
 from dynamiq.nodes.node import Transformer, ensure_config
 from dynamiq.nodes.types import ChoiceCondition, ConditionOperator
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
@@ -238,6 +239,8 @@ class Map(Node):
             logger.warning(f"Map: failed to prepare isolated streaming config for iteration {index}: {e}")
 
         result = node_copy.run(data, local_config, **merged_kwargs)
+        if result.status == RunnableStatus.CANCELED:
+            raise CanceledException()
         if result.status != RunnableStatus.SUCCESS:
             if self.behavior == Behavior.RAISE:
                 raise ValueError(f"Node under iteration index {index + 1} has failed.")
@@ -266,11 +269,14 @@ class Map(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         try:
+            check_cancellation(config)
             with ContextAwareThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 results = executor.map(
                     lambda args: self.execute_workflow(args[0], args[1], config, merged_kwargs),
                     enumerate(input_data),
                 )
+        except CanceledException:
+            raise
         except Exception as e:
             logger.error(str(e))
             raise ValueError(f"Map node failed to execute:{str(e)}")

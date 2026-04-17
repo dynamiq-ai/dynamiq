@@ -12,12 +12,7 @@ from dynamiq.nodes.converters.html import HTMLConverter
 from dynamiq.nodes.converters.pptx import PPTXFileConverter
 from dynamiq.nodes.converters.pypdf import PyPDFConverter
 from dynamiq.nodes.converters.text import TextFileConverter
-from dynamiq.nodes.extractors.extractors import (
-    EXTENSION_MAP,
-    FileType,
-    FileTypeExtractor,
-    FileTypeExtractorInputSchema,
-)
+from dynamiq.nodes.extractors.extractors import EXTENSION_MAP, FileType, FileTypeExtractor, FileTypeExtractorInputSchema
 from dynamiq.nodes.node import Node, NodeDependency, ensure_config
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig, RunnableStatus

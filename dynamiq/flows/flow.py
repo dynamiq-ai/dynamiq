@@ -19,6 +19,7 @@ from dynamiq.nodes.node import Node, NodeReadyToRun
 from dynamiq.nodes.types import Behavior
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableFailedNodeInfo, RunnableResultError
+from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.utils.duration import format_duration
 from dynamiq.utils.logger import logger
 
@@ -357,6 +358,25 @@ class Flow(CheckpointFlowMixin, BaseFlow):
             if isinstance(res, Exception):
                 logger.error(f"Failed to clean up dry run resources for node {node.id}: {res}")
 
+    @staticmethod
+    def _setup_cancellation(config: RunnableConfig | None) -> RunnableConfig:
+        """Ensure the config has a live CancellationConfig with a token.
+
+        ``RunnableConfig.cancellation`` defaults to a fresh CancellationConfig with
+        its own CancellationToken, so in most cases this just returns the config as-is.
+
+        Handles edge cases:
+        - ``config`` is None: create a fresh RunnableConfig (gets default cancellation).
+        - ``config.cancellation`` is None (explicitly cleared after construction): restore it.
+        """
+        from dynamiq.types.cancellation import CancellationConfig
+
+        if config is None:
+            return RunnableConfig()
+        if config.cancellation is None:
+            config.cancellation = CancellationConfig()
+        return config
+
     def run_sync(
         self,
         input_data: Any,
@@ -382,6 +402,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         Raises:
             ValueError: If resume_from is provided but checkpoint not found
         """
+        config = self._setup_cancellation(config)
         self._effective_checkpoint_config = self._get_effective_checkpoint_config(config)
         effective_resume = resume_from or self._effective_checkpoint_config.resume_from
 
@@ -431,7 +452,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                     run_id=str(run_id),
                     wf_run_id=wf_run_id,
                     original_input=input_data,
-                    original_config=config.to_checkpoint_dict() if config else None,
+                    original_config=config.to_checkpoint_dict(),
                     pending_node_ids=[n.id for n in self.nodes],
                 )
                 self._save_checkpoint()
@@ -451,6 +472,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 node_run_kwargs = merged_kwargs | {"parent_run_id": run_id}
 
                 while self._ts.is_active():
+                    check_cancellation(config)
                     ready_nodes = self._get_nodes_ready_to_run(input_data=input_data)
 
                     if self._checkpoint:
@@ -468,6 +490,11 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                     )
                     self._results.update(results)
                     self._ts.done(*results.keys())
+
+                    # If any node was canceled, propagate cancellation to the flow
+                    for node_id, result in results.items():
+                        if result.status == RunnableStatus.CANCELED:
+                            raise CanceledException()
 
                     if self._is_checkpoint_after_node_enabled():
                         self._update_checkpoint(results, CheckpointStatus.ACTIVE)
@@ -503,6 +530,15 @@ class Flow(CheckpointFlowMixin, BaseFlow):
             self.run_on_flow_end(output, config, **merged_kwargs)
             logger.info(f"Flow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
             return RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=output)
+        except CanceledException:
+            self.run_on_flow_canceled(config, **merged_kwargs)
+            logger.info(f"Flow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
+            return RunnableResult(
+                status=RunnableStatus.CANCELED,
+                input=None,
+                output=None,
+                error=None,
+            )
         except Exception as e:
             if self._checkpoint and self._is_checkpoint_on_failure_enabled():
                 self._update_checkpoint({}, CheckpointStatus.FAILED)
@@ -541,6 +577,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         Returns:
             RunnableResult: Result of the flow execution.
         """
+        config = self._setup_cancellation(config)
         self._effective_checkpoint_config = self._get_effective_checkpoint_config(config)
         effective_resume = resume_from or self._effective_checkpoint_config.resume_from
 
@@ -590,7 +627,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                     run_id=str(run_id),
                     wf_run_id=wf_run_id,
                     original_input=input_data,
-                    original_config=config.to_checkpoint_dict() if config else None,
+                    original_config=config.to_checkpoint_dict(),
                     pending_node_ids=[n.id for n in self.nodes],
                 )
                 await self._save_checkpoint_async()
@@ -606,6 +643,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 node_run_kwargs = merged_kwargs | {"parent_run_id": run_id}
 
                 while self._ts.is_active():
+                    check_cancellation(config)
                     ready_nodes = self._get_nodes_ready_to_run(input_data=input_data)
 
                     if self._checkpoint:
@@ -635,6 +673,11 @@ class Flow(CheckpointFlowMixin, BaseFlow):
 
                         self._results.update(results)
                         self._ts.done(*results.keys())
+
+                        # If any node was canceled, propagate cancellation to the flow
+                        for node_id, result in results.items():
+                            if result.status == RunnableStatus.CANCELED:
+                                raise CanceledException()
 
                         if self._is_checkpoint_after_node_enabled():
                             await self._update_checkpoint_async(results, CheckpointStatus.ACTIVE)
@@ -669,6 +712,19 @@ class Flow(CheckpointFlowMixin, BaseFlow):
             self.run_on_flow_end(output, config, **merged_kwargs)
             logger.info(f"Flow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
             return RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=output)
+        except (CanceledException, asyncio.CancelledError) as e:
+            if isinstance(e, asyncio.CancelledError):
+                # Signal the token so any in-flight threads stop
+                if config and config.cancellation and config.cancellation.token:
+                    config.cancellation.token.cancel()
+            self.run_on_flow_canceled(config, **merged_kwargs)
+            logger.info(f"Flow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
+            return RunnableResult(
+                status=RunnableStatus.CANCELED,
+                input=None,
+                output=None,
+                error=None,
+            )
         except Exception as e:
             if self._checkpoint and self._is_checkpoint_on_failure_enabled():
                 await self._update_checkpoint_async({}, CheckpointStatus.FAILED)

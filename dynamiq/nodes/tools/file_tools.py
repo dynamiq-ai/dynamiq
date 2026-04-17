@@ -28,6 +28,7 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox
 from dynamiq.storages.file.base import FileStore
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.file_types import EXTENSION_MAP, FileType
 
 logger = logging.getLogger(__name__)
@@ -505,6 +506,7 @@ class FileReadTool(Node):
                     file.name = filename
 
                 converter_input = {"files": [file]}
+                check_cancellation(config)
                 result = converter.run(
                     input_data=converter_input,
                     config=config,

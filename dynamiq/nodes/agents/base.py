@@ -46,6 +46,7 @@ from dynamiq.skills.types import SkillMetadata
 from dynamiq.skills.utils import ingest_skills_into_sandbox, normalize_sandbox_skills_base_path
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
+from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
 
@@ -965,6 +966,7 @@ class Agent(IterativeCheckpointMixin, Node):
             RunnableResult: Generated response.
         """
         try:
+            check_cancellation(config)
             llm_result = self.llm.run(
                 input_data={},
                 config=config,
@@ -973,6 +975,8 @@ class Agent(IterativeCheckpointMixin, Node):
                 **kwargs,
             )
             self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
+            if llm_result.status == RunnableStatus.CANCELED:
+                raise CanceledException()
             if llm_result.status != RunnableStatus.SUCCESS:
                 error_message = f"LLM '{self.llm.name}' failed: {llm_result.error.message}"
                 raise ValueError(error_message)
@@ -1358,6 +1362,7 @@ class Agent(IterativeCheckpointMixin, Node):
                     target_id=tool_run_id,
                 )
 
+            check_cancellation(config)
             tool_result = tool_to_run.run(
                 input_data=merged_input,
                 config=tool_config,
@@ -1368,6 +1373,8 @@ class Agent(IterativeCheckpointMixin, Node):
             dependency_dict = NodeDependency(node=dependency_node).to_dict(for_tracing=True)
             if update_run_depends:
                 self._run_depends = [dependency_dict]
+            if tool_result.status == RunnableStatus.CANCELED:
+                raise CanceledException()
             if tool_result.status != RunnableStatus.SUCCESS:
                 error_message = f"Tool '{tool.name}' failed: {tool_result.error.to_dict()}"
                 if tool_result.error.recoverable:

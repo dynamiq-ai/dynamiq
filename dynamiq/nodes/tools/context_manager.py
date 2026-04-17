@@ -11,6 +11,7 @@ from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.prompts.prompts import Prompt, VisionMessage
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 MERGE_SUMMARIES_PROMPT = (
@@ -214,6 +215,7 @@ class ContextManagerTool(Node):
         **kwargs,
     ) -> str:
         """Send *messages* to the LLM and return the generated text."""
+        check_cancellation(config)
         llm_result = self.llm.run(
             input_data={},
             prompt=Prompt(messages=messages),

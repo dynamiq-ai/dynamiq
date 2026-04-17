@@ -25,6 +25,7 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.llm_tool import Tool
 from dynamiq.utils.logger import logger
 
@@ -511,6 +512,7 @@ class BaseLLM(ConnectionNode):
         """
         chunks = []
         for chunk in response:
+            check_cancellation(config)
             chunks.append(chunk)
 
             self.run_on_node_execute_stream(

@@ -28,6 +28,7 @@ from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
 from dynamiq.nodes.types import ActionType, Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import (
     AgentReasoningEventMessageData,
@@ -864,6 +865,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             **kwargs,
         )
         try:
+            check_cancellation(config)
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
                 to_summarize, to_preserve = self._split_history()
@@ -1130,6 +1132,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         Returns:
             str | None: Final answer if delegation occurred, None to continue loop
         """
+        check_cancellation(config)
         if action and self.tools:
             tool_result = None
             skipped_tools: list[str] = []
@@ -1258,6 +1261,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self.reset_resumed_flag()
 
         for loop_num in range(start_loop, self.max_loops + 1):
+            check_cancellation(config)
+
             if loop_num > start_loop:
                 self._refresh_agent_state(loop_num)
 
@@ -1287,6 +1292,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                             self.llm.streaming.enabled = original_streaming_enabled
                         except Exception:
                             logger.error("Failed to restore llm.streaming.enabled state")
+
+                check_cancellation(config)
 
                 action, action_input = None, None
                 llm_generated_output = ""
@@ -1329,10 +1336,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     continue
 
                 thought, action, action_input = result
+                check_cancellation(config)
 
                 final_answer = self._execute_tools_and_update_prompt(
                     action, action_input, thought, loop_num, config, **kwargs
                 )
+                check_cancellation(config)
 
                 self._completed_loops = loop_num
 
@@ -1742,6 +1751,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     with ContextAwareThreadPoolExecutor(max_workers=max_workers) as executor:
                         future_map = {}
                         for tool_payload in parallel_group:
+                            check_cancellation(config)
                             future = executor.submit(
                                 _execute_single_tool_to_result,
                                 tool_payload,
@@ -1752,6 +1762,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                             future_map[future] = tool_payload
 
                         for future in as_completed(future_map.keys()):
+                            check_cancellation(config)
                             all_results.append(future.result())
                 elif len(parallel_group) == 1:
                     all_results.append(
@@ -1771,6 +1782,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 # Phase 2: run sequential-only tools one-by-one
                 for tool_payload in sequential_group:
+                    check_cancellation(config)
                     all_results.append(
                         _execute_single_tool_to_result(
                             tool_payload,

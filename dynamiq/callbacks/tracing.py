@@ -23,6 +23,7 @@ class RunStatus(str, Enum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     SKIPPED = "skipped"
+    CANCELED = "canceled"
 
 
 class RunType(str, Enum):
@@ -509,6 +510,52 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
 
         if tool_data := kwargs.get("tool_data"):
             run.metadata["tool_data"] = tool_data
+
+    def on_workflow_canceled(self, serialized: dict[str, Any], **kwargs: Any):
+        """Called when the workflow is canceled mid-execution.
+
+        Args:
+            serialized (dict[str, Any]): Serialized workflow data.
+            **kwargs (Any): Additional arguments.
+        """
+        run = ensure_run(get_run_id(kwargs), self.runs)
+        run.end_time = datetime.now(UTC)
+        run.status = RunStatus.CANCELED
+        self.flush()
+
+    def on_flow_canceled(self, serialized: dict[str, Any], **kwargs: Any):
+        """Called when the flow is canceled mid-execution.
+
+        Args:
+            serialized (dict[str, Any]): Serialized flow data.
+            **kwargs (Any): Additional arguments.
+        """
+        run = ensure_run(get_run_id(kwargs), self.runs)
+        run.end_time = datetime.now(UTC)
+        run.status = RunStatus.CANCELED
+
+        # If parent_run_id is None, the run is the highest in the execution tree
+        if run.parent_run_id is None:
+            self.flush()
+
+    def on_node_canceled(self, serialized: dict[str, Any], **kwargs: Any):
+        """Called when the node is canceled mid-execution.
+
+        Args:
+            serialized (dict[str, Any]): Serialized node data.
+            **kwargs (Any): Additional arguments.
+        """
+        run_id = get_run_id(kwargs)
+        if (run := self.runs.get(run_id)) is None:
+            run = self._get_node_base_run(serialized, **kwargs)
+            self.runs[run_id] = run
+
+        run.end_time = datetime.now(UTC)
+        run.status = RunStatus.CANCELED
+
+        # If parent_run_id is None, the run is the highest in the execution tree
+        if run.parent_run_id is None:
+            self.flush()
 
     def flush(self):
         """Flush the runs to the tracing client."""
