@@ -19,6 +19,7 @@ from dynamiq.nodes.agents.exceptions import (
     RecoverableAgentException,
     TagNotFoundError,
 )
+from dynamiq.nodes.agents.prompts.manager import AgentPromptManager, ReactPromptConfig
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser, extract_message_text
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
@@ -1549,42 +1550,34 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""
-        super()._init_prompt_blocks()
-        # Delegation guidance is rendered via prompt variables managed by AgentPromptManager
-
-        # Handle function calling schema generation first
+        # Generate inference-mode schemas
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
             self._tools = schema_generator.generate_function_calling_schemas(
-                self.tools, self.delegation_allowed, self.sanitize_tool_name, self.llm
+                self.tools, self.delegation_allowed, self.sanitize_tool_name
             )
         elif self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
             self._response_format = schema_generator.generate_structured_output_schemas(
                 self.tools, self.sanitize_tool_name, self.delegation_allowed
             )
 
-        # Setup ReAct-specific prompts via prompt manager.
-        has_tools = bool(self.tools) or (self.skills.enabled and self.skills.source is not None)
-        self.system_prompt_manager.setup_for_react_agent(
-            inference_mode=self.inference_mode,
-            parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
-            has_tools=has_tools,
-            delegation_allowed=self.delegation_allowed,
-            context_compaction_enabled=self.summarization_config.enabled,
-            todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
-            or bool(self.sandbox_backend),
-            sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
-            has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
+        # Build the entire prompt in one call
+        model_name = getattr(self.llm, "model", None)
+        self.system_prompt_manager = AgentPromptManager(model_name=model_name, tool_description=self.tool_description)
+        self.system_prompt_manager.build_react_prompt(
+            ReactPromptConfig(
+                inference_mode=self.inference_mode,
+                has_tools=bool(self.tools) or (self.skills.enabled and self.skills.source is not None),
+                parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
+                delegation_allowed=self.delegation_allowed,
+                context_compaction_enabled=self.summarization_config.enabled,
+                todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
+                or bool(self.sandbox_backend),
+                sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
+                has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
+                role=self.role,
+                instructions=self.instructions,
+            )
         )
-
-        # Only auto-wrap the entire role in a raw block if the user did not
-        # provide explicit raw/endraw markers. This allows roles to mix
-        # literal sections (via raw) with Jinja variables like {{ input }}
-        # without creating nested raw blocks.
-        if self.role:
-            if ("{% raw %}" in self.role) or ("{% endraw %}" in self.role):
-                self.system_prompt_manager.set_block("role", self.role)
-            else:
-                self.system_prompt_manager.set_block("role", f"{{% raw %}}{self.role}{{% endraw %}}")
 
     @staticmethod
     def _build_unique_file_key(files_map: dict[str, Any], base: str) -> str:
