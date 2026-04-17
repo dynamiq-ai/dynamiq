@@ -511,40 +511,32 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         if tool_data := kwargs.get("tool_data"):
             run.metadata["tool_data"] = tool_data
 
-    def on_workflow_canceled(self, serialized: dict[str, Any], **kwargs: Any):
-        """Called when the workflow is canceled mid-execution.
+    @staticmethod
+    def _canceled_message(kind: str, serialized: dict[str, Any]) -> str:
+        """Build a human-readable cancellation message from serialized node/flow/workflow data."""
+        name = serialized.get("name", serialized.get("id", "?"))
+        return f"{kind} '{name}' was canceled during execution"
 
-        Args:
-            serialized (dict[str, Any]): Serialized workflow data.
-            **kwargs (Any): Additional arguments.
-        """
+    def on_workflow_canceled(self, serialized: dict[str, Any], **kwargs: Any):
+        """Called when the workflow is canceled mid-execution."""
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
         run.status = RunStatus.CANCELED
+        run.error = {"message": self._canceled_message("Workflow", serialized)}
         self.flush()
 
     def on_flow_canceled(self, serialized: dict[str, Any], **kwargs: Any):
-        """Called when the flow is canceled mid-execution.
-
-        Args:
-            serialized (dict[str, Any]): Serialized flow data.
-            **kwargs (Any): Additional arguments.
-        """
+        """Called when the flow is canceled mid-execution."""
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
         run.status = RunStatus.CANCELED
+        run.error = {"message": self._canceled_message("Flow", serialized)}
 
-        # If parent_run_id is None, the run is the highest in the execution tree
         if run.parent_run_id is None:
             self.flush()
 
     def on_node_canceled(self, serialized: dict[str, Any], **kwargs: Any):
-        """Called when the node is canceled mid-execution.
-
-        Args:
-            serialized (dict[str, Any]): Serialized node data.
-            **kwargs (Any): Additional arguments.
-        """
+        """Called when the node is canceled mid-execution."""
         run_id = get_run_id(kwargs)
         if (run := self.runs.get(run_id)) is None:
             run = self._get_node_base_run(serialized, **kwargs)
@@ -552,8 +544,8 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
 
         run.end_time = datetime.now(UTC)
         run.status = RunStatus.CANCELED
+        run.error = {"message": self._canceled_message("Node", serialized)}
 
-        # If parent_run_id is None, the run is the highest in the execution tree
         if run.parent_run_id is None:
             self.flush()
 

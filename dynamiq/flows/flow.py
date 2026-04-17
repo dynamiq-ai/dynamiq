@@ -533,11 +533,22 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         except CanceledException:
             self.run_on_flow_canceled(config, **merged_kwargs)
             logger.info(f"Flow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
+            # Find which node was canceled to propagate its message
+            canceled_error = None
+            for node_id, result in self._results.items():
+                if result.status == RunnableStatus.CANCELED and result.error:
+                    canceled_error = result.error
+                    break
+            if canceled_error is None:
+                canceled_error = RunnableResultError(
+                    type=CanceledException,
+                    message=f"Flow '{self.name}' was canceled during execution",
+                )
             return RunnableResult(
                 status=RunnableStatus.CANCELED,
                 input=None,
                 output=None,
-                error=None,
+                error=canceled_error,
             )
         except Exception as e:
             if self._checkpoint and self._is_checkpoint_on_failure_enabled():
@@ -719,11 +730,21 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                     config.cancellation.token.cancel()
             self.run_on_flow_canceled(config, **merged_kwargs)
             logger.info(f"Flow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
+            canceled_error = None
+            for node_id, result in self._results.items():
+                if result.status == RunnableStatus.CANCELED and result.error:
+                    canceled_error = result.error
+                    break
+            if canceled_error is None:
+                canceled_error = RunnableResultError(
+                    type=CanceledException,
+                    message=f"Flow '{self.name}' was canceled during execution",
+                )
             return RunnableResult(
                 status=RunnableStatus.CANCELED,
                 input=None,
                 output=None,
-                error=None,
+                error=canceled_error,
             )
         except Exception as e:
             if self._checkpoint and self._is_checkpoint_on_failure_enabled():

@@ -996,7 +996,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 status=RunnableStatus.CANCELED,
                 input=None,
                 output=None,
-                error=None,
+                error=RunnableResultError(
+                    type=CanceledException,
+                    message=f"Node '{self.name}' was canceled during execution",
+                ),
             )
         except Exception as e:
             self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
@@ -1051,7 +1054,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 status=RunnableStatus.CANCELED,
                 input=None,
                 output=None,
-                error=None,
+                error=RunnableResultError(
+                    type=CanceledException,
+                    message=f"Node '{self.name}' was canceled during execution",
+                ),
             )
 
     def ensure_client(self) -> None:

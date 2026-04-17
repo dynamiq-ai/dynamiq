@@ -11,7 +11,8 @@ from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.flows import BaseFlow, Flow
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
-from dynamiq.runnables.base import RunnableFailedNodeInfo
+from dynamiq.runnables.base import RunnableFailedNodeInfo, RunnableResultError
+from dynamiq.types.cancellation import CanceledException
 from dynamiq.utils import format_duration, generate_uuid, merge
 from dynamiq.utils.logger import logger
 
@@ -191,7 +192,7 @@ class Workflow(BaseModel, Runnable):
         elif result.status == RunnableStatus.CANCELED:
             self.run_on_workflow_canceled(config, **merged_kwargs)
             logger.info(f"Workflow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
-            return RunnableResult(status=RunnableStatus.CANCELED, input=None, output=None, error=None)
+            return RunnableResult(status=RunnableStatus.CANCELED, input=None, output=None, error=result.error)
         else:
             error = result.error.type(result.error.message)
             failed_nodes: list[RunnableFailedNodeInfo] = result.error.failed_nodes
@@ -234,7 +235,15 @@ class Workflow(BaseModel, Runnable):
                 config.cancellation.token.cancel()
             self.run_on_workflow_canceled(config, **merged_kwargs)
             logger.info(f"Workflow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
-            return RunnableResult(status=RunnableStatus.CANCELED, input=None, output=None, error=None)
+            return RunnableResult(
+                status=RunnableStatus.CANCELED,
+                input=None,
+                output=None,
+                error=RunnableResultError(
+                    type=CanceledException,
+                    message=f"Workflow '{self.name}' was canceled during execution",
+                ),
+            )
 
         if result.status == RunnableStatus.SUCCESS:
             self.run_on_workflow_end(result.output, config, **merged_kwargs)
@@ -242,7 +251,7 @@ class Workflow(BaseModel, Runnable):
         elif result.status == RunnableStatus.CANCELED:
             self.run_on_workflow_canceled(config, **merged_kwargs)
             logger.info(f"Workflow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
-            return RunnableResult(status=RunnableStatus.CANCELED, input=None, output=None, error=None)
+            return RunnableResult(status=RunnableStatus.CANCELED, input=None, output=None, error=result.error)
         else:
             if result.error:
                 error = result.error.type(result.error.message)
