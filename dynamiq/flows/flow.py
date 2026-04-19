@@ -531,6 +531,10 @@ class Flow(CheckpointFlowMixin, BaseFlow):
             logger.info(f"Flow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
             return RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=output)
         except CanceledException:
+            if self._checkpoint and self._is_checkpoint_on_cancel_enabled():
+                self._update_checkpoint({}, CheckpointStatus.CANCELED)
+                logger.info(f"Flow {self.id}: checkpoint saved on cancel, checkpoint_id={self._checkpoint.id}")
+
             self.run_on_flow_canceled(config, **merged_kwargs)
             logger.info(f"Flow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
             # Find which node was canceled to propagate its message
@@ -728,6 +732,9 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 # Signal the token so any in-flight threads stop
                 if config and config.cancellation and config.cancellation.token:
                     config.cancellation.token.cancel()
+            if self._checkpoint and self._is_checkpoint_on_cancel_enabled():
+                await self._update_checkpoint_async({}, CheckpointStatus.CANCELED)
+                logger.info(f"Flow {self.id}: checkpoint saved on cancel, checkpoint_id={self._checkpoint.id}")
             self.run_on_flow_canceled(config, **merged_kwargs)
             logger.info(f"Flow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
             canceled_error = None

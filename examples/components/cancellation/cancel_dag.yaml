@@ -1,0 +1,56 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+nodes:
+  agent-1:
+    type: dynamiq.nodes.agents.Agent
+    name: Summarizer
+    role: "Summarize the input topic in 2 sentences. Do not use any tools."
+    llm:
+      type: dynamiq.nodes.llms.OpenAI
+      model: gpt-4o-mini
+      connection: openai-conn
+      temperature: 0.1
+      max_tokens: 500
+    max_loops: 2
+
+  agent-2:
+    type: dynamiq.nodes.agents.Agent
+    name: Deep Researcher
+    role: >
+      You are a thorough researcher. Use the research-tool to investigate
+      each sub-topic mentioned in the input. Research at least 3 different
+      aspects before providing your final answer.
+    llm:
+      type: dynamiq.nodes.llms.OpenAI
+      model: gpt-4o-mini
+      connection: openai-conn
+      temperature: 0.1
+      max_tokens: 2000
+    tools:
+      - type: dynamiq.nodes.tools.Python
+        name: research-tool
+        description: "Researches a topic in depth. Input: {'topic': '<topic>'}."
+        code: |
+          import time
+          def run(params: dict):
+              topic = params.get("topic", "unknown")
+              time.sleep(2)
+              return {"content": f"Research findings for: {topic}"}
+    max_loops: 10
+    depends:
+      - node: agent-1
+
+flows:
+  cancellation-flow:
+    name: Cancellation Demo Flow
+    nodes:
+      - agent-1
+      - agent-2
+
+workflows:
+  cancellation-workflow:
+    flow: cancellation-flow
+    version: 1
