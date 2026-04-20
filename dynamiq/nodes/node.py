@@ -1061,15 +1061,31 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         Returns:
             RunnableResult: Result of the node execution.
         """
-        try:
-            return await asyncio.to_thread(
+        # Shielded inner task lets us convert asyncio cancel into cooperative cancel:
+        # on cancel, we signal the token, uncancel, and drain the thread so run_sync
+        # fires its proper terminal callbacks.
+        task = asyncio.ensure_future(
+            asyncio.to_thread(
                 self.run_sync, input_data=input_data, config=config, depends_result=depends_result, **kwargs
             )
+        )
+        try:
+            return await asyncio.shield(task)
         except asyncio.CancelledError:
-            # Signal the CancellationToken so the background thread stops at its next check
             if config and config.cancellation and config.cancellation.token:
                 config.cancellation.token.cancel()
-            logger.info(f"Node {self.name} - {self.id}: asyncio task canceled.")
+            parent = asyncio.current_task()
+            if parent is not None and hasattr(parent, "uncancel"):
+                parent.uncancel()
+            logger.info(f"Node {self.name} - {self.id}: asyncio task canceled, draining thread.")
+            try:
+                return await task
+            except BaseException:
+                if task.done() and not task.cancelled():
+                    try:
+                        return task.result()
+                    except BaseException:
+                        pass
             return RunnableResult(
                 status=RunnableStatus.CANCELED,
                 input=None,

@@ -360,15 +360,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
 
     @staticmethod
     def _setup_cancellation(config: RunnableConfig | None) -> RunnableConfig:
-        """Ensure the config has a live CancellationConfig with a token.
-
-        ``RunnableConfig.cancellation`` defaults to a fresh CancellationConfig with
-        its own CancellationToken, so in most cases this just returns the config as-is.
-
-        Handles edge cases:
-        - ``config`` is None: create a fresh RunnableConfig (gets default cancellation).
-        - ``config.cancellation`` is None (explicitly cleared after construction): restore it.
-        """
+        """Ensure the config has a CancellationConfig/token."""
         from dynamiq.types.cancellation import CancellationConfig
 
         if config is None:
@@ -729,13 +721,18 @@ class Flow(CheckpointFlowMixin, BaseFlow):
             return RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=output)
         except (CanceledException, asyncio.CancelledError) as e:
             if isinstance(e, asyncio.CancelledError):
-                # Signal the token so any in-flight threads stop
                 if config and config.cancellation and config.cancellation.token:
                     config.cancellation.token.cancel()
-            if self._checkpoint and self._is_checkpoint_on_cancel_enabled():
-                await self._update_checkpoint_async({}, CheckpointStatus.CANCELED)
-                logger.info(f"Flow {self.id}: checkpoint saved on cancel, checkpoint_id={self._checkpoint.id}")
+                current = asyncio.current_task()
+                if current is not None and hasattr(current, "uncancel"):
+                    current.uncancel()
             self.run_on_flow_canceled(config, **merged_kwargs)
+            if self._checkpoint and self._is_checkpoint_on_cancel_enabled():
+                try:
+                    await self._update_checkpoint_async({}, CheckpointStatus.CANCELED)
+                    logger.info(f"Flow {self.id}: checkpoint saved on cancel, checkpoint_id={self._checkpoint.id}")
+                except Exception as ckpt_err:
+                    logger.warning(f"Flow {self.id}: failed to save cancel checkpoint: {ckpt_err}")
             logger.info(f"Flow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
             canceled_error = None
             for node_id, result in self._results.items():

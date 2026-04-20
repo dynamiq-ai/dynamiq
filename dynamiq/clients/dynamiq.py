@@ -113,7 +113,7 @@ class DynamiqTracingClient(BaseTracingClient):
         try:
             if is_called_from_async_context():
                 loop = asyncio.get_running_loop()
-                loop.create_task(self._send_traces_async(runs))
+                loop.run_in_executor(None, lambda: asyncio.run(self._send_traces_async(runs)))
             else:
                 self._send_traces_sync(runs)
         except Exception as e:
