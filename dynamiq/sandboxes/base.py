@@ -300,8 +300,6 @@ class Sandbox(abc.ABC, BaseModel):
             resolved_path = self._resolve_path(file_path)
             result = self.run_command_shell(f"rm -f {shlex.quote(resolved_path)}")
             return getattr(result, "is_success", True)
-        except NotImplementedError:
-            raise
         except Exception as e:
             logging.getLogger(__name__).warning(f"{self.__class__.__name__}.delete_file({file_path}) failed: {e}")
             return False
