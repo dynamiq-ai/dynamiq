@@ -1,5 +1,7 @@
 import asyncio
+import contextvars
 import copy
+import functools
 import inspect
 import time
 from abc import ABC, abstractmethod
@@ -14,7 +16,7 @@ from uuid import uuid4
 from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, create_model, model_validator
 
-from dynamiq.cache.utils import cache_wf_entity
+from dynamiq.cache.utils import cache_wf_entity, cache_wf_entity_async
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingCallbackHandler
 from dynamiq.checkpoints.checkpoint import CheckpointNodeMixin
 from dynamiq.connections import BaseConnection
@@ -52,6 +54,9 @@ from dynamiq.utils.jsonpath import filter as jsonpath_filter
 from dynamiq.utils.jsonpath import mapper as jsonpath_mapper
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import clear_annotation
+
+if TYPE_CHECKING:
+    from concurrent.futures import ThreadPoolExecutor
 
 
 def ensure_config(config: RunnableConfig = None) -> RunnableConfig:
@@ -278,6 +283,18 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
     _output_references: NodeOutputReferences = PrivateAttr()
     _pending_approval_response: ApprovalInputData | None = PrivateAttr(default=None)
 
+    # Set to True in subclasses that manage their own background event loop
+    # (e.g. CuaDesktopTool, E2BDesktopTool) to force run_async to offload
+    # via run_in_executor instead of calling execute_async on the main loop.
+    _force_thread_executor: ClassVar[bool] = False
+
+    @property
+    def has_native_async(self) -> bool:
+        """Check if the subclass provides a native async execute implementation."""
+        if self._force_thread_executor:
+            return False
+        return type(self).execute_async is not Node.execute_async
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: type[BaseModel] | None = None
     callbacks: list[NodeCallbackHandler] = []
@@ -487,8 +504,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         Raises:
             NodeException: If input data does not match the input schema.
         """
-        from dynamiq.nodes.agents.exceptions import RecoverableAgentException
-
         if self.input_schema:
             try:
                 return self.input_schema.model_validate(
@@ -496,6 +511,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 )
             except Exception as e:
                 if kwargs.get("recoverable_error", False):
+                    from dynamiq.nodes.agents.exceptions import RecoverableAgentException
+
                     raise RecoverableAgentException(f"Input data validation failed: {e}")
                 raise e
 
@@ -917,6 +934,105 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         if (approval_response := state_dict.get("approval_response")) is not None:
             self._pending_approval_response = ApprovalInputData(**approval_response)
 
+    def _prepare_execution(
+        self,
+        input_data: dict,
+        config: RunnableConfig,
+        depends_result: dict | None,
+        **kwargs,
+    ) -> tuple[RunnableConfig, dict, dict]:
+        """Shared pre-execution setup for run_sync and _run_async_native.
+
+        Returns:
+            Tuple of (config, merged_kwargs, depends_result).
+        """
+        if not self.is_resumed:
+            self._pending_approval_response = None
+
+        config = ensure_config(config)
+        run_id = uuid4()
+        merged_kwargs = merge(kwargs, {"run_id": run_id, "parent_run_id": kwargs.get("parent_run_id", None)})
+        if depends_result is None:
+            depends_result = {}
+        return config, merged_kwargs, depends_result
+
+    def _handle_skip(
+        self,
+        e: "NodeException",
+        input_data: dict,
+        depends_result: dict,
+        config: RunnableConfig,
+        **merged_kwargs,
+    ) -> RunnableResult:
+        """Handle node skip due to failed dependency or approval rejection."""
+        transformed_input = input_data | {k: result.to_tracing_depend_dict() for k, result in depends_result.items()}
+        skip_data = {"failed_dependency": e.failed_depend.to_dict(for_tracing=True)}
+        self.run_on_node_skip(
+            callbacks=config.callbacks,
+            skip_data=skip_data,
+            input_data=transformed_input,
+            human_feedback=getattr(e, "human_feedback", None),
+            **merged_kwargs,
+        )
+        logger.info(f"Node {self.name} - {self.id}: execution skipped.")
+        return RunnableResult(
+            status=RunnableStatus.SKIP,
+            input=transformed_input,
+            output=None,
+            error=RunnableResultError.from_exception(e, recoverable=e.recoverable),
+        )
+
+    def _handle_success(
+        self,
+        output: Any,
+        from_cache: bool,
+        transformed_input: dict,
+        config: RunnableConfig,
+        time_start: datetime,
+        log_prefix: str,
+        merged_kwargs: dict,
+        **kwargs,
+    ) -> RunnableResult:
+        """Handle successful execution — transform output, fire callbacks, return result."""
+        callback_kwargs = {**merged_kwargs, "is_output_from_cache": from_cache}
+        # transform_output uses original kwargs; run_on_node_end needs merged_kwargs with run_id
+        transformed_output = self.transform_output(output, config=config, **kwargs)
+        self.run_on_node_end(config.callbacks, transformed_output, **callback_kwargs)
+
+        # Clear stored approval response after successful completion
+        self._pending_approval_response = None
+
+        logger.info(
+            f"Node {self.name} - {self.id}: {log_prefix}execution succeeded in "
+            f"{format_duration(time_start, datetime.now())}."
+        )
+        return RunnableResult(status=RunnableStatus.SUCCESS, input=dict(transformed_input), output=transformed_output)
+
+    def _handle_failure(
+        self,
+        e: Exception,
+        transformed_input: dict,
+        config: RunnableConfig,
+        time_start: datetime,
+        log_prefix: str,
+        **merged_kwargs,
+    ) -> RunnableResult:
+        """Handle execution failure — fire error callbacks, return failure result."""
+        from dynamiq.nodes.agents.exceptions import RecoverableAgentException
+
+        self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
+        logger.error(
+            f"Node {self.name} - {self.id}: {log_prefix}execution failed in "
+            f"{format_duration(time_start, datetime.now())}. {e}"
+        )
+        recoverable = isinstance(e, RecoverableAgentException)
+        return RunnableResult(
+            status=RunnableStatus.FAILURE,
+            input=transformed_input,
+            output=None,
+            error=RunnableResultError.from_exception(e, recoverable=recoverable),
+        )
+
     def run_sync(
         self,
         input_data: dict,
@@ -936,47 +1052,17 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         Returns:
             RunnableResult: Result of the node execution.
         """
-        from dynamiq.nodes.agents.exceptions import RecoverableAgentException
-
-        # Reset stored approval response for fresh runs (not resumed from checkpoint)
-        if not self.is_resumed:
-            self._pending_approval_response = None
-
         logger.info(f"Node {self.name} - {self.id}: execution started.")
         transformed_input = input_data
         time_start = datetime.now()
-
-        config = ensure_config(config)
-
-        run_id = uuid4()
-        merged_kwargs = merge(kwargs, {"run_id": run_id, "parent_run_id": kwargs.get("parent_run_id", None)})
-        if depends_result is None:
-            depends_result = {}
+        config, merged_kwargs, depends_result = self._prepare_execution(input_data, config, depends_result, **kwargs)
 
         try:
-            check_cancellation(config)
             try:
                 self.validate_depends(depends_result)
                 input_data = self.get_approved_data_or_origin(input_data, config=config, **merged_kwargs)
             except NodeException as e:
-                transformed_input = input_data | {
-                    k: result.to_tracing_depend_dict() for k, result in depends_result.items()
-                }
-                skip_data = {"failed_dependency": e.failed_depend.to_dict(for_tracing=True)}
-                self.run_on_node_skip(
-                    callbacks=config.callbacks,
-                    skip_data=skip_data,
-                    input_data=transformed_input,
-                    human_feedback=getattr(e, "human_feedback", None),
-                    **merged_kwargs,
-                )
-                logger.info(f"Node {self.name} - {self.id}: execution skipped.")
-                return RunnableResult(
-                    status=RunnableStatus.SKIP,
-                    input=transformed_input,
-                    output=None,
-                    error=RunnableResultError.from_exception(e, recoverable=e.recoverable),
-                )
+                return self._handle_skip(e, input_data, depends_result, config, **merged_kwargs)
 
             transformed_input = self.validate_input_schema(
                 self.transform_input(input_data=input_data, depends_result=depends_result, config=config, **kwargs),
@@ -991,62 +1077,97 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
             output, from_cache = cache(self.execute_with_retry)(transformed_input, config, **merged_kwargs)
 
-            merged_kwargs["is_output_from_cache"] = from_cache
-            transformed_output = self.transform_output(output, config=config, **kwargs)
-
-            self.run_on_node_end(config.callbacks, transformed_output, **merged_kwargs)
-
-            # Clear stored approval response after successful completion
-            self._pending_approval_response = None
-
-            logger.info(
-                f"Node {self.name} - {self.id}: execution succeeded in "
-                f"{format_duration(time_start, datetime.now())}."
-            )
-            return RunnableResult(
-                status=RunnableStatus.SUCCESS, input=dict(transformed_input), output=transformed_output
-            )
-        except CanceledException:
-            self.run_on_node_canceled(callbacks=config.callbacks, **merged_kwargs)
-            logger.info(
-                f"Node {self.name} - {self.id}: execution canceled in "
-                f"{format_duration(time_start, datetime.now())}."
-            )
-            return RunnableResult(
-                status=RunnableStatus.CANCELED,
-                input=None,
-                output=None,
-                error=RunnableResultError(
-                    type=CanceledException,
-                    message=f"Node '{self.name}' was canceled during execution",
-                ),
+            return self._handle_success(
+                output, from_cache, transformed_input, config, time_start, "", merged_kwargs=merged_kwargs, **kwargs
             )
         except Exception as e:
-            self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
-            logger.error(
-                f"Node {self.name} - {self.id}: execution failed in "
-                f"{format_duration(time_start, datetime.now())}. {e}"
+            return self._handle_failure(e, transformed_input, config, time_start, "", **merged_kwargs)
+
+    async def _run_async_native(
+        self,
+        input_data: dict,
+        config: RunnableConfig = None,
+        depends_result: dict = None,
+        executor: "ThreadPoolExecutor | None" = None,
+        **kwargs,
+    ) -> RunnableResult:
+        """
+        Run the node asynchronously using native async execute.
+        Mirrors run_sync() lifecycle but calls execute_async_with_retry().
+
+        Blocking sync calls (approval queue read, client init) are offloaded to
+        the provided executor when supplied, otherwise to the default asyncio
+        thread pool via asyncio.to_thread.
+        """
+        logger.info(f"Node {self.name} - {self.id}: async execution started.")
+        transformed_input = input_data
+        time_start = datetime.now()
+        config, merged_kwargs, depends_result = self._prepare_execution(input_data, config, depends_result, **kwargs)
+
+        try:
+            try:
+                self.validate_depends(depends_result)
+                # Offload blocking approval queue read to a thread to avoid blocking the event loop
+                input_data = await self._offload_to_executor(
+                    executor, self.get_approved_data_or_origin, input_data, config=config, **merged_kwargs
+                )
+            except NodeException as e:
+                return self._handle_skip(e, input_data, depends_result, config, **merged_kwargs)
+
+            transformed_input = self.validate_input_schema(
+                self.transform_input(input_data=input_data, depends_result=depends_result, config=config, **kwargs),
+                **kwargs,
+            )
+            self.run_on_node_start(config.callbacks, dict(transformed_input), **merged_kwargs)
+
+            cache = cache_wf_entity_async(
+                entity_id=self.id,
+                cache_enabled=self.caching.enabled,
+                cache_config=config.cache,
+            )
+            output, from_cache = await cache(self.execute_async_with_retry)(
+                transformed_input, config, executor=executor, **merged_kwargs
             )
 
-            recoverable = isinstance(e, RecoverableAgentException)
-            result = RunnableResult(
-                status=RunnableStatus.FAILURE,
-                input=transformed_input,
-                output=None,
-                error=RunnableResultError.from_exception(e, recoverable=recoverable),
+            return self._handle_success(
+                output,
+                from_cache,
+                transformed_input,
+                config,
+                time_start,
+                "async ",
+                merged_kwargs=merged_kwargs,
+                **kwargs,
             )
-            return result
+        except Exception as e:
+            return self._handle_failure(e, transformed_input, config, time_start, "async ", **merged_kwargs)
+
+    @staticmethod
+    async def _offload_to_executor(executor: "ThreadPoolExecutor | None", func: Callable, *args, **kwargs) -> Any:
+        """Run a blocking callable on the given executor (or default thread pool if None)."""
+        fn = functools.partial(func, *args, **kwargs)
+        if executor is None:
+            return await asyncio.to_thread(fn)
+        loop = asyncio.get_running_loop()
+        if isinstance(executor, ContextAwareThreadPoolExecutor):
+            return await loop.run_in_executor(executor, fn)
+        ctx = contextvars.copy_context()
+        return await loop.run_in_executor(executor, ctx.run, fn)
 
     async def run_async(
         self,
         input_data: dict,
         config: RunnableConfig = None,
         depends_result: dict = None,
+        executor: "ThreadPoolExecutor | None" = None,
         **kwargs,
     ) -> RunnableResult:
         """
         Run the node asynchronously with given input data and configuration.
-        This runs the synchronous implementation in a thread pool to avoid blocking the event loop.
+
+        If the node has a native async execute implementation (has_native_async),
+        runs directly on the event loop. Otherwise, offloads sync execution to
+        the provided executor (or the default asyncio executor if None).
 
         When the asyncio task is canceled (``task.cancel()``), the CancelledError is caught,
         the CancellationToken is signalled (so the background thread stops at the next check),
@@ -1054,47 +1175,34 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
         Args:
             input_data (Any): Input data for the node.
-            config (RunnableConfig, optional): Configuration for the run. Defaults to None.
-            depends_result (dict, optional): Results of dependent nodes. Defaults to None.
+            config (RunnableConfig, optional): Configuration for the run.
+            depends_result (dict, optional): Results of dependent nodes.
+            executor (ThreadPoolExecutor, optional): Thread pool executor for sync fallback.
             **kwargs: Additional keyword arguments.
 
         Returns:
             RunnableResult: Result of the node execution.
         """
-        # Shielded inner task lets us convert asyncio cancel into cooperative cancel:
-        # on cancel, we signal the token, uncancel, and drain the thread so run_sync
-        # fires its proper terminal callbacks.
-        task = asyncio.ensure_future(
-            asyncio.to_thread(
+        if self.has_native_async:
+            return await self._run_async_native(
+                input_data=input_data,
+                config=config,
+                depends_result=depends_result,
+                executor=executor,
+                **kwargs,
+            )
+        else:
+            loop = asyncio.get_running_loop()
+            fn = functools.partial(
                 self.run_sync, input_data=input_data, config=config, depends_result=depends_result, **kwargs
             )
-        )
-        try:
-            return await asyncio.shield(task)
-        except asyncio.CancelledError:
-            if config and config.cancellation and config.cancellation.token:
-                config.cancellation.token.cancel()
-            parent = asyncio.current_task()
-            if parent is not None and hasattr(parent, "uncancel"):
-                parent.uncancel()
-            logger.info(f"Node {self.name} - {self.id}: asyncio task canceled, draining thread.")
-            try:
-                return await task
-            except BaseException:
-                if task.done() and not task.cancelled():
-                    try:
-                        return task.result()
-                    except BaseException:
-                        pass
-            return RunnableResult(
-                status=RunnableStatus.CANCELED,
-                input=None,
-                output=None,
-                error=RunnableResultError(
-                    type=CanceledException,
-                    message=f"Node '{self.name}' was canceled during execution",
-                ),
-            )
+            # ContextAwareThreadPoolExecutor already propagates contextvars
+            # in its submit() method — no need to copy context again.
+            if isinstance(executor, ContextAwareThreadPoolExecutor):
+                return await loop.run_in_executor(executor, fn)
+            else:
+                ctx = contextvars.copy_context()
+                return await loop.run_in_executor(executor, ctx.run, fn)
 
     def ensure_client(self) -> None:
         """
@@ -1228,6 +1336,76 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             # For running tasks, we rely on executor.shutdown(cancel_futures=True).
             future.cancel()
             raise
+
+    async def execute_async_with_retry(
+        self,
+        input_data: dict[str, Any] | BaseModel,
+        config: RunnableConfig = None,
+        executor: "ThreadPoolExecutor | None" = None,
+        **kwargs,
+    ):
+        """
+        Execute the node asynchronously with retry logic.
+        Uses asyncio.wait_for for timeout instead of thread-based timeout.
+        Uses asyncio.sleep for non-blocking retry backoff.
+
+        Blocking client initialization is offloaded to the provided executor
+        when supplied (typically the per-flow ContextAwareThreadPoolExecutor),
+        otherwise to the default asyncio thread pool.
+        """
+        config = ensure_config(config)
+        timeout = self.error_handling.timeout_seconds
+        error = None
+        n_attempt = self.error_handling.max_retries + 1
+
+        for attempt in range(n_attempt):
+            merged_kwargs = merge(kwargs, {"execution_run_id": uuid4()})
+
+            try:
+                # Offload blocking client initialization to a thread to avoid blocking the event loop
+                await self._offload_to_executor(executor, self.ensure_client)
+            except Exception as conn_error:
+                logger.error(f"Node {self.name} - {self.id}: Failed to ensure client connection: {conn_error}")
+                error = conn_error
+                if attempt < n_attempt - 1:
+                    time_to_sleep = self.error_handling.retry_interval_seconds * (
+                        self.error_handling.backoff_rate**attempt
+                    )
+                    logger.info(f"Node {self.name} - {self.id}: retrying connection in {time_to_sleep} seconds.")
+                    await asyncio.sleep(time_to_sleep)
+                    continue
+                else:
+                    raise
+
+            self.run_on_node_execute_start(config.callbacks, input_data, **merged_kwargs)
+
+            try:
+                if timeout is not None:
+                    output = await asyncio.wait_for(
+                        self.execute_async(input_data=input_data, config=config, **merged_kwargs),
+                        timeout=timeout,
+                    )
+                else:
+                    output = await self.execute_async(input_data=input_data, config=config, **merged_kwargs)
+
+                self.run_on_node_execute_end(config.callbacks, output, **merged_kwargs)
+                return output
+            except asyncio.TimeoutError as e:
+                error = e
+                self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
+                logger.warning(f"Node {self.name} - {self.id}: timeout.")
+            except Exception as e:
+                error = e
+                self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
+                logger.error(f"Node {self.name} - {self.id}: execution error: {e}")
+
+            if attempt < n_attempt - 1:
+                time_to_sleep = self.error_handling.retry_interval_seconds * (self.error_handling.backoff_rate**attempt)
+                logger.info(f"Node {self.name} - {self.id}: retrying in {time_to_sleep} seconds.")
+                await asyncio.sleep(time_to_sleep)
+
+        logger.error(f"Node {self.name} - {self.id}: execution failed after {n_attempt} attempts.")
+        raise error
 
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""
@@ -1559,6 +1737,19 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             Any: Result of the execution.
         """
         pass
+
+    async def execute_async(
+        self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs
+    ) -> Any:
+        """
+        Async execution of the node. Override in subclasses for native async support.
+        Raises NotImplementedError to fail loudly if invoked on a node that does not
+        provide a native async implementation (run_async routes to the sync execute()
+        via a thread executor when has_native_async is False).
+        """
+        raise NotImplementedError(
+            f"Node {type(self).__name__} does not provide a native async execute_async() implementation."
+        )
 
     def depends_on(self, nodes: Union["Node", list["Node"]], condition: ChoiceCondition | None = None) -> "Node":
         """

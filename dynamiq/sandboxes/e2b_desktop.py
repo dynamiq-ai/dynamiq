@@ -1,7 +1,4 @@
-"""E2B Desktop sandbox implementation."""
-
 from e2b_desktop import Sandbox as E2BDesktopSDK
-
 from dynamiq.sandboxes.e2b import E2BSandbox
 
 

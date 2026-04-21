@@ -377,7 +377,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             per_tool_reasoning.append(
                 AgentReasoningEventMessageData(
                     tool_run_id=tid,
-                    thought="",
+                    thought=tp.get("thought", ""),
                     action=tp["name"],
                     tool=tool_data,
                     action_input=tp["input"],
@@ -591,7 +591,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 tc_input = tc_args["action_input"]
                 if not isinstance(tc_input, dict):
                     tc_input = {"input": tc_input}
-                tool_items.append(ToolCallItem(name=tc_name, input=tc_input))
+                tool_items.append(ToolCallItem(name=tc_name, input=tc_input, thought=tc_args.get("thought", "")))
 
             validated = ParallelToolCallsInputSchema(tools=tool_items)
             action_input = validated.model_dump()
@@ -1700,14 +1700,16 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     }
                 )
                 continue
-            prepared_tools.append({"order": idx, "name": tool_name, "input": tool_input})
+            prepared_tools.append(
+                {"order": idx, "name": tool_name, "input": tool_input, "thought": td.get("thought", "")}
+            )
 
         def _execute_single_tool_to_result(tool_payload: dict[str, Any], **extra) -> dict[str, Any]:
             """Execute a single tool and wrap the result as a dict."""
             tool_result, tool_files, _, success, dependency = self._execute_single_tool(
                 tool_payload["name"],
                 tool_payload["input"],
-                thought or "",
+                tool_payload.get("thought") or thought or "",
                 loop_num,
                 config,
                 collect_dependency=True,
