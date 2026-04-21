@@ -925,6 +925,9 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         Returns:
             Tuple of (config, merged_kwargs, depends_result).
         """
+        if not self.is_resumed:
+            self._pending_approval_response = None
+
         config = ensure_config(config)
         run_id = uuid4()
         merged_kwargs = merge(kwargs, {"run_id": run_id, "parent_run_id": kwargs.get("parent_run_id", None)})

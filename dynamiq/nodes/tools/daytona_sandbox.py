@@ -125,6 +125,9 @@ class DaytonaInterpreterTool(BaseCodeInterpreterTool):
         result = sandbox.process.exec(command)
         return result.exit_code, result.result or ""
 
+    def _reconnect_sandbox(self, sandbox_id: str) -> Any:
+        return self.connection.get_client().get(sandbox_id)
+
     def _destroy_sandbox(self, sandbox: Any) -> None:
         self.connection.get_client().delete(sandbox)
 

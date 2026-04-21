@@ -9,6 +9,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
+from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
@@ -279,6 +280,13 @@ class CodeInterpreterInputSchema(BaseModel):
         return handle_file_upload(files)
 
 
+class CodeInterpreterCheckpointState(BaseCheckpointState):
+    """Checkpoint state for sandbox interpreter tools."""
+
+    sandbox_id: str | None = Field(default=None, description="Sandbox ID for reconnection")
+    installed_packages: list[str] = Field(default_factory=list, description="List of installed packages")
+
+
 class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
     """
     Abstract base class for sandbox interpreter tools.
@@ -384,6 +392,11 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
         """Close the persistent sandbox."""
         ...
 
+    @abc.abstractmethod
+    def _reconnect_sandbox(self, sandbox_id: str) -> Any:
+        """Reconnect to an existing sandbox by its ID. Used during checkpoint restore."""
+        ...
+
     def __init__(self, **kwargs):
         """Initialize the sandbox interpreter tool."""
         super().__init__(**kwargs)
@@ -418,6 +431,34 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
         if self.files:
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         return data
+
+    def to_checkpoint_state(self) -> CodeInterpreterCheckpointState:
+        """Extract sandbox state for checkpointing."""
+        base_fields = super().to_checkpoint_state().model_dump(exclude_none=True)
+        if self._sandbox and self.persistent_sandbox:
+            return CodeInterpreterCheckpointState(
+                sandbox_id=self._get_sandbox_id(self._sandbox),
+                installed_packages=list(self.installed_packages),
+                **base_fields,
+            )
+        return CodeInterpreterCheckpointState(**base_fields)
+
+    def from_checkpoint_state(self, state: CodeInterpreterCheckpointState | dict[str, Any]) -> None:
+        """Restore sandbox state from checkpoint, attempting to reconnect to existing sandbox."""
+        super().from_checkpoint_state(state)
+        state_dict = state if isinstance(state, dict) else state.model_dump()
+        sandbox_id = state_dict.get("sandbox_id")
+
+        if sandbox_id and self.persistent_sandbox:
+            try:
+                self._sandbox = self._reconnect_sandbox(sandbox_id)
+                logger.info(f"Tool {self.name} - {self.id}: Reconnected to existing sandbox {sandbox_id}")
+            except Exception as e:
+                logger.warning(
+                    f"Tool {self.name} - {self.id}: Failed to reconnect to sandbox {sandbox_id}: {e}. "
+                    f"Creating new sandbox."
+                )
+                self._initialize_persistent_sandbox()
 
     def _initialize_persistent_sandbox(self):
         """Initialize the persistent sandbox, install packages, and upload initial files."""
