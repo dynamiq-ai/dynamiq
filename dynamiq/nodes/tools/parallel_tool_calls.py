@@ -21,6 +21,7 @@ class ToolCallItem(BaseModel):
         default_factory=dict,
         description="Input parameters for the tool as key-value pairs",
     )
+    thought: str = Field(default="", description="Reasoning for this tool call.")
 
     model_config = ConfigDict(extra="forbid")
 

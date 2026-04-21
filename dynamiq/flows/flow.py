@@ -13,6 +13,7 @@ from pydantic import Field, PrivateAttr, computed_field, field_validator
 from dynamiq.checkpoints.checkpoint import CheckpointFlowMixin, CheckpointNodeMixin, CheckpointStatus, FlowCheckpoint
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.executors.base import BaseExecutor
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.executors.pool import ThreadExecutor
 from dynamiq.flows.base import BaseFlow
 from dynamiq.nodes.node import Node, NodeReadyToRun
@@ -530,6 +531,8 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         """
         Run the flow asynchronously with the given input data and configuration.
 
+        Creates a dedicated ContextAwareThreadPoolExecutor for this flow run,
+        isolating it from other concurrent flow executions.
         Args:
             input_data (Any): Input data for the flow. If resuming, this can be None
                               to use the checkpoint's original_input.
@@ -578,6 +581,9 @@ class Flow(CheckpointFlowMixin, BaseFlow):
             "parent_run_id": kwargs.get("parent_run_id", run_id),
         }
 
+        max_workers = (config.max_node_workers if config else None) or self.max_node_workers
+        executor = ContextAwareThreadPoolExecutor(max_workers=max_workers)
+
         if self._is_checkpoint_active():
             if self._checkpoint:
                 self._checkpoint.run_id = str(run_id)
@@ -624,6 +630,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                                 input_data=node.input_data,
                                 depends_result=node.depends_result,
                                 config=config,
+                                executor=executor,
                                 **node_run_kwargs,
                             )
                             for node in nodes_to_run
@@ -683,6 +690,8 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 error=RunnableResultError.from_exception(e, failed_nodes=failed_nodes),
             )
         finally:
+            # wait=False is safe: all node tasks have been awaited via asyncio.gather()
+            executor.shutdown(wait=False)
             try:
                 await self._cleanup_dry_run_async(config)
             except Exception as e:

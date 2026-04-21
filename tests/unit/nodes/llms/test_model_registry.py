@@ -100,3 +100,33 @@ def test_totally_unknown_model_returns_default():
 
     llm = TogetherAI(model="unknown/x", connection=TogetherAIConnection(api_key="test-key"))
     assert llm.get_token_limit() == LLM_DEFAULT_MAX_TOKENS
+
+
+@pytest.mark.usefixtures("_litellm_unknown", "_patch_registry")
+def test_model_info_override_takes_priority():
+    """model_info on the LLM instance overrides both litellm and model_registry."""
+    from dynamiq.connections import TogetherAI as TogetherAIConnection
+    from dynamiq.nodes.llms.togetherai import TogetherAI
+
+    llm = TogetherAI(
+        model=MODEL_A,
+        connection=TogetherAIConnection(api_key="test-key"),
+        model_info={"max_input_tokens": 99_999, "supports_vision": True, "supports_pdf_input": True},
+    )
+
+    # Registry has 50_000 for MODEL_A, but model_info should win
+    assert llm.get_token_limit() == 99_999
+    assert llm.is_vision_supported is True
+    assert llm.is_pdf_input_supported is True
+
+
+@pytest.mark.usefixtures("_litellm_unknown", "_patch_registry")
+def test_model_info_none_falls_through():
+    """When model_info is None, the existing lookup chain is used."""
+    from dynamiq.connections import TogetherAI as TogetherAIConnection
+    from dynamiq.nodes.llms.togetherai import TogetherAI
+
+    llm = TogetherAI(model=MODEL_B, connection=TogetherAIConnection(api_key="test-key"))
+    assert llm.model_info is None
+    assert llm.get_token_limit() == 200_000
+    assert llm.is_vision_supported is True
