@@ -105,15 +105,28 @@ class DynamiqTracingClient(BaseTracingClient):
         except Exception as e:
             logger.error(f"Failed to send traces (async). Error: {e}")
 
+    @staticmethod
+    def _log_send_error(fut) -> None:
+        try:
+            exc = fut.exception()
+        except Exception:
+            return
+        if exc:
+            logger.error(f"Failed to send traces (executor). Error: {exc}")
+
     def trace(self, runs: list["Run"]) -> None:
-        """Sync method required by BaseTracingClient interface"""
+        """Send traces. In async context the blocking HTTP call is offloaded to the
+        default thread pool executor — caller's event loop stays non-blocking, and
+        asyncio.run() waits for executor threads on shutdown, so delivery is reliable.
+        Exceptions from the background thread are surfaced via a done-callback."""
         if not runs:
             return
 
         try:
             if is_called_from_async_context():
                 loop = asyncio.get_running_loop()
-                loop.run_in_executor(None, lambda: asyncio.run(self._send_traces_async(runs)))
+                fut = loop.run_in_executor(None, self._send_traces_sync, runs)
+                fut.add_done_callback(self._log_send_error)
             else:
                 self._send_traces_sync(runs)
         except Exception as e:
