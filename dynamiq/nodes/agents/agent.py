@@ -124,6 +124,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
     _streaming_tool_run_id: str | None = None
     _streaming_tool_run_ids: list[str] = PrivateAttr(default_factory=list)
 
+    @property
+    def to_dict_exclude_params(self):
+        return super().to_dict_exclude_params | {"response_format": True}
+
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
         Define attribute initializers for cloning.
@@ -1331,6 +1335,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
 
                 if final_answer is not None:
+                    if self.response_format is not None:
+                        final_answer = self._coerce_to_response_format(final_answer)
                     return final_answer
 
             except OutputFileNotFoundError as e:
@@ -1696,8 +1702,21 @@ class Agent(HistoryManagerMixin, BaseAgent):
             if start == -1:
                 continue
             depth = 0
+            in_string = False
+            escape = False
             for idx in range(start, len(stripped)):
                 ch = stripped[idx]
+                if in_string:
+                    if escape:
+                        escape = False
+                    elif ch == "\\":
+                        escape = True
+                    elif ch == '"':
+                        in_string = False
+                    continue
+                if ch == '"':
+                    in_string = True
+                    continue
                 if ch == opener:
                     depth += 1
                 elif ch == closer:
