@@ -420,3 +420,213 @@ def _mock_llm_stream(text: str):
         model_r = ModelResponse(stream=True)
         model_r.choices[0].delta = Delta(role="assistant", content=char)
         yield model_r
+
+
+def _make_agent(inference_mode=None, response_format=None):
+    """Build a minimal Agent suitable for in-process unit tests."""
+    import uuid
+
+    from dynamiq import connections, prompts
+    from dynamiq.nodes.agents import Agent
+    from dynamiq.nodes.llms import OpenAI
+    from dynamiq.nodes.types import InferenceMode
+
+    conn = connections.OpenAI(id=str(uuid.uuid4()), api_key="fake-key")
+    llm = OpenAI(
+        name="TestLLM",
+        model="gpt-4o-mini",
+        connection=conn,
+        prompt=prompts.Prompt(messages=[prompts.Message(role="user", content="{{input}}")]),
+    )
+    return Agent(
+        name="test-agent",
+        llm=llm,
+        tools=[],
+        inference_mode=inference_mode or InferenceMode.DEFAULT,
+        response_format=response_format,
+    )
+
+
+class _DocumentModel:
+    """Placeholder — real model is defined inside tests to avoid import-time side effects."""
+
+
+def test_build_final_answer_function_schema_default_unchanged():
+    """With no response_format the schema is the existing FINAL_ANSWER_FUNCTION_SCHEMA."""
+    from dynamiq.nodes.agents.components import schema_generator
+
+    assert schema_generator.build_final_answer_function_schema(None) is schema_generator.FINAL_ANSWER_FUNCTION_SCHEMA
+
+
+def test_build_final_answer_function_schema_with_pydantic_model():
+    """Pydantic classes are expanded and replace the answer property."""
+    from pydantic import BaseModel
+
+    from dynamiq.nodes.agents.components import schema_generator
+
+    class Doc(BaseModel):
+        title: str
+        tags: list[str]
+
+    schema = schema_generator.build_final_answer_function_schema(Doc)
+    props = schema["function"]["parameters"]["properties"]
+    assert props["answer"]["type"] == "object"
+    assert set(props["answer"]["properties"].keys()) == {"title", "tags"}
+    assert props["thought"]["type"] == "string"
+    assert props["output_files"]["type"] == "string"
+
+
+def test_build_final_answer_function_schema_unwraps_dict_wrapper():
+    """When a response_format dict uses litellm's json_schema wrapper it is unwrapped."""
+    from dynamiq.nodes.agents.components import schema_generator
+
+    wrapped = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "x",
+            "schema": {
+                "type": "object",
+                "properties": {"title": {"type": "string"}},
+                "required": ["title"],
+                "additionalProperties": False,
+            },
+        },
+    }
+    schema = schema_generator.build_final_answer_function_schema(wrapped)
+    answer = schema["function"]["parameters"]["properties"]["answer"]
+    assert answer["type"] == "object"
+    assert "title" in answer["properties"]
+
+
+def test_agent_default_returns_string_without_response_format():
+    """Regression: agents without response_format still return strings."""
+    agent = _make_agent()
+    assert agent.response_format is None
+    # _coerce_to_response_format is a no-op
+    assert agent._coerce_to_response_format("plain string") == "plain string"
+
+
+def test_agent_coerce_to_dict_schema():
+    """Dict response_format parses JSON string into a dict."""
+    schema = {
+        "type": "object",
+        "properties": {"title": {"type": "string"}},
+        "required": ["title"],
+        "additionalProperties": False,
+    }
+    agent = _make_agent(response_format=schema)
+    result = agent._coerce_to_response_format('{"title": "Harry Potter"}')
+    assert result == {"title": "Harry Potter"}
+
+
+def test_agent_coerce_to_pydantic_instance():
+    """Pydantic response_format returns a validated instance."""
+    from pydantic import BaseModel
+
+    class Doc(BaseModel):
+        title: str
+        tags: list[str]
+
+    agent = _make_agent(response_format=Doc)
+    result = agent._coerce_to_response_format('{"title": "HP", "tags": ["a", "b"]}')
+    assert isinstance(result, Doc)
+    assert result.title == "HP"
+    assert result.tags == ["a", "b"]
+
+
+def test_agent_coerce_handles_markdown_fenced_json():
+    """The coercion strips Markdown code fences around JSON."""
+    schema = {"type": "object", "properties": {"x": {"type": "integer"}}}
+    agent = _make_agent(response_format=schema)
+    result = agent._coerce_to_response_format('```json\n{"x": 7}\n```')
+    assert result == {"x": 7}
+
+
+def test_agent_coerce_accepts_already_parsed_dict():
+    """FUNCTION_CALLING already parses arguments to dict; coerce must accept that."""
+    from pydantic import BaseModel
+
+    class Doc(BaseModel):
+        title: str
+
+    agent = _make_agent(response_format=Doc)
+    result = agent._coerce_to_response_format({"title": "HP"})
+    assert isinstance(result, Doc)
+    assert result.title == "HP"
+
+
+def test_agent_coerce_raises_on_invalid_json():
+    """Malformed final answer raises a ParsingError with a clear message."""
+    from dynamiq.nodes.agents.exceptions import ParsingError
+
+    schema = {"type": "object"}
+    agent = _make_agent(response_format=schema)
+    with pytest.raises(ParsingError):
+        agent._coerce_to_response_format("definitely not json")
+
+
+def test_agent_response_format_injects_prompt_instructions():
+    """Non-FUNCTION_CALLING modes get a FINAL ANSWER SCHEMA directive appended."""
+    from dynamiq.nodes.types import InferenceMode
+
+    schema = {"type": "object", "properties": {"title": {"type": "string"}}}
+    agent = _make_agent(inference_mode=InferenceMode.DEFAULT, response_format=schema)
+    output_format = agent.system_prompt_manager._prompt_blocks.get("output_format", "")
+    assert "FINAL ANSWER SCHEMA" in output_format
+    assert "title" in output_format
+
+
+def test_agent_response_format_function_calling_uses_schema_in_tools():
+    """FUNCTION_CALLING mode swaps the answer schema in the final-answer function."""
+    from pydantic import BaseModel
+
+    from dynamiq.nodes.types import InferenceMode
+
+    class Doc(BaseModel):
+        title: str
+
+    agent = _make_agent(inference_mode=InferenceMode.FUNCTION_CALLING, response_format=Doc)
+    final_answer_schema = next(s for s in agent._tools if s.get("function", {}).get("name") == "provide_final_answer")
+    answer = final_answer_schema["function"]["parameters"]["properties"]["answer"]
+    assert answer["type"] == "object"
+    assert "title" in answer["properties"]
+
+
+def test_agent_response_format_structured_output_schema_unchanged():
+    """STRUCTURED_OUTPUT keeps its simple `action_input: string` schema; the
+    user's response_format is enforced via prompt injection + coerce instead."""
+    from pydantic import BaseModel
+
+    from dynamiq.nodes.types import InferenceMode
+
+    class Doc(BaseModel):
+        title: str
+        tags: list[str]
+
+    agent = _make_agent(inference_mode=InferenceMode.STRUCTURED_OUTPUT, response_format=Doc)
+    schema = agent._response_format["json_schema"]["schema"]
+    assert schema["properties"]["action_input"] == {
+        "type": "string",
+        "description": "Input for chosen action.",
+    }
+    output_format = agent.system_prompt_manager._prompt_blocks.get("output_format", "")
+    assert "FINAL ANSWER SCHEMA" in output_format
+
+
+def test_agent_structured_output_finish_with_json_string_action_input():
+    """STRUCTURED_OUTPUT finish emits a JSON string; coerce parses it into the model."""
+    from pydantic import BaseModel
+
+    from dynamiq.nodes.types import InferenceMode
+
+    class Doc(BaseModel):
+        title: str
+
+    agent = _make_agent(inference_mode=InferenceMode.STRUCTURED_OUTPUT, response_format=Doc)
+
+    output = '{"thought": "done", "action": "finish", ' '"action_input": "{\\"title\\": \\"HP\\"}", "output_files": ""}'
+    thought, action, action_input = agent._handle_structured_output_mode(output, loop_num=1)
+    assert action == "final_answer"
+    coerced = agent._coerce_to_response_format(action_input)
+    assert isinstance(coerced, Doc)
+    assert coerced.title == "HP"

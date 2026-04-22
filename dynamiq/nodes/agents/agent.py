@@ -107,6 +107,16 @@ class Agent(HistoryManagerMixin, BaseAgent):
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
     state: AgentState = Field(default_factory=AgentState, exclude=True)
+    response_format: dict[str, Any] | type[BaseModel] | None = Field(
+        default=None,
+        description=(
+            "Optional schema for structured final output. Accepts a JSON schema dict or a "
+            "pydantic BaseModel subclass, matching BaseLLM.response_format. When set, the "
+            "agent returns a parsed BaseModel instance (if a model class was given) or a "
+            "dict (if a schema dict was given) instead of a string. Default None keeps the "
+            "existing string-return behaviour."
+        ),
+    )
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
@@ -1304,7 +1314,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 # Handle final answer
                 if result[1] == "final_answer":
                     self._resolve_requested_output_files(strict=True)
-                    return result[2]
+                    final_answer = result[2]
+                    if self.response_format is not None:
+                        final_answer = self._coerce_to_response_format(final_answer)
+                    return final_answer
 
                 # Handle recovery (for modes that support it)
                 # Check if action is None, which indicates (None, None, None) recovery
@@ -1382,6 +1395,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     config=config,
                     **kwargs,
                 )
+            if self.response_format is not None:
+                max_loop_final_answer = self._coerce_to_response_format(max_loop_final_answer)
             return max_loop_final_answer
 
     def _try_summarize_history(
@@ -1555,7 +1570,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
         # Handle function calling schema generation first
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
             self._tools = schema_generator.generate_function_calling_schemas(
-                self.tools, self.delegation_allowed, self.sanitize_tool_name, self.llm
+                self.tools,
+                self.delegation_allowed,
+                self.sanitize_tool_name,
+                self.llm,
+                response_format=self.response_format,
             )
         elif self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
             self._response_format = schema_generator.generate_structured_output_schemas(
@@ -1576,6 +1595,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
             has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
         )
 
+        if self.response_format is not None and self.inference_mode != InferenceMode.FUNCTION_CALLING:
+            self._inject_response_format_instructions()
+
         # Only auto-wrap the entire role in a raw block if the user did not
         # provide explicit raw/endraw markers. This allows roles to mix
         # literal sections (via raw) with Jinja variables like {{ input }}
@@ -1585,6 +1607,104 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self.system_prompt_manager.set_block("role", self.role)
             else:
                 self.system_prompt_manager.set_block("role", f"{{% raw %}}{self.role}{{% endraw %}}")
+
+    def _resolve_response_format_schema(self) -> dict[str, Any]:
+        """Return the raw JSON schema dict for the user-provided response_format."""
+        return schema_generator._unwrap_response_format(self.response_format)
+
+    def _inject_response_format_instructions(self) -> None:
+        """Append a directive requiring the final answer to match response_format's schema.
+
+        The directive is merged into the ``output_format`` prompt block so it
+        appears alongside the existing RESPONSE FORMAT section. The structural
+        ReAct schema (thought/action/action_input) is not touched; only the
+        content of the final answer is constrained.
+        """
+        schema_json = json.dumps(self._resolve_response_format_schema(), indent=2)
+        directive = (
+            "\n\n## FINAL ANSWER SCHEMA\n"
+            "Your FINAL answer (the text you provide once you decide to finish) "
+            "MUST be a valid JSON document conforming exactly to this schema:\n"
+            f"{schema_json}\n"
+            "Do not wrap it in prose, Markdown, or code fences."
+        )
+        blocks = self.system_prompt_manager._prompt_blocks
+        existing = blocks.get("output_format", "") or ""
+        blocks["output_format"] = existing + directive
+
+    def _coerce_to_response_format(self, final_answer: Any) -> Any:
+        """Convert the raw final answer into the shape requested by ``response_format``.
+
+        - If ``response_format`` is a pydantic BaseModel subclass, returns a
+          validated instance of that model.
+        - If ``response_format`` is a dict (JSON schema), returns a plain dict.
+        - FUNCTION_CALLING mode may already pass a dict (litellm parses the
+          function arguments); other modes pass a JSON string.
+        """
+        if self.response_format is None:
+            return final_answer
+
+        is_model = isinstance(self.response_format, type) and issubclass(self.response_format, BaseModel)
+
+        if is_model and isinstance(final_answer, self.response_format):
+            return final_answer
+
+        if isinstance(final_answer, (dict, list)):
+            if is_model:
+                return self.response_format.model_validate(final_answer)
+            return final_answer
+
+        if not isinstance(final_answer, str):
+            raise ParsingError(
+                f"Cannot coerce final answer of type {type(final_answer).__name__} " "to the requested response_format."
+            )
+
+        payload = self._extract_json_payload(final_answer)
+        if is_model:
+            try:
+                return self.response_format.model_validate_json(payload)
+            except Exception as e:
+                raise ParsingError(
+                    f"Final answer did not validate against response_format " f"{self.response_format.__name__}: {e}"
+                ) from e
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError as e:
+            raise ParsingError(f"Final answer is not valid JSON for response_format: {e}") from e
+
+    @staticmethod
+    def _extract_json_payload(text: str) -> str:
+        """Return a JSON substring from ``text``.
+
+        Accepts raw JSON, JSON wrapped in Markdown code fences, or JSON embedded
+        in prose. Falls back to the first balanced ``{...}`` or ``[...]`` block.
+        """
+        stripped = text.strip()
+        if stripped.startswith("```"):
+            # Strip leading fence with optional language tag
+            lines = stripped.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            stripped = "\n".join(lines).strip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            return stripped
+
+        for opener, closer in (("{", "}"), ("[", "]")):
+            start = stripped.find(opener)
+            if start == -1:
+                continue
+            depth = 0
+            for idx in range(start, len(stripped)):
+                ch = stripped[idx]
+                if ch == opener:
+                    depth += 1
+                elif ch == closer:
+                    depth -= 1
+                    if depth == 0:
+                        return stripped[start : idx + 1]
+        return stripped
 
     @staticmethod
     def _build_unique_file_key(files_map: dict[str, Any], base: str) -> str:
