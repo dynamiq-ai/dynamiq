@@ -1033,6 +1033,29 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             error=RunnableResultError.from_exception(e, recoverable=recoverable),
         )
 
+    def _handle_canceled(
+        self,
+        config: RunnableConfig,
+        time_start: datetime,
+        log_prefix: str,
+        **merged_kwargs,
+    ) -> RunnableResult:
+        """Handle cooperative cancel — fire on_node_canceled, return CANCELED result."""
+        self.run_on_node_canceled(callbacks=config.callbacks, **merged_kwargs)
+        logger.info(
+            f"Node {self.name} - {self.id}: {log_prefix}execution canceled in "
+            f"{format_duration(time_start, datetime.now())}."
+        )
+        return RunnableResult(
+            status=RunnableStatus.CANCELED,
+            input=None,
+            output=None,
+            error=RunnableResultError(
+                type=CanceledException,
+                message=f"Node '{self.name}' was canceled during execution",
+            ),
+        )
+
     def run_sync(
         self,
         input_data: dict,
@@ -1080,6 +1103,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             return self._handle_success(
                 output, from_cache, transformed_input, config, time_start, "", merged_kwargs=merged_kwargs, **kwargs
             )
+        except CanceledException:
+            return self._handle_canceled(config, time_start, "", **merged_kwargs)
         except Exception as e:
             return self._handle_failure(e, transformed_input, config, time_start, "", **merged_kwargs)
 
@@ -1139,6 +1164,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 merged_kwargs=merged_kwargs,
                 **kwargs,
             )
+        except CanceledException:
+            return self._handle_canceled(config, time_start, "async ", **merged_kwargs)
         except Exception as e:
             return self._handle_failure(e, transformed_input, config, time_start, "async ", **merged_kwargs)
 
@@ -1191,18 +1218,47 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 executor=executor,
                 **kwargs,
             )
+
+        loop = asyncio.get_running_loop()
+        fn = functools.partial(
+            self.run_sync, input_data=input_data, config=config, depends_result=depends_result, **kwargs
+        )
+        if isinstance(executor, ContextAwareThreadPoolExecutor):
+            future = loop.run_in_executor(executor, fn)
         else:
-            loop = asyncio.get_running_loop()
-            fn = functools.partial(
-                self.run_sync, input_data=input_data, config=config, depends_result=depends_result, **kwargs
+            ctx = contextvars.copy_context()
+            future = loop.run_in_executor(executor, ctx.run, fn)
+
+        # Shield the inner future so asyncio cancel can be translated into cooperative
+        # cancel: signal the token, uncancel ourselves, and drain the thread so run_sync
+        # fires its proper terminal callbacks (on_node_canceled / on_node_end).
+        task = asyncio.ensure_future(future)
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            if config and getattr(config, "cancellation", None) and config.cancellation.token:
+                config.cancellation.token.cancel()
+            parent = asyncio.current_task()
+            if parent is not None and hasattr(parent, "uncancel"):
+                parent.uncancel()
+            logger.info(f"Node {self.name} - {self.id}: asyncio task canceled, draining thread.")
+            try:
+                return await task
+            except BaseException:
+                if task.done() and not task.cancelled():
+                    try:
+                        return task.result()
+                    except BaseException:
+                        pass
+            return RunnableResult(
+                status=RunnableStatus.CANCELED,
+                input=None,
+                output=None,
+                error=RunnableResultError(
+                    type=CanceledException,
+                    message=f"Node '{self.name}' was canceled during execution",
+                ),
             )
-            # ContextAwareThreadPoolExecutor already propagates contextvars
-            # in its submit() method — no need to copy context again.
-            if isinstance(executor, ContextAwareThreadPoolExecutor):
-                return await loop.run_in_executor(executor, fn)
-            else:
-                ctx = contextvars.copy_context()
-                return await loop.run_in_executor(executor, ctx.run, fn)
 
     def ensure_client(self) -> None:
         """
@@ -1360,6 +1416,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
         for attempt in range(n_attempt):
             merged_kwargs = merge(kwargs, {"execution_run_id": uuid4()})
+            check_cancellation(config)
 
             try:
                 # Offload blocking client initialization to a thread to avoid blocking the event loop
@@ -1390,6 +1447,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
                 self.run_on_node_execute_end(config.callbacks, output, **merged_kwargs)
                 return output
+            except CanceledException:
+                raise
             except asyncio.TimeoutError as e:
                 error = e
                 self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)

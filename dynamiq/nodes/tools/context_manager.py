@@ -322,6 +322,7 @@ class ContextManagerTool(Node):
 
         chunk_summaries: list[str] = []
         for idx, chunk in enumerate(chunks):
+            check_cancellation(config)
             logger.info(f"Context Manager Tool: Summarizing chunk {idx + 1}/{len(chunks)}.")
             chunk_messages = [
                 self._flatten_messages_to_single(chunk),
@@ -347,6 +348,7 @@ class ContextManagerTool(Node):
             )
             re_summaries: list[str] = []
             for merge_chunk in merge_chunks:
+                check_cancellation(config)
                 merge_chunk.append(Message(content=MERGE_SUMMARIES_PROMPT, role=MessageRole.USER, static=True))
                 re_summaries.append(self._call_llm_for_summary(merge_chunk, config, **kwargs))
             combined = "\n\n".join(re_summaries)
