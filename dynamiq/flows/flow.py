@@ -395,6 +395,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         Raises:
             ValueError: If resume_from is provided but checkpoint not found
         """
+        user_run_id = config.run_id if config else None
         config = self._setup_cancellation(config)
         self._effective_checkpoint_config = self._get_effective_checkpoint_config(config)
         effective_resume = resume_from or self._effective_checkpoint_config.resume_from
@@ -427,7 +428,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         self._original_input = input_data
 
         run_id = uuid4()
-        wf_run_id = str(config.run_id) if config and config.run_id else str(run_id)
+        wf_run_id = str(user_run_id) if user_run_id else str(run_id)
         merged_kwargs = kwargs | {
             "run_id": run_id,
             "parent_run_id": kwargs.get("parent_run_id", None),
@@ -587,6 +588,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         Returns:
             RunnableResult: Result of the flow execution.
         """
+        user_run_id = config.run_id if config else None
         config = self._setup_cancellation(config)
         self._effective_checkpoint_config = self._get_effective_checkpoint_config(config)
         effective_resume = resume_from or self._effective_checkpoint_config.resume_from
@@ -619,7 +621,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         self._original_input = input_data
 
         run_id = uuid4()
-        wf_run_id = str(config.run_id) if config and config.run_id else str(run_id)
+        wf_run_id = str(user_run_id) if user_run_id else str(run_id)
         merged_kwargs = kwargs | {
             "run_id": run_id,
             "parent_run_id": kwargs.get("parent_run_id", run_id),
