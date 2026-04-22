@@ -1,4 +1,5 @@
 from io import BytesIO
+from unittest.mock import AsyncMock
 
 import pytest
 from litellm import ModelResponse
@@ -91,6 +92,7 @@ def mock_llm_success(mocker, response: str = "mocked_response"):
         r["choices"][0]["message"]["content"] = response
         return r
 
+    mocker.patch("dynamiq.nodes.llms.base.BaseLLM._acompletion", new_callable=AsyncMock, side_effect=side_effect)
     return mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=side_effect)
 
 
@@ -106,6 +108,7 @@ def mock_llm_fail_then_succeed(mocker, fail_count: int = 1, success_response: st
         return r
 
     mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=side_effect)
+    mocker.patch("dynamiq.nodes.llms.base.BaseLLM._acompletion", new_callable=AsyncMock, side_effect=side_effect)
     return call_count
 
 
@@ -126,6 +129,7 @@ def mock_agent_react(mocker, tool_calls: int = 1, final_answer: str = "The resul
         return r
 
     mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=side_effect)
+    mocker.patch("dynamiq.nodes.llms.base.BaseLLM._acompletion", new_callable=AsyncMock, side_effect=side_effect)
     return call_count
 
 
@@ -229,6 +233,11 @@ class TestWorkflowFailureCheckpoint:
         """LLM fails: checkpoint is FAILED but input node is captured as completed."""
         backend = backend_factory(backend_type)
         mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=RuntimeError("API down"))
+        mocker.patch(
+            "dynamiq.nodes.llms.base.BaseLLM._acompletion",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("API down"),
+        )
 
         flow = flows.Flow(
             nodes=make_pipeline(),
@@ -621,6 +630,11 @@ class TestCheckpointStatusLifecycle:
     def test_failed_flow_ends_with_failed(self, mocker, backend_factory, backend_type):
         backend = backend_factory(backend_type)
         mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=RuntimeError("boom"))
+        mocker.patch(
+            "dynamiq.nodes.llms.base.BaseLLM._acompletion",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("boom"),
+        )
 
         flow = flows.Flow(
             nodes=make_pipeline(),
@@ -652,6 +666,7 @@ class TestCheckpointStatusLifecycle:
             return r
 
         mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=side_effect)
+        mocker.patch("dynamiq.nodes.llms.base.BaseLLM._acompletion", new_callable=AsyncMock, side_effect=side_effect)
 
         flow = flows.Flow(
             nodes=make_pipeline(),
@@ -769,6 +784,11 @@ class TestAsyncFailure:
         """LLM raises: checkpoint status is FAILED, and nodes before it are captured."""
         backend = InMemory()
         mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=RuntimeError("API down"))
+        mocker.patch(
+            "dynamiq.nodes.llms.base.BaseLLM._acompletion",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("API down"),
+        )
 
         flow = flows.Flow(
             nodes=make_pipeline(),
@@ -793,6 +813,9 @@ class TestAsyncFailure:
         """
         backend = InMemory()
         mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=RuntimeError("boom"))
+        mocker.patch(
+            "dynamiq.nodes.llms.base.BaseLLM._acompletion", new_callable=AsyncMock, side_effect=RuntimeError("boom")
+        )
 
         flow = flows.Flow(
             nodes=make_pipeline(),
@@ -832,6 +855,7 @@ class TestAsyncResume:
             return r
 
         mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=side_effect)
+        mocker.patch("dynamiq.nodes.llms.base.BaseLLM._acompletion", new_callable=AsyncMock, side_effect=side_effect)
 
         flow = flows.Flow(
             nodes=make_pipeline(),
@@ -942,6 +966,7 @@ class TestAsyncCheckpointBehaviour:
             return r
 
         mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=side_effect)
+        mocker.patch("dynamiq.nodes.llms.base.BaseLLM._acompletion", new_callable=AsyncMock, side_effect=side_effect)
 
         flow = flows.Flow(
             nodes=make_pipeline(),
