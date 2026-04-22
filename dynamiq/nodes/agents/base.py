@@ -30,6 +30,7 @@ from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, Parallel
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.nodes.tools.skills_tool import SkillsTool
+from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
@@ -555,6 +556,21 @@ class Agent(Node):
 
         return custom_metadata
 
+    def _clear_todos_file(self) -> None:
+        """Delete the persisted todos file and reset in-memory todo state.
+
+        Invoked unconditionally from execute()'s finally block.
+        Failures are logged but never propagate — cleanup must not break the agent run.
+        """
+        try:
+            for tool in self.tools:
+                if isinstance(tool, TodoWriteTool):
+                    tool.clear()
+            if getattr(self, "state", None) is not None:
+                self.state.update_todos([])
+        except Exception as e:
+            logger.warning(f"Agent {self.name} - {self.id}: todo cleanup failed: {e}")
+
     def execute(
         self,
         input_data: AgentInputSchema,
@@ -649,6 +665,7 @@ class Agent(Node):
             raise
         finally:
             self._current_call_context = None
+            self._clear_todos_file()
 
         if use_memory:
             try:
