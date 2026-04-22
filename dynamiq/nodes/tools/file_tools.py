@@ -1474,6 +1474,7 @@ class FileSearchTool(Node):
                 query = input_data.query if input_data.case_sensitive else input_data.query.lower()
 
             for file_path in files_to_scan:
+                check_cancellation(config)
                 total_scanned += 1
                 file_matches = self._search_file(
                     file_path=file_path,
