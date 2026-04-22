@@ -275,3 +275,59 @@ def test_backward_compatible_imports():
     assert E2BInterpreterTool is not None
     assert BaseCodeInterpreterTool is not None
     assert SandboxCreationErrorHandling is not None
+
+
+@pytest.mark.parametrize("paused_state", ["STOPPED", "ARCHIVED"])
+def test_reconnect_sandbox_wakes_paused_sandbox(daytona_tool, mock_daytona_sdk, paused_state):
+    """A sandbox idle-stopped via auto_stop_interval (STOPPED) or ARCHIVED must be
+    woken via sandbox.start() before it can be used."""
+    from daytona import SandboxState
+
+    mock_client = mock_daytona_sdk["client"]
+    paused_sandbox = MagicMock()
+    paused_sandbox.id = "paused-sandbox-id"
+    paused_sandbox.state = getattr(SandboxState, paused_state)
+    mock_client.get.return_value = paused_sandbox
+
+    result = daytona_tool._reconnect_sandbox("paused-sandbox-id")
+
+    mock_client.get.assert_called_once_with("paused-sandbox-id")
+    paused_sandbox.start.assert_called_once_with(timeout=daytona_tool.timeout)
+    assert result is paused_sandbox
+
+
+def test_reconnect_sandbox_skips_start_when_already_started(daytona_tool, mock_daytona_sdk):
+    """No start() call should be made when the sandbox is already running."""
+    from daytona import SandboxState
+
+    mock_client = mock_daytona_sdk["client"]
+    started_sandbox = MagicMock()
+    started_sandbox.id = "running-sandbox-id"
+    started_sandbox.state = SandboxState.STARTED
+    mock_client.get.return_value = started_sandbox
+
+    result = daytona_tool._reconnect_sandbox("running-sandbox-id")
+
+    mock_client.get.assert_called_once_with("running-sandbox-id")
+    started_sandbox.start.assert_not_called()
+    assert result is started_sandbox
+
+
+def test_from_checkpoint_state_reconnects_and_wakes(daytona_tool, mock_daytona_sdk):
+    """End-to-end: checkpoint restore reconnects to the saved sandbox_id and wakes it."""
+    from daytona import SandboxState
+
+    from dynamiq.nodes.tools.code_interpreter import CodeInterpreterCheckpointState
+
+    mock_client = mock_daytona_sdk["client"]
+    paused_sandbox = MagicMock()
+    paused_sandbox.id = "checkpoint-sandbox-id"
+    paused_sandbox.state = SandboxState.STOPPED
+    mock_client.get.return_value = paused_sandbox
+
+    state = CodeInterpreterCheckpointState(sandbox_id="checkpoint-sandbox-id", installed_packages=[])
+    daytona_tool.from_checkpoint_state(state)
+
+    mock_client.get.assert_called_once_with("checkpoint-sandbox-id")
+    paused_sandbox.start.assert_called_once_with(timeout=daytona_tool.timeout)
+    assert daytona_tool._sandbox is paused_sandbox

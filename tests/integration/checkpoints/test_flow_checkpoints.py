@@ -233,11 +233,6 @@ class TestWorkflowFailureCheckpoint:
         """LLM fails: checkpoint is FAILED but input node is captured as completed."""
         backend = backend_factory(backend_type)
         mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=RuntimeError("API down"))
-        mocker.patch(
-            "dynamiq.nodes.llms.base.BaseLLM._acompletion",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("API down"),
-        )
 
         flow = flows.Flow(
             nodes=make_pipeline(),
@@ -630,11 +625,6 @@ class TestCheckpointStatusLifecycle:
     def test_failed_flow_ends_with_failed(self, mocker, backend_factory, backend_type):
         backend = backend_factory(backend_type)
         mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=RuntimeError("boom"))
-        mocker.patch(
-            "dynamiq.nodes.llms.base.BaseLLM._acompletion",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("boom"),
-        )
 
         flow = flows.Flow(
             nodes=make_pipeline(),
@@ -666,7 +656,6 @@ class TestCheckpointStatusLifecycle:
             return r
 
         mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=side_effect)
-        mocker.patch("dynamiq.nodes.llms.base.BaseLLM._acompletion", new_callable=AsyncMock, side_effect=side_effect)
 
         flow = flows.Flow(
             nodes=make_pipeline(),
@@ -814,7 +803,9 @@ class TestAsyncFailure:
         backend = InMemory()
         mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=RuntimeError("boom"))
         mocker.patch(
-            "dynamiq.nodes.llms.base.BaseLLM._acompletion", new_callable=AsyncMock, side_effect=RuntimeError("boom")
+            "dynamiq.nodes.llms.base.BaseLLM._acompletion",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("boom"),
         )
 
         flow = flows.Flow(
