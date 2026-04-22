@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from litellm import ModelResponse
@@ -60,6 +61,7 @@ def mock_llm_success(mocker, response: str = "mocked-response"):
         r["choices"][0]["message"]["content"] = response
         return r
 
+    mocker.patch("dynamiq.nodes.llms.base.BaseLLM._acompletion", new_callable=AsyncMock, side_effect=side_effect)
     return mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=side_effect)
 
 
