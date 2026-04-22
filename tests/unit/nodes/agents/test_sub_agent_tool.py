@@ -456,13 +456,12 @@ class TestSerialization:
 
 
 class TestSchemaGeneration:
-    def test_function_calling_schema_detects_sub_agent_tool(self, test_llm, child_agent):
+    def test_function_calling_schema_detects_sub_agent_tool(self, child_agent):
         tool = SubAgentTool(agent=child_agent, name="Researcher", description="Performs web research")
         schemas = schema_generator.generate_function_calling_schemas(
             tools=[tool],
             delegation_allowed=True,
             sanitize_tool_name=_sanitize_tool_name,
-            llm=test_llm,
         )
 
         tool_schema = next(s for s in schemas if s["function"]["name"] == "Researcher")
