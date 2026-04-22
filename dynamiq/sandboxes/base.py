@@ -2,6 +2,7 @@ import abc
 import io
 import logging
 import mimetypes
+import shlex
 from enum import Enum
 from functools import cached_property
 from pathlib import Path
@@ -280,6 +281,28 @@ class Sandbox(abc.ABC, BaseModel):
             f"{self.__class__.__name__} does not support file retrieval. "
             "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
         )
+
+    def delete_file(self, file_path: str) -> bool:
+        """Delete a file from the sandbox filesystem.
+
+        Default implementation routes through ``run_command_shell`` with ``rm -f``,
+        which is portable across every concrete sandbox backend. Subclasses may
+        override to use a vendor-native delete primitive if available.
+
+        Args:
+            file_path: Path to the file (relative paths resolved against base_path).
+
+        Returns:
+            True if the file was removed (or was already absent), False otherwise.
+            Never raises — callers can treat the boolean as authoritative.
+        """
+        try:
+            resolved_path = self._resolve_path(file_path)
+            result = self.run_command_shell(f"rm -f {shlex.quote(resolved_path)}")
+            return getattr(result, "is_success", True)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"{self.__class__.__name__}.delete_file({file_path}) failed: {e}")
+            return False
 
     def apply_public_preview_branding(
         self, public_host: str | None, public_url: str | None
