@@ -679,6 +679,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         try:
             if isinstance(action_input, str):
+                action_input = action_input.replace("\\'", "'")
                 action_input = json.loads(action_input, strict=False)
         except json.JSONDecodeError as e:
             raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
