@@ -520,7 +520,8 @@ def test_agent_coerce_to_dict_schema():
 
 
 def test_agent_coerce_to_pydantic_instance():
-    """Pydantic response_format returns a validated instance."""
+    """BaseModel input is normalized to its JSON schema dict; coerce returns a parsed dict
+    that the caller can validate back into the original BaseModel."""
     from pydantic import BaseModel
 
     class Doc(BaseModel):
@@ -528,10 +529,18 @@ def test_agent_coerce_to_pydantic_instance():
         tags: list[str]
 
     agent = _make_agent(response_format=Doc)
+    # BaseModel class input is converted to dict schema on field validation.
+    assert isinstance(agent.response_format, dict)
+    assert "title" in agent.response_format["properties"]
+
     result = agent._coerce_to_response_format('{"title": "HP", "tags": ["a", "b"]}')
-    assert isinstance(result, Doc)
-    assert result.title == "HP"
-    assert result.tags == ["a", "b"]
+    assert result == {"title": "HP", "tags": ["a", "b"]}
+
+    # Callers who want a typed object keep their original BaseModel class and validate.
+    doc = Doc.model_validate(result)
+    assert isinstance(doc, Doc)
+    assert doc.title == "HP"
+    assert doc.tags == ["a", "b"]
 
 
 def test_agent_coerce_handles_markdown_fenced_json():
@@ -543,7 +552,7 @@ def test_agent_coerce_handles_markdown_fenced_json():
 
 
 def test_agent_coerce_accepts_already_parsed_dict():
-    """FUNCTION_CALLING already parses arguments to dict; coerce must accept that."""
+    """FUNCTION_CALLING already parses arguments to dict; coerce must pass it through."""
     from pydantic import BaseModel
 
     class Doc(BaseModel):
@@ -551,8 +560,7 @@ def test_agent_coerce_accepts_already_parsed_dict():
 
     agent = _make_agent(response_format=Doc)
     result = agent._coerce_to_response_format({"title": "HP"})
-    assert isinstance(result, Doc)
-    assert result.title == "HP"
+    assert result == {"title": "HP"}
 
 
 def test_agent_coerce_raises_on_invalid_json():
@@ -616,7 +624,7 @@ def test_agent_response_format_structured_output_schema_unchanged():
 
 
 def test_agent_structured_output_finish_with_json_string_action_input():
-    """STRUCTURED_OUTPUT finish emits a JSON string; coerce parses it into the model."""
+    """STRUCTURED_OUTPUT finish emits a JSON string; coerce parses it into a dict."""
     from pydantic import BaseModel
 
     from dynamiq.nodes.types import InferenceMode
@@ -630,5 +638,4 @@ def test_agent_structured_output_finish_with_json_string_action_input():
     thought, action, action_input = agent._handle_structured_output_mode(output, loop_num=1)
     assert action == "final_answer"
     coerced = agent._coerce_to_response_format(action_input)
-    assert isinstance(coerced, Doc)
-    assert coerced.title == "HP"
+    assert coerced == {"title": "HP"}

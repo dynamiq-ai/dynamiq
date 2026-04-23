@@ -3,7 +3,7 @@ from concurrent.futures import as_completed
 from typing import Any, Callable, Mapping
 
 from litellm import get_supported_openai_params, supports_function_calling
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
@@ -109,13 +109,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
     state: AgentState = Field(default_factory=AgentState, exclude=True)
-    response_format: dict[str, Any] | type[BaseModel] | None = Field(
+    response_format: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "Optional schema for structured final output. Accepts a JSON schema dict or a "
-            "pydantic BaseModel subclass, matching BaseLLM.response_format. When set, the "
-            "agent returns a parsed BaseModel instance (if a model class was given) or a "
-            "dict (if a schema dict was given) instead of a string. Default None keeps the "
+            "Optional JSON schema (dict) for structured final output. Also accepts a "
+            "pydantic BaseModel subclass as input convenience — it is converted to its "
+            "JSON schema dict immediately and stored as dict. When set, the agent's "
+            "final answer is parsed from JSON into a dict. Default None keeps the "
             "existing string-return behaviour."
         ),
     )
@@ -126,9 +126,17 @@ class Agent(HistoryManagerMixin, BaseAgent):
     _streaming_tool_run_id: str | None = None
     _streaming_tool_run_ids: list[str] = PrivateAttr(default_factory=list)
 
-    @property
-    def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"response_format": True}
+    @field_validator("response_format", mode="before")
+    @classmethod
+    def _normalize_response_format(cls, v):
+        """Accept a pydantic BaseModel subclass as input but store it as a dict schema."""
+        if v is None or isinstance(v, dict):
+            return v
+        if isinstance(v, type) and issubclass(v, BaseModel):
+            from dynamiq.nodes.agents.components import schema_generator
+
+            return schema_generator.unwrap_response_format(v)
+        return v
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
@@ -1629,20 +1637,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
         )
 
     def _coerce_to_response_format(self, final_answer: Any) -> Any:
-        """Convert the raw final answer into the shape requested by ``response_format``.
+        """Parse the raw final answer into a dict matching ``response_format``.
 
-        - If ``response_format`` is a pydantic BaseModel subclass, returns a
-          validated instance of that model.
-        - If ``response_format`` is a dict (JSON schema), returns a plain dict.
-        - FUNCTION_CALLING mode may already pass a dict (litellm parses the
-          function arguments); other modes pass a JSON string.
+        ``response_format`` is always a JSON schema dict (BaseModel input is
+        converted to dict at validation time). FUNCTION_CALLING mode may pass an
+        already-parsed dict; other modes pass a JSON string that needs parsing.
         """
         if self.response_format is None:
-            return final_answer
-
-        is_model = isinstance(self.response_format, type) and issubclass(self.response_format, BaseModel)
-
-        if is_model and isinstance(final_answer, self.response_format):
             return final_answer
 
         if isinstance(final_answer, str):
@@ -1652,14 +1653,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 raise ParsingError(f"Final answer is not valid JSON for response_format: {e}") from e
 
         if isinstance(final_answer, (dict, list)):
-            if is_model:
-                try:
-                    return self.response_format.model_validate(final_answer)
-                except Exception as e:
-                    raise ParsingError(
-                        f"Final answer did not validate against response_format "
-                        f"{self.response_format.__name__}: {e}"
-                    ) from e
             return final_answer
 
         raise ParsingError(
