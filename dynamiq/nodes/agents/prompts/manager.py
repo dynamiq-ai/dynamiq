@@ -184,6 +184,15 @@ class AgentPromptManager:
         prompt = self._clean_prompt(prompt)
         return textwrap.dedent(prompt)
 
+    def render_max_loops_prompt(self) -> str:
+        """Render ``max_loops_prompt`` with the manager's current variables.
+
+        The template may reference prompt variables such as ``response_format_schema``
+        so the fallback LLM call sees any schema constraints the rest of the
+        prompt carries.
+        """
+        return Template(self.max_loops_prompt).render(self._prompt_variables)
+
     def render_block(self, block_name: str, **kwargs) -> str:
         """
         Renders a specific prompt block with variables.

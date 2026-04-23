@@ -1417,7 +1417,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     **kwargs,
                 )
             if self.response_format is not None:
-                max_loop_final_answer = self._coerce_to_response_format(max_loop_final_answer)
+                try:
+                    max_loop_final_answer = self._coerce_to_response_format(max_loop_final_answer)
+                except ParsingError as e:
+                    raise ParsingError(f"Max-loops fallback answer could not be coerced to response_format: {e}") from e
             return max_loop_final_answer
 
     def _try_summarize_history(
@@ -1522,7 +1525,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             str: Final answer provided by the agent.
         """
         # Use model-specific max loops prompt from prompt manager
-        max_loops_prompt = self.system_prompt_manager.max_loops_prompt
+        max_loops_prompt = self.system_prompt_manager.render_max_loops_prompt()
 
         system_message = Message(content=max_loops_prompt, role=MessageRole.SYSTEM, static=True)
         conversation_history = Message(

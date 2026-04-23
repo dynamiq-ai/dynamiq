@@ -329,6 +329,12 @@ Your response should be clear, concise, and professional.
 [Your final answer or explanation goes here]
 </answer>
 <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
+{%- if response_format_schema %}
+
+The content inside <answer> MUST be a valid JSON document conforming exactly to this schema:
+{{response_format_schema}}
+Output only the raw JSON inside the <answer> tag — no prose, Markdown, or code fences.
+{%- endif %}
 """  # noqa: E501
 
 
