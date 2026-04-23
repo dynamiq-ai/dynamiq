@@ -85,9 +85,11 @@ steel-sdk = "0.15.0"
 reportlab = "~4.3.0"
 cua-computer = { version = "0.4.19", python = ">=3.12,<3.14", optional = true }
 daytona = "^0.161.0"
+pydantic-monty = {version = "^0.0.16", optional = true}
 
 [tool.poetry.extras]
 cua = ["cua-computer"]
+monty = ["pydantic-monty"]
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~78.1.1"
