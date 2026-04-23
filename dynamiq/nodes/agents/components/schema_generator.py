@@ -6,7 +6,6 @@ from typing import Any, Callable, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
-from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
 
@@ -326,7 +325,7 @@ def generate_property_schema(properties: dict, name: str, field: Any) -> None:
 
 
 def generate_function_calling_schemas(
-    tools: list[Node], delegation_allowed: bool, sanitize_tool_name: Callable[[str], str], llm: Any
+    tools: list[Node], delegation_allowed: bool, sanitize_tool_name: Callable[[str], str]
 ) -> list[dict]:
     """
     Generate schemas for function calling mode.
@@ -380,7 +379,7 @@ def generate_function_calling_schemas(
         properties = {}
         required_fields = []
         input_params = tool.input_schema.model_fields.items()
-        if list(input_params) and not isinstance(llm, Gemini):
+        if list(input_params):
             for name, field in tool.input_schema.model_fields.items():
                 generate_property_schema(properties, name, field)
                 if field.is_required() and name in properties:

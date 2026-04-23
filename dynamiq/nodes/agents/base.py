@@ -36,6 +36,7 @@ from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, Parallel
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.nodes.tools.skills_tool import SkillsTool
+from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
@@ -269,6 +270,10 @@ class Agent(IterativeCheckpointMixin, Node):
         description="""Agent basic instructions.
             Can be used to provide additional context or instructions to the agent.
             Accepts Jinja templates to provide additional parameters.""",
+    )
+    instructions: str | None = Field(
+        default=None,
+        description="Additional operational instructions appended to the operational instructions block.",
     )
     description: str | None = Field(default=None, description="Short human-readable description of the agent.")
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
@@ -658,6 +663,21 @@ class Agent(IterativeCheckpointMixin, Node):
 
         return custom_metadata
 
+    def _clear_todos_file(self) -> None:
+        """Delete the persisted todos file and reset in-memory todo state.
+
+        Invoked unconditionally from execute()'s finally block.
+        Failures are logged but never propagate — cleanup must not break the agent run.
+        """
+        try:
+            for tool in self.tools:
+                if isinstance(tool, TodoWriteTool):
+                    tool.clear()
+            if getattr(self, "state", None) is not None:
+                self.state.update_todos([])
+        except Exception as e:
+            logger.warning(f"Agent {self.name} - {self.id}: todo cleanup failed: {e}")
+
     def execute(
         self,
         input_data: AgentInputSchema,
@@ -752,6 +772,7 @@ class Agent(IterativeCheckpointMixin, Node):
             raise
         finally:
             self._current_call_context = None
+            self._clear_todos_file()
 
         if use_memory:
             try:
@@ -1626,17 +1647,23 @@ class Agent(IterativeCheckpointMixin, Node):
             from dynamiq.nodes.agents.agent import Agent
 
             if isinstance(self, Agent):
+                from dynamiq.nodes.agents.prompts.manager import ReactPromptConfig
                 from dynamiq.nodes.tools.agent_tool import SubAgentTool
 
-                self.system_prompt_manager.setup_for_react_agent(
-                    inference_mode=self.inference_mode,
-                    parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
-                    has_tools=True,
-                    delegation_allowed=self.delegation_allowed,
-                    context_compaction_enabled=self.summarization_config.enabled,
-                    todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
-                    or bool(self.sandbox_backend),
-                    has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
+                self.system_prompt_manager.build_react_prompt(
+                    ReactPromptConfig(
+                        inference_mode=self.inference_mode,
+                        has_tools=True,
+                        parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
+                        delegation_allowed=self.delegation_allowed,
+                        context_compaction_enabled=self.summarization_config.enabled,
+                        todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
+                        or bool(self.sandbox_backend),
+                        sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
+                        has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
+                        role=self.role,
+                        instructions=self.instructions,
+                    )
                 )
 
     def _inject_attached_files_into_message(
