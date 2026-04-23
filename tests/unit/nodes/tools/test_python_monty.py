@@ -2,6 +2,8 @@ import pytest
 
 pytest.importorskip("pydantic_monty")
 
+from dynamiq import Workflow  # noqa: E402
+from dynamiq.flows import Flow  # noqa: E402
 from dynamiq.nodes.agents.exceptions import ToolExecutionException  # noqa: E402
 from dynamiq.nodes.tools.python_monty import PythonMonty  # noqa: E402
 
@@ -131,14 +133,6 @@ def run(inputs):
     assert output == {"content": {"v": 99}}
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Monty's type_check flag flags the injected `__dynamiq_inputs__` "
-        "reference in the wrapper trailer as unresolved. Plumbing is correct; "
-        "full interop with type_check would require reworking _wrap_user_code."
-    ),
-    strict=True,
-)
 def test_type_check_true_accepts_valid_code():
     code = """
 def run(inputs: dict) -> dict:
@@ -147,3 +141,44 @@ def run(inputs: dict) -> dict:
     node = PythonMonty(code=code, type_check=True)
     output = node.execute({})
     assert output == {"content": {"ok": True}}
+
+
+def test_type_check_true_rejects_type_errors():
+    code = """
+def run(inputs: dict) -> int:
+    return "not-an-int"
+"""
+    node = PythonMonty(code=code, type_check=True)
+    with pytest.raises(ToolExecutionException) as excinfo:
+        node.execute({})
+    assert excinfo.value.recoverable is True
+
+
+def test_python_monty_yaml_roundtrip(tmp_path):
+    code = 'def run(inputs):\n    return {"value": inputs.get("x", 0) + 1}\n'
+    node = PythonMonty(
+        id="monty-node",
+        code=code,
+        use_multiple_params=False,
+        type_check=False,
+    )
+    workflow = Workflow(id="monty-workflow", flow=Flow(id="monty-flow", nodes=[node]))
+
+    yaml_path = tmp_path / "monty_workflow.yaml"
+    workflow.to_yaml_file(str(yaml_path))
+
+    loaded = Workflow.from_yaml_file(str(yaml_path), init_components=True)
+    assert isinstance(loaded.flow.nodes[0], PythonMonty)
+    loaded_node = loaded.flow.nodes[0]
+    assert loaded_node.id == "monty-node"
+    assert loaded_node.code == code
+    assert loaded_node.use_multiple_params is False
+    assert loaded_node.type_check is False
+
+    roundtrip_path = tmp_path / "monty_workflow_roundtrip.yaml"
+    loaded.to_yaml_file(str(roundtrip_path))
+    roundtrip = Workflow.from_yaml_file(str(roundtrip_path), init_components=True)
+    roundtrip_node = roundtrip.flow.nodes[0]
+    assert roundtrip_node.id == "monty-node"
+    assert roundtrip_node.code == code
+    assert roundtrip_node.execute({"x": 4}) == {"content": {"value": 5}}

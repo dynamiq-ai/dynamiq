@@ -10,7 +10,8 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-_INPUTS_VAR = "__dynamiq_inputs__"
+_INPUTS_VAR = "dynamiq_monty_inputs_"
+_TYPE_CHECK_STUBS = f"{_INPUTS_VAR}: dict = {{}}\n"
 
 
 def _run_contains_async_def(code: str) -> bool:
@@ -55,7 +56,7 @@ class PythonMonty(Node):
     action_type: ActionType = ActionType.CODE_EXECUTION
     name: str = "python-tool-monty"
     description: str = (
-        "Executes Python code inside a Rust-based minimal Python interpreter). \n"
+        "Executes Python code inside a Rust-based minimal Python interpreter.\n"
         "Does not support third-party libraries (pandas, numpy, requests, pydantic, "
         "matplotlib, etc.)"
     )
@@ -66,9 +67,37 @@ class PythonMonty(Node):
     is_files_allowed: bool = False
 
     def execute(self, input_data: PythonInputSchema, config: RunnableConfig = None, **kwargs) -> Any:
+        """
+        Execute the configured Python code synchronously via the Monty interpreter.
+
+        Args:
+            input_data (PythonInputSchema): Inputs forwarded to the user-defined ``run`` function.
+            config (RunnableConfig, optional): Execution configuration, including callbacks.
+            **kwargs: Additional arguments passed to the execution context.
+
+        Returns:
+            Any: A dictionary with a ``content`` key holding the ``run`` return value.
+
+        Raises:
+            ToolExecutionException: If ``pydantic_monty`` is unavailable or the user code fails.
+        """
         return asyncio.run(self.execute_async(input_data, config, **kwargs))
 
     async def execute_async(self, input_data: PythonInputSchema, config: RunnableConfig = None, **kwargs) -> Any:
+        """
+        Execute the configured Python code asynchronously via the Monty interpreter.
+
+        Args:
+            input_data (PythonInputSchema): Inputs forwarded to the user-defined ``run`` function.
+            config (RunnableConfig, optional): Execution configuration, including callbacks.
+            **kwargs: Additional arguments passed to the execution context.
+
+        Returns:
+            Any: A dictionary with a ``content`` key holding the ``run`` return value.
+
+        Raises:
+            ToolExecutionException: If ``pydantic_monty`` is unavailable or the user code fails.
+        """
         logger.info(
             f"Tool {self.name} - {self.id}: started with INPUT DATA:\n"
             f"{input_data.model_dump() if hasattr(input_data, 'model_dump') else input_data}"
@@ -93,6 +122,7 @@ class PythonMonty(Node):
                 inputs=[_INPUTS_VAR],
                 script_name="python_monty.py",
                 type_check=self.type_check,
+                type_check_stubs=_TYPE_CHECK_STUBS if self.type_check else None,
             )
             result = await monty.run_async(inputs={_INPUTS_VAR: inputs_dict})
         except Exception as e:
