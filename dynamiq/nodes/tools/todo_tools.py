@@ -144,6 +144,20 @@ RULES:
                 overwrite=True,
             )
 
+    def clear(self) -> bool:
+        """Delete the todos file from storage.
+
+        Errors are logged and swallowed — cleanup must never fail the agent run.
+        Returns True if the file was removed (or absent); False on failure.
+        """
+        try:
+            if isinstance(self.file_store, Sandbox):
+                return bool(self.file_store.delete_file(TODOS_FILE_PATH))
+            return bool(self.file_store.delete(TODOS_FILE_PATH))
+        except Exception as e:
+            logger.warning(f"TodoWriteTool: failed to clear todos file: {e}")
+            return False
+
     def execute(
         self, input_data: TodoWriteInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:

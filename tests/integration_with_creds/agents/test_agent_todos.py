@@ -36,8 +36,16 @@ def run_config():
 
 
 @pytest.mark.integration
-def test_agent_todo_state_updates(openai_llm, run_config):
-    """Test that Agent todo state is updated when using TodoWriteTool."""
+def test_agent_todo_state_updates(openai_llm, run_config, monkeypatch):
+    """Verify the agent writes todos mid-run and that end-of-run cleanup wipes them.
+
+    The todos file and ``agent.state.todos`` only exist during the run — ``Agent.execute()``
+    unconditionally deletes them in its ``finally`` block. To observe that the file
+    really did exist, we intercept ``_clear_todos_file`` and snapshot the pre-cleanup
+    state, then check post-run that cleanup actually ran.
+    """
+    from dynamiq.nodes.agents.agent import TodoItem
+    from dynamiq.nodes.agents.base import Agent as AgentBase
     from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH, TodoWriteTool
 
     file_store_backend = InMemoryFileStore()
@@ -63,6 +71,19 @@ def test_agent_todo_state_updates(openai_llm, run_config):
     todo_tools = [t for t in agent.tools if isinstance(t, TodoWriteTool)]
     assert len(todo_tools) == 1, "TodoWriteTool should be automatically added"
 
+    # Snapshot file + state at the instant before cleanup deletes them.
+    snapshot: dict = {}
+    original_clear = AgentBase._clear_todos_file
+
+    def _snapshot_then_clear(self):
+        snapshot["file_existed"] = file_store_backend.exists(TODOS_FILE_PATH)
+        if snapshot["file_existed"]:
+            snapshot["file_content"] = file_store_backend.retrieve(TODOS_FILE_PATH)
+        snapshot["state_todos"] = list(self.state.todos) if self.state is not None else []
+        return original_clear(self)
+
+    monkeypatch.setattr(AgentBase, "_clear_todos_file", _snapshot_then_clear)
+
     workflow = Workflow(flow=Flow(nodes=[agent]))
     tracing = TracingCallbackHandler()
     config = run_config.model_copy(update={"callbacks": [tracing]})
@@ -79,21 +100,24 @@ def test_agent_todo_state_updates(openai_llm, run_config):
     agent_output = result.output[agent.id]["output"]["content"]
     logger.info(f"Agent output: {agent_output}")
 
-    # Check that todos were created in the file store
-    assert file_store_backend.exists(TODOS_FILE_PATH), "Todos file should exist in file store"
-
-    # Verify the agent state has exactly 3 todos
-    todos_content = file_store_backend.retrieve(TODOS_FILE_PATH).decode("utf-8")
-    todos_data = json.loads(todos_content)
+    # The todos file MUST have existed at the moment cleanup was about to run,
+    # proving TodoWriteTool wrote it during the loop.
+    assert snapshot.get("file_existed"), "Todos file should have existed before cleanup fired"
+    todos_data = json.loads(snapshot["file_content"].decode("utf-8"))
     assert "todos" in todos_data, "Todos data should have 'todos' key"
-    assert len(todos_data["todos"]) == 3, f"Should have exactly 3 todos, got {len(todos_data['todos'])}"
+    assert (
+        len(todos_data["todos"]) == 3
+    ), f"Pre-cleanup todos file should contain 3 items, got {len(todos_data['todos'])}"
 
-    # Verify AgentState also has the todos
-    from dynamiq.nodes.agents.agent import TodoItem
+    # In-memory state must also have carried 3 TodoItem objects at that moment.
+    pre_cleanup_state = snapshot["state_todos"]
+    assert len(pre_cleanup_state) == 3, f"Pre-cleanup state should have 3 todos, got {len(pre_cleanup_state)}"
+    assert all(isinstance(t, TodoItem) for t in pre_cleanup_state), "All pre-cleanup todos should be TodoItem instances"
 
-    assert len(agent.state.todos) == 3, f"AgentState should have 3 todos, got {len(agent.state.todos)}"
-    assert all(
-        isinstance(t, TodoItem) for t in agent.state.todos
-    ), "All todos in AgentState should be TodoItem instances"
+    # After execute() returns, the cleanup must have completed: file gone, state empty.
+    assert not file_store_backend.exists(
+        TODOS_FILE_PATH
+    ), "Todos file should be deleted by Agent cleanup in execute()'s finally block"
+    assert agent.state.todos == [], f"AgentState.todos should be empty after cleanup; got {agent.state.todos}"
 
     logger.info("--- Test Passed for Todo State Updates ---")
