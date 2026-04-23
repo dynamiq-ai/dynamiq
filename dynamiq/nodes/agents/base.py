@@ -741,6 +741,23 @@ class Agent(IterativeCheckpointMixin, Node):
 
         try:
             result = self._run_agent(input_message, history_messages, config=config, **kwargs)
+        except CanceledException:
+            if use_memory:
+                try:
+                    self._save_history_to_memory(custom_metadata)
+                except Exception as save_error:
+                    logger.error(
+                        f"Agent {self.name} - {self.id}: failed to save history to memory "
+                        f"after cancel: {save_error}",
+                    )
+                    try:
+                        self._append_user_input_to_memory(custom_metadata)
+                    except Exception as save_error2:
+                        logger.error(
+                            f"Agent {self.name} - {self.id}: also failed to save user input "
+                            f"after cancel: {save_error2}",
+                        )
+            raise
         except Exception:
             if use_memory:
                 try:
