@@ -1591,7 +1591,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self.tools,
                 self.delegation_allowed,
                 self.sanitize_tool_name,
-                self.llm,
                 response_format=self.response_format,
             )
         elif self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
@@ -1602,9 +1601,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         # Build the entire prompt in one call
         model_name = getattr(self.llm, "model", None)
         response_format_schema = (
-            schema_generator.unwrap_response_format(self.response_format)
-            if self.response_format is not None and self.inference_mode in (InferenceMode.DEFAULT, InferenceMode.XML)
-            else None
+            schema_generator.unwrap_response_format(self.response_format) if self.response_format is not None else None
         )
         self.system_prompt_manager = AgentPromptManager(
             model_name=model_name,

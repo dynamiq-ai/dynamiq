@@ -252,15 +252,7 @@ listing absolute file paths (comma-separated). This tag is optional — omit it 
 """
 
 
-REACT_BLOCK_OUTPUT_FORMAT = """
-{%- if response_format_schema %}
-
-Your FINAL answer (the text you provide once you decide to finish) MUST be a valid JSON document
- conforming exactly to this schema:
-{{response_format_schema}}
-Do not wrap it in prose, Markdown, or code fences. Output only the raw JSON.
-{%- else %}
-
+_REACT_OUTPUT_FORMAT_PROSE_RULES = """
 In your answers, adhere to the following formatting and stylistic guidelines:
 
 - Use GitHub-flavored Markdown as the default format for all responses and generated documents.
@@ -282,8 +274,39 @@ IMPORTANT:
     - Avoid phrases like 'based on the information gathered or provided'.
     - Clearly mention any files that were generated during the process
     - Provide file names and brief descriptions of their contents.
+"""
+
+
+REACT_BLOCK_OUTPUT_FORMAT = (
+    """
+{%- if response_format_schema %}
+
+Your FINAL answer (the text you provide once you decide to finish) MUST be a valid JSON document
+ conforming exactly to this schema:
+{{response_format_schema}}
+Do not wrap it in prose, Markdown, or code fences. Output only the raw JSON.
+{%- else %}
+"""
+    + _REACT_OUTPUT_FORMAT_PROSE_RULES
+    + """
 {%- endif %}
 """
+)
+
+
+REACT_BLOCK_OUTPUT_FORMAT_FUNCTION_CALLING = (
+    """
+{%- if response_format_schema %}
+
+Your final answer must be delivered via the `answer` argument of `provide_final_answer`,
+matching its declared schema exactly.
+{%- else %}
+"""
+    + _REACT_OUTPUT_FORMAT_PROSE_RULES
+    + """
+{%- endif %}
+"""
+)
 
 REACT_MAX_LOOPS_PROMPT = """
 You are tasked with providing a final answer for initial user question based on information gathered during a process that has reached its maximum number of loops.

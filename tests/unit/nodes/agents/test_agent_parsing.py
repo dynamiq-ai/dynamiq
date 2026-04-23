@@ -566,14 +566,14 @@ def test_agent_coerce_raises_on_invalid_json():
 
 
 def test_agent_response_format_injects_prompt_instructions():
-    """Non-FUNCTION_CALLING modes get a FINAL ANSWER SCHEMA directive appended."""
+    """Non-FUNCTION_CALLING modes inline the response_format schema into the rendered prompt."""
     from dynamiq.nodes.types import InferenceMode
 
     schema = {"type": "object", "properties": {"title": {"type": "string"}}}
     agent = _make_agent(inference_mode=InferenceMode.DEFAULT, response_format=schema)
-    output_format = agent.system_prompt_manager._prompt_blocks.get("output_format", "")
-    assert "FINAL ANSWER SCHEMA" in output_format
-    assert "title" in output_format
+    rendered = agent.generate_prompt()
+    assert "MUST be a valid JSON document" in rendered
+    assert "title" in rendered
 
 
 def test_agent_response_format_function_calling_uses_schema_in_tools():
@@ -609,8 +609,10 @@ def test_agent_response_format_structured_output_schema_unchanged():
         "type": "string",
         "description": "Input for chosen action.",
     }
-    output_format = agent.system_prompt_manager._prompt_blocks.get("output_format", "")
-    assert "FINAL ANSWER SCHEMA" in output_format
+    rendered = agent.generate_prompt()
+    assert "MUST be a valid JSON document" in rendered
+    assert "title" in rendered
+    assert "tags" in rendered
 
 
 def test_agent_structured_output_finish_with_json_string_action_input():

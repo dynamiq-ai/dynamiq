@@ -394,7 +394,6 @@ def generate_function_calling_schemas(
     tools: list[Node],
     delegation_allowed: bool,
     sanitize_tool_name: Callable[[str], str],
-    llm: Any,
     response_format: dict | type[BaseModel] | None = None,
 ) -> list[dict]:
     """
@@ -404,7 +403,6 @@ def generate_function_calling_schemas(
         tools: List of tools to generate schemas for
         delegation_allowed: Whether delegation is allowed
         sanitize_tool_name: Function to sanitize tool names
-        llm: The LLM instance
         response_format: Optional user-provided schema. When set, the
             ``provide_final_answer`` function's ``answer`` property is
             replaced with this schema so the LLM returns structured data

@@ -15,6 +15,7 @@ from dynamiq.nodes.agents.prompts.react import (
     REACT_BLOCK_INSTRUCTIONS_SINGLE,
     REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT,
     REACT_BLOCK_OUTPUT_FORMAT,
+    REACT_BLOCK_OUTPUT_FORMAT_FUNCTION_CALLING,
     REACT_BLOCK_TOOLS,
     REACT_BLOCK_TOOLS_BRIEF,
     REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS,
@@ -257,7 +258,14 @@ class AgentPromptManager:
         instructions_no_tools = get_prompt_constant(
             model, "REACT_BLOCK_INSTRUCTIONS_NO_TOOLS", REACT_BLOCK_INSTRUCTIONS_NO_TOOLS
         )
-        output_format = get_prompt_constant(model, "REACT_BLOCK_OUTPUT_FORMAT", REACT_BLOCK_OUTPUT_FORMAT)
+        if config.inference_mode == InferenceMode.FUNCTION_CALLING:
+            output_format = get_prompt_constant(
+                model,
+                "REACT_BLOCK_OUTPUT_FORMAT_FUNCTION_CALLING",
+                REACT_BLOCK_OUTPUT_FORMAT_FUNCTION_CALLING,
+            )
+        else:
+            output_format = get_prompt_constant(model, "REACT_BLOCK_OUTPUT_FORMAT", REACT_BLOCK_OUTPUT_FORMAT)
 
         prompt_blocks: dict[str, str] = {
             "tools": "" if not config.has_tools else react_block_tools,
