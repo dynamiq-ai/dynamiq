@@ -84,6 +84,7 @@ For questions that don't require tools:
 
 ## Critical XML Format Rules
 - ALWAYS include <thought> tags with detailed reasoning
+- ALWAYS place <thought> BEFORE <action>/<action_input> (or before <answer>); reasoning must come first
 - Start the text immediately after each opening tag; do not add leading newlines or indentation inside the tags
 - Write thoughts in the first person (e.g., "I will...", "I should...")
 - Explain why this specific tool is the right choice
@@ -325,16 +326,20 @@ If you cannot provide a full answer based on the given context, explain that due
 Important: Do not mention specific errors in tools, exact steps, environments, code, or search results. Keep your response general and focused on the task at hand.
 Provide your final answer or explanation within <answer> tags.
 Your response should be clear, concise, and professional.
-<answer>
-[Your final answer or explanation goes here]
-</answer>
-<output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 {%- if response_format_schema %}
 
 The content inside <answer> MUST be a valid JSON document conforming exactly to this schema:
 {{response_format_schema}}
 Output only the raw JSON inside the <answer> tag — no prose, Markdown, or code fences.
 {%- endif %}
+<answer>
+{%- if response_format_schema %}
+[Raw JSON matching the schema above]
+{%- else %}
+[Your final answer or explanation goes here]
+{%- endif %}
+</answer>
+<output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 """  # noqa: E501
 
 

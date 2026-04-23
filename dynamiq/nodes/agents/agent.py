@@ -129,14 +129,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
     @field_validator("response_format", mode="before")
     @classmethod
     def _normalize_response_format(cls, v):
-        """Accept a pydantic BaseModel subclass as input but store it as a dict schema."""
-        if v is None or isinstance(v, dict):
-            return v
-        if isinstance(v, type) and issubclass(v, BaseModel):
-            from dynamiq.nodes.agents.components import schema_generator
+        """Normalize any accepted input to a raw JSON schema dict.
 
-            return schema_generator.unwrap_response_format(v)
-        return v
+        Routes all non-None inputs through ``unwrap_response_format`` so the
+        stored value has a single shape regardless of how it was constructed:
+        BaseModel class, litellm-wrapped dict, or raw schema dict all land as
+        the raw schema dict.
+        """
+        if v is None:
+            return v
+
+        from dynamiq.nodes.agents.components import schema_generator
+
+        return schema_generator.unwrap_response_format(v)
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
