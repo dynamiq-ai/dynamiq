@@ -518,7 +518,7 @@ def test_generate_function_calling_schemas(openai_node, mock_tool):
     agent = Agent(name="Test Agent", llm=openai_node, tools=[mock_tool], inference_mode=InferenceMode.FUNCTION_CALLING)
 
     schemas = generate_function_calling_schemas(
-        tools=[mock_tool], delegation_allowed=False, sanitize_tool_name=agent.sanitize_tool_name, llm=openai_node
+        tools=[mock_tool], delegation_allowed=False, sanitize_tool_name=agent.sanitize_tool_name
     )
 
     # Should have at least final answer function + mock tool
@@ -587,7 +587,7 @@ def test_todo_tools_added_when_enabled(openai_node, mock_llm_executor):
 
     # Check that todo instructions are in the prompt
     prompt = agent.generate_prompt()
-    assert "TODO MANAGEMENT" in prompt, "TODO instructions should be in system prompt"
+    assert "Todo Management" in prompt, "TODO instructions should be in system prompt"
     assert "todo-write" in prompt, "todo-write tool should be mentioned in prompt"
 
 
@@ -625,6 +625,35 @@ def test_agent_state_updates_with_todos(openai_node):
     state.reset(max_loops=10)
     assert state.current_loop == 0
     assert state.max_loops == 10
+    assert state.todos == []
+
+
+def test_clear_todos_file_deletes_file_and_resets_agent_state_todos():
+    """_clear_todos_file both deletes the todos file from storage and empties AgentState.todos."""
+    import types
+
+    from dynamiq.nodes.agents.agent import AgentState
+    from dynamiq.nodes.agents.base import Agent
+    from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH, TodoItem, TodoStatus, TodoWriteTool
+    from dynamiq.storages.file.in_memory import InMemoryFileStore
+
+    backend = InMemoryFileStore()
+    backend.store(file_path=TODOS_FILE_PATH, content=b'{"todos": []}', content_type="application/json")
+    assert backend.exists(TODOS_FILE_PATH), "precondition: todos file exists in storage"
+
+    state = AgentState()
+    state.update_todos([TodoItem(id="1", content="do X", status=TodoStatus.IN_PROGRESS)])
+    assert state.todos, "precondition: state has one todo"
+
+    dummy = types.SimpleNamespace(
+        tools=[TodoWriteTool(file_store=backend)],
+        state=state,
+        name="A",
+        id="id",
+    )
+    Agent._clear_todos_file(dummy)
+
+    assert not backend.exists(TODOS_FILE_PATH), "todos file must be deleted from storage"
     assert state.todos == []
 
 
