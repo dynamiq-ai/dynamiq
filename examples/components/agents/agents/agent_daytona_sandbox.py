@@ -21,7 +21,6 @@ from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from dynamiq.sandboxes import SandboxConfig
 from dynamiq.sandboxes.daytona import DaytonaSandbox
-
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 

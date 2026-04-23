@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -9,6 +9,7 @@ class TestCacheWfEntityAsync:
     @pytest.mark.asyncio
     async def test_cache_miss_calls_async_func(self):
         """On cache miss, the async wrapper should await the wrapped coroutine."""
+
         async def my_async_func(*args, **kwargs):
             return {"result": "computed"}
 
@@ -47,6 +48,7 @@ class TestCacheWfEntityAsync:
     @pytest.mark.asyncio
     async def test_cache_miss_stores_result(self):
         """On cache miss with caching enabled, should store the result."""
+
         async def my_async_func(*args, **kwargs):
             return {"result": "computed"}
 

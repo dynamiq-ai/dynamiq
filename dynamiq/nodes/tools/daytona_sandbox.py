@@ -1,7 +1,7 @@
 import io
 from typing import Any, ClassVar
 
-from daytona import CreateSandboxFromSnapshotParams, DaytonaRateLimitError
+from daytona import CreateSandboxFromSnapshotParams, DaytonaRateLimitError, SandboxState
 from pydantic import Field
 
 from dynamiq.connections import Daytona as DaytonaConnection
@@ -124,6 +124,12 @@ class DaytonaInterpreterTool(BaseCodeInterpreterTool):
     def _run_shell_command(self, command: str, sandbox: Any) -> tuple[int, str]:
         result = sandbox.process.exec(command)
         return result.exit_code, result.result or ""
+
+    def _reconnect_sandbox(self, sandbox_id: str) -> Any:
+        sandbox = self.connection.get_client().get(sandbox_id)
+        if sandbox.state != SandboxState.STARTED:
+            sandbox.start(timeout=self.timeout)
+        return sandbox
 
     def _destroy_sandbox(self, sandbox: Any) -> None:
         self.connection.get_client().delete(sandbox)

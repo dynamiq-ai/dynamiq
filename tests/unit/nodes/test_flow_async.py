@@ -12,6 +12,7 @@ from dynamiq.runnables import RunnableConfig, RunnableStatus
 
 class SlowSyncNode(Node):
     """Sync-only node that takes time."""
+
     group: NodeGroup = NodeGroup.UTILS
     name: str = "SlowSync"
     latency: float = 0.1
@@ -23,6 +24,7 @@ class SlowSyncNode(Node):
 
 class FastAsyncNode(Node):
     """Async node that is fast."""
+
     group: NodeGroup = NodeGroup.UTILS
     name: str = "FastAsync"
 
@@ -44,6 +46,7 @@ class TestFlowAsyncExecutor:
 
         with patch("dynamiq.flows.flow.ContextAwareThreadPoolExecutor") as mock_executor_cls:
             from dynamiq.executors.context import ContextAwareThreadPoolExecutor
+
             real_executor = ContextAwareThreadPoolExecutor(max_workers=4)
             mock_executor_cls.return_value = real_executor
 

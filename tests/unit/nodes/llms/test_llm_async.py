@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.nodes.llms.base import FallbackConfig
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.prompts import Prompt
-from dynamiq.nodes.llms.base import FallbackConfig
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 
 
@@ -22,8 +22,7 @@ def make_mock_response(content="test response"):
 class TestBaseLLMAsync:
     def test_base_llm_has_native_async(self):
         """BaseLLM should report has_native_async=True after we add execute_async."""
-        with patch("litellm.completion"), \
-             patch("litellm.stream_chunk_builder"):
+        with patch("litellm.completion"), patch("litellm.stream_chunk_builder"):
             node = OpenAI(
                 model="gpt-4o-mini",
                 connection=OpenAIConnection(api_key="test-key"),
@@ -35,8 +34,7 @@ class TestBaseLLMAsync:
         """execute_async should call litellm.acompletion, not completion."""
         mock_response = make_mock_response("async response")
 
-        with patch("litellm.completion"), \
-             patch("litellm.stream_chunk_builder"):
+        with patch("litellm.completion"), patch("litellm.stream_chunk_builder"):
             node = OpenAI(
                 model="gpt-4o-mini",
                 connection=OpenAIConnection(api_key="test-key"),
@@ -69,8 +67,7 @@ class TestBaseLLMAsync:
         from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
         from dynamiq.types.streaming import StreamingConfig
 
-        with patch("litellm.completion"), \
-             patch("litellm.stream_chunk_builder"):
+        with patch("litellm.completion"), patch("litellm.stream_chunk_builder"):
             node = OpenAI(
                 model="gpt-4o-mini",
                 connection=OpenAIConnection(api_key="test-key"),
@@ -93,8 +90,7 @@ class TestBaseLLMAsync:
 class TestBuildCompletionParams:
     def test_build_completion_params_returns_expected_keys(self):
         """_build_completion_params should return dict with model, messages, stream, etc."""
-        with patch("litellm.completion"), \
-             patch("litellm.stream_chunk_builder"):
+        with patch("litellm.completion"), patch("litellm.stream_chunk_builder"):
             node = OpenAI(
                 model="gpt-4o-mini",
                 connection=OpenAIConnection(api_key="test-key"),
@@ -120,8 +116,7 @@ class TestBuildCompletionParams:
 
     def test_build_completion_params_excludes_client_when_not_sync(self):
         """When include_sync_client=False, client should not be in params."""
-        with patch("litellm.completion"), \
-             patch("litellm.stream_chunk_builder"):
+        with patch("litellm.completion"), patch("litellm.stream_chunk_builder"):
             node = OpenAI(
                 model="gpt-4o-mini",
                 connection=OpenAIConnection(api_key="test-key"),
@@ -181,6 +176,7 @@ class TestBaseLLMAsyncFallback:
 
         # Primary raises a rate limit error
         from litellm.exceptions import RateLimitError
+
         primary._acompletion = AsyncMock(
             side_effect=RateLimitError(
                 message="Rate limit exceeded",

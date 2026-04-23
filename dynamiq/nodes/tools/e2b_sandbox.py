@@ -135,6 +135,13 @@ class E2BInterpreterTool(BaseCodeInterpreterTool):
             out = res
         return out.exit_code, out.stdout
 
+    def _reconnect_sandbox(self, sandbox_id: str) -> Sandbox:
+        return Sandbox.connect(
+            sandbox_id,
+            api_key=self.connection.api_key,
+            domain=self.connection.domain,
+        )
+
     def _destroy_sandbox(self, sandbox: Any) -> None:
         sandbox.kill()
 

@@ -107,6 +107,7 @@ def cache_wf_entity_async(
     Returns:
         Callable: Wrapped async function with caching.
     """
+
     def _cache(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> tuple[Any, bool]:

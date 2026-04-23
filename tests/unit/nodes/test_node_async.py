@@ -1,17 +1,18 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
-from dynamiq.nodes.node import Node, ErrorHandling
+from dynamiq.nodes.node import ErrorHandling, Node
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 
 
 class SyncOnlyNode(Node):
     """Test node with only sync execute."""
+
     group: NodeGroup = NodeGroup.UTILS
     name: str = "SyncOnly"
 
@@ -21,6 +22,7 @@ class SyncOnlyNode(Node):
 
 class NativeAsyncNode(Node):
     """Test node with both sync and async execute."""
+
     group: NodeGroup = NodeGroup.UTILS
     name: str = "NativeAsync"
 
@@ -50,13 +52,12 @@ class TestNodeAsyncProtocol:
 
 class FailThenSucceedAsyncNode(Node):
     """Test node that fails N times then succeeds."""
+
     group: NodeGroup = NodeGroup.UTILS
     name: str = "FailThenSucceed"
     attempt_count: int = 0
     fail_times: int = 2
-    error_handling: ErrorHandling = ErrorHandling(
-        max_retries=3, retry_interval_seconds=0.01, backoff_rate=1
-    )
+    error_handling: ErrorHandling = ErrorHandling(max_retries=3, retry_interval_seconds=0.01, backoff_rate=1)
 
     def execute(self, input_data, config=None, **kwargs):
         return {"result": "sync"}
@@ -70,6 +71,7 @@ class FailThenSucceedAsyncNode(Node):
 
 class TimeoutAsyncNode(Node):
     """Test node that takes too long."""
+
     group: NodeGroup = NodeGroup.UTILS
     name: str = "TimeoutAsync"
     error_handling: ErrorHandling = ErrorHandling(timeout_seconds=0.05)
@@ -125,9 +127,7 @@ class TestRunAsyncRouting:
     async def test_async_node_runs_on_event_loop(self):
         """Async-native node should NOT use executor — runs directly on event loop."""
         node = NativeAsyncNode()
-        result = await node.run_async(
-            input_data={"input": "test"}, config=RunnableConfig(callbacks=[]), executor=None
-        )
+        result = await node.run_async(input_data={"input": "test"}, config=RunnableConfig(callbacks=[]), executor=None)
         assert result.status == RunnableStatus.SUCCESS
         assert result.output == {"result": "async"}
 
@@ -135,15 +135,14 @@ class TestRunAsyncRouting:
     async def test_sync_node_without_executor_falls_back_to_default(self):
         """Sync-only node with executor=None should use default executor (backward compat)."""
         node = SyncOnlyNode()
-        result = await node.run_async(
-            input_data={"input": "test"}, config=RunnableConfig(callbacks=[])
-        )
+        result = await node.run_async(input_data={"input": "test"}, config=RunnableConfig(callbacks=[]))
         assert result.status == RunnableStatus.SUCCESS
         assert result.output == {"result": "sync"}
 
 
 class CachingAsyncNode(Node):
     """Test node that tracks whether sync or async execute was called."""
+
     group: NodeGroup = NodeGroup.UTILS
     name: str = "CachingAsync"
     sync_called: bool = False

@@ -156,12 +156,20 @@ class Workflow(BaseModel, Runnable):
             logger.error(f"Failed to dump workflow to YAML. {e}")
             raise
 
-    def run_sync(self, input_data: Any, config: RunnableConfig = None, **kwargs) -> RunnableResult:
+    def run_sync(
+        self,
+        input_data: Any,
+        config: RunnableConfig = None,
+        *,
+        resume_from: str | None = None,
+        **kwargs,
+    ) -> RunnableResult:
         """Run the workflow synchronously with given input data and configuration.
 
         Args:
             input_data (Any): Input data for the workflow.
             config (RunnableConfig, optional): Configuration for the run. Defaults to None.
+            resume_from: Checkpoint ID to resume from. Alternatively use config.checkpoint.resume_from.
             **kwargs: Additional keyword arguments.
 
         Returns:
@@ -170,12 +178,12 @@ class Workflow(BaseModel, Runnable):
         run_id = uuid4()
         logger.info(f"Workflow {self.id}: execution started.")
 
-        # update kwargs with run_id
         merged_kwargs = merge(kwargs, {"run_id": run_id, "wf_run_id": getattr(config, "run_id", None)})
         self.run_on_workflow_start(input_data, config, **merged_kwargs)
         time_start = datetime.now()
 
-        result = self.flow.run_sync(input_data, config, **merge(merged_kwargs, {"parent_run_id": run_id}))
+        flow_kwargs = merge(merged_kwargs, {"parent_run_id": run_id})
+        result = self.flow.run_sync(input_data, config, resume_from=resume_from, **flow_kwargs)
         if result.status == RunnableStatus.SUCCESS:
             self.run_on_workflow_end(result.output, config, **merged_kwargs)
             logger.info(f"Workflow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
@@ -187,12 +195,20 @@ class Workflow(BaseModel, Runnable):
 
         return RunnableResult(status=result.status, input=input_data, output=result.output, error=result.error)
 
-    async def run_async(self, input_data: Any, config: RunnableConfig = None, **kwargs) -> RunnableResult:
+    async def run_async(
+        self,
+        input_data: Any,
+        config: RunnableConfig = None,
+        *,
+        resume_from: str | None = None,
+        **kwargs,
+    ) -> RunnableResult:
         """Run the workflow asynchronously with given input data and configuration.
 
         Args:
             input_data (Any): Input data for the workflow.
             config (RunnableConfig, optional): Configuration for the run. Defaults to None.
+            resume_from: Checkpoint ID to resume from. Alternatively use config.checkpoint.resume_from.
             **kwargs: Additional keyword arguments.
 
         Returns:
@@ -201,12 +217,12 @@ class Workflow(BaseModel, Runnable):
         run_id = uuid4()
         logger.info(f"Workflow {self.id}: execution started.")
 
-        # update kwargs with run_id
         merged_kwargs = merge(kwargs, {"run_id": run_id, "wf_run_id": getattr(config, "run_id", None)})
         self.run_on_workflow_start(input_data, config, **merged_kwargs)
         time_start = datetime.now()
 
-        result = await self.flow.run_async(input_data, config, **merge(merged_kwargs, {"parent_run_id": run_id}))
+        flow_kwargs = merge(merged_kwargs, {"parent_run_id": run_id})
+        result = await self.flow.run_async(input_data, config, resume_from=resume_from, **flow_kwargs)
         if result.status == RunnableStatus.SUCCESS:
             self.run_on_workflow_end(result.output, config, **merged_kwargs)
             logger.info(
