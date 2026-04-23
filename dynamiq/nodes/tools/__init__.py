@@ -1,6 +1,8 @@
 from .agent_tool import SubAgentTool
+from .cua_desktop import CuaDesktopTool
 from .cypher_executor import CypherExecutor
 from .daytona_sandbox import DaytonaInterpreterTool
+from .e2b_desktop import E2BDesktopTool
 from .e2b_sandbox import E2BInterpreterTool
 from .exa_search import ExaTool
 from .file_tools import FileListTool, FileReadTool, FileWriteTool

@@ -21,7 +21,7 @@ Thought: [Your reasoning about the question]
 Output Files: [Optional: comma-separated file paths to return, omit this line if there are no files]
 Answer: [Your direct response]
 
-ADVANCED REASONING:
+## Advanced Reasoning
 Before acting, reason through:
 1. Dependencies: Policy rules → operation order → prerequisites (reorder if needed)
 2. Risk: Assess consequences; prefer action over asking user for exploratory tasks
@@ -47,12 +47,12 @@ IMPORTANT RULES:
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
-SINGLE ACTION PER TURN:
+## Single Action Per Turn
 - Execute exactly ONE action per response, then wait for its Observation before continuing
 - Do NOT chain multiple Action/Action Input pairs in the same response
 - After receiving an Observation, decide the next single action based on the result
 
-FILE HANDLING:
+## File Handling
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - If you want to return files, include an "Output Files:" line before "Answer:" listing file paths (comma-separated). This line is optional — omit it if there are no files to return.
 """  # noqa: E501
@@ -96,7 +96,7 @@ For questions that don't require tools:
     <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 </output>
 
-ADVANCED REASONING:
+## Advanced Reasoning
 Before acting, reason through:
 1. Dependencies: Policy rules → operation order → prerequisites (reorder if needed)
 2. Risk: Assess consequences; prefer action over asking user for exploratory tasks
@@ -105,7 +105,7 @@ Before acting, reason through:
 5. Completeness: Check ALL sources, requirements, constraints before concluding.
 6. Persistence: Retry transient errors; change strategy for other errors; never repeat failed calls
 
-CRITICAL XML FORMAT RULES:
+## Critical XML Format Rules
 - ALWAYS include <thought> tags with detailed reasoning
 - Start the text immediately after each opening tag; do not add leading newlines or indentation inside the tags
 - Write thoughts in the first person (e.g., "I will...", "I should...")
@@ -127,18 +127,18 @@ CRITICAL XML FORMAT RULES:
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
-SINGLE ACTION PER TURN:
+## Single Action Per Turn
 - Execute exactly ONE <action>/<action_input> pair per response, then wait for its Observation before continuing
 - Do NOT include multiple action blocks or answer blocks in the same response
 - After receiving an Observation, decide the next single action based on the result
 
-JSON FORMATTING REQUIREMENTS:
+## JSON Formatting Requirements
 - Put JSON on single line within tags
 - Use double quotes for all strings
 - Escape newlines as \\n, quotes as \\"
 - NO multi-line JSON formatting
 
-FILE HANDLING:
+## File Handling
 - Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
 - If you want to return files, include an <output_files> tag after </answer> (but still inside <output>) listing absolute file paths (comma-separated). This tag is optional — omit it if there are no files to return.
 """  # noqa: E501
