@@ -171,7 +171,7 @@ IMPORTANT RULES:
 - ALWAYS populate the "thought" field FIRST before any other field (particularly "action_input") in your response.
 - Each tool has a specific input format you must strictly follow
 - In action_input field, provide properly formatted JSON with double quotes
-# - Never escape apostrophes as \' in JSON — apostrophes do not need escaping, write them as ' directly.
+- Never escape apostrophes as \' in JSON — apostrophes do not need escaping, write them as ' directly.
 - When action_input contains multi-line content (e.g. shell commands, code), you MUST escape newlines as \\n within the JSON string — do NOT use literal line breaks inside JSON string values.
 - Json has to be parsable with json.loads() in Python.
 - Do not use markdown code blocks around your JSON
