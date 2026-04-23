@@ -253,6 +253,13 @@ listing absolute file paths (comma-separated). This tag is optional — omit it 
 
 
 REACT_BLOCK_OUTPUT_FORMAT = """
+{%- if response_format_schema %}
+
+Your FINAL answer (the text you provide once you decide to finish) MUST be a valid JSON document
+ conforming exactly to this schema:
+{{response_format_schema}}
+Do not wrap it in prose, Markdown, or code fences. Output only the raw JSON.
+{%- else %}
 
 In your answers, adhere to the following formatting and stylistic guidelines:
 
@@ -275,6 +282,7 @@ IMPORTANT:
     - Avoid phrases like 'based on the information gathered or provided'.
     - Clearly mention any files that were generated during the process
     - Provide file names and brief descriptions of their contents.
+{%- endif %}
 """
 
 REACT_MAX_LOOPS_PROMPT = """

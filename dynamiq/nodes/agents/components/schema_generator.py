@@ -43,7 +43,7 @@ FINAL_ANSWER_FUNCTION_SCHEMA = {
 }
 
 
-def _unwrap_response_format(response_format: dict | type[BaseModel]) -> dict:
+def unwrap_response_format(response_format: dict | type[BaseModel]) -> dict:
     """Return a raw JSON-schema object for use inside another schema.
 
     Accepts either a pydantic BaseModel subclass or a dict. For dicts we
@@ -74,7 +74,7 @@ def build_final_answer_function_schema(response_format: dict | type[BaseModel] |
     if response_format is None:
         return FINAL_ANSWER_FUNCTION_SCHEMA
 
-    answer_schema = _unwrap_response_format(response_format)
+    answer_schema = unwrap_response_format(response_format)
     strict = _is_strict_compatible(answer_schema)
 
     parameters = {

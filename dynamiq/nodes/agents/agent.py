@@ -38,6 +38,7 @@ from dynamiq.types.streaming import (
     StreamingMode,
 )
 from dynamiq.utils import generate_uuid, serialize_files_in_value
+from dynamiq.utils.json_parser import parse_llm_json_output
 from dynamiq.utils.logger import logger
 
 
@@ -1354,6 +1355,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
                 continue
 
+            except ParsingError as e:
+                self._append_recovery_instruction(
+                    error_label=type(e).__name__,
+                    error_detail=str(e),
+                    llm_generated_output=llm_generated_output,
+                    extra_guidance=(
+                        "Your final answer must be valid JSON that conforms exactly to the declared "
+                        "response_format schema. Return only the JSON document — no prose, Markdown, "
+                        "or code fences — and provide the final answer again."
+                    ),
+                )
+                continue
+
             except ActionParsingException as e:
                 self._emit_tool_input_error(e, loop_num, config, **kwargs)
 
@@ -1587,7 +1601,17 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         # Build the entire prompt in one call
         model_name = getattr(self.llm, "model", None)
-        self.system_prompt_manager = AgentPromptManager(model_name=model_name, tool_description=self.tool_description)
+        response_format_schema = (
+            schema_generator.unwrap_response_format(self.response_format)
+            if self.response_format is not None and self.inference_mode in (InferenceMode.DEFAULT, InferenceMode.XML)
+            else None
+        )
+        self.system_prompt_manager = AgentPromptManager(
+            model_name=model_name,
+            tool_description=self.tool_description,
+            response_format_schema=response_format_schema,
+        )
+
         self.system_prompt_manager.build_react_prompt(
             ReactPromptConfig(
                 inference_mode=self.inference_mode,
@@ -1603,30 +1627,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 instructions=self.instructions,
             )
         )
-
-    def _resolve_response_format_schema(self) -> dict[str, Any]:
-        """Return the raw JSON schema dict for the user-provided response_format."""
-        return schema_generator._unwrap_response_format(self.response_format)
-
-    def _inject_response_format_instructions(self) -> None:
-        """Append a directive requiring the final answer to match response_format's schema.
-
-        The directive is merged into the ``output_format`` prompt block so it
-        appears alongside the existing RESPONSE FORMAT section. The structural
-        ReAct schema (thought/action/action_input) is not touched; only the
-        content of the final answer is constrained.
-        """
-        schema_json = json.dumps(self._resolve_response_format_schema(), indent=2)
-        directive = (
-            "\n\n## FINAL ANSWER SCHEMA\n"
-            "Your FINAL answer (the text you provide once you decide to finish) "
-            "MUST be a valid JSON document conforming exactly to this schema:\n"
-            f"{schema_json}\n"
-            "Do not wrap it in prose, Markdown, or code fences."
-        )
-        blocks = self.system_prompt_manager._prompt_blocks
-        existing = blocks.get("output_format", "") or ""
-        blocks["output_format"] = existing + directive
 
     def _coerce_to_response_format(self, final_answer: Any) -> Any:
         """Convert the raw final answer into the shape requested by ``response_format``.
@@ -1645,75 +1645,26 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if is_model and isinstance(final_answer, self.response_format):
             return final_answer
 
+        if isinstance(final_answer, str):
+            try:
+                final_answer = parse_llm_json_output(final_answer)
+            except ValueError as e:
+                raise ParsingError(f"Final answer is not valid JSON for response_format: {e}") from e
+
         if isinstance(final_answer, (dict, list)):
             if is_model:
-                return self.response_format.model_validate(final_answer)
+                try:
+                    return self.response_format.model_validate(final_answer)
+                except Exception as e:
+                    raise ParsingError(
+                        f"Final answer did not validate against response_format "
+                        f"{self.response_format.__name__}: {e}"
+                    ) from e
             return final_answer
 
-        if not isinstance(final_answer, str):
-            raise ParsingError(
-                f"Cannot coerce final answer of type {type(final_answer).__name__} " "to the requested response_format."
-            )
-
-        payload = self._extract_json_payload(final_answer)
-        if is_model:
-            try:
-                return self.response_format.model_validate_json(payload)
-            except Exception as e:
-                raise ParsingError(
-                    f"Final answer did not validate against response_format " f"{self.response_format.__name__}: {e}"
-                ) from e
-        try:
-            return json.loads(payload)
-        except json.JSONDecodeError as e:
-            raise ParsingError(f"Final answer is not valid JSON for response_format: {e}") from e
-
-    @staticmethod
-    def _extract_json_payload(text: str) -> str:
-        """Return a JSON substring from ``text``.
-
-        Accepts raw JSON, JSON wrapped in Markdown code fences, or JSON embedded
-        in prose. Falls back to the first balanced ``{...}`` or ``[...]`` block.
-        """
-        stripped = text.strip()
-        if stripped.startswith("```"):
-            # Strip leading fence with optional language tag
-            lines = stripped.splitlines()
-            if lines and lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            stripped = "\n".join(lines).strip()
-        if stripped.startswith("{") or stripped.startswith("["):
-            return stripped
-
-        for opener, closer in (("{", "}"), ("[", "]")):
-            start = stripped.find(opener)
-            if start == -1:
-                continue
-            depth = 0
-            in_string = False
-            escape = False
-            for idx in range(start, len(stripped)):
-                ch = stripped[idx]
-                if in_string:
-                    if escape:
-                        escape = False
-                    elif ch == "\\":
-                        escape = True
-                    elif ch == '"':
-                        in_string = False
-                    continue
-                if ch == '"':
-                    in_string = True
-                    continue
-                if ch == opener:
-                    depth += 1
-                elif ch == closer:
-                    depth -= 1
-                    if depth == 0:
-                        return stripped[start : idx + 1]
-        return stripped
+        raise ParsingError(
+            f"Cannot coerce final answer of type {type(final_answer).__name__} to the requested response_format."
+        )
 
     @staticmethod
     def _build_unique_file_key(files_map: dict[str, Any], base: str) -> str:

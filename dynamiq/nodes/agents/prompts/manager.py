@@ -1,5 +1,6 @@
 """Helper functions and managers for model-specific prompts."""
 
+import json
 import re
 import textwrap
 from datetime import datetime
@@ -64,13 +65,21 @@ class AgentPromptManager:
         agent.prompt_manager.generate_prompt()
     """
 
-    def __init__(self, model_name: str = None, tool_description: str = ""):
+    def __init__(
+        self,
+        model_name: str = None,
+        tool_description: str = "",
+        response_format_schema: dict | None = None,
+    ):
         """
         Initialize the prompt manager.
 
         Args:
             model_name: The LLM model name for model-specific prompts
             tool_description: Description of available tools
+            response_format_schema: Optional JSON schema (as a dict) that the agent's
+                final answer must conform to. Rendered into the RESPONSE FORMAT block
+                so the LLM sees the target shape in free-text modes.
         """
         self.model_name = model_name
 
@@ -94,6 +103,8 @@ class AgentPromptManager:
             "tool_description": tool_description,
             "date": datetime.now().strftime("%d %B %Y"),
         }
+        if response_format_schema is not None:
+            self._initial_variables["response_format_schema"] = json.dumps(response_format_schema, indent=2)
         self._prompt_variables: dict[str, Any] = self._initial_variables.copy()
 
     def set_block(self, block_name: str, content: str):
