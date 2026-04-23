@@ -84,6 +84,7 @@ For questions that don't require tools:
 
 ## Critical XML Format Rules
 - ALWAYS include <thought> tags with detailed reasoning
+- ALWAYS place <thought> BEFORE <action>/<action_input> (or before <answer>); reasoning must come first
 - Start the text immediately after each opening tag; do not add leading newlines or indentation inside the tags
 - Write thoughts in the first person (e.g., "I will...", "I should...")
 - Explain why this specific tool is the right choice
@@ -252,8 +253,7 @@ listing absolute file paths (comma-separated). This tag is optional — omit it 
 """
 
 
-REACT_BLOCK_OUTPUT_FORMAT = """
-
+_REACT_OUTPUT_FORMAT_PROSE_RULES = """
 In your answers, adhere to the following formatting and stylistic guidelines:
 
 - Use GitHub-flavored Markdown as the default format for all responses and generated documents.
@@ -277,6 +277,38 @@ IMPORTANT:
     - Provide file names and brief descriptions of their contents.
 """
 
+
+REACT_BLOCK_OUTPUT_FORMAT = (
+    """
+{%- if response_format_schema %}
+
+Your FINAL answer (the text you provide once you decide to finish) MUST be a valid JSON document
+ conforming exactly to this schema:
+{{response_format_schema}}
+Do not wrap it in prose, Markdown, or code fences. Output only the raw JSON.
+{%- else %}
+"""
+    + _REACT_OUTPUT_FORMAT_PROSE_RULES
+    + """
+{%- endif %}
+"""
+)
+
+
+REACT_BLOCK_OUTPUT_FORMAT_FUNCTION_CALLING = (
+    """
+{%- if response_format_schema %}
+
+Your final answer must be delivered via the `answer` argument of `provide_final_answer`,
+matching its declared schema exactly.
+{%- else %}
+"""
+    + _REACT_OUTPUT_FORMAT_PROSE_RULES
+    + """
+{%- endif %}
+"""
+)
+
 REACT_MAX_LOOPS_PROMPT = """
 You are tasked with providing a final answer for initial user question based on information gathered during a process that has reached its maximum number of loops.
 Your goal is to analyze the given context and formulate a clear, concise response.
@@ -294,8 +326,18 @@ If you cannot provide a full answer based on the given context, explain that due
 Important: Do not mention specific errors in tools, exact steps, environments, code, or search results. Keep your response general and focused on the task at hand.
 Provide your final answer or explanation within <answer> tags.
 Your response should be clear, concise, and professional.
+{%- if response_format_schema %}
+
+The content inside <answer> MUST be a valid JSON document conforming exactly to this schema:
+{{response_format_schema}}
+Output only the raw JSON inside the <answer> tag — no prose, Markdown, or code fences.
+{%- endif %}
 <answer>
+{%- if response_format_schema %}
+[Raw JSON matching the schema above]
+{%- else %}
 [Your final answer or explanation goes here]
+{%- endif %}
 </answer>
 <output_files>[Optional: comma-separated absolute file paths to return]</output_files>
 """  # noqa: E501

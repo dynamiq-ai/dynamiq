@@ -1,5 +1,6 @@
 """Helper functions and managers for model-specific prompts."""
 
+import json
 import re
 import textwrap
 from datetime import datetime
@@ -14,6 +15,7 @@ from dynamiq.nodes.agents.prompts.react import (
     REACT_BLOCK_INSTRUCTIONS_SINGLE,
     REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT,
     REACT_BLOCK_OUTPUT_FORMAT,
+    REACT_BLOCK_OUTPUT_FORMAT_FUNCTION_CALLING,
     REACT_BLOCK_TOOLS,
     REACT_BLOCK_TOOLS_BRIEF,
     REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS,
@@ -64,13 +66,21 @@ class AgentPromptManager:
         agent.prompt_manager.generate_prompt()
     """
 
-    def __init__(self, model_name: str = None, tool_description: str = ""):
+    def __init__(
+        self,
+        model_name: str = None,
+        tool_description: str = "",
+        response_format_schema: dict | None = None,
+    ):
         """
         Initialize the prompt manager.
 
         Args:
             model_name: The LLM model name for model-specific prompts
             tool_description: Description of available tools
+            response_format_schema: Optional JSON schema (as a dict) that the agent's
+                final answer must conform to. Rendered into the RESPONSE FORMAT block
+                so the LLM sees the target shape in free-text modes.
         """
         self.model_name = model_name
 
@@ -94,6 +104,8 @@ class AgentPromptManager:
             "tool_description": tool_description,
             "date": datetime.now().strftime("%d %B %Y"),
         }
+        if response_format_schema is not None:
+            self._initial_variables["response_format_schema"] = json.dumps(response_format_schema, indent=2)
         self._prompt_variables: dict[str, Any] = self._initial_variables.copy()
 
     def set_block(self, block_name: str, content: str):
@@ -172,6 +184,15 @@ class AgentPromptManager:
         prompt = self._clean_prompt(prompt)
         return textwrap.dedent(prompt)
 
+    def render_max_loops_prompt(self) -> str:
+        """Render ``max_loops_prompt`` with the manager's current variables.
+
+        The template may reference prompt variables such as ``response_format_schema``
+        so the fallback LLM call sees any schema constraints the rest of the
+        prompt carries.
+        """
+        return Template(self.max_loops_prompt).render(self._prompt_variables)
+
     def render_block(self, block_name: str, **kwargs) -> str:
         """
         Renders a specific prompt block with variables.
@@ -246,7 +267,14 @@ class AgentPromptManager:
         instructions_no_tools = get_prompt_constant(
             model, "REACT_BLOCK_INSTRUCTIONS_NO_TOOLS", REACT_BLOCK_INSTRUCTIONS_NO_TOOLS
         )
-        output_format = get_prompt_constant(model, "REACT_BLOCK_OUTPUT_FORMAT", REACT_BLOCK_OUTPUT_FORMAT)
+        if config.inference_mode == InferenceMode.FUNCTION_CALLING:
+            output_format = get_prompt_constant(
+                model,
+                "REACT_BLOCK_OUTPUT_FORMAT_FUNCTION_CALLING",
+                REACT_BLOCK_OUTPUT_FORMAT_FUNCTION_CALLING,
+            )
+        else:
+            output_format = get_prompt_constant(model, "REACT_BLOCK_OUTPUT_FORMAT", REACT_BLOCK_OUTPUT_FORMAT)
 
         prompt_blocks: dict[str, str] = {
             "tools": "" if not config.has_tools else react_block_tools,
