@@ -957,6 +957,49 @@ class TestYamlRoundtrip:
                 "Child agent must have been initialized via init_components"
             )
 
+    def test_agent_response_format_yaml_roundtrip(self, tmp_path):
+        """``response_format`` survives YAML roundtrip for both input forms.
+
+        - Dict input: stored and roundtripped as-is.
+        - BaseModel input: normalized to JSON schema dict at validation time,
+          then roundtripped as dict.
+        """
+        from pydantic import BaseModel
+
+        openai_conn = OpenAIConnection(id="openai-conn", api_key="test-key")
+        llm = OpenAI(id="llm", connection=openai_conn, model="gpt-4o")
+
+        schema_dict = {
+            "type": "object",
+            "properties": {"title": {"type": "string"}},
+            "required": ["title"],
+        }
+
+        class Doc(BaseModel):
+            title: str
+            tags: list[str]
+
+        agent_dict = Agent(id="dict-agent", name="Dict Agent", llm=llm, tools=[], response_format=schema_dict)
+        agent_model = Agent(id="model-agent", name="Model Agent", llm=llm, tools=[], response_format=Doc)
+
+        # BaseModel input is converted to a schema dict at field validation time.
+        assert isinstance(agent_model.response_format, dict)
+        model_schema_dict = agent_model.response_format
+
+        wf = Workflow(
+            id="rf-wf",
+            flow=Flow(id="rf-flow", name="Response Format Flow", nodes=[agent_dict, agent_model]),
+            version="1",
+        )
+
+        yaml_path = tmp_path / "response_format.yaml"
+        wf.to_yaml_file(yaml_path)
+        loaded = Workflow.from_yaml_file(str(yaml_path), init_components=True)
+
+        loaded_nodes = {n.id: n for n in loaded.flow.nodes}
+        assert loaded_nodes["dict-agent"].response_format == schema_dict
+        assert loaded_nodes["model-agent"].response_format == model_schema_dict
+
 
 # --- ToolParams resolution through SubAgentTool wrapper ---
 

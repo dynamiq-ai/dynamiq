@@ -3,7 +3,7 @@ from concurrent.futures import as_completed
 from typing import Any, Callable, Mapping
 
 from litellm import get_supported_openai_params, supports_function_calling
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
@@ -38,6 +38,7 @@ from dynamiq.types.streaming import (
     StreamingMode,
 )
 from dynamiq.utils import generate_uuid, serialize_files_in_value
+from dynamiq.utils.json_parser import parse_llm_json_output
 from dynamiq.utils.logger import logger
 
 
@@ -108,12 +109,39 @@ class Agent(HistoryManagerMixin, BaseAgent):
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
     state: AgentState = Field(default_factory=AgentState, exclude=True)
+    response_format: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Optional JSON schema (dict) for structured final output. Also accepts a "
+            "pydantic BaseModel subclass as input convenience — it is converted to its "
+            "JSON schema dict immediately and stored as dict. When set, the agent's "
+            "final answer is parsed from JSON into a dict. Default None keeps the "
+            "existing string-return behaviour."
+        ),
+    )
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
     _requested_output_files: list[str] = []
     _streaming_tool_run_id: str | None = None
     _streaming_tool_run_ids: list[str] = PrivateAttr(default_factory=list)
+
+    @field_validator("response_format", mode="before")
+    @classmethod
+    def _normalize_response_format(cls, v):
+        """Normalize any accepted input to a raw JSON schema dict.
+
+        Routes all non-None inputs through ``unwrap_response_format`` so the
+        stored value has a single shape regardless of how it was constructed:
+        BaseModel class, litellm-wrapped dict, or raw schema dict all land as
+        the raw schema dict.
+        """
+        if v is None:
+            return v
+
+        from dynamiq.nodes.agents.components import schema_generator
+
+        return schema_generator.unwrap_response_format(v)
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
@@ -1306,7 +1334,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 # Handle final answer
                 if result[1] == "final_answer":
                     self._resolve_requested_output_files(strict=True)
-                    return result[2]
+                    final_answer = result[2]
+                    if self.response_format is not None:
+                        final_answer = self._coerce_to_response_format(final_answer)
+                    return final_answer
 
                 # Handle recovery (for modes that support it)
                 # Check if action is None, which indicates (None, None, None) recovery
@@ -1320,6 +1351,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
 
                 if final_answer is not None:
+                    if self.response_format is not None:
+                        final_answer = self._coerce_to_response_format(final_answer)
                     return final_answer
 
             except OutputFileNotFoundError as e:
@@ -1332,6 +1365,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         "The response format is correct, but some files could not be found. "
                         "Please create the missing files or correct the file paths, "
                         "then provide your final answer again."
+                    ),
+                )
+                continue
+
+            except ParsingError as e:
+                self._append_recovery_instruction(
+                    error_label=type(e).__name__,
+                    error_detail=str(e),
+                    llm_generated_output=llm_generated_output,
+                    extra_guidance=(
+                        "Your final answer must be valid JSON that conforms exactly to the declared "
+                        "response_format schema. Return only the JSON document — no prose, Markdown, "
+                        "or code fences — and provide the final answer again."
                     ),
                 )
                 continue
@@ -1384,6 +1430,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     config=config,
                     **kwargs,
                 )
+            if self.response_format is not None:
+                try:
+                    max_loop_final_answer = self._coerce_to_response_format(max_loop_final_answer)
+                except ParsingError as e:
+                    raise ParsingError(f"Max-loops fallback answer could not be coerced to response_format: {e}") from e
             return max_loop_final_answer
 
     def _try_summarize_history(
@@ -1488,7 +1539,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             str: Final answer provided by the agent.
         """
         # Use model-specific max loops prompt from prompt manager
-        max_loops_prompt = self.system_prompt_manager.max_loops_prompt
+        max_loops_prompt = self.system_prompt_manager.render_max_loops_prompt()
 
         system_message = Message(content=max_loops_prompt, role=MessageRole.SYSTEM, static=True)
         conversation_history = Message(
@@ -1554,7 +1605,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
         # Generate inference-mode schemas
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
             self._tools = schema_generator.generate_function_calling_schemas(
-                self.tools, self.delegation_allowed, self.sanitize_tool_name
+                self.tools,
+                self.delegation_allowed,
+                self.sanitize_tool_name,
+                response_format=self.response_format,
             )
         elif self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
             self._response_format = schema_generator.generate_structured_output_schemas(
@@ -1563,7 +1617,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         # Build the entire prompt in one call
         model_name = getattr(self.llm, "model", None)
-        self.system_prompt_manager = AgentPromptManager(model_name=model_name, tool_description=self.tool_description)
+        response_format_schema = (
+            schema_generator.unwrap_response_format(self.response_format) if self.response_format is not None else None
+        )
+        self.system_prompt_manager = AgentPromptManager(
+            model_name=model_name,
+            tool_description=self.tool_description,
+            response_format_schema=response_format_schema,
+        )
+
         self.system_prompt_manager.build_react_prompt(
             ReactPromptConfig(
                 inference_mode=self.inference_mode,
@@ -1578,6 +1640,29 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 role=self.role,
                 instructions=self.instructions,
             )
+        )
+
+    def _coerce_to_response_format(self, final_answer: Any) -> Any:
+        """Parse the raw final answer into a dict matching ``response_format``.
+
+        ``response_format`` is always a JSON schema dict (BaseModel input is
+        converted to dict at validation time). FUNCTION_CALLING mode may pass an
+        already-parsed dict; other modes pass a JSON string that needs parsing.
+        """
+        if self.response_format is None:
+            return final_answer
+
+        if isinstance(final_answer, str):
+            try:
+                final_answer = parse_llm_json_output(final_answer)
+            except ValueError as e:
+                raise ParsingError(f"Final answer is not valid JSON for response_format: {e}") from e
+
+        if isinstance(final_answer, (dict, list)):
+            return final_answer
+
+        raise ParsingError(
+            f"Cannot coerce final answer of type {type(final_answer).__name__} to the requested response_format."
         )
 
     @staticmethod
