@@ -141,3 +141,62 @@ class TestEmbedDocumentsAsync:
         embedder = _make_openai_embedder()
         with pytest.raises(TypeError, match="DocumentEmbedder expects a list"):
             await embedder.embed_documents_async("not a list")
+
+
+class TestHuggingFaceAsyncOverrides:
+    @pytest.mark.asyncio
+    async def test_hf_embed_text_async_sends_single_input_not_list(self):
+        from dynamiq.components.embedders.huggingface import HuggingFaceEmbedder
+        from dynamiq.connections import HuggingFace as HuggingFaceConnection
+
+        embedder = HuggingFaceEmbedder(
+            connection=HuggingFaceConnection(api_key="hf-test"),
+        )
+        embedder._aembedding = AsyncMock(
+            return_value=_make_embedding_response(
+                model=embedder.model, embedding=[0.1, 0.2]
+            )
+        )
+
+        result = await embedder.embed_text_async("hello")
+
+        call_kwargs = embedder._aembedding.await_args.kwargs
+        # HF sends a single string, not a list.
+        assert call_kwargs["input"] == "hello"
+        assert "api_base" in call_kwargs
+        assert result["embedding"] == [0.1, 0.2]
+
+    @pytest.mark.asyncio
+    async def test_hf_batch_async_iterates_one_by_one(self):
+        from dynamiq.components.embedders.huggingface import HuggingFaceEmbedder
+        from dynamiq.connections import HuggingFace as HuggingFaceConnection
+
+        embedder = HuggingFaceEmbedder(
+            connection=HuggingFaceConnection(api_key="hf-test"),
+        )
+
+        async def fake_aembedding(model, input, **kwargs):
+            response = EmbeddingResponse()
+            response["data"] = [{"embedding": [0.0]}]
+            response["model"] = model
+            response["usage"] = Usage(
+                prompt_tokens=1,
+                completion_tokens=0,
+                total_tokens=1,
+            )
+            return response
+
+        embedder._aembedding = AsyncMock(side_effect=fake_aembedding)
+
+        texts = ["a", "b", "c"]
+        embeddings, meta = await embedder._embed_texts_batch_async(
+            texts_to_embed=texts, batch_size=2
+        )
+
+        # Non-batched API → one call per text.
+        assert embedder._aembedding.await_count == 3
+        # Each call received a single string, not a list.
+        for call in embedder._aembedding.await_args_list:
+            assert isinstance(call.kwargs["input"], str)
+        assert len(embeddings) == 3
+        assert meta["usage"]["total_tokens"] == 3
