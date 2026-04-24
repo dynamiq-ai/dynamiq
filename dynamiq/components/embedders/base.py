@@ -115,13 +115,15 @@ class BaseEmbedder(BaseModel):
     client: Any | None = None
 
     _embedding: Callable = PrivateAttr()
+    _aembedding: Callable = PrivateAttr()
 
     def __init__(self, *args, **kwargs):
         # Import in runtime to save memory
         super().__init__(**kwargs)
-        from litellm import embedding
+        from litellm import aembedding, embedding
 
         self._embedding = embedding
+        self._aembedding = aembedding
 
     @property
     def embed_params(self) -> dict:
