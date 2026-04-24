@@ -346,3 +346,47 @@ class BaseEmbedder(BaseModel):
             raise ValueError(f"Invalid document embeddings: {str(e)}")
 
         return {"documents": documents, "meta": meta}
+
+    async def embed_documents_async(self, documents: list[Document]) -> dict:
+        """Async mirror of :meth:`embed_documents`.
+
+        Args:
+            documents (list[Document]): The documents to be embedded.
+
+        Returns:
+            dict: Same shape as :meth:`embed_documents`.
+
+        Raises:
+            TypeError: If input is not a list of Documents.
+            ValueError: If the embedding response is invalid.
+        """
+        if (
+            not isinstance(documents, list)
+            or documents
+            and not isinstance(documents[0], Document)
+        ):
+            msg = (
+                "DocumentEmbedder expects a list of Documents as input."
+                "In case you want to embed a string, please use the embed_text."
+            )
+            raise TypeError(msg)
+
+        if not documents:
+            return {"documents": [], "meta": {}}
+
+        texts_to_embed = self._prepare_documents_to_embed(documents=documents)
+
+        embeddings, meta = await self._embed_texts_batch_async(
+            texts_to_embed=texts_to_embed, batch_size=self.batch_size
+        )
+
+        for doc, emb in zip(documents, embeddings):
+            doc.embedding = emb
+
+        try:
+            self.validate_document_embeddings(documents)
+        except DocumentEmbeddingValidationError as e:
+            logger.error(f"Invalid document embeddings returned by model {self.model}: {str(e)}")
+            raise ValueError(f"Invalid document embeddings: {str(e)}")
+
+        return {"documents": documents, "meta": meta}

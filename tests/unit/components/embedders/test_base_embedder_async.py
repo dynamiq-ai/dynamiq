@@ -96,3 +96,48 @@ class TestEmbedTextsBatchAsync:
         assert len(embeddings) == 5
         assert meta["model"] == "text-embedding-3-small"
         assert meta["usage"]["total_tokens"] == 5
+
+
+class TestEmbedDocumentsAsync:
+    @pytest.mark.asyncio
+    async def test_embed_documents_async_populates_embeddings(self):
+        from dynamiq.types import Document
+
+        embedder = _make_openai_embedder()
+
+        async def fake_aembedding(model, input, **kwargs):
+            response = EmbeddingResponse()
+            response["data"] = [{"embedding": [float(i)]} for i in range(len(input))]
+            response["model"] = model
+            response["usage"] = Usage(
+                prompt_tokens=len(input),
+                completion_tokens=0,
+                total_tokens=len(input),
+            )
+            return response
+
+        embedder._aembedding = AsyncMock(side_effect=fake_aembedding)
+
+        docs = [Document(content="one"), Document(content="two")]
+        result = await embedder.embed_documents_async(docs)
+
+        assert result["documents"] is docs
+        assert docs[0].embedding == [0.0]
+        assert docs[1].embedding == [1.0]
+        assert result["meta"]["model"] == "text-embedding-3-small"
+
+    @pytest.mark.asyncio
+    async def test_embed_documents_async_empty_returns_early(self):
+        embedder = _make_openai_embedder()
+        embedder._aembedding = AsyncMock()
+
+        result = await embedder.embed_documents_async([])
+
+        assert result == {"documents": [], "meta": {}}
+        embedder._aembedding.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_embed_documents_async_rejects_non_list(self):
+        embedder = _make_openai_embedder()
+        with pytest.raises(TypeError, match="DocumentEmbedder expects a list"):
+            await embedder.embed_documents_async("not a list")
