@@ -23,6 +23,20 @@ class MemoryRetrievalStrategy(str, Enum):
     BOTH = "both"
 
 
+class MemorySaveMode(str, Enum):
+    """Controls which messages an agent persists to memory at end of run.
+
+    FULL: snapshot every non-system message from the agent's prompt state,
+        including intermediate assistant reasoning and tool observations.
+        Best for full replay/debug fidelity; inflates tokens on next turn.
+    INPUT_OUTPUT: snapshot only the user input and the final assistant
+        response. Best for clean multi-turn chat; drops intermediate trace.
+    """
+
+    FULL = "full"
+    INPUT_OUTPUT = "input_output"
+
+
 class MemoryError(Exception):
     """Base exception for Memory errors."""
 

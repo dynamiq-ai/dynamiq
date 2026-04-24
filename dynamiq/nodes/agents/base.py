@@ -14,7 +14,7 @@ from dynamiq.checkpoints.checkpoint import (
     IterativeCheckpointMixin,
 )
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.memory import Memory, MemoryRetrievalStrategy
+from dynamiq.memory import Memory, MemoryRetrievalStrategy, MemorySaveMode
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
@@ -253,6 +253,14 @@ class Agent(IterativeCheckpointMixin, Node):
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
+    memory_save_mode: MemorySaveMode = Field(
+        default=MemorySaveMode.FULL,
+        description=(
+            "What to persist to memory at end of run. FULL stores every non-system "
+            "message from the prompt (incl. tool calls/observations); INPUT_OUTPUT "
+            "stores only the user input and final assistant response."
+        ),
+    )
     verbose: bool = Field(False, description="Whether to print verbose logs.")
     file_store: FileStoreConfig = Field(
         default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
@@ -884,6 +892,31 @@ class Agent(IterativeCheckpointMixin, Node):
         logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
         return history_messages
 
+    def _input_output_pair(self, metadata: dict, snapshot_messages: list[Message]) -> list[Message]:
+        """Return [pinned_user, last_assistant] from a FULL snapshot (either may be absent)."""
+        pair: list[Message] = []
+        if self._pinned_input is not None:
+            pair.append(
+                Message(
+                    role=MessageRole.USER,
+                    content=extract_message_text(self._pinned_input),
+                    metadata=metadata.copy(),
+                )
+            )
+        last_assistant = next(
+            (m for m in reversed(snapshot_messages) if m.role == MessageRole.ASSISTANT),
+            None,
+        )
+        if last_assistant is not None:
+            pair.append(
+                Message(
+                    role=last_assistant.role,
+                    content=last_assistant.content,
+                    metadata=metadata.copy(),
+                )
+            )
+        return pair
+
     def _save_history_to_memory(
         self,
         metadata: dict,
@@ -891,8 +924,9 @@ class Agent(IterativeCheckpointMixin, Node):
         """Snapshot prompt state into memory for current user/session scope.
 
         Replaces only the messages matching current ``user_id``/``session_id``
-        filters, then writes every non-system message from ``self._prompt.messages``.
-        This avoids wiping unrelated users/sessions when a backend is shared.
+        filters. What gets written depends on ``memory_save_mode``: FULL stores
+        every non-system message (incl. tool calls/observations); INPUT_OUTPUT
+        stores only the user input and final assistant response.
 
         Args:
             metadata: Metadata dict forwarded to each ``memory.add`` call.
@@ -908,14 +942,18 @@ class Agent(IterativeCheckpointMixin, Node):
 
         fully_scoped = bool(user_id and session_id)
 
-        saved = 0
         snapshot_messages: list[Message] = []
         for msg in self._prompt.messages:
             if msg.role == MessageRole.SYSTEM:
                 continue
-            content = extract_message_text(msg)
-            snapshot_messages.append(Message(role=msg.role, content=content, metadata=metadata.copy()))
-            saved += 1
+            snapshot_messages.append(
+                Message(role=msg.role, content=extract_message_text(msg), metadata=metadata.copy())
+            )
+
+        if self.memory_save_mode == MemorySaveMode.INPUT_OUTPUT:
+            snapshot_messages = self._input_output_pair(metadata, snapshot_messages)
+
+        saved = len(snapshot_messages)
 
         if fully_scoped:
             scope_filters = {"user_id": user_id, "session_id": session_id}
@@ -954,23 +992,10 @@ class Agent(IterativeCheckpointMixin, Node):
 
     def _append_fallback_messages(self, metadata: dict, snapshot_messages: list[Message]) -> None:
         """Append only the user input and last assistant response to memory (safe fallback)."""
-        saved = 0
-        if self._pinned_input is not None:
-            pinned_content = extract_message_text(self._pinned_input)
-            self.memory.add(role=MessageRole.USER, content=pinned_content, metadata=metadata.copy())
-            saved += 1
-        last_assistant = next(
-            (m for m in reversed(snapshot_messages) if m.role == MessageRole.ASSISTANT),
-            None,
-        )
-        if last_assistant:
-            self.memory.add(
-                role=last_assistant.role,
-                content=last_assistant.content,
-                metadata=metadata.copy(),
-            )
-            saved += 1
-        logger.info(f"Agent {self.name} - {self.id}: saved {saved} message(s) to memory (fallback)")
+        pair = self._input_output_pair(metadata, snapshot_messages)
+        for m in pair:
+            self.memory.add(role=m.role, content=m.content, metadata=m.metadata)
+        logger.info(f"Agent {self.name} - {self.id}: saved {len(pair)} message(s) to memory (fallback)")
 
     def _run_llm(
         self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs

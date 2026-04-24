@@ -11,12 +11,12 @@ import uuid
 import pytest
 
 from dynamiq import connections
-from dynamiq.memory import Memory
+from dynamiq.memory import Memory, MemorySaveMode
 from dynamiq.memory.backends import InMemory
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
-from dynamiq.prompts import MessageRole
+from dynamiq.prompts import Message, MessageRole, Prompt
 from dynamiq.runnables import RunnableStatus
 
 USER_ID = "test-user"
@@ -152,3 +152,93 @@ def test_memory_retrieved_messages_are_static(memory):
         assert msg.static is True
     for msg in memory.get_agent_conversation(filters=filters):
         assert msg.static is True
+
+
+def _seed_react_prompt(agent, user_input: str, final_answer: str) -> None:
+    """Seed the agent with a pinned input and a simulated ReAct trace (thought,
+    observation, final answer) on ``_prompt.messages`` so save-mode behavior
+    can be tested without running a real tool loop.
+    """
+    agent._pinned_input = Message(role=MessageRole.USER, content=user_input)
+    agent._prompt = Prompt(
+        messages=[
+            Message(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+            Message(role=MessageRole.USER, content=user_input),
+            Message(role=MessageRole.ASSISTANT, content="Thought: I should use the lookup tool."),
+            Message(role=MessageRole.USER, content="Observation: tool returned 'Alex works at TechCorp.'"),
+            Message(role=MessageRole.ASSISTANT, content=final_answer),
+        ]
+    )
+
+
+def test_save_mode_full_persists_intermediate_messages(llm, memory):
+    """Default FULL mode stores every non-system message, including the trace."""
+    agent = Agent(
+        name="FullModeAgent",
+        llm=llm,
+        tools=[],
+        inference_mode=InferenceMode.DEFAULT,
+        memory=memory,
+    )
+    assert agent.memory_save_mode == MemorySaveMode.FULL
+
+    _seed_react_prompt(agent, user_input="Where does Alex work?", final_answer="Alex works at TechCorp.")
+    agent._save_history_to_memory({"user_id": USER_ID, "session_id": SESSION_ID})
+
+    stored = memory.backend.messages
+    assert len(stored) == 4, f"Expected full trace (4 msgs) in memory, got {len(stored)}"
+    assert [m.role for m in stored] == [
+        MessageRole.USER,
+        MessageRole.ASSISTANT,
+        MessageRole.USER,
+        MessageRole.ASSISTANT,
+    ]
+    assert any("Thought" in m.content for m in stored)
+    assert any("Observation" in m.content for m in stored)
+
+
+def test_save_mode_input_output_persists_only_input_and_final(llm, memory):
+    """INPUT_OUTPUT mode drops intermediate thoughts/observations."""
+    agent = Agent(
+        name="IOModeAgent",
+        llm=llm,
+        tools=[],
+        inference_mode=InferenceMode.DEFAULT,
+        memory=memory,
+        memory_save_mode=MemorySaveMode.INPUT_OUTPUT,
+    )
+
+    _seed_react_prompt(agent, user_input="Where does Alex work?", final_answer="Alex works at TechCorp.")
+    agent._save_history_to_memory({"user_id": USER_ID, "session_id": SESSION_ID})
+
+    stored = memory.backend.messages
+    assert len(stored) == 2, f"Expected only input+final (2 msgs), got {len(stored)}"
+    assert stored[0].role == MessageRole.USER
+    assert stored[0].content == "Where does Alex work?"
+    assert stored[1].role == MessageRole.ASSISTANT
+    assert stored[1].content == "Alex works at TechCorp."
+    assert not any("Thought" in m.content for m in stored)
+    assert not any("Observation" in m.content for m in stored)
+
+
+def test_save_mode_input_output_replaces_prior_full_snapshot(llm, memory):
+    """Switching to INPUT_OUTPUT on an existing scoped history replaces, not appends."""
+    full_agent = Agent(name="FirstAgent", llm=llm, tools=[], memory=memory)
+    _seed_react_prompt(full_agent, user_input="Q1", final_answer="A1")
+    full_agent._save_history_to_memory({"user_id": USER_ID, "session_id": SESSION_ID})
+    assert len(memory.backend.messages) == 4
+
+    io_agent = Agent(
+        name="SecondAgent",
+        llm=llm,
+        tools=[],
+        memory=memory,
+        memory_save_mode=MemorySaveMode.INPUT_OUTPUT,
+    )
+    _seed_react_prompt(io_agent, user_input="Q2", final_answer="A2")
+    io_agent._save_history_to_memory({"user_id": USER_ID, "session_id": SESSION_ID})
+
+    stored = memory.backend.messages
+    assert len(stored) == 2
+    assert stored[0].content == "Q2"
+    assert stored[1].content == "A2"

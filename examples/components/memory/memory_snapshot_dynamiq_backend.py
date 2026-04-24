@@ -19,7 +19,7 @@ import sys
 import uuid
 
 from dynamiq import Workflow, connections, flows
-from dynamiq.memory import Memory
+from dynamiq.memory import Memory, MemorySaveMode  # noqa: F401  # exposed for the INPUT_OUTPUT option below
 from dynamiq.memory.backends.dynamiq import Dynamiq as DynamiqBackend
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
