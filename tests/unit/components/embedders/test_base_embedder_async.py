@@ -1,7 +1,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from litellm.types.utils import EmbeddingResponse
+from litellm.types.utils import EmbeddingResponse, Usage
 
 from dynamiq.components.embedders.openai import OpenAIEmbedder
 from dynamiq.connections import OpenAI as OpenAIConnection
@@ -11,7 +11,7 @@ def _make_embedding_response(model: str, embedding: list[float]) -> EmbeddingRes
     response = EmbeddingResponse()
     response["data"] = [{"embedding": embedding}]
     response["model"] = model
-    response["usage"] = {"prompt_tokens": 1, "completion_tokens": 0, "total_tokens": 1}
+    response["usage"] = Usage(prompt_tokens=1, completion_tokens=0, total_tokens=1)
     return response
 
 
@@ -65,3 +65,34 @@ class TestEmbedTextAsync:
         )
         with pytest.raises(ValueError, match="Invalid embedding"):
             await embedder.embed_text_async("hello")
+
+
+class TestEmbedTextsBatchAsync:
+    @pytest.mark.asyncio
+    async def test_batch_async_splits_inputs_by_batch_size(self):
+        embedder = _make_openai_embedder()
+        embedder.batch_size = 2
+
+        async def fake_aembedding(model, input, **kwargs):
+            response = EmbeddingResponse()
+            response["data"] = [{"embedding": [float(i)]} for i in range(len(input))]
+            response["model"] = model
+            response["usage"] = Usage(
+                prompt_tokens=len(input),
+                completion_tokens=0,
+                total_tokens=len(input),
+            )
+            return response
+
+        embedder._aembedding = AsyncMock(side_effect=fake_aembedding)
+
+        texts = ["a", "b", "c", "d", "e"]
+        embeddings, meta = await embedder._embed_texts_batch_async(
+            texts_to_embed=texts, batch_size=2
+        )
+
+        # 5 texts, batch_size=2 → 3 calls.
+        assert embedder._aembedding.await_count == 3
+        assert len(embeddings) == 5
+        assert meta["model"] == "text-embedding-3-small"
+        assert meta["usage"]["total_tokens"] == 5

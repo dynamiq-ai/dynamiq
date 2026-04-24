@@ -276,6 +276,29 @@ class BaseEmbedder(BaseModel):
 
         return all_embeddings, meta
 
+    async def _embed_texts_batch_async(
+        self, texts_to_embed: list[str], batch_size: int
+    ) -> tuple[list[list[float]], dict[str, Any]]:
+        """Async mirror of :meth:`_embed_texts_batch`."""
+        all_embeddings: list[list[float]] = []
+        meta: dict[str, Any] = {}
+        embed_params = self.embed_params
+        for i in range(0, len(texts_to_embed), batch_size):
+            batch = texts_to_embed[i : i + batch_size]
+            response = await self._aembedding(model=self.model, input=batch, **embed_params)
+            embeddings = [el["embedding"] for el in response.data]
+            all_embeddings.extend(embeddings)
+
+            if "model" not in meta:
+                meta["model"] = response.model
+            if "usage" not in meta:
+                meta["usage"] = dict(response.usage)
+            else:
+                meta["usage"]["prompt_tokens"] += response.usage.prompt_tokens
+                meta["usage"]["total_tokens"] += response.usage.total_tokens
+
+        return all_embeddings, meta
+
     def embed_documents(self, documents: list[Document]) -> dict:
         """
         Embeds a list of documents and returns the embedded documents along with meta information.
