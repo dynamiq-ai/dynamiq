@@ -200,3 +200,13 @@ class TestHuggingFaceAsyncOverrides:
             assert isinstance(call.kwargs["input"], str)
         assert len(embeddings) == 3
         assert meta["usage"]["total_tokens"] == 3
+
+
+class TestMockAembeddingExecutorFixture:
+    @pytest.mark.asyncio
+    async def test_fixture_patches_aembedding(self, mock_aembedding_executor):
+        embedder = _make_openai_embedder()
+        result = await embedder.embed_text_async("hello")
+
+        mock_aembedding_executor.assert_awaited_once()
+        assert "embedding" in result
