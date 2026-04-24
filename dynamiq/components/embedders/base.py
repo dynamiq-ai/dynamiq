@@ -189,6 +189,43 @@ class BaseEmbedder(BaseModel):
 
         return {"embedding": embedding, "meta": meta}
 
+    async def embed_text_async(self, text: str) -> dict:
+        """Async mirror of :meth:`embed_text`. Uses ``litellm.aembedding``.
+
+        Args:
+            text (str): The text string to be embedded.
+
+        Returns:
+            dict: Same shape as :meth:`embed_text`.
+
+        Raises:
+            TypeError: If input is not a string.
+            ValueError: If the embedding response is invalid.
+        """
+        if not isinstance(text, str):
+            msg = (
+                "TextEmbedder expects a string as input."
+                "In case you want to embed a list of Documents, please use the DocumentEmbedder."
+            )
+            raise TypeError(msg)
+
+        text_to_embed = self.prefix + text + self.suffix
+        text_to_embed = text_to_embed.replace("\n", " ")
+        text_to_embed = self._apply_text_truncation(text_to_embed)
+
+        response = await self._aembedding(model=self.model, input=[text_to_embed], **self.embed_params)
+
+        meta = {"model": response.model, "usage": dict(response.usage)}
+        embedding = response.data[0]["embedding"]
+
+        try:
+            self.validate_embedding(embedding)
+        except InvalidEmbeddingError as e:
+            logger.error(f"Invalid embedding returned by model {self.model}: {str(e)}")
+            raise ValueError(f"Invalid embedding returned by the model: {str(e)}")
+
+        return {"embedding": embedding, "meta": meta}
+
     def _prepare_documents_to_embed(self, documents: list[Document]) -> list[str]:
         """
         Prepare the texts to embed by concatenating the Document text with the metadata fields to embed.
