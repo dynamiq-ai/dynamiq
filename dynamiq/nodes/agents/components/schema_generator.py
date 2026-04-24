@@ -43,6 +43,72 @@ FINAL_ANSWER_FUNCTION_SCHEMA = {
 }
 
 
+def unwrap_response_format(response_format: dict | type[BaseModel]) -> dict:
+    """Return a raw JSON-schema object for use inside another schema.
+
+    Accepts either a pydantic BaseModel subclass or a dict. For dicts we
+    strip the ``{"type": "json_schema", "json_schema": {"schema": ...}}``
+    wrapper that callers may pass (matching litellm's response_format shape).
+    """
+    if isinstance(response_format, type) and issubclass(response_format, BaseModel):
+        return _basemodel_to_schema(response_format)
+
+    if isinstance(response_format, dict):
+        if response_format.get("type") == "json_schema" and "json_schema" in response_format:
+            inner = response_format["json_schema"]
+            if isinstance(inner, dict) and "schema" in inner:
+                return inner["schema"]
+            return inner
+        return response_format
+
+    raise TypeError(f"Unsupported response_format type: {type(response_format).__name__}")
+
+
+def build_final_answer_function_schema(response_format: dict | type[BaseModel] | None) -> dict:
+    """Return ``FINAL_ANSWER_FUNCTION_SCHEMA``, optionally with the ``answer``
+    property replaced by a user-provided schema.
+
+    When ``response_format`` is ``None`` the original schema is returned
+    unchanged so default behaviour is preserved.
+    """
+    if response_format is None:
+        return FINAL_ANSWER_FUNCTION_SCHEMA
+
+    answer_schema = unwrap_response_format(response_format)
+    strict = _is_strict_compatible(answer_schema)
+
+    parameters = {
+        "type": "object",
+        "properties": {
+            "thought": {
+                "type": "string",
+                "description": "Your reasoning about why you can answer original question.",
+            },
+            "answer": answer_schema,
+            "output_files": {
+                "type": "string",
+                "description": "Optional comma-separated file paths to return. Empty string if none.",
+            },
+        },
+        "required": ["thought", "answer", "output_files"],
+    }
+    if strict:
+        parameters["additionalProperties"] = False
+
+    return {
+        "type": "function",
+        "strict": strict,
+        "function": {
+            "name": "provide_final_answer",
+            "description": (
+                "Function should be called when if you can answer the initial request"
+                " or if there is not request at all."
+            ),
+            "parameters": parameters,
+        },
+    }
+
+
 PRIORITY_FIELDS = ("brief",)
 
 
@@ -325,7 +391,10 @@ def generate_property_schema(properties: dict, name: str, field: Any) -> None:
 
 
 def generate_function_calling_schemas(
-    tools: list[Node], delegation_allowed: bool, sanitize_tool_name: Callable[[str], str]
+    tools: list[Node],
+    delegation_allowed: bool,
+    sanitize_tool_name: Callable[[str], str],
+    response_format: dict | type[BaseModel] | None = None,
 ) -> list[dict]:
     """
     Generate schemas for function calling mode.
@@ -334,12 +403,15 @@ def generate_function_calling_schemas(
         tools: List of tools to generate schemas for
         delegation_allowed: Whether delegation is allowed
         sanitize_tool_name: Function to sanitize tool names
-        llm: The LLM instance
+        response_format: Optional user-provided schema. When set, the
+            ``provide_final_answer`` function's ``answer`` property is
+            replaced with this schema so the LLM returns structured data
+            directly as part of the final answer function call.
 
     Returns:
         List of function calling schemas for all tools
     """
-    schemas = [FINAL_ANSWER_FUNCTION_SCHEMA]
+    schemas = [build_final_answer_function_schema(response_format)]
 
     for tool in tools:
         if isinstance(tool, SubAgentTool):
