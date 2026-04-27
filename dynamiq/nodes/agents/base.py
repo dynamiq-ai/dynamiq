@@ -253,14 +253,6 @@ class Agent(IterativeCheckpointMixin, Node):
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
-    memory_save_mode: MemorySaveMode = Field(
-        default=MemorySaveMode.FULL,
-        description=(
-            "What to persist to memory at end of run. FULL stores every non-system "
-            "message from the prompt (incl. tool calls/observations); INPUT_OUTPUT "
-            "stores only the user input and final assistant response."
-        ),
-    )
     verbose: bool = Field(False, description="Whether to print verbose logs.")
     file_store: FileStoreConfig = Field(
         default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
@@ -924,7 +916,7 @@ class Agent(IterativeCheckpointMixin, Node):
         """Snapshot prompt state into memory for current user/session scope.
 
         Replaces only the messages matching current ``user_id``/``session_id``
-        filters. What gets written depends on ``memory_save_mode``: FULL stores
+        filters. What gets written depends on ``memory.save_mode``: FULL stores
         every non-system message (incl. tool calls/observations); INPUT_OUTPUT
         stores only the user input and final assistant response.
 
@@ -950,7 +942,7 @@ class Agent(IterativeCheckpointMixin, Node):
                 Message(role=msg.role, content=extract_message_text(msg), metadata=metadata.copy())
             )
 
-        if self.memory_save_mode == MemorySaveMode.INPUT_OUTPUT:
+        if self.memory.save_mode == MemorySaveMode.INPUT_OUTPUT:
             snapshot_messages = self._input_output_pair(metadata, snapshot_messages)
 
         saved = len(snapshot_messages)

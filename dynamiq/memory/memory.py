@@ -53,6 +53,14 @@ class Memory(BaseModel):
     message_limit: int = Field(default=DEFAULT_LIMIT, gt=0, description="Default limit for message retrieval")
     backend: MemoryBackend = Field(default_factory=InMemory, description="Backend storage implementation")
     filters: dict[str, Any] = Field(default_factory=dict, description="Default filters to apply to searches")
+    save_mode: MemorySaveMode = Field(
+        default=MemorySaveMode.FULL,
+        description=(
+            "What to persist to memory at end of run. FULL stores every non-system "
+            "message from the prompt (incl. tool calls/observations); INPUT_OUTPUT "
+            "stores only the user input and final assistant response."
+        ),
+    )
 
     @property
     def to_dict_exclude_params(self) -> dict[str, bool]:

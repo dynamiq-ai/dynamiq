@@ -19,7 +19,7 @@ import sys
 import uuid
 
 from dynamiq import Workflow, connections, flows
-from dynamiq.memory import Memory, MemorySaveMode  # noqa: F401  # exposed for the INPUT_OUTPUT option below
+from dynamiq.memory import Memory, MemorySaveMode
 from dynamiq.memory.backends.dynamiq import Dynamiq as DynamiqBackend
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
@@ -43,7 +43,11 @@ def main():
 
     dynamiq_conn = connections.Dynamiq(url=DYNAMIQ_URL, api_key=DYNAMIQ_API_KEY)
     backend = DynamiqBackend(connection=dynamiq_conn, memory_id=DYNAMIQ_MEMORY_ID)
-    memory = Memory(backend=backend)
+    memory = Memory(
+        backend=backend,
+        # Set save_mode=MemorySaveMode.INPUT_OUTPUT to keep only user input and final answer.
+        save_mode=MemorySaveMode.FULL,
+    )
 
     lookup_tool = Python(
         name="company-lookup",

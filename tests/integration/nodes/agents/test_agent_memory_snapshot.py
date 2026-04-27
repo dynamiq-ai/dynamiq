@@ -180,7 +180,7 @@ def test_save_mode_full_persists_intermediate_messages(llm, memory):
         inference_mode=InferenceMode.DEFAULT,
         memory=memory,
     )
-    assert agent.memory_save_mode == MemorySaveMode.FULL
+    assert agent.memory.save_mode == MemorySaveMode.FULL
 
     _seed_react_prompt(agent, user_input="Where does Alex work?", final_answer="Alex works at TechCorp.")
     agent._save_history_to_memory({"user_id": USER_ID, "session_id": SESSION_ID})
@@ -204,8 +204,7 @@ def test_save_mode_input_output_persists_only_input_and_final(llm, memory):
         llm=llm,
         tools=[],
         inference_mode=InferenceMode.DEFAULT,
-        memory=memory,
-        memory_save_mode=MemorySaveMode.INPUT_OUTPUT,
+        memory=Memory(backend=memory.backend, save_mode=MemorySaveMode.INPUT_OUTPUT),
     )
 
     _seed_react_prompt(agent, user_input="Where does Alex work?", final_answer="Alex works at TechCorp.")
@@ -232,8 +231,7 @@ def test_save_mode_input_output_replaces_prior_full_snapshot(llm, memory):
         name="SecondAgent",
         llm=llm,
         tools=[],
-        memory=memory,
-        memory_save_mode=MemorySaveMode.INPUT_OUTPUT,
+        memory=Memory(backend=memory.backend, save_mode=MemorySaveMode.INPUT_OUTPUT),
     )
     _seed_react_prompt(io_agent, user_input="Q2", final_answer="A2")
     io_agent._save_history_to_memory({"user_id": USER_ID, "session_id": SESSION_ID})
