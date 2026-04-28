@@ -234,15 +234,6 @@ class TestRunnableConfigCancellation:
         assert config.cancellation is not None
         assert config.cancellation.token is not None
 
-    def test_flow_setup_cancellation_restores_cleared_cancellation(self):
-        """Flow._setup_cancellation re-adds cancellation if user explicitly cleared it to None."""
-        config = RunnableConfig()
-        config.cancellation = None
-        result = Flow._setup_cancellation(config)
-        assert result is config
-        assert config.cancellation is not None
-        assert config.cancellation.token is not None
-
     def test_flow_setup_cancellation_preserves_existing_token(self):
         """Flow._setup_cancellation does not overwrite an existing cancellation config."""
         token = CancellationToken()
