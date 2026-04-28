@@ -107,9 +107,11 @@ class DynamiqTracingClient(BaseTracingClient):
 
     @staticmethod
     def _log_send_error(fut) -> None:
+        if fut.cancelled():
+            return
         try:
             exc = fut.exception()
-        except Exception:
+        except (asyncio.CancelledError, Exception):
             return
         if exc:
             logger.error(f"Failed to send traces (executor). Error: {exc}")

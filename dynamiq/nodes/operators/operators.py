@@ -278,6 +278,8 @@ class Map(Node):
                     )
                 )
         except CanceledException:
+            if config and getattr(config, "cancellation", None) and config.cancellation.token:
+                config.cancellation.token.cancel()
             raise
         except Exception as e:
             logger.error(str(e))

@@ -233,6 +233,12 @@ class Workflow(BaseModel, Runnable):
         except asyncio.CancelledError:
             if config and config.cancellation and config.cancellation.token:
                 config.cancellation.token.cancel()
+            current = asyncio.current_task()
+            if current is not None and hasattr(current, "uncancel"):
+                try:
+                    current.uncancel()
+                except Exception:  # nosec
+                    pass
             self.run_on_workflow_canceled(config, **merged_kwargs)
             logger.info(f"Workflow {self.id}: execution canceled in {format_duration(time_start, datetime.now())}.")
             return RunnableResult(
