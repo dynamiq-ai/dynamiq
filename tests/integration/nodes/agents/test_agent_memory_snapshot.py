@@ -171,8 +171,9 @@ def _seed_react_prompt(agent, user_input: str, final_answer: str) -> None:
     )
 
 
-def test_save_mode_full_persists_intermediate_messages(llm, memory):
+def test_save_mode_full_persists_intermediate_messages(llm):
     """Default FULL mode stores every non-system message, including the trace."""
+    memory = Memory(backend=InMemory(), save_mode=MemorySaveMode.FULL)
     agent = Agent(
         name="FullModeAgent",
         llm=llm,
@@ -183,7 +184,9 @@ def test_save_mode_full_persists_intermediate_messages(llm, memory):
     assert agent.memory.save_mode == MemorySaveMode.FULL
 
     _seed_react_prompt(agent, user_input="Where does Alex work?", final_answer="Alex works at TechCorp.")
-    agent._save_history_to_memory({"user_id": USER_ID, "session_id": SESSION_ID})
+    agent._save_history_to_memory(
+        {"user_id": USER_ID, "session_id": SESSION_ID}, final_output="Alex works at TechCorp."
+    )
 
     stored = memory.backend.messages
     assert len(stored) == 4, f"Expected full trace (4 msgs) in memory, got {len(stored)}"
@@ -197,8 +200,9 @@ def test_save_mode_full_persists_intermediate_messages(llm, memory):
     assert any("Observation" in m.content for m in stored)
 
 
-def test_save_mode_input_output_persists_only_input_and_final(llm, memory):
+def test_save_mode_input_output_persists_only_input_and_final(llm):
     """INPUT_OUTPUT mode drops intermediate thoughts/observations."""
+    memory = Memory(backend=InMemory())
     agent = Agent(
         name="IOModeAgent",
         llm=llm,
@@ -208,7 +212,9 @@ def test_save_mode_input_output_persists_only_input_and_final(llm, memory):
     )
 
     _seed_react_prompt(agent, user_input="Where does Alex work?", final_answer="Alex works at TechCorp.")
-    agent._save_history_to_memory({"user_id": USER_ID, "session_id": SESSION_ID})
+    agent._save_history_to_memory(
+        {"user_id": USER_ID, "session_id": SESSION_ID}, final_output="Alex works at TechCorp."
+    )
 
     stored = memory.backend.messages
     assert len(stored) == 2, f"Expected only input+final (2 msgs), got {len(stored)}"
@@ -220,8 +226,9 @@ def test_save_mode_input_output_persists_only_input_and_final(llm, memory):
     assert not any("Observation" in m.content for m in stored)
 
 
-def test_save_mode_input_output_replaces_prior_full_snapshot(llm, memory):
+def test_save_mode_input_output_replaces_prior_full_snapshot(llm):
     """Switching to INPUT_OUTPUT on an existing scoped history replaces, not appends."""
+    memory = Memory(backend=InMemory(), save_mode=MemorySaveMode.FULL)
     full_agent = Agent(name="FirstAgent", llm=llm, tools=[], memory=memory)
     _seed_react_prompt(full_agent, user_input="Q1", final_answer="A1")
     full_agent._save_history_to_memory({"user_id": USER_ID, "session_id": SESSION_ID})
@@ -234,9 +241,92 @@ def test_save_mode_input_output_replaces_prior_full_snapshot(llm, memory):
         memory=Memory(backend=memory.backend, save_mode=MemorySaveMode.INPUT_OUTPUT),
     )
     _seed_react_prompt(io_agent, user_input="Q2", final_answer="A2")
-    io_agent._save_history_to_memory({"user_id": USER_ID, "session_id": SESSION_ID})
+    io_agent._save_history_to_memory({"user_id": USER_ID, "session_id": SESSION_ID}, final_output="A2")
 
     stored = memory.backend.messages
     assert len(stored) == 2
     assert stored[0].content == "Q2"
     assert stored[1].content == "A2"
+
+
+def test_save_mode_input_output_preserves_prior_turns_while_dropping_trace(llm):
+    """INPUT_OUTPUT should preserve accumulated chat turns, not just the latest pair."""
+    memory = Memory(backend=InMemory())
+    agent = Agent(
+        name="IOMultiTurnAgent",
+        llm=llm,
+        tools=[],
+        inference_mode=InferenceMode.DEFAULT,
+        memory=Memory(backend=memory.backend, save_mode=MemorySaveMode.INPUT_OUTPUT),
+    )
+
+    agent._pinned_input = Message(role=MessageRole.USER, content="Q2")
+    agent._prompt = Prompt(
+        messages=[
+            Message(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+            Message(role=MessageRole.USER, content="Q1"),
+            Message(role=MessageRole.ASSISTANT, content="A1"),
+            Message(role=MessageRole.USER, content="Q2"),
+            Message(role=MessageRole.ASSISTANT, content="Thought: I should use the lookup tool."),
+            Message(role=MessageRole.USER, content="Observation: tool returned 'A2'."),
+            Message(role=MessageRole.ASSISTANT, content="A2"),
+        ]
+    )
+
+    agent._save_history_to_memory({"user_id": USER_ID, "session_id": SESSION_ID}, final_output="A2")
+
+    stored = memory.get_agent_conversation(filters={"user_id": USER_ID, "session_id": SESSION_ID})
+    assert [m.role for m in stored] == [
+        MessageRole.USER,
+        MessageRole.ASSISTANT,
+        MessageRole.USER,
+        MessageRole.ASSISTANT,
+    ]
+    assert [m.content for m in stored] == ["Q1", "A1", "Q2", "A2"]
+    assert not any("Thought:" in m.content for m in stored)
+    assert not any("Observation:" in m.content for m in stored)
+
+
+def test_save_mode_input_output_uses_final_output_for_current_assistant_turn(llm):
+    """INPUT_OUTPUT should use the resolved final output for the current assistant turn."""
+    memory = Memory(backend=InMemory())
+    agent = Agent(
+        name="IOAnswerExtractionAgent",
+        llm=llm,
+        tools=[],
+        inference_mode=InferenceMode.DEFAULT,
+        memory=Memory(backend=memory.backend, save_mode=MemorySaveMode.INPUT_OUTPUT),
+    )
+
+    agent._pinned_input = Message(role=MessageRole.USER, content="How are you?")
+    agent._prompt = Prompt(
+        messages=[
+            Message(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+            Message(role=MessageRole.USER, content="Hello, I'm Oleks"),
+            Message(role=MessageRole.ASSISTANT, content="Hello, Oleks!"),
+            Message(role=MessageRole.USER, content="How are you?"),
+            Message(
+                role=MessageRole.ASSISTANT,
+                content="Thought: The user is asking how I am doing.\nAnswer: Placeholder raw LLM output.",
+            ),
+        ]
+    )
+
+    agent._save_history_to_memory(
+        {"user_id": USER_ID, "session_id": SESSION_ID},
+        final_output="I'm here and ready to help. How can I assist you today?",
+    )
+
+    stored = memory.get_agent_conversation(filters={"user_id": USER_ID, "session_id": SESSION_ID})
+    assert [m.role for m in stored] == [
+        MessageRole.USER,
+        MessageRole.ASSISTANT,
+        MessageRole.USER,
+        MessageRole.ASSISTANT,
+    ]
+    assert [m.content for m in stored] == [
+        "Hello, I'm Oleks",
+        "Hello, Oleks!",
+        "How are you?",
+        "I'm here and ready to help. How can I assist you today?",
+    ]

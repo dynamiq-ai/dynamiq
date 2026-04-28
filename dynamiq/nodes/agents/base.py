@@ -776,7 +776,7 @@ class Agent(IterativeCheckpointMixin, Node):
 
         if use_memory:
             try:
-                self._save_history_to_memory(custom_metadata)
+                self._save_history_to_memory(custom_metadata, final_output=result)
             except Exception as save_error:
                 logger.error(
                     "Agent %s - %s: failed to save history to memory: %s",
@@ -884,34 +884,66 @@ class Agent(IterativeCheckpointMixin, Node):
         logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
         return history_messages
 
-    def _input_output_pair(self, metadata: dict, snapshot_messages: list[Message]) -> list[Message]:
-        """Return [pinned_user, last_assistant] from a FULL snapshot (either may be absent)."""
-        pair: list[Message] = []
-        if self._pinned_input is not None:
-            pair.append(
+    def _is_input_output_trace_message(self, message: Message) -> bool:
+        """Return True when a message is an internal ReAct/tool-trace entry."""
+        content = message.content.strip()
+
+        if message.role == MessageRole.USER:
+            return content.startswith("Observation:")
+
+        if message.role == MessageRole.ASSISTANT:
+            return content.startswith("Thought:")
+
+        return False
+
+    def _input_output_history(
+        self,
+        metadata: dict,
+        snapshot_messages: list[Message],
+        final_output: Any | None = None,
+    ) -> list[Message]:
+        """Return conversation history with internal trace removed.
+
+        INPUT_OUTPUT mode is still snapshot-based: it rewrites the scoped memory
+        slice with the current prompt state. The difference from FULL mode is that
+        only user/assistant conversation turns are preserved while intermediate
+        ReAct/tool messages are dropped.
+        """
+        history: list[Message] = []
+        for message in snapshot_messages:
+            if self._is_input_output_trace_message(message):
+                continue
+            history.append(
                 Message(
-                    role=MessageRole.USER,
-                    content=extract_message_text(self._pinned_input),
+                    role=message.role,
+                    content=message.content,
                     metadata=metadata.copy(),
                 )
             )
-        last_assistant = next(
-            (m for m in reversed(snapshot_messages) if m.role == MessageRole.ASSISTANT),
-            None,
-        )
-        if last_assistant is not None:
-            pair.append(
-                Message(
-                    role=last_assistant.role,
-                    content=last_assistant.content,
-                    metadata=metadata.copy(),
-                )
-            )
-        return pair
+
+        if final_output is not None:
+            final_output_text = str(final_output)
+            if final_output_text:
+                if history and history[-1].role == MessageRole.ASSISTANT:
+                    history[-1] = Message(
+                        role=MessageRole.ASSISTANT,
+                        content=final_output_text,
+                        metadata=metadata.copy(),
+                    )
+                else:
+                    history.append(
+                        Message(
+                            role=MessageRole.ASSISTANT,
+                            content=final_output_text,
+                            metadata=metadata.copy(),
+                        )
+                    )
+        return history
 
     def _save_history_to_memory(
         self,
         metadata: dict,
+        final_output: Any | None = None,
     ) -> None:
         """Snapshot prompt state into memory for current user/session scope.
 
@@ -943,7 +975,7 @@ class Agent(IterativeCheckpointMixin, Node):
             )
 
         if self.memory.save_mode == MemorySaveMode.INPUT_OUTPUT:
-            snapshot_messages = self._input_output_pair(metadata, snapshot_messages)
+            snapshot_messages = self._input_output_history(metadata, snapshot_messages, final_output=final_output)
 
         saved = len(snapshot_messages)
 
@@ -984,7 +1016,7 @@ class Agent(IterativeCheckpointMixin, Node):
 
     def _append_fallback_messages(self, metadata: dict, snapshot_messages: list[Message]) -> None:
         """Append only the user input and last assistant response to memory (safe fallback)."""
-        pair = self._input_output_pair(metadata, snapshot_messages)
+        pair = self._input_output_history(metadata, snapshot_messages)[-2:]
         for m in pair:
             self.memory.add(role=m.role, content=m.content, metadata=m.metadata)
         logger.info(f"Agent {self.name} - {self.id}: saved {len(pair)} message(s) to memory (fallback)")
