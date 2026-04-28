@@ -361,13 +361,9 @@ class Flow(CheckpointFlowMixin, BaseFlow):
 
     @staticmethod
     def _setup_cancellation(config: RunnableConfig | None) -> RunnableConfig:
-        """Ensure the config has a CancellationConfig/token."""
-        from dynamiq.types.cancellation import CancellationConfig
-
+        """Return a RunnableConfig that has a CancellationConfig/token."""
         if config is None:
             return RunnableConfig()
-        if config.cancellation is None:
-            config.cancellation = CancellationConfig()
         return config
 
     def run_sync(
@@ -457,6 +453,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         self.run_on_flow_start(input_data, config, **merged_kwargs)
         time_start = datetime.now()
 
+        run_executor = None
         try:
             if self.nodes:
                 max_workers = (
@@ -494,8 +491,6 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                         self._update_checkpoint(results, CheckpointStatus.ACTIVE)
 
                     time.sleep(0.001)
-
-                run_executor.shutdown()
 
             output = self._get_output()
             failed_nodes = self._get_failed_nodes_with_raise_behavior()
@@ -562,6 +557,11 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 error=RunnableResultError.from_exception(e, failed_nodes=failed_nodes),
             )
         finally:
+            if run_executor is not None:
+                try:
+                    run_executor.shutdown()
+                except Exception as e:
+                    logger.warning(f"Flow {self.id}: executor shutdown failed: {e}")
             self._cleanup_dry_run(config)
 
     async def run_async(

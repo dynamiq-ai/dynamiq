@@ -271,9 +271,11 @@ class Map(Node):
         try:
             check_cancellation(config)
             with ContextAwareThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                results = executor.map(
-                    lambda args: self.execute_workflow(args[0], args[1], config, merged_kwargs),
-                    enumerate(input_data),
+                results = list(
+                    executor.map(
+                        lambda args: self.execute_workflow(args[0], args[1], config, merged_kwargs),
+                        enumerate(input_data),
+                    )
                 )
         except CanceledException:
             raise
@@ -281,7 +283,7 @@ class Map(Node):
             logger.error(str(e))
             raise ValueError(f"Map node failed to execute:{str(e)}")
 
-        return {"output": list(results)}
+        return {"output": results}
 
 
 class Pass(Node):
