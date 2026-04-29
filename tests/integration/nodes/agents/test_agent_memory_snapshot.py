@@ -330,3 +330,30 @@ def test_save_mode_input_output_uses_final_output_for_current_assistant_turn(llm
         "How are you?",
         "I'm here and ready to help. How can I assist you today?",
     ]
+
+
+def test_fallback_append_preserves_react_assistant_response_in_full_mode(llm):
+    """Append-only fallback must not drop ReAct assistant turns that start with Thought:."""
+    memory = Memory(backend=InMemory(), save_mode=MemorySaveMode.FULL)
+    agent = Agent(
+        name="FallbackFullModeAgent",
+        llm=llm,
+        tools=[],
+        inference_mode=InferenceMode.DEFAULT,
+        memory=memory,
+    )
+
+    _seed_react_prompt(
+        agent,
+        user_input="Where does Alex work?",
+        final_answer="Thought: I now know the answer.\nAnswer: Alex works at TechCorp.",
+    )
+
+    agent._save_history_to_memory({"user_id": USER_ID}, final_output="Alex works at TechCorp.")
+
+    stored = memory.get_agent_conversation(filters={"user_id": USER_ID})
+    assert [m.role for m in stored] == [MessageRole.USER, MessageRole.ASSISTANT]
+    assert [m.content for m in stored] == [
+        "Where does Alex work?",
+        "Alex works at TechCorp.",
+    ]

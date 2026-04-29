@@ -940,6 +940,53 @@ class Agent(IterativeCheckpointMixin, Node):
                     )
         return history
 
+    def _fallback_input_output_pair(
+        self,
+        metadata: dict,
+        snapshot_messages: list[Message],
+        final_output: Any | None = None,
+    ) -> list[Message]:
+        """Return the current user input and the latest assistant response.
+
+        This fallback path is used when scoped snapshot replacement is not
+        available. It must not apply ReAct trace filtering to assistant
+        messages in FULL mode, otherwise final assistant turns starting with
+        ``Thought:`` are silently lost.
+        """
+        pair: list[Message] = []
+
+        if self._pinned_input is not None:
+            pair.append(
+                Message(
+                    role=MessageRole.USER,
+                    content=extract_message_text(self._pinned_input),
+                    metadata=metadata.copy(),
+                )
+            )
+
+        assistant_content = str(final_output) if final_output is not None else None
+        if assistant_content == "":
+            assistant_content = None
+
+        if assistant_content is None:
+            last_assistant = next(
+                (m for m in reversed(snapshot_messages) if m.role == MessageRole.ASSISTANT),
+                None,
+            )
+            if last_assistant is not None:
+                assistant_content = last_assistant.content
+
+        if assistant_content is not None:
+            pair.append(
+                Message(
+                    role=MessageRole.ASSISTANT,
+                    content=assistant_content,
+                    metadata=metadata.copy(),
+                )
+            )
+
+        return pair
+
     def _save_history_to_memory(
         self,
         metadata: dict,
@@ -988,14 +1035,14 @@ class Agent(IterativeCheckpointMixin, Node):
                     f"Agent {self.name} - {self.id}: backend does not support scoped delete, "
                     "falling back to appending user input and assistant response.",
                 )
-                self._append_fallback_messages(metadata, snapshot_messages)
+                self._append_fallback_messages(metadata, snapshot_messages, final_output=final_output)
                 return
         else:
             logger.info(
                 f"Agent {self.name} - {self.id}: only one of user_id/session_id provided, "
                 "using append-only save to avoid cross-scope data loss.",
             )
-            self._append_fallback_messages(metadata, snapshot_messages)
+            self._append_fallback_messages(metadata, snapshot_messages, final_output=final_output)
             return
 
         logger.info(
@@ -1014,9 +1061,14 @@ class Agent(IterativeCheckpointMixin, Node):
         self.memory.add(role=MessageRole.USER, content=pinned_content, metadata=metadata.copy())
         logger.info(f"Agent {self.name} - {self.id}: saved user input to memory after agent error")
 
-    def _append_fallback_messages(self, metadata: dict, snapshot_messages: list[Message]) -> None:
+    def _append_fallback_messages(
+        self,
+        metadata: dict,
+        snapshot_messages: list[Message],
+        final_output: Any | None = None,
+    ) -> None:
         """Append only the user input and last assistant response to memory (safe fallback)."""
-        pair = self._input_output_history(metadata, snapshot_messages)[-2:]
+        pair = self._fallback_input_output_pair(metadata, snapshot_messages, final_output=final_output)
         for m in pair:
             self.memory.add(role=m.role, content=m.content, metadata=m.metadata)
         logger.info(f"Agent {self.name} - {self.id}: saved {len(pair)} message(s) to memory (fallback)")
