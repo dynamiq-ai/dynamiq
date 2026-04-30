@@ -12,6 +12,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.node import Node, NodeGroup
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.streaming import StreamingConfig, StreamingEventMessage
 
 TEST_ENTITY_ID = "test-entity"
@@ -32,14 +33,20 @@ TIMING_TOLERANCE = 0.2
 
 
 class SlowExecuteNode(Node):
-    """Test node that simulates slow execution."""
+    """Test node that simulates slow execution, cooperatively cancellable."""
 
     group: NodeGroup = NodeGroup.UTILS
     name: str = "SlowExecuteNode"
     sleep_time: float = 5.0
 
     def execute(self, input_data: dict, config: RunnableConfig = None, **kwargs) -> dict:
-        time.sleep(self.sleep_time)
+        # Cooperative sleep: poll cancel token every 50ms so task.cancel() is responsive.
+        elapsed = 0.0
+        step = 0.05
+        while elapsed < self.sleep_time:
+            check_cancellation(config)
+            time.sleep(step)
+            elapsed += step
         return {"result": "completed"}
 
 
@@ -486,11 +493,9 @@ async def test_multiple_workflow_cancellations_do_not_accumulate_blocked_threads
 @pytest.mark.asyncio
 async def test_asyncio_task_cancel_does_not_hang():
     """
-    Verifies that when an asyncio task running run_async is explicitly cancelled,
-    the cancellation is propagated and doesn't hang.
-
-    Note: The underlying thread will continue running until its timeout expires.
-    This is a Python limitation - threads cannot be interrupted.
+    Verifies that task.cancel() on a run_async task is translated into cooperative
+    cancellation and returns a RunnableResult(status=CANCELED) without leaking
+    CancelledError, and without hanging on the blocking thread.
     """
     node = BlockingQueueNode()
     input_queue = Queue()
@@ -508,8 +513,9 @@ async def test_asyncio_task_cancel_does_not_hang():
 
     task.cancel()
 
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    result = await task
+    assert isinstance(result, RunnableResult)
+    assert result.status == RunnableStatus.CANCELED
 
     elapsed_time = time.time() - start_time
 
@@ -522,8 +528,9 @@ async def test_asyncio_task_cancel_does_not_hang():
 @pytest.mark.asyncio
 async def test_asyncio_task_cancel_with_slow_node_does_not_hang():
     """
-    Verifies that cancelling an asyncio task with a slow node
-    returns immediately without waiting for the node to complete.
+    Verifies that task.cancel() on a slow cooperative node returns a CANCELED
+    RunnableResult quickly (thread drains at next cooperative check) without
+    leaking CancelledError and without waiting the full sleep.
     """
     node = SlowExecuteNode(sleep_time=30.0)
     node.error_handling.timeout_seconds = None
@@ -537,8 +544,9 @@ async def test_asyncio_task_cancel_with_slow_node_does_not_hang():
 
     task.cancel()
 
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    result = await task
+    assert isinstance(result, RunnableResult)
+    assert result.status == RunnableStatus.CANCELED
 
     elapsed_time = time.time() - start_time
 
@@ -576,7 +584,8 @@ async def test_multiple_asyncio_task_cancels_do_not_hang():
 
     elapsed_time = time.time() - start_time
     for result in results:
-        assert isinstance(result, asyncio.CancelledError)
+        assert isinstance(result, RunnableResult)
+        assert result.status == RunnableStatus.CANCELED
 
     assert (
         elapsed_time < MAX_ELAPSED_TIME

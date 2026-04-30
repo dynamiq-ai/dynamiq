@@ -105,3 +105,54 @@ class HuggingFaceEmbedder(BaseEmbedder):
                     meta["usage"]["total_tokens"] += response.usage.total_tokens
 
         return all_embeddings, meta
+
+    async def embed_text_async(self, text: str) -> dict:
+        """Async mirror of :meth:`embed_text`. Sends a single string, not a list."""
+        if not isinstance(text, str):
+            msg = (
+                "TextEmbedder expects a string as input."
+                "In case you want to embed a list of Documents, please use the DocumentEmbedder."
+            )
+            raise TypeError(msg)
+
+        text_to_embed = f"{self.prefix}{text}{self.suffix}"
+        text_to_embed = text_to_embed.replace("\n", " ")
+
+        response = await self._aembedding(model=self.model, input=text_to_embed, **self.embed_params)
+
+        meta = {"model": response.model, "usage": dict(response.usage)}
+        embedding = response.data[0]["embedding"]
+
+        try:
+            self.validate_embedding(embedding)
+        except InvalidEmbeddingError as e:
+            logger.error(f"Invalid embedding returned by model {self.model}: {str(e)}")
+            raise ValueError(f"Invalid embedding returned by the model: {str(e)}")
+
+        return {"embedding": embedding, "meta": meta}
+
+    async def _embed_texts_batch_async(
+        self, texts_to_embed: list[str], batch_size: int
+    ) -> tuple[list[list[float]], dict[str, Any]]:
+        """Async mirror of :meth:`_embed_texts_batch` — non-batched HF API."""
+        all_embeddings: list[list[float]] = []
+        meta: dict[str, Any] = {}
+        embed_params = self.embed_params
+
+        for i in range(0, len(texts_to_embed), batch_size):
+            batch = texts_to_embed[i : i + batch_size]
+
+            for text in batch:
+                response = await self._aembedding(model=self.model, input=text, **embed_params)
+                embedding = response.data[0]["embedding"]
+                all_embeddings.append(embedding)
+
+                if "model" not in meta:
+                    meta["model"] = response.model
+                if "usage" not in meta:
+                    meta["usage"] = dict(response.usage)
+                else:
+                    meta["usage"]["prompt_tokens"] += response.usage.prompt_tokens
+                    meta["usage"]["total_tokens"] += response.usage.total_tokens
+
+        return all_embeddings, meta

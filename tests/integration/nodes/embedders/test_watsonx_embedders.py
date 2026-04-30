@@ -310,3 +310,35 @@ def test_text_embedder_invalid_model(
         mock_embedding.side_effect = error
         response = workflow.run(input_data=query_input)
         assert_embedder_failure(response, embedder, output_node, "BadRequestError", "not available")
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_watsonx_text_embedder_async(
+    mock_aembedding_executor, watsonx_text_embedder, query_input, watsonx_connection, watsonx_model
+):
+    result = await watsonx_text_embedder.run_async(input_data=query_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    mock_aembedding_executor.assert_awaited_once_with(
+        input=[query_input["query"]],
+        model=watsonx_model,
+        api_key=watsonx_connection.api_key,
+        project_id=watsonx_connection.project_id,
+        api_base=watsonx_connection.url,
+    )
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_watsonx_document_embedder_async(
+    mock_aembedding_executor, watsonx_document_embedder, document_input, watsonx_connection, watsonx_model
+):
+    result = await watsonx_document_embedder.run_async(input_data=document_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    mock_aembedding_executor.assert_awaited_once_with(
+        input=[document_input["documents"][0].content],
+        model=watsonx_model,
+        api_key=watsonx_connection.api_key,
+        project_id=watsonx_connection.project_id,
+        api_base=watsonx_connection.url,
+    )

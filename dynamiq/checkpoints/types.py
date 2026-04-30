@@ -14,4 +14,5 @@ class CheckpointStatus(str, Enum):
     PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELED = "canceled"
     PENDING_INPUT = "pending_input"

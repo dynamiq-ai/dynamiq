@@ -12,6 +12,7 @@ from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentMan
 from dynamiq.nodes.agents.orchestrators.orchestrator import ActionParseError, Decision, Orchestrator, OrchestratorError
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.chat import format_chat_history
 from dynamiq.utils.logger import logger
@@ -141,6 +142,8 @@ class AdaptiveOrchestrator(Orchestrator):
         )
         self._run_depends = [NodeDependency(node=self.manager).to_dict(for_tracing=True)]
 
+        if manager_result.status == RunnableStatus.CANCELED:
+            raise CanceledException()
         if manager_result.status != RunnableStatus.SUCCESS:
             error_message = f"Agent '{self.manager.name}' failed: {manager_result.error.message}"
             raise ActionParseError(f"Unable to retrieve the next action from Agent Manager, Error: {error_message}")
@@ -162,6 +165,8 @@ class AdaptiveOrchestrator(Orchestrator):
             )
             self._run_depends = [NodeDependency(node=self.manager).to_dict(for_tracing=True)]
 
+            if reflect_result.status == RunnableStatus.CANCELED:
+                raise CanceledException()
             if reflect_result.status != RunnableStatus.SUCCESS:
                 error_message = f"Agent '{self.manager.name}' failed on reflection: {reflect_result.error.message}"
                 logger.error(error_message)
@@ -199,6 +204,7 @@ class AdaptiveOrchestrator(Orchestrator):
                 self._chat_history.append({"role": "user", "content": input_task})
 
             for i in range(self._resumed_iterations, self.max_loops):
+                check_cancellation(config)
                 action = self.get_next_action(config=config, **kwargs)
                 logger.info(f"Orchestrator {self.name} - {self.id}: Loop {i + 1} - Action: {action.dict()}")
 
@@ -242,6 +248,8 @@ class AdaptiveOrchestrator(Orchestrator):
                 **kwargs,
             )
             self._run_depends = [NodeDependency(node=agent).to_dict(for_tracing=True)]
+            if result.status == RunnableStatus.CANCELED:
+                raise CanceledException()
             if result.status != RunnableStatus.SUCCESS:
                 error_message = f"Agent '{agent.name}' failed: {result.error.message}"
                 raise OrchestratorError(f"Failed to execute Agent {agent.name}, due to error: {error_message}")
@@ -265,6 +273,8 @@ class AdaptiveOrchestrator(Orchestrator):
                 **kwargs,
             )
             self._run_depends = [NodeDependency(node=self.manager).to_dict(for_tracing=True)]
+            if result.status == RunnableStatus.CANCELED:
+                raise CanceledException()
             if result.status != RunnableStatus.SUCCESS:
                 content = result.error.message
                 logger.error(
@@ -308,6 +318,8 @@ class AdaptiveOrchestrator(Orchestrator):
         )
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
+        if manager_result.status == RunnableStatus.CANCELED:
+            raise CanceledException()
         if manager_result.status != RunnableStatus.SUCCESS:
             error_message = f"Manager agent '{self.manager.name}' failed: {manager_result.error.message}"
             raise OrchestratorError(f"Failed to execute respond action with manager, due to error: {error_message}")
