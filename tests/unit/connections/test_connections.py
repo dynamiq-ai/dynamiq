@@ -1,7 +1,11 @@
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
+from dynamiq.connections.connections import HTTPMethod
+from dynamiq.connections.connections import Http as HttpConnection
+from dynamiq.connections.connections import HttpApiKey as HttpApiKeyConnection
 from dynamiq.connections.connections import Milvus as MilvusConnection
 from dynamiq.connections.connections import MilvusDeploymentType
 from dynamiq.connections.connections import Qdrant as QdrantConnection
@@ -98,3 +102,39 @@ def test_milvus_connect_host_without_token(mock_milvus_client_class):
 def test_milvus_connect_file_invalid_uri():
     with pytest.raises(ValueError, match="For FILE deployment, URI should point to a file ending with '.db'"):
         MilvusConnection(deployment_type=MilvusDeploymentType.FILE, uri="not_a_db_path")
+
+
+@pytest.mark.asyncio
+async def test_http_connect_async_returns_async_client():
+    conn = HttpConnection(method=HTTPMethod.GET, url="https://example.com")
+    client = await conn.connect_async()
+    try:
+        assert isinstance(client, httpx.AsyncClient)
+        assert client.follow_redirects is True
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_http_api_key_connect_async_returns_async_client():
+    conn = HttpApiKeyConnection(url="https://example.com", api_key="k")
+    client = await conn.connect_async()
+    try:
+        assert isinstance(client, httpx.AsyncClient)
+        assert client.follow_redirects is True
+    finally:
+        await client.aclose()
+
+
+def test_http_connect_returns_requests_module():
+    import requests as requests_module
+
+    conn = HttpConnection(method=HTTPMethod.GET, url="https://example.com")
+    assert conn.connect() is requests_module
+
+
+def test_http_api_key_connect_returns_requests_module():
+    import requests as requests_module
+
+    conn = HttpApiKeyConnection(url="https://example.com", api_key="k")
+    assert conn.connect() is requests_module

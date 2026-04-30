@@ -143,6 +143,17 @@ class HttpApiKey(BaseApiKeyConnection):
 
         return requests
 
+    async def connect_async(self):
+        """Build an httpx.AsyncClient mirroring requests defaults.
+
+        Defaults pinned to match the sync path: ``follow_redirects=True`` (httpx defaults to
+        False, requests defaults to True) and ``trust_env=True``. No global timeout is set;
+        callers pass ``timeout=`` per-request, mirroring the sync tools.
+        """
+        import httpx
+
+        return httpx.AsyncClient(follow_redirects=True, trust_env=True)
+
     @property
     def conn_params(self) -> dict:
         """
@@ -215,6 +226,17 @@ class Http(BaseConnection):
         import requests
 
         return requests
+
+    async def connect_async(self):
+        """Build an httpx.AsyncClient mirroring requests defaults.
+
+        Defaults pinned to match the sync path: ``follow_redirects=True`` (httpx defaults to
+        False, requests defaults to True) and ``trust_env=True``. No global timeout is set;
+        callers pass ``timeout=`` per-request, mirroring the sync tools.
+        """
+        import httpx
+
+        return httpx.AsyncClient(follow_redirects=True, trust_env=True)
 
 
 class OpenAI(BaseApiKeyConnection):
