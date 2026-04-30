@@ -54,6 +54,42 @@ class ZenRowsTool(ConnectionNode):
 
     input_schema: ClassVar[type[ZenRowsInputSchema]] = ZenRowsInputSchema
 
+    def _build_request_kwargs(self, input_data: ZenRowsInputSchema) -> dict[str, Any]:
+        params = {
+            "url": input_data.url,
+            "markdown_response": str(self.markdown_response).lower(),
+        }
+        return {
+            "method": self.connection.method,
+            "url": self.connection.url,
+            "params": {**self.connection.params, **params},
+        }
+
+    def _handle_response(self, response: Any, input_data: ZenRowsInputSchema) -> dict[str, Any]:
+        if response.status_code >= 400:
+            error = response.json().get("detail")
+            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {error}")
+            raise ToolExecutionException(
+                f"Tool '{self.name}' failed to execute the requested action. "
+                f"Error: {error}. Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
+        scrape_result = response.text
+        if self.is_optimized_for_agents:
+            result = f"## Source URL\n{input_data.url}\n\n## Scraped Result\n\n{scrape_result}\n"
+        else:
+            result = {"url": input_data.url, "content": scrape_result}
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
+        return {"content": result}
+
+    def _wrap_request_exception(self, exc: Exception) -> ToolExecutionException:
+        logger.error(f"Tool {self.name} - {self.id}: unexpected error occurred. Error: {str(exc)}")
+        return ToolExecutionException(
+            f"Tool '{self.name}' encountered an unexpected error. "
+            f"Error: {str(exc)}. Please analyze the error and take appropriate action.",
+            recoverable=True,
+        )
+
     def execute(self, input_data: ZenRowsInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Executes the web scraping process.
@@ -67,43 +103,26 @@ class ZenRowsTool(ConnectionNode):
             dict[str, Any]: A dictionary containing the URL and the scraped content.
         """
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
-
-        # Ensure the config is set up correctly
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        params = {
-            "url": input_data.url,
-            "markdown_response": str(self.markdown_response).lower(),
-        }
         try:
-            response = self.client.request(
-                method=self.connection.method,
-                url=self.connection.url,
-                params={**self.connection.params, **params},
-            )
-            if response.status_code >= 400:
-                error = response.json().get("detail")
-                logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {error}")
-                raise ToolExecutionException(
-                    f"Tool '{self.name}' failed to execute the requested action. "
-                    f"Error: {error}. Please analyze the error and take appropriate action.",
-                    recoverable=True,
-                )
-            scrape_result = response.text
-        except ToolExecutionException:
-            raise
+            response = self.client.request(**self._build_request_kwargs(input_data))
         except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: unexpected error occurred. Error: {str(e)}")
-            raise ToolExecutionException(
-                f"Tool '{self.name}' encountered an unexpected error. "
-                f"Error: {str(e)}. Please analyze the error and take appropriate action.",
-                recoverable=True,
-            )
+            raise self._wrap_request_exception(e)
+        return self._handle_response(response, input_data)
 
-        if self.is_optimized_for_agents:
-            result = f"## Source URL\n{input_data.url}\n\n## Scraped Result\n\n{scrape_result}\n"
-        else:
-            result = {"url": input_data.url, "content": scrape_result}
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
-        return {"content": result}
+    async def execute_async(
+        self, input_data: ZenRowsInputSchema, config: RunnableConfig = None, **kwargs
+    ) -> dict[str, Any]:
+        """Native async execution path mirroring ``execute``."""
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        client = await self.get_async_client()
+        try:
+            response = await client.request(**self._build_request_kwargs(input_data))
+        except Exception as e:
+            raise self._wrap_request_exception(e)
+        return self._handle_response(response, input_data)

@@ -133,17 +133,8 @@ class ScaleSerpTool(ConnectionNode):
 
         return "\n".join(formatted_results).strip()
 
-    def execute(
-        self, input_data: ScaleSerpInputSchema, config: RunnableConfig | None = None, **kwargs
-    ) -> dict[str, Any]:
-        """
-        Executes the search using the Scale SERP API and returns the formatted results.
-        """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
-
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-
+    def _build_request_kwargs(self, input_data: ScaleSerpInputSchema) -> tuple[dict[str, Any], Any, str | None, str | None]:
+        """Return (request_kwargs, search_type, query, url)."""
         query = input_data.query or self.query
         url = input_data.url or self.url
         limit = input_data.limit or self.limit
@@ -155,41 +146,43 @@ class ScaleSerpTool(ConnectionNode):
             raise ToolExecutionException(
                 "Either 'query' or 'url' must be provided in input data or node parameters.", recoverable=True
             )
-        try:
-            response = self.client.request(
-                method=self.connection.method,
-                url=urljoin(self.connection.url, "/search"),
-                params=self.get_params(
-                    query=query,
-                    url=url,
-                    num=limit,
-                    search_type=search_type,
-                    output=output_format,
-                    include_html=include_html,
-                ),
-            )
-            search_result = response.json()
-            if response.status_code >= 400:
-                error_message = search_result.get("request_info", {}).get("message")
-                logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(error_message)}")
-                raise ToolExecutionException(
-                    f"Tool '{self.name}' failed to retrieve search results. "
-                    f"Error: {str(error_message)}. Please analyze the error and take appropriate action.",
-                    recoverable=True,
-                )
-        except ToolExecutionException:
-            raise
-        except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: unexpected error occurred. Error: {str(e)}")
+
+        request_kwargs = {
+            "method": self.connection.method,
+            "url": urljoin(self.connection.url, "/search"),
+            "params": self.get_params(
+                query=query,
+                url=url,
+                num=limit,
+                search_type=search_type,
+                output=output_format,
+                include_html=include_html,
+            ),
+        }
+        return request_kwargs, search_type, query, url
+
+    def _wrap_request_exception(self, exc: Exception) -> ToolExecutionException:
+        logger.error(f"Tool {self.name} - {self.id}: unexpected error occurred. Error: {str(exc)}")
+        return ToolExecutionException(
+            f"Tool '{self.name}' encountered an unexpected error. "
+            f"Error: {str(exc)}. Please analyze the error and take appropriate action.",
+            recoverable=True,
+        )
+
+    def _handle_search_response(
+        self, search_result: dict, status_code: int, search_type: Any, query: str | None, url: str | None
+    ) -> dict[str, Any]:
+        if status_code >= 400:
+            error_message = search_result.get("request_info", {}).get("message")
+            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(error_message)}")
             raise ToolExecutionException(
-                f"Tool '{self.name}' encountered an unexpected error. "
-                f"Error: {str(e)}. Please analyze the error and take appropriate action.",
+                f"Tool '{self.name}' failed to retrieve search results. "
+                f"Error: {str(error_message)}. Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
 
         formatted_results = self._format_search_results(search_result)
         content_results = search_result.get(search_type.result_key, [])
-
         sources_with_url = [f"[{result.get('title')}]({result.get('link')})" for result in content_results]
 
         if self.is_optimized_for_agents:
@@ -211,6 +204,47 @@ class ScaleSerpTool(ConnectionNode):
                 "raw_response": search_result,
             }
         }
+
+    def execute(
+        self, input_data: ScaleSerpInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
+        """
+        Executes the search using the Scale SERP API and returns the formatted results.
+        """
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        request_kwargs, search_type, query, url = self._build_request_kwargs(input_data)
+        try:
+            response = self.client.request(**request_kwargs)
+            search_result = response.json()
+            return self._handle_search_response(search_result, response.status_code, search_type, query, url)
+        except ToolExecutionException:
+            raise
+        except Exception as e:
+            raise self._wrap_request_exception(e)
+
+    async def execute_async(
+        self, input_data: ScaleSerpInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
+        """Native async execution path mirroring ``execute``."""
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        request_kwargs, search_type, query, url = self._build_request_kwargs(input_data)
+        client = await self.get_async_client()
+        try:
+            response = await client.request(**request_kwargs)
+            search_result = response.json()
+            return self._handle_search_response(search_result, response.status_code, search_type, query, url)
+        except ToolExecutionException:
+            raise
+        except Exception as e:
+            raise self._wrap_request_exception(e)
 
     def get_params(
         self,
