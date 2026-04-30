@@ -332,6 +332,94 @@ def test_save_mode_input_output_uses_final_output_for_current_assistant_turn(llm
     ]
 
 
+@pytest.mark.parametrize(
+    ("inference_mode", "action_message", "final_message"),
+    [
+        (
+            InferenceMode.FUNCTION_CALLING,
+            'Function call: lookup({"thought": "search", "action_input": {"query": "Alex"}})',
+            'Function call: provide_final_answer({"thought": "done", "answer": "A2"})',
+        ),
+        (
+            InferenceMode.STRUCTURED_OUTPUT,
+            '{"thought": "search", "action": "lookup", "action_input": {"query": "Alex"}}',
+            '{"thought": "done", "action": "finish", "action_input": "A2"}',
+        ),
+        (
+            InferenceMode.XML,
+            "<output><thought>search</thought><action>lookup</action><action_input>{}</action_input></output>",
+            "<output><thought>done</thought><answer>A2</answer></output>",
+        ),
+    ],
+)
+def test_save_mode_input_output_filters_non_default_trace_messages(
+    llm,
+    inference_mode,
+    action_message,
+    final_message,
+):
+    """INPUT_OUTPUT mode should drop tool traces for every inference mode."""
+    memory = Memory(backend=InMemory())
+    agent = Agent(
+        name="IONonDefaultModeAgent",
+        llm=llm,
+        tools=[],
+        inference_mode=inference_mode,
+        memory=Memory(backend=memory.backend, save_mode=MemorySaveMode.INPUT_OUTPUT),
+    )
+
+    agent._pinned_input = Message(role=MessageRole.USER, content="Q2")
+    agent._prompt = Prompt(
+        messages=[
+            Message(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+            Message(role=MessageRole.USER, content="Q1"),
+            Message(role=MessageRole.ASSISTANT, content="A1"),
+            Message(role=MessageRole.USER, content="Q2"),
+            Message(role=MessageRole.ASSISTANT, content=action_message),
+            Message(role=MessageRole.USER, content="Observation: tool returned A2."),
+            Message(role=MessageRole.ASSISTANT, content=final_message),
+        ]
+    )
+
+    agent._save_history_to_memory({"user_id": USER_ID, "session_id": SESSION_ID}, final_output="A2")
+
+    stored = memory.get_agent_conversation(filters={"user_id": USER_ID, "session_id": SESSION_ID})
+    assert [m.role for m in stored] == [
+        MessageRole.USER,
+        MessageRole.ASSISTANT,
+        MessageRole.USER,
+        MessageRole.ASSISTANT,
+    ]
+    assert [m.content for m in stored] == ["Q1", "A1", "Q2", "A2"]
+    assert not any("Function call:" in m.content for m in stored)
+    assert not any("Observation:" in m.content for m in stored)
+    assert not any("<thought>" in m.content for m in stored)
+
+
+def test_save_mode_input_output_single_scope_fallback_does_not_prefilter_snapshot(llm, mocker):
+    """Append-only fallback should build the current pair without pre-filtering the full snapshot."""
+    memory = Memory(backend=InMemory(), save_mode=MemorySaveMode.INPUT_OUTPUT)
+    agent = Agent(
+        name="IOSingleScopeFallbackAgent",
+        llm=llm,
+        tools=[],
+        inference_mode=InferenceMode.DEFAULT,
+        memory=memory,
+    )
+    _seed_react_prompt(agent, user_input="Where does Alex work?", final_answer="Alex works at TechCorp.")
+    input_output_history_spy = mocker.spy(agent, "_input_output_history")
+
+    agent._save_history_to_memory({"user_id": USER_ID}, final_output="Alex works at TechCorp.")
+
+    input_output_history_spy.assert_not_called()
+    stored = memory.get_agent_conversation(filters={"user_id": USER_ID})
+    assert [m.role for m in stored] == [MessageRole.USER, MessageRole.ASSISTANT]
+    assert [m.content for m in stored] == [
+        "Where does Alex work?",
+        "Alex works at TechCorp.",
+    ]
+
+
 def test_fallback_append_preserves_react_assistant_response_in_full_mode(llm):
     """Append-only fallback must not drop ReAct assistant turns that start with Thought:."""
     memory = Memory(backend=InMemory(), save_mode=MemorySaveMode.FULL)

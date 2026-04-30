@@ -1,4 +1,5 @@
 import io
+import json
 import re
 from copy import deepcopy
 from enum import Enum
@@ -910,7 +911,19 @@ class Agent(IterativeCheckpointMixin, Node):
             return content.startswith("Observation:")
 
         if message.role == MessageRole.ASSISTANT:
-            return content.startswith("Thought:")
+            if content.startswith("Thought:") or content.startswith("Function call:"):
+                return True
+
+            if self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
+                try:
+                    parsed_content = json.loads(content, strict=False)
+                except (TypeError, ValueError):
+                    parsed_content = None
+
+                return isinstance(parsed_content, dict) and {"thought", "action"}.issubset(parsed_content)
+
+            if self.inference_mode == InferenceMode.XML:
+                return "<thought" in content and ("<action" in content or "<answer" in content)
 
         return False
 
@@ -1031,36 +1044,36 @@ class Agent(IterativeCheckpointMixin, Node):
 
         fully_scoped = bool(user_id and session_id)
 
-        snapshot_messages: list[Message] = []
+        raw_snapshot_messages: list[Message] = []
         for msg in self._prompt.messages:
             if msg.role == MessageRole.SYSTEM:
                 continue
-            snapshot_messages.append(
+            raw_snapshot_messages.append(
                 Message(role=msg.role, content=extract_message_text(msg), metadata=metadata.copy())
             )
 
-        if self.memory.save_mode == MemorySaveMode.INPUT_OUTPUT:
-            snapshot_messages = self._input_output_history(metadata, snapshot_messages, final_output=final_output)
-
-        saved = len(snapshot_messages)
-
-        if fully_scoped:
-            scope_filters = {"user_id": user_id, "session_id": session_id}
-            try:
-                self.memory.replace_messages(filters=scope_filters, messages=snapshot_messages)
-            except NotImplementedError:
-                logger.warning(
-                    f"Agent {self.name} - {self.id}: backend does not support scoped delete, "
-                    "falling back to appending user input and assistant response.",
-                )
-                self._append_fallback_messages(metadata, snapshot_messages, final_output=final_output)
-                return
-        else:
+        if not fully_scoped:
             logger.info(
                 f"Agent {self.name} - {self.id}: only one of user_id/session_id provided, "
                 "using append-only save to avoid cross-scope data loss.",
             )
-            self._append_fallback_messages(metadata, snapshot_messages, final_output=final_output)
+            self._append_fallback_messages(metadata, raw_snapshot_messages, final_output=final_output)
+            return
+
+        snapshot_messages = raw_snapshot_messages
+        if self.memory.save_mode == MemorySaveMode.INPUT_OUTPUT:
+            snapshot_messages = self._input_output_history(metadata, snapshot_messages, final_output=final_output)
+
+        saved = len(snapshot_messages)
+        scope_filters = {"user_id": user_id, "session_id": session_id}
+        try:
+            self.memory.replace_messages(filters=scope_filters, messages=snapshot_messages)
+        except NotImplementedError:
+            logger.warning(
+                f"Agent {self.name} - {self.id}: backend does not support scoped delete, "
+                "falling back to appending user input and assistant response.",
+            )
+            self._append_fallback_messages(metadata, raw_snapshot_messages, final_output=final_output)
             return
 
         logger.info(
