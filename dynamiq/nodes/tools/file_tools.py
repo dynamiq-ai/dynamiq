@@ -28,6 +28,7 @@ from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox
 from dynamiq.storages.file.base import FileStore
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.file_types import EXTENSION_MAP, FileType
 
 logger = logging.getLogger(__name__)
@@ -505,6 +506,7 @@ class FileReadTool(Node):
                     file.name = filename
 
                 converter_input = {"files": [file]}
+                check_cancellation(config)
                 result = converter.run(
                     input_data=converter_input,
                     config=config,
@@ -1303,9 +1305,8 @@ class FileWriteTool(Node):
             Dict with ``content`` (summary with counts and any warnings) and
             ``file_info``.
 
-        Raises:
-            ToolExecutionException: when one or more find strings are absent
-                from the original file content (no changes written).
+        Returns a result dict with a message when one or more find strings are absent
+        (no changes written), rather than raising — same pattern as shell command errors.
         """
         edits = input_data.edits
         encoding = input_data.encoding or "utf-8"
@@ -1315,11 +1316,12 @@ class FileWriteTool(Node):
 
         missing = [e.find for e in edits if e.find not in content]
         if missing:
-            raise ToolExecutionException(
-                f"Aborting edit: find string(s) not found in '{path}': "
-                f"{[repr(s[:80]) for s in missing]}. No changes were made.",
-                recoverable=True,
+            message = (
+                f"Edit not applied: find string(s) not found in '{path}': "
+                f"{[repr(s[:80]) for s in missing]}. No changes were made."
             )
+            logger.warning(f"Tool {self.name} - {self.id}: {message}")
+            return {"content": message}
 
         total = 0
         skipped: list[str] = []
@@ -1472,6 +1474,7 @@ class FileSearchTool(Node):
                 query = input_data.query if input_data.case_sensitive else input_data.query.lower()
 
             for file_path in files_to_scan:
+                check_cancellation(config)
                 total_scanned += 1
                 file_matches = self._search_file(
                     file_path=file_path,

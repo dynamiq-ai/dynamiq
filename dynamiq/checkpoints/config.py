@@ -70,6 +70,7 @@ class CheckpointConfig(BaseModel):
 
     checkpoint_after_node_enabled: bool = Field(default=True, description="Create checkpoint after each node")
     checkpoint_on_failure_enabled: bool = Field(default=True, description="Create checkpoint when workflow fails")
+    checkpoint_on_cancel_enabled: bool = Field(default=True, description="Create checkpoint when workflow is canceled")
     checkpoint_mid_agent_loop_enabled: bool = Field(default=False, description="Checkpoint during long agent loops")
 
     max_checkpoints: int = Field(

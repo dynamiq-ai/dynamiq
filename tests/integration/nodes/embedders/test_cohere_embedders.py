@@ -294,3 +294,33 @@ def test_text_embedder_invalid_model(
         mock_embedding.side_effect = error
         response = workflow.run(input_data=query_input)
         assert_embedder_failure(response, embedder, output_node, "BadRequestError", "Invalid model")
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_cohere_text_embedder_async(
+    mock_aembedding_executor, cohere_text_embedder, query_input, cohere_model
+):
+    result = await cohere_text_embedder.run_async(input_data=query_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    mock_aembedding_executor.assert_awaited_once_with(
+        input_type="search_query",
+        input=[query_input["query"]],
+        model=cohere_model,
+        api_key="api_key",
+    )
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_cohere_document_embedder_async(
+    mock_aembedding_executor, cohere_document_embedder, document_input, cohere_model
+):
+    result = await cohere_document_embedder.run_async(input_data=document_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    mock_aembedding_executor.assert_awaited_once_with(
+        input=[document_input["documents"][0].content],
+        input_type="search_query",
+        model=cohere_model,
+        api_key="api_key",
+    )

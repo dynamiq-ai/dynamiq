@@ -293,3 +293,31 @@ def test_text_embedder_invalid_params(
         mock_embedding.side_effect = error
         response = workflow.run(input_data=query_input)
         assert_embedder_failure(response, embedder, output_node, "BadRequestError", "Invalid dimensions")
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_openai_text_embedder_async(
+    mock_aembedding_executor, openai_text_embedder, query_input, openai_model
+):
+    result = await openai_text_embedder.run_async(input_data=query_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    mock_aembedding_executor.assert_awaited_once_with(
+        input=[query_input["query"]],
+        model=openai_model,
+        client=ANY,
+    )
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_openai_document_embedder_async(
+    mock_aembedding_executor, openai_document_embedder, document_input, openai_model
+):
+    result = await openai_document_embedder.run_async(input_data=document_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    mock_aembedding_executor.assert_awaited_once_with(
+        input=[document_input["documents"][0].content],
+        model=openai_model,
+        client=ANY,
+    )

@@ -45,6 +45,18 @@ class DocumentEmbedder(ConnectionNode):
 
         return output
 
+    async def execute_async(
+        self, input_data: DocumentEmbedderInputSchema, config: RunnableConfig = None, **kwargs
+    ):
+        """Async mirror of :meth:`execute` — uses the component's async embed path."""
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        output = await self.document_embedder.embed_documents_async(input_data.documents)
+        logger.debug(f"{self.name} executed successfully.")
+
+        return output
+
 
 class TextEmbedderInputSchema(BaseModel):
     query: str = Field(..., description="Parameter to provide query to find embeddings for.")
@@ -90,6 +102,20 @@ class TextEmbedder(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         raw_output = self.text_embedder.embed_text(input_data.query)
+        logger.debug(f"{self.name}: {raw_output['meta']}")
+        result = TextEmbeddingOutput(
+            embedding=raw_output["embedding"],
+            query=input_data.query,
+        )
+        return result
+
+    async def execute_async(
+        self, input_data: TextEmbedderInputSchema, config: RunnableConfig = None, **kwargs
+    ):
+        """Async mirror of :meth:`execute` — uses the component's async embed path."""
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+        raw_output = await self.text_embedder.embed_text_async(input_data.query)
         logger.debug(f"{self.name}: {raw_output['meta']}")
         result = TextEmbeddingOutput(
             embedding=raw_output["embedding"],

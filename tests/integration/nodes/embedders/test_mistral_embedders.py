@@ -289,3 +289,31 @@ def test_text_embedder_invalid_model(
         mock_embedding.side_effect = error
         response = workflow.run(input_data=query_input)
         assert_embedder_failure(response, embedder, output_node, "BadRequestError", "Unknown model")
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_mistral_text_embedder_async(
+    mock_aembedding_executor, mistral_text_embedder, query_input, mistral_model
+):
+    result = await mistral_text_embedder.run_async(input_data=query_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    mock_aembedding_executor.assert_awaited_once_with(
+        input=[query_input["query"]],
+        model=mistral_model,
+        api_key="api_key",
+    )
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_mistral_document_embedder_async(
+    mock_aembedding_executor, mistral_document_embedder, document_input, mistral_model
+):
+    result = await mistral_document_embedder.run_async(input_data=document_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    mock_aembedding_executor.assert_awaited_once_with(
+        input=[document_input["documents"][0].content],
+        model=mistral_model,
+        api_key="api_key",
+    )

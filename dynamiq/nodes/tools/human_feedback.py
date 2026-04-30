@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import Node, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.feedback import FeedbackMethod
 from dynamiq.types.streaming import StreamingEntitySource, StreamingEventMessage
 from dynamiq.utils.logger import logger
@@ -140,17 +141,35 @@ Important:
         )
         return self
 
-    def input_method_console(self, prompt: str) -> str:
+    def input_method_console(self, prompt: str, config: RunnableConfig = None) -> str:
         """
         Get input from the user using the console input method.
+        Cancellable: runs input() in a daemon thread and polls for cancellation.
 
         Args:
             prompt (str): The prompt to display to the user.
+            config (RunnableConfig, optional): Configuration for cancellation check.
 
         Returns:
             str: The user's input.
         """
-        return input(prompt)
+        import threading as _threading
+
+        check_cancellation(config)
+
+        result = {}
+
+        def _read_input():
+            result["feedback"] = input(prompt)
+
+        input_thread = _threading.Thread(target=_read_input, daemon=True)
+        input_thread.start()
+
+        while input_thread.is_alive():
+            check_cancellation(config)
+            input_thread.join(timeout=0.5)
+
+        return result.get("feedback", "")
 
     def input_method_streaming(self, prompt: str, config: RunnableConfig, **kwargs) -> str:
         """
@@ -164,6 +183,7 @@ Important:
             str: The user's input.
         """
         logger.debug(f"Tool {self.name} - {self.id}: started with prompt {prompt}")
+        check_cancellation(config)
 
         streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
 
@@ -226,9 +246,10 @@ Important:
 
     def _execute_ask(self, input_text: str, config: RunnableConfig, **kwargs) -> str:
         """Execute the 'ask' action - get input from user."""
+        check_cancellation(config)
         if isinstance(self.input_method, FeedbackMethod):
             if self.input_method == FeedbackMethod.CONSOLE:
-                return self.input_method_console(input_text)
+                return self.input_method_console(input_text, config=config)
             elif self.input_method == FeedbackMethod.STREAM:
                 streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
                 if not streaming.input_streaming_enabled:
@@ -273,6 +294,7 @@ Important:
         """
         logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         input_text = Template(self.msg_template).render(input_data.model_dump())

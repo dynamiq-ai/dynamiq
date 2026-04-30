@@ -13,6 +13,7 @@ from dynamiq.nodes.retrievers.base import Retriever
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types import Document
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 
@@ -412,12 +413,14 @@ class VectorStoreRetriever(Node):
         try:
             kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
             kwargs.pop("run_depends", None)
+            check_cancellation(config)
             text_embedder_output = self.text_embedder.run(
                 input_data={"query": query}, run_depends=self._run_depends, config=config, **kwargs
             )
             self._run_depends = [NodeDependency(node=self.text_embedder).to_dict(for_tracing=True)]
             embedding = text_embedder_output.output.get("embedding")
 
+            check_cancellation(config)
             document_retriever_output = self.document_retriever.run(
                 input_data={
                     "embedding": embedding,
@@ -441,6 +444,7 @@ class VectorStoreRetriever(Node):
                     f"Tool {self.name} - {self.id}: Applying document_reranker '{self.document_reranker.name}' "
                     f"to {docs_before_rerank} documents"
                 )
+                check_cancellation(config)
                 document_reranker_result = self.document_reranker.run(
                     input_data={"query": query, "documents": retrieved_documents},
                     run_depends=self._run_depends,
