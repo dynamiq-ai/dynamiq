@@ -8,6 +8,7 @@ from dynamiq.nodes.node import Node, NodeDependency, NodeGroup, ensure_config
 from dynamiq.prompts import prompts
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types import Document
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 DEFAULT_PROMPT = """
@@ -197,6 +198,7 @@ class LLMDocumentRanker(Node):
             messages=[prompts.Message(role="user", content=self.prompt_template)]
         )
 
+        check_cancellation(config)
         with ContextAwareThreadPoolExecutor() as executor:
             llm_results = list(
                 executor.map(

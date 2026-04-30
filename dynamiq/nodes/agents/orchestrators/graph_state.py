@@ -14,6 +14,7 @@ from dynamiq.nodes.tools.function_tool import FunctionTool
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.prompts import MessageRole
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.cancellation import CanceledException
 from dynamiq.utils.logger import logger
 
 
@@ -187,6 +188,8 @@ class GraphState(Node):
 
                 run_depends = [NodeDependency(node=self.manager).to_dict(for_tracing=True)]
 
+                if manager_result.status == RunnableStatus.CANCELED:
+                    raise CanceledException()
                 if manager_result.status != RunnableStatus.SUCCESS:
                     result = manager_result.to_dict()
                     logger.error(f"GraphOrchestrator: Error generating actions for state: {result}")
@@ -214,6 +217,8 @@ class GraphState(Node):
                 **kwargs,
             )
 
+            if response.status == RunnableStatus.CANCELED:
+                raise CanceledException()
             if response.status != RunnableStatus.SUCCESS:
                 error_msg = response.error.message
                 logger.error(f"GraphOrchestrator: Failed to execute Agent {task.name} with Error: {error_msg}")
@@ -229,6 +234,8 @@ class GraphState(Node):
 
         response = task.run(input_data=input_data, config=config, run_depends=run_depends, **kwargs)
 
+        if response.status == RunnableStatus.CANCELED:
+            raise CanceledException()
         if response.status != RunnableStatus.SUCCESS:
             error_msg = response.error.message
             logger.error(f"GraphOrchestrator: Failed to execute {task.name} with Error: {error_msg}")

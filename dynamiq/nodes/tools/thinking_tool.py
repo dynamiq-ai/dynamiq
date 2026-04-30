@@ -10,6 +10,7 @@ from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 THINKING_PROMPT_TEMPLATE = """You are a thinking assistant that helps
@@ -212,6 +213,7 @@ Examples:
 
         logger.debug(f"Tool {self.name} - {self.id}: prompt content:\n{prompt_content}")
 
+        check_cancellation(config)
         result = self.llm.run(
             input_data={},
             prompt=Prompt(messages=[Message(role="user", content=prompt_content, static=True)]),

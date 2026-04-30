@@ -24,6 +24,7 @@ from dynamiq.prompts import (
 )
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types import Document
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 DEFAULT_EXTRACTION_INSTRUCTION = """
@@ -344,6 +345,7 @@ class LLMImageConverter(Node):
 
         prompt = self.vision_prompt
 
+        check_cancellation(config)
         with ContextAwareThreadPoolExecutor() as executor:
             llm_results = list(
                 executor.map(
@@ -371,6 +373,7 @@ class LLMImageConverter(Node):
         Returns:
             dict: The result from the LLM.
         """
+        check_cancellation(config)
         llm_result = self.llm.run(
             input_data=input_data,
             prompt=prompt,

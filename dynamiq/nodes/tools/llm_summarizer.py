@@ -8,6 +8,7 @@ from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 
@@ -182,6 +183,7 @@ Parameter Guide:
             ValueError: If the language model execution fails.
         """
         prompt = self.prompt_template.format(input=chunk)
+        check_cancellation(config)
         result = self.llm.run(
             input_data={},
             prompt=Prompt(messages=[Message(role="user", content=prompt)]),
@@ -229,7 +231,10 @@ Parameter Guide:
                 " ".join(words[i : i + self.chunk_size])
                 for i in range(0, len(words), self.chunk_size)
             ]
-            summaries = [self._process_chunk(chunk, config, **kwargs) for chunk in content_chunks]
+            summaries = []
+            for chunk in content_chunks:
+                check_cancellation(config)
+                summaries.append(self._process_chunk(chunk, config, **kwargs))
             summary = "\n".join(summaries)
         else:
             summary = self._process_chunk(input_text, config, **kwargs)
