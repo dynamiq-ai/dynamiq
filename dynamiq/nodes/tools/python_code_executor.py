@@ -266,7 +266,7 @@ class PythonCodeExecutor(Node):
         "is forced onto the 'Agg' backend so you can always render"
         " plots headlessly with `plt.savefig(...)` (no GUI popups). "
         "Available libraries include: pandas, numpy, "
-        "requests, pdfplumber, PyPDF2 and pypdf, docx (python-docx), "
+        "requests, pdfplumber, pypdf, docx (python-docx), "
         "pptx (python-pptx), markdown, openpyxl, "
         "seaborn (preloaded as `sns` and the default for plotting), and the "
         "standard library. Default to seaborn for"

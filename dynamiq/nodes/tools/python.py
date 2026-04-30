@@ -46,7 +46,6 @@ ALLOWED_MODULES = [
     "docx",
     "pptx",
     "pdfplumber",
-    "PyPDF2",
     "pypdf",
     "matplotlib",
     "seaborn",
