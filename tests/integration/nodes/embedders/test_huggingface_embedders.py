@@ -322,3 +322,34 @@ def test_text_embedder_invalid_model(
         mock_embedding.side_effect = error
         response = workflow.run(input_data=query_input)
         assert_embedder_failure(response, embedder, output_node, "BadRequestError", "does not exist")
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_huggingface_text_embedder_async(
+    mock_aembedding_executor, huggingface_text_embedder, query_input, huggingface_model, huggingface_api_base
+):
+    result = await huggingface_text_embedder.run_async(input_data=query_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    mock_aembedding_executor.assert_awaited_once_with(
+        input=query_input["query"],
+        model=huggingface_model,
+        api_key="api_key",
+        api_base=huggingface_api_base,
+    )
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_huggingface_document_embedder_async(
+    mock_aembedding_executor, huggingface_document_embedder, document_input, huggingface_model, huggingface_api_base
+):
+    result = await huggingface_document_embedder.run_async(input_data=document_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    # HF API is non-batched: one call per document, input is a single string (not a list).
+    mock_aembedding_executor.assert_awaited_once_with(
+        input=document_input["documents"][0].content,
+        model=huggingface_model,
+        api_key="api_key",
+        api_base=huggingface_api_base,
+    )

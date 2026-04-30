@@ -115,13 +115,15 @@ class BaseEmbedder(BaseModel):
     client: Any | None = None
 
     _embedding: Callable = PrivateAttr()
+    _aembedding: Callable = PrivateAttr()
 
     def __init__(self, *args, **kwargs):
         # Import in runtime to save memory
         super().__init__(**kwargs)
-        from litellm import embedding
+        from litellm import aembedding, embedding
 
         self._embedding = embedding
+        self._aembedding = aembedding
 
     @property
     def embed_params(self) -> dict:
@@ -187,6 +189,43 @@ class BaseEmbedder(BaseModel):
 
         return {"embedding": embedding, "meta": meta}
 
+    async def embed_text_async(self, text: str) -> dict:
+        """Async mirror of :meth:`embed_text`. Uses ``litellm.aembedding``.
+
+        Args:
+            text (str): The text string to be embedded.
+
+        Returns:
+            dict: Same shape as :meth:`embed_text`.
+
+        Raises:
+            TypeError: If input is not a string.
+            ValueError: If the embedding response is invalid.
+        """
+        if not isinstance(text, str):
+            msg = (
+                "TextEmbedder expects a string as input."
+                "In case you want to embed a list of Documents, please use the DocumentEmbedder."
+            )
+            raise TypeError(msg)
+
+        text_to_embed = self.prefix + text + self.suffix
+        text_to_embed = text_to_embed.replace("\n", " ")
+        text_to_embed = self._apply_text_truncation(text_to_embed)
+
+        response = await self._aembedding(model=self.model, input=[text_to_embed], **self.embed_params)
+
+        meta = {"model": response.model, "usage": dict(response.usage)}
+        embedding = response.data[0]["embedding"]
+
+        try:
+            self.validate_embedding(embedding)
+        except InvalidEmbeddingError as e:
+            logger.error(f"Invalid embedding returned by model {self.model}: {str(e)}")
+            raise ValueError(f"Invalid embedding returned by the model: {str(e)}")
+
+        return {"embedding": embedding, "meta": meta}
+
     def _prepare_documents_to_embed(self, documents: list[Document]) -> list[str]:
         """
         Prepare the texts to embed by concatenating the Document text with the metadata fields to embed.
@@ -237,6 +276,29 @@ class BaseEmbedder(BaseModel):
 
         return all_embeddings, meta
 
+    async def _embed_texts_batch_async(
+        self, texts_to_embed: list[str], batch_size: int
+    ) -> tuple[list[list[float]], dict[str, Any]]:
+        """Async mirror of :meth:`_embed_texts_batch`."""
+        all_embeddings: list[list[float]] = []
+        meta: dict[str, Any] = {}
+        embed_params = self.embed_params
+        for i in range(0, len(texts_to_embed), batch_size):
+            batch = texts_to_embed[i : i + batch_size]
+            response = await self._aembedding(model=self.model, input=batch, **embed_params)
+            embeddings = [el["embedding"] for el in response.data]
+            all_embeddings.extend(embeddings)
+
+            if "model" not in meta:
+                meta["model"] = response.model
+            if "usage" not in meta:
+                meta["usage"] = dict(response.usage)
+            else:
+                meta["usage"]["prompt_tokens"] += response.usage.prompt_tokens
+                meta["usage"]["total_tokens"] += response.usage.total_tokens
+
+        return all_embeddings, meta
+
     def embed_documents(self, documents: list[Document]) -> dict:
         """
         Embeds a list of documents and returns the embedded documents along with meta information.
@@ -271,6 +333,50 @@ class BaseEmbedder(BaseModel):
         texts_to_embed = self._prepare_documents_to_embed(documents=documents)
 
         embeddings, meta = self._embed_texts_batch(
+            texts_to_embed=texts_to_embed, batch_size=self.batch_size
+        )
+
+        for doc, emb in zip(documents, embeddings):
+            doc.embedding = emb
+
+        try:
+            self.validate_document_embeddings(documents)
+        except DocumentEmbeddingValidationError as e:
+            logger.error(f"Invalid document embeddings returned by model {self.model}: {str(e)}")
+            raise ValueError(f"Invalid document embeddings: {str(e)}")
+
+        return {"documents": documents, "meta": meta}
+
+    async def embed_documents_async(self, documents: list[Document]) -> dict:
+        """Async mirror of :meth:`embed_documents`.
+
+        Args:
+            documents (list[Document]): The documents to be embedded.
+
+        Returns:
+            dict: Same shape as :meth:`embed_documents`.
+
+        Raises:
+            TypeError: If input is not a list of Documents.
+            ValueError: If the embedding response is invalid.
+        """
+        if (
+            not isinstance(documents, list)
+            or documents
+            and not isinstance(documents[0], Document)
+        ):
+            msg = (
+                "DocumentEmbedder expects a list of Documents as input."
+                "In case you want to embed a string, please use the embed_text."
+            )
+            raise TypeError(msg)
+
+        if not documents:
+            return {"documents": [], "meta": {}}
+
+        texts_to_embed = self._prepare_documents_to_embed(documents=documents)
+
+        embeddings, meta = await self._embed_texts_batch_async(
             texts_to_embed=texts_to_embed, batch_size=self.batch_size
         )
 
