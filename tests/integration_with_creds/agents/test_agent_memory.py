@@ -424,8 +424,7 @@ def test_memory_snapshot_with_inmemory_backend(anthropic_llm, run_config):
        intact after both turns (cross-scope isolation).
     """
     usage_capture = UsageCaptureCallback()
-    test_run_config = run_config.model_copy(deep=True)
-    test_run_config.callbacks = [usage_capture]
+    test_run_config = run_config.model_copy(update={"callbacks": [usage_capture]})
 
     lookup_tool = Python(
         name="company-lookup",

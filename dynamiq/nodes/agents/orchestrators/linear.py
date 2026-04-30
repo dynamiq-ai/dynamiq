@@ -19,6 +19,7 @@ from dynamiq.nodes.agents.orchestrators.orchestrator import (
 )
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.feedback import PlanApprovalConfig
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
@@ -158,6 +159,7 @@ class LinearOrchestrator(Orchestrator):
         feedback = ""
 
         for _ in range(self.max_plan_retries):
+            check_cancellation(config)
             manager_result = self.manager.run(
                 input_data={
                     "action": "plan",
@@ -172,6 +174,8 @@ class LinearOrchestrator(Orchestrator):
             )
             self._run_depends = [NodeDependency(node=self.manager).to_dict(for_tracing=True)]
 
+            if manager_result.status == RunnableStatus.CANCELED:
+                raise CanceledException()
             if manager_result.status != RunnableStatus.SUCCESS:
                 error_message = f"LLM '{self.manager.name}' failed: {manager_result.error.message}"
                 raise ValueError(f"Failed to generate tasks: {error_message}")
@@ -255,6 +259,7 @@ class LinearOrchestrator(Orchestrator):
         """Execute the tasks using appropriate agents."""
 
         for count, task in enumerate(tasks[self._resumed_iterations :], start=self._resumed_iterations + 1):
+            check_cancellation(config)
             task_per_llm = f"**{task.description}**\n**Required information for output**: {task.output}"
 
             dependency_outputs = self.get_dependency_outputs(task.dependencies)
@@ -263,6 +268,7 @@ class LinearOrchestrator(Orchestrator):
 
             success_flag = False
             for _ in range(self.manager.max_loops):
+                check_cancellation(config)
                 manager_result = self.manager.run(
                     input_data={
                         "action": "assign",
@@ -275,6 +281,8 @@ class LinearOrchestrator(Orchestrator):
                     **kwargs,
                 )
                 self._run_depends = [NodeDependency(node=self.manager).to_dict(for_tracing=True)]
+                if manager_result.status == RunnableStatus.CANCELED:
+                    raise CanceledException()
 
                 if manager_result.status == RunnableStatus.SUCCESS:
                     assigned_agent_index = self._extract_agent_index(manager_result.output.get("content", {}))
@@ -302,6 +310,8 @@ class LinearOrchestrator(Orchestrator):
                             **kwargs,
                         )
                         self._run_depends = [NodeDependency(node=assigned_agent).to_dict(for_tracing=True)]
+                        if result.status == RunnableStatus.CANCELED:
+                            raise CanceledException()
                         if result.status != RunnableStatus.SUCCESS:
                             raise ValueError(
                                 f"Failed to execute task {task.id}.{task.name} "

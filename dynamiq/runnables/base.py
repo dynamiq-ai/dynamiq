@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.cache.config import CacheConfig
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.checkpoints.config import CheckpointConfig
+from dynamiq.types.cancellation import CancellationConfig
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.types.streaming import StreamingConfig
 from dynamiq.utils import format_value, generate_uuid, is_called_from_async_context
@@ -34,12 +35,19 @@ class RunnableConfig(BaseModel):
     nodes_override: dict[str, NodeRunnableConfig] = {}
     dry_run: DryRunConfig | None = None
     checkpoint: CheckpointConfig | None = Field(default=None, description="Per-run checkpoint config overrides")
+    cancellation: CancellationConfig = Field(
+        default_factory=CancellationConfig,
+        description=(
+            "Cancellation config for mid-run abort. Always active — every RunnableConfig gets a fresh "
+            "CancellationToken by default. Grab the token via `config.cancellation.token` to signal cancellation."
+        ),
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def to_checkpoint_dict(self) -> dict:
         """Serialize config for checkpoint storage, excluding non-serializable runtime fields."""
-        return self.model_dump(mode="json", exclude={"callbacks", "checkpoint"})
+        return self.model_dump(mode="json", exclude={"callbacks", "checkpoint", "cancellation"})
 
 
 class RunnableStatus(str, Enum):
@@ -57,6 +65,7 @@ class RunnableStatus(str, Enum):
     FAILURE = "failure"
     SUCCESS = "success"
     SKIP = "skip"
+    CANCELED = "canceled"
 
 
 class RunnableFailedNodeInfo(BaseModel):

@@ -19,6 +19,7 @@ from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools import Python
 from dynamiq.nodes.tools.function_tool import function_tool
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
@@ -253,6 +254,8 @@ class GraphOrchestrator(Orchestrator):
         )
         self._run_depends = [NodeDependency(node=self.manager).to_dict(for_tracing=True)]
 
+        if manager_result.status == RunnableStatus.CANCELED:
+            raise CanceledException()
         if manager_result.status != RunnableStatus.SUCCESS:
             error = manager_result.error.to_dict()
             logger.error(f"GraphOrchestrator {self.id}: Error generating final answer: {error}")
@@ -366,6 +369,7 @@ class GraphOrchestrator(Orchestrator):
                 state = self._state_by_id[self.initial_state]
 
             for i in range(self._resumed_iterations, self.max_loops):
+                check_cancellation(config)
                 logger.info(f"GraphOrchestrator {self.id}: Next state: {state.id}")
                 self._current_state_id = state.id
 
@@ -382,6 +386,8 @@ class GraphOrchestrator(Orchestrator):
                         run_depends=self._run_depends,
                         **kwargs,
                     )
+                    if output.status == RunnableStatus.CANCELED:
+                        raise CanceledException()
                     if output.status != RunnableStatus.SUCCESS:
                         raise OrchestratorError(output.error.message)
 

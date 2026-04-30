@@ -320,6 +320,11 @@ class CheckpointFlowMixin(BaseModel):
         cfg = self._effective_checkpoint_config or self.checkpoint
         return cfg.enabled and cfg.backend is not None and cfg.checkpoint_on_failure_enabled
 
+    def _is_checkpoint_on_cancel_enabled(self) -> bool:
+        """Check if checkpointing on cancel is enabled."""
+        cfg = self._effective_checkpoint_config or self.checkpoint
+        return cfg.enabled and cfg.backend is not None and cfg.checkpoint_on_cancel_enabled
+
     def _setup_checkpoint_context(self, config: RunnableConfig | None) -> RunnableConfig | None:
         """Setup checkpoint context for HITL and mid-agent-loop checkpointing.
 

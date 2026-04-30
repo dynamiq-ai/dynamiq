@@ -202,6 +202,32 @@ class StreamingQueueCallbackHandler(BaseStreamingCallbackHandler):
         self.send_to_queue(event)
         self.done_event.set()
 
+    def on_workflow_canceled(self, serialized: dict[str, Any], **kwargs: Any) -> None:
+        """Called when the workflow is canceled.
+
+        Sends a cancellation event to the queue and signals done so
+        WebSocket/SSE clients don't hang waiting for more events.
+        """
+        name = serialized.get("name", serialized.get("id", "?"))
+        event = StreamingEventMessage(
+            run_id=str(get_run_id(kwargs)),
+            wf_run_id=kwargs.get("wf_run_id"),
+            entity_id=serialized.get("id"),
+            data={
+                "canceled": True,
+                "error": {"message": f"Workflow '{name}' was canceled during execution"},
+            },
+            event=serialized.get("streaming", {}).get("event"),
+            source=StreamingEntitySource(
+                id=serialized.get("id"),
+                name=serialized.get("name", None),
+                group=serialized.get("group", None),
+                type=serialized.get("type", None),
+            ),
+        )
+        self.send_to_queue(event)
+        self.done_event.set()
+
     def send_to_queue(self, event: StreamingEventMessage):
         """Send the event to the queue."""
         self.queue.put_nowait(event)

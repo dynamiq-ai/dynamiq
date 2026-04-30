@@ -98,6 +98,15 @@ class NodeCallbackHandler(ABC):
         """
         pass
 
+    def on_node_canceled(self, serialized: dict[str, Any], **kwargs: Any):
+        """Called when the node is canceled mid-execution.
+
+        Args:
+            serialized (dict[str, Any]): Serialized node data.
+            **kwargs (Any): Additional arguments.
+        """
+        pass
+
 
 class BaseCallbackHandler(NodeCallbackHandler, ABC):
     """Abstract base class for general callback handlers."""
@@ -138,6 +147,15 @@ class BaseCallbackHandler(NodeCallbackHandler, ABC):
         """
         pass
 
+    def on_workflow_canceled(self, serialized: dict[str, Any], **kwargs: Any):
+        """Called when the workflow is canceled mid-execution.
+
+        Args:
+            serialized (dict[str, Any]): Serialized workflow data.
+            **kwargs (Any): Additional arguments.
+        """
+        pass
+
     def on_flow_start(
         self, serialized: dict[str, Any], input_data: dict[str, Any], **kwargs: Any
     ):
@@ -170,6 +188,15 @@ class BaseCallbackHandler(NodeCallbackHandler, ABC):
         Args:
             serialized (dict[str, Any]): Serialized flow data.
             error (BaseException): Error encountered.
+            **kwargs (Any): Additional arguments.
+        """
+        pass
+
+    def on_flow_canceled(self, serialized: dict[str, Any], **kwargs: Any):
+        """Called when the flow is canceled mid-execution.
+
+        Args:
+            serialized (dict[str, Any]): Serialized flow data.
             **kwargs (Any): Additional arguments.
         """
         pass

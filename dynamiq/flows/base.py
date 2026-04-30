@@ -108,3 +108,18 @@ class BaseFlow(BaseModel, Runnable, ABC):
                 if isinstance(callback, TracingCallbackHandler):
                     dict_kwargs["for_tracing"] = True
                 callback.on_flow_error(self.to_dict(**dict_kwargs), error, **kwargs)
+
+    def run_on_flow_canceled(self, config: RunnableConfig = None, **kwargs: Any):
+        """
+        Execute callbacks when the flow is canceled mid-execution.
+
+        Args:
+            config (RunnableConfig, optional): Configuration for the runnable.
+            **kwargs: Additional keyword arguments to be passed to the callbacks.
+        """
+        if config and config.callbacks:
+            for callback in config.callbacks:
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_flow_canceled(self.to_dict(**dict_kwargs), **kwargs)
