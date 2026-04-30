@@ -1305,9 +1305,8 @@ class FileWriteTool(Node):
             Dict with ``content`` (summary with counts and any warnings) and
             ``file_info``.
 
-        Raises:
-            ToolExecutionException: when one or more find strings are absent
-                from the original file content (no changes written).
+        Returns a result dict with a message when one or more find strings are absent
+        (no changes written), rather than raising — same pattern as shell command errors.
         """
         edits = input_data.edits
         encoding = input_data.encoding or "utf-8"
@@ -1317,11 +1316,12 @@ class FileWriteTool(Node):
 
         missing = [e.find for e in edits if e.find not in content]
         if missing:
-            raise ToolExecutionException(
-                f"Aborting edit: find string(s) not found in '{path}': "
-                f"{[repr(s[:80]) for s in missing]}. No changes were made.",
-                recoverable=True,
+            message = (
+                f"Edit not applied: find string(s) not found in '{path}': "
+                f"{[repr(s[:80]) for s in missing]}. No changes were made."
             )
+            logger.warning(f"Tool {self.name} - {self.id}: {message}")
+            return {"content": message}
 
         total = 0
         skipped: list[str] = []

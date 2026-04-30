@@ -361,7 +361,7 @@ def test_edit_sequential_and_replace_all(file_store):
 
 
 def test_edit_find_not_found_aborts(file_store):
-    """If a find string doesn't exist in the original file, abort with no changes."""
+    """If a find string doesn't exist in the original file, return a message with no changes."""
     file_store.store("readme.md", b"# Title\n")
     tool = FileWriteTool(file_store=file_store)
 
@@ -374,7 +374,8 @@ def test_edit_find_not_found_aborts(file_store):
         }
     )
 
-    assert result.status == RunnableStatus.FAILURE
+    assert result.status == RunnableStatus.SUCCESS
+    assert "not found" in result.output["content"]
     assert file_store.retrieve("readme.md") == b"# Title\n"
 
 
