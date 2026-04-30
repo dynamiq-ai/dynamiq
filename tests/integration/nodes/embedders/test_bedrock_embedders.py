@@ -303,3 +303,35 @@ def test_text_embedder_invalid_model(
         mock_embedding.side_effect = error
         response = workflow.run(input_data=query_input)
         assert_embedder_failure(response, embedder, output_node, "BadRequestError", "not found")
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_bedrock_text_embedder_async(
+    mock_aembedding_executor, bedrock_text_embedder, query_input, bedrock_connection, bedrock_model
+):
+    result = await bedrock_text_embedder.run_async(input_data=query_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    mock_aembedding_executor.assert_awaited_once_with(
+        input=[query_input["query"]],
+        model=bedrock_model,
+        aws_secret_access_key=bedrock_connection.secret_access_key,
+        aws_region_name=bedrock_connection.region,
+        aws_access_key_id=bedrock_connection.access_key_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_bedrock_document_embedder_async(
+    mock_aembedding_executor, bedrock_document_embedder, document_input, bedrock_connection, bedrock_model
+):
+    result = await bedrock_document_embedder.run_async(input_data=document_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    mock_aembedding_executor.assert_awaited_once_with(
+        input=[document_input["documents"][0].content],
+        model=bedrock_model,
+        aws_secret_access_key=bedrock_connection.secret_access_key,
+        aws_region_name=bedrock_connection.region,
+        aws_access_key_id=bedrock_connection.access_key_id,
+    )

@@ -81,6 +81,27 @@ def mock_embedding_executor(mocker):
 
 
 @pytest.fixture
+def mock_aembedding_executor(mocker):
+    """Async counterpart of ``mock_embedding_executor``. Patches ``BaseEmbedder._aembedding``."""
+    from unittest.mock import AsyncMock
+
+    def build_response(*args, **kwargs):
+        embed_r = EmbeddingResponse()
+        embedding_data = {"embedding": [0]}
+        embed_r["data"] = [embedding_data]
+        embed_r["model"] = kwargs.get("model")
+        embed_r["usage"] = {"usage": {"prompt_tokens": 6, "completion_tokens": 0, "total_tokens": 6}}
+        return embed_r
+
+    mock = mocker.patch(
+        "dynamiq.components.embedders.base.BaseEmbedder._aembedding",
+        new_callable=AsyncMock,
+        side_effect=build_response,
+    )
+    yield mock
+
+
+@pytest.fixture
 def mock_embedding_tracing_output():
     return {
         "embedding": [

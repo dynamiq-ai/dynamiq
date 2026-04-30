@@ -313,3 +313,33 @@ def test_text_embedder_invalid_model(
         mock_embedding.side_effect = error
         response = workflow.run(input_data=query_input)
         assert_embedder_failure(response, embedder, output_node, "BadRequestError", "Model invalid-model not found")
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_gemini_text_embedder_async(
+    mock_aembedding_executor, gemini_text_embedder, query_input, gemini_model
+):
+    result = await gemini_text_embedder.run_async(input_data=query_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    mock_aembedding_executor.assert_awaited_once_with(
+        input=[query_input["query"]],
+        model=gemini_model,
+        task_type="RETRIEVAL_QUERY",
+        api_key="api_key",
+    )
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_gemini_document_embedder_async(
+    mock_aembedding_executor, gemini_document_embedder, document_input, gemini_model
+):
+    result = await gemini_document_embedder.run_async(input_data=document_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    mock_aembedding_executor.assert_awaited_once_with(
+        input=[document_input["documents"][0].content],
+        model=gemini_model,
+        task_type="RETRIEVAL_DOCUMENT",
+        api_key="api_key",
+    )

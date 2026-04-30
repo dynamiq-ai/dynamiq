@@ -318,3 +318,33 @@ def test_text_embedder_invalid_model(
         mock_embedding.side_effect = error
         response = workflow.run(input_data=query_input)
         assert_embedder_failure(response, embedder, output_node, "BadRequestError", "not found")
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_vertexai_text_embedder_async(
+    mock_aembedding_executor, vertexai_text_embedder, query_input, vertexai_connection, vertexai_model
+):
+    result = await vertexai_text_embedder.run_async(input_data=query_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    mock_aembedding_executor.assert_awaited_once_with(
+        task_type="RETRIEVAL_QUERY",
+        input=[query_input["query"]],
+        model=vertexai_model,
+        **vertexai_connection.conn_params,
+    )
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_vertexai_document_embedder_async(
+    mock_aembedding_executor, vertexai_document_embedder, document_input, vertexai_connection, vertexai_model
+):
+    result = await vertexai_document_embedder.run_async(input_data=document_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    mock_aembedding_executor.assert_awaited_once_with(
+        task_type="RETRIEVAL_DOCUMENT",
+        input=[document_input["documents"][0].content],
+        model=vertexai_model,
+        **vertexai_connection.conn_params,
+    )
