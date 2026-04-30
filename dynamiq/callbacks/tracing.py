@@ -23,6 +23,7 @@ class RunStatus(str, Enum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     SKIPPED = "skipped"
+    CANCELED = "canceled"
 
 
 class RunType(str, Enum):
@@ -509,6 +510,44 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
 
         if tool_data := kwargs.get("tool_data"):
             run.metadata["tool_data"] = tool_data
+
+    @staticmethod
+    def _canceled_message(kind: str, serialized: dict[str, Any]) -> str:
+        """Build a human-readable cancellation message from serialized node/flow/workflow data."""
+        name = serialized.get("name", serialized.get("id", "?"))
+        return f"{kind} '{name}' was canceled during execution"
+
+    def on_workflow_canceled(self, serialized: dict[str, Any], **kwargs: Any):
+        """Called when the workflow is canceled mid-execution."""
+        run = ensure_run(get_run_id(kwargs), self.runs)
+        run.end_time = datetime.now(UTC)
+        run.status = RunStatus.CANCELED
+        run.error = {"message": self._canceled_message("Workflow", serialized)}
+        self.flush()
+
+    def on_flow_canceled(self, serialized: dict[str, Any], **kwargs: Any):
+        """Called when the flow is canceled mid-execution."""
+        run = ensure_run(get_run_id(kwargs), self.runs)
+        run.end_time = datetime.now(UTC)
+        run.status = RunStatus.CANCELED
+        run.error = {"message": self._canceled_message("Flow", serialized)}
+
+        if run.parent_run_id is None:
+            self.flush()
+
+    def on_node_canceled(self, serialized: dict[str, Any], **kwargs: Any):
+        """Called when the node is canceled mid-execution."""
+        run_id = get_run_id(kwargs)
+        if (run := self.runs.get(run_id)) is None:
+            run = self._get_node_base_run(serialized, **kwargs)
+            self.runs[run_id] = run
+
+        run.end_time = datetime.now(UTC)
+        run.status = RunStatus.CANCELED
+        run.error = {"message": self._canceled_message("Node", serialized)}
+
+        if run.parent_run_id is None:
+            self.flush()
 
     def flush(self):
         """Flush the runs to the tracing client."""

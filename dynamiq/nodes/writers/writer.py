@@ -10,6 +10,7 @@ from dynamiq.nodes.node import NodeDependency, NodeGroup, ensure_config
 from dynamiq.nodes.writers.base import Writer
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types import Document
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.logger import logger
 
@@ -196,6 +197,7 @@ class VectorStoreWriter(Node):
             kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
             kwargs.pop("run_depends", None)
 
+            check_cancellation(config)
             document_embedder_output = self.document_embedder.run(
                 input_data={"documents": documents}, run_depends=self._run_depends, config=config, **kwargs
             )
@@ -203,6 +205,7 @@ class VectorStoreWriter(Node):
             embedded_documents = document_embedder_output.output.get("documents", [])
             logger.debug(f"Tool {self.name} - {self.id}: embedded {len(embedded_documents)} documents")
 
+            check_cancellation(config)
             document_writer_output = self.document_writer.run(
                 input_data={"documents": embedded_documents},
                 run_depends=self._run_depends,

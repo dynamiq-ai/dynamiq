@@ -12,6 +12,7 @@ from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.base import AgentManager
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.cancellation import CanceledException
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
@@ -158,6 +159,8 @@ class Orchestrator(IterativeCheckpointMixin, Node, ABC):
             **kwargs,
         )
 
+        if handle_result.status == RunnableStatus.CANCELED:
+            raise CanceledException()
         if handle_result.status != RunnableStatus.SUCCESS:
             error = handle_result.error.to_dict()
             error_message = f"Orchestrator {self.name} - {self.id}: Manager failed to analyze input: {error}"
@@ -232,6 +235,8 @@ class Orchestrator(IterativeCheckpointMixin, Node, ABC):
         )
         self._run_depends = [NodeDependency(node=self.manager).to_dict(for_tracing=True)]
 
+        if manager_result.status == RunnableStatus.CANCELED:
+            raise CanceledException()
         if manager_result.status != RunnableStatus.SUCCESS:
             error_message = f"Manager '{self.manager.name}' failed: {manager_result.error.message}"
             logger.error(f"Orchestrator {self.name} - {self.id}: Error generating final, due to error: {error_message}")
