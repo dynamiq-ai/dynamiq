@@ -591,13 +591,29 @@ class Agent(HistoryManagerMixin, BaseAgent):
             raise ActionParsingException("Error: No function called, you need to call the correct function.")
 
         tool_calls = llm_result.output["tool_calls"]
+        if not tool_calls:
+            raise ActionParsingException("Error: tool_calls is empty.", recoverable=True)
+
         first_call = tool_calls[0]
         action = first_call["function"]["name"].strip()
         first_args = first_call["function"]["arguments"]
+        if isinstance(first_args, str):
+            try:
+                first_args = json.loads(first_args, strict=False)
+            except json.JSONDecodeError as e:
+                raise ActionParsingException(f"Error parsing function arguments string. {e}", recoverable=True)
 
-        thoughts = [tc["function"]["arguments"].get("thought", "") for tc in tool_calls]
+        thoughts = []
+        for tc in tool_calls:
+            tc_arguments = tc["function"]["arguments"]
+            if isinstance(tc_arguments, dict):
+                thoughts.append(tc_arguments.get("thought", ""))
         thought = "\n".join(t for t in thoughts if t)
         if action == "provide_final_answer":
+            if "answer" not in first_args:
+                raise ActionParsingException(
+                    "Error: 'answer' field missing in provide_final_answer call.", recoverable=True
+                )
             final_answer = first_args["answer"]
             self._requested_output_files = self._parse_output_files_csv(first_args.get("output_files") or "")
             self.log_final_output(thought, final_answer, loop_num)
@@ -617,17 +633,20 @@ class Agent(HistoryManagerMixin, BaseAgent):
             for tc in actual_tool_calls:
                 tc_name = tc["function"]["name"].strip()
                 tc_args = tc["function"]["arguments"]
-                tc_input = tc_args["action_input"]
+                tc_input = tc_args.get("action_input", {k: v for k, v in tc_args.items() if k != "thought"})
                 if not isinstance(tc_input, dict):
                     tc_input = {"input": tc_input}
                 tool_items.append(ToolCallItem(name=tc_name, input=tc_input, thought=tc_args.get("thought", "")))
 
-            validated = ParallelToolCallsInputSchema(tools=tool_items)
+            try:
+                validated = ParallelToolCallsInputSchema(tools=tool_items)
+            except Exception as e:
+                raise ActionParsingException(f"Error validating parallel tool calls. {e}", recoverable=True)
             action_input = validated.model_dump()
             self.log_reasoning(thought, PARALLEL_TOOL_NAME, action_input["tools"], loop_num)
             return thought, PARALLEL_TOOL_NAME, action_input
 
-        action_input = first_args["action_input"]
+        action_input = first_args.get("action_input", {k: v for k, v in first_args.items() if k != "thought"})
 
         if isinstance(action_input, str):
             try:
