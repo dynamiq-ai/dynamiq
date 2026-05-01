@@ -1676,6 +1676,12 @@ class PipedreamOAuth2(BaseConnection):
 
         return requests
 
+    async def connect_async(self):
+        """Build an httpx.AsyncClient mirroring requests defaults."""
+        import httpx
+
+        return httpx.AsyncClient(follow_redirects=True, trust_env=True)
+
     @property
     def conn_params(self) -> dict:
         return {
