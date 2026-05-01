@@ -147,12 +147,17 @@ class HttpApiKey(BaseApiKeyConnection):
         """Build an httpx.AsyncClient mirroring requests defaults.
 
         Defaults pinned to match the sync path: ``follow_redirects=True`` (httpx defaults to
-        False, requests defaults to True) and ``trust_env=True``. No global timeout is set;
-        callers pass ``timeout=`` per-request, mirroring the sync tools.
+        False, requests defaults to True) and ``trust_env=True``. ``timeout=httpx.Timeout(None)``
+        is explicit because httpx otherwise applies a 5-second default — the sync ``requests``
+        module has no implicit timeout. Callers pass ``timeout=`` per-request.
         """
         import httpx
 
-        return httpx.AsyncClient(follow_redirects=True, trust_env=True)  # nosec B113
+        return httpx.AsyncClient(  # nosec B113 - timeout=None is intentional; matches requests defaults
+            follow_redirects=True,
+            trust_env=True,
+            timeout=httpx.Timeout(None),
+        )
 
     @property
     def conn_params(self) -> dict:
@@ -231,12 +236,17 @@ class Http(BaseConnection):
         """Build an httpx.AsyncClient mirroring requests defaults.
 
         Defaults pinned to match the sync path: ``follow_redirects=True`` (httpx defaults to
-        False, requests defaults to True) and ``trust_env=True``. No global timeout is set;
-        callers pass ``timeout=`` per-request, mirroring the sync tools.
+        False, requests defaults to True) and ``trust_env=True``. ``timeout=httpx.Timeout(None)``
+        is explicit because httpx otherwise applies a 5-second default — the sync ``requests``
+        module has no implicit timeout. Callers pass ``timeout=`` per-request.
         """
         import httpx
 
-        return httpx.AsyncClient(follow_redirects=True, trust_env=True)  # nosec B113
+        return httpx.AsyncClient(  # nosec B113 - timeout=None is intentional; matches requests defaults
+            follow_redirects=True,
+            trust_env=True,
+            timeout=httpx.Timeout(None),
+        )
 
 
 class OpenAI(BaseApiKeyConnection):
@@ -1680,7 +1690,11 @@ class PipedreamOAuth2(BaseConnection):
         """Build an httpx.AsyncClient mirroring requests defaults."""
         import httpx
 
-        return httpx.AsyncClient(follow_redirects=True, trust_env=True)  # nosec B113
+        return httpx.AsyncClient(  # nosec B113 - timeout=None is intentional; matches requests defaults
+            follow_redirects=True,
+            trust_env=True,
+            timeout=httpx.Timeout(None),
+        )
 
     @property
     def conn_params(self) -> dict:
