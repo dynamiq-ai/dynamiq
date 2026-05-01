@@ -8,6 +8,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
+from dynamiq.nodes.agents.orchestrators.orchestrator import ActionCommand
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
@@ -98,7 +99,7 @@ async def _send_stream_events_by_ws(send_handler):
             step = message.data["choices"][-1]["delta"]["step"]
             if step == "manager_planning":
                 next_action = message.data["choices"][-1]["delta"]["content"]["next_action"]
-                if next_action["command"] == "delegate":
+                if next_action["command"] == ActionCommand.DELEGATE:
                     task = next_action["task"]
                     agent = next_action["agent"]
                     content = f"Delegating task: '{task}' for agent: **{agent}**."
