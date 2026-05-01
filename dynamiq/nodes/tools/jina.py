@@ -253,10 +253,9 @@ class JinaScrapeTool(ConnectionNode):
                 json=request_body,
             )
             response.raise_for_status()
+            return self._format_scrape_response(response, request_body, headers)
         except Exception as e:
             raise self._wrap_request_exception(e)
-
-        return self._format_scrape_response(response, request_body, headers)
 
     async def execute_async(
         self, input_data: JinaScrapeInputSchema, config: RunnableConfig = None, **kwargs
@@ -279,10 +278,9 @@ class JinaScrapeTool(ConnectionNode):
                 json=request_body,
             )
             response.raise_for_status()
+            return self._format_scrape_response(response, request_body, headers)
         except Exception as e:
             raise self._wrap_request_exception(e)
-
-        return self._format_scrape_response(response, request_body, headers)
 
 
 SummaryPreference = bool | Literal["all"]

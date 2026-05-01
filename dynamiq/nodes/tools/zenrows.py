@@ -108,9 +108,11 @@ class ZenRowsTool(ConnectionNode):
 
         try:
             response = self.client.request(**self._build_request_kwargs(input_data))
+            return self._handle_response(response, input_data)
+        except ToolExecutionException:
+            raise
         except Exception as e:
             raise self._wrap_request_exception(e)
-        return self._handle_response(response, input_data)
 
     async def execute_async(
         self, input_data: ZenRowsInputSchema, config: RunnableConfig = None, **kwargs
@@ -123,6 +125,8 @@ class ZenRowsTool(ConnectionNode):
         client = await self.get_async_client()
         try:
             response = await client.request(**self._build_request_kwargs(input_data))
+            return self._handle_response(response, input_data)
+        except ToolExecutionException:
+            raise
         except Exception as e:
             raise self._wrap_request_exception(e)
-        return self._handle_response(response, input_data)
