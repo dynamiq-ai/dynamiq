@@ -669,7 +669,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         thought = llm_generated_output_json["thought"]
         action = llm_generated_output_json["action"]
-        action_input = llm_generated_output_json["action_input"]
+        action_input = llm_generated_output_json.get("action_input")
 
         if action == "finish":
             self._requested_output_files = self._parse_output_files_csv(
@@ -678,12 +678,23 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self.log_final_output(thought, action_input, loop_num)
             return thought, "final_answer", action_input
 
-        try:
-            if isinstance(action_input, str):
-                action_input = action_input.replace("\\'", "'")
-                action_input = json.loads(action_input, strict=False)
-        except json.JSONDecodeError as e:
-            raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
+        if action_input is None:
+            action_input = {}
+        elif isinstance(action_input, list):
+            parsed = {}
+            for item in action_input:
+                key = item.get("key", "")
+                raw = item.get("value", "")
+                try:
+                    parsed[key] = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    parsed[key] = raw
+            action_input = parsed
+        elif not isinstance(action_input, dict):
+            raise ActionParsingException(
+                f"Expected action_input to be an array or object, got {type(action_input).__name__}.",
+                recoverable=True,
+            )
 
         self.log_reasoning(thought, action, action_input, loop_num)
         return thought, action, action_input

@@ -198,8 +198,21 @@ def generate_structured_output_schemas(
                         "description": f"Next action to make (choose from [{tool_names}, finish]).",
                     },
                     "action_input": {
-                        "type": "string",
-                        "description": action_input_description,
+                        "type": "array",
+                        "description": (
+                            action_input_description
+                            + " Required when action is a tool name. Omit when action is 'finish'."
+                            " Each item is a {key, value} pair representing one tool parameter."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": {"type": "string"},
+                                "value": {"type": "string"},
+                            },
+                            "required": ["key", "value"],
+                            "additionalProperties": False,
+                        },
                     },
                     "output_files": {
                         "type": "string",
