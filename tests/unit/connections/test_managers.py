@@ -66,20 +66,54 @@ async def test_async_client_is_cached_within_loop():
 
 
 def test_async_client_loop_id_isolation():
+    """Sequential ``asyncio.run`` invocations must never share a cached client.
+
+    Loop ids are returned by ``id()`` on the loop object and can be recycled when one
+    loop is garbage-collected. The manager uses a weakref to the originating loop on
+    each cached client to detect this and rebuild rather than returning a stale client.
+    """
     cm = ConnectionManager()
     connection = HttpConnection(method=HTTPMethod.GET, url="https://example.com")
 
     async def build():
         return await cm.get_async_connection_client(connection)
 
-    client_loop_1 = asyncio.run(build())
-    client_loop_2 = asyncio.run(build())
+    clients = [asyncio.run(build()) for _ in range(10)]
 
-    assert client_loop_1 is not client_loop_2
-    assert len(cm.connection_clients) == 2
+    assert len({id(c) for c in clients}) == 10, "stale client returned across asyncio.run boundaries"
 
     asyncio.run(cm.aclose())
     assert len(cm.connection_clients) == 0
+
+
+@pytest.mark.asyncio
+async def test_async_client_eviction_when_underlying_closed():
+    """A closed httpx.AsyncClient in the cache must not be returned."""
+    cm = ConnectionManager()
+    connection = HttpConnection(method=HTTPMethod.GET, url="https://example.com")
+
+    client1 = await cm.get_async_connection_client(connection)
+    await client1.aclose()
+    assert client1.is_closed
+
+    client2 = await cm.get_async_connection_client(connection)
+    try:
+        assert client2 is not client1
+        assert not client2.is_closed
+    finally:
+        await cm.aclose()
+
+
+def test_is_client_alive_recognizes_httpx_is_closed():
+    """``_is_client_alive`` must inspect ``is_closed`` (httpx) as well as ``closed``."""
+    cm = ConnectionManager()
+
+    class _FakeHttpx:
+        def __init__(self, closed):
+            self.is_closed = closed
+
+    assert cm._is_client_alive(_FakeHttpx(False)) is True
+    assert cm._is_client_alive(_FakeHttpx(True)) is False
 
 
 @pytest.mark.asyncio
