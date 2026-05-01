@@ -321,6 +321,35 @@ class FirecrawlTool(ConnectionNode):
 
         return "\n\n".join(sections)
 
+    def _resolve_scrape_request(self, input_data: FirecrawlInputSchema) -> tuple[str, dict, str]:
+        url = input_data.url or self.url
+        if not url:
+            logger.error(f"Tool {self.name} - {self.id}: failed to get input data.")
+            raise ValueError("URL is required for scraping")
+        scrape_data = self._build_scrape_data(url, input_data)
+        connection_url = self.connection.url + "scrape"
+        return url, scrape_data, connection_url
+
+    def _wrap_scrape_exception(self, exc: Exception) -> ToolExecutionException:
+        logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {exc}")
+        return ToolExecutionException(
+            f"Tool '{self.name}' failed to execute the requested action. Error: {str(exc)}. "
+            f"Please analyze the error and take appropriate action.",
+            recoverable=True,
+        )
+
+    def _format_scrape_output(self, url: str, scrape_result: dict) -> dict[str, Any]:
+        if self.is_optimized_for_agents:
+            result = self._format_agent_response(url, scrape_result)
+            data = scrape_result.get("data") or {}
+            page_metadata = data.get("metadata") or {}
+            output = {"content": result, "urls": [url], "page_metadata": page_metadata}
+        else:
+            result = {"success": scrape_result.get("success", False), "url": url, **(scrape_result.get("data") or {})}
+            output = {"content": result}
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
+        return output
+
     def execute(
         self, input_data: FirecrawlInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
@@ -330,13 +359,7 @@ class FirecrawlTool(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        url = input_data.url or self.url
-        if not url:
-            logger.error(f"Tool {self.name} - {self.id}: failed to get input data.")
-            raise ValueError("URL is required for scraping")
-
-        scrape_data = self._build_scrape_data(url, input_data)
-        connection_url = self.connection.url + "scrape"
+        url, scrape_data, connection_url = self._resolve_scrape_request(input_data)
 
         try:
             response = self.client.request(
@@ -348,23 +371,32 @@ class FirecrawlTool(ConnectionNode):
             response.raise_for_status()
             scrape_result = response.json()
         except Exception as e:
-            logger.error(
-                f"Tool {self.name} - {self.id}: failed to get results. Error: {e}"
-            )
-            raise ToolExecutionException(
-                f"Tool '{self.name}' failed to execute the requested action. Error: {str(e)}. "
-                f"Please analyze the error and take appropriate action.",
-                recoverable=True,
-            )
+            raise self._wrap_scrape_exception(e)
 
-        if self.is_optimized_for_agents:
-            result = self._format_agent_response(url, scrape_result)
-            data = scrape_result.get("data") or {}
-            page_metadata = data.get("metadata") or {}
-            output = {"content": result, "urls": [url], "page_metadata": page_metadata}
-        else:
-            result = {"success": scrape_result.get("success", False), "url": url, **(scrape_result.get("data") or {})}
-            output = {"content": result}
+        return self._format_scrape_output(url, scrape_result)
 
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
-        return output
+    async def execute_async(
+        self, input_data: FirecrawlInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
+        """Native async execution path mirroring ``execute``."""
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        url, scrape_data, connection_url = self._resolve_scrape_request(input_data)
+        client = await self.get_async_client()
+
+        try:
+            response = await client.request(
+                method=self.connection.method,
+                url=connection_url,
+                json=scrape_data,
+                headers=self.connection.headers,
+            )
+            response.raise_for_status()
+            scrape_result = response.json()
+        except Exception as e:
+            raise self._wrap_scrape_exception(e)
+
+        return self._format_scrape_output(url, scrape_result)
