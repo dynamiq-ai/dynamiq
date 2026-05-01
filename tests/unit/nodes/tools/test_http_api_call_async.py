@@ -152,6 +152,71 @@ async def test_http_api_call_execute_async_payload_json_mode():
 
 
 @pytest.mark.asyncio
+async def test_http_api_call_json_payload_omits_empty_files_kwarg():
+    """When no files are uploaded, ``files`` must not appear in request kwargs.
+
+    Regression: previously ``_build_request_kwargs`` always set ``files={}``, which left
+    the async request with both ``files`` and ``json`` arguments — currently tolerated by
+    httpx 0.28 but ambiguous and not guaranteed across versions.
+    """
+    node = _build_node(ResponseType.JSON)
+    mock_client = MagicMock()
+    mock_client.request = AsyncMock(return_value=_mock_response(json_payload={"ok": True}))
+
+    schema = HttpApiCallInputSchema(
+        data={"k": "v"},
+        payload_type="json",
+        url="https://api.example.com/post",
+    )
+
+    with patch.object(HttpApiCall, "get_async_client", AsyncMock(return_value=mock_client)):
+        await node.execute_async(schema)
+
+    call_kwargs = mock_client.request.await_args.kwargs
+    assert "files" not in call_kwargs
+    assert call_kwargs["json"] == {"k": "v"}
+
+
+@pytest.mark.asyncio
+async def test_http_api_call_real_httpx_json_payload():
+    """End-to-end against a real ``httpx.AsyncClient`` to catch httpx behavior shifts.
+
+    Uses ``httpx.MockTransport`` so no network is required. If a future httpx version
+    starts rejecting ``files=`` alongside ``json=``, this test fails before the bug
+    reaches users.
+    """
+    import httpx
+
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.content
+        captured["content_type"] = request.headers.get("content-type", "")
+        return httpx.Response(200, json={"ok": True})
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
+
+    node = _build_node(ResponseType.JSON)
+    schema = HttpApiCallInputSchema(
+        data={"k": "v"},
+        payload_type="json",
+        url="https://api.example.com/post",
+    )
+
+    try:
+        with patch.object(HttpApiCall, "get_async_client", AsyncMock(return_value=real_client)):
+            result = await node.execute_async(schema)
+    finally:
+        await real_client.aclose()
+
+    assert result["status_code"] == 200
+    assert result["content"] == {"ok": True}
+    assert captured["content_type"].startswith("application/json")
+    assert captured["body"] == b'{"k": "v"}'
+
+
+@pytest.mark.asyncio
 async def test_http_api_call_concurrency_overlap():
     """Verify gather'd run_async calls overlap rather than serialize."""
     from tests.helpers.async_node import assert_concurrent_execution

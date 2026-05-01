@@ -175,7 +175,13 @@ class HttpApiCall(ConnectionNode):
     input_schema: ClassVar[type[HttpApiCallInputSchema]] = HttpApiCallInputSchema
 
     def _build_request_kwargs(self, input_data: HttpApiCallInputSchema) -> dict[str, Any]:
-        """Build the kwargs dict passed to the underlying request call."""
+        """Build the kwargs dict passed to the underlying request call.
+
+        ``files`` is only included when there is at least one upload. ``httpx`` accepts
+        ``files`` and ``json`` together but treats them as ambiguous body inputs; the
+        sync ``requests`` module uses an ``if files:`` falsy check internally and never
+        sends an empty files arg, so omitting it here keeps both paths byte-equivalent.
+        """
         data = self.connection.data | self.data | input_data.data
         payload_type = input_data.payload_type or self.payload_type
         files = {param: file_io.getvalue() for param, file_io in input_data.files.items()}
@@ -184,15 +190,17 @@ class HttpApiCall(ConnectionNode):
         if not url:
             raise ValueError("No url provided.")
         method = input_data.method or self.method or self.connection.method
-        return {
+        kwargs: dict[str, Any] = {
             "method": method,
             "url": url,
             "headers": self.connection.headers | self.headers | input_data.headers,
             "params": self.connection.params | self.params | input_data.params,
             "timeout": self.timeout,
-            "files": files,
             **extras,
         }
+        if files:
+            kwargs["files"] = files
+        return kwargs
 
     def _parse_response(self, response: Any) -> dict[str, Any]:
         """Validate status and shape the response per response_type."""
