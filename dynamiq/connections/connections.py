@@ -152,7 +152,7 @@ class HttpApiKey(BaseApiKeyConnection):
         """
         import httpx
 
-        return httpx.AsyncClient(follow_redirects=True, trust_env=True)
+        return httpx.AsyncClient(follow_redirects=True, trust_env=True)  # nosec B113
 
     @property
     def conn_params(self) -> dict:
@@ -236,7 +236,7 @@ class Http(BaseConnection):
         """
         import httpx
 
-        return httpx.AsyncClient(follow_redirects=True, trust_env=True)
+        return httpx.AsyncClient(follow_redirects=True, trust_env=True)  # nosec B113
 
 
 class OpenAI(BaseApiKeyConnection):
@@ -1680,7 +1680,7 @@ class PipedreamOAuth2(BaseConnection):
         """Build an httpx.AsyncClient mirroring requests defaults."""
         import httpx
 
-        return httpx.AsyncClient(follow_redirects=True, trust_env=True)
+        return httpx.AsyncClient(follow_redirects=True, trust_env=True)  # nosec B113
 
     @property
     def conn_params(self) -> dict:

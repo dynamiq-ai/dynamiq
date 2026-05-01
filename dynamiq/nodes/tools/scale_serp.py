@@ -133,7 +133,9 @@ class ScaleSerpTool(ConnectionNode):
 
         return "\n".join(formatted_results).strip()
 
-    def _build_request_kwargs(self, input_data: ScaleSerpInputSchema) -> tuple[dict[str, Any], Any, str | None, str | None]:
+    def _build_request_kwargs(
+        self, input_data: ScaleSerpInputSchema
+    ) -> tuple[dict[str, Any], Any, str | None, str | None]:
         """Return (request_kwargs, search_type, query, url)."""
         query = input_data.query or self.query
         url = input_data.url or self.url
