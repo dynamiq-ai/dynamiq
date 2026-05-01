@@ -420,7 +420,7 @@ If a PR adds nodes with other nodes as parameters (e.g., agents with LLMs, tools
       data['parent_node'] = self.parent_node.to_dict(for_tracing=True)  # Minimal to avoid cycles
   ```
 
-  See `ReActAgent` or other agent implementations for reference patterns."
+  See `Agent` or other agent implementations for reference patterns."
 
 ### Exclude non-serializable fields from to_dict()
 

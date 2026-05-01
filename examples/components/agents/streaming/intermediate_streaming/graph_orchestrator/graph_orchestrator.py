@@ -6,9 +6,9 @@ import streamlit as st
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.agents.orchestrators.adaptive import ActionCommand
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
+from dynamiq.nodes.agents.orchestrators.orchestrator import ActionCommand
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig, StreamingMode

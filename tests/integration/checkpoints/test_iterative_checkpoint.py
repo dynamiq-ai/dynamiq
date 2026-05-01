@@ -795,48 +795,6 @@ class TestSummarizerToolCheckpointInFlow:
 class TestOrchestratorResumeSkipsIterations:
     """Orchestrator checkpoint + resume: verify execute() consumes restored iteration state."""
 
-    def test_orchestrator_execute_sets_resumed_iterations(self):
-        """When orchestrator is resumed, execute() calls get_start_iteration() and sets _resumed_iterations."""
-        from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
-        from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
-
-        orch = AdaptiveOrchestrator(
-            id="ao",
-            manager=AdaptiveAgentManager(llm=make_agent_llm()),
-            agents=[],
-            max_loops=10,
-        )
-        orch._chat_history = [{"role": "user", "content": "task"}, {"role": "assistant", "content": "delegated"}]
-        orch._completed_iterations = 3
-
-        state_dict = orch.to_checkpoint_state().model_dump()
-
-        new_orch = AdaptiveOrchestrator(
-            id="ao",
-            manager=AdaptiveAgentManager(llm=make_agent_llm()),
-            agents=[],
-            max_loops=10,
-        )
-        new_orch.from_checkpoint_state(state_dict)
-        assert new_orch.is_resumed is True
-
-        resuming = new_orch.is_resumed
-        new_orch.reset_run_state()
-
-        assert new_orch._chat_history == []
-        assert new_orch._completed_iterations == 0
-
-        if resuming:
-            new_orch._resumed_iterations = new_orch.get_start_iteration()
-            new_orch.reset_resumed_flag()
-
-        assert new_orch._resumed_iterations == 3
-        assert new_orch._chat_history == [
-            {"role": "user", "content": "task"},
-            {"role": "assistant", "content": "delegated"},
-        ]
-        assert not new_orch.is_resumed
-
     def test_graph_orchestrator_execute_restores_state_on_resume(self):
         """GraphOrchestrator resume restores chat_history, context, and current_state_id."""
         from dynamiq.nodes.agents.orchestrators.graph import GraphOrchestrator
@@ -863,30 +821,6 @@ class TestOrchestratorResumeSkipsIterations:
         assert new_orch._chat_history == [{"role": "user", "content": "navigate"}]
         assert new_orch.context == {"key": "restored_value"}
         assert new_orch._current_state_id == "state_2"
-
-    def test_linear_orchestrator_execute_restores_results_on_resume(self):
-        """LinearOrchestrator resume restores _results and _chat_history."""
-        from dynamiq.nodes.agents.orchestrators.linear import LinearOrchestrator
-        from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
-
-        orch = LinearOrchestrator(id="lo", manager=LinearAgentManager(llm=make_agent_llm()), agents=[])
-        orch._chat_history = [{"role": "user", "content": "plan"}]
-        orch._results = {1: {"name": "Task1", "result": "done"}}
-        orch._completed_iterations = 1
-
-        state_dict = orch.to_checkpoint_state().model_dump()
-
-        new_orch = LinearOrchestrator(id="lo", manager=LinearAgentManager(llm=make_agent_llm()), agents=[])
-        new_orch.from_checkpoint_state(state_dict)
-
-        resuming = new_orch.is_resumed
-        new_orch.reset_run_state()
-        if resuming:
-            new_orch._resumed_iterations = new_orch.get_start_iteration()
-            new_orch.reset_resumed_flag()
-
-        assert new_orch._resumed_iterations == 1
-        assert new_orch._chat_history == [{"role": "user", "content": "plan"}]
 
     @pytest.mark.parametrize("backend_type", ["in_memory", "file"])
     def test_agent_checkpoint_captures_iteration_count(self, mocker, backend_factory, backend_type):
