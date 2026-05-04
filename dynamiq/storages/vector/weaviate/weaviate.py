@@ -13,6 +13,7 @@ from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException, VectorStoreException
 from dynamiq.storages.vector.policies import DuplicatePolicy
+from dynamiq.storages.vector.utils import DEFAULT_SEARCHABLE_TEXT_METADATA_FIELDS
 from dynamiq.types import Document
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.logger import logger
@@ -56,12 +57,20 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
         "user_id": DataType.TEXT,
         "session_id": DataType.TEXT,
     }
+    _DEFAULT_QUERY_METADATA_PROPERTIES: tuple[str, ...] = DEFAULT_SEARCHABLE_TEXT_METADATA_FIELDS
 
     def _get_property_type(self, property_name: str) -> str:
         """Gets the Weaviate data type for a known property, defaults to TEXT."""
         if property_name == self.content_key:
             return DataType.TEXT
         return self._PROPERTY_DATA_TYPES.get(property_name, DataType.TEXT)
+
+    def _get_query_properties(self, properties: list[Any], content_key: str | None = None) -> list[str]:
+        """Return text properties that should participate in keyword/hybrid search."""
+        available_properties = {p.name for p in properties}
+        preferred_properties = (content_key or self.content_key, *self._DEFAULT_QUERY_METADATA_PROPERTIES)
+        query_properties = [prop for prop in preferred_properties if prop in available_properties]
+        return query_properties or [content_key or self.content_key]
 
     @staticmethod
     def is_valid_collection_name(name: str) -> bool:
@@ -814,6 +823,7 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
         query: str,
         filters: dict[str, Any] | None = None,
         top_k: int | None = None,
+        content_key: str | None = None,
     ) -> list[Document]:
         """
         Perform BM25 retrieval on the documents.
@@ -826,18 +836,19 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
         Returns:
             list[Document]: A list of retrieved documents.
         """
-        properties = [p.name for p in self._collection.config.get().properties]
+        collection_properties = self._collection.config.get().properties
+        properties = [p.name for p in collection_properties]
         result = self._collection.query.bm25(
             query=query,
             filters=convert_filters(filters) if filters else None,
             limit=top_k,
             include_vector=True,
-            query_properties=["content"],
+            query_properties=self._get_query_properties(collection_properties, content_key=content_key),
             return_properties=properties,
             return_metadata=["score"],
         )
 
-        return [self._to_document(doc) for doc in result.objects]
+        return [self._to_document(doc, content_key=content_key) for doc in result.objects]
 
     def _embedding_retrieval(
         self,
@@ -907,7 +918,8 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
         Returns:
             list[Document]: A list of retrieved documents.
         """
-        properties = [p.name for p in self._collection.config.get().properties]
+        collection_properties = self._collection.config.get().properties
+        properties = [p.name for p in collection_properties]
 
         query_alpha = self.alpha if alpha is None else alpha
         result = self._collection.query.hybrid(
@@ -916,7 +928,7 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
             filters=convert_filters(filters) if filters else None,
             limit=top_k,
             include_vector=not exclude_document_embeddings,
-            query_properties=[content_key or self.content_key],
+            query_properties=self._get_query_properties(collection_properties, content_key=content_key),
             return_properties=properties,
             return_metadata=["score"],
             alpha=query_alpha,

@@ -11,7 +11,7 @@ from dynamiq.nodes.embedders.base import TextEmbedder
 from dynamiq.nodes.node import NodeDependency, NodeGroup, ensure_config
 from dynamiq.nodes.retrievers.base import Retriever
 from dynamiq.nodes.types import ActionType
-from dynamiq.runnables import RunnableConfig
+from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types import Document
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
@@ -408,7 +408,7 @@ class VectorStoreRetriever(Node):
             else self.similarity_threshold
         )
 
-        alpha = input_data.alpha or self.alpha
+        alpha = input_data.alpha if input_data.alpha is not None else self.alpha
         query = input_data.query
         try:
             kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
@@ -417,6 +417,9 @@ class VectorStoreRetriever(Node):
             text_embedder_output = self.text_embedder.run(
                 input_data={"query": query}, run_depends=self._run_depends, config=config, **kwargs
             )
+            if text_embedder_output.status != RunnableStatus.SUCCESS:
+                error = text_embedder_output.error.message if text_embedder_output.error else "unknown error"
+                raise RuntimeError(f"Text embedder failed: {error}")
             self._run_depends = [NodeDependency(node=self.text_embedder).to_dict(for_tracing=True)]
             embedding = text_embedder_output.output.get("embedding")
 
@@ -427,13 +430,16 @@ class VectorStoreRetriever(Node):
                     **({"top_k": top_k} if top_k else {}),
                     "filters": filters,
                     "alpha": alpha,
-                    **({"query": query} if alpha else {}),
+                    **({"query": query} if query is not None else {}),
                     **({"similarity_threshold": similarity_threshold} if similarity_threshold is not None else {}),
                 },
                 run_depends=self._run_depends,
                 config=config,
                 **kwargs,
             )
+            if document_retriever_output.status != RunnableStatus.SUCCESS:
+                error = document_retriever_output.error.message if document_retriever_output.error else "unknown error"
+                raise RuntimeError(f"Document retriever failed: {error}")
             self._run_depends = [NodeDependency(node=self.document_retriever).to_dict(for_tracing=True)]
             retrieved_documents = document_retriever_output.output.get("documents", [])
             logger.info(f"Tool {self.name} - {self.id}: retrieved {len(retrieved_documents)} documents")

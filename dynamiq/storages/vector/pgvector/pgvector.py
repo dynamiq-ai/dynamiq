@@ -17,7 +17,11 @@ from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.pgvector.filters import _convert_filters_to_query
-from dynamiq.storages.vector.utils import create_pgvector_file_id_filter, create_pgvector_file_ids_filter
+from dynamiq.storages.vector.utils import (
+    DEFAULT_SEARCHABLE_TEXT_METADATA_FIELDS,
+    create_pgvector_file_id_filter,
+    create_pgvector_file_ids_filter,
+)
 from dynamiq.types import Document
 from dynamiq.types.constants import SANITIZED_VALUE_PLACEHOLDER
 from dynamiq.types.dry_run import DryRunConfig
@@ -86,6 +90,8 @@ class PGVectorStoreWriterParams(PGVectorStoreParams, BaseWriterVectorStoreParams
 
 class PGVectorStore(BaseVectorStore, DryRunMixin):
     """Vector store using pgvector."""
+
+    _DEFAULT_QUERY_METADATA_PROPERTIES: tuple[str, ...] = DEFAULT_SEARCHABLE_TEXT_METADATA_FIELDS
 
     def __init__(
         self,
@@ -571,24 +577,39 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         """
 
         content_key = content_key or self.content_key
+        search_vector = self._keyword_search_vector(content_key)
 
         create_keyword_index_query = SQL(
             """
             CREATE INDEX IF NOT EXISTS {index_name}
             ON {schema_name}.{table_name}
-            USING gin(to_tsvector({language}, {content_key}));
+            USING gin({search_vector});
             """
         ).format(
             index_name=Identifier(self.keyword_index_name),
             schema_name=Identifier(self.schema_name),
             table_name=Identifier(self.table_name),
-            content_key=Identifier(content_key),
-            language=SQLLiteral(self.language),
+            search_vector=search_vector,
         )
 
         with conn.cursor(row_factory=dict_row) as cur:
             self._execute_sql_query(create_keyword_index_query, cursor=cur)
             conn.commit()
+
+    def _keyword_search_vector(self, content_key: str | None = None) -> SQL:
+        """Build the full-text vector over content and selected searchable metadata."""
+        content_key = content_key or self.content_key
+        searchable_parts = [SQL("coalesce({content_key}, '')").format(content_key=Identifier(content_key))]
+        searchable_parts.extend(
+            SQL("coalesce(metadata->>{field}, '')").format(field=SQLLiteral(field))
+            for field in self._DEFAULT_QUERY_METADATA_PROPERTIES
+        )
+        searchable_text = SQL(" || ' ' || ").join(searchable_parts)
+
+        return SQL("to_tsvector({language}, {searchable_text})").format(
+            language=SQLLiteral(self.language),
+            searchable_text=searchable_text,
+        )
 
     def _drop_index(self, conn: psycopg.Connection) -> None:
         """
@@ -1090,6 +1111,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         self._validate_top_k(top_k)
 
         content_key = content_key or self.content_key
+        search_vector = self._keyword_search_vector(content_key)
 
         # Do not select the embeddings if exclude_document_embeddings is True
         select_fields = f"id, {content_key}, metadata" if exclude_document_embeddings else "*"
@@ -1097,16 +1119,16 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         # Build the base SELECT query with score
         base_select = SQL(
             """
-            SELECT {fields}, ts_rank_cd(to_tsvector({language}, {content_key}), query) AS score
+            SELECT {fields}, ts_rank_cd({search_vector}, query) AS score
             FROM {schema_name}.{table_name}, plainto_tsquery({language}, %s) query
-            WHERE to_tsvector({language}, {content_key}) @@ query
+            WHERE {search_vector} @@ query
             """
         ).format(
             fields=SQL(select_fields),
             schema_name=Identifier(self.schema_name),
             table_name=Identifier(self.table_name),
             language=SQLLiteral(self.language),
-            content_key=Identifier(content_key),
+            search_vector=search_vector,
         )
 
         # Handle filters if they exist
@@ -1177,6 +1199,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         vector_function = self.vector_function
         content_key = content_key or self.content_key
         embedding_key = embedding_key or self.embedding_key
+        search_vector = self._keyword_search_vector(content_key)
 
         # If alpha is 0, perform purely keyword search
         if alpha == 0:
@@ -1247,9 +1270,9 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             """
             keyword_search AS (
                 SELECT id, {content_key}, metadata{embedding_select},
-                       RANK() OVER (ORDER BY ts_rank_cd(to_tsvector({language}, {content_key}), query) DESC) AS rank
+                       RANK() OVER (ORDER BY ts_rank_cd({search_vector}, query) DESC) AS rank
                 FROM {schema_name}.{table_name}, plainto_tsquery({language}, {query}) query
-                WHERE to_tsvector({language}, {content_key}) @@ query
+                WHERE {search_vector} @@ query
                 {where_clause}
                 LIMIT {subquery_limit}
             )
@@ -1261,6 +1284,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             table_name=Identifier(self.table_name),
             language=SQLLiteral(self.language),
             query=SQLLiteral(query),
+            search_vector=search_vector,
             where_clause=keyword_where_clause,
             subquery_limit=SQLLiteral(subquery_limit),
         )

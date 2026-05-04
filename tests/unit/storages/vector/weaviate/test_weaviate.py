@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -80,6 +81,19 @@ def test_valid_property_names(name: str) -> None:
 def test_invalid_property_names(name: str) -> None:
     """Test that invalid property names are correctly identified."""
     assert WeaviateVectorStore.is_valid_property_name(name) is False
+
+
+def test_get_query_properties_includes_searchable_metadata_fields() -> None:
+    store = WeaviateVectorStore.__new__(WeaviateVectorStore)
+    store.content_key = "content"
+    properties = [
+        SimpleNamespace(name="content"),
+        SimpleNamespace(name="file_name"),
+        SimpleNamespace(name="file_path"),
+        SimpleNamespace(name="file_content_hash"),
+    ]
+
+    assert store._get_query_properties(properties) == ["content", "file_name", "file_path"]
 
 
 @patch("dynamiq.storages.vector.weaviate.weaviate.Weaviate")

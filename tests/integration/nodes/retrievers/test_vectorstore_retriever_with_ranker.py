@@ -208,6 +208,9 @@ def test_vectorstore_retriever_without_ranker(
 
     retrieved_docs = output["documents"]
     assert len(retrieved_docs) == len(mock_retriever_documents)
+    document_retriever_input = mock_retriever_run.call_args.kwargs["input_data"]
+    assert document_retriever_input["query"] == "What is machine learning?"
+    assert document_retriever_input["alpha"] == 0.0
 
 
 @patch("dynamiq.nodes.rankers.llm.LLMDocumentRanker.run")
