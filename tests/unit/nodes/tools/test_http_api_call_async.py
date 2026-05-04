@@ -1,3 +1,4 @@
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -182,15 +183,19 @@ async def test_http_api_call_real_httpx_json_payload():
     """End-to-end against a real ``httpx.AsyncClient`` to catch httpx behavior shifts.
 
     Uses ``httpx.MockTransport`` so no network is required. If a future httpx version
-    starts rejecting ``files=`` alongside ``json=``, this test fails before the bug
-    reaches users.
+    starts rejecting ``files=`` alongside ``json=``, or the request body fails to be
+    sent as JSON, this test fails before the bug reaches users. The body assertion
+    parses JSON rather than byte-comparing because httpx 0.28 switched to compact
+    separators (``{"k":"v"}``) where 0.27 used spaced ones (``{"k": "v"}``).
     """
+    import json
+
     import httpx
 
-    captured = {}
+    captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        captured["body"] = request.content
+        captured["body_bytes"] = request.content
         captured["content_type"] = request.headers.get("content-type", "")
         return httpx.Response(200, json={"ok": True})
 
@@ -213,7 +218,7 @@ async def test_http_api_call_real_httpx_json_payload():
     assert result["status_code"] == 200
     assert result["content"] == {"ok": True}
     assert captured["content_type"].startswith("application/json")
-    assert captured["body"] == b'{"k": "v"}'
+    assert json.loads(captured["body_bytes"]) == {"k": "v"}
 
 
 @pytest.mark.asyncio
