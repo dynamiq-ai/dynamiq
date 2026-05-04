@@ -39,3 +39,30 @@ def test_recursive_character_to_dict_excludes_runtime_splitter():
     assert "splitter" in splitter.to_dict_exclude_params
     serialized = splitter.model_dump(exclude={"splitter"})
     assert serialized["chunk_size"] == 50
+
+
+def test_recursive_character_parent_chunks_are_positionally_matched():
+    splitter = RecursiveCharacterSplitter(
+        chunk_size=24,
+        chunk_overlap=0,
+        parent_chunk_size=80,
+        parent_chunk_overlap=0,
+        separators=[" ", ""],
+    )
+    splitter.init_components()
+    text = " ".join(f"token_{index:02d}" for index in range(30))
+
+    chunks = splitter.execute(splitter.input_schema(documents=[Document(content=text)]))["documents"]
+
+    parent_chunks = [chunk for chunk in chunks if chunk.metadata.get("is_parent")]
+    child_chunks = [chunk for chunk in chunks if not chunk.metadata.get("is_parent")]
+    assert parent_chunks
+    assert all("start_index" in chunk.metadata for chunk in parent_chunks)
+    assert all("parent_chunk_id" in chunk.metadata for chunk in child_chunks)
+
+    parents_by_id = {chunk.id: chunk for chunk in parent_chunks}
+    for child in child_chunks:
+        parent = parents_by_id[child.metadata["parent_chunk_id"]]
+        child_start = child.metadata["start_index"]
+        parent_start = parent.metadata["start_index"]
+        assert parent_start <= child_start < parent_start + len(parent.content)

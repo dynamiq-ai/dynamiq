@@ -2,7 +2,7 @@ import os
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms import OpenAI as OpenAILLM
-from dynamiq.nodes.splitters import ContextualChunker, RecursiveCharacterSplitter
+from dynamiq.nodes.splitters import ContextualSplitter, RecursiveCharacterSplitter
 from dynamiq.types import Document
 
 
@@ -13,8 +13,8 @@ def main() -> None:
 
     inner = RecursiveCharacterSplitter(chunk_size=140, chunk_overlap=20)
     llm = OpenAILLM(connection=OpenAIConnection(), model="gpt-4o-mini")
-    chunker = ContextualChunker(inner_splitter=inner, llm=llm, prepend=True)
-    chunker.init_components()
+    splitter = ContextualSplitter(inner_splitter=inner, llm=llm, prepend=True)
+    splitter.init_components()
 
     document = Document(
         content=(
@@ -24,7 +24,7 @@ def main() -> None:
         ),
         metadata={"company": "Acme", "quarter": "Q3"},
     )
-    output = chunker.execute(chunker.input_schema(documents=[document]))
+    output = splitter.execute(splitter.input_schema(documents=[document]))
     for chunk in output["documents"]:
         print("--- contextualized chunk ---")
         print(chunk.content)

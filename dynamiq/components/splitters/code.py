@@ -39,6 +39,11 @@ class CodeSplitterComponent(RecursiveCharacterSplitterComponent):
                 return tree_chunks
         return super().split_text(text)
 
+    def _constructor_kwargs(self) -> dict:
+        kwargs = super()._constructor_kwargs()
+        kwargs.update(language=self.language, parser=self.parser)
+        return kwargs
+
     def _split_with_tree_sitter(self, text: str) -> list[str] | None:
         try:
             from tree_sitter_languages import get_parser
@@ -46,7 +51,12 @@ class CodeSplitterComponent(RecursiveCharacterSplitterComponent):
             return None
         parser = get_parser(self.language.value)
         tree = parser.parse(text.encode("utf-8"))
-        node_kinds = {"function_definition", "class_definition", "method_definition", "function_declaration"}
+        node_kinds = {
+            "function_definition",
+            "class_definition",
+            "method_definition",
+            "function_declaration",
+        }
         boundaries: list[tuple[int, int]] = []
         cursor = tree.root_node.walk()
 

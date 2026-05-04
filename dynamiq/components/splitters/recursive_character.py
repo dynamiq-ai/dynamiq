@@ -25,6 +25,11 @@ class RecursiveCharacterSplitterComponent(SplitterComponentBase):
     def split_text(self, text: str) -> list[str]:
         return self._split_text(text, self.separators)
 
+    def _constructor_kwargs(self) -> dict:
+        kwargs = super()._constructor_kwargs()
+        kwargs.update(separators=self.separators, is_separator_regex=self.is_separator_regex)
+        return kwargs
+
     def _split_text(self, text: str, separators: list[str]) -> list[str]:
         final_chunks: list[str] = []
         separator = separators[-1]

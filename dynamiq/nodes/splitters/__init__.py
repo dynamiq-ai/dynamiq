@@ -4,20 +4,20 @@ from dynamiq.components.splitters.language import Language, get_separators_for_l
 from dynamiq.components.splitters.semantic import BreakpointThresholdType
 
 from .code import CodeSplitter
-from .contextual import ContextualChunker
+from .contextual import ContextualSplitter
 from .document import DocumentSplitter
 from .html import HTMLHeaderSplitter, HTMLSectionSplitter
 from .json import RecursiveJsonSplitter
 from .markdown_header import MarkdownHeaderSplitter
 from .recursive_character import RecursiveCharacterSplitter
-from .semantic import SemanticChunker
+from .semantic import SemanticSplitter
 from .token import TokenSplitter
 
 __all__ = [
     "BreakpointThresholdType",
     "CodeParser",
     "CodeSplitter",
-    "ContextualChunker",
+    "ContextualSplitter",
     "DocumentSplitter",
     "HTMLHeaderSplitter",
     "HTMLSectionSplitter",
@@ -27,7 +27,7 @@ __all__ = [
     "MarkdownHeaderSplitter",
     "RecursiveCharacterSplitter",
     "RecursiveJsonSplitter",
-    "SemanticChunker",
+    "SemanticSplitter",
     "TokenSplitter",
     "get_separators_for_language",
 ]

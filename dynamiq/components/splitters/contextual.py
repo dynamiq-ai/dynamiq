@@ -15,7 +15,7 @@ DEFAULT_CONTEXT_PROMPT = (
 )
 
 
-class ContextualChunkerComponent:
+class ContextualSplitterComponent:
     """Wraps an inner splitter and prepends LLM-generated doc-level context to each chunk.
 
     ``inner_splitter`` must expose ``run(documents) -> {"documents": list[Document]}``.
@@ -45,11 +45,11 @@ class ContextualChunkerComponent:
 
     def run(self, documents: list[Document]) -> dict[str, list[Document]]:
         if not isinstance(documents, list):
-            raise TypeError("ContextualChunker expects a list of Documents as input.")
+            raise TypeError("ContextualSplitter expects a list of Documents as input.")
         outputs: list[Document] = []
         for doc in documents:
             if doc.content is None:
-                raise ValueError(f"ContextualChunker requires text content; document ID {doc.id} has none.")
+                raise ValueError(f"ContextualSplitter requires text content; document ID {doc.id} has none.")
             split_result = self._run_inner_splitter([doc])
             child_chunks: list[Document] = split_result["documents"]
             for chunk in child_chunks:
@@ -57,8 +57,15 @@ class ContextualChunkerComponent:
                 metadata = deepcopy(chunk.metadata) if chunk.metadata else {}
                 metadata[self.METADATA_KEY] = context
                 content = f"{context}{self.separator}{chunk.content}" if self.prepend else chunk.content
-                outputs.append(Document(id=chunk.id, content=content, metadata=metadata, embedding=chunk.embedding))
-        logger.debug(f"ContextualChunker: produced {len(outputs)} chunks from {len(documents)} documents.")
+                outputs.append(
+                    Document(
+                        id=chunk.id,
+                        content=content,
+                        metadata=metadata,
+                        embedding=chunk.embedding,
+                    )
+                )
+        logger.debug(f"ContextualSplitter: produced {len(outputs)} chunks from {len(documents)} documents.")
         return {"documents": outputs}
 
     def _run_inner_splitter(self, documents: list[Document]) -> dict[str, list[Document]]:

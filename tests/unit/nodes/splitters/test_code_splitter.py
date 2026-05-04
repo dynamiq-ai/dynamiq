@@ -1,3 +1,4 @@
+from dynamiq.components.splitters.code import CodeParser, CodeSplitterComponent
 from dynamiq.components.splitters.language import Language
 from dynamiq.nodes.splitters.code import CodeSplitter
 from dynamiq.types import Document
@@ -24,3 +25,21 @@ def test_code_splitter_excludes_runtime_splitter_from_serialization():
     serialized = splitter.model_dump(exclude={"splitter"})
     assert serialized["language"] == Language.JS
     assert serialized["chunk_size"] == 100
+
+
+def test_code_parent_splitter_preserves_language_and_parser_settings():
+    splitter = CodeSplitterComponent(
+        language=Language.JS,
+        parser=CodeParser.TREE_SITTER,
+        chunk_size=40,
+        chunk_overlap=0,
+        parent_chunk_size=120,
+    )
+
+    parent_kwargs = splitter._parent_splitter_kwargs()
+
+    assert parent_kwargs["language"] == Language.JS
+    assert parent_kwargs["parser"] == CodeParser.TREE_SITTER
+    assert parent_kwargs["separators"][0] == "\nfunction "
+    assert parent_kwargs["is_separator_regex"] is True
+    assert parent_kwargs["add_start_index"] is True

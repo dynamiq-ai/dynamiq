@@ -1,4 +1,4 @@
-from dynamiq.components.splitters.contextual import ContextualChunkerComponent
+from dynamiq.components.splitters.contextual import ContextualSplitterComponent
 from dynamiq.types import Document
 
 
@@ -11,19 +11,19 @@ class _FakeInnerSplitter:
         return {"documents": chunks}
 
 
-def test_contextual_chunker_prepends_llm_context():
+def test_contextual_splitter_prepends_llm_context():
     calls = []
 
     def fake_llm(prompt: str) -> str:
         calls.append(prompt)
         return "Doc-level context."
 
-    chunker = ContextualChunkerComponent(
+    splitter = ContextualSplitterComponent(
         inner_splitter=_FakeInnerSplitter(),
         llm_fn=fake_llm,
         prepend=True,
     )
-    output = chunker.run([Document(content="part-a|part-b")])
+    output = splitter.run([Document(content="part-a|part-b")])
     assert len(output["documents"]) == 2
     for chunk in output["documents"]:
         assert chunk.content.startswith("Doc-level context.")
@@ -31,17 +31,17 @@ def test_contextual_chunker_prepends_llm_context():
     assert len(calls) == 2
 
 
-def test_contextual_chunker_caches_repeated_chunks():
+def test_contextual_splitter_caches_repeated_splits():
     call_count = {"n": 0}
 
     def fake_llm(prompt: str) -> str:
         call_count["n"] += 1
         return "ctx"
 
-    chunker = ContextualChunkerComponent(
+    splitter = ContextualSplitterComponent(
         inner_splitter=_FakeInnerSplitter(),
         llm_fn=fake_llm,
         cache_context=True,
     )
-    chunker.run([Document(content="same|same")])
+    splitter.run([Document(content="same|same")])
     assert call_count["n"] == 1

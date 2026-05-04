@@ -24,8 +24,8 @@ _DEFAULT_THRESHOLD_AMOUNT: dict[BreakpointThresholdType, float] = {
 }
 
 
-class SemanticChunkerComponent:
-    """Semantic-similarity chunker.
+class SemanticSplitterComponent:
+    """Semantic-similarity splitter.
 
     Sentence-splits the text, embeds groups of neighboring sentences, then breaks
     where consecutive embeddings diverge above a configurable threshold.
@@ -59,18 +59,18 @@ class SemanticChunkerComponent:
 
     def run(self, documents: list[Document]) -> dict[str, list[Document]]:
         if not isinstance(documents, list):
-            raise TypeError("SemanticChunker expects a list of Documents as input.")
+            raise TypeError("SemanticSplitter expects a list of Documents as input.")
         results: list[Document] = []
         for doc in documents:
             if doc.content is None:
-                raise ValueError(f"SemanticChunker requires text content; document ID {doc.id} has none.")
+                raise ValueError(f"SemanticSplitter requires text content; document ID {doc.id} has none.")
             chunks = self.split_text(doc.content)
             for index, chunk in enumerate(chunks):
                 metadata = deepcopy(doc.metadata) if doc.metadata else {}
                 metadata["source_id"] = doc.id
                 metadata["chunk_index"] = index
                 results.append(Document(content=chunk, metadata=metadata))
-        logger.debug(f"SemanticChunker: split {len(documents)} documents into {len(results)} chunks.")
+        logger.debug(f"SemanticSplitter: split {len(documents)} documents into {len(results)} chunks.")
         return {"documents": results}
 
     def split_text(self, text: str) -> list[str]:
@@ -85,7 +85,7 @@ class SemanticChunkerComponent:
         matrix = np.asarray(embeddings, dtype=float)
         distances = self._pairwise_cosine_distances(matrix).tolist()
         if not distances:
-            return ["".join(sentences)]
+            return [" ".join(sentences)]
 
         breakpoints = self._compute_breakpoints(distances)
         chunks: list[str] = []
@@ -120,8 +120,12 @@ class SemanticChunkerComponent:
             indexed = sorted(enumerate(distances), key=lambda item: item[1], reverse=True)
             return sorted(index for index, _ in indexed[:count])
 
+        values = np.asarray(distances, dtype=float)
+        comparison_values = values
+        if self.breakpoint_threshold_type == BreakpointThresholdType.GRADIENT:
+            comparison_values = np.gradient(values) if values.size > 1 else np.zeros_like(values)
         threshold = self._compute_threshold(distances)
-        return [index for index, distance in enumerate(distances) if distance > threshold]
+        return [i for i, value in enumerate(comparison_values) if value > threshold]
 
     def _compute_threshold(self, distances: list[float]) -> float:
         values = np.asarray(distances, dtype=float)

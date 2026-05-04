@@ -50,6 +50,7 @@ class HTMLHeaderSplitterComponent:
 
         soup = BeautifulSoup(text, "lxml" if _has_lxml() else "html.parser")
         header_tags = {tag for tag, _ in self.headers_to_split_on}
+        header_levels_by_key = {metadata_key: int(tag[1:]) for tag, metadata_key in self.headers_to_split_on}
 
         chunks: list[dict[str, Any]] = []
         active_headers: dict[str, str] = {}
@@ -65,10 +66,10 @@ class HTMLHeaderSplitterComponent:
                 if buffer_lines:
                     flush()
                     buffer_lines = []
-                level = int(element.name[1])
-                for tag, key in list(active_headers.items()):
-                    if tag.startswith("h") and int(tag[1]) >= level:
-                        active_headers.pop(tag, None)
+                level = int(element.name[1:])
+                for metadata_key in list(active_headers):
+                    if header_levels_by_key[metadata_key] >= level:
+                        active_headers.pop(metadata_key, None)
                 _, metadata_key = next(pair for pair in self.headers_to_split_on if pair[0] == element.name)
                 active_headers[metadata_key] = element.get_text(strip=True)
                 continue

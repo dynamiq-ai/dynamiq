@@ -127,30 +127,50 @@ class SplitterComponentBase:
                 metadata["start_index"] = start_index
                 cursor = max(cursor, start_index + 1)
             chunk_id = self._build_chunk_id(doc_id, index, chunk)
-            built.append(Document(id=chunk_id, content=chunk, metadata=metadata))
+            if chunk_id is None:
+                built.append(Document(content=chunk, metadata=metadata))
+            else:
+                built.append(Document(id=chunk_id, content=chunk, metadata=metadata))
         return built
 
     def _build_chunk_id(self, parent_id: str | None, index: int, content: str) -> str | None:
         if self.id_strategy == IdStrategy.DETERMINISTIC:
-            digest = hashlib.sha256(f"{parent_id}:{index}:{content}".encode()).hexdigest()
+            payload = f"{parent_id}:{index}:{content}".encode()
+            digest = hashlib.sha256(payload).hexdigest()
             return digest[:32]
         return None  # let Document default factory generate UUID
 
-    def _attach_parent_chunks(self, source: Document, child_chunks: list[Document]) -> list[Document]:
-        """Build parent chunks (larger context) and stamp each child with its parent's ID."""
-        parent = self.__class__(
+    def _constructor_kwargs(self) -> dict[str, Any]:
+        return {
+            "chunk_size": self.chunk_size,
+            "chunk_overlap": self.chunk_overlap,
+            "length_unit": self.length_unit,
+            "length_function": self.length_function,
+            "keep_separator": self.keep_separator,
+            "strip_whitespace": self.strip_whitespace,
+            "add_start_index": self.add_start_index,
+            "add_chunk_index": self.add_chunk_index,
+            "merge_short_chunks": self.merge_short_chunks,
+            "parent_chunk_size": self.parent_chunk_size,
+            "parent_chunk_overlap": self.parent_chunk_overlap,
+            "id_strategy": self.id_strategy,
+        }
+
+    def _parent_splitter_kwargs(self) -> dict[str, Any]:
+        kwargs = self._constructor_kwargs()
+        kwargs.update(
             chunk_size=self.parent_chunk_size,
             chunk_overlap=self.parent_chunk_overlap,
-            length_unit=self.length_unit,
-            length_function=self.length_function,
-            keep_separator=self.keep_separator,
-            strip_whitespace=self.strip_whitespace,
-            add_start_index=False,
+            add_start_index=True,
             add_chunk_index=False,
-            merge_short_chunks=self.merge_short_chunks,
             parent_chunk_size=None,
-            id_strategy=self.id_strategy,
+            parent_chunk_overlap=None,
         )
+        return kwargs
+
+    def _attach_parent_chunks(self, source: Document, child_chunks: list[Document]) -> list[Document]:
+        """Build parent chunks (larger context) and stamp each child with its parent's ID."""
+        parent = self.__class__(**self._parent_splitter_kwargs())
         parent_chunks = parent._build_documents(
             parent.split_text(source.content),
             source.content,
@@ -158,13 +178,16 @@ class SplitterComponentBase:
             doc_id=source.id,
         )
         for child in child_chunks:
-            start_index = (child.metadata or {}).get("start_index", 0)
+            if not child.metadata or "start_index" not in child.metadata:
+                continue
+            start_index = child.metadata["start_index"]
             owner = next(
                 (
                     p
                     for p in parent_chunks
-                    if start_index >= (p.metadata or {}).get("start_index", 0)
-                    and start_index < (p.metadata or {}).get("start_index", 0) + len(p.content)
+                    if "start_index" in (p.metadata or {})
+                    and start_index >= p.metadata["start_index"]
+                    and start_index < p.metadata["start_index"] + len(p.content)
                 ),
                 None,
             )

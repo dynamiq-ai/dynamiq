@@ -46,8 +46,22 @@ class TokenSplitterComponent(SplitterComponentBase):
     def _length(self, text: str) -> int:
         tokenizer = self._ensure_tokenizer()
         return len(
-            tokenizer.encode(text, allowed_special=self.allowed_special, disallowed_special=self.disallowed_special)
+            tokenizer.encode(
+                text,
+                allowed_special=self.allowed_special,
+                disallowed_special=self.disallowed_special,
+            )
         )
+
+    def _constructor_kwargs(self) -> dict[str, Any]:
+        kwargs = super()._constructor_kwargs()
+        kwargs.update(
+            encoding_name=self.encoding_name,
+            model_name=self.model_name,
+            allowed_special=self.allowed_special,
+            disallowed_special=self.disallowed_special,
+        )
+        return kwargs
 
     def split_text(self, text: str) -> list[str]:
         tokenizer = self._ensure_tokenizer()
