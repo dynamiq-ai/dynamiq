@@ -19,7 +19,7 @@ from dynamiq.utils.logger import logger
 
 class VectorStoreRetrieverInputSchema(BaseModel):
     query: str = Field(..., description="Parameter to provide a query to retrieve documents.")
-    alpha: float = Field(default=0.0, description="Parameter to provide alpha for hybrid retrieval.")
+    alpha: float | None = Field(default=None, description="Parameter to provide alpha for hybrid retrieval.")
     filters: dict[str, Any] = Field(
         default_factory=dict, description="Parameter to provide filters to apply for retrieving specific documents."
     )

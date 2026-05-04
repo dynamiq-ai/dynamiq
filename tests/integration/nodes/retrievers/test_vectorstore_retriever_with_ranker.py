@@ -213,6 +213,114 @@ def test_vectorstore_retriever_without_ranker(
     assert document_retriever_input["alpha"] == 0.0
 
 
+@patch("dynamiq.nodes.retrievers.weaviate.WeaviateDocumentRetriever.run")
+@patch("dynamiq.nodes.embedders.openai.OpenAITextEmbedder.run")
+def test_vectorstore_retriever_uses_node_alpha_when_input_omits_alpha(
+    mock_embedder_run,
+    mock_retriever_run,
+    mock_embedder_response,
+    mock_retriever_documents,
+    mock_weaviate_vector_store,
+):
+    mock_embedder_run.return_value = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        input={},
+        output=mock_embedder_response,
+    )
+    mock_retriever_run.return_value = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        input={},
+        output={"documents": mock_retriever_documents},
+    )
+
+    openai_connection = connections.OpenAI(
+        id=str(uuid.uuid4()),
+        api_key="test_api_key",
+    )
+    text_embedder = OpenAITextEmbedder(
+        connection=openai_connection,
+        model="text-embedding-3-small",
+    )
+    document_retriever = WeaviateDocumentRetriever(
+        vector_store=mock_weaviate_vector_store,
+        index_name="test-index",
+        top_k=5,
+    )
+    retriever = VectorStoreRetriever(
+        name="Test Retriever with Node Alpha",
+        text_embedder=text_embedder,
+        document_retriever=document_retriever,
+        alpha=0.5,
+    )
+    wf = Workflow(
+        id=str(uuid.uuid4()),
+        flow=Flow(nodes=[retriever]),
+    )
+
+    result = wf.run(
+        input_data={"query": "What is machine learning?"},
+        config=RunnableConfig(callbacks=[TracingCallbackHandler()]),
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    document_retriever_input = mock_retriever_run.call_args.kwargs["input_data"]
+    assert document_retriever_input["alpha"] == 0.5
+
+
+@patch("dynamiq.nodes.retrievers.weaviate.WeaviateDocumentRetriever.run")
+@patch("dynamiq.nodes.embedders.openai.OpenAITextEmbedder.run")
+def test_vectorstore_retriever_preserves_input_zero_alpha(
+    mock_embedder_run,
+    mock_retriever_run,
+    mock_embedder_response,
+    mock_retriever_documents,
+    mock_weaviate_vector_store,
+):
+    mock_embedder_run.return_value = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        input={},
+        output=mock_embedder_response,
+    )
+    mock_retriever_run.return_value = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        input={},
+        output={"documents": mock_retriever_documents},
+    )
+
+    openai_connection = connections.OpenAI(
+        id=str(uuid.uuid4()),
+        api_key="test_api_key",
+    )
+    text_embedder = OpenAITextEmbedder(
+        connection=openai_connection,
+        model="text-embedding-3-small",
+    )
+    document_retriever = WeaviateDocumentRetriever(
+        vector_store=mock_weaviate_vector_store,
+        index_name="test-index",
+        top_k=5,
+    )
+    retriever = VectorStoreRetriever(
+        name="Test Retriever with Input Alpha",
+        text_embedder=text_embedder,
+        document_retriever=document_retriever,
+        alpha=0.5,
+    )
+    wf = Workflow(
+        id=str(uuid.uuid4()),
+        flow=Flow(nodes=[retriever]),
+    )
+
+    result = wf.run(
+        input_data={"query": "What is machine learning?", "alpha": 0.0},
+        config=RunnableConfig(callbacks=[TracingCallbackHandler()]),
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    document_retriever_input = mock_retriever_run.call_args.kwargs["input_data"]
+    assert document_retriever_input["alpha"] == 0.0
+
+
 @patch("dynamiq.nodes.rankers.llm.LLMDocumentRanker.run")
 @patch("dynamiq.nodes.retrievers.weaviate.WeaviateDocumentRetriever.run")
 @patch("dynamiq.nodes.embedders.openai.OpenAITextEmbedder.run")
