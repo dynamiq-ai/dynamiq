@@ -675,11 +675,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
             for tc in actual_tool_calls:
                 args = tc.function.parse_as_tool_call()
                 tc_input = args.action_input
-                if not isinstance(tc_input, dict):
+                if isinstance(tc_input, str):
                     try:
                         tc_input = json.loads(tc_input, strict=False)
                     except json.JSONDecodeError as e:
                         raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
+                if not isinstance(tc_input, dict):
+                    tc_input = {"input": tc_input}
                 tool_items.append(
                     ToolCallItem(
                         name=tc.function.name.strip(),
@@ -701,6 +703,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 action_input = json.loads(action_input, strict=False)
             except json.JSONDecodeError as e:
                 raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
+        if not isinstance(action_input, dict):
+            action_input = {"input": action_input}
 
         self.log_reasoning(thought, action, action_input, loop_num)
         return thought, action, action_input
