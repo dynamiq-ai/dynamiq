@@ -935,4 +935,4 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
             fusion_type=fusion_type,
         )
 
-        return [self._to_document(doc) for doc in result.objects]
+        return [self._to_document(doc, content_key=content_key) for doc in result.objects]
