@@ -1381,6 +1381,16 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         response_format=self._response_format,
                         config=llm_config,
                         parallel_tool_calls=True if native_parallel else None,
+                        tool_choice=(
+                            "required"
+                            if (
+                                self.inference_mode == InferenceMode.FUNCTION_CALLING
+                                and self._tools
+                                and not getattr(self.llm, "thinking_enabled", False)
+                                and "tool_choice" in (get_supported_openai_params(model=self.llm.model) or [])
+                            )
+                            else None
+                        ),
                         **kwargs,
                     )
                 finally:

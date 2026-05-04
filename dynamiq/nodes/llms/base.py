@@ -647,6 +647,7 @@ class BaseLLM(ConnectionNode):
         tools: list[Tool | dict] | None = None,
         response_format: dict[str, Any] | None = None,
         parallel_tool_calls: bool | None = None,
+        tool_choice: str | None = None,
         include_sync_client: bool = True,
     ) -> dict[str, Any]:
         """Build the common parameter dict for litellm completion/acompletion calls.
@@ -690,7 +691,7 @@ class BaseLLM(ConnectionNode):
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "tools": tools,
-            "tool_choice": self.tool_choice,
+            "tool_choice": tool_choice if tool_choice is not None else self.tool_choice,
             "stop": self.stop if self.stop else None,
             "top_p": self.top_p,
             "seed": self.seed,
@@ -713,6 +714,7 @@ class BaseLLM(ConnectionNode):
         tools: list[Tool | dict] | None = None,
         response_format: dict[str, Any] | None = None,
         parallel_tool_calls: bool | None = None,
+        tool_choice: str | None = None,
         **kwargs,
     ):
         """Execute the LLM node.
@@ -746,6 +748,7 @@ class BaseLLM(ConnectionNode):
             tools=tools,
             response_format=response_format,
             parallel_tool_calls=parallel_tool_calls,
+            tool_choice=tool_choice,
             include_sync_client=True,
         )
 
@@ -768,6 +771,7 @@ class BaseLLM(ConnectionNode):
         tools: list[Tool | dict] | None = None,
         response_format: dict[str, Any] | None = None,
         parallel_tool_calls: bool | None = None,
+        tool_choice: str | None = None,
         **kwargs,
     ):
         """Execute the LLM node asynchronously using litellm.acompletion.
@@ -801,6 +805,7 @@ class BaseLLM(ConnectionNode):
             tools=tools,
             response_format=response_format,
             parallel_tool_calls=parallel_tool_calls,
+            tool_choice=tool_choice,
             include_sync_client=False,
         )
 
