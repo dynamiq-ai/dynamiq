@@ -25,8 +25,8 @@ class TokenSplitter(BaseSplitterNode):
     length_unit: LengthUnit = Field(default=LengthUnit.TOKENS, description="Always tokens for TokenSplitter.")
     encoding_name: str = Field(default="cl100k_base", description="Tiktoken encoding name.")
     model_name: str | None = Field(default=None, description="Optional model name used to look up the encoding.")
-    allowed_special: str = Field(default="all", description="Forwarded to tiktoken.encode.")
-    disallowed_special: str = Field(default="all", description="Forwarded to tiktoken.encode.")
+    allowed_special: set[str] | str = Field(default="all", description="Forwarded to tiktoken.encode.")
+    disallowed_special: set[str] | str = Field(default="all", description="Forwarded to tiktoken.encode.")
 
     def _component_kwargs(self) -> dict[str, Any]:
         kwargs = super()._component_kwargs()

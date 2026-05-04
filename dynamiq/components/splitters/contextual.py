@@ -1,5 +1,6 @@
 import hashlib
 import inspect
+import json
 from copy import deepcopy
 from typing import Any, Callable, ClassVar
 
@@ -106,7 +107,13 @@ class ContextualSplitterComponent(BaseModel):
         config: RunnableConfig | None = None,
         **kwargs,
     ) -> str:
-        cache_key = hashlib.sha256(f"{document_text}:{chunk_text}".encode()).hexdigest() if self.cache_context else ""
+        cache_key = (
+            hashlib.sha256(
+                json.dumps([document_text, chunk_text], ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            if self.cache_context
+            else ""
+        )
         if self.cache_context and cache_key in self._cache:
             return self._cache[cache_key]
         prompt = self.context_prompt.format(document=document_text, chunk=chunk_text)

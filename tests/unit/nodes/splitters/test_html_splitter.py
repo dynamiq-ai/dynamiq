@@ -45,3 +45,10 @@ def test_html_section_splitter_applies_xpath_filter():
 
     assert [chunk.content for chunk in chunks] == ["Keep me"]
     assert chunks[0].metadata["h1"] == "Main"
+
+
+def test_html_section_splitter_passes_return_each_element_to_component():
+    splitter = HTMLSectionSplitter(return_each_element=True)
+    splitter.init_components()
+
+    assert splitter.splitter.return_each_element is True

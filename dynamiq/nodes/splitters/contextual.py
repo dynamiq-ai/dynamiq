@@ -113,12 +113,18 @@ class ContextualSplitter(Node):
     ) -> str:
         config = ensure_config(config)
         prompt = Prompt(messages=[Message(role=MessageRole.USER, content=prompt_text)])
+        run_kwargs = dict(kwargs)
+        run_kwargs.pop("config", None)
+        run_kwargs.pop("input_data", None)
+        run_kwargs.pop("prompt", None)
+        run_kwargs.pop("run_depends", None)
+        run_kwargs.setdefault("parent_run_id", run_kwargs.get("run_id"))
         result = self.llm.run(
             input_data={},
             prompt=prompt,
             config=config,
             run_depends=getattr(self, "_run_depends", []),
-            **(kwargs | {"parent_run_id": kwargs.get("run_id")}),
+            **run_kwargs,
         )
         if isinstance(self.llm, Node):
             self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]

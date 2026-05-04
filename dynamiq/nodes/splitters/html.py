@@ -69,5 +69,6 @@ class HTMLSectionSplitter(HTMLHeaderSplitter):
         if self.splitter is None:
             self.splitter = HTMLSectionSplitterComponent(
                 headers_to_split_on=[tuple(pair) for pair in self.headers_to_split_on],
+                return_each_element=self.return_each_element,
                 xpath_filter=self.xpath_filter,
             )

@@ -85,6 +85,27 @@ def test_contextual_splitter_caches_repeated_splits():
     assert call_count["n"] == 1
 
 
+def test_contextual_splitter_cache_key_separates_document_and_chunk_text():
+    calls = []
+
+    def fake_llm(prompt: str) -> str:
+        calls.append(prompt)
+        return f"ctx-{len(calls)}"
+
+    splitter = ContextualSplitterComponent(
+        inner_splitter=_FakeInnerSplitter(),
+        llm_fn=fake_llm,
+        cache_context=True,
+    )
+
+    first = splitter._get_context("a:", "b")
+    second = splitter._get_context("a", ":b")
+
+    assert first == "ctx-1"
+    assert second == "ctx-2"
+    assert len(calls) == 2
+
+
 def test_contextual_splitter_uses_run_lifecycle_for_node_like_inner_splitter():
     inner = _FakeRunnableInnerSplitter()
     config = RunnableConfig()
@@ -111,3 +132,27 @@ def test_contextual_splitter_node_uses_run_lifecycle_for_llm():
     assert context == "ctx"
     assert llm.execute_calls == 0
     assert len(llm.run_calls) == 1
+
+
+def test_contextual_splitter_llm_call_removes_duplicate_run_kwargs():
+    llm = _FakeLLM()
+    config = RunnableConfig()
+    splitter = ContextualSplitter.model_construct(llm=llm)
+
+    context = splitter._call_llm(
+        "Prompt text",
+        config=config,
+        input_data={"ignored": True},
+        prompt="ignored",
+        run_depends=[{"ignored": True}],
+        parent_run_id="parent",
+        run_id="run",
+    )
+
+    assert context == "ctx"
+    _, _, call_config, call_kwargs = llm.run_calls[0]
+    assert call_config is config
+    assert call_kwargs["run_depends"] == []
+    assert call_kwargs["parent_run_id"] == "parent"
+    assert "input_data" not in call_kwargs
+    assert "prompt" not in call_kwargs
