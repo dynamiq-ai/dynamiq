@@ -4,10 +4,10 @@ from pydantic import BaseModel, Field
 
 from dynamiq.components.splitters.contextual import DEFAULT_CONTEXT_PROMPT, ContextualSplitterComponent
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes.llms.base import BaseLLM, BaseLLMInputSchema
-from dynamiq.nodes.node import Node, NodeGroup, ensure_config
+from dynamiq.nodes.llms.base import BaseLLM
+from dynamiq.nodes.node import Node, NodeDependency, NodeGroup, ensure_config
 from dynamiq.prompts.prompts import Message, MessageRole, Prompt
-from dynamiq.runnables import RunnableConfig
+from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -54,12 +54,36 @@ class ContextualSplitter(Node):
             "llm": True,
         }
 
-    def to_dict(self, **kwargs) -> dict[str, Any]:
-        data = super().to_dict(**kwargs)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._run_depends = []
+
+    def reset_run_state(self) -> None:
+        self._run_depends = []
+
+    def to_dict(
+        self,
+        include_secure_params: bool = False,
+        for_tracing: bool = False,
+        **kwargs,
+    ) -> dict[str, Any]:
+        data = super().to_dict(
+            include_secure_params=include_secure_params,
+            for_tracing=for_tracing,
+            **kwargs,
+        )
         if self.inner_splitter is not None:
-            data["inner_splitter"] = self.inner_splitter.to_dict(**kwargs)
+            data["inner_splitter"] = self.inner_splitter.to_dict(
+                include_secure_params=include_secure_params,
+                for_tracing=for_tracing,
+                **kwargs,
+            )
         if self.llm is not None:
-            data["llm"] = self.llm.to_dict(**kwargs)
+            data["llm"] = self.llm.to_dict(
+                include_secure_params=include_secure_params,
+                for_tracing=for_tracing,
+                **kwargs,
+            )
         return data
 
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
@@ -81,11 +105,26 @@ class ContextualSplitter(Node):
                 separator=self.separator,
             )
 
-    def _call_llm(self, prompt_text: str) -> str:
+    def _call_llm(
+        self,
+        prompt_text: str,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> str:
+        config = ensure_config(config)
         prompt = Prompt(messages=[Message(role=MessageRole.USER, content=prompt_text)])
-        input_data = BaseLLMInputSchema.model_validate({}, context={"prompt": prompt})
-        result = self.llm.execute(input_data=input_data, prompt=prompt)
-        return result.get("content") or ""
+        result = self.llm.run(
+            input_data={},
+            prompt=prompt,
+            config=config,
+            run_depends=getattr(self, "_run_depends", []),
+            **(kwargs | {"parent_run_id": kwargs.get("run_id")}),
+        )
+        if isinstance(self.llm, Node):
+            self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
+        if result.status != RunnableStatus.SUCCESS:
+            raise ValueError("ContextualSplitter LLM execution failed")
+        return result.output.get("content") or ""
 
     def execute(
         self,
@@ -94,10 +133,11 @@ class ContextualSplitter(Node):
         **kwargs,
     ) -> dict[str, Any]:
         config = ensure_config(config)
+        self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         documents = input_data.documents
         logger.debug(f"ContextualSplitter: splitting {len(documents)} documents.")
-        output = self.splitter.run(documents=documents)
+        output = self.splitter.run(documents=documents, config=config, **kwargs)
         return {"documents": output["documents"]}
 
     def run_with_inner_splitter(self, documents: list[Document]) -> dict[str, Any]:

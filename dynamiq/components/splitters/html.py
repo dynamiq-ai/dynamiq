@@ -74,6 +74,8 @@ class HTMLHeaderSplitterComponent:
                 active_headers[metadata_key] = element.get_text(strip=True)
                 continue
             if getattr(element, "name", None) is None:  # NavigableString
+                if any(getattr(parent, "name", None) in header_tags for parent in getattr(element, "parents", [])):
+                    continue
                 text_value = str(element).strip()
                 if text_value:
                     if self.return_each_element:
@@ -101,7 +103,7 @@ class HTMLSectionSplitterComponent(HTMLHeaderSplitterComponent):
             return super().split_text(text)
 
         try:
-            from lxml import etree, html
+            from lxml import etree, html  # nosec B410
         except ImportError as exc:
             raise ImportError("HTMLSectionSplitter xpath_filter requires the 'lxml' package.") from exc
 

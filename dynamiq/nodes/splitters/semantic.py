@@ -2,6 +2,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
+from dynamiq.components.embedders.base import BaseEmbedder, InvalidEmbeddingError
 from dynamiq.components.splitters.semantic import BreakpointThresholdType, SemanticSplitterComponent
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.embedders.base import TextEmbedder
@@ -62,10 +63,23 @@ class SemanticSplitter(Node):
     def to_dict_exclude_params(self) -> dict[str, Any]:
         return super().to_dict_exclude_params | {"splitter": True, "embedder": True}
 
-    def to_dict(self, **kwargs) -> dict[str, Any]:
-        data = super().to_dict(**kwargs)
+    def to_dict(
+        self,
+        include_secure_params: bool = False,
+        for_tracing: bool = False,
+        **kwargs,
+    ) -> dict[str, Any]:
+        data = super().to_dict(
+            include_secure_params=include_secure_params,
+            for_tracing=for_tracing,
+            **kwargs,
+        )
         if self.embedder is not None:
-            data["embedder"] = self.embedder.to_dict(**kwargs)
+            data["embedder"] = self.embedder.to_dict(
+                include_secure_params=include_secure_params,
+                for_tracing=for_tracing,
+                **kwargs,
+            )
         return data
 
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
@@ -86,10 +100,24 @@ class SemanticSplitter(Node):
             )
 
     def _embed_batch(self, texts: list[str]) -> list[list[float]]:
-        embeddings: list[list[float]] = []
-        for text in texts:
-            output = self.embedder.text_embedder.embed_text(text)
-            embeddings.append(output["embedding"])
+        if self.embedder is None or self.embedder.text_embedder is None:
+            raise ValueError("SemanticSplitter requires an initialized `embedder`.")
+
+        component = self.embedder.text_embedder
+        texts_to_embed = [
+            component._apply_text_truncation(f"{component.prefix}{text}{component.suffix}".replace("\n", " "))
+            for text in texts
+        ]
+        embeddings, _ = component._embed_texts_batch(
+            texts_to_embed=texts_to_embed,
+            batch_size=component.batch_size,
+        )
+        try:
+            for embedding in embeddings:
+                BaseEmbedder.validate_embedding(embedding)
+        except InvalidEmbeddingError as e:
+            logger.error(f"Invalid embedding returned by model {component.model}: {str(e)}")
+            raise ValueError(f"Invalid embedding returned by the model: {str(e)}")
         return embeddings
 
     def execute(

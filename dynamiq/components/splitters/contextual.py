@@ -1,7 +1,9 @@
 import hashlib
+import inspect
 from copy import deepcopy
 from typing import Any, Callable
 
+from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -19,7 +21,8 @@ class ContextualSplitterComponent:
     """Wraps an inner splitter and prepends LLM-generated doc-level context to each chunk.
 
     ``inner_splitter`` must expose ``run(documents) -> {"documents": list[Document]}``.
-    ``llm_fn`` accepts a fully-formatted prompt string and returns the model response.
+    Node-like splitters are called through their ``run`` lifecycle. ``llm_fn``
+    accepts a fully-formatted prompt string and may optionally accept ``config``.
     """
 
     METADATA_KEY = "context"
@@ -27,7 +30,7 @@ class ContextualSplitterComponent:
     def __init__(
         self,
         inner_splitter: Any,
-        llm_fn: Callable[[str], str],
+        llm_fn: Callable[..., str],
         context_prompt: str = DEFAULT_CONTEXT_PROMPT,
         prepend: bool = True,
         cache_context: bool = True,
@@ -43,17 +46,22 @@ class ContextualSplitterComponent:
         self.separator = separator
         self._cache: dict[str, str] = {}
 
-    def run(self, documents: list[Document]) -> dict[str, list[Document]]:
+    def run(
+        self,
+        documents: list[Document],
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> dict[str, list[Document]]:
         if not isinstance(documents, list):
             raise TypeError("ContextualSplitter expects a list of Documents as input.")
         outputs: list[Document] = []
         for doc in documents:
             if doc.content is None:
                 raise ValueError(f"ContextualSplitter requires text content; document ID {doc.id} has none.")
-            split_result = self._run_inner_splitter([doc])
+            split_result = self._run_inner_splitter([doc], config=config, **kwargs)
             child_chunks: list[Document] = split_result["documents"]
             for chunk in child_chunks:
-                context = self._get_context(doc.content, chunk.content)
+                context = self._get_context(doc.content, chunk.content, config=config, **kwargs)
                 metadata = deepcopy(chunk.metadata) if chunk.metadata else {}
                 metadata[self.METADATA_KEY] = context
                 content = f"{context}{self.separator}{chunk.content}" if self.prepend else chunk.content
@@ -68,18 +76,52 @@ class ContextualSplitterComponent:
         logger.debug(f"ContextualSplitter: produced {len(outputs)} chunks from {len(documents)} documents.")
         return {"documents": outputs}
 
-    def _run_inner_splitter(self, documents: list[Document]) -> dict[str, list[Document]]:
+    def _run_inner_splitter(
+        self,
+        documents: list[Document],
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> dict[str, list[Document]]:
         input_schema = getattr(self.inner_splitter, "input_schema", None)
+        if input_schema is not None and hasattr(self.inner_splitter, "run"):
+            result = self.inner_splitter.run(input_data={"documents": documents}, config=config, **kwargs)
+            return self._unwrap_inner_result(result)
         if input_schema is not None and hasattr(self.inner_splitter, "execute"):
-            return self.inner_splitter.execute(input_schema(documents=documents))
+            return self.inner_splitter.execute(input_schema(documents=documents), config=config, **kwargs)
         return self.inner_splitter.run(documents=documents)
 
-    def _get_context(self, document_text: str, chunk_text: str) -> str:
+    @staticmethod
+    def _unwrap_inner_result(result: Any) -> dict[str, list[Document]]:
+        if isinstance(result, RunnableResult):
+            if result.status != RunnableStatus.SUCCESS:
+                raise ValueError("ContextualSplitter inner splitter execution failed")
+            return result.output
+        return result
+
+    def _get_context(
+        self,
+        document_text: str,
+        chunk_text: str,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> str:
         cache_key = hashlib.sha256(f"{document_text}:{chunk_text}".encode()).hexdigest() if self.cache_context else ""
         if self.cache_context and cache_key in self._cache:
             return self._cache[cache_key]
         prompt = self.context_prompt.format(document=document_text, chunk=chunk_text)
-        context = self.llm_fn(prompt).strip()
+        context = self._call_llm_fn(prompt, config=config, **kwargs).strip()
         if self.cache_context:
             self._cache[cache_key] = context
         return context
+
+    def _call_llm_fn(self, prompt: str, config: RunnableConfig | None = None, **kwargs) -> str:
+        try:
+            signature = inspect.signature(self.llm_fn)
+        except (TypeError, ValueError):
+            return self.llm_fn(prompt)
+        accepts_config = "config" in signature.parameters or any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()
+        )
+        if accepts_config:
+            return self.llm_fn(prompt, config=config, **kwargs)
+        return self.llm_fn(prompt)

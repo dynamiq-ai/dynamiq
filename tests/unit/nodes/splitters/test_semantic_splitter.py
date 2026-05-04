@@ -4,6 +4,7 @@ from dynamiq.components.splitters.semantic import (
     BreakpointThresholdType,
     SemanticSplitterComponent,
 )
+from dynamiq.nodes.splitters.semantic import SemanticSplitter
 
 
 def test_semantic_splitter_splits_on_distance_breakpoints():
@@ -65,3 +66,41 @@ def test_semantic_splitter_gradient_threshold_compares_gradients():
     assert splitter.split_text("First sentence. Second sentence.") == [
         "First sentence. Second sentence."
     ]
+
+
+class _FakeEmbedderComponent:
+    model = "fake-model"
+    prefix = "prefix:"
+    suffix = ":suffix"
+    batch_size = 16
+
+    def __init__(self):
+        self.embed_text_calls = []
+        self.batch_calls = []
+
+    def embed_text(self, text):
+        self.embed_text_calls.append(text)
+        return {"embedding": [0.0]}
+
+    def _apply_text_truncation(self, text):
+        return text
+
+    def _embed_texts_batch(self, texts_to_embed, batch_size):
+        self.batch_calls.append((texts_to_embed, batch_size))
+        return [[float(index)] for index, _ in enumerate(texts_to_embed)], {"model": self.model}
+
+
+class _FakeTextEmbedderNode:
+    def __init__(self, component):
+        self.text_embedder = component
+
+
+def test_semantic_splitter_node_embeds_sentence_groups_in_batch():
+    component = _FakeEmbedderComponent()
+    splitter = SemanticSplitter.model_construct(embedder=_FakeTextEmbedderNode(component))
+
+    embeddings = splitter._embed_batch(["first\ntext", "second text"])
+
+    assert embeddings == [[0.0], [1.0]]
+    assert component.embed_text_calls == []
+    assert component.batch_calls == [(["prefix:first text:suffix", "prefix:second text:suffix"], 16)]
