@@ -64,8 +64,8 @@ class FunctionCall(BaseModel):
         if isinstance(v, str):
             try:
                 return json.loads(v, strict=False)
-            except json.JSONDecodeError:
-                return {}
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Tool call arguments are not valid JSON: {e}")
         return v or {}
 
     def parse_as_tool_call(self) -> ToolCallArguments:
