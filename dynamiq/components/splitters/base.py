@@ -206,6 +206,14 @@ class SplitterComponentBase:
 
     def _merge_splits(self, splits: list[str], separator: str) -> list[str]:
         """Merge splits respecting chunk_size/chunk_overlap. Ported from LangChain."""
+        if not self.merge_short_chunks:
+            chunks = []
+            for split in splits:
+                chunk = split.strip() if self.strip_whitespace else split
+                if chunk:
+                    chunks.append(chunk)
+            return chunks
+
         separator_len = self._length(separator)
         chunks: list[str] = []
         current: list[str] = []

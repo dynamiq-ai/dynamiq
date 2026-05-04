@@ -24,6 +24,20 @@ def test_recursive_character_metadata_propagation():
     assert all(chunk.metadata["source_id"] == document.id for chunk in chunks)
 
 
+def test_recursive_character_can_disable_short_chunk_merging():
+    splitter = RecursiveCharacterSplitter(
+        chunk_size=100,
+        chunk_overlap=0,
+        separators=[" "],
+        merge_short_chunks=False,
+    )
+    splitter.init_components()
+
+    chunks = splitter.execute(splitter.input_schema(documents=[Document(content="alpha beta gamma")]))["documents"]
+
+    assert [chunk.content for chunk in chunks] == ["alpha", "beta", "gamma"]
+
+
 def test_recursive_character_language_preset_replaces_separators():
     splitter = RecursiveCharacterSplitter(chunk_size=80, chunk_overlap=0, language=Language.PYTHON)
     splitter.init_components()

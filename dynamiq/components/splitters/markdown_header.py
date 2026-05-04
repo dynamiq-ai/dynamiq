@@ -1,3 +1,4 @@
+import re
 from copy import deepcopy
 from typing import Any
 
@@ -67,13 +68,10 @@ class MarkdownHeaderSplitterComponent:
         for line in lines:
             stripped = line.strip()
             if not in_code_block:
-                if stripped.startswith("```") and stripped.count("```") == 1:
+                opening_fence = self._opening_code_fence(stripped)
+                if opening_fence:
                     in_code_block = True
-                    opening_fence = "```"
-                elif stripped.startswith("~~~"):
-                    in_code_block = True
-                    opening_fence = "~~~"
-            elif stripped.startswith(opening_fence):
+            elif self._is_closing_code_fence(stripped, opening_fence):
                 in_code_block = False
                 opening_fence = ""
 
@@ -106,3 +104,21 @@ class MarkdownHeaderSplitterComponent:
         if current_lines:
             flush(active_headers)
         return chunks
+
+    @staticmethod
+    def _opening_code_fence(stripped: str) -> str:
+        match = re.match(r"^(`{3,}|~{3,})(.*)$", stripped)
+        if match is None:
+            return ""
+        fence = match.group(1)
+        if fence[0] == "`" and "`" in match.group(2):
+            return ""
+        return fence
+
+    @staticmethod
+    def _is_closing_code_fence(stripped: str, opening_fence: str) -> bool:
+        if not opening_fence:
+            return False
+        fence_char = re.escape(opening_fence[0])
+        min_length = len(opening_fence)
+        return re.match(rf"^{fence_char}{{{min_length},}}\s*$", stripped) is not None

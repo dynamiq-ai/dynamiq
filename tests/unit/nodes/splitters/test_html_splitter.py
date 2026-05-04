@@ -1,6 +1,6 @@
 import pytest
 
-from dynamiq.nodes.splitters.html import HTMLHeaderSplitter
+from dynamiq.nodes.splitters.html import HTMLHeaderSplitter, HTMLSectionSplitter
 from dynamiq.types import Document
 
 pytest.importorskip("bs4")
@@ -26,3 +26,22 @@ def test_html_header_splitter_clears_custom_metadata_keys_by_header_level():
     second = next(chunk for chunk in chunks if chunk.content == "B")
     assert second.metadata["title"] == "Second"
     assert "subtitle" not in second.metadata
+
+
+def test_html_section_splitter_applies_xpath_filter():
+    pytest.importorskip("lxml")
+    splitter = HTMLSectionSplitter(xpath_filter="//main")
+    splitter.init_components()
+    text = """
+    <html>
+      <body>
+        <aside><h1>Aside</h1><p>Skip me</p></aside>
+        <main><h1>Main</h1><p>Keep me</p></main>
+      </body>
+    </html>
+    """
+
+    chunks = splitter.execute(splitter.input_schema(documents=[Document(content=text)]))["documents"]
+
+    assert [chunk.content for chunk in chunks] == ["Keep me"]
+    assert chunks[0].metadata["h1"] == "Main"

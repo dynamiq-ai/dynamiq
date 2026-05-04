@@ -27,3 +27,15 @@ def test_markdown_header_splitter_ignores_headers_inside_code_fence():
     chunks = splitter.execute(splitter.input_schema(documents=[Document(content=text)]))["documents"]
     assert len(chunks) == 1
     assert chunks[0].metadata["h1"] == "Real"
+
+
+def test_markdown_header_splitter_does_not_close_fences_with_info_strings():
+    splitter = MarkdownHeaderSplitter()
+    splitter.init_components()
+    text = "# Real\nbefore\n````markdown\n```python\n# Fake A\n```\n````python\n# Fake B\n````\nafter"
+
+    chunks = splitter.execute(splitter.input_schema(documents=[Document(content=text)]))["documents"]
+
+    assert len(chunks) == 1
+    assert chunks[0].metadata["h1"] == "Real"
+    assert "# Fake B" in chunks[0].content

@@ -96,6 +96,32 @@ class HTMLSectionSplitterComponent(HTMLHeaderSplitterComponent):
         super().__init__(headers_to_split_on=headers_to_split_on, return_each_element=False)
         self.xpath_filter = xpath_filter
 
+    def split_text(self, text: str) -> list[dict[str, Any]]:
+        if not self.xpath_filter:
+            return super().split_text(text)
+
+        try:
+            from lxml import etree, html
+        except ImportError as exc:
+            raise ImportError("HTMLSectionSplitter xpath_filter requires the 'lxml' package.") from exc
+
+        try:
+            tree = html.fromstring(text)
+            selected = tree.xpath(self.xpath_filter)
+        except etree.XPathError as exc:
+            raise ValueError(f"Invalid xpath_filter: {self.xpath_filter}") from exc
+
+        scoped_html: list[str] = []
+        for item in selected:
+            if hasattr(item, "tag"):
+                scoped_html.append(html.tostring(item, encoding="unicode"))
+            elif item is not None:
+                scoped_html.append(str(item))
+        if not scoped_html:
+            return []
+
+        return super().split_text("\n".join(scoped_html))
+
 
 def _has_lxml() -> bool:
     return find_spec("lxml") is not None
