@@ -276,6 +276,10 @@ class ScaleSerpTool(ConnectionNode):
             params["output"] = output
 
         if include_html is not None:
-            params["include_html"] = include_html
+            # Stringify with Python's bool repr ("True"/"False") so the wire form is
+            # identical across sync and async paths: ``requests`` calls ``str(True)``
+            # while ``httpx`` lowercases bools to ``"true"``. Pinning the format here
+            # avoids divergence if the upstream API is case-sensitive.
+            params["include_html"] = str(include_html)
 
         return {k: v for k, v in params.items() if v is not None}

@@ -108,6 +108,20 @@ async def test_scale_serp_execute_async_requires_query_or_url():
     mock_client.request.assert_not_awaited()
 
 
+@pytest.mark.parametrize("include_html, expected", [(True, "True"), (False, "False")])
+def test_scale_serp_get_params_stringifies_include_html(include_html, expected):
+    """``include_html`` must reach the wire as Python bool repr ("True"/"False").
+
+    Regression: ``requests`` calls ``str(True)`` -> ``"True"`` while ``httpx``
+    encodes bools as ``"true"``. Pinning the string at ``get_params`` time keeps
+    sync and async query strings byte-identical for case-sensitive upstreams.
+    """
+    node = ScaleSerpTool(connection=connections.ScaleSerp(api_key="k"))
+    params = node.get_params(query="q", include_html=include_html)
+    assert params["include_html"] == expected
+    assert isinstance(params["include_html"], str)
+
+
 @pytest.mark.asyncio
 async def test_zenrows_execute_async():
     node = ZenRowsTool(connection=connections.ZenRows(api_key="k"))
