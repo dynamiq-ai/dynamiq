@@ -50,7 +50,7 @@ class ToolCallArguments(BaseModel):
 
 class FinalAnswerArguments(BaseModel):
     thought: str
-    answer: str
+    answer: str | dict | list
     output_files: str = ""
 
 
