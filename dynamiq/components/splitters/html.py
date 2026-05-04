@@ -1,28 +1,33 @@
 from copy import deepcopy
 from importlib.util import find_spec
-from typing import Any
+from typing import Any, ClassVar
+
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
 
-class HTMLHeaderSplitterComponent:
+class HTMLHeaderSplitterComponent(BaseModel):
     """Splits HTML content on header tags (``h1``..``h6``), keeping a header-path in metadata."""
 
-    DEFAULT_HEADERS_TO_SPLIT_ON: list[tuple[str, str]] = [
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    DEFAULT_HEADERS_TO_SPLIT_ON: ClassVar[list[tuple[str, str]]] = [
         ("h1", "h1"),
         ("h2", "h2"),
         ("h3", "h3"),
         ("h4", "h4"),
     ]
 
-    def __init__(
-        self,
-        headers_to_split_on: list[tuple[str, str]] | None = None,
-        return_each_element: bool = False,
-    ) -> None:
-        self.headers_to_split_on = headers_to_split_on or self.DEFAULT_HEADERS_TO_SPLIT_ON
-        self.return_each_element = return_each_element
+    headers_to_split_on: list[tuple[str, str]] | None = None
+    return_each_element: bool = False
+
+    @model_validator(mode="after")
+    def set_default_headers(self) -> "HTMLHeaderSplitterComponent":
+        if self.headers_to_split_on is None:
+            self.headers_to_split_on = list(self.DEFAULT_HEADERS_TO_SPLIT_ON)
+        return self
 
     def run(self, documents: list[Document]) -> dict[str, list[Document]]:
         if not isinstance(documents, list):
@@ -90,13 +95,7 @@ class HTMLHeaderSplitterComponent:
 class HTMLSectionSplitterComponent(HTMLHeaderSplitterComponent):
     """Variant that returns one chunk per HTML section, mirroring LangChain's ``HTMLSectionSplitter``."""
 
-    def __init__(
-        self,
-        headers_to_split_on: list[tuple[str, str]] | None = None,
-        xpath_filter: str | None = None,
-    ) -> None:
-        super().__init__(headers_to_split_on=headers_to_split_on, return_each_element=False)
-        self.xpath_filter = xpath_filter
+    xpath_filter: str | None = None
 
     def split_text(self, text: str) -> list[dict[str, Any]]:
         if not self.xpath_filter:

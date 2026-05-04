@@ -2,24 +2,26 @@ import json
 from copy import deepcopy
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
 
-class RecursiveJsonSplitterComponent:
+class RecursiveJsonSplitterComponent(BaseModel):
     """Recursively splits JSON-like structures so each chunk's serialized size <= ``max_chunk_size``."""
 
-    def __init__(
-        self,
-        max_chunk_size: int = 2000,
-        min_chunk_size: int | None = None,
-        convert_lists: bool = False,
-    ) -> None:
-        if max_chunk_size <= 0:
-            raise ValueError("max_chunk_size must be greater than 0.")
-        self.max_chunk_size = max_chunk_size
-        self.min_chunk_size = min_chunk_size if min_chunk_size is not None else max(max_chunk_size - 200, 50)
-        self.convert_lists = convert_lists
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    max_chunk_size: int = Field(default=2000, gt=0)
+    min_chunk_size: int | None = None
+    convert_lists: bool = False
+
+    @model_validator(mode="after")
+    def set_default_min_chunk_size(self) -> "RecursiveJsonSplitterComponent":
+        if self.min_chunk_size is None:
+            self.min_chunk_size = max(self.max_chunk_size - 200, 50)
+        return self
 
     def run(self, documents: list[Document]) -> dict[str, list[Document]]:
         if not isinstance(documents, list):

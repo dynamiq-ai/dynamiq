@@ -1,19 +1,23 @@
 import re
 from copy import deepcopy
-from typing import Any
+from typing import Any, ClassVar
+
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
 
-class MarkdownHeaderSplitterComponent:
+class MarkdownHeaderSplitterComponent(BaseModel):
     """Splits Markdown text on header markers, carrying the header path in metadata.
 
     Each output chunk's ``metadata`` is enriched with ``{header_key: header_text}``
     for every active header level above the chunk.
     """
 
-    DEFAULT_HEADERS_TO_SPLIT_ON: list[tuple[str, str]] = [
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    DEFAULT_HEADERS_TO_SPLIT_ON: ClassVar[list[tuple[str, str]]] = [
         ("#", "h1"),
         ("##", "h2"),
         ("###", "h3"),
@@ -22,19 +26,18 @@ class MarkdownHeaderSplitterComponent:
         ("######", "h6"),
     ]
 
-    def __init__(
-        self,
-        headers_to_split_on: list[tuple[str, str]] | None = None,
-        strip_headers: bool = True,
-        return_each_line: bool = False,
-    ) -> None:
+    headers_to_split_on: list[tuple[str, str]] | None = None
+    strip_headers: bool = True
+    return_each_line: bool = False
+
+    @model_validator(mode="after")
+    def sort_headers(self) -> "MarkdownHeaderSplitterComponent":
         self.headers_to_split_on = sorted(
-            headers_to_split_on or self.DEFAULT_HEADERS_TO_SPLIT_ON,
+            self.headers_to_split_on or self.DEFAULT_HEADERS_TO_SPLIT_ON,
             key=lambda item: len(item[0]),
             reverse=True,
         )
-        self.strip_headers = strip_headers
-        self.return_each_line = return_each_line
+        return self
 
     def run(self, documents: list[Document]) -> dict[str, list[Document]]:
         if not isinstance(documents, list):

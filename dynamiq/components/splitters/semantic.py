@@ -4,6 +4,8 @@ from copy import deepcopy
 from typing import Callable
 
 import numpy as np
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
@@ -24,7 +26,7 @@ _DEFAULT_THRESHOLD_AMOUNT: dict[BreakpointThresholdType, float] = {
 }
 
 
-class SemanticSplitterComponent:
+class SemanticSplitterComponent(BaseModel):
     """Semantic-similarity splitter.
 
     Sentence-splits the text, embeds groups of neighboring sentences, then breaks
@@ -33,29 +35,21 @@ class SemanticSplitterComponent:
     ``embed_fn`` must accept ``list[str]`` and return ``list[list[float]]``.
     """
 
-    def __init__(
-        self,
-        embed_fn: Callable[[list[str]], list[list[float]]],
-        breakpoint_threshold_type: BreakpointThresholdType = BreakpointThresholdType.PERCENTILE,
-        breakpoint_threshold_amount: float | None = None,
-        number_of_chunks: int | None = None,
-        buffer_size: int = 1,
-        sentence_split_regex: str = r"(?<=[.?!])\s+",
-        min_chunk_size: int = 0,
-    ) -> None:
-        self.embed_fn = embed_fn
-        self.breakpoint_threshold_type = breakpoint_threshold_type
-        self.breakpoint_threshold_amount = (
-            breakpoint_threshold_amount
-            if breakpoint_threshold_amount is not None
-            else _DEFAULT_THRESHOLD_AMOUNT[breakpoint_threshold_type]
-        )
-        self.number_of_chunks = number_of_chunks
-        if buffer_size < 0:
-            raise ValueError("buffer_size must be >= 0.")
-        self.buffer_size = buffer_size
-        self.sentence_split_regex = sentence_split_regex
-        self.min_chunk_size = min_chunk_size
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    embed_fn: SkipJsonSchema[Callable[[list[str]], list[list[float]]]]
+    breakpoint_threshold_type: BreakpointThresholdType = BreakpointThresholdType.PERCENTILE
+    breakpoint_threshold_amount: float | None = None
+    number_of_chunks: int | None = None
+    buffer_size: int = Field(default=1, ge=0)
+    sentence_split_regex: str = r"(?<=[.?!])\s+"
+    min_chunk_size: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def set_default_threshold(self) -> "SemanticSplitterComponent":
+        if self.breakpoint_threshold_amount is None:
+            self.breakpoint_threshold_amount = _DEFAULT_THRESHOLD_AMOUNT[self.breakpoint_threshold_type]
+        return self
 
     def run(self, documents: list[Document]) -> dict[str, list[Document]]:
         if not isinstance(documents, list):

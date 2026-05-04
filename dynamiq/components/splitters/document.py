@@ -1,6 +1,9 @@
 import enum
 from copy import deepcopy
+
 from more_itertools import windowed
+from pydantic import BaseModel, ConfigDict, Field
+
 from dynamiq.types import Document
 
 
@@ -25,7 +28,7 @@ SPLIT_STR_BY_SPLIT_TYPE = {
 }
 
 
-class DocumentSplitter:
+class DocumentSplitter(BaseModel):
     """
     Splits a list of text documents into a list of text documents with shorter texts.
 
@@ -34,34 +37,11 @@ class DocumentSplitter:
     and avoids exceeding the maximum context length of language models.
     """
 
-    def __init__(
-        self,
-        split_by: DocumentSplitBy = DocumentSplitBy.PASSAGE,
-        split_length: int = 10,
-        split_overlap: int = 0,
-    ):
-        """
-        Initializes an object for splitting documents into smaller parts based on specified criteria.
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-        Args:
-            split_by (DocumentSplitBy): Determines the unit by which the document should be split.
-                Defaults to DocumentSplitBy.PASSAGE.
-            split_length (int): Specifies the maximum number of units to include in each split.
-                Defaults to 10.
-            split_overlap (int): Specifies the number of units that should overlap between consecutive
-                splits. Defaults to 0.
-
-        Raises:
-            ValueError: If split_length is less than or equal to 0.
-            ValueError: If split_overlap is less than 0.
-        """
-        self.split_by = split_by
-        if split_length <= 0:
-            raise ValueError("split_length must be greater than 0.")
-        self.split_length = split_length
-        if split_overlap < 0:
-            raise ValueError("split_overlap must be greater than or equal to 0.")
-        self.split_overlap = split_overlap
+    split_by: DocumentSplitBy = DocumentSplitBy.PASSAGE
+    split_length: int = Field(default=10, gt=0)
+    split_overlap: int = Field(default=0, ge=0)
 
     def run(self, documents: list[Document]) -> dict:
         """

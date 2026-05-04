@@ -1,7 +1,10 @@
 import enum
 import hashlib
 from copy import deepcopy
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
@@ -21,7 +24,7 @@ class IdStrategy(str, enum.Enum):
     DETERMINISTIC = "deterministic"
 
 
-class SplitterComponentBase:
+class SplitterComponentBase(BaseModel):
     """Base text-splitter component.
 
     Implements the``_merge_splits`` algorithm with overlap handling, separator
@@ -31,44 +34,34 @@ class SplitterComponentBase:
     Subclasses must implement :meth:`split_text`.
     """
 
-    PARENT_DOC_KEY = "parent_chunk_id"
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
-    def __init__(
-        self,
-        chunk_size: int = 4000,
-        chunk_overlap: int = 200,
-        length_unit: LengthUnit = LengthUnit.CHARS,
-        length_function: Callable[[str], int] | None = None,
-        keep_separator: bool | str = False,
-        strip_whitespace: bool = True,
-        add_start_index: bool = True,
-        add_chunk_index: bool = True,
-        merge_short_chunks: bool = True,
-        parent_chunk_size: int | None = None,
-        parent_chunk_overlap: int | None = None,
-        id_strategy: IdStrategy = IdStrategy.UUID,
-    ) -> None:
-        if chunk_size <= 0:
-            raise ValueError("chunk_size must be greater than 0.")
-        if chunk_overlap < 0:
-            raise ValueError("chunk_overlap must be greater than or equal to 0.")
-        if chunk_overlap >= chunk_size:
+    PARENT_DOC_KEY: ClassVar[str] = "parent_chunk_id"
+
+    chunk_size: int = Field(default=4000, gt=0)
+    chunk_overlap: int = Field(default=200, ge=0)
+    length_unit: LengthUnit = LengthUnit.CHARS
+    length_function: SkipJsonSchema[Callable[[str], int] | None] = None
+    keep_separator: bool | str = False
+    strip_whitespace: bool = True
+    add_start_index: bool = True
+    add_chunk_index: bool = True
+    merge_short_chunks: bool = True
+    parent_chunk_size: int | None = None
+    parent_chunk_overlap: int | None = None
+    id_strategy: IdStrategy = IdStrategy.UUID
+
+    @model_validator(mode="after")
+    def validate_splitter_config(self) -> "SplitterComponentBase":
+        if self.chunk_overlap >= self.chunk_size:
             raise ValueError("chunk_overlap must be smaller than chunk_size.")
-        if parent_chunk_size is not None and parent_chunk_size < chunk_size:
+        if self.parent_chunk_size is not None and self.parent_chunk_size < self.chunk_size:
             raise ValueError("parent_chunk_size must be >= chunk_size when set.")
-
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
-        self.length_unit = length_unit
-        self.length_function = length_function or len
-        self.keep_separator = keep_separator
-        self.strip_whitespace = strip_whitespace
-        self.add_start_index = add_start_index
-        self.add_chunk_index = add_chunk_index
-        self.merge_short_chunks = merge_short_chunks
-        self.parent_chunk_size = parent_chunk_size
-        self.parent_chunk_overlap = parent_chunk_overlap if parent_chunk_overlap is not None else chunk_overlap
-        self.id_strategy = id_strategy
+        if self.parent_chunk_overlap is None:
+            self.parent_chunk_overlap = self.chunk_overlap
+        if self.length_function is None:
+            self.length_function = len
+        return self
 
     def split_text(self, text: str) -> list[str]:
         """Split a single string into chunk strings. Subclasses must implement."""
@@ -202,7 +195,7 @@ class SplitterComponentBase:
         return text or None
 
     def _length(self, text: str) -> int:
-        return self.length_function(text)
+        return (self.length_function or len)(text)
 
     def _merge_splits(self, splits: list[str], separator: str) -> list[str]:
         """Merge splits respecting chunk_size/chunk_overlap. Ported from LangChain."""

@@ -1,7 +1,10 @@
 import hashlib
 import inspect
 from copy import deepcopy
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
+
+from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types import Document
@@ -17,7 +20,7 @@ DEFAULT_CONTEXT_PROMPT = (
 )
 
 
-class ContextualSplitterComponent:
+class ContextualSplitterComponent(BaseModel):
     """Wraps an inner splitter and prepends LLM-generated doc-level context to each chunk.
 
     ``inner_splitter`` must expose ``run(documents) -> {"documents": list[Document]}``.
@@ -25,26 +28,24 @@ class ContextualSplitterComponent:
     accepts a fully-formatted prompt string and may optionally accept ``config``.
     """
 
-    METADATA_KEY = "context"
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def __init__(
-        self,
-        inner_splitter: Any,
-        llm_fn: Callable[..., str],
-        context_prompt: str = DEFAULT_CONTEXT_PROMPT,
-        prepend: bool = True,
-        cache_context: bool = True,
-        separator: str = "\n\n",
-    ) -> None:
-        if not (hasattr(inner_splitter, "run") or hasattr(inner_splitter, "execute")):
+    METADATA_KEY: ClassVar[str] = "context"
+
+    inner_splitter: Any
+    llm_fn: SkipJsonSchema[Callable[..., str]]
+    context_prompt: str = DEFAULT_CONTEXT_PROMPT
+    prepend: bool = True
+    cache_context: bool = True
+    separator: str = "\n\n"
+
+    _cache: dict[str, str] = PrivateAttr(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_inner_splitter(self) -> "ContextualSplitterComponent":
+        if not (hasattr(self.inner_splitter, "run") or hasattr(self.inner_splitter, "execute")):
             raise TypeError("inner_splitter must expose a run(documents) or execute(input_data) method.")
-        self.inner_splitter = inner_splitter
-        self.llm_fn = llm_fn
-        self.context_prompt = context_prompt
-        self.prepend = prepend
-        self.cache_context = cache_context
-        self.separator = separator
-        self._cache: dict[str, str] = {}
+        return self
 
     def run(
         self,

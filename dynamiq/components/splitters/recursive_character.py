@@ -1,4 +1,5 @@
 import re
+from typing import ClassVar
 
 from dynamiq.components.splitters.base import SplitterComponentBase
 
@@ -10,7 +11,7 @@ class RecursiveCharacterSplitterComponent(SplitterComponentBase):
     chunk that still exceeds ``chunk_size``.
     """
 
-    DEFAULT_SEPARATORS = ["\n\n", "\n", " ", ""]
+    DEFAULT_SEPARATORS: ClassVar[list[str]] = ["\n\n", "\n", " ", ""]
 
     def __init__(
         self,
