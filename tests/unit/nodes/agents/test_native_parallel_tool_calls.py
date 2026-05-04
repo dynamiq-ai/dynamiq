@@ -4,7 +4,21 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from dynamiq.nodes.agents.exceptions import ActionParsingException
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME
+
+
+def _make_agent(**kwargs):
+    agent = MagicMock()
+    agent.verbose = False
+    agent.parallel_tool_calls_enabled = kwargs.get("parallel_tool_calls_enabled", True)
+    agent.log_reasoning = MagicMock()
+    agent.log_final_output = MagicMock()
+    agent.sanitize_tool_name = lambda name: name
+    agent._parse_output_files_csv = lambda v: []
+    return agent
 
 
 class TestNativeParallelToolCalling:
@@ -80,3 +94,120 @@ class TestNativeParallelToolCalling:
 
         assert action == "search"
         assert action_input == {"q": "a"}
+
+
+class TestFunctionCallingEdgeCases:
+
+    def test_no_tool_calls_raises(self):
+        from dynamiq.nodes.agents.agent import Agent
+
+        agent = _make_agent()
+        llm_result = SimpleNamespace(output={})
+
+        with pytest.raises(ActionParsingException):
+            Agent._handle_function_calling_mode(agent, llm_result, loop_num=1)
+
+    def test_arguments_as_json_string(self):
+        from dynamiq.nodes.agents.agent import Agent
+
+        agent = _make_agent()
+        llm_result = SimpleNamespace(
+            output={
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "search",
+                            "arguments": json.dumps({"thought": "t", "action_input": {"q": "a"}}),
+                        }
+                    }
+                ]
+            }
+        )
+
+        thought, action, action_input = Agent._handle_function_calling_mode(agent, llm_result, loop_num=1)
+
+        assert action == "search"
+        assert thought == "t"
+        assert action_input == {"q": "a"}
+
+    def test_missing_thought_raises(self):
+        from dynamiq.nodes.agents.agent import Agent
+
+        agent = _make_agent()
+        llm_result = SimpleNamespace(
+            output={
+                "tool_calls": [
+                    {"function": {"name": "search", "arguments": {"action_input": {"q": "a"}}}},
+                ]
+            }
+        )
+
+        with pytest.raises(ActionParsingException):
+            Agent._handle_function_calling_mode(agent, llm_result, loop_num=1)
+
+    def test_missing_action_input_raises(self):
+        from dynamiq.nodes.agents.agent import Agent
+
+        agent = _make_agent()
+        llm_result = SimpleNamespace(
+            output={
+                "tool_calls": [
+                    {"function": {"name": "search", "arguments": {"thought": "t"}}},
+                ]
+            }
+        )
+
+        with pytest.raises(ActionParsingException):
+            Agent._handle_function_calling_mode(agent, llm_result, loop_num=1)
+
+    def test_final_answer(self):
+        from dynamiq.nodes.agents.agent import Agent
+
+        agent = _make_agent()
+        llm_result = SimpleNamespace(
+            output={
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "provide_final_answer",
+                            "arguments": {"thought": "done", "answer": "42", "output_files": ""},
+                        }
+                    }
+                ]
+            }
+        )
+
+        thought, action, result = Agent._handle_function_calling_mode(agent, llm_result, loop_num=1)
+
+        assert action == "final_answer"
+        assert result == "42"
+        assert thought == "done"
+
+    def test_final_answer_missing_answer_raises(self):
+        from dynamiq.nodes.agents.agent import Agent
+
+        agent = _make_agent()
+        llm_result = SimpleNamespace(
+            output={
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "provide_final_answer",
+                            "arguments": {"thought": "done"},
+                        }
+                    }
+                ]
+            }
+        )
+
+        with pytest.raises(ActionParsingException):
+            Agent._handle_function_calling_mode(agent, llm_result, loop_num=1)
+
+    def test_invalid_tool_calls_structure_raises(self):
+        from dynamiq.nodes.agents.agent import Agent
+
+        agent = _make_agent()
+        llm_result = SimpleNamespace(output={"tool_calls": [{"bad": "structure"}]})
+
+        with pytest.raises(ActionParsingException):
+            Agent._handle_function_calling_mode(agent, llm_result, loop_num=1)

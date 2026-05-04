@@ -43,6 +43,58 @@ from dynamiq.utils.json_parser import parse_llm_json_output
 from dynamiq.utils.logger import logger
 
 
+class ToolCallArguments(BaseModel):
+    thought: str
+    action_input: dict | str
+
+
+class FinalAnswerArguments(BaseModel):
+    thought: str
+    answer: str
+    output_files: str = ""
+
+
+class FunctionCall(BaseModel):
+    name: str
+    arguments: dict = Field(default_factory=dict)
+
+    @field_validator("arguments", mode="before")
+    @classmethod
+    def parse_arguments(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            try:
+                return json.loads(v, strict=False)
+            except json.JSONDecodeError:
+                return {}
+        return v or {}
+
+    def parse_as_tool_call(self) -> ToolCallArguments:
+        try:
+            return ToolCallArguments.model_validate(self.arguments)
+        except Exception:
+            raise ActionParsingException(
+                "Your tool call is missing required fields. "
+                "Every tool call must include 'thought' (your reasoning) "
+                "and 'action_input' (the tool parameters as an object).",
+                recoverable=True,
+            )
+
+    def parse_as_final_answer(self) -> FinalAnswerArguments:
+        try:
+            return FinalAnswerArguments.model_validate(self.arguments)
+        except Exception:
+            raise ActionParsingException(
+                "Your final answer call is missing required fields. "
+                "The 'provide_final_answer' function must include 'thought' (your reasoning) "
+                "and 'answer' (your final response to the user).",
+                recoverable=True,
+            )
+
+
+class ToolCall(BaseModel):
+    function: FunctionCall
+
+
 class AgentState(BaseModel):
     """
     Encapsulates the dynamic state of an agent during execution.
@@ -588,22 +640,28 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         if "tool_calls" not in dict(llm_result.output):
             logger.error("Error: No function called.")
-            raise ActionParsingException("Error: No function called, you need to call the correct function.")
+            raise ActionParsingException(
+                "You must always respond by calling a function. "
+                "Call a tool function to continue, or call 'provide_final_answer' to finish.",
+                recoverable=True,
+            )
 
-        tool_calls = llm_result.output["tool_calls"]
+        try:
+            tool_calls = [ToolCall.model_validate(tc) for tc in llm_result.output["tool_calls"]]
+        except Exception as e:
+            raise ActionParsingException(f"Error parsing tool calls: {e}", recoverable=True)
+
         first_call = tool_calls[0]
-        action = first_call["function"]["name"].strip()
-        first_args = first_call["function"]["arguments"]
+        action = first_call.function.name.strip()
 
-        thoughts = [tc["function"]["arguments"].get("thought", "") for tc in tool_calls]
-        thought = "\n".join(t for t in thoughts if t)
         if action == "provide_final_answer":
-            final_answer = first_args["answer"]
-            self._requested_output_files = self._parse_output_files_csv(first_args.get("output_files") or "")
-            self.log_final_output(thought, final_answer, loop_num)
-            return thought, "final_answer", final_answer
+            final_args = first_call.function.parse_as_final_answer()
+            thought = final_args.thought
+            self._requested_output_files = self._parse_output_files_csv(final_args.output_files)
+            self.log_final_output(thought, final_args.answer, loop_num)
+            return thought, "final_answer", final_args.answer
 
-        actual_tool_calls = [tc for tc in tool_calls if tc["function"]["name"].strip() != "provide_final_answer"]
+        actual_tool_calls = [tc for tc in tool_calls if tc.function.name.strip() != "provide_final_answer"]
 
         if len(actual_tool_calls) > 1 and not self.parallel_tool_calls_enabled:
             logger.warning(
@@ -615,20 +673,29 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if len(actual_tool_calls) > 1 and self.parallel_tool_calls_enabled:
             tool_items = []
             for tc in actual_tool_calls:
-                tc_name = tc["function"]["name"].strip()
-                tc_args = tc["function"]["arguments"]
-                tc_input = tc_args["action_input"]
+                args = tc.function.parse_as_tool_call()
+                tc_input = args.action_input
                 if not isinstance(tc_input, dict):
-                    tc_input = {"input": tc_input}
-                tool_items.append(ToolCallItem(name=tc_name, input=tc_input, thought=tc_args.get("thought", "")))
-
+                    try:
+                        tc_input = json.loads(tc_input, strict=False)
+                    except json.JSONDecodeError as e:
+                        raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
+                tool_items.append(
+                    ToolCallItem(
+                        name=tc.function.name.strip(),
+                        input=tc_input,
+                        thought=args.thought,
+                    )
+                )
+            thought = "\n".join(item.thought for item in tool_items if item.thought)
             validated = ParallelToolCallsInputSchema(tools=tool_items)
             action_input = validated.model_dump()
             self.log_reasoning(thought, PARALLEL_TOOL_NAME, action_input["tools"], loop_num)
             return thought, PARALLEL_TOOL_NAME, action_input
 
-        action_input = first_args["action_input"]
-
+        args = first_call.function.parse_as_tool_call()
+        thought = args.thought
+        action_input = args.action_input
         if isinstance(action_input, str):
             try:
                 action_input = json.loads(action_input, strict=False)
@@ -1427,6 +1494,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     extra_guidance = (
                         "Provide 'Thought:' and either 'Action:' "
                         "with a JSON 'Action Input:' or a final 'Answer:' section."
+                    )
+                elif self.inference_mode == InferenceMode.FUNCTION_CALLING:
+                    extra_guidance = (
+                        "You MUST respond by calling a function — never plain text. "
+                        "Call a tool with 'thought' and 'action_input', "
+                        "or call 'provide_final_answer' with 'thought' and 'answer' to finish."
                     )
 
                 self._append_recovery_instruction(
