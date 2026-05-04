@@ -1,4 +1,5 @@
 import io
+import json
 import re
 from copy import deepcopy
 from enum import Enum
@@ -14,7 +15,7 @@ from dynamiq.checkpoints.checkpoint import (
     IterativeCheckpointMixin,
 )
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.memory import Memory, MemoryRetrievalStrategy
+from dynamiq.memory import Memory, MemoryRetrievalStrategy, MemorySaveMode
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
@@ -794,7 +795,7 @@ class Agent(IterativeCheckpointMixin, Node):
 
         if use_memory:
             try:
-                self._save_history_to_memory(custom_metadata)
+                self._save_history_to_memory(custom_metadata, final_output=result)
             except Exception as save_error:
                 logger.error(
                     "Agent %s - %s: failed to save history to memory: %s",
@@ -902,15 +903,132 @@ class Agent(IterativeCheckpointMixin, Node):
         logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
         return history_messages
 
+    def _is_input_output_trace_message(self, message: Message) -> bool:
+        """Return True when a message is an internal ReAct/tool-trace entry."""
+        content = message.content.strip()
+
+        if message.role == MessageRole.USER:
+            return content.startswith("Observation:")
+
+        if message.role == MessageRole.ASSISTANT:
+            if content.startswith("Thought:") or content.startswith("Function call:"):
+                return True
+
+            if self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
+                try:
+                    parsed_content = json.loads(content, strict=False)
+                except (TypeError, ValueError):
+                    parsed_content = None
+
+                return isinstance(parsed_content, dict) and {"thought", "action"}.issubset(parsed_content)
+
+            if self.inference_mode == InferenceMode.XML:
+                return "<thought" in content and ("<action" in content or "<answer" in content)
+
+        return False
+
+    def _input_output_history(
+        self,
+        metadata: dict,
+        snapshot_messages: list[Message],
+        final_output: Any | None = None,
+    ) -> list[Message]:
+        """Return conversation history with internal trace removed.
+
+        INPUT_OUTPUT mode is still snapshot-based: it rewrites the scoped memory
+        slice with the current prompt state. The difference from FULL mode is that
+        only user/assistant conversation turns are preserved while intermediate
+        ReAct/tool messages are dropped.
+        """
+        history: list[Message] = []
+        for message in snapshot_messages:
+            if self._is_input_output_trace_message(message):
+                continue
+            history.append(
+                Message(
+                    role=message.role,
+                    content=message.content,
+                    metadata=metadata.copy(),
+                )
+            )
+
+        if final_output is not None:
+            final_output_text = str(final_output)
+            if final_output_text:
+                if history and history[-1].role == MessageRole.ASSISTANT:
+                    history[-1] = Message(
+                        role=MessageRole.ASSISTANT,
+                        content=final_output_text,
+                        metadata=metadata.copy(),
+                    )
+                else:
+                    history.append(
+                        Message(
+                            role=MessageRole.ASSISTANT,
+                            content=final_output_text,
+                            metadata=metadata.copy(),
+                        )
+                    )
+        return history
+
+    def _fallback_input_output_pair(
+        self,
+        metadata: dict,
+        snapshot_messages: list[Message],
+        final_output: Any | None = None,
+    ) -> list[Message]:
+        """Return the current user input and the latest assistant response.
+
+        This fallback path is used when scoped snapshot replacement is not
+        available. It must not apply ReAct trace filtering to assistant
+        messages in FULL mode, otherwise final assistant turns starting with
+        ``Thought:`` are silently lost.
+        """
+        pair: list[Message] = []
+
+        if self._pinned_input is not None:
+            pair.append(
+                Message(
+                    role=MessageRole.USER,
+                    content=extract_message_text(self._pinned_input),
+                    metadata=metadata.copy(),
+                )
+            )
+
+        assistant_content = str(final_output) if final_output is not None else None
+        if assistant_content == "":
+            assistant_content = None
+
+        if assistant_content is None:
+            last_assistant = next(
+                (m for m in reversed(snapshot_messages) if m.role == MessageRole.ASSISTANT),
+                None,
+            )
+            if last_assistant is not None:
+                assistant_content = last_assistant.content
+
+        if assistant_content is not None:
+            pair.append(
+                Message(
+                    role=MessageRole.ASSISTANT,
+                    content=assistant_content,
+                    metadata=metadata.copy(),
+                )
+            )
+
+        return pair
+
     def _save_history_to_memory(
         self,
         metadata: dict,
+        final_output: Any | None = None,
     ) -> None:
         """Snapshot prompt state into memory for current user/session scope.
 
         Replaces only the messages matching current ``user_id``/``session_id``
-        filters, then writes every non-system message from ``self._prompt.messages``.
-        This avoids wiping unrelated users/sessions when a backend is shared.
+        filters. What gets written depends on ``memory.save_mode``: FULL stores
+        every non-system message (incl. tool calls/observations); INPUT_OUTPUT
+        stores only the user input and final assistant response.
 
         Args:
             metadata: Metadata dict forwarded to each ``memory.add`` call.
@@ -926,32 +1044,36 @@ class Agent(IterativeCheckpointMixin, Node):
 
         fully_scoped = bool(user_id and session_id)
 
-        saved = 0
-        snapshot_messages: list[Message] = []
+        raw_snapshot_messages: list[Message] = []
         for msg in self._prompt.messages:
             if msg.role == MessageRole.SYSTEM:
                 continue
-            content = extract_message_text(msg)
-            snapshot_messages.append(Message(role=msg.role, content=content, metadata=metadata.copy()))
-            saved += 1
+            raw_snapshot_messages.append(
+                Message(role=msg.role, content=extract_message_text(msg), metadata=metadata.copy())
+            )
 
-        if fully_scoped:
-            scope_filters = {"user_id": user_id, "session_id": session_id}
-            try:
-                self.memory.replace_messages(filters=scope_filters, messages=snapshot_messages)
-            except NotImplementedError:
-                logger.warning(
-                    f"Agent {self.name} - {self.id}: backend does not support scoped delete, "
-                    "falling back to appending user input and assistant response.",
-                )
-                self._append_fallback_messages(metadata, snapshot_messages)
-                return
-        else:
+        if not fully_scoped:
             logger.info(
                 f"Agent {self.name} - {self.id}: only one of user_id/session_id provided, "
                 "using append-only save to avoid cross-scope data loss.",
             )
-            self._append_fallback_messages(metadata, snapshot_messages)
+            self._append_fallback_messages(metadata, raw_snapshot_messages, final_output=final_output)
+            return
+
+        snapshot_messages = raw_snapshot_messages
+        if self.memory.save_mode == MemorySaveMode.INPUT_OUTPUT:
+            snapshot_messages = self._input_output_history(metadata, snapshot_messages, final_output=final_output)
+
+        saved = len(snapshot_messages)
+        scope_filters = {"user_id": user_id, "session_id": session_id}
+        try:
+            self.memory.replace_messages(filters=scope_filters, messages=snapshot_messages)
+        except NotImplementedError:
+            logger.warning(
+                f"Agent {self.name} - {self.id}: backend does not support scoped delete, "
+                "falling back to appending user input and assistant response.",
+            )
+            self._append_fallback_messages(metadata, raw_snapshot_messages, final_output=final_output)
             return
 
         logger.info(
@@ -970,25 +1092,17 @@ class Agent(IterativeCheckpointMixin, Node):
         self.memory.add(role=MessageRole.USER, content=pinned_content, metadata=metadata.copy())
         logger.info(f"Agent {self.name} - {self.id}: saved user input to memory after agent error")
 
-    def _append_fallback_messages(self, metadata: dict, snapshot_messages: list[Message]) -> None:
+    def _append_fallback_messages(
+        self,
+        metadata: dict,
+        snapshot_messages: list[Message],
+        final_output: Any | None = None,
+    ) -> None:
         """Append only the user input and last assistant response to memory (safe fallback)."""
-        saved = 0
-        if self._pinned_input is not None:
-            pinned_content = extract_message_text(self._pinned_input)
-            self.memory.add(role=MessageRole.USER, content=pinned_content, metadata=metadata.copy())
-            saved += 1
-        last_assistant = next(
-            (m for m in reversed(snapshot_messages) if m.role == MessageRole.ASSISTANT),
-            None,
-        )
-        if last_assistant:
-            self.memory.add(
-                role=last_assistant.role,
-                content=last_assistant.content,
-                metadata=metadata.copy(),
-            )
-            saved += 1
-        logger.info(f"Agent {self.name} - {self.id}: saved {saved} message(s) to memory (fallback)")
+        pair = self._fallback_input_output_pair(metadata, snapshot_messages, final_output=final_output)
+        for m in pair:
+            self.memory.add(role=m.role, content=m.content, metadata=m.metadata)
+        logger.info(f"Agent {self.name} - {self.id}: saved {len(pair)} message(s) to memory (fallback)")
 
     def _run_llm(
         self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs
