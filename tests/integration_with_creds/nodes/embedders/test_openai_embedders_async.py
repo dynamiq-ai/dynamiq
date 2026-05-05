@@ -11,8 +11,6 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.runnables import RunnableStatus
 from dynamiq.types.document import Document
 
-load_dotenv()
-
 @pytest.mark.asyncio
 async def test_openai_text_embedder_run_async():
     """Single async embed call must return a real embedding vector."""
