@@ -130,7 +130,9 @@ class TestFunctionCallingEdgeCases:
         assert thought == "t"
         assert action_input == {"q": "a"}
 
-    def test_missing_thought_raises(self):
+    def test_missing_thought_defaults_to_empty(self):
+        """LLMs sometimes omit `thought` despite the schema. Tolerate it
+        (default to empty string) instead of forcing a recoverable retry."""
         from dynamiq.nodes.agents.agent import Agent
 
         agent = _make_agent()
@@ -142,8 +144,11 @@ class TestFunctionCallingEdgeCases:
             }
         )
 
-        with pytest.raises(ActionParsingException):
-            Agent._handle_function_calling_mode(agent, llm_result, loop_num=1)
+        thought, action, action_input = Agent._handle_function_calling_mode(agent, llm_result, loop_num=1)
+
+        assert action == "search"
+        assert thought == ""
+        assert action_input == {"q": "a"}
 
     def test_missing_action_input_raises(self):
         from dynamiq.nodes.agents.agent import Agent
