@@ -51,6 +51,16 @@ class Decision(str, Enum):
     PLAN = "plan"
 
 
+class ActionCommand(str, Enum):
+    """
+    Enumeration for orchestrator action commands.
+    """
+
+    DELEGATE = "delegate"
+    FINAL_ANSWER = "final_answer"
+    RESPOND = "respond"
+
+
 class DecisionResult(BaseModel):
     """
     Holds the result of analyzing the user input.
