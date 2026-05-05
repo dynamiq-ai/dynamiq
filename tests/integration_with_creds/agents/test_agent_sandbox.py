@@ -6,6 +6,7 @@ import pytest
 from pydantic import Field
 
 from dynamiq import Workflow
+from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.callbacks.tracing import TracingCallbackHandler
 from dynamiq.connections import E2B as E2BConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
@@ -18,6 +19,8 @@ from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.sandboxes import SandboxConfig
 from dynamiq.sandboxes.base import Sandbox, ShellCommandResult
 from dynamiq.sandboxes.tools.shell import SandboxShellTool
+from dynamiq.types.streaming import StreamingConfig, StreamingMode
+from tests.integration_with_creds.agents.streaming_assertions import assert_streaming_events, collect_streaming_events
 
 
 class TestSandbox(Sandbox):
@@ -74,21 +77,31 @@ def test_agent_with_sandbox_executes_shell(openai_llm):
         inference_mode=InferenceMode.XML,
         max_loops=5,
         role="You are helpful assistant that can run commands in the sandbox.",
+        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL, min_chunk_chars=16),
     )
 
     wf = Workflow(flow=Flow(nodes=[agent]))
 
+    streaming_handler = StreamingIteratorCallbackHandler()
     result = wf.run(
         input_data={
             "input": "Run this command in the sandbox and tell me the output: echo hello."
             " Use sandbox command tool and return its exact result."
         },
-        config=RunnableConfig(),
+        config=RunnableConfig(callbacks=[streaming_handler]),
     )
     assert result.status == RunnableStatus.SUCCESS
     content = result.output.get(agent.id, {}).get("output", {}).get("content", "")
     assert content is not None
     assert "hello" in str(content), f"Expected 'hello' in output, got: {content[:500]}"
+
+    ordered_events = collect_streaming_events(streaming_handler, agent.id)
+    assert_streaming_events(
+        ordered_events,
+        agent.inference_mode,
+        agent.streaming.mode,
+        min_chunk_chars=agent.streaming.min_chunk_chars,
+    )
 
 
 @pytest.mark.flaky(reruns=3)
