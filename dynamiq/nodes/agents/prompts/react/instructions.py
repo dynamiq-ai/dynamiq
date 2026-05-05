@@ -186,8 +186,6 @@ IMPORTANT RULES:
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
-You MUST respond exclusively by calling a function. Never write plain text responses. Every response must be a function call.
-
 You need to use the right functions based on what the user asks.
 
 Use the function `provide_final_answer` when you can give a clear answer to the user's first question,
