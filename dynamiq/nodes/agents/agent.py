@@ -107,6 +107,7 @@ class FunctionCall(BaseModel):
 
 
 class ToolCall(BaseModel):
+    id: str | None = None
     function: FunctionCall
 
 
@@ -242,6 +243,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self.state.reset()
         self._streaming_tool_run_id = None
         self._streaming_tool_run_ids = []
+        self._pending_fc_tool_call_ids: list[str] = []
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -587,18 +589,38 @@ class Agent(HistoryManagerMixin, BaseAgent):
             llm_generated_output: The generated text output from the LLM.
         """
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
+            self._pending_fc_tool_call_ids = []
             if "tool_calls" in dict[Any, Any](llm_result.output):
                 try:
                     tool_calls = llm_result.output["tool_calls"]
-                    parts = []
+                    payload: list[dict] = []
+                    pending_ids: list[str] = []
                     for tc in tool_calls:
-                        function_name = tc["function"]["name"]
-                        function_args = json.dumps(tc["function"]["arguments"])
-                        parts.append(f"Function call: {function_name}({function_args})")
-                    message_content = "\n".join(parts)
-                    self._prompt.messages.append(
-                        Message(role=MessageRole.ASSISTANT, content=message_content, static=True)
-                    )
+                        function_name = tc["function"]["name"].strip()
+                        if function_name == "provide_final_answer":
+                            continue
+                        tc_id = tc.get("id") or generate_uuid()
+                        payload.append(
+                            {
+                                "id": tc_id,
+                                "type": "function",
+                                "function": {
+                                    "name": function_name,
+                                    "arguments": json.dumps(tc["function"]["arguments"]),
+                                },
+                            }
+                        )
+                        pending_ids.append(tc_id)
+                    if payload:
+                        self._prompt.messages.append(
+                            Message(
+                                role=MessageRole.ASSISTANT,
+                                content="",
+                                tool_calls=payload,
+                                static=True,
+                            )
+                        )
+                        self._pending_fc_tool_call_ids = pending_ids
                 except Exception as e:
                     logger.warning(f"Failed to extract tool call from LLM result: {e}. Using raw output instead.")
                     self._prompt.messages.append(
@@ -1133,6 +1155,42 @@ class Agent(HistoryManagerMixin, BaseAgent):
         observation = f"\nObservation: {tool_result}\n"
         self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
 
+    def _emit_tool_observations(
+        self, tool_result: Any, ordered_results: list[dict[str, Any]] | None = None
+    ) -> None:
+        """Append tool observations to prompt history.
+
+        In FUNCTION_CALLING mode with stashed tool_call_ids, emits one
+        ``role: "tool"`` message per id (per-tool result for parallel runs,
+        the combined result for single-tool runs) — required by OpenAI's
+        function-calling protocol. Falls back to the legacy ``role: "user"``
+        ``Observation: ...`` message in all other cases.
+        """
+        pending_ids = getattr(self, "_pending_fc_tool_call_ids", None) or []
+        if self.inference_mode == InferenceMode.FUNCTION_CALLING and pending_ids:
+            if ordered_results and len(ordered_results) == len(pending_ids):
+                for tc_id, result in zip(pending_ids, ordered_results):
+                    self._prompt.messages.append(
+                        Message(
+                            role=MessageRole.TOOL,
+                            content=str(result.get("result", "")),
+                            tool_call_id=tc_id,
+                            static=True,
+                        )
+                    )
+            else:
+                self._prompt.messages.append(
+                    Message(
+                        role=MessageRole.TOOL,
+                        content=str(tool_result),
+                        tool_call_id=pending_ids[0],
+                        static=True,
+                    )
+                )
+            self._pending_fc_tool_call_ids = []
+            return
+        self._add_observation(tool_result)
+
     def _validate_parallel_tool_input(self, action_input: Any) -> list[dict[str, Any]] | None:
         """Validate and parse parallel tool input schema.
 
@@ -1279,12 +1337,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self._add_observation(subagent_error)
                 return None
 
+            ordered_results: list[dict[str, Any]] = []
             if (
                 self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME
                 and self.parallel_tool_calls_enabled
                 and not skip_parallel
             ):
-                tool_result, _ = self._execute_tools(tools_data, thought, loop_num, config, **kwargs)
+                tool_result, _, ordered_results = self._execute_tools(
+                    tools_data, thought, loop_num, config, **kwargs
+                )
             else:
                 tool_result, _, is_delegated, _, _ = self._execute_single_tool(
                     action, action_input, thought, loop_num, config, **kwargs
@@ -1300,7 +1361,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
                 tool_result = f"{tool_result}{skipped_notice}" if tool_result else skipped_notice
 
-            self._add_observation(tool_result)
+            self._emit_tool_observations(tool_result, ordered_results)
 
         # else: No action or no tools available - no reasoning to stream
 
@@ -1409,6 +1470,16 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         response_format=self._response_format,
                         config=llm_config,
                         parallel_tool_calls=True if native_parallel else None,
+                        tool_choice=(
+                            "required"
+                            if (
+                                self.inference_mode == InferenceMode.FUNCTION_CALLING
+                                and self._tools
+                                and not getattr(self.llm, "thinking_enabled", False)
+                                and "tool_choice" in (get_supported_openai_params(model=self.llm.model) or [])
+                            )
+                            else None
+                        ),
                         **kwargs,
                     )
                 finally:
@@ -1839,7 +1910,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         loop_num: int,
         config: RunnableConfig,
         **kwargs,
-    ) -> tuple[str, dict[str, Any]]:
+    ) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
         """
         Execute one or more tools and gather their results.
 
@@ -1855,12 +1926,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
             **kwargs: Additional arguments for tool execution
 
         Returns:
-            tuple: (combined_observation, aggregated_files)
+            tuple: (combined_observation, aggregated_files, ordered_results)
+                where ordered_results is a list of per-tool result dicts in
+                input order. Each entry contains tool_name, success, result,
+                and files keys.
         """
         all_results: list[dict[str, Any]] = []
 
         if not tools_data:
-            return "", {}
+            return "", {}, []
 
         prepared_tools: list[dict[str, Any]] = []
 
@@ -2000,4 +2074,4 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         combined_observation = "\n\n".join(observation_parts)
 
-        return combined_observation, aggregated_files
+        return combined_observation, aggregated_files, ordered_results

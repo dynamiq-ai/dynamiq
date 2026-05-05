@@ -18,6 +18,7 @@ class MessageRole(str, enum.Enum):
     USER = "user"
     SYSTEM = "system"
     ASSISTANT = "assistant"
+    TOOL = "tool"
 
 
 class MessageType(str, enum.Enum):
@@ -65,11 +66,17 @@ class Message(BaseModel):
         role (MessageRole): The role of the message sender.
         metadata (dict | None): Additional metadata for the message, default is None.
         static (bool): Determines whether it is possible to pass parameters via this message.
+        tool_calls (list[dict] | None): Native tool_calls payload for assistant
+            messages in OpenAI function-calling protocol.
+        tool_call_id (str | None): Identifier of the tool call this message
+            answers. Required when ``role == TOOL``.
     """
-    content: str
+    content: str = ""
     role: MessageRole = MessageRole.USER
     metadata: dict | None = None
     static: bool = Field(default=False, exclude=True)
+    tool_calls: list[dict] | None = None
+    tool_call_id: str | None = None
 
     message_type: ClassVar[MessageType] = MessageType.MESSAGE
 
@@ -417,9 +424,9 @@ class Prompt(BasePrompt):
             if isinstance(msg, Message):
                 if not msg.static:
                     msg = msg.format_message(**kwargs)
-                out.append(msg.model_dump(exclude={"metadata"}))
+                out.append(msg.model_dump(exclude={"metadata"}, exclude_none=True))
             elif isinstance(msg, VisionMessage):
-                out.append(msg.format_message(**kwargs).model_dump(exclude={"metadata"}))
+                out.append(msg.format_message(**kwargs).model_dump(exclude={"metadata"}, exclude_none=True))
             else:
                 raise ValueError(f"Invalid message type: {type(msg)}")
 
