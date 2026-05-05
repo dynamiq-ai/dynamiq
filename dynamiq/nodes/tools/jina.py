@@ -189,16 +189,28 @@ class JinaScrapeTool(ConnectionNode):
             recoverable=True,
         )
 
-    def _format_scrape_response(
-        self, response: Any, request_body: dict, headers: dict
-    ) -> dict[str, Any]:
-        if self.response_format in [JinaResponseFormat.PAGESHOT, JinaResponseFormat.SCREENSHOT]:
-            scrape_result = response.content
-            links, images = {}, {}
-        else:
-            response_data = response.json()
-            scrape_result, links, images = self._parse_response(response_data)
+    def _extract_scrape_payload(self, response: Any) -> tuple[Any, dict, dict]:
+        """Pull ``(scrape_result, links, images)`` from the response.
 
+        Kept separate from rendering so this stays inside the request try/except (it
+        calls ``response.json()`` and ``_parse_response``, both of which can raise on
+        malformed payloads), while output formatting runs outside.
+        """
+        if self.response_format in [JinaResponseFormat.PAGESHOT, JinaResponseFormat.SCREENSHOT]:
+            return response.content, {}, {}
+        response_data = response.json()
+        return self._parse_response(response_data)
+
+    def _render_scrape_output(
+        self,
+        scrape_result: Any,
+        links: dict,
+        images: dict,
+        request_body: dict,
+        headers: dict,
+    ) -> dict[str, Any]:
+        """Pure formatting; no I/O or parsing — runs outside the request try/except so
+        bugs here surface as themselves rather than as wrapped request errors."""
         url = request_body["url"]
         if self.is_optimized_for_agents:
             result_parts = [f"## Source URL\n{url}", f"## Scraped Content\n\n{scrape_result}"]
@@ -253,9 +265,11 @@ class JinaScrapeTool(ConnectionNode):
                 json=request_body,
             )
             response.raise_for_status()
-            return self._format_scrape_response(response, request_body, headers)
+            scrape_result, links, images = self._extract_scrape_payload(response)
         except Exception as e:
             raise self._wrap_request_exception(e)
+
+        return self._render_scrape_output(scrape_result, links, images, request_body, headers)
 
     async def execute_async(
         self, input_data: JinaScrapeInputSchema, config: RunnableConfig = None, **kwargs
@@ -278,9 +292,11 @@ class JinaScrapeTool(ConnectionNode):
                 json=request_body,
             )
             response.raise_for_status()
-            return self._format_scrape_response(response, request_body, headers)
+            scrape_result, links, images = self._extract_scrape_payload(response)
         except Exception as e:
             raise self._wrap_request_exception(e)
+
+        return self._render_scrape_output(scrape_result, links, images, request_body, headers)
 
 
 SummaryPreference = bool | Literal["all"]
