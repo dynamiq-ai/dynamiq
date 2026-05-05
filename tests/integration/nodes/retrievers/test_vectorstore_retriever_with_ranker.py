@@ -210,7 +210,7 @@ def test_vectorstore_retriever_without_ranker(
     assert len(retrieved_docs) == len(mock_retriever_documents)
     document_retriever_input = mock_retriever_run.call_args.kwargs["input_data"]
     assert document_retriever_input["query"] == "What is machine learning?"
-    assert document_retriever_input["alpha"] == 0.0
+    assert document_retriever_input["alpha"] == 0.5
 
 
 @patch("dynamiq.nodes.retrievers.weaviate.WeaviateDocumentRetriever.run")

@@ -23,7 +23,7 @@ class VectorStoreRetrieverInputSchema(BaseModel):
         default=None,
         ge=0,
         le=1,
-        description="Parameter to provide alpha for hybrid retrieval.",
+        description="Parameter to provide alpha for hybrid retrieval. 0 is keyword-only, 1 is semantic-only.",
     )
     filters: dict[str, Any] = Field(
         default_factory=dict,
@@ -50,7 +50,7 @@ class VectorStoreRetriever(Node):
         document_reranker (Node | None): Optional document_reranker node for reranking retrieved documents.
         filters (dict[str, Any] | None): Filters for document retrieval.
         top_k (int): The maximum number of documents to return.
-        alpha (float): The alpha parameter for hybrid retrieval.
+        alpha (float): The alpha parameter for hybrid retrieval. 0 is keyword-only, 1 is semantic-only.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -63,7 +63,12 @@ class VectorStoreRetriever(Node):
     document_reranker: Node | None = None
     filters: dict[str, Any] = Field(default_factory=dict)
     top_k: int | None = None
-    alpha: float = 0.0
+    alpha: float = Field(
+        default=0.5,
+        ge=0,
+        le=1,
+        description="Default alpha for hybrid retrieval. 0 is keyword-only, 1 is semantic-only.",
+    )
     similarity_threshold: float | None = None
 
     input_schema: ClassVar[type[VectorStoreRetrieverInputSchema]] = VectorStoreRetrieverInputSchema
