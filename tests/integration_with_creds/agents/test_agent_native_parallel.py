@@ -49,7 +49,7 @@ def test_parallel_tool_calling(inference_mode: InferenceMode):
         llm=llm,
         tools=[tool_a, tool_b],
         parallel_tool_calls_enabled=True,
-        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL),
+        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL, min_chunk_chars=16),
         inference_mode=inference_mode,
     )
 
@@ -73,4 +73,9 @@ def test_parallel_tool_calling(inference_mode: InferenceMode):
     assert len(llm_runs) <= 2, f"Expected at most 2 LLM loops (parallel tools + final answer), got {len(llm_runs)}"
 
     ordered_events = collect_streaming_events(streaming_handler, agent.id)
-    assert_streaming_events(ordered_events, inference_mode)
+    assert_streaming_events(
+        ordered_events,
+        inference_mode,
+        agent.streaming.mode,
+        min_chunk_chars=agent.streaming.min_chunk_chars,
+    )
