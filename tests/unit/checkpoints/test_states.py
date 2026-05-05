@@ -506,30 +506,6 @@ class TestBackwardCompatibility:
 class TestOrchestratorCheckpointImplementation:
     """Verify Orchestrator subclasses implement checkpoint interface correctly."""
 
-    def test_adaptive_orchestrator_implements_mixin(self):
-        from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
-        from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
-
-        manager = AdaptiveAgentManager(llm=create_test_llm("mgr-llm"))
-        orch = AdaptiveOrchestrator(id="ao", manager=manager, agents=[])
-        assert isinstance(orch, IterativeCheckpointMixin)
-
-    def test_adaptive_orchestrator_checkpoint_roundtrip(self):
-        from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
-        from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
-
-        orch = AdaptiveOrchestrator(id="ao", manager=AdaptiveAgentManager(llm=create_test_llm()), agents=[])
-        orch._chat_history = [{"role": "user", "content": "task 1"}]
-        orch._completed_iterations = 3
-
-        state_dict = orch.to_checkpoint_state().model_dump()
-        assert state_dict["iteration"]["completed_iterations"] == 3
-
-        new_orch = AdaptiveOrchestrator(id="ao2", manager=AdaptiveAgentManager(llm=create_test_llm()), agents=[])
-        new_orch.from_checkpoint_state(state_dict)
-        assert new_orch._chat_history == orch._chat_history
-        assert new_orch.get_start_iteration() == 3
-
     def test_graph_orchestrator_checkpoint_roundtrip(self):
         from dynamiq.nodes.agents.orchestrators.graph import GraphOrchestrator
         from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
@@ -566,23 +542,6 @@ class TestOrchestratorCheckpointImplementation:
         assert orch._chat_history == [{"role": "user", "content": "hi"}]
         assert orch.context == {"k": "v"}
         assert orch._current_state_id == "s2"
-
-    def test_linear_orchestrator_checkpoint_roundtrip(self):
-        from dynamiq.nodes.agents.orchestrators.linear import LinearOrchestrator
-        from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
-
-        orch = LinearOrchestrator(id="lo", manager=LinearAgentManager(llm=create_test_llm()), agents=[])
-        orch._chat_history = [{"role": "user", "content": "plan tasks"}]
-        orch._results = {1: {"name": "Task1", "result": "done"}}
-        orch._completed_iterations = 2
-
-        state_dict = orch.to_checkpoint_state().model_dump()
-        assert state_dict["iteration"]["completed_iterations"] == 2
-
-        new_orch = LinearOrchestrator(id="lo2", manager=LinearAgentManager(llm=create_test_llm()), agents=[])
-        new_orch.from_checkpoint_state(state_dict)
-        assert new_orch._chat_history == [{"role": "user", "content": "plan tasks"}]
-        assert new_orch.get_start_iteration() == 2
 
 
 class TestCheckpointBehavior:

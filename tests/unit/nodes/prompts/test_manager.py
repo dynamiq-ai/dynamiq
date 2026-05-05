@@ -2,27 +2,13 @@ import pytest
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
-from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
 from dynamiq.nodes.agents.prompts import get_prompt_constant
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
-from dynamiq.nodes.agents.prompts.orchestrators.adaptive import (
-    PROMPT_TEMPLATE_ADAPTIVE_FINAL,
-    PROMPT_TEMPLATE_ADAPTIVE_PLAN,
-    PROMPT_TEMPLATE_ADAPTIVE_REFLECT,
-    PROMPT_TEMPLATE_ADAPTIVE_RESPOND,
-)
-from dynamiq.nodes.agents.prompts.orchestrators.base import PROMPT_TEMPLATE_BASE_HANDLE_INPUT
 from dynamiq.nodes.agents.prompts.orchestrators.graph import (
     PROMPT_TEMPLATE_GRAPH_ASSIGN,
     PROMPT_TEMPLATE_GRAPH_HANDLE_INPUT,
     PROMPT_TEMPLATE_GRAPH_PLAN,
-)
-from dynamiq.nodes.agents.prompts.orchestrators.linear import (
-    PROMPT_TEMPLATE_LINEAR_ASSIGN,
-    PROMPT_TEMPLATE_LINEAR_FINAL,
-    PROMPT_TEMPLATE_LINEAR_PLAN,
 )
 from dynamiq.nodes.agents.prompts.overrides.gpt import (
     REACT_BLOCK_INSTRUCTIONS_SINGLE as GPT_REACT_BLOCK_INSTRUCTIONS_SINGLE,
@@ -115,27 +101,6 @@ def test_agent_initialization_with_model_specific_prompts(test_llm, inference_mo
         )
 
 
-def test_linear_manager_prompt_blocks_setup(test_llm):
-    """Test that LinearManager properly sets up orchestrator-specific prompt blocks."""
-
-    # Create LinearManager
-    linear_manager = LinearAgentManager(
-        name="TestLinearManager",
-        id="test_linear_manager",
-        llm=test_llm,
-    )
-
-    # Verify prompt manager is initialized
-    assert linear_manager.system_prompt_manager is not None
-    assert isinstance(linear_manager.system_prompt_manager, AgentPromptManager)
-
-    assert linear_manager.system_prompt_manager._prompt_blocks
-    assert linear_manager.system_prompt_manager._prompt_blocks["plan"] == PROMPT_TEMPLATE_LINEAR_PLAN
-    assert linear_manager.system_prompt_manager._prompt_blocks["assign"] == PROMPT_TEMPLATE_LINEAR_ASSIGN
-    assert linear_manager.system_prompt_manager._prompt_blocks["final"] == PROMPT_TEMPLATE_LINEAR_FINAL
-    assert linear_manager.system_prompt_manager._prompt_blocks["handle_input"] == PROMPT_TEMPLATE_BASE_HANDLE_INPUT
-
-
 def test_graph_manager_prompt_blocks_setup(test_llm):
     """Test that GraphManager properly sets up orchestrator-specific prompt blocks."""
 
@@ -154,23 +119,6 @@ def test_graph_manager_prompt_blocks_setup(test_llm):
     assert graph_manager.system_prompt_manager._prompt_blocks["plan"] == PROMPT_TEMPLATE_GRAPH_PLAN
     assert graph_manager.system_prompt_manager._prompt_blocks["assign"] == PROMPT_TEMPLATE_GRAPH_ASSIGN
     assert graph_manager.system_prompt_manager._prompt_blocks["handle_input"] == PROMPT_TEMPLATE_GRAPH_HANDLE_INPUT
-
-
-def test_adaptive_manager_prompt_blocks_setup(test_llm):
-    """Test that AdaptiveManager properly sets up orchestrator-specific prompt blocks."""
-
-    # Create AdaptiveManager
-    adaptive_manager = AdaptiveAgentManager(name="TestAdaptiveManager", id="test_adaptive_manager", llm=test_llm)
-
-    assert adaptive_manager.system_prompt_manager is not None
-    assert isinstance(adaptive_manager.system_prompt_manager, AgentPromptManager)
-
-    assert adaptive_manager.system_prompt_manager._prompt_blocks
-    assert adaptive_manager.system_prompt_manager._prompt_blocks["plan"] == PROMPT_TEMPLATE_ADAPTIVE_PLAN
-    assert adaptive_manager.system_prompt_manager._prompt_blocks["final"] == PROMPT_TEMPLATE_ADAPTIVE_FINAL
-    assert adaptive_manager.system_prompt_manager._prompt_blocks["respond"] == PROMPT_TEMPLATE_ADAPTIVE_RESPOND
-    assert adaptive_manager.system_prompt_manager._prompt_blocks["reflect"] == PROMPT_TEMPLATE_ADAPTIVE_REFLECT
-    assert adaptive_manager.system_prompt_manager._prompt_blocks["handle_input"] == PROMPT_TEMPLATE_BASE_HANDLE_INPUT
 
 
 def test_file_tools_persist_across_resets(test_llm):
