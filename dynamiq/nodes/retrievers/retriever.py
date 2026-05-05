@@ -19,9 +19,15 @@ from dynamiq.utils.logger import logger
 
 class VectorStoreRetrieverInputSchema(BaseModel):
     query: str = Field(..., description="Parameter to provide a query to retrieve documents.")
-    alpha: float | None = Field(default=None, description="Parameter to provide alpha for hybrid retrieval.")
+    alpha: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Parameter to provide alpha for hybrid retrieval.",
+    )
     filters: dict[str, Any] = Field(
-        default_factory=dict, description="Parameter to provide filters to apply for retrieving specific documents."
+        default_factory=dict,
+        description="Parameter to provide filters to apply for retrieving specific documents.",
     )
     top_k: int | None = Field(default=None, description="Parameter to provide how many documents to retrieve.")
     similarity_threshold: float | None = Field(
@@ -55,7 +61,7 @@ class VectorStoreRetriever(Node):
     text_embedder: TextEmbedder
     document_retriever: Retriever
     document_reranker: Node | None = None
-    filters: dict[str, Any] = {}
+    filters: dict[str, Any] = Field(default_factory=dict)
     top_k: int | None = None
     alpha: float = 0.0
     similarity_threshold: float | None = None
@@ -68,7 +74,13 @@ class VectorStoreRetriever(Node):
         "vectors",
     )
     _EXCLUDED_METADATA_TOKENS: ClassVar[tuple[str, ...]] = ("id", "hash")
-    _EXPECTED_METADATA_KEYWORDS: ClassVar[tuple[str, ...]] = ("url", "link", "source", "file", "title")
+    _EXPECTED_METADATA_KEYWORDS: ClassVar[tuple[str, ...]] = (
+        "url",
+        "link",
+        "source",
+        "file",
+        "title",
+    )
 
     def __init__(self, **kwargs):
         """
@@ -382,7 +394,10 @@ class VectorStoreRetriever(Node):
         return [token for token in normalized.lower().split("_") if token]
 
     def execute(
-        self, input_data: VectorStoreRetrieverInputSchema, config: RunnableConfig | None = None, **kwargs
+        self,
+        input_data: VectorStoreRetrieverInputSchema,
+        config: RunnableConfig | None = None,
+        **kwargs,
     ) -> dict[str, Any]:
         """Execute the retrieval tool.
 
@@ -415,7 +430,10 @@ class VectorStoreRetriever(Node):
             kwargs.pop("run_depends", None)
             check_cancellation(config)
             text_embedder_output = self.text_embedder.run(
-                input_data={"query": query}, run_depends=self._run_depends, config=config, **kwargs
+                input_data={"query": query},
+                run_depends=self._run_depends,
+                config=config,
+                **kwargs,
             )
             if text_embedder_output.status != RunnableStatus.SUCCESS:
                 error = text_embedder_output.error.message if text_embedder_output.error else "unknown error"
@@ -469,7 +487,10 @@ class VectorStoreRetriever(Node):
 
             return {"content": result, "documents": retrieved_documents}
         except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: execution error: {str(e)}", exc_info=True)
+            logger.error(
+                f"Tool {self.name} - {self.id}: execution error: {str(e)}",
+                exc_info=True,
+            )
             raise ToolExecutionException(
                 f"Tool '{self.name}' failed to retrieve data using the specified action. "
                 f"Error: {str(e)}. Please analyze the error and take appropriate action.",

@@ -10,7 +10,8 @@ from dynamiq.nodes.types import ActionType
 class RetrieverInputSchema(BaseModel):
     embedding: list[float] = Field(..., description="Parameter to provided embedding for search.")
     filters: dict[str, Any] = Field(
-        default={}, description="Parameter to provided filters to apply for retrieving specific documents."
+        default_factory=dict,
+        description="Parameter to provided filters to apply for retrieving specific documents.",
     )
     top_k: int = Field(default=0, description="Parameter to provided how many documents to retrieve.")
     similarity_threshold: float | None = Field(
@@ -18,10 +19,15 @@ class RetrieverInputSchema(BaseModel):
         description="Parameter to provide minimal similarity "
         "or maximal distance score accepted for retrieved documents.",
     )
-    content_key: str = Field(default=None, description="Parameter to provide content key.")
-    embedding_key: str = Field(default=None, description="Parameter to provide embedding key.")
-    query: str = Field(default=None, description="Parameter to provide query for search.")
-    alpha: float = Field(default=None, description="Parameter to provide alpha for hybrid retrieval.")
+    content_key: str | None = Field(default=None, description="Parameter to provide content key.")
+    embedding_key: str | None = Field(default=None, description="Parameter to provide embedding key.")
+    query: str | None = Field(default=None, description="Parameter to provide query for search.")
+    alpha: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Parameter to provide alpha for hybrid retrieval.",
+    )
 
 
 class Retriever(VectorStoreNode, ABC):
