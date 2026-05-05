@@ -250,7 +250,12 @@ def run_and_assert_agent(agent: Agent, agent_input, expected_length, run_config)
     ), f"Expected length '{expected_length_str}' not found in agent output: '{agent_output}'"
 
     ordered_events = collect_streaming_events(streaming, agent.id)
-    assert_streaming_events(ordered_events, agent.inference_mode, agent.streaming.mode)
+    assert_streaming_events(
+        ordered_events,
+        agent.inference_mode,
+        agent.streaming.mode,
+        min_chunk_chars=agent.streaming.min_chunk_chars,
+    )
 
     logger.info(f"--- Test Passed for Mode: {agent.inference_mode.value} ---")
 
@@ -321,7 +326,12 @@ def _run_comprehensive_schema_test(llm, comprehensive_tool, run_config, inferenc
     assert isinstance(content, str) and len(content) > 0, f"Expected non-empty string for {label}, got: {content!r}"
 
     ordered_events = collect_streaming_events(streaming, agent.id)
-    assert_streaming_events(ordered_events, inference_mode, agent.streaming.mode)
+    assert_streaming_events(
+        ordered_events,
+        inference_mode,
+        agent.streaming.mode,
+        min_chunk_chars=agent.streaming.min_chunk_chars,
+    )
 
 
 @pytest.mark.integration

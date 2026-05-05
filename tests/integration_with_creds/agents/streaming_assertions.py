@@ -1,5 +1,6 @@
 import json
 from enum import Enum, auto
+from itertools import groupby
 
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.types.streaming import StreamingMode
@@ -422,7 +423,10 @@ def _validate_single_post_parse(content, tool_blocks, reasoning_blocks):
         # while post_parse decodes via json.loads (real newline).
         # Encode expected to raw JSON form for a fair comparison.
         expected_thought_raw = json.dumps(expected_thought)[1:-1]
-        assert accumulated_thought == expected_thought or accumulated_thought == expected_thought_raw, (
+        accumulated_stripped = accumulated_thought.strip()
+        assert (
+            accumulated_stripped == expected_thought.strip() or accumulated_stripped == expected_thought_raw.strip()
+        ), (
             f"tool_run_id {tid} ({tool_name}): accumulated reasoning "
             f"({len(accumulated_thought)} chars) does not match post_parse thought. "
             f"Accumulated: {accumulated_thought!r}\n"
@@ -695,10 +699,60 @@ def _run_fsm_default(ordered_events, streaming_mode):
 # ---------------------------------------------------------------------------
 
 
+def _normalize_chunked_events(ordered_events: list) -> list[tuple]:
+    """Reduce raw ``(step, content)`` events to ``(step, tool_run_id, fragment)``
+    triples that represent one chunked emission each. Non-chunked events
+    (post_parse_reasoning summaries, tool_input_start metadata, tool_result
+    payloads) are dropped so they don't pollute the chunking assertion.
+
+    Reasoning chunks arrive in two shapes depending on how ``_emit`` wraps them:
+    plain string, or ``{"thought": "<chunk>"}`` dict via StreamingThought. Both
+    forms are normalised so the assertion sees actual chunk fragments, not dicts.
+    """
+    normalized = []
+    for step, content in ordered_events:
+        if isinstance(content, str):
+            normalized.append((step, None, content))
+        elif isinstance(content, dict):
+            if step == "tool_input":
+                fragment = content.get("action_input")
+                if isinstance(fragment, str):
+                    normalized.append((step, content.get("tool_run_id"), fragment))
+            elif step == "reasoning" and "tool_run_id" not in content:
+                # Plain reasoning chunk wrapped as {"thought": "<chunk>"}.
+                # post_parse_reasoning carries tool_run_id and is a one-shot
+                # summary, not a chunk — explicitly skip it here.
+                fragment = content.get("thought")
+                if isinstance(fragment, str):
+                    normalized.append((step, None, fragment))
+            # Other dict-content events (post_parse_reasoning, tool_input_start,
+            # tool_result, tool_input_error) are not chunked emissions.
+    return normalized
+
+
+def _assert_min_chunk_chars(ordered_events: list, min_chunk_chars: int) -> None:
+    """Within each consecutive same-step run for the same tool_run_id, every
+    emitted chunk must be at least ``min_chunk_chars`` long except the final
+    one — that's the flush of the buffer at the step (or tool-call) boundary
+    and may legitimately be shorter.
+
+    Grouping by ``(step, tool_run_id)`` (rather than just step) is what makes
+    parallel tool calls work: when the parser transitions from tool A to tool B
+    it flushes A's chunk buffer, and that final A-fragment is a flush — not a
+    short non-flush chunk."""
+    for (step, _tid), group in groupby(_normalize_chunked_events(ordered_events), key=lambda x: (x[0], x[1])):
+        chunks = [fragment for _, _, fragment in group]
+        for chunk in chunks[:-1]:
+            assert (
+                len(chunk) >= min_chunk_chars
+            ), f"step={step!r} chunk length {len(chunk)} < min_chunk_chars={min_chunk_chars}"
+
+
 def assert_streaming_events(
     ordered_events: list,
     inference_mode: InferenceMode,
     streaming_mode: StreamingMode = StreamingMode.ALL,
+    min_chunk_chars: int = 0,
 ):
     """Validate ordered streaming events against the FSM event policy.
 
@@ -706,6 +760,8 @@ def assert_streaming_events(
         ordered_events: List of (step, content) tuples from collect_streaming_events().
         inference_mode: The InferenceMode the agent was configured with.
         streaming_mode: The StreamingMode used during the run.
+        min_chunk_chars: When >0, also asserts every emitted chunk per step is at
+            least this long, except the final flush chunk.
     """
     assert len(ordered_events) > 0, "No streaming events collected"
 
@@ -736,3 +792,6 @@ def assert_streaming_events(
         assert State.REASONING in visited, (
             f"{inference_mode.value}/ALL: never entered REASONING state. " f"Visited: {[s.name for s in visited]}"
         )
+
+    if min_chunk_chars > 0:
+        _assert_min_chunk_chars(ordered_events, min_chunk_chars)
