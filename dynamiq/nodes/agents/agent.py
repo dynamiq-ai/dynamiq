@@ -707,7 +707,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self.log_reasoning(thought, PARALLEL_TOOL_NAME, action_input["tools"], loop_num)
             return thought, PARALLEL_TOOL_NAME, action_input
 
-        args = first_call.function.parse_as_tool_call()
+        single_call = actual_tool_calls[0]
+        action = single_call.function.name.strip()
+        args = single_call.function.parse_as_tool_call()
         thought = args.thought
         action_input = args.action_input
         if isinstance(action_input, str):
