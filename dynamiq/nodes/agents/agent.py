@@ -53,6 +53,11 @@ class FinalAnswerArguments(BaseModel):
     answer: str | dict | list
     output_files: str = ""
 
+    @field_validator("output_files", mode="before")
+    @classmethod
+    def _coerce_output_files(cls, v: Any) -> str:
+        return v or ""
+
 
 class FunctionCall(BaseModel):
     name: str
