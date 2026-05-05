@@ -5,8 +5,10 @@ from psycopg.sql import SQL
 from psycopg.types.json import Jsonb
 
 from dynamiq.storages.vector.exceptions import VectorStoreFilterException
+from dynamiq.storages.vector.utils import normalize_filters
 
 NO_VALUE = "no_value"
+DEFAULT_TOP_LEVEL_FIELDS = frozenset({"id", "content", "embedding", "metadata"})
 
 PYTHON_TO_PGVECTOR_DATA_TYPE = {
     str: "text",
@@ -17,7 +19,9 @@ PYTHON_TO_PGVECTOR_DATA_TYPE = {
 
 
 def _convert_filters_to_query(
-    filters: dict[str, Any], operator: Literal["WHERE", "AND"] = "WHERE"
+    filters: dict[str, Any],
+    operator: Literal["WHERE", "AND"] = "WHERE",
+    top_level_fields: set[str] | None = None,
 ) -> tuple[SQL, tuple]:
     """
     Convert filters from dict format to an SQL query and a tuple of params to query pgvector.
@@ -25,10 +29,22 @@ def _convert_filters_to_query(
     Args:
         filters (dict[str, Any]): The filters to convert.
         operator (Literal["WHERE", "AND"], optional): The logical operator to use. Defaults to "WHERE".
+        top_level_fields (set[str] | None, optional): Fields stored as table columns instead of metadata.
 
     Returns:
         tuple[SQL, tuple]: The SQL query and a tuple of params to query pgvector.
     """
+    if not isinstance(filters, dict):
+        msg = "Filters must be a dictionary"
+        raise VectorStoreFilterException(msg)
+
+    filters = normalize_filters(filters)
+    if not filters:
+        msg = "No filters provided"
+        raise VectorStoreFilterException(msg)
+
+    filters = _qualify_metadata_fields(filters, top_level_fields or DEFAULT_TOP_LEVEL_FIELDS)
+
     if "field" in filters:
         query, values = _parse_comparison_condition(filters)
     else:
@@ -38,6 +54,23 @@ def _convert_filters_to_query(
     params = tuple(value for value in values if value != NO_VALUE)
 
     return where_clause, params
+
+
+def _qualify_metadata_fields(filters: dict[str, Any], top_level_fields: set[str] | frozenset[str]) -> dict[str, Any]:
+    """Qualify backend-agnostic metadata filter fields for PGVector's JSONB metadata column."""
+    if "field" in filters:
+        condition = filters.copy()
+        field = condition["field"]
+        if isinstance(field, str) and "." not in field and field not in top_level_fields:
+            condition["field"] = f"metadata.{field}"
+        return condition
+
+    if "conditions" not in filters:
+        return filters
+
+    condition = filters.copy()
+    condition["conditions"] = [_qualify_metadata_fields(c, top_level_fields) for c in filters["conditions"]]
+    return condition
 
 
 def _parse_logical_condition(condition: dict[str, Any]) -> tuple[str, list[Any]]:
@@ -363,7 +396,7 @@ def _not_in(field: str, value: Any) -> tuple[str, list]:
         VectorStoreFilterException: If the value is not a list or contains unsupported types.
     """
     _validate_list_value(field, value, "not in")
-    return f"{field} IS NULL OR {field} != ALL(%s::text[])", [value]
+    return f"{field} IS NULL OR {field} != ALL(%s::text[])", value
 
 
 def _in(field: str, value: Any) -> tuple[str, list]:
@@ -381,7 +414,7 @@ def _in(field: str, value: Any) -> tuple[str, list]:
         VectorStoreFilterException: If the value is not a list or contains unsupported types.
     """
     _validate_list_value(field, value, "in")
-    return f"{field} = ANY(%s::text[])", [value]
+    return f"{field} = ANY(%s::text[])", value
 
 
 LOGICAL_OPERATORS = ["AND", "OR"]

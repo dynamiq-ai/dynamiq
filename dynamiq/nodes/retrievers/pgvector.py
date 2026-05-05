@@ -111,7 +111,7 @@ class PGVectorDocumentRetriever(Retriever, PGVectorStoreRetrieverParams):
             else self.similarity_threshold
         )
 
-        alpha = input_data.alpha or self.alpha
+        alpha = input_data.alpha if input_data.alpha is not None else self.alpha
         query = input_data.query
 
         output = self.document_retriever.run(
