@@ -200,11 +200,14 @@ class HttpApiCall(ConnectionNode):
         }
         if files:
             kwargs["files"] = files
-            if payload_type == RequestPayloadType.RAW:
+        # Only emit ``data`` when there's something to send. ``requests`` treats
+        # ``data={}`` as no body, while older/future httpx versions could encode it as
+        # an empty form payload with a ``Content-Type`` header — omitting the kwarg
+        # keeps both paths byte-identical for the default GET case.
+        if payload_type == RequestPayloadType.RAW:
+            if data:
                 kwargs["data"] = data
-        elif payload_type == RequestPayloadType.RAW:
-            kwargs["data"] = data
-        else:
+        elif not files:
             kwargs["json"] = data
         return kwargs
 

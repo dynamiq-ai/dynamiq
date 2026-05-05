@@ -153,6 +153,43 @@ async def test_http_api_call_execute_async_payload_json_mode():
 
 
 @pytest.mark.asyncio
+async def test_http_api_call_default_get_omits_empty_data_kwarg():
+    """Default GET (RAW payload, no files, no data) must not send ``data={}``.
+
+    Sync ``requests`` treats ``data={}`` as no body; older or future httpx versions
+    could encode it as an empty form payload with a content-type header. Omitting the
+    kwarg keeps both paths byte-equivalent.
+    """
+    node = _build_node(ResponseType.JSON)
+    node.payload_type = "raw"
+    mock_client = MagicMock()
+    mock_client.request = AsyncMock(return_value=_mock_response(json_payload={"ok": True}))
+
+    with patch.object(HttpApiCall, "get_async_client", AsyncMock(return_value=mock_client)):
+        await node.run_async(input_data={})
+
+    call_kwargs = mock_client.request.await_args.kwargs
+    assert "data" not in call_kwargs
+    assert "json" not in call_kwargs
+    assert "files" not in call_kwargs
+
+
+@pytest.mark.asyncio
+async def test_http_api_call_raw_with_data_includes_data():
+    """When RAW data is non-empty, it still travels in the request kwargs."""
+    node = _build_node(ResponseType.JSON)
+    node.payload_type = "raw"
+    mock_client = MagicMock()
+    mock_client.request = AsyncMock(return_value=_mock_response(json_payload={"ok": True}))
+
+    with patch.object(HttpApiCall, "get_async_client", AsyncMock(return_value=mock_client)):
+        await node.run_async(input_data={"data": {"k": "v"}})
+
+    call_kwargs = mock_client.request.await_args.kwargs
+    assert call_kwargs["data"] == {"k": "v"}
+
+
+@pytest.mark.asyncio
 async def test_http_api_call_json_payload_dropped_when_files_present():
     """``json`` and ``files`` are mutually exclusive on the wire.
 
