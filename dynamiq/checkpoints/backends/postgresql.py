@@ -6,7 +6,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 import psycopg
-from psycopg.sql import SQL, Identifier
+from psycopg.sql import SQL, Composable, Identifier
 from pydantic import ConfigDict, Field, PrivateAttr
 
 from dynamiq.checkpoints.backends.base import CheckpointBackend
@@ -91,7 +91,9 @@ class PostgreSQL(CheckpointBackend):
                 "PostgreSQL checkpoint backend has been closed. Create a new instance to reconnect."
             )
 
-    def _execute_sql(self, sql_query: SQL | str, params: tuple | list | None = None, fetch: FetchMode | None = None):
+    def _execute_sql(
+        self, sql_query: Composable | str, params: tuple | list | None = None, fetch: FetchMode | None = None
+    ):
         self._check_connection_state()
 
         if self._conn is None or self._conn.closed:
@@ -110,7 +112,7 @@ class PostgreSQL(CheckpointBackend):
                     return cur.fetchall()
                 return None
         except psycopg.Error as e:
-            sql_str = sql_query.as_string(self._conn) if isinstance(sql_query, SQL) else str(sql_query)
+            sql_str = sql_query.as_string(self._conn) if isinstance(sql_query, Composable) else str(sql_query)
             logger.error(f"PostgreSQL checkpoint error: {e}\nSQL: {sql_str}\nParams: {params}")
             raise PostgresCheckpointError(f"PostgreSQL error: {e}") from e
 
