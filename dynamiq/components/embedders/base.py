@@ -135,7 +135,12 @@ class BaseEmbedder(BaseModel):
     @property
     def embed_params_async(self) -> dict:
         """Params for the async embedding call."""
-        return self.connection.conn_params
+        params = dict(self.embed_params)
+        if self.client is not None and params.get("client") is self.client:
+            del params["client"]
+            for key, value in self.connection.conn_params.items():
+                params.setdefault(key, value)
+        return params
 
     def _apply_text_truncation(self, text: str) -> str:
         """

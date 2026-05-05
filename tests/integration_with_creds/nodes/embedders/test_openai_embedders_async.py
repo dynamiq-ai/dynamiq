@@ -93,3 +93,35 @@ def test_openai_embedder_async_params_omit_sync_client():
     params = node.text_embedder.embed_params_async
     assert "client" not in params, "async embed params must not pass the sync client"
     assert "api_key" in params and "api_base" in params
+
+
+def test_openai_embedder_async_params_preserve_dimensions():
+    """``embed_params_async`` must preserve subclass-specific params like ``dimensions``.
+
+    OpenAIEmbedderComponent overrides ``embed_params`` to add ``dimensions`` when set.
+    A naive async params builder that only returned ``conn_params`` would silently drop
+    this and produce embeddings of the model's default size instead of the requested one.
+    """
+    node = OpenAITextEmbedder(connection=OpenAIConnection(), dimensions=512)
+
+    sync_params = node.text_embedder.embed_params
+    async_params = node.text_embedder.embed_params_async
+
+    assert sync_params.get("dimensions") == 512
+    assert async_params.get("dimensions") == 512
+    assert "client" not in async_params
+    assert "api_key" in async_params and "api_base" in async_params
+
+
+@pytest.mark.asyncio
+async def test_openai_text_embedder_dimensions_round_trip_async():
+    """End-to-end: setting ``dimensions`` on the async path must produce vectors of that size."""
+    node = OpenAITextEmbedder(connection=OpenAIConnection(), dimensions=512)
+    result = await node.run_async(input_data={"query": "hello world"})
+
+    assert result.status == RunnableStatus.SUCCESS, f"failed: {result.output}"
+    embedding = result.output["embedding"]
+    assert len(embedding) == 512, (
+        f"expected 512-d vector via async path; got {len(embedding)}. "
+        f"Subclass-specific dimensions param was likely dropped from embed_params_async."
+    )
