@@ -2,7 +2,6 @@ import asyncio
 import time
 
 import pytest
-from dotenv import load_dotenv
 
 from dynamiq import Workflow
 from dynamiq.flows import Flow
@@ -10,6 +9,7 @@ from dynamiq.nodes.embedders import OpenAIDocumentEmbedder, OpenAITextEmbedder
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.runnables import RunnableStatus
 from dynamiq.types.document import Document
+
 
 @pytest.mark.asyncio
 async def test_openai_text_embedder_run_async():
