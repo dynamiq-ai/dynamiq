@@ -177,15 +177,16 @@ class HttpApiCall(ConnectionNode):
     def _build_request_kwargs(self, input_data: HttpApiCallInputSchema) -> dict[str, Any]:
         """Build the kwargs dict passed to the underlying request call.
 
-        ``files`` is only included when there is at least one upload. ``httpx`` accepts
-        ``files`` and ``json`` together but treats them as ambiguous body inputs; the
-        sync ``requests`` module uses an ``if files:`` falsy check internally and never
-        sends an empty files arg, so omitting it here keeps both paths byte-equivalent.
+        ``files`` is only included when at least one upload is present. When files are
+        present, ``json`` is dropped: the sync ``requests`` library silently overwrites
+        a json body with the multipart payload, and httpx (any version) treats both
+        together as ambiguous. Demoting JSON-mode data to multipart form fields would
+        change wire shape, so we mirror the sync drop and let multipart-only callers
+        send ``data`` (RAW) explicitly when they need form fields alongside files.
         """
         data = self.connection.data | self.data | input_data.data
         payload_type = input_data.payload_type or self.payload_type
         files = {param: file_io.getvalue() for param, file_io in input_data.files.items()}
-        extras = {"data": data} if payload_type == RequestPayloadType.RAW else {"json": data}
         url = input_data.url or self.url or self.connection.url
         if not url:
             raise ValueError("No url provided.")
@@ -196,10 +197,15 @@ class HttpApiCall(ConnectionNode):
             "headers": self.connection.headers | self.headers | input_data.headers,
             "params": self.connection.params | self.params | input_data.params,
             "timeout": self.timeout,
-            **extras,
         }
         if files:
             kwargs["files"] = files
+            if payload_type == RequestPayloadType.RAW:
+                kwargs["data"] = data
+        elif payload_type == RequestPayloadType.RAW:
+            kwargs["data"] = data
+        else:
+            kwargs["json"] = data
         return kwargs
 
     def _parse_response(self, response: Any) -> dict[str, Any]:

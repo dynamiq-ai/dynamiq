@@ -153,6 +153,59 @@ async def test_http_api_call_execute_async_payload_json_mode():
 
 
 @pytest.mark.asyncio
+async def test_http_api_call_json_payload_dropped_when_files_present():
+    """``json`` and ``files`` are mutually exclusive on the wire.
+
+    Sync ``requests`` silently overwrites a json body with multipart when ``files`` is set;
+    we mirror that here so the async path doesn't ship an ambiguous request.
+    """
+    import io
+
+    node = _build_node(ResponseType.JSON)
+    mock_client = MagicMock()
+    mock_client.request = AsyncMock(return_value=_mock_response(json_payload={"ok": True}))
+
+    schema = HttpApiCallInputSchema(
+        data={"k": "v"},
+        payload_type="json",
+        url="https://api.example.com/post",
+        files={"upload": io.BytesIO(b"hello")},
+    )
+
+    with patch.object(HttpApiCall, "get_async_client", AsyncMock(return_value=mock_client)):
+        await node.execute_async(schema)
+
+    call_kwargs = mock_client.request.await_args.kwargs
+    assert "json" not in call_kwargs
+    assert "files" in call_kwargs
+    assert call_kwargs["files"]["upload"] == b"hello"
+
+
+@pytest.mark.asyncio
+async def test_http_api_call_raw_data_kept_alongside_files():
+    """RAW payload data must travel as multipart form fields when files are present."""
+    import io
+
+    node = _build_node(ResponseType.JSON)
+    mock_client = MagicMock()
+    mock_client.request = AsyncMock(return_value=_mock_response(json_payload={"ok": True}))
+
+    schema = HttpApiCallInputSchema(
+        data={"field1": "value1"},
+        payload_type="raw",
+        url="https://api.example.com/post",
+        files={"upload": io.BytesIO(b"hello")},
+    )
+
+    with patch.object(HttpApiCall, "get_async_client", AsyncMock(return_value=mock_client)):
+        await node.execute_async(schema)
+
+    call_kwargs = mock_client.request.await_args.kwargs
+    assert call_kwargs["data"] == {"field1": "value1"}
+    assert call_kwargs["files"]["upload"] == b"hello"
+
+
+@pytest.mark.asyncio
 async def test_http_api_call_json_payload_omits_empty_files_kwarg():
     """When no files are uploaded, ``files`` must not appear in request kwargs.
 
