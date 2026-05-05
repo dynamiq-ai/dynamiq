@@ -11,7 +11,7 @@ from dynamiq.nodes.embedders.base import TextEmbedder
 from dynamiq.nodes.node import NodeDependency, NodeGroup, ensure_config
 from dynamiq.nodes.retrievers.base import Retriever
 from dynamiq.nodes.types import ActionType
-from dynamiq.runnables import RunnableConfig
+from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types import Document
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
@@ -19,9 +19,15 @@ from dynamiq.utils.logger import logger
 
 class VectorStoreRetrieverInputSchema(BaseModel):
     query: str = Field(..., description="Parameter to provide a query to retrieve documents.")
-    alpha: float = Field(default=0.0, description="Parameter to provide alpha for hybrid retrieval.")
+    alpha: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Parameter to provide alpha for hybrid retrieval. 0 is keyword-only, 1 is semantic-only.",
+    )
     filters: dict[str, Any] = Field(
-        default_factory=dict, description="Parameter to provide filters to apply for retrieving specific documents."
+        default_factory=dict,
+        description="Parameter to provide filters to apply for retrieving specific documents.",
     )
     top_k: int | None = Field(default=None, description="Parameter to provide how many documents to retrieve.")
     similarity_threshold: float | None = Field(
@@ -44,7 +50,7 @@ class VectorStoreRetriever(Node):
         document_reranker (Node | None): Optional document_reranker node for reranking retrieved documents.
         filters (dict[str, Any] | None): Filters for document retrieval.
         top_k (int): The maximum number of documents to return.
-        alpha (float): The alpha parameter for hybrid retrieval.
+        alpha (float): The alpha parameter for hybrid retrieval. 0 is keyword-only, 1 is semantic-only.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -55,9 +61,14 @@ class VectorStoreRetriever(Node):
     text_embedder: TextEmbedder
     document_retriever: Retriever
     document_reranker: Node | None = None
-    filters: dict[str, Any] = {}
+    filters: dict[str, Any] = Field(default_factory=dict)
     top_k: int | None = None
-    alpha: float = 0.0
+    alpha: float = Field(
+        default=0.5,
+        ge=0,
+        le=1,
+        description="Default alpha for hybrid retrieval. 0 is keyword-only, 1 is semantic-only.",
+    )
     similarity_threshold: float | None = None
 
     input_schema: ClassVar[type[VectorStoreRetrieverInputSchema]] = VectorStoreRetrieverInputSchema
@@ -68,7 +79,13 @@ class VectorStoreRetriever(Node):
         "vectors",
     )
     _EXCLUDED_METADATA_TOKENS: ClassVar[tuple[str, ...]] = ("id", "hash")
-    _EXPECTED_METADATA_KEYWORDS: ClassVar[tuple[str, ...]] = ("url", "link", "source", "file", "title")
+    _EXPECTED_METADATA_KEYWORDS: ClassVar[tuple[str, ...]] = (
+        "url",
+        "link",
+        "source",
+        "file",
+        "title",
+    )
 
     def __init__(self, **kwargs):
         """
@@ -382,7 +399,10 @@ class VectorStoreRetriever(Node):
         return [token for token in normalized.lower().split("_") if token]
 
     def execute(
-        self, input_data: VectorStoreRetrieverInputSchema, config: RunnableConfig | None = None, **kwargs
+        self,
+        input_data: VectorStoreRetrieverInputSchema,
+        config: RunnableConfig | None = None,
+        **kwargs,
     ) -> dict[str, Any]:
         """Execute the retrieval tool.
 
@@ -408,15 +428,21 @@ class VectorStoreRetriever(Node):
             else self.similarity_threshold
         )
 
-        alpha = input_data.alpha or self.alpha
+        alpha = input_data.alpha if input_data.alpha is not None else self.alpha
         query = input_data.query
         try:
             kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
             kwargs.pop("run_depends", None)
             check_cancellation(config)
             text_embedder_output = self.text_embedder.run(
-                input_data={"query": query}, run_depends=self._run_depends, config=config, **kwargs
+                input_data={"query": query},
+                run_depends=self._run_depends,
+                config=config,
+                **kwargs,
             )
+            if text_embedder_output.status != RunnableStatus.SUCCESS:
+                error = text_embedder_output.error.message if text_embedder_output.error else "unknown error"
+                raise RuntimeError(f"Text embedder failed: {error}")
             self._run_depends = [NodeDependency(node=self.text_embedder).to_dict(for_tracing=True)]
             embedding = text_embedder_output.output.get("embedding")
 
@@ -427,13 +453,16 @@ class VectorStoreRetriever(Node):
                     **({"top_k": top_k} if top_k else {}),
                     "filters": filters,
                     "alpha": alpha,
-                    **({"query": query} if alpha else {}),
+                    **({"query": query} if query is not None else {}),
                     **({"similarity_threshold": similarity_threshold} if similarity_threshold is not None else {}),
                 },
                 run_depends=self._run_depends,
                 config=config,
                 **kwargs,
             )
+            if document_retriever_output.status != RunnableStatus.SUCCESS:
+                error = document_retriever_output.error.message if document_retriever_output.error else "unknown error"
+                raise RuntimeError(f"Document retriever failed: {error}")
             self._run_depends = [NodeDependency(node=self.document_retriever).to_dict(for_tracing=True)]
             retrieved_documents = document_retriever_output.output.get("documents", [])
             logger.info(f"Tool {self.name} - {self.id}: retrieved {len(retrieved_documents)} documents")
@@ -463,7 +492,10 @@ class VectorStoreRetriever(Node):
 
             return {"content": result, "documents": retrieved_documents}
         except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: execution error: {str(e)}", exc_info=True)
+            logger.error(
+                f"Tool {self.name} - {self.id}: execution error: {str(e)}",
+                exc_info=True,
+            )
             raise ToolExecutionException(
                 f"Tool '{self.name}' failed to retrieve data using the specified action. "
                 f"Error: {str(e)}. Please analyze the error and take appropriate action.",
