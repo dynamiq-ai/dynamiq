@@ -1,8 +1,10 @@
 from dynamiq.storages.vector.utils import (
+    DEFAULT_SEARCHABLE_TEXT_METADATA_FIELDS,
     create_file_id_filter,
     create_file_ids_filter,
     create_pgvector_file_id_filter,
     create_pgvector_file_ids_filter,
+    normalize_filters,
 )
 
 
@@ -64,3 +66,30 @@ def test_create_pgvector_file_ids_filter_multiple():
     assert result["field"] == "metadata.file_id"
     assert result["operator"] == "in"
     assert result["value"] == ["file1", "file2", "file3"]
+
+
+def test_normalize_filters_converts_simple_metadata_dict():
+    result = normalize_filters({"file_type": "ticket", "tags": ["bug", "vip"]})
+
+    assert result == {
+        "operator": "AND",
+        "conditions": [
+            {"field": "file_type", "operator": "==", "value": "ticket"},
+            {"field": "tags", "operator": "in", "value": ["bug", "vip"]},
+        ],
+    }
+
+
+def test_normalize_filters_preserves_structured_filter():
+    filters = {
+        "operator": "AND",
+        "conditions": [
+            {"field": "file_type", "operator": "in", "value": ["ticket"]},
+        ],
+    }
+
+    assert normalize_filters(filters) is filters
+
+
+def test_default_searchable_text_metadata_fields():
+    assert DEFAULT_SEARCHABLE_TEXT_METADATA_FIELDS == ("file_name", "file_path", "title", "source", "url")
