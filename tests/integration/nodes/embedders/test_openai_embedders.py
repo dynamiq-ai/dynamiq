@@ -302,11 +302,18 @@ async def test_workflow_with_openai_text_embedder_async(
     result = await openai_text_embedder.run_async(input_data=query_input)
 
     assert result.status == RunnableStatus.SUCCESS
+    # Async path must NOT pass the sync ``client`` (which is a ``openai.OpenAI``
+    # instance) — litellm would invoke its sync ``.create`` and the resulting
+    # ``LegacyAPIResponse`` cannot be ``await``-ed. Instead, we pass the auth
+    # params from the connection and let litellm build its own AsyncOpenAI.
     mock_aembedding_executor.assert_awaited_once_with(
         input=[query_input["query"]],
         model=openai_model,
-        client=ANY,
+        api_key=ANY,
+        api_base=ANY,
     )
+    call_kwargs = mock_aembedding_executor.await_args.kwargs
+    assert "client" not in call_kwargs
 
 
 @pytest.mark.asyncio
@@ -319,5 +326,8 @@ async def test_workflow_with_openai_document_embedder_async(
     mock_aembedding_executor.assert_awaited_once_with(
         input=[document_input["documents"][0].content],
         model=openai_model,
-        client=ANY,
+        api_key=ANY,
+        api_base=ANY,
     )
+    call_kwargs = mock_aembedding_executor.await_args.kwargs
+    assert "client" not in call_kwargs
