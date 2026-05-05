@@ -638,7 +638,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: using function calling inference mode")
 
-        if "tool_calls" not in dict(llm_result.output):
+        if not llm_result.output.get("tool_calls"):
             logger.error("Error: No function called.")
             raise ActionParsingException(
                 "You must always respond by calling a function. "
@@ -650,6 +650,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
             tool_calls = [ToolCall.model_validate(tc) for tc in llm_result.output["tool_calls"]]
         except Exception as e:
             raise ActionParsingException(f"Error parsing tool calls: {e}", recoverable=True)
+
+        if not tool_calls:
+            raise ActionParsingException(
+                "You must always respond by calling a function. "
+                "Call a tool function to continue, or call 'provide_final_answer' to finish.",
+                recoverable=True,
+            )
 
         first_call = tool_calls[0]
         action = first_call.function.name.strip()
