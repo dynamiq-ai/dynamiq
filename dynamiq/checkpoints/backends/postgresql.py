@@ -63,12 +63,9 @@ class PostgreSQL(CheckpointBackend):
             if self.create_if_not_exist:
                 self._create_table_and_indices()
             logger.debug(f"PostgreSQL checkpoint backend connected to table '{self.table_name}'.")
-        except psycopg.Error as e:
+        except Exception as e:
             logger.error(f"Failed to initialize PostgreSQL checkpoint table '{self.table_name}': {e}")
             raise PostgresCheckpointError(f"Failed to initialize PostgreSQL checkpoint backend: {e}") from e
-        except Exception as e:
-            logger.error(f"Unexpected error initializing PostgreSQL checkpoint backend: {e}")
-            raise PostgresCheckpointError(f"Unexpected error initializing PostgreSQL checkpoint backend: {e}") from e
 
     def close(self) -> None:
         """Explicitly close the underlying connection. Safe to call multiple times."""
@@ -160,7 +157,8 @@ class PostgreSQL(CheckpointBackend):
         try:
             return FlowCheckpoint(**decode_checkpoint_data(data))
         except Exception:
-            logger.warning("PostgreSQL checkpoint: failed to decode row %s", row.get("id"), exc_info=True)
+            checkpoint_id = data.get("id") if isinstance(data, dict) else None
+            logger.warning(f"PostgreSQL checkpoint: failed to decode row {checkpoint_id}", exc_info=True)
             return None
 
     def save(self, checkpoint: FlowCheckpoint) -> str:
