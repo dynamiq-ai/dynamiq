@@ -108,6 +108,44 @@ async def test_scale_serp_execute_async_requires_query_or_url():
     mock_client.request.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_scale_serp_input_search_type_drives_formatting():
+    """When input_data overrides the node's default search_type, formatted markdown
+    and structured content must both come from the input-resolved result key.
+
+    Pre-existing bug: ``_format_search_results`` used ``self.search_type.result_key``
+    while the structured ``content_results`` used the input-resolved type, so a
+    user requesting ``news`` on a ``web``-default node would see organic_results in
+    the markdown and news_results in the structured payload.
+    """
+    from dynamiq.nodes.tools.scale_serp import SearchType
+
+    node = ScaleSerpTool(connection=connections.ScaleSerp(api_key="k"))
+    assert node.search_type == SearchType.WEB
+
+    # Server returns BOTH news_results and organic_results so we can detect which
+    # the formatter actually pulled from.
+    payload = {
+        "news_results": [{"title": "NewsTitle", "link": "https://news", "snippet": "news snippet"}],
+        "organic_results": [{"title": "OrganicTitle", "link": "https://web", "snippet": "web snippet"}],
+    }
+    mock_client = MagicMock()
+    mock_client.request = AsyncMock(return_value=_mock_response(json_payload=payload))
+
+    with patch.object(ScaleSerpTool, "get_async_client", AsyncMock(return_value=mock_client)):
+        result = await node.run_async(input_data={"query": "q", "search_type": "news"})
+
+    assert result.status.value == "success"
+    # Inspect the formatted markdown and structured sources, not raw_response
+    # (which contains both result keys verbatim).
+    formatted = result.output["content"]["result"]
+    sources = result.output["content"]["sources_with_url"]
+    assert "NewsTitle" in formatted
+    assert "OrganicTitle" not in formatted
+    assert any("NewsTitle" in s for s in sources)
+    assert not any("OrganicTitle" in s for s in sources)
+
+
 @pytest.mark.parametrize("include_html, expected", [(True, "True"), (False, "False")])
 def test_scale_serp_get_params_stringifies_include_html(include_html, expected):
     """``include_html`` must reach the wire as Python bool repr ("True"/"False").

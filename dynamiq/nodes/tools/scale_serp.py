@@ -114,11 +114,15 @@ class ScaleSerpTool(ConnectionNode):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[ScaleSerpInputSchema]] = ScaleSerpInputSchema
 
-    def _format_search_results(self, results: dict[str, Any]) -> str:
+    def _format_search_results(self, results: dict[str, Any], search_type: "SearchType | None" = None) -> str:
+        """Formats the search results into a human-readable string.
+
+        ``search_type`` defaults to ``self.search_type`` to preserve historical callers,
+        but ``_handle_search_response`` always passes the input-resolved type so the
+        formatted markdown and the structured content list draw from the same key.
         """
-        Formats the search results into a human-readable string.
-        """
-        content_results = results.get(self.search_type.result_key, [])
+        active_type = search_type or self.search_type
+        content_results = results.get(active_type.result_key, [])
 
         formatted_results = []
         for result in content_results:
@@ -183,7 +187,7 @@ class ScaleSerpTool(ConnectionNode):
                 recoverable=True,
             )
 
-        formatted_results = self._format_search_results(search_result)
+        formatted_results = self._format_search_results(search_result, search_type)
         content_results = search_result.get(search_type.result_key, [])
         sources_with_url = [f"[{result.get('title')}]({result.get('link')})" for result in content_results]
 
