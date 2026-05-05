@@ -44,14 +44,24 @@ from dynamiq.utils.logger import logger
 
 
 class ToolCallArguments(BaseModel):
-    thought: str
+    thought: str = ""
     action_input: dict | str
+
+    @field_validator("thought", mode="before")
+    @classmethod
+    def _coerce_thought(cls, v: Any) -> str:
+        return v or ""
 
 
 class FinalAnswerArguments(BaseModel):
-    thought: str
+    thought: str = ""
     answer: str | dict | list
     output_files: str = ""
+
+    @field_validator("thought", mode="before")
+    @classmethod
+    def _coerce_thought(cls, v: Any) -> str:
+        return v or ""
 
     @field_validator("output_files", mode="before")
     @classmethod
