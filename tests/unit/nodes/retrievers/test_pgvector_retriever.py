@@ -62,7 +62,10 @@ def test_to_dict_exclude_params(pgvector_document_retriever):
 def test_init_components(pgvector_document_retriever, mock_pg_vector_store):
     connection_manager = MagicMock(spec=ConnectionManager)
     pgvector_document_retriever.init_components(connection_manager)
-    assert isinstance(pgvector_document_retriever.document_retriever, PGVectorDocumentRetrieverComponent)
+    assert isinstance(
+        pgvector_document_retriever.document_retriever,
+        PGVectorDocumentRetrieverComponent,
+    )
     assert pgvector_document_retriever.document_retriever.vector_store == mock_pg_vector_store
 
 
@@ -112,6 +115,47 @@ def test_execute_hybrid(pgvector_document_retriever):
     )
 
     assert result == {"documents": mock_output["documents"]}
+
+
+def test_execute_preserves_zero_alpha(pgvector_document_retriever):
+    input_data = RetrieverInputSchema(
+        embedding=[0.1, 0.2, 0.3],
+        query="query",
+        filters={"field": "value"},
+        top_k=5,
+        alpha=0.0,
+    )
+    config = RunnableConfig(callbacks=[])
+
+    mock_output = {"documents": [{"id": "1", "content": "Document 1"}]}
+    pgvector_document_retriever.document_retriever = MagicMock(spec=PGVectorDocumentRetrieverComponent)
+    pgvector_document_retriever.document_retriever.run.return_value = mock_output
+
+    result = pgvector_document_retriever.execute(input_data, config)
+
+    pgvector_document_retriever.document_retriever.run.assert_called_once_with(
+        input_data.embedding,
+        filters=input_data.filters,
+        top_k=input_data.top_k,
+        content_key=None,
+        embedding_key=None,
+        query=input_data.query,
+        alpha=0.0,
+        similarity_threshold=None,
+    )
+
+    assert result == {"documents": mock_output["documents"]}
+
+
+def test_component_defaults_none_alpha_to_balanced_hybrid(mock_pg_vector_store):
+    mock_pg_vector_store._hybrid_retrieval.return_value = []
+    retriever = PGVectorDocumentRetrieverComponent(vector_store=mock_pg_vector_store)
+
+    result = retriever.run(query_embedding=[0.1, 0.2, 0.3], query="query", alpha=None)
+
+    mock_pg_vector_store._hybrid_retrieval.assert_called_once()
+    assert mock_pg_vector_store._hybrid_retrieval.call_args.kwargs["alpha"] == 0.5
+    assert result == {"documents": []}
 
 
 def test_execute_with_missing_embedding_key(pgvector_document_retriever):

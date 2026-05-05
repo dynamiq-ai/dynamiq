@@ -4,6 +4,7 @@ from dateutil import parser
 from weaviate.collections.classes.filters import Filter, FilterReturn
 
 from dynamiq.storages.vector.exceptions import VectorStoreFilterException
+from dynamiq.storages.vector.utils import normalize_filters
 
 
 def convert_filters(filters: dict[str, Any]) -> FilterReturn:
@@ -21,6 +22,11 @@ def convert_filters(filters: dict[str, Any]) -> FilterReturn:
     """
     if not isinstance(filters, dict):
         msg = "Filters must be a dictionary"
+        raise VectorStoreFilterException(msg)
+
+    filters = normalize_filters(filters)
+    if not filters:
+        msg = "No filters provided"
         raise VectorStoreFilterException(msg)
 
     if "field" in filters:

@@ -101,6 +101,31 @@ def test_execute_hybrid(weaviate_document_retriever):
     assert result == {"documents": mock_output["documents"]}
 
 
+def test_execute_preserves_zero_alpha(weaviate_document_retriever):
+    input_data = RetrieverInputSchema(
+        embedding=[0.1, 0.2, 0.3], filters={"field": "value"}, top_k=5, query="query", alpha=0.0
+    )
+    config = RunnableConfig(callbacks=[])
+
+    mock_output = {"documents": [{"id": "1", "content": "Document 1"}]}
+    weaviate_document_retriever.document_retriever = MagicMock(spec=WeaviateDocumentRetrieverComponent)
+    weaviate_document_retriever.document_retriever.run.return_value = mock_output
+
+    result = weaviate_document_retriever.execute(input_data, config)
+
+    weaviate_document_retriever.document_retriever.run.assert_called_once_with(
+        input_data.embedding,
+        filters=input_data.filters,
+        top_k=input_data.top_k,
+        content_key=None,
+        query=input_data.query,
+        alpha=0.0,
+        similarity_threshold=None,
+    )
+
+    assert result == {"documents": mock_output["documents"]}
+
+
 def test_execute_with_missing_embedding_key(weaviate_document_retriever):
     config = RunnableConfig(callbacks=[])
 
