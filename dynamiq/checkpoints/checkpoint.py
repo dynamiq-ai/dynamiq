@@ -69,7 +69,7 @@ class IterativeCheckpointMixin:
     """Mixin for nodes that perform iterative work and support per-iteration resume.
 
     Provides a standardised save/restore contract so any long-running node
-    (Agent, GraphOrchestrator, AdaptiveOrchestrator, …) can skip already-completed
+    (Agent, GraphOrchestrator, …) can skip already-completed
     iterations on resume without duplicating the staging-field pattern.
 
     Subclasses must implement:

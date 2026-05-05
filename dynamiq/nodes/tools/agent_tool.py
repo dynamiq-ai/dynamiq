@@ -181,7 +181,7 @@ class SubAgentTool(Node):
         from dynamiq.nodes.agents.base import Agent as BaseAgent
 
         if isinstance(self.agent_factory, dict):
-            from dynamiq.nodes.agents.agent import Agent as ReActAgent
+            from dynamiq.nodes.agents.agent import Agent
             from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
 
             data = copy.deepcopy(self.agent_factory)
@@ -199,7 +199,7 @@ class SubAgentTool(Node):
             )
             resolved.setdefault("is_postponed_component_init", True)
             resolved.pop("id", None)
-            agent = ReActAgent(**resolved)
+            agent = Agent(**resolved)
         elif callable(self.agent_factory):
             agent = self.agent_factory()
         else:
