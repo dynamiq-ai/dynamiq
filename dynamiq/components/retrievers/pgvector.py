@@ -76,7 +76,7 @@ class PGVectorDocumentRetriever:
             query(Optional[str]): The query string to search for (when using keyword search). Defaults to None.
             alpha (Optional[float]): The alpha value for hybrid retrieval. Defaults to 0.5.
 
-            When using hybrid retrieval, the alpha value determines the weight of the keyword search score in the
+            When using hybrid retrieval, the alpha value determines the weight of the vector similarity score in the
             final ranking. A value of 0.0 means only keyword search score will be used, and a value of 1.0 means only
             vector similarity score will be considered.
 
@@ -86,6 +86,7 @@ class PGVectorDocumentRetriever:
 
         top_k = top_k or self.top_k
         filters = filters or self.filters
+        alpha = 0.5 if alpha is None else alpha
 
         if query:
             docs = self.vector_store._hybrid_retrieval(

@@ -132,6 +132,18 @@ class BaseEmbedder(BaseModel):
             params = {"client": self.client}
         return params
 
+    @property
+    def embed_params_async(self) -> dict:
+        """Params for the async embedding call."""
+        params = dict(self.embed_params)
+
+        client = params.pop("client", None)
+
+        if self.client is not None and client is self.client:
+            params.update(self.connection.conn_params)
+
+        return params
+
     def _apply_text_truncation(self, text: str) -> str:
         """
         Apply text truncation if enabled and text exceeds max_input_tokens.
@@ -213,7 +225,7 @@ class BaseEmbedder(BaseModel):
         text_to_embed = text_to_embed.replace("\n", " ")
         text_to_embed = self._apply_text_truncation(text_to_embed)
 
-        response = await self._aembedding(model=self.model, input=[text_to_embed], **self.embed_params)
+        response = await self._aembedding(model=self.model, input=[text_to_embed], **self.embed_params_async)
 
         meta = {"model": response.model, "usage": dict(response.usage)}
         embedding = response.data[0]["embedding"]
@@ -282,7 +294,7 @@ class BaseEmbedder(BaseModel):
         """Async mirror of :meth:`_embed_texts_batch`."""
         all_embeddings: list[list[float]] = []
         meta: dict[str, Any] = {}
-        embed_params = self.embed_params
+        embed_params = self.embed_params_async
         for i in range(0, len(texts_to_embed), batch_size):
             batch = texts_to_embed[i : i + batch_size]
             response = await self._aembedding(model=self.model, input=batch, **embed_params)

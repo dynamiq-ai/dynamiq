@@ -1,4 +1,5 @@
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -80,6 +81,48 @@ def test_valid_property_names(name: str) -> None:
 def test_invalid_property_names(name: str) -> None:
     """Test that invalid property names are correctly identified."""
     assert WeaviateVectorStore.is_valid_property_name(name) is False
+
+
+def test_get_query_properties_includes_searchable_metadata_fields() -> None:
+    store = WeaviateVectorStore.__new__(WeaviateVectorStore)
+    store.content_key = "content"
+    properties = [
+        SimpleNamespace(name="content"),
+        SimpleNamespace(name="file_name"),
+        SimpleNamespace(name="file_path"),
+        SimpleNamespace(name="file_content_hash"),
+    ]
+
+    assert store._get_query_properties(properties) == ["content", "file_name", "file_path"]
+
+
+def test_hybrid_retrieval_forwards_custom_content_key_to_document_conversion() -> None:
+    store = WeaviateVectorStore.__new__(WeaviateVectorStore)
+    store.content_key = "content"
+    store.alpha = 0.5
+
+    collection_properties = [
+        SimpleNamespace(name="custom_content"),
+        SimpleNamespace(name="file_name"),
+    ]
+    result_object = SimpleNamespace(objects=[SimpleNamespace(properties={"_original_id": "1", "custom_content": "ok"})])
+    store._collection = MagicMock()
+    store._collection.config.get.return_value.properties = collection_properties
+    store._collection.query.hybrid.return_value = result_object
+    store._to_document = MagicMock(return_value=Document(content="ok"))
+
+    docs = store._hybrid_retrieval(
+        query_embedding=[0.1, 0.2],
+        query="Ticket #5485",
+        top_k=1,
+        content_key="custom_content",
+    )
+
+    assert len(docs) == 1
+    assert docs[0].content == "ok"
+    store._to_document.assert_called_once_with(result_object.objects[0], content_key="custom_content")
+    store._collection.query.hybrid.assert_called_once()
+    assert store._collection.query.hybrid.call_args.kwargs["query_properties"] == ["custom_content", "file_name"]
 
 
 @patch("dynamiq.storages.vector.weaviate.weaviate.Weaviate")
