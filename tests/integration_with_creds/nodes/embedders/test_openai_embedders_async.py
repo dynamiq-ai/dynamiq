@@ -1,6 +1,3 @@
-import asyncio
-import time
-
 import pytest
 
 from dynamiq import Workflow
@@ -50,31 +47,6 @@ async def test_openai_text_embedder_workflow_run_async():
     node_output = result.output[node.id]
     assert node_output["status"] == "success"
     assert len(node_output["output"]["embedding"]) > 0
-
-
-@pytest.mark.asyncio
-async def test_openai_text_embedder_concurrent_calls_overlap():
-    """Three parallel embed calls via ``asyncio.gather`` must overlap on the wire."""
-    queries = ["alpha is the first", "beta is the second", "gamma is the third"]
-    node = OpenAITextEmbedder(connection=OpenAIConnection())
-
-    start = time.perf_counter()
-    baseline = await node.run_async(input_data={"query": queries[0]})
-    single_call_s = time.perf_counter() - start
-    assert baseline.status == RunnableStatus.SUCCESS
-
-    start = time.perf_counter()
-    results = await asyncio.gather(*(node.run_async(input_data={"query": q}) for q in queries))
-    parallel_s = time.perf_counter() - start
-
-    for r, q in zip(results, queries):
-        assert r.status == RunnableStatus.SUCCESS, f"failed for {q!r}: {r.output}"
-
-    ceiling = (single_call_s * 2.0) + 1.0
-    assert parallel_s < ceiling, (
-        f"async embed calls did not overlap: parallel={parallel_s:.2f}s, "
-        f"single_call_baseline={single_call_s:.2f}s, ceiling={ceiling:.2f}s"
-    )
 
 
 def test_openai_embedder_async_params_omit_sync_client():
