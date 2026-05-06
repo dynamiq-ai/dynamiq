@@ -703,8 +703,8 @@ class BaseLLM(ConnectionNode):
         }
         if parallel_tool_calls is not None:
             common_params["parallel_tool_calls"] = parallel_tool_calls
-        if not tools:
-            common_params.pop("tool_choice", None)
+        if not tools and common_params.get("tool_choice") is not None:
+            common_params.pop("tool_choice")
 
         return self.update_completion_params(common_params)
 
