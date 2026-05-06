@@ -209,24 +209,8 @@ class TavilyTool(ConnectionNode):
 
         return "\n".join(formatted_results).strip()
 
-    def execute(self, input_data: TavilyInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
-        """
-        Executes the search operation using the provided input data.
-        Parameters from input_data override the node's default parameters if provided.
-
-        Args:
-            input_data (TavilyInputSchema): The input data containing the search query and optional parameters.
-            config (RunnableConfig | None): Optional configuration for the execution.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            dict[str, Any]: The result of the search operation.
-        """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
-
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-
+    def _build_search_payload(self, input_data: TavilyInputSchema) -> tuple[dict, str]:
+        """Build the search payload and the resolved request URL."""
         search_data = {
             "query": input_data.query,
             "auto_parameters": self.auto_parameters,
@@ -263,8 +247,36 @@ class TavilyTool(ConnectionNode):
 
         search_data = {key: value for key, value in search_data.items() if value is not None}
         request_payload = dict(search_data)
-
         connection_url = urljoin(self.connection.url, "/search")
+        return request_payload, connection_url
+
+    def _wrap_search_exception(self, exc: Exception) -> ToolExecutionException:
+        logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(exc)}")
+        return ToolExecutionException(
+            f"Tool '{self.name}' failed to retrieve search results. "
+            f"Error: {str(exc)}. Please analyze the error and take appropriate action.",
+            recoverable=True,
+        )
+
+    def execute(self, input_data: TavilyInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+        """
+        Executes the search operation using the provided input data.
+        Parameters from input_data override the node's default parameters if provided.
+
+        Args:
+            input_data (TavilyInputSchema): The input data containing the search query and optional parameters.
+            config (RunnableConfig | None): Optional configuration for the execution.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            dict[str, Any]: The result of the search operation.
+        """
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        request_payload, connection_url = self._build_search_payload(input_data)
 
         try:
             response = self.client.request(
@@ -275,13 +287,38 @@ class TavilyTool(ConnectionNode):
             response.raise_for_status()
             search_result = response.json()
         except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
-            raise ToolExecutionException(
-                f"Tool '{self.name}' failed to retrieve search results. "
-                f"Error: {str(e)}. Please analyze the error and take appropriate action.",
-                recoverable=True,
-            )
+            raise self._wrap_search_exception(e)
 
+        return self._format_tavily_result(search_result, request_payload, input_data)
+
+    async def execute_async(
+        self, input_data: TavilyInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
+        """Native async execution path mirroring ``execute``."""
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        request_payload, connection_url = self._build_search_payload(input_data)
+        client = await self.get_async_client()
+
+        try:
+            response = await client.request(
+                method=self.connection.method,
+                url=connection_url,
+                json={**self.connection.data, **request_payload},
+            )
+            response.raise_for_status()
+            search_result = response.json()
+        except Exception as e:
+            raise self._wrap_search_exception(e)
+
+        return self._format_tavily_result(search_result, request_payload, input_data)
+
+    def _format_tavily_result(
+        self, search_result: dict, request_payload: dict, input_data: TavilyInputSchema
+    ) -> dict[str, Any]:
         formatted_results = self._format_search_results(search_result)
         sources_with_url = []
         for result in search_result.get("results", []):
