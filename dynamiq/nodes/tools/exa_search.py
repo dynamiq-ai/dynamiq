@@ -477,17 +477,8 @@ class ExaTool(ConnectionNode):
 
         return contents.model_dump(by_alias=True, exclude_none=True)
 
-    def execute(self, input_data: ExaInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
-        """
-        Executes the search using the Exa API and returns the formatted results.
-
-        Input parameters override node parameters when provided.
-        """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
-
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-
+    def _build_search_payload(self, input_data: ExaInputSchema) -> tuple[dict[str, Any], str]:
+        """Return (payload, connection_url)."""
         payload = {
             "query": input_data.query,
             "useAutoprompt": (
@@ -554,31 +545,23 @@ class ExaTool(ConnectionNode):
             payload["contents"] = self._serialize_contents(default_contents)
 
         connection_url = urljoin(self.connection.url, "search")
+        return payload, connection_url
 
-        try:
-            response = self.client.request(
-                method=self.connection.method,
-                url=connection_url,
-                json=payload,
-                headers=self.connection.headers,
-            )
-            response.raise_for_status()
-            search_result = response.json()
-        except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
-            raise ToolExecutionException(
-                f"Tool '{self.name}' failed to retrieve search results. Error: {str(e)}. "
-                f"Please analyze the error and take appropriate action.",
-                recoverable=True,
-            )
+    def _wrap_search_exception(self, exc: Exception) -> ToolExecutionException:
+        logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(exc)}")
+        return ToolExecutionException(
+            f"Tool '{self.name}' failed to retrieve search results. Error: {str(exc)}. "
+            f"Please analyze the error and take appropriate action.",
+            recoverable=True,
+        )
 
+    def _format_search_response(self, search_result: dict) -> dict[str, Any]:
         results = search_result.get("results", [])
         formatted_results = self._format_search_results(results)
-
         sources_with_url = self._format_sources(results)
         formatted_context = self._format_context_section(search_result.get("context"))
-
         urls = [r.get("url") for r in results]
+
         if self.is_optimized_for_agents:
             result_parts = ["## Sources", "\n".join(sources_with_url)]
             result_parts.extend(["## Search Results", formatted_results])
@@ -606,8 +589,60 @@ class ExaTool(ConnectionNode):
                 "context": formatted_context,
                 "raw_response": search_result,
             }
-
             output = {"content": result}
 
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
         return output
+
+    def execute(self, input_data: ExaInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+        """
+        Executes the search using the Exa API and returns the formatted results.
+
+        Input parameters override node parameters when provided.
+        """
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        payload, connection_url = self._build_search_payload(input_data)
+
+        try:
+            response = self.client.request(
+                method=self.connection.method,
+                url=connection_url,
+                json=payload,
+                headers=self.connection.headers,
+            )
+            response.raise_for_status()
+            search_result = response.json()
+        except Exception as e:
+            raise self._wrap_search_exception(e)
+
+        return self._format_search_response(search_result)
+
+    async def execute_async(
+        self, input_data: ExaInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
+        """Native async execution path mirroring ``execute``."""
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        payload, connection_url = self._build_search_payload(input_data)
+        client = await self.get_async_client()
+
+        try:
+            response = await client.request(
+                method=self.connection.method,
+                url=connection_url,
+                json=payload,
+                headers=self.connection.headers,
+            )
+            response.raise_for_status()
+            search_result = response.json()
+        except Exception as e:
+            raise self._wrap_search_exception(e)
+
+        return self._format_search_response(search_result)

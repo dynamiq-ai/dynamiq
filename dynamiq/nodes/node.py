@@ -2009,6 +2009,21 @@ class ConnectionNode(Node, ABC):
 
         return False
 
+    async def get_async_client(self) -> Any:
+        """Resolve the per-loop async client for this node's connection.
+
+        Delegates to ``ConnectionManager.get_async_connection_client``, which caches
+        the client per ``(connection, running_loop)``. The node does not cache the
+        client itself so a node reused across event loops always gets the right client.
+        """
+        if self._connection_manager is None:
+            self._connection_manager = ConnectionManager()
+        if self.connection is None:
+            raise ValueError(
+                f"Node {type(self).__name__} requires a connection to build an async client."
+            )
+        return await self._connection_manager.get_async_connection_client(self.connection)
+
     def ensure_client(self) -> None:
         """
         Ensure the client is alive and reconnect if needed.
