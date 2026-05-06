@@ -66,7 +66,7 @@ class TokenSplitterComponent(SplitterComponentBase):
         return kwargs
 
     def split_text(self, text: str) -> list[str]:
-        return [chunk for chunk, _ in self._split_text_with_offsets(text)]
+        return [chunk for chunk, _, _ in self._split_text_with_offsets(text)]
 
     def _split_document(self, doc: Document) -> list[Document]:
         base_metadata: dict[str, Any] = deepcopy(doc.metadata) if doc.metadata else {}
@@ -83,8 +83,23 @@ class TokenSplitterComponent(SplitterComponentBase):
         base_metadata: dict[str, Any],
         doc_id: str | None,
     ) -> list[Document]:
-        built: list[Document] = []
-        for index, (chunk, start_index) in enumerate(self._split_text_with_offsets(source_text)):
+        return [
+            document
+            for document, _, _ in self._build_documents_with_token_spans(
+                source_text,
+                base_metadata,
+                doc_id=doc_id,
+            )
+        ]
+
+    def _build_documents_with_token_spans(
+        self,
+        source_text: str,
+        base_metadata: dict[str, Any],
+        doc_id: str | None,
+    ) -> list[tuple[Document, int, int]]:
+        built: list[tuple[Document, int, int]] = []
+        for index, (chunk, start_index, end_index) in enumerate(self._split_text_with_offsets(source_text)):
             if not chunk:
                 continue
             metadata = deepcopy(base_metadata)
@@ -94,9 +109,10 @@ class TokenSplitterComponent(SplitterComponentBase):
                 metadata["start_index"] = start_index
             chunk_id = self._build_chunk_id(doc_id, index, chunk)
             if chunk_id is None:
-                built.append(Document(content=chunk, metadata=metadata))
+                document = Document(content=chunk, metadata=metadata)
             else:
-                built.append(Document(id=chunk_id, content=chunk, metadata=metadata))
+                document = Document(id=chunk_id, content=chunk, metadata=metadata)
+            built.append((document, start_index, end_index))
         return built
 
     def _attach_parent_chunks_with_token_offsets(
@@ -105,11 +121,12 @@ class TokenSplitterComponent(SplitterComponentBase):
         child_chunks: list[Document],
     ) -> list[Document]:
         parent = self.__class__(**self._parent_splitter_kwargs())
-        parent_chunks = parent._build_documents_with_token_offsets(
+        parent_spans = parent._build_documents_with_token_spans(
             source.content,
             base_metadata={"source_id": source.id, "is_parent": True},
             doc_id=source.id,
         )
+        parent_chunks = [document for document, _, _ in parent_spans]
         for child in child_chunks:
             if not child.metadata or "start_index" not in child.metadata:
                 continue
@@ -117,10 +134,8 @@ class TokenSplitterComponent(SplitterComponentBase):
             owner = next(
                 (
                     p
-                    for p in parent_chunks
-                    if "start_index" in (p.metadata or {})
-                    and start_index >= p.metadata["start_index"]
-                    and start_index < p.metadata["start_index"] + len(p.content)
+                    for p, parent_start, parent_end in parent_spans
+                    if start_index >= parent_start and start_index < parent_end
                 ),
                 None,
             )
@@ -128,7 +143,7 @@ class TokenSplitterComponent(SplitterComponentBase):
                 child.metadata[self.PARENT_DOC_KEY] = owner.id
         return parent_chunks + child_chunks
 
-    def _split_text_with_offsets(self, text: str) -> list[tuple[str, int]]:
+    def _split_text_with_offsets(self, text: str) -> list[tuple[str, int, int]]:
         tokenizer = self._ensure_tokenizer()
         token_ids = tokenizer.encode(
             text,
@@ -139,14 +154,15 @@ class TokenSplitterComponent(SplitterComponentBase):
             return []
         token_byte_offsets = self._token_byte_offsets(text, token_ids)
         byte_to_char = self._byte_to_char_offsets(text)
-        chunks: list[tuple[str, int]] = []
+        chunks: list[tuple[str, int, int]] = []
         step = max(self.chunk_size - self.chunk_overlap, 1)
         for start in range(0, len(token_ids), step):
             window = token_ids[start : start + self.chunk_size]
             if not window:
                 break
             start_index = byte_to_char[token_byte_offsets[start]]
-            chunks.append((tokenizer.decode(window), start_index))
+            end_index = byte_to_char[token_byte_offsets[start + len(window)]]
+            chunks.append((tokenizer.decode(window), start_index, end_index))
             if start + self.chunk_size >= len(token_ids):
                 break
         return chunks

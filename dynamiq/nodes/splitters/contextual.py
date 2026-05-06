@@ -59,6 +59,9 @@ class ContextualSplitter(Node):
         self._run_depends = []
 
     def reset_run_state(self) -> None:
+        parent_reset = getattr(super(), "reset_run_state", None)
+        if callable(parent_reset):
+            parent_reset()
         self._run_depends = []
 
     def to_dict(
@@ -118,7 +121,9 @@ class ContextualSplitter(Node):
         run_kwargs.pop("input_data", None)
         run_kwargs.pop("prompt", None)
         run_kwargs.pop("run_depends", None)
-        run_kwargs.setdefault("parent_run_id", run_kwargs.get("run_id"))
+        parent_run_id = run_kwargs.pop("run_id", None)
+        if run_kwargs.get("parent_run_id") is None:
+            run_kwargs["parent_run_id"] = parent_run_id
         result = self.llm.run(
             input_data={},
             prompt=prompt,

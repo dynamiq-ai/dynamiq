@@ -154,5 +154,23 @@ def test_contextual_splitter_llm_call_removes_duplicate_run_kwargs():
     assert call_config is config
     assert call_kwargs["run_depends"] == []
     assert call_kwargs["parent_run_id"] == "parent"
+    assert "run_id" not in call_kwargs
     assert "input_data" not in call_kwargs
     assert "prompt" not in call_kwargs
+
+
+def test_contextual_splitter_llm_call_converts_run_id_to_parent_run_id():
+    llm = _FakeLLM()
+    splitter = ContextualSplitter.model_construct(llm=llm)
+
+    context = splitter._call_llm(
+        "Prompt text",
+        config=RunnableConfig(),
+        parent_run_id=None,
+        run_id="parent-run",
+    )
+
+    assert context == "ctx"
+    _, _, _, call_kwargs = llm.run_calls[0]
+    assert call_kwargs["parent_run_id"] == "parent-run"
+    assert "run_id" not in call_kwargs

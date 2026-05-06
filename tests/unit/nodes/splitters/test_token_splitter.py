@@ -53,6 +53,42 @@ def test_token_splitter_tracks_start_index_from_token_offsets_when_decoded_chunk
     assert [chunk.metadata["start_index"] for chunk in chunks] == [0, 2, 4]
 
 
+class _ShortParentDecodedTokenizer:
+    def encode(self, text, allowed_special="all", disallowed_special="all"):
+        return list(range(len(text)))
+
+    def decode(self, token_ids):
+        if token_ids == [0, 1, 2, 3]:
+            return "a"
+        return "".join(chr(ord("a") + token_id) for token_id in token_ids)
+
+    def decode_single_token_bytes(self, token_id):
+        return chr(ord("a") + token_id).encode("utf-8")
+
+
+class _ShortParentDecodedTokenSplitter(TokenSplitterComponent):
+    def _ensure_tokenizer(self):
+        return _ShortParentDecodedTokenizer()
+
+
+def test_token_splitter_parent_matching_uses_token_span_end_offsets():
+    splitter = _ShortParentDecodedTokenSplitter(
+        chunk_size=2,
+        chunk_overlap=0,
+        parent_chunk_size=4,
+        parent_chunk_overlap=0,
+    )
+
+    chunks = splitter._split_document(Document(id="source", content="abcdef"))
+    parent_chunks = [chunk for chunk in chunks if chunk.metadata.get("is_parent")]
+    child_chunks = [chunk for chunk in chunks if not chunk.metadata.get("is_parent")]
+
+    assert len(parent_chunks) == 2
+    assert [chunk.metadata["start_index"] for chunk in child_chunks] == [0, 2, 4]
+    assert all("parent_chunk_id" in chunk.metadata for chunk in child_chunks)
+    assert child_chunks[1].metadata["parent_chunk_id"] == parent_chunks[0].id
+
+
 def test_token_splitter_node_accepts_special_token_sets():
     splitter = TokenSplitter(
         allowed_special={"<|endoftext|>"},
