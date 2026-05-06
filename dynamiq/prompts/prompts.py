@@ -8,7 +8,7 @@ from typing import Any, ClassVar
 import filetype
 from jinja2 import Environment, meta
 from litellm import token_counter
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_serializer
 
 from dynamiq.types.llm_tool import Tool
 from dynamiq.utils import generate_uuid
@@ -18,6 +18,7 @@ class MessageRole(str, enum.Enum):
     USER = "user"
     SYSTEM = "system"
     ASSISTANT = "assistant"
+    TOOL = "tool"
 
 
 class MessageType(str, enum.Enum):
@@ -65,11 +66,22 @@ class Message(BaseModel):
         role (MessageRole): The role of the message sender.
         metadata (dict | None): Additional metadata for the message, default is None.
         static (bool): Determines whether it is possible to pass parameters via this message.
+        tool_calls (list[dict] | None): Native tool_calls payload for assistant
+            messages in OpenAI function-calling protocol.
+        tool_call_id (str | None): Identifier of the tool call this message
+            answers. Required when ``role == TOOL``.
+        name (str | None): Function name a tool message is responding to.
+            Optional in OpenAI's chat-completions API but conventionally
+            included in tool messages for clarity.
     """
+
     content: str
     role: MessageRole = MessageRole.USER
     metadata: dict | None = None
     static: bool = Field(default=False, exclude=True)
+    tool_calls: list[dict] | None = None
+    tool_call_id: str | None = None
+    name: str | None = None
 
     message_type: ClassVar[MessageType] = MessageType.MESSAGE
 
@@ -84,19 +96,46 @@ class Message(BaseModel):
         return Message(
             role=self.role,
             content=self._Template(self.content).render(**kwargs),
+            tool_calls=self.tool_calls,
+            tool_call_id=self.tool_call_id,
+            name=self.name,
         )
 
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        # FC-only fields stay out of the dump shape unless explicitly set,
+        # so non-FC consumers see the same dict shape as before these fields existed.
+        data = handler(self)
+        for key in ("tool_calls", "tool_call_id", "name"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
+
     def to_dict(self) -> dict:
-        return {
+        data = {
             "type": self.message_type.value,
             "content": self.content,
             "role": self.role.value,
             "static": self.static,
         }
+        if self.tool_calls is not None:
+            data["tool_calls"] = self.tool_calls
+        if self.tool_call_id is not None:
+            data["tool_call_id"] = self.tool_call_id
+        if self.name is not None:
+            data["name"] = self.name
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "Message":
-        return cls(content=data["content"], role=MessageRole(data["role"]), static=data.get("static", False))
+        return cls(
+            content=data["content"],
+            role=MessageRole(data["role"]),
+            static=data.get("static", False),
+            tool_calls=data.get("tool_calls"),
+            tool_call_id=data.get("tool_call_id"),
+            name=data.get("name"),
+        )
 
 
 class VisionMessageTextContent(BaseModel):
@@ -417,9 +456,9 @@ class Prompt(BasePrompt):
             if isinstance(msg, Message):
                 if not msg.static:
                     msg = msg.format_message(**kwargs)
-                out.append(msg.model_dump(exclude={"metadata"}))
+                out.append(msg.model_dump(exclude={"metadata"}, exclude_none=True))
             elif isinstance(msg, VisionMessage):
-                out.append(msg.format_message(**kwargs).model_dump(exclude={"metadata"}))
+                out.append(msg.format_message(**kwargs).model_dump(exclude={"metadata"}, exclude_none=True))
             else:
                 raise ValueError(f"Invalid message type: {type(msg)}")
 

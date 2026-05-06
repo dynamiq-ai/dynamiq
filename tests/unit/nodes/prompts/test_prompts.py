@@ -4,6 +4,7 @@ import io
 import pytest
 
 from dynamiq.prompts.prompts import (
+    Message,
     MessageRole,
     Prompt,
     VisionMessage,
@@ -112,3 +113,89 @@ def test_vision_prompt_unsupported_type():
 
     with pytest.raises(ValueError):
         prompt.format_messages(image=12345)
+
+
+class TestFunctionCallingProtocolMessages:
+    """Tests for OpenAI function-calling protocol fields on the Message model."""
+
+    def test_message_role_tool_exists(self):
+        assert MessageRole.TOOL.value == "tool"
+
+    def test_message_accepts_tool_calls_field(self):
+        tool_calls = [
+            {"id": "call_1", "type": "function", "function": {"name": "search", "arguments": "{}"}}
+        ]
+        msg = Message(role=MessageRole.ASSISTANT, content="", tool_calls=tool_calls)
+        assert msg.tool_calls == tool_calls
+
+    def test_message_accepts_tool_call_id_field(self):
+        msg = Message(role=MessageRole.TOOL, content="result", tool_call_id="call_1")
+        assert msg.tool_call_id == "call_1"
+
+    def test_format_messages_strips_null_tool_calls_from_user(self):
+        prompt = Prompt(messages=[Message(role=MessageRole.USER, content="hi")])
+        out = prompt.format_messages()
+        assert out == [{"role": "user", "content": "hi"}]
+        assert "tool_calls" not in out[0]
+        assert "tool_call_id" not in out[0]
+
+    def test_format_messages_keeps_tool_calls_on_assistant(self):
+        tool_calls = [
+            {"id": "call_a", "type": "function", "function": {"name": "search", "arguments": "{}"}}
+        ]
+        prompt = Prompt(
+            messages=[Message(role=MessageRole.ASSISTANT, content="", tool_calls=tool_calls)]
+        )
+        out = prompt.format_messages()
+        assert len(out) == 1
+        assert out[0]["role"] == "assistant"
+        assert out[0]["tool_calls"] == tool_calls
+        assert "tool_call_id" not in out[0]
+
+    def test_format_messages_keeps_tool_call_id_on_tool_message(self):
+        prompt = Prompt(
+            messages=[
+                Message(role=MessageRole.TOOL, content="Cats sleep 12-16h", tool_call_id="call_a")
+            ]
+        )
+        out = prompt.format_messages()
+        assert out == [{"role": "tool", "content": "Cats sleep 12-16h", "tool_call_id": "call_a"}]
+
+    def test_format_messages_round_trip_well_formed_fc_conversation(self):
+        """End-to-end: a complete FC round-trip serializes to OpenAI's expected shape."""
+        prompt = Prompt(
+            messages=[
+                Message(role=MessageRole.USER, content="Call cat and dog tools in parallel"),
+                Message(
+                    role=MessageRole.ASSISTANT,
+                    content="",
+                    tool_calls=[
+                        {"id": "call_a", "type": "function",
+                         "function": {"name": "CatFacts", "arguments": "{}"}},
+                        {"id": "call_b", "type": "function",
+                         "function": {"name": "DogFacts", "arguments": "{}"}},
+                    ],
+                ),
+                Message(role=MessageRole.TOOL, content="Cats sleep 12-16h", tool_call_id="call_a"),
+                Message(role=MessageRole.TOOL, content="Dogs have 40x smell", tool_call_id="call_b"),
+            ]
+        )
+        out = prompt.format_messages()
+        assert [m["role"] for m in out] == ["user", "assistant", "tool", "tool"]
+        assert out[1]["tool_calls"][0]["id"] == "call_a"
+        assert out[2]["tool_call_id"] == "call_a"
+        assert out[3]["tool_call_id"] == "call_b"
+        # No null pollution anywhere
+        for m in out:
+            assert None not in m.values()
+
+    def test_model_dump_drops_unset_fc_fields_when_nested(self):
+        """Plain messages must not leak None FC fields, even when dumped via a
+        parent model — the path that broke orchestrator output."""
+        from pydantic import BaseModel
+
+        class _Parent(BaseModel):
+            msg: Message
+
+        data = _Parent(msg=Message(role=MessageRole.USER, content="hi")).model_dump()
+        assert data == {"msg": {"content": "hi", "role": MessageRole.USER, "metadata": None}}

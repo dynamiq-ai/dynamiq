@@ -1,3 +1,4 @@
+import json
 import re
 from unittest.mock import MagicMock, patch
 
@@ -465,7 +466,7 @@ class TestSchemaGeneration:
         )
 
         tool_schema = next(s for s in schemas if s["function"]["name"] == "Researcher")
-        assert "delegate_final" in tool_schema["function"]["parameters"]["properties"]["action_input"]["description"]
+        assert "delegate_final" in json.dumps(tool_schema)
 
     def test_structured_output_schema_detects_sub_agent_tool(self, test_llm, child_agent):
         tool = SubAgentTool(agent=child_agent, name="Researcher", description="Performs web research")

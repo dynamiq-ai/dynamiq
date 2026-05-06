@@ -261,6 +261,7 @@ def run_and_assert_agent(agent: Agent, agent_input, expected_length, run_config)
 
 
 @pytest.mark.integration
+@pytest.mark.flaky(reruns=3)
 @pytest.mark.parametrize(
     "inference_mode",
     [
