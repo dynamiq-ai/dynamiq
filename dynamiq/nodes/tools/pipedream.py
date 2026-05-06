@@ -160,6 +160,55 @@ class Pipedream(ConnectionNode):
 
         return ConfiguredPropsModel
 
+    def _build_request(self, input_data: BaseModel) -> tuple[str, dict]:
+        base_url = self.connection.url or "https://api.pipedream.com/v1/"
+        url = f"{base_url}/connect/{self.connection.project_id}/actions/run"
+        payload = {
+            "external_user_id": self.external_user_id,
+            "id": self.action_id,
+            "configured_props": {
+                **self.configurable_props,
+                **{k: v for k, v in input_data.model_dump().items() if v is not None},
+            },
+            **({"stash_id": self.stash_id} if self.stash_id is not None else {}),
+            **({"dynamic_props_id": self.dynamic_props_id} if self.dynamic_props_id else {}),
+        }
+        return url, payload
+
+    def _check_response_status(self, response: Any) -> None:
+        if response.status_code not in SUCCESS_CODES:
+            error_message = f"Pipedream API request failed with status code: {response.status_code}"
+            logger.error(f"Tool {self.name} - {error_message}")
+            recoverable = response.status_code in RECOVERABLE_CODES
+            raise ToolExecutionException(f"{error_message} and response: {response.text}", recoverable=recoverable)
+        if (
+            status := response.json().get("exports", {}).get("debug", {}).get("status")
+        ) and status not in SUCCESS_CODES:
+            error_message = f"Pipedream API request failed with status code: {status}"
+            logger.error(f"Tool {self.name} - {error_message}")
+            recoverable = response.status_code in RECOVERABLE_CODES
+            raise ToolExecutionException(
+                f"{error_message} and response: {response.json().get('exports', {}).get('debug', {}).get('data')}",
+                recoverable=recoverable,
+            )
+
+    def _process_response_files(self, response_json: dict) -> list:
+        files = []
+        if file_uploads := response_json.get("exports", {}).get("$filestash_uploads", None):
+            for file_upload in file_uploads:
+                file_name = file_upload.get("path")
+                file_url = file_upload.get("get_url")
+                if file_url:
+                    files.append(create_file_from_url(file_url, file_name, self.timeout))
+        return files
+
+    def _build_output(self, response: Any, files: list) -> dict[str, Any]:
+        if self.is_optimized_for_agents:
+            content = response.text
+        else:
+            content = response.json()
+        return {"content": content, "files": files}
+
     def execute(self, input_data: BaseModel, config: RunnableConfig = None, **kwargs):
         """Execute the specific workflow logic.
 
@@ -183,21 +232,7 @@ class Pipedream(ConnectionNode):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         try:
-            base_url = self.connection.url or "https://api.pipedream.com/v1/"
-            url = f"{base_url}/connect/{self.connection.project_id}/actions/run"
-            logger.debug(f"Tool {self.name} - Using API URL: {url}")
-            payload = {
-                "external_user_id": self.external_user_id,
-                "id": self.action_id,
-                "configured_props": {
-                    **self.configurable_props,
-                    **{k: v for k, v in input_data.model_dump().items() if v is not None},
-                },
-                **({"stash_id": self.stash_id} if self.stash_id is not None else {}),
-                **({"dynamic_props_id": self.dynamic_props_id} if self.dynamic_props_id else {}),
-            }
-
-            logger.debug(f"Tool {self.name} - Sending request")
+            url, payload = self._build_request(input_data)
             response = self.client.request(
                 method="POST",
                 url=url,
@@ -205,46 +240,55 @@ class Pipedream(ConnectionNode):
                 json=payload,
                 timeout=self.timeout,
             )
+            self._check_response_status(response)
 
-            if response.status_code not in SUCCESS_CODES:
-                error_message = f"Pipedream API request failed with status code: {response.status_code}"
-                logger.error(f"Tool {self.name} - {error_message}")
-
-                recoverable = response.status_code in RECOVERABLE_CODES
-                raise ToolExecutionException(f"{error_message} and response: {response.text}", recoverable=recoverable)
-            if (
-                status := response.json().get("exports", {}).get("debug", {}).get("status")
-            ) and status not in SUCCESS_CODES:
-                error_message = f"Pipedream API request failed with status code: {status}"
-                logger.error(f"Tool {self.name} - {error_message}")
-
-                recoverable = response.status_code in RECOVERABLE_CODES
-                raise ToolExecutionException(
-                    f"{error_message} and response: {response.json().get('exports', {}).get('debug', {}).get('data')}",
-                    recoverable=recoverable,
-                )
-
-            logger.debug(f"Tool {self.name} - request sent successfully")
-            response_json = response.json()
             try:
-                files = []
-                if file_uploads := response_json.get("exports", {}).get("$filestash_uploads", None):
-                    for file_upload in file_uploads:
-                        file_name = file_upload.get("path")
-                        file_url = file_upload.get("get_url")
-                        if file_url:
-                            files.append(create_file_from_url(file_url, file_name, self.timeout))
+                files = self._process_response_files(response.json())
             except Exception as e:
                 logger.error(f"Tool {self.name} - Unexpected error during file processing: {str(e)}")
                 raise ToolExecutionException(f"Unexpected error during file processing:  {str(e)}", recoverable=True)
 
-            if self.is_optimized_for_agents:
-                content = response.text
-            else:
-                content = response_json
+            return self._build_output(response, files)
+        except ToolExecutionException:
+            raise
+        except Exception as e:
+            logger.error(f"Tool {self.name} - Unexpected error during execution: {str(e)}")
+            raise ToolExecutionException(f"Unexpected error during execution:  {str(e)}", recoverable=False)
 
-            return {"content": content, "files": files}
+    async def execute_async(self, input_data: BaseModel, config: RunnableConfig = None, **kwargs):
+        """Native async execution path mirroring ``execute``.
 
+        The HTTP call is awaited natively. File-attachment download still uses the sync
+        ``create_file_from_url`` helper, so the file-processing block is offloaded to a
+        thread via ``asyncio.to_thread`` to keep the event loop unblocked. Adding async
+        file downloads is out of scope for this PR.
+        """
+        import asyncio
+
+        logger.debug(f"Tool {self.name} - Starting execution with input data: {input_data.model_dump()}")
+
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        try:
+            url, payload = self._build_request(input_data)
+            client = await self.get_async_client()
+            response = await client.request(
+                method="POST",
+                url=url,
+                headers=self.connection.conn_params,
+                json=payload,
+                timeout=self.timeout,
+            )
+            self._check_response_status(response)
+
+            try:
+                files = await asyncio.to_thread(self._process_response_files, response.json())
+            except Exception as e:
+                logger.error(f"Tool {self.name} - Unexpected error during file processing: {str(e)}")
+                raise ToolExecutionException(f"Unexpected error during file processing:  {str(e)}", recoverable=True)
+
+            return self._build_output(response, files)
         except ToolExecutionException:
             raise
         except Exception as e:

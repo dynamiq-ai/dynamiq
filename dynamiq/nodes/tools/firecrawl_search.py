@@ -228,6 +228,32 @@ class FirecrawlSearchTool(ConnectionNode):
             return self._format_indexed_results(query, data)
         return f'## Search Results for "{query}"\nNo results returned.'
 
+    def _resolve_search_request(self, input_data: FirecrawlSearchInputSchema) -> tuple[str, dict, str]:
+        query = input_data.query or self.query
+        if not query:
+            logger.error(f"Tool {self.name} - {self.id}: failed to get input data.")
+            raise ValueError("Query is required for search")
+        search_payload = self._build_search_payload(query, input_data)
+        connection_url = urljoin(self.connection.url, "search")
+        return query, search_payload, connection_url
+
+    def _wrap_search_exception(self, exc: Exception) -> ToolExecutionException:
+        logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(exc)}")
+        return ToolExecutionException(
+            f"Tool '{self.name}' failed to execute the requested action. Error: {str(exc)}. "
+            f"Please analyze the error and take appropriate action.",
+            recoverable=True,
+        )
+
+    def _format_search_output(self, query: str, search_result: dict) -> dict[str, Any]:
+        data = search_result.get("data")
+        if self.is_optimized_for_agents:
+            result = self._format_agent_response(query, data)
+        else:
+            result = {"success": search_result.get("success", False), "query": query, "data": data}
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
+        return {"content": result}
+
     def execute(
         self, input_data: FirecrawlSearchInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
@@ -237,13 +263,7 @@ class FirecrawlSearchTool(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        query = input_data.query or self.query
-        if not query:
-            logger.error(f"Tool {self.name} - {self.id}: failed to get input data.")
-            raise ValueError("Query is required for search")
-
-        search_payload = self._build_search_payload(query, input_data)
-        connection_url = urljoin(self.connection.url, "search")
+        query, search_payload, connection_url = self._resolve_search_request(input_data)
 
         try:
             response = self.client.request(
@@ -255,19 +275,32 @@ class FirecrawlSearchTool(ConnectionNode):
             response.raise_for_status()
             search_result = response.json()
         except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
-            raise ToolExecutionException(
-                f"Tool '{self.name}' failed to execute the requested action. Error: {str(e)}. "
-                f"Please analyze the error and take appropriate action.",
-                recoverable=True,
+            raise self._wrap_search_exception(e)
+
+        return self._format_search_output(query, search_result)
+
+    async def execute_async(
+        self, input_data: FirecrawlSearchInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
+        """Native async execution path mirroring ``execute``."""
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        query, search_payload, connection_url = self._resolve_search_request(input_data)
+        client = await self.get_async_client()
+
+        try:
+            response = await client.request(
+                method=self.connection.method,
+                url=connection_url,
+                json=search_payload,
+                headers=self.connection.headers,
             )
+            response.raise_for_status()
+            search_result = response.json()
+        except Exception as e:
+            raise self._wrap_search_exception(e)
 
-        data = search_result.get("data")
-        if self.is_optimized_for_agents:
-            result = self._format_agent_response(query, data)
-        else:
-            result = {"success": search_result.get("success", False), "query": query, "data": data}
-
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
-
-        return {"content": result}
+        return self._format_search_output(query, search_result)

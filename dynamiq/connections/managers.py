@@ -1,8 +1,10 @@
+import asyncio
 import enum
 import hashlib
 import importlib
 import threading
-from contextlib import contextmanager
+import weakref
+from contextlib import asynccontextmanager, contextmanager
 from typing import Any
 
 from dynamiq.components.serializers import JsonPickleSerializer
@@ -18,10 +20,12 @@ class ConnectionManagerException(Exception):
 class ConnectionClientInitType(str, enum.Enum):
     """Enumeration of connection client initialization types."""
     DEFAULT = "DEFAULT"
+    ASYNC = "ASYNC"
 
 
 CONNECTION_METHOD_BY_INIT_TYPE = {
     ConnectionClientInitType.DEFAULT: "connect",
+    ConnectionClientInitType.ASYNC: "connect_async",
 }
 
 
@@ -79,11 +83,37 @@ class ConnectionManager:
             return self._connection_locks[conn_id]
 
     def _is_client_alive(self, conn_client: Any) -> bool:
-        """Check if an existing connection client is still usable."""
+        """Check if an existing connection client is still usable.
+
+        Inspects the common closed-state attributes used by sync and async clients:
+        ``closed`` (e.g. ``requests.Session``), ``is_closed`` (httpx ``AsyncClient``).
+        Both are checked because the legacy code only looked at ``closed`` and silently
+        treated httpx clients as always-alive even after their event loop closed.
+        """
         conn_client_closed = getattr(conn_client, "closed", None)
-        if conn_client_closed is None:
+        if conn_client_closed is not None:
+            return not conn_client_closed
+
+        is_closed = getattr(conn_client, "is_closed", None)
+        if is_closed is None:
             return True
-        return not conn_client_closed
+        if callable(is_closed):
+            return not is_closed()
+        return not is_closed
+
+    def _is_async_client_for_loop(self, conn_client: Any, loop: "asyncio.AbstractEventLoop") -> bool:
+        """Verify that a cached async client still belongs to the current running loop.
+
+        Loop ids (``id(loop)``) get reused after a loop is garbage-collected, so id-only
+        keying is unsafe across sequential ``asyncio.run(...)`` invocations. Each cached
+        async client carries a weakref to its origin loop set in ``get_async_connection_client``.
+        Returns True only when the weakref still resolves to the current loop AND the
+        client is alive.
+        """
+        loop_ref = getattr(conn_client, "_dynamiq_loop_ref", None)
+        if loop_ref is None or loop_ref() is not loop:
+            return False
+        return self._is_client_alive(conn_client)
 
     def get_connection_client(
         self,
@@ -106,6 +136,10 @@ class ConnectionManager:
         Raises:
             ConnectionManagerException: If the connection does not support the specified initialization type.
         """
+        if init_type == ConnectionClientInitType.ASYNC:
+            raise ConnectionManagerException(
+                "Use get_async_connection_client(...) for ASYNC initialization."
+            )
         logger.debug(
             f"Get connection client for '{connection.id}-{connection.type}' "
             f"with '{init_type.value.lower()}' initialization"
@@ -139,6 +173,38 @@ class ConnectionManager:
 
             return conn_client
 
+    async def get_async_connection_client(self, connection: BaseConnection) -> Any:
+        """Retrieve or initialize an async connection client for the running event loop.
+
+        The cache key includes the running loop's id, and each cached client carries a
+        weakref to that loop so id collisions across sequential ``asyncio.run(...)``
+        invocations cannot return a client bound to a closed loop.
+
+        No lock is held across ``await connect_async()``. ``connect_async`` is effectively
+        synchronous in practice (it constructs a client without suspending), so the only
+        race is two coroutines on the same loop both initializing simultaneously — the
+        second one overwrites the cache entry and the first client is discarded. Holding
+        a ``threading.Lock`` across ``await`` would risk deadlocking the event loop if
+        ``connect_async`` were ever modified to suspend.
+        """
+        loop = asyncio.get_running_loop()
+        conn_id = self._get_async_connection_id(connection, id(loop))
+
+        cached = self.connection_clients.get(conn_id)
+        if cached is not None and self._is_async_client_for_loop(cached, loop):
+            return cached
+
+        conn_method = getattr(connection, "connect_async", None)
+        if not callable(conn_method):
+            raise ConnectionManagerException(
+                f"Connection '{connection.id}-{connection.type}' does not support async initialization."
+            )
+
+        conn_client = await conn_method()
+        conn_client._dynamiq_loop_ref = weakref.ref(loop)
+        self.connection_clients[conn_id] = conn_client
+        return conn_client
+
     def get_connection_id(
         self,
         connection: BaseConnection,
@@ -157,14 +223,39 @@ class ConnectionManager:
         conn_hash = self.hash(connection.model_dump_json())
         return f"{connection.type.lower()}:{init_type.lower()}:{conn_hash}"
 
+    def _get_async_connection_id(self, connection: BaseConnection, loop_id: int) -> str:
+        """Build a cache key that includes the running loop id."""
+        conn_hash = self.hash(connection.model_dump_json())
+        return f"{connection.type.lower()}:async:{loop_id}:{conn_hash}"
+
     def close(self):
         """
-        Closes all open connection clients and clears the connection_clients dictionary.
+        Closes all open sync connection clients and clears the connection_clients dictionary.
+
+        Async clients (those exposing ``aclose`` but no ``close``) are dropped without being
+        closed; callers using async clients should use ``await manager.aclose()`` instead.
         """
         logger.debug("Close connection clients")
         for conn_client in self.connection_clients.values():
-            if hasattr(conn_client, "close"):
-                conn_client.close()
+            close_method = getattr(conn_client, "close", None)
+            if callable(close_method) and not asyncio.iscoroutinefunction(close_method):
+                close_method()
+        self.connection_clients = {}
+
+    async def aclose(self):
+        """Close every cached connection client, awaiting async clients."""
+        logger.debug("Async-close connection clients")
+        for conn_client in self.connection_clients.values():
+            aclose = getattr(conn_client, "aclose", None)
+            if callable(aclose):
+                try:
+                    await aclose()
+                except Exception as exc:
+                    logger.warning(f"Error closing async connection client: {exc}")
+                continue
+            close_method = getattr(conn_client, "close", None)
+            if callable(close_method) and not asyncio.iscoroutinefunction(close_method):
+                close_method()
         self.connection_clients = {}
 
     @staticmethod
@@ -216,3 +307,13 @@ def get_connection_manager():
     cm = ConnectionManager()
     yield cm
     cm.close()
+
+
+@asynccontextmanager
+async def get_async_connection_manager():
+    """Async context manager yielding a ConnectionManager and awaiting close on exit."""
+    cm = ConnectionManager()
+    try:
+        yield cm
+    finally:
+        await cm.aclose()
