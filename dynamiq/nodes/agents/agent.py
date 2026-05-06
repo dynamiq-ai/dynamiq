@@ -595,10 +595,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     tool_calls = llm_result.output["tool_calls"]
                     payload: list[dict] = []
                     pending_ids: list[str] = []
+                    fa_stub_ids: list[str] = []
                     for tc in tool_calls:
                         function_name = tc["function"]["name"].strip()
-                        if function_name == "provide_final_answer":
-                            continue
                         tc_id = tc.get("id") or generate_uuid()
                         payload.append(
                             {
@@ -610,16 +609,30 @@ class Agent(HistoryManagerMixin, BaseAgent):
                                 },
                             }
                         )
-                        pending_ids.append(tc_id)
+                        if function_name == "provide_final_answer":
+                            fa_stub_ids.append(tc_id)
+                        else:
+                            pending_ids.append(tc_id)
                     if payload:
+                        called_names = ", ".join(p["function"]["name"] for p in payload)
                         self._prompt.messages.append(
                             Message(
                                 role=MessageRole.ASSISTANT,
-                                content="",
+                                content=f"Calling: {called_names}",
                                 tool_calls=payload,
                                 static=True,
                             )
                         )
+                        for fa_id in fa_stub_ids:
+                            self._prompt.messages.append(
+                                Message(
+                                    role=MessageRole.TOOL,
+                                    content="Acknowledged.",
+                                    tool_call_id=fa_id,
+                                    name="provide_final_answer",
+                                    static=True,
+                                )
+                            )
                         self._pending_fc_tool_call_ids = pending_ids
                 except Exception as e:
                     logger.warning(f"Failed to extract tool call from LLM result: {e}. Using raw output instead.")
@@ -1156,7 +1169,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
 
     def _emit_tool_observations(
-        self, tool_result: Any, ordered_results: list[dict[str, Any]] | None = None
+        self,
+        tool_result: Any,
+        ordered_results: list[dict[str, Any]] | None = None,
+        tool_name: str | None = None,
     ) -> None:
         """Append tool observations to prompt history.
 
@@ -1175,6 +1191,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                             role=MessageRole.TOOL,
                             content=str(result.get("result", "")),
                             tool_call_id=tc_id,
+                            name=result.get("tool_name"),
                             static=True,
                         )
                     )
@@ -1184,6 +1201,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         role=MessageRole.TOOL,
                         content=str(tool_result),
                         tool_call_id=pending_ids[0],
+                        name=tool_name,
                         static=True,
                     )
                 )
@@ -1361,7 +1379,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
                 tool_result = f"{tool_result}{skipped_notice}" if tool_result else skipped_notice
 
-            self._emit_tool_observations(tool_result, ordered_results)
+            self._emit_tool_observations(tool_result, ordered_results, tool_name=action)
 
         # else: No action or no tools available - no reasoning to stream
 

@@ -216,3 +216,99 @@ class TestFunctionCallingEdgeCases:
 
         with pytest.raises(ActionParsingException):
             Agent._handle_function_calling_mode(agent, llm_result, loop_num=1)
+
+
+class TestFunctionCallingProtocolEmission:
+    """End-to-end tests for OpenAI function-calling protocol emission in agent.py.
+
+    Together these verify both halves of the protocol round-trip:
+    - assistant turn carries native tool_calls + FA stub (provide_final_answer
+      gets a dummy tool result so OpenAI doesn't 400 on missing tool_call_id),
+    - observations are emitted as role:'tool' messages with matching ids/names.
+    """
+
+    def test_append_assistant_message_emits_native_tool_calls_with_fa_stub(self):
+        """LLM returns native tool_calls including provide_final_answer.
+        We must emit a real assistant message with native tool_calls AND a stub
+        role:'tool' acknowledgment for the FA call so the protocol stays valid.
+        Real-tool ids must end up in the pending stash; FA id must NOT."""
+        from dynamiq.nodes.agents.agent import Agent
+        from dynamiq.nodes.types import InferenceMode
+        from dynamiq.prompts.prompts import MessageRole
+
+        agent = MagicMock()
+        agent.inference_mode = InferenceMode.FUNCTION_CALLING
+        agent._prompt = MagicMock()
+        agent._prompt.messages = []
+        agent._pending_fc_tool_call_ids = ["stale_id_from_previous_loop"]
+
+        llm_result = SimpleNamespace(
+            output={
+                "tool_calls": [
+                    {"id": "call_a", "function": {"name": "CatFacts", "arguments": {"q": "sleep"}}},
+                    {"id": "call_b", "function": {"name": "DogFacts", "arguments": {"q": "smell"}}},
+                    {"id": "call_fa", "function": {"name": "provide_final_answer",
+                                                    "arguments": {"answer": "done"}}},
+                ]
+            }
+        )
+
+        Agent._append_assistant_message(agent, llm_result, llm_generated_output="")
+
+        # 1. Assistant message + 1 stub tool message for FA = 2 messages
+        assert len(agent._prompt.messages) == 2
+
+        assistant = agent._prompt.messages[0]
+        assert assistant.role == MessageRole.ASSISTANT
+        assert assistant.content == "Calling: CatFacts, DogFacts, provide_final_answer"
+        # All three calls (including FA) appear in the native tool_calls payload
+        assert [tc["function"]["name"] for tc in assistant.tool_calls] == [
+            "CatFacts", "DogFacts", "provide_final_answer",
+        ]
+        # arguments are JSON-encoded strings (OpenAI native shape)
+        assert json.loads(assistant.tool_calls[0]["function"]["arguments"]) == {"q": "sleep"}
+
+        fa_stub = agent._prompt.messages[1]
+        assert fa_stub.role == MessageRole.TOOL
+        assert fa_stub.tool_call_id == "call_fa"
+        assert fa_stub.name == "provide_final_answer"
+        assert fa_stub.content == "Acknowledged."
+
+        # Pending stash holds ONLY real-tool ids (FA is acknowledged inline, not pending).
+        # Stale id from previous loop is gone.
+        assert agent._pending_fc_tool_call_ids == ["call_a", "call_b"]
+
+    def test_emit_tool_observations_parallel_pairs_ids_results_and_names(self):
+        """In FC mode, parallel observations must produce one role:'tool' message per
+        pending id, paired with the matching ordered_result (id ↔ result by index),
+        carrying tool_call_id, content, and name. Stash must be cleared after."""
+        from dynamiq.nodes.agents.agent import Agent
+        from dynamiq.nodes.types import InferenceMode
+        from dynamiq.prompts.prompts import MessageRole
+
+        agent = MagicMock()
+        agent.inference_mode = InferenceMode.FUNCTION_CALLING
+        agent._prompt = MagicMock()
+        agent._prompt.messages = []
+        agent._pending_fc_tool_call_ids = ["call_a", "call_b"]
+
+        ordered_results = [
+            {"tool_name": "CatFacts", "result": "Cats sleep 12-16h", "success": True, "files": []},
+            {"tool_name": "DogFacts", "result": "Dogs have 40x smell", "success": True, "files": []},
+        ]
+
+        Agent._emit_tool_observations(
+            agent, tool_result="combined_string_unused_here", ordered_results=ordered_results
+        )
+
+        assert len(agent._prompt.messages) == 2
+        for m in agent._prompt.messages:
+            assert m.role == MessageRole.TOOL
+
+        first, second = agent._prompt.messages
+        assert (first.tool_call_id, first.name, first.content) == ("call_a", "CatFacts", "Cats sleep 12-16h")
+        assert (second.tool_call_id, second.name, second.content) == (
+            "call_b", "DogFacts", "Dogs have 40x smell",
+        )
+        # Stash must be empty so the next loop doesn't see stale ids.
+        assert agent._pending_fc_tool_call_ids == []

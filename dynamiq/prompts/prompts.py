@@ -70,13 +70,18 @@ class Message(BaseModel):
             messages in OpenAI function-calling protocol.
         tool_call_id (str | None): Identifier of the tool call this message
             answers. Required when ``role == TOOL``.
+        name (str | None): Function name a tool message is responding to.
+            Optional in OpenAI's chat-completions API but conventionally
+            included in tool messages for clarity.
     """
-    content: str = ""
+
+    content: str
     role: MessageRole = MessageRole.USER
     metadata: dict | None = None
     static: bool = Field(default=False, exclude=True)
     tool_calls: list[dict] | None = None
     tool_call_id: str | None = None
+    name: str | None = None
 
     message_type: ClassVar[MessageType] = MessageType.MESSAGE
 
@@ -91,6 +96,9 @@ class Message(BaseModel):
         return Message(
             role=self.role,
             content=self._Template(self.content).render(**kwargs),
+            tool_calls=self.tool_calls,
+            tool_call_id=self.tool_call_id,
+            name=self.name,
         )
 
     def to_dict(self) -> dict:
