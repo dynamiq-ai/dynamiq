@@ -348,3 +348,43 @@ class TestFunctionCallingProtocolEmission:
         )
         # Stash must be empty so the next loop doesn't see stale ids.
         assert agent._pending_fc_tool_call_ids == []
+
+
+class TestRollbackOrphanFCPayload:
+    def test_rollback_removes_orphan_assistant_and_fa_stub(self):
+        from dynamiq.nodes.agents.agent import Agent
+        from dynamiq.nodes.types import InferenceMode
+        from dynamiq.prompts import Message, MessageRole
+
+        earlier = Message(role=MessageRole.USER, content="hi", static=True)
+        orphan = Message(
+            role=MessageRole.ASSISTANT,
+            content="Calling: search, provide_final_answer",
+            tool_calls=[
+                {"id": "call_a", "type": "function", "function": {"name": "search", "arguments": "{}"}},
+                {
+                    "id": "call_fa",
+                    "type": "function",
+                    "function": {"name": "provide_final_answer", "arguments": '{"answer": "x"}'},
+                },
+            ],
+            static=True,
+        )
+        fa_stub = Message(
+            role=MessageRole.TOOL,
+            content="Acknowledged.",
+            tool_call_id="call_fa",
+            name="provide_final_answer",
+            static=True,
+        )
+
+        agent = MagicMock()
+        agent.inference_mode = InferenceMode.FUNCTION_CALLING
+        agent._prompt = MagicMock()
+        agent._prompt.messages = [earlier, orphan, fa_stub]
+        agent._pending_fc_tool_call_ids = ["call_a"]
+
+        Agent._rollback_orphan_fc_payload(agent)
+
+        assert agent._prompt.messages == [earlier]
+        assert agent._pending_fc_tool_call_ids == []

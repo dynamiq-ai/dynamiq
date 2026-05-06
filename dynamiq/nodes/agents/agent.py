@@ -650,6 +650,25 @@ class Agent(HistoryManagerMixin, BaseAgent):
         elif llm_generated_output:
             self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output, static=True))
 
+    def _rollback_orphan_fc_payload(self) -> None:
+        """Remove the assistant(tool_calls=[…]) and any inline FA stub replies
+        appended by _append_assistant_message when validation later fails.
+
+        Keeping unpaired tool_calls in history would violate OpenAI's FC protocol
+        and 400 the next request. Called from the recoverable-error branch.
+        """
+        if not (self.inference_mode == InferenceMode.FUNCTION_CALLING and self._pending_fc_tool_call_ids):
+            return
+        while self._prompt.messages and self._prompt.messages[-1].role == MessageRole.TOOL:
+            self._prompt.messages.pop()
+        if (
+            self._prompt.messages
+            and self._prompt.messages[-1].role == MessageRole.ASSISTANT
+            and self._prompt.messages[-1].tool_calls
+        ):
+            self._prompt.messages.pop()
+        self._pending_fc_tool_call_ids = []
+
     def _handle_default_mode(
         self, llm_generated_output: str, loop_num: int
     ) -> tuple[str | None, str | None, dict | list | None]:
@@ -1593,6 +1612,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             except ActionParsingException as e:
                 self._emit_tool_input_error(e, loop_num, config, **kwargs)
+                self._rollback_orphan_fc_payload()
 
                 extra_guidance = None
                 if self.inference_mode == InferenceMode.XML:
