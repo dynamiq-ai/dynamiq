@@ -171,6 +171,72 @@ class JinaScrapeTool(ConnectionNode):
 
         return content, links, images
 
+    def _wrap_request_exception(self, exc: Exception) -> ToolExecutionException:
+        error_detail = str(exc)
+        error_response = getattr(exc, "response", None)
+        if error_response is not None:
+            error_body = None
+            try:
+                error_body = error_response.json().get("message")
+            except Exception as parse_err:
+                logger.debug(f"Tool {self.name} - {self.id}: could not parse error response: {parse_err}")
+            if error_body:
+                error_detail = f"{error_detail}. {str(error_body)[:500]}"
+        logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {error_detail}")
+        return ToolExecutionException(
+            f"Tool '{self.name}' failed to execute the requested action. "
+            f"Error: {error_detail}. Please analyze the error and take appropriate action.",
+            recoverable=True,
+        )
+
+    def _extract_scrape_payload(self, response: Any) -> tuple[Any, dict, dict]:
+        """Pull ``(scrape_result, links, images)`` from the response.
+
+        Kept separate from rendering so this stays inside the request try/except (it
+        calls ``response.json()`` and ``_parse_response``, both of which can raise on
+        malformed payloads), while output formatting runs outside.
+        """
+        if self.response_format in [JinaResponseFormat.PAGESHOT, JinaResponseFormat.SCREENSHOT]:
+            return response.content, {}, {}
+        response_data = response.json()
+        return self._parse_response(response_data)
+
+    def _render_scrape_output(
+        self,
+        scrape_result: Any,
+        links: dict,
+        images: dict,
+        request_body: dict,
+        headers: dict,
+    ) -> dict[str, Any]:
+        """Pure formatting; no I/O or parsing — runs outside the request try/except so
+        bugs here surface as themselves rather than as wrapped request errors."""
+        url = request_body["url"]
+        if self.is_optimized_for_agents:
+            result_parts = [f"## Source URL\n{url}", f"## Scraped Content\n\n{scrape_result}"]
+            if links:
+                links_list = [f"- [{text}]({u})" for text, u in links.items()]
+                result_parts.append("## Links Found\n" + "\n".join(links_list))
+            if images:
+                images_list = [f"- {desc}: {u}" for desc, u in images.items()]
+                result_parts.append("## Images Found\n" + "\n".join(images_list))
+            result = "\n\n".join(result_parts)
+        else:
+            result = {
+                "url": url,
+                "content": scrape_result,
+                "links": links,
+                "images": images,
+                "metadata": {
+                    "response_format": self.response_format.value,
+                    "engine_used": headers.get("X-Engine", "direct"),
+                    "target_selector": headers.get("X-Target-Selector"),
+                    "remove_selector": headers.get("X-Remove-Selector"),
+                },
+            }
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
+        return {"content": result}
+
     def execute(self, input_data: JinaScrapeInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Executes the web scraping process using the Jina Reader API.
@@ -199,62 +265,38 @@ class JinaScrapeTool(ConnectionNode):
                 json=request_body,
             )
             response.raise_for_status()
-
-            if self.response_format in [JinaResponseFormat.PAGESHOT, JinaResponseFormat.SCREENSHOT]:
-                scrape_result = response.content
-                links, images = {}, {}
-            else:
-                response_data = response.json()
-                scrape_result, links, images = self._parse_response(response_data)
-
+            scrape_result, links, images = self._extract_scrape_payload(response)
         except Exception as e:
-            error_detail = str(e)
-            error_response = getattr(e, "response", None)
-            if error_response is not None:
-                error_body = None
-                try:
-                    error_body = error_response.json().get("message")
-                except Exception as parse_err:
-                    logger.debug(f"Tool {self.name} - {self.id}: could not parse error response: {parse_err}")
-                if error_body:
-                    error_detail = f"{error_detail}. {str(error_body)[:500]}"
-            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {error_detail}")
-            raise ToolExecutionException(
-                f"Tool '{self.name}' failed to execute the requested action. "
-                f"Error: {error_detail}. Please analyze the error and take appropriate action.",
-                recoverable=True,
+            raise self._wrap_request_exception(e)
+
+        return self._render_scrape_output(scrape_result, links, images, request_body, headers)
+
+    async def execute_async(
+        self, input_data: JinaScrapeInputSchema, config: RunnableConfig = None, **kwargs
+    ) -> dict[str, Any]:
+        """Native async execution path mirroring ``execute``."""
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        headers = self._build_headers(input_data)
+        request_body = self._build_request_body(input_data)
+        client = await self.get_async_client()
+
+        try:
+            response = await client.request(
+                method="POST",
+                url=self.SCRAPE_PATH,
+                headers=headers,
+                json=request_body,
             )
+            response.raise_for_status()
+            scrape_result, links, images = self._extract_scrape_payload(response)
+        except Exception as e:
+            raise self._wrap_request_exception(e)
 
-        url = request_body["url"]
-
-        if self.is_optimized_for_agents:
-            result_parts = [f"## Source URL\n{url}", f"## Scraped Content\n\n{scrape_result}"]
-
-            if links:
-                links_list = [f"- [{text}]({url})" for text, url in links.items()]
-                result_parts.append("## Links Found\n" + "\n".join(links_list))
-
-            if images:
-                images_list = [f"- {desc}: {url}" for desc, url in images.items()]
-                result_parts.append("## Images Found\n" + "\n".join(images_list))
-
-            result = "\n\n".join(result_parts)
-        else:
-            result = {
-                "url": url,
-                "content": scrape_result,
-                "links": links,
-                "images": images,
-                "metadata": {
-                    "response_format": self.response_format.value,
-                    "engine_used": headers.get("X-Engine", "direct"),
-                    "target_selector": headers.get("X-Target-Selector"),
-                    "remove_selector": headers.get("X-Remove-Selector"),
-                },
-            }
-
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
-        return {"content": result}
+        return self._render_scrape_output(scrape_result, links, images, request_body, headers)
 
 
 SummaryPreference = bool | Literal["all"]
@@ -580,6 +622,51 @@ class JinaSearchTool(ConnectionNode):
             formatted_results.append("")
         return "\n".join(formatted_results).strip()
 
+    def _wrap_search_exception(self, exc: Exception) -> ToolExecutionException:
+        logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {exc}")
+        return ToolExecutionException(
+            f"Tool '{self.name}' failed to retrieve search results. "
+            f"Error: {str(exc)}. Please analyze the error and take appropriate action.",
+            recoverable=True,
+        )
+
+    def _format_search_response(
+        self, search_result: dict, request_body: dict, headers: dict, include_full: bool
+    ) -> dict[str, Any]:
+        formatted_results = self._format_search_results(search_result, include_full)
+        sources_with_url = [
+            f"[{result.get('title') or result.get('url')}]({result.get('url')})"
+            for result in search_result.get("data", [])
+            if result.get("url")
+        ]
+
+        if self.is_optimized_for_agents:
+            result_sections = [f"## Search Results for '{request_body['q']}'", ""]
+            if sources_with_url:
+                result_sections.extend(["### Sources", *sources_with_url, ""])
+            if formatted_results:
+                result_sections.append(formatted_results)
+            else:
+                result_sections.append("No results were returned by the tool.")
+            result = "\n".join(result_sections).strip()
+        else:
+            images = {}
+            for d in search_result.get("data", []):
+                images.update(d.get("images", {}))
+            result = {
+                "result": formatted_results,
+                "sources_with_url": sources_with_url,
+                "raw_response": search_result,
+                "images": images,
+                "query": request_body["q"],
+                "request_body": request_body,
+                "headers_used": {k: v for k, v in headers.items() if k.startswith("X-")},
+                "include_full_content": include_full,
+            }
+
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
+        return {"content": result}
+
     def execute(self, input_data: JinaSearchInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Execute the web search process with full API parameter support.
@@ -602,7 +689,6 @@ class JinaSearchTool(ConnectionNode):
             if input_data.include_full_content is not None
             else self.include_full_content
         )
-
         headers = self._build_headers(input_data, include_full)
         request_body = self._build_request_body(input_data)
 
@@ -616,47 +702,38 @@ class JinaSearchTool(ConnectionNode):
             response.raise_for_status()
             search_result = response.json()
         except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {e}")
-            raise ToolExecutionException(
-                f"Tool '{self.name}' failed to retrieve search results. "
-                f"Error: {str(e)}. Please analyze the error and take appropriate action.",
-                recoverable=True,
+            raise self._wrap_search_exception(e)
+
+        return self._format_search_response(search_result, request_body, headers, include_full)
+
+    async def execute_async(
+        self, input_data: JinaSearchInputSchema, config: RunnableConfig = None, **kwargs
+    ) -> dict[str, Any]:
+        """Native async execution path mirroring ``execute``."""
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        include_full = (
+            input_data.include_full_content
+            if input_data.include_full_content is not None
+            else self.include_full_content
+        )
+        headers = self._build_headers(input_data, include_full)
+        request_body = self._build_request_body(input_data)
+        client = await self.get_async_client()
+
+        try:
+            response = await client.request(
+                method="POST",
+                url=self.SEARCH_PATH,
+                headers=headers,
+                json=request_body,
             )
+            response.raise_for_status()
+            search_result = response.json()
+        except Exception as e:
+            raise self._wrap_search_exception(e)
 
-        formatted_results = self._format_search_results(search_result, include_full)
-        sources_with_url = [
-            f"[{result.get('title') or result.get('url')}]({result.get('url')})"
-            for result in search_result.get("data", [])
-            if result.get("url")
-        ]
-
-        if self.is_optimized_for_agents:
-            result_sections = [
-                f"## Search Results for '{request_body['q']}'",
-                "",
-            ]
-            if sources_with_url:
-                result_sections.extend(["### Sources", *sources_with_url, ""])
-            if formatted_results:
-                result_sections.append(formatted_results)
-            else:
-                result_sections.append("No results were returned by the tool.")
-            result = "\n".join(result_sections).strip()
-        else:
-            images = {}
-            for d in search_result.get("data", []):
-                images.update(d.get("images", {}))
-
-            result = {
-                "result": formatted_results,
-                "sources_with_url": sources_with_url,
-                "raw_response": search_result,
-                "images": images,
-                "query": request_body["q"],
-                "request_body": request_body,
-                "headers_used": {k: v for k, v in headers.items() if k.startswith("X-")},
-                "include_full_content": include_full,
-            }
-
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
-        return {"content": result}
+        return self._format_search_response(search_result, request_body, headers, include_full)

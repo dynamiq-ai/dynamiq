@@ -174,55 +174,45 @@ class HttpApiCall(ConnectionNode):
     is_files_allowed: bool = True
     input_schema: ClassVar[type[HttpApiCallInputSchema]] = HttpApiCallInputSchema
 
-    def execute(self, input_data: HttpApiCallInputSchema, config: RunnableConfig = None, **kwargs):
-        """Execute the API call.
+    def _build_request_kwargs(self, input_data: HttpApiCallInputSchema) -> dict[str, Any]:
+        """Build the kwargs dict passed to the underlying request call.
 
-        This method takes input data and returns content of API call response.
-
-        Args:
-            input_data (dict[str, Any]): The input data containing(optionally) data, headers, payload_type,
-                params for request.
-            config (RunnableConfig, optional): Configuration for the execution. Defaults to None.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-             dict: A dictionary with the following keys:
-                - "content" (bytes|string|dict[str,Any]): Value containing the result of request.
-                - "status_code" (int): The status code of the request.
+        ``files`` is only included when at least one upload is present. When files are
+        present, ``json`` is dropped: the sync ``requests`` library silently overwrites
+        a json body with the multipart payload, and httpx (any version) treats both
+        together as ambiguous. Demoting JSON-mode data to multipart form fields would
+        change wire shape, so we mirror the sync drop and let multipart-only callers
+        send ``data`` (RAW) explicitly when they need form fields alongside files.
         """
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n" f"{input_data.model_dump()}")
-
         data = self.connection.data | self.data | input_data.data
         payload_type = input_data.payload_type or self.payload_type
         files = {param: file_io.getvalue() for param, file_io in input_data.files.items()}
-
-        extras = {"data": data} if payload_type == RequestPayloadType.RAW else {"json": data}
         url = input_data.url or self.url or self.connection.url
         if not url:
             raise ValueError("No url provided.")
-        headers = input_data.headers
-        params = input_data.params
         method = input_data.method or self.method or self.connection.method
+        kwargs: dict[str, Any] = {
+            "method": method,
+            "url": url,
+            "headers": self.connection.headers | self.headers | input_data.headers,
+            "params": self.connection.params | self.params | input_data.params,
+            "timeout": self.timeout,
+        }
+        if files:
+            kwargs["files"] = files
+        # Only emit ``data`` when there's something to send. ``requests`` treats
+        # ``data={}`` as no body, while older/future httpx versions could encode it as
+        # an empty form payload with a ``Content-Type`` header — omitting the kwarg
+        # keeps both paths byte-identical for the default GET case.
+        if payload_type == RequestPayloadType.RAW:
+            if data:
+                kwargs["data"] = data
+        elif not files:
+            kwargs["json"] = data
+        return kwargs
 
-        try:
-            response = self.client.request(
-                method=method,
-                url=url,
-                headers=self.connection.headers | self.headers | headers,
-                params=self.connection.params | self.params | params,
-                timeout=self.timeout,
-                files=files,
-                **extras,
-            )
-        except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
-            raise ToolExecutionException(
-                f"Request failed with error: {str(e)}. Please analyze the error and take appropriate action.",
-                recoverable=True,
-            )
-
+    def _parse_response(self, response: Any) -> dict[str, Any]:
+        """Validate status and shape the response per response_type."""
         if response.status_code not in self.success_codes:
             logger.error(f"Tool {self.name} - {self.id}: failed to get results.")
             raise ToolExecutionException(
@@ -248,3 +238,56 @@ class HttpApiCall(ConnectionNode):
             )
         logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n" f"{str(content)[:200]}...")
         return {"content": content, "status_code": response.status_code}
+
+    def execute(self, input_data: HttpApiCallInputSchema, config: RunnableConfig = None, **kwargs):
+        """Execute the API call.
+
+        This method takes input data and returns content of API call response.
+
+        Args:
+            input_data (dict[str, Any]): The input data containing(optionally) data, headers, payload_type,
+                params for request.
+            config (RunnableConfig, optional): Configuration for the execution. Defaults to None.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+             dict: A dictionary with the following keys:
+                - "content" (bytes|string|dict[str,Any]): Value containing the result of request.
+                - "status_code" (int): The status code of the request.
+        """
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n" f"{input_data.model_dump()}")
+
+        request_kwargs = self._build_request_kwargs(input_data)
+
+        try:
+            response = self.client.request(**request_kwargs)
+        except Exception as e:
+            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
+            raise ToolExecutionException(
+                f"Request failed with error: {str(e)}. Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
+
+        return self._parse_response(response)
+
+    async def execute_async(self, input_data: HttpApiCallInputSchema, config: RunnableConfig = None, **kwargs):
+        """Native async execution path mirroring ``execute``."""
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n" f"{input_data.model_dump()}")
+
+        request_kwargs = self._build_request_kwargs(input_data)
+        client = await self.get_async_client()
+
+        try:
+            response = await client.request(**request_kwargs)
+        except Exception as e:
+            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
+            raise ToolExecutionException(
+                f"Request failed with error: {str(e)}. Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
+
+        return self._parse_response(response)
