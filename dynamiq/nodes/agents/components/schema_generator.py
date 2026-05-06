@@ -414,40 +414,6 @@ def generate_function_calling_schemas(
     schemas = [build_final_answer_function_schema(response_format)]
 
     for tool in tools:
-        if isinstance(tool, SubAgentTool):
-            agent_action_input_description = "JSON string containing the agent's inputs "
-            if delegation_allowed:
-                agent_action_input_description += '(e.g., {"input": "<subtask>", "delegate_final": true}).'
-            else:
-                agent_action_input_description += '(e.g., {"input": "<subtask>"}).'
-
-            schema = {
-                "type": "function",
-                "function": {
-                    "name": sanitize_tool_name(tool.name),
-                    "description": tool.description[:1024],
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "thought": {
-                                "type": "string",
-                                "description": "Your reasoning about using this tool.",
-                            },
-                            "action_input": {
-                                "type": "string",
-                                "description": agent_action_input_description,
-                            },
-                        },
-                        "additionalProperties": False,
-                        "required": ["thought", "action_input"],
-                    },
-                    "strict": True,
-                },
-            }
-
-            schemas.append(schema)
-            continue
-
         properties = {}
         required_fields = []
         input_params = tool.input_schema.model_fields.items()
@@ -457,12 +423,21 @@ def generate_function_calling_schemas(
                 if field.is_required() and name in properties:
                     required_fields.append(name)
 
+            if isinstance(tool, SubAgentTool) and delegation_allowed:
+                properties["delegate_final"] = {
+                    "type": "boolean",
+                    "description": (
+                        "Set to true to return the sub-agent's response verbatim "
+                        "as the parent agent's final output."
+                    ),
+                }
+
             has_optional = len(required_fields) < len(properties)
             use_strict = _is_strict_compatible(properties) and not has_optional
 
             action_input_schema: dict[str, Any] = {
                 "type": "object",
-                "description": "Input for the selected tool",
+                "description": "Tool parameters as a JSON object, not a string.",
                 "properties": properties,
             }
             if use_strict:

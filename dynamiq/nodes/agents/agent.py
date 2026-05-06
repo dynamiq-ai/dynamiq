@@ -43,6 +43,74 @@ from dynamiq.utils.json_parser import parse_llm_json_output
 from dynamiq.utils.logger import logger
 
 
+class ToolCallArguments(BaseModel):
+    thought: str = ""
+    action_input: dict | str
+
+    @field_validator("thought", mode="before")
+    @classmethod
+    def _coerce_thought(cls, v: Any) -> str:
+        return v or ""
+
+
+class FinalAnswerArguments(BaseModel):
+    thought: str = ""
+    answer: str | dict | list
+    output_files: str = ""
+
+    @field_validator("thought", mode="before")
+    @classmethod
+    def _coerce_thought(cls, v: Any) -> str:
+        return v or ""
+
+    @field_validator("output_files", mode="before")
+    @classmethod
+    def _coerce_output_files(cls, v: Any) -> str:
+        return v or ""
+
+
+class FunctionCall(BaseModel):
+    name: str
+    arguments: dict = Field(default_factory=dict)
+
+    @field_validator("arguments", mode="before")
+    @classmethod
+    def parse_arguments(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            try:
+                return json.loads(v, strict=False)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Tool call arguments are not valid JSON: {e}")
+        return v or {}
+
+    def parse_as_tool_call(self) -> ToolCallArguments:
+        try:
+            return ToolCallArguments.model_validate(self.arguments)
+        except Exception:
+            raise ActionParsingException(
+                "Your tool call is missing required fields. "
+                "Every tool call must include 'thought' (your reasoning) "
+                "and 'action_input' (the tool parameters as an object).",
+                recoverable=True,
+            )
+
+    def parse_as_final_answer(self) -> FinalAnswerArguments:
+        try:
+            return FinalAnswerArguments.model_validate(self.arguments)
+        except Exception:
+            raise ActionParsingException(
+                "Your final answer call is missing required fields. "
+                "The 'provide_final_answer' function must include 'thought' (your reasoning) "
+                "and 'answer' (your final response to the user).",
+                recoverable=True,
+            )
+
+
+class ToolCall(BaseModel):
+    id: str | None = None
+    function: FunctionCall
+
+
 class AgentState(BaseModel):
     """
     Encapsulates the dynamic state of an agent during execution.
@@ -175,6 +243,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self.state.reset()
         self._streaming_tool_run_id = None
         self._streaming_tool_run_ids = []
+        self._pending_fc_tool_call_ids: list[str] = []
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -520,18 +589,55 @@ class Agent(HistoryManagerMixin, BaseAgent):
             llm_generated_output: The generated text output from the LLM.
         """
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
+            self._pending_fc_tool_call_ids = []
             if "tool_calls" in dict[Any, Any](llm_result.output):
                 try:
                     tool_calls = llm_result.output["tool_calls"]
-                    parts = []
+                    payload: list[dict] = []
+                    pending_ids: list[str] = []
+                    fa_stub_ids: list[str] = []
                     for tc in tool_calls:
-                        function_name = tc["function"]["name"]
-                        function_args = json.dumps(tc["function"]["arguments"])
-                        parts.append(f"Function call: {function_name}({function_args})")
-                    message_content = "\n".join(parts)
-                    self._prompt.messages.append(
-                        Message(role=MessageRole.ASSISTANT, content=message_content, static=True)
-                    )
+                        function_name = tc["function"]["name"].strip()
+                        tc_id = tc.get("id") or generate_uuid()
+                        raw_args = tc["function"]["arguments"]
+                        arguments_str = raw_args if isinstance(raw_args, str) else json.dumps(raw_args)
+                        entry = {
+                            "id": tc_id,
+                            "type": "function",
+                            "function": {
+                                "name": function_name,
+                                "arguments": arguments_str,
+                            },
+                        }
+                        if function_name == "provide_final_answer":
+                            payload.append(entry)
+                            fa_stub_ids.append(tc_id)
+                        elif self.parallel_tool_calls_enabled or not pending_ids:
+                            # Only the first non-final-answer call is kept when parallel
+                            # execution is disabled
+                            payload.append(entry)
+                            pending_ids.append(tc_id)
+                    if payload:
+                        called_names = ", ".join(p["function"]["name"] for p in payload)
+                        self._prompt.messages.append(
+                            Message(
+                                role=MessageRole.ASSISTANT,
+                                content=f"Calling: {called_names}",
+                                tool_calls=payload,
+                                static=True,
+                            )
+                        )
+                        for fa_id in fa_stub_ids:
+                            self._prompt.messages.append(
+                                Message(
+                                    role=MessageRole.TOOL,
+                                    content="Acknowledged.",
+                                    tool_call_id=fa_id,
+                                    name="provide_final_answer",
+                                    static=True,
+                                )
+                            )
+                        self._pending_fc_tool_call_ids = pending_ids
                 except Exception as e:
                     logger.warning(f"Failed to extract tool call from LLM result: {e}. Using raw output instead.")
                     self._prompt.messages.append(
@@ -543,6 +649,25 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     )
         elif llm_generated_output:
             self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output, static=True))
+
+    def _rollback_orphan_fc_payload(self) -> None:
+        """Remove the assistant(tool_calls=[…]) and any inline FA stub replies
+        appended by _append_assistant_message when validation later fails.
+
+        Keeping unpaired tool_calls in history would violate OpenAI's FC protocol
+        and 400 the next request. Called from the recoverable-error branch.
+        """
+        if not (self.inference_mode == InferenceMode.FUNCTION_CALLING and self._pending_fc_tool_call_ids):
+            return
+        while self._prompt.messages and self._prompt.messages[-1].role == MessageRole.TOOL:
+            self._prompt.messages.pop()
+        if (
+            self._prompt.messages
+            and self._prompt.messages[-1].role == MessageRole.ASSISTANT
+            and self._prompt.messages[-1].tool_calls
+        ):
+            self._prompt.messages.pop()
+        self._pending_fc_tool_call_ids = []
 
     def _handle_default_mode(
         self, llm_generated_output: str, loop_num: int
@@ -586,24 +711,37 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: using function calling inference mode")
 
-        if "tool_calls" not in dict(llm_result.output):
+        if not llm_result.output.get("tool_calls"):
             logger.error("Error: No function called.")
-            raise ActionParsingException("Error: No function called, you need to call the correct function.")
+            raise ActionParsingException(
+                "You must always respond by calling a function. "
+                "Call a tool function to continue, or call 'provide_final_answer' to finish.",
+                recoverable=True,
+            )
 
-        tool_calls = llm_result.output["tool_calls"]
+        try:
+            tool_calls = [ToolCall.model_validate(tc) for tc in llm_result.output["tool_calls"]]
+        except Exception as e:
+            raise ActionParsingException(f"Error parsing tool calls: {e}", recoverable=True)
+
+        if not tool_calls:
+            raise ActionParsingException(
+                "You must always respond by calling a function. "
+                "Call a tool function to continue, or call 'provide_final_answer' to finish.",
+                recoverable=True,
+            )
+
         first_call = tool_calls[0]
-        action = first_call["function"]["name"].strip()
-        first_args = first_call["function"]["arguments"]
+        action = first_call.function.name.strip()
 
-        thoughts = [tc["function"]["arguments"].get("thought", "") for tc in tool_calls]
-        thought = "\n".join(t for t in thoughts if t)
         if action == "provide_final_answer":
-            final_answer = first_args["answer"]
-            self._requested_output_files = self._parse_output_files_csv(first_args.get("output_files") or "")
-            self.log_final_output(thought, final_answer, loop_num)
-            return thought, "final_answer", final_answer
+            final_args = first_call.function.parse_as_final_answer()
+            thought = final_args.thought
+            self._requested_output_files = self._parse_output_files_csv(final_args.output_files)
+            self.log_final_output(thought, final_args.answer, loop_num)
+            return thought, "final_answer", final_args.answer
 
-        actual_tool_calls = [tc for tc in tool_calls if tc["function"]["name"].strip() != "provide_final_answer"]
+        actual_tool_calls = [tc for tc in tool_calls if tc.function.name.strip() != "provide_final_answer"]
 
         if len(actual_tool_calls) > 1 and not self.parallel_tool_calls_enabled:
             logger.warning(
@@ -615,25 +753,40 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if len(actual_tool_calls) > 1 and self.parallel_tool_calls_enabled:
             tool_items = []
             for tc in actual_tool_calls:
-                tc_name = tc["function"]["name"].strip()
-                tc_args = tc["function"]["arguments"]
-                tc_input = tc_args["action_input"]
+                args = tc.function.parse_as_tool_call()
+                tc_input = args.action_input
+                if isinstance(tc_input, str):
+                    try:
+                        tc_input = json.loads(tc_input, strict=False)
+                    except json.JSONDecodeError as e:
+                        raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
                 if not isinstance(tc_input, dict):
                     tc_input = {"input": tc_input}
-                tool_items.append(ToolCallItem(name=tc_name, input=tc_input, thought=tc_args.get("thought", "")))
-
+                tool_items.append(
+                    ToolCallItem(
+                        name=tc.function.name.strip(),
+                        input=tc_input,
+                        thought=args.thought,
+                    )
+                )
+            thought = "\n".join(item.thought for item in tool_items if item.thought)
             validated = ParallelToolCallsInputSchema(tools=tool_items)
             action_input = validated.model_dump()
             self.log_reasoning(thought, PARALLEL_TOOL_NAME, action_input["tools"], loop_num)
             return thought, PARALLEL_TOOL_NAME, action_input
 
-        action_input = first_args["action_input"]
-
+        single_call = actual_tool_calls[0]
+        action = single_call.function.name.strip()
+        args = single_call.function.parse_as_tool_call()
+        thought = args.thought
+        action_input = args.action_input
         if isinstance(action_input, str):
             try:
                 action_input = json.loads(action_input, strict=False)
             except json.JSONDecodeError as e:
                 raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
+        if not isinstance(action_input, dict):
+            action_input = {"input": action_input}
 
         self.log_reasoning(thought, action, action_input, loop_num)
         return thought, action, action_input
@@ -1038,6 +1191,47 @@ class Agent(HistoryManagerMixin, BaseAgent):
         observation = f"\nObservation: {tool_result}\n"
         self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
 
+    def _emit_tool_observations(
+        self,
+        tool_result: Any,
+        ordered_results: list[dict[str, Any]] | None = None,
+        tool_name: str | None = None,
+    ) -> None:
+        """Append tool observations to prompt history.
+
+        In FUNCTION_CALLING mode with stashed tool_call_ids, emits one
+        ``role: "tool"`` message per id (per-tool result for parallel runs,
+        the combined result for single-tool runs) — required by OpenAI's
+        function-calling protocol. Falls back to the legacy ``role: "user"``
+        ``Observation: ...`` message in all other cases.
+        """
+        pending_ids = getattr(self, "_pending_fc_tool_call_ids", None) or []
+        if self.inference_mode == InferenceMode.FUNCTION_CALLING and pending_ids:
+            if ordered_results and len(ordered_results) == len(pending_ids):
+                for tc_id, result in zip(pending_ids, ordered_results):
+                    self._prompt.messages.append(
+                        Message(
+                            role=MessageRole.TOOL,
+                            content=str(result.get("result", "")),
+                            tool_call_id=tc_id,
+                            name=result.get("tool_name"),
+                            static=True,
+                        )
+                    )
+            else:
+                self._prompt.messages.append(
+                    Message(
+                        role=MessageRole.TOOL,
+                        content=str(tool_result),
+                        tool_call_id=pending_ids[0],
+                        name=tool_name,
+                        static=True,
+                    )
+                )
+            self._pending_fc_tool_call_ids = []
+            return
+        self._add_observation(tool_result)
+
     def _validate_parallel_tool_input(self, action_input: Any) -> list[dict[str, Any]] | None:
         """Validate and parse parallel tool input schema.
 
@@ -1184,12 +1378,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self._add_observation(subagent_error)
                 return None
 
+            ordered_results: list[dict[str, Any]] = []
             if (
                 self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME
                 and self.parallel_tool_calls_enabled
                 and not skip_parallel
             ):
-                tool_result, _ = self._execute_tools(tools_data, thought, loop_num, config, **kwargs)
+                tool_result, _, ordered_results = self._execute_tools(
+                    tools_data, thought, loop_num, config, **kwargs
+                )
             else:
                 tool_result, _, is_delegated, _, _ = self._execute_single_tool(
                     action, action_input, thought, loop_num, config, **kwargs
@@ -1205,7 +1402,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
                 tool_result = f"{tool_result}{skipped_notice}" if tool_result else skipped_notice
 
-            self._add_observation(tool_result)
+            self._emit_tool_observations(tool_result, ordered_results, tool_name=action)
 
         # else: No action or no tools available - no reasoning to stream
 
@@ -1415,6 +1612,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             except ActionParsingException as e:
                 self._emit_tool_input_error(e, loop_num, config, **kwargs)
+                self._rollback_orphan_fc_payload()
 
                 extra_guidance = None
                 if self.inference_mode == InferenceMode.XML:
@@ -1427,6 +1625,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     extra_guidance = (
                         "Provide 'Thought:' and either 'Action:' "
                         "with a JSON 'Action Input:' or a final 'Answer:' section."
+                    )
+                elif self.inference_mode == InferenceMode.FUNCTION_CALLING:
+                    extra_guidance = (
+                        "You MUST respond by calling a function — never plain text. "
+                        "Call a tool with 'thought' and 'action_input', "
+                        "or call 'provide_final_answer' with 'thought' and 'answer' to finish."
                     )
 
                 self._append_recovery_instruction(
@@ -1738,7 +1942,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         loop_num: int,
         config: RunnableConfig,
         **kwargs,
-    ) -> tuple[str, dict[str, Any]]:
+    ) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
         """
         Execute one or more tools and gather their results.
 
@@ -1754,12 +1958,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
             **kwargs: Additional arguments for tool execution
 
         Returns:
-            tuple: (combined_observation, aggregated_files)
+            tuple: (combined_observation, aggregated_files, ordered_results)
+                where ordered_results is a list of per-tool result dicts in
+                input order. Each entry contains tool_name, success, result,
+                and files keys.
         """
         all_results: list[dict[str, Any]] = []
 
         if not tools_data:
-            return "", {}
+            return "", {}, []
 
         prepared_tools: list[dict[str, Any]] = []
 
@@ -1899,4 +2106,4 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         combined_observation = "\n\n".join(observation_parts)
 
-        return combined_observation, aggregated_files
+        return combined_observation, aggregated_files, ordered_results

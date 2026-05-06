@@ -260,3 +260,86 @@ class TestCompactHistory:
         with patch.object(agent, "_split_history", wraps=agent._split_history) as spy:
             agent._compact_history(summary="A summary.")
             spy.assert_called_once()
+
+
+def _assistant_tc(content: str, tool_calls: list[dict]) -> Message:
+    return Message(role=MessageRole.ASSISTANT, content=content, tool_calls=tool_calls, static=True)
+
+
+def _tool_reply(content: str, tool_call_id: str, name: str) -> Message:
+    return Message(role=MessageRole.TOOL, content=content, tool_call_id=tool_call_id, name=name, static=True)
+
+
+class TestSplitHistoryFCSafety:
+    def test_orphan_tool_replies_at_boundary_all_dropped(self):
+        msgs = [
+            _system(),
+            _user("filler " * 2000),
+            _assistant_tc(
+                "Calling: a, b, c",
+                tool_calls=[
+                    {"id": "call_a", "type": "function", "function": {"name": "a", "arguments": "{}"}},
+                    {"id": "call_b", "type": "function", "function": {"name": "b", "arguments": "{}"}},
+                    {"id": "call_c", "type": "function", "function": {"name": "c", "arguments": "{}"}},
+                ],
+            ),
+            _tool_reply("ra", "call_a", "a"),
+            _tool_reply("rb", "call_b", "b"),
+            _tool_reply("rc", "call_c", "c"),
+            _assistant("Final."),
+        ]
+        agent = FakeAgent(messages=msgs, max_preserved_tokens=40)
+
+        to_summarize, to_preserve = agent._split_history()
+
+        preserved_tool_ids = {m.tool_call_id for m in to_preserve if m.role == MessageRole.TOOL}
+        assert preserved_tool_ids == set()
+
+        summarized_tool_ids = {m.tool_call_id for m in to_summarize if m.role == MessageRole.TOOL}
+        assert summarized_tool_ids == {"call_a", "call_b", "call_c"}
+
+        assert [m.content for m in to_preserve] == ["Final."]
+
+    def test_full_fc_group_preserved_when_budget_allows(self):
+        msgs = [
+            _system(),
+            _user("hi"),
+            _assistant_tc(
+                "Calling: search",
+                tool_calls=[{"id": "call_a", "type": "function", "function": {"name": "search", "arguments": "{}"}}],
+            ),
+            _tool_reply("Sunny", "call_a", "search"),
+            _assistant("Final."),
+        ]
+        agent = FakeAgent(messages=msgs, max_preserved_tokens=10_000)
+
+        to_summarize, to_preserve = agent._split_history()
+
+        assert to_summarize == []
+        assert len(to_preserve) == 4
+        assert to_preserve[0].role == MessageRole.USER
+        assert to_preserve[1].tool_calls is not None
+        assert to_preserve[2].role == MessageRole.TOOL
+
+    def test_fa_stub_orphan_dropped(self):
+        msgs = [
+            _system(),
+            _user("filler " * 800),
+            _assistant_tc(
+                "Calling: provide_final_answer",
+                tool_calls=[
+                    {
+                        "id": "call_fa",
+                        "type": "function",
+                        "function": {"name": "provide_final_answer", "arguments": '{"answer": "done"}'},
+                    }
+                ],
+            ),
+            _tool_reply("Acknowledged.", "call_fa", "provide_final_answer"),
+        ]
+        agent = FakeAgent(messages=msgs, max_preserved_tokens=20)
+
+        to_summarize, to_preserve = agent._split_history()
+
+        for m in to_preserve:
+            assert m.role != MessageRole.TOOL

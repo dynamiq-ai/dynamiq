@@ -65,6 +65,11 @@ class HistoryManagerMixin:
             to_summarize = conversation_history
             to_preserve = []
 
+        # Drop orphan tool replies whose assistant ended up in to_summarize —
+        # an unpaired role:tool message at the boundary would 400 the next request.
+        while to_preserve and to_preserve[0].role == MessageRole.TOOL:
+            to_summarize = list(to_summarize) + [to_preserve.pop(0)]
+
         if to_summarize == [] and self.is_token_limit_exceeded():
             to_summarize = conversation_history
             to_preserve = []
