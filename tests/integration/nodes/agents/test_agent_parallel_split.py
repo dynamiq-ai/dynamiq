@@ -184,7 +184,7 @@ class TestExecuteToolsSplit:
             {"name": "ToolX", "input": {"x": 1}},
             {"name": "ToolA", "input": {"x": 2}},
         ]
-        observation, files = agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
+        observation, files, _ = agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
 
         lines = observation.strip().split("\n\n")
         assert "ToolX" in lines[0], "ToolX (order=0) should appear first in output"
@@ -207,9 +207,10 @@ class TestExecuteToolsSplit:
 
     def test_empty_tools_data_returns_empty(self, openai_node, mock_llm_executor):
         agent = _build_agent(openai_node, mock_llm_executor, [])
-        observation, files = agent._execute_tools([], "thinking", 1, RunnableConfig())
+        observation, files, ordered_results = agent._execute_tools([], "thinking", 1, RunnableConfig())
         assert observation == ""
         assert files == {}
+        assert ordered_results == []
 
     def test_invalid_tool_payload_produces_error_result(self, openai_node, mock_llm_executor, parallel_tool_a, mocker):
         """Missing 'name' or 'input' in a payload should produce an error entry, not crash."""
@@ -220,7 +221,7 @@ class TestExecuteToolsSplit:
             {"name": "ToolA"},  # missing 'input'
             {"name": "ToolA", "input": {"x": 1}},
         ]
-        observation, _ = agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
+        observation, _, _ = agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
 
         assert "ERROR" in observation, "Invalid payload should appear as ERROR in observation"
         mock_single.assert_called_once()

@@ -188,3 +188,14 @@ class TestFunctionCallingProtocolMessages:
         # No null pollution anywhere
         for m in out:
             assert None not in m.values()
+
+    def test_model_dump_drops_unset_fc_fields_when_nested(self):
+        """Plain messages must not leak None FC fields, even when dumped via a
+        parent model — the path that broke orchestrator output."""
+        from pydantic import BaseModel
+
+        class _Parent(BaseModel):
+            msg: Message
+
+        data = _Parent(msg=Message(role=MessageRole.USER, content="hi")).model_dump()
+        assert data == {"msg": {"content": "hi", "role": MessageRole.USER, "metadata": None}}

@@ -599,19 +599,23 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     for tc in tool_calls:
                         function_name = tc["function"]["name"].strip()
                         tc_id = tc.get("id") or generate_uuid()
-                        payload.append(
-                            {
-                                "id": tc_id,
-                                "type": "function",
-                                "function": {
-                                    "name": function_name,
-                                    "arguments": json.dumps(tc["function"]["arguments"]),
-                                },
-                            }
-                        )
+                        raw_args = tc["function"]["arguments"]
+                        arguments_str = raw_args if isinstance(raw_args, str) else json.dumps(raw_args)
+                        entry = {
+                            "id": tc_id,
+                            "type": "function",
+                            "function": {
+                                "name": function_name,
+                                "arguments": arguments_str,
+                            },
+                        }
                         if function_name == "provide_final_answer":
+                            payload.append(entry)
                             fa_stub_ids.append(tc_id)
-                        else:
+                        elif self.parallel_tool_calls_enabled or not pending_ids:
+                            # Only the first non-final-answer call is kept when parallel
+                            # execution is disabled
+                            payload.append(entry)
                             pending_ids.append(tc_id)
                     if payload:
                         called_names = ", ".join(p["function"]["name"] for p in payload)
@@ -1488,16 +1492,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         response_format=self._response_format,
                         config=llm_config,
                         parallel_tool_calls=True if native_parallel else None,
-                        tool_choice=(
-                            "required"
-                            if (
-                                self.inference_mode == InferenceMode.FUNCTION_CALLING
-                                and self._tools
-                                and not getattr(self.llm, "thinking_enabled", False)
-                                and "tool_choice" in (get_supported_openai_params(model=self.llm.model) or [])
-                            )
-                            else None
-                        ),
                         **kwargs,
                     )
                 finally:

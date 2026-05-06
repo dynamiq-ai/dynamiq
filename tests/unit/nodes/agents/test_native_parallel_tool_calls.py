@@ -247,8 +247,10 @@ class TestFunctionCallingProtocolEmission:
                 "tool_calls": [
                     {"id": "call_a", "function": {"name": "CatFacts", "arguments": {"q": "sleep"}}},
                     {"id": "call_b", "function": {"name": "DogFacts", "arguments": {"q": "smell"}}},
-                    {"id": "call_fa", "function": {"name": "provide_final_answer",
-                                                    "arguments": {"answer": "done"}}},
+                    {
+                        "id": "call_fa",
+                        "function": {"name": "provide_final_answer", "arguments": {"answer": "done"}},
+                    },
                 ]
             }
         )
@@ -277,6 +279,40 @@ class TestFunctionCallingProtocolEmission:
         # Pending stash holds ONLY real-tool ids (FA is acknowledged inline, not pending).
         # Stale id from previous loop is gone.
         assert agent._pending_fc_tool_call_ids == ["call_a", "call_b"]
+
+    def test_append_assistant_message_drops_extra_calls_when_parallel_disabled(self):
+        """Regression: when parallel is disabled and the LLM still returns multiple
+        non-final-answer tool calls, only the first one may be recorded in the assistant
+        message."""
+        from dynamiq.nodes.agents.agent import Agent
+        from dynamiq.nodes.types import InferenceMode
+
+        agent = MagicMock()
+        agent.inference_mode = InferenceMode.FUNCTION_CALLING
+        agent.parallel_tool_calls_enabled = False
+        agent._prompt = MagicMock()
+        agent._prompt.messages = []
+        agent._pending_fc_tool_call_ids = []
+
+        llm_result = SimpleNamespace(
+            output={
+                "tool_calls": [
+                    {"id": "call_a", "function": {"name": "CatFacts", "arguments": {}}},
+                    {"id": "call_b", "function": {"name": "DogFacts", "arguments": {}}},
+                    {"id": "call_fa", "function": {"name": "provide_final_answer", "arguments": {"answer": "done"}}},
+                ]
+            }
+        )
+
+        Agent._append_assistant_message(agent, llm_result, llm_generated_output="")
+
+        assistant = agent._prompt.messages[0]
+        # Only call_a (first non-FA) and call_fa survive in the assistant payload —
+        # call_b is dropped at source so no orphan tool_call_id is left behind.
+        assert [tc["id"] for tc in assistant.tool_calls] == ["call_a", "call_fa"]
+        # Pending ids match: only call_a will get a tool response from execution;
+        # call_fa is acknowledged inline.
+        assert agent._pending_fc_tool_call_ids == ["call_a"]
 
     def test_emit_tool_observations_parallel_pairs_ids_results_and_names(self):
         """In FC mode, parallel observations must produce one role:'tool' message per

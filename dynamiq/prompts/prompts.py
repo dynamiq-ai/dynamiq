@@ -8,7 +8,7 @@ from typing import Any, ClassVar
 import filetype
 from jinja2 import Environment, meta
 from litellm import token_counter
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_serializer
 
 from dynamiq.types.llm_tool import Tool
 from dynamiq.utils import generate_uuid
@@ -101,17 +101,41 @@ class Message(BaseModel):
             name=self.name,
         )
 
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        # FC-only fields stay out of the dump shape unless explicitly set,
+        # so non-FC consumers see the same dict shape as before these fields existed.
+        data = handler(self)
+        for key in ("tool_calls", "tool_call_id", "name"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
+
     def to_dict(self) -> dict:
-        return {
+        data = {
             "type": self.message_type.value,
             "content": self.content,
             "role": self.role.value,
             "static": self.static,
         }
+        if self.tool_calls is not None:
+            data["tool_calls"] = self.tool_calls
+        if self.tool_call_id is not None:
+            data["tool_call_id"] = self.tool_call_id
+        if self.name is not None:
+            data["name"] = self.name
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "Message":
-        return cls(content=data["content"], role=MessageRole(data["role"]), static=data.get("static", False))
+        return cls(
+            content=data["content"],
+            role=MessageRole(data["role"]),
+            static=data.get("static", False),
+            tool_calls=data.get("tool_calls"),
+            tool_call_id=data.get("tool_call_id"),
+            name=data.get("name"),
+        )
 
 
 class VisionMessageTextContent(BaseModel):
