@@ -12,6 +12,7 @@ from dynamiq.nodes.retrievers.base import Retriever
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import ElasticsearchVectorStore
 from dynamiq.storages.vector.elasticsearch.elasticsearch import ElasticsearchVectorStoreParams
+from dynamiq.types.cancellation import check_cancellation
 
 
 class ElasticsearchRetrieverInputSchema(BaseModel):
@@ -127,6 +128,7 @@ class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
             dict[str, Any]: A dictionary containing the retrieved documents.
         """
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         output = self.document_retriever.run(

@@ -13,6 +13,7 @@ from dynamiq.nodes.agents.utils import FileMappedInput
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file.base import FileInfo
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 DESCRIPTION_HTTP = """Makes HTTP API requests with support for all methods and configurable parameters.
@@ -256,6 +257,7 @@ class HttpApiCall(ConnectionNode):
                 - "status_code" (int): The status code of the request.
         """
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n" f"{input_data.model_dump()}")
 

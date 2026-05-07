@@ -16,6 +16,7 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file.base import FileInfo
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 _DESCRIPTION_TEMPLATE = """Executes Python code and shell commands in a secure cloud sandbox environment.
@@ -683,6 +684,7 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
         """
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n" f"{str(input_data.model_dump())[:300]}")
         config = ensure_config(config)
+        check_cancellation(config)
 
         if self.persistent_sandbox and self._sandbox:
             sandbox = self._sandbox

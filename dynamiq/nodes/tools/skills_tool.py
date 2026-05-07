@@ -8,6 +8,7 @@ from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.runnables import RunnableConfig
 from dynamiq.skills import BaseSkillRegistry
 from dynamiq.skills.utils import normalize_sandbox_skills_base_path
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 
@@ -71,6 +72,7 @@ class SkillsTool(Node):
     def execute(
         self, input_data: SkillsToolInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
+        check_cancellation(config)
         action = input_data.action
         logger.info("SkillsTool - action=%s", action.value)
 

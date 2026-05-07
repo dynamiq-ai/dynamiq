@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.node import Node, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 T = TypeVar("T")
@@ -68,6 +69,7 @@ Examples:
         """
         logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         result = self.run_func(input_data, config=config, **kwargs)
