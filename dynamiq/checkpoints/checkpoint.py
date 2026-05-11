@@ -351,33 +351,65 @@ class CheckpointFlowMixin(BaseModel):
                     self._save_checkpoint_unlocked()
                     logger.debug(f"Flow {self.id}: cleared pending input for node {node_id}")
 
+        def _snapshot_node_state_unlocked(node_id: str) -> bool:
+            """Snapshot a node's internal state into the checkpoint and persist.
+
+            Caller must hold ``self._checkpoint_lock``. Returns ``True`` if the snapshot
+            was written, ``False`` if there's no live checkpoint, the node is unknown,
+            or the node doesn't implement ``CheckpointNodeMixin``.
+            """
+            if not self._checkpoint:
+                return False
+            node = self._node_by_id.get(node_id)
+            if not node or not isinstance(node, CheckpointNodeMixin):
+                return False
+            checkpoint_state = node.to_checkpoint_state()
+            internal_state = (
+                checkpoint_state.model_dump() if hasattr(checkpoint_state, "model_dump") else checkpoint_state
+            )
+            if node_id in self._checkpoint.node_states:
+                self._checkpoint.node_states[node_id].internal_state = internal_state
+            else:
+                self._checkpoint.node_states[node_id] = NodeCheckpointState(
+                    node_id=node_id,
+                    node_type=node.type,
+                    status=CheckpointStatus.ACTIVE.value,
+                    internal_state=internal_state,
+                )
+            self._save_checkpoint_unlocked()
+            return True
+
         def on_save_mid_run(node_id: str) -> None:
             with self._checkpoint_lock:
                 cfg = self._effective_checkpoint_config or self.checkpoint
-                if self._checkpoint and cfg.checkpoint_mid_agent_loop_enabled:
-                    node = self._node_by_id.get(node_id)
-                    if not node or not isinstance(node, CheckpointNodeMixin):
-                        return
-                    checkpoint_state = node.to_checkpoint_state()
-                    internal_state = (
-                        checkpoint_state.model_dump() if hasattr(checkpoint_state, "model_dump") else checkpoint_state
-                    )
-                    if node_id in self._checkpoint.node_states:
-                        self._checkpoint.node_states[node_id].internal_state = internal_state
-                    else:
-                        self._checkpoint.node_states[node_id] = NodeCheckpointState(
-                            node_id=node_id,
-                            node_type=node.type,
-                            status=CheckpointStatus.ACTIVE.value,
-                            internal_state=internal_state,
-                        )
-                    self._save_checkpoint_unlocked()
+                if not cfg.checkpoint_mid_agent_loop_enabled:
+                    return
+                if _snapshot_node_state_unlocked(node_id):
                     logger.debug(f"Flow {self.id}: mid-run checkpoint saved for node {node_id}")
+                else:
+                    logger.debug(
+                        f"Flow {self.id}: mid-run save requested for node {node_id} - "
+                        f"no checkpoint state captured (no live checkpoint or unknown node)"
+                    )
+
+        def on_input_timeout(node_id: str) -> None:
+            with self._checkpoint_lock:
+                cfg = self._effective_checkpoint_config or self.checkpoint
+                if not cfg.checkpoint_on_input_timeout_enabled:
+                    return
+                if _snapshot_node_state_unlocked(node_id):
+                    logger.info(f"Flow {self.id}: checkpoint saved on input streaming timeout for node {node_id}")
+                else:
+                    logger.debug(
+                        f"Flow {self.id}: input streaming timeout for node {node_id} - "
+                        f"no checkpoint state captured (no live checkpoint or unknown node)"
+                    )
 
         checkpoint_context = CheckpointContext(
             on_pending_input=on_pending_input,
             on_input_received=on_input_received,
             on_save_mid_run=on_save_mid_run,
+            on_input_timeout=on_input_timeout,
         )
 
         if config is None:

@@ -1,4 +1,5 @@
 from io import BytesIO
+from queue import Queue
 from unittest.mock import AsyncMock
 
 import pytest
@@ -7,15 +8,16 @@ from litellm import ModelResponse
 from dynamiq import Workflow, connections, flows
 from dynamiq.checkpoints.backends.filesystem import FileSystem
 from dynamiq.checkpoints.backends.in_memory import InMemory
-from dynamiq.checkpoints.checkpoint import CheckpointStatus
+from dynamiq.checkpoints.checkpoint import CheckpointStatus, FlowCheckpoint
 from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.node import NodeDependency
+from dynamiq.nodes.node import Node, NodeDependency, NodeGroup
 from dynamiq.nodes.tools import Python
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.streaming import StreamingConfig
 
 TEST_API_KEY = "test-api-key"
 LLM_MODEL = "gpt-4o-mini"
@@ -685,6 +687,115 @@ class TestCheckpointStatusLifecycle:
         all_checkpoints = backend.get_list_by_flow(flow.id, limit=50)
         children = [cp for cp in all_checkpoints if cp.parent_checkpoint_id == original_id]
         assert len(children) >= 1, "No APPEND snapshot linked to the original checkpoint was created"
+
+
+INPUT_TIMEOUT_NODE_ID = "blocking-input-node"
+INPUT_TIMEOUT_FLOW_ID = "input-timeout-flow"
+SHORT_STREAMING_TIMEOUT = 0.3
+
+
+class _BlockingInputNode(Node):
+    """Test node that blocks on streaming input so the timeout fires."""
+
+    group: NodeGroup = NodeGroup.UTILS
+    name: str = "BlockingInputNode"
+
+    def execute(self, input_data: dict, config: RunnableConfig = None, **kwargs) -> dict:
+        event_msg = self.get_input_streaming_event(config=config)
+        return {"result": event_msg.data}
+
+
+def _make_blocking_node() -> _BlockingInputNode:
+    return _BlockingInputNode(
+        id=INPUT_TIMEOUT_NODE_ID,
+        streaming=StreamingConfig(enabled=True, input_queue=Queue(), timeout=SHORT_STREAMING_TIMEOUT),
+    )
+
+
+def _has_active_node_state(checkpoints: list[FlowCheckpoint]) -> bool:
+    """True if any checkpoint contains an ACTIVE node_state for the blocking node.
+
+    The on_input_timeout save writes node_states[NODE_ID].status = "active".
+    The per-node-completion path writes status = "failure" once the node returns FAILURE,
+    so "active" is the unique signature of the on_input_timeout save.
+    """
+    return any(
+        INPUT_TIMEOUT_NODE_ID in cp.node_states
+        and cp.node_states[INPUT_TIMEOUT_NODE_ID].status == CheckpointStatus.ACTIVE.value
+        for cp in checkpoints
+    )
+
+
+class TestInputStreamingTimeoutCheckpoint:
+    """Checkpoint creation when StreamingConfig.timeout fires waiting for input."""
+
+    def test_checkpoint_saved_on_input_timeout(self):
+        backend = InMemory()
+        flow = flows.Flow(
+            id=INPUT_TIMEOUT_FLOW_ID,
+            nodes=[_make_blocking_node()],
+            checkpoint=CheckpointConfig(enabled=True, backend=backend),
+        )
+
+        result = flow.run_sync(input_data={})
+
+        assert result.status == RunnableStatus.FAILURE
+        assert "timeout" in str(result.error.message).lower()
+        assert _has_active_node_state(
+            backend.get_list_by_flow(INPUT_TIMEOUT_FLOW_ID)
+        ), "expected an on_input_timeout checkpoint with node_states[NODE_ID].status == 'active'"
+
+    def test_no_input_timeout_snapshot_when_flag_disabled(self):
+        backend = InMemory()
+        flow = flows.Flow(
+            id=INPUT_TIMEOUT_FLOW_ID,
+            nodes=[_make_blocking_node()],
+            checkpoint=CheckpointConfig(
+                enabled=True,
+                backend=backend,
+                checkpoint_on_input_timeout_enabled=False,
+            ),
+        )
+
+        result = flow.run_sync(input_data={})
+
+        assert result.status == RunnableStatus.FAILURE
+        assert not _has_active_node_state(
+            backend.get_list_by_flow(INPUT_TIMEOUT_FLOW_ID)
+        ), "did not expect an ACTIVE node_state snapshot when checkpoint_on_input_timeout_enabled is False"
+
+    def test_no_checkpoint_when_checkpoints_disabled(self):
+        backend = InMemory()
+        flow = flows.Flow(
+            id=INPUT_TIMEOUT_FLOW_ID,
+            nodes=[_make_blocking_node()],
+            checkpoint=CheckpointConfig(enabled=False, backend=backend),
+        )
+
+        result = flow.run_sync(input_data={})
+
+        assert result.status == RunnableStatus.FAILURE
+        assert backend.get_list_by_flow(INPUT_TIMEOUT_FLOW_ID) == []
+
+    def test_input_timeout_enabled_via_runnable_config_override(self):
+        backend = InMemory()
+        flow = flows.Flow(
+            id=INPUT_TIMEOUT_FLOW_ID,
+            nodes=[_make_blocking_node()],
+            checkpoint=CheckpointConfig(
+                enabled=True,
+                backend=backend,
+                checkpoint_on_input_timeout_enabled=False,
+            ),
+        )
+
+        config = RunnableConfig(checkpoint=CheckpointConfig(checkpoint_on_input_timeout_enabled=True))
+        result = flow.run_sync(input_data={}, config=config)
+
+        assert result.status == RunnableStatus.FAILURE
+        assert _has_active_node_state(
+            backend.get_list_by_flow(INPUT_TIMEOUT_FLOW_ID)
+        ), "per-run override should have re-enabled the on_input_timeout save"
 
 
 class TestBinaryDataCheckpoint:

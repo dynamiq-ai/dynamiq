@@ -27,10 +27,12 @@ class CheckpointContext:
         on_pending_input: Callable[[str, str, dict | None], None] | None = None,
         on_input_received: Callable[[str], None] | None = None,
         on_save_mid_run: Callable[[str], None] | None = None,
+        on_input_timeout: Callable[[str], None] | None = None,
     ):
         self._on_pending_input = on_pending_input
         self._on_input_received = on_input_received
         self._on_save_mid_run = on_save_mid_run
+        self._on_input_timeout = on_input_timeout
 
     def mark_pending_input(self, node_id: str, prompt: str, metadata: dict | None = None) -> None:
         """Notify that a node is waiting for human input."""
@@ -46,6 +48,11 @@ class CheckpointContext:
         """Request a checkpoint save during a long-running node (e.g., agent loop iteration)."""
         if self._on_save_mid_run:
             self._on_save_mid_run(node_id)
+
+    def save_on_input_timeout(self, node_id: str) -> None:
+        """Request a checkpoint save when StreamingConfig input wait times out."""
+        if self._on_input_timeout:
+            self._on_input_timeout(node_id)
 
 
 class CheckpointConfig(BaseModel):
@@ -72,6 +79,10 @@ class CheckpointConfig(BaseModel):
     checkpoint_on_failure_enabled: bool = Field(default=True, description="Create checkpoint when workflow fails")
     checkpoint_on_cancel_enabled: bool = Field(default=True, description="Create checkpoint when workflow is canceled")
     checkpoint_mid_agent_loop_enabled: bool = Field(default=False, description="Checkpoint during long agent loops")
+    checkpoint_on_input_timeout_enabled: bool = Field(
+        default=True,
+        description="Create checkpoint when StreamingConfig input wait times out",
+    )
 
     max_checkpoints: int = Field(
         default=50,

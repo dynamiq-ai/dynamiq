@@ -295,6 +295,18 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             return False
         return type(self).execute_async is not Node.execute_async
 
+    @model_validator(mode="after")
+    def validate_streaming_vs_error_handling_timeout(self):
+        streaming_timeout = self.streaming.timeout
+        node_timeout = self.error_handling.timeout_seconds
+        if streaming_timeout is not None and node_timeout is not None and streaming_timeout >= node_timeout:
+            raise ValueError(
+                f"Node {self.name or self.id}: streaming.timeout ({streaming_timeout}s) must be smaller than "
+                f"error_handling.timeout_seconds ({node_timeout}s) so the input-streaming timeout can fire "
+                f"before the generic execution timeout."
+            )
+        return self
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: type[BaseModel] | None = None
     callbacks: list[NodeCallbackHandler] = []
@@ -1508,6 +1520,9 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         while not is_done():
             check_cancellation(config)
             if streaming.timeout is not None and elapsed >= streaming.timeout:
+                checkpoint_ctx = config.checkpoint.context if config and config.checkpoint else None
+                if checkpoint_ctx:
+                    checkpoint_ctx.save_on_input_timeout(self.id)
                 raise ValueError(f"Input streaming timeout: {streaming.timeout} seconds exceeded.")
 
             remaining = streaming.timeout - elapsed if streaming.timeout is not None else poll_interval

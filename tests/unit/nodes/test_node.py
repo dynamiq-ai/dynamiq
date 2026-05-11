@@ -6,11 +6,11 @@ from threading import Event
 from typing import ClassVar
 
 import pytest
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.nodes.node import Node, NodeGroup
+from dynamiq.nodes.node import ErrorHandling, Node, NodeGroup
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.streaming import StreamingConfig, StreamingEventMessage
@@ -287,6 +287,46 @@ def test_get_input_streaming_event_skips_invalid_messages():
 
     assert result.entity_id == TEST_ENTITY_ID
     assert result.data == {"content": "valid"}
+
+
+def test_streaming_timeout_must_be_smaller_than_error_handling_timeout():
+    with pytest.raises(ValidationError, match="streaming.timeout"):
+        BlockingQueueNode(
+            streaming=StreamingConfig(enabled=True, input_queue=Queue(), timeout=5.0),
+            error_handling=ErrorHandling(timeout_seconds=5.0),
+        )
+
+    with pytest.raises(ValidationError, match="streaming.timeout"):
+        BlockingQueueNode(
+            streaming=StreamingConfig(enabled=True, input_queue=Queue(), timeout=10.0),
+            error_handling=ErrorHandling(timeout_seconds=5.0),
+        )
+
+
+def test_streaming_timeout_smaller_than_error_handling_timeout_is_allowed():
+    node = BlockingQueueNode(
+        streaming=StreamingConfig(enabled=True, input_queue=Queue(), timeout=1.0),
+        error_handling=ErrorHandling(timeout_seconds=5.0),
+    )
+    assert node.streaming.timeout == 1.0
+    assert node.error_handling.timeout_seconds == 5.0
+
+
+def test_streaming_timeout_with_no_error_handling_timeout_is_allowed():
+    node = BlockingQueueNode(
+        streaming=StreamingConfig(enabled=True, input_queue=Queue(), timeout=5.0),
+    )
+    assert node.streaming.timeout == 5.0
+    assert node.error_handling.timeout_seconds is None
+
+
+def test_no_streaming_timeout_with_error_handling_timeout_is_allowed():
+    node = BlockingQueueNode(
+        streaming=StreamingConfig(enabled=True, input_queue=Queue(), timeout=None),
+        error_handling=ErrorHandling(timeout_seconds=1.0),
+    )
+    assert node.streaming.timeout is None
+    assert node.error_handling.timeout_seconds == 1.0
 
 
 def test_blocking_queue_node_with_streaming_timeout_does_not_hang():
