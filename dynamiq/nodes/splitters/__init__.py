@@ -1,8 +1,10 @@
+from dynamiq.components.splitters.auto import AutoSplitterRule, AutoSplitterStrategy
 from dynamiq.components.splitters.base import IdStrategy, LengthUnit
 from dynamiq.components.splitters.code import CodeParser
 from dynamiq.components.splitters.language import Language, get_separators_for_language
 from dynamiq.components.splitters.semantic import BreakpointThresholdType
 
+from .auto import AutoSplitter
 from .code import CodeSplitter
 from .contextual import ContextualSplitter
 from .document import DocumentSplitter
@@ -14,6 +16,9 @@ from .semantic import SemanticSplitter
 from .token import TokenSplitter
 
 __all__ = [
+    "AutoSplitter",
+    "AutoSplitterRule",
+    "AutoSplitterStrategy",
     "BreakpointThresholdType",
     "CodeParser",
     "CodeSplitter",

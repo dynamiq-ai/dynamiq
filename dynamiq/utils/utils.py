@@ -314,8 +314,14 @@ def format_value(
     Returns:
         Any: Formatted value.
     """
-    from dynamiq.nodes.tools.python import PythonInputSchema
     from dynamiq.runnables import RunnableResult
+
+    try:
+        from dynamiq.nodes.tools.python import PythonInputSchema
+    except ImportError:
+        python_input_schema_types = ()
+    else:
+        python_input_schema_types = (PythonInputSchema,)
 
     if skip_format_types is None:
         skip_format_types = set()
@@ -368,7 +374,7 @@ def format_value(
 
         return type(value)(formatted_list)
 
-    if isinstance(value, (RunnableResult, PythonInputSchema)):
+    if isinstance(value, (RunnableResult, *python_input_schema_types)):
         return value.to_dict(skip_format_types=skip_format_types, force_format_types=force_format_types)
     if isinstance(value, BaseModel):
         dict_kwargs = {"for_tracing": for_tracing} if for_tracing else {}
