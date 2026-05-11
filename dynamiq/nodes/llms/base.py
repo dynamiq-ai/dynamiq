@@ -456,8 +456,11 @@ class BaseLLM(ConnectionNode):
             cls._usage_value(usage, "total_tokens", prompt_tokens + completion_tokens)
             or prompt_tokens + completion_tokens
         )
-        cached_tokens = getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", 0) or 0
-        cache_read_input_tokens = cls._usage_value(usage, "cache_read_input_tokens", cached_tokens)
+        prompt_tokens_details = cls._usage_value(usage, "prompt_tokens_details", None)
+        cached_tokens = cls._usage_value(prompt_tokens_details, "cached_tokens", 0) or 0
+        cache_read_input_tokens = cls._usage_value(usage, "cache_read_input_tokens", None)
+        if cache_read_input_tokens is None:
+            cache_read_input_tokens = cached_tokens
         cache_creation_input_tokens = cls._usage_value(usage, "cache_creation_input_tokens", None)
 
         cache_read_input_tokens = min(cache_read_input_tokens or 0, prompt_tokens)
