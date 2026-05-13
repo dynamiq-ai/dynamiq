@@ -329,6 +329,21 @@ def test_no_streaming_timeout_with_error_handling_timeout_is_allowed():
     assert node.error_handling.timeout_seconds == 1.0
 
 
+def test_validator_skipped_when_input_streaming_not_enabled():
+    """Default StreamingConfig.timeout (600s) must not collide with low error_handling timeouts
+    when input streaming is not actually active (e.g., audio/image nodes with streaming disabled
+    or output-only streaming without an input_queue)."""
+    BlockingQueueNode(
+        streaming=StreamingConfig(enabled=False),
+        error_handling=ErrorHandling(timeout_seconds=0.5),
+    )
+
+    BlockingQueueNode(
+        streaming=StreamingConfig(enabled=True),
+        error_handling=ErrorHandling(timeout_seconds=0.5),
+    )
+
+
 def test_blocking_queue_node_with_streaming_timeout_does_not_hang():
     node = BlockingQueueNode()
     input_queue = Queue()

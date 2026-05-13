@@ -297,6 +297,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
     @model_validator(mode="after")
     def validate_streaming_vs_error_handling_timeout(self):
+        if not self.streaming.input_streaming_enabled:
+            return self
         streaming_timeout = self.streaming.timeout
         node_timeout = self.error_handling.timeout_seconds
         if streaming_timeout is not None and node_timeout is not None and streaming_timeout >= node_timeout:

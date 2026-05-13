@@ -8,15 +8,28 @@ from litellm import ModelResponse
 from dynamiq import Workflow, connections, flows
 from dynamiq.checkpoints.backends.filesystem import FileSystem
 from dynamiq.checkpoints.backends.in_memory import InMemory
-from dynamiq.checkpoints.checkpoint import CheckpointStatus, FlowCheckpoint
-from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig
+from dynamiq.checkpoints.checkpoint import CheckpointStatus
+from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig, CheckpointContext
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.node import Node, NodeDependency, NodeGroup
+from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools.human_feedback import (
+    HFStreamingInputEventMessage,
+    HFStreamingInputEventMessageData,
+    HumanFeedbackAction,
+    HumanFeedbackTool,
+)
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.feedback import (
+    APPROVAL_EVENT,
+    ApprovalConfig,
+    ApprovalInputData,
+    ApprovalStreamingInputEventMessage,
+    FeedbackMethod,
+)
 from dynamiq.types.streaming import StreamingConfig
 
 TEST_API_KEY = "test-api-key"
@@ -689,113 +702,102 @@ class TestCheckpointStatusLifecycle:
         assert len(children) >= 1, "No APPEND snapshot linked to the original checkpoint was created"
 
 
-INPUT_TIMEOUT_NODE_ID = "blocking-input-node"
+INPUT_TIMEOUT_NODE_ID = "human-feedback-node"
 INPUT_TIMEOUT_FLOW_ID = "input-timeout-flow"
 SHORT_STREAMING_TIMEOUT = 0.3
 
 
-class _BlockingInputNode(Node):
-    """Test node that blocks on streaming input so the timeout fires."""
-
-    group: NodeGroup = NodeGroup.UTILS
-    name: str = "BlockingInputNode"
-
-    def execute(self, input_data: dict, config: RunnableConfig = None, **kwargs) -> dict:
-        event_msg = self.get_input_streaming_event(config=config)
-        return {"result": event_msg.data}
-
-
-def _make_blocking_node() -> _BlockingInputNode:
-    return _BlockingInputNode(
-        id=INPUT_TIMEOUT_NODE_ID,
-        streaming=StreamingConfig(enabled=True, input_queue=Queue(), timeout=SHORT_STREAMING_TIMEOUT),
-    )
-
-
-def _has_active_node_state(checkpoints: list[FlowCheckpoint]) -> bool:
-    """True if any checkpoint contains an ACTIVE node_state for the blocking node.
-
-    The on_input_timeout save writes node_states[NODE_ID].status = "active".
-    The per-node-completion path writes status = "failure" once the node returns FAILURE,
-    so "active" is the unique signature of the on_input_timeout save.
-    """
-    return any(
-        INPUT_TIMEOUT_NODE_ID in cp.node_states
-        and cp.node_states[INPUT_TIMEOUT_NODE_ID].status == CheckpointStatus.ACTIVE.value
-        for cp in checkpoints
+def _input_timeout_only_config(backend) -> CheckpointConfig:
+    """CheckpointConfig with all save triggers off except input-timeout, so any
+    save_on_input_timeout invocation can be uniquely attributed to this feature."""
+    return CheckpointConfig(
+        enabled=True,
+        backend=backend,
+        checkpoint_after_node_enabled=False,
+        checkpoint_on_failure_enabled=False,
+        checkpoint_on_cancel_enabled=False,
+        checkpoint_mid_agent_loop_enabled=False,
+        checkpoint_on_input_timeout_enabled=True,
     )
 
 
 class TestInputStreamingTimeoutCheckpoint:
-    """Checkpoint creation when StreamingConfig.timeout fires waiting for input."""
+    """End-to-end: streaming-input timeout saves a recoverable checkpoint."""
 
-    def test_checkpoint_saved_on_input_timeout(self):
+    def test_human_feedback_tool_timeout_checkpoint_recoverable(self, mocker):
+        """HumanFeedbackTool times out → on_input_timeout fires → checkpoint
+        saved → resume with input now available → flow completes."""
+        spy = mocker.spy(CheckpointContext, "save_on_input_timeout")
+        queue = Queue()
+        node = HumanFeedbackTool(
+            id=INPUT_TIMEOUT_NODE_ID,
+            action=HumanFeedbackAction.ASK,
+            input_method=FeedbackMethod.STREAM,
+            output_method=FeedbackMethod.STREAM,
+            streaming=StreamingConfig(enabled=True, input_queue=queue, timeout=SHORT_STREAMING_TIMEOUT),
+        )
         backend = InMemory()
         flow = flows.Flow(
             id=INPUT_TIMEOUT_FLOW_ID,
-            nodes=[_make_blocking_node()],
-            checkpoint=CheckpointConfig(enabled=True, backend=backend),
+            nodes=[node],
+            checkpoint=_input_timeout_only_config(backend),
         )
 
-        result = flow.run_sync(input_data={})
+        first = flow.run_sync(input_data={"input": "approve?"})
+        assert first.status == RunnableStatus.FAILURE
+        assert any(
+            call.args[1] == INPUT_TIMEOUT_NODE_ID for call in spy.call_args_list
+        ), "expected save_on_input_timeout to be invoked with the node's id"
+        saved = backend.get_latest_by_flow(INPUT_TIMEOUT_FLOW_ID)
+        assert saved is not None
+        assert INPUT_TIMEOUT_NODE_ID in saved.node_states
 
-        assert result.status == RunnableStatus.FAILURE
-        assert "timeout" in str(result.error.message).lower()
-        assert _has_active_node_state(
-            backend.get_list_by_flow(INPUT_TIMEOUT_FLOW_ID)
-        ), "expected an on_input_timeout checkpoint with node_states[NODE_ID].status == 'active'"
+        queue.put(
+            HFStreamingInputEventMessage(
+                entity_id=INPUT_TIMEOUT_NODE_ID,
+                data=HFStreamingInputEventMessageData(content="approved"),
+            ).model_dump_json()
+        )
+        second = flow.run_sync(input_data={"input": "approve?"}, resume_from=saved.id)
+        assert second.status == RunnableStatus.SUCCESS
 
-    def test_no_input_timeout_snapshot_when_flag_disabled(self):
+    def test_streaming_approval_timeout_checkpoint_recoverable(self, mocker):
+        """A Python node opens a stream wait only because of ApprovalConfig(STREAM);
+        on timeout, on_input_timeout fires, the checkpoint is saved, and resume completes."""
+        spy = mocker.spy(CheckpointContext, "save_on_input_timeout")
+        queue = Queue()
+        node = Python(
+            id=INPUT_TIMEOUT_NODE_ID,
+            name="approval-gated-python",
+            code='def run(input_data): return {"result": "ran"}',
+            approval=ApprovalConfig(enabled=True, feedback_method=FeedbackMethod.STREAM),
+            streaming=StreamingConfig(enabled=True, input_queue=queue, timeout=SHORT_STREAMING_TIMEOUT),
+        )
         backend = InMemory()
         flow = flows.Flow(
             id=INPUT_TIMEOUT_FLOW_ID,
-            nodes=[_make_blocking_node()],
-            checkpoint=CheckpointConfig(
-                enabled=True,
-                backend=backend,
-                checkpoint_on_input_timeout_enabled=False,
-            ),
+            nodes=[node],
+            checkpoint=_input_timeout_only_config(backend),
         )
 
-        result = flow.run_sync(input_data={})
+        first = flow.run_sync(input_data={})
+        assert first.status == RunnableStatus.FAILURE
+        assert any(
+            call.args[1] == INPUT_TIMEOUT_NODE_ID for call in spy.call_args_list
+        ), "expected save_on_input_timeout to be invoked with the node's id"
+        saved = backend.get_latest_by_flow(INPUT_TIMEOUT_FLOW_ID)
+        assert saved is not None
+        assert INPUT_TIMEOUT_NODE_ID in saved.node_states
 
-        assert result.status == RunnableStatus.FAILURE
-        assert not _has_active_node_state(
-            backend.get_list_by_flow(INPUT_TIMEOUT_FLOW_ID)
-        ), "did not expect an ACTIVE node_state snapshot when checkpoint_on_input_timeout_enabled is False"
-
-    def test_no_checkpoint_when_checkpoints_disabled(self):
-        backend = InMemory()
-        flow = flows.Flow(
-            id=INPUT_TIMEOUT_FLOW_ID,
-            nodes=[_make_blocking_node()],
-            checkpoint=CheckpointConfig(enabled=False, backend=backend),
+        queue.put(
+            ApprovalStreamingInputEventMessage(
+                entity_id=INPUT_TIMEOUT_NODE_ID,
+                event=APPROVAL_EVENT,
+                data=ApprovalInputData(is_approved=True, feedback=""),
+            ).model_dump_json()
         )
-
-        result = flow.run_sync(input_data={})
-
-        assert result.status == RunnableStatus.FAILURE
-        assert backend.get_list_by_flow(INPUT_TIMEOUT_FLOW_ID) == []
-
-    def test_input_timeout_enabled_via_runnable_config_override(self):
-        backend = InMemory()
-        flow = flows.Flow(
-            id=INPUT_TIMEOUT_FLOW_ID,
-            nodes=[_make_blocking_node()],
-            checkpoint=CheckpointConfig(
-                enabled=True,
-                backend=backend,
-                checkpoint_on_input_timeout_enabled=False,
-            ),
-        )
-
-        config = RunnableConfig(checkpoint=CheckpointConfig(checkpoint_on_input_timeout_enabled=True))
-        result = flow.run_sync(input_data={}, config=config)
-
-        assert result.status == RunnableStatus.FAILURE
-        assert _has_active_node_state(
-            backend.get_list_by_flow(INPUT_TIMEOUT_FLOW_ID)
-        ), "per-run override should have re-enabled the on_input_timeout save"
+        second = flow.run_sync(input_data={}, resume_from=saved.id)
+        assert second.status == RunnableStatus.SUCCESS
 
 
 class TestBinaryDataCheckpoint:

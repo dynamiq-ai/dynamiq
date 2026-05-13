@@ -392,12 +392,34 @@ class CheckpointFlowMixin(BaseModel):
                         f"no checkpoint state captured (no live checkpoint or unknown node)"
                     )
 
+        def _resolve_top_level_owner(node_id: str) -> str:
+            """Map a node id to the top-level flow node id that owns it.
+
+            ``_node_by_id`` only holds top-level flow nodes, so when an agent's
+            tool times out we need to find the enclosing agent to snapshot its
+            state. Falls back to the original id if no owner is found (helper
+            will then no-op cleanly).
+            """
+            if node_id in self._node_by_id:
+                return node_id
+            for top_id, top in self._node_by_id.items():
+                tools = getattr(top, "tools", None) or []
+                if any(getattr(t, "id", None) == node_id for t in tools):
+                    return top_id
+            return node_id
+
         def on_input_timeout(node_id: str) -> None:
             with self._checkpoint_lock:
                 cfg = self._effective_checkpoint_config or self.checkpoint
                 if not cfg.checkpoint_on_input_timeout_enabled:
                     return
-                if _snapshot_node_state_unlocked(node_id):
+                effective_id = _resolve_top_level_owner(node_id)
+                if effective_id != node_id:
+                    logger.debug(
+                        f"Flow {self.id}: input timeout from nested node {node_id} - "
+                        f"snapshotting enclosing top-level node {effective_id}"
+                    )
+                if _snapshot_node_state_unlocked(effective_id):
                     logger.info(f"Flow {self.id}: checkpoint saved on input streaming timeout for node {node_id}")
                 else:
                     logger.debug(
