@@ -445,3 +445,96 @@ def test_fallback_append_preserves_react_assistant_response_in_full_mode(llm):
         "Where does Alex work?",
         "Alex works at TechCorp.",
     ]
+
+
+_FA_TOOL_CALL_ID = "toolu_fa_abc"
+_FA_TOOL_CALLS = [
+    {
+        "id": _FA_TOOL_CALL_ID,
+        "type": "function",
+        "function": {
+            "name": "provide_final_answer",
+            "arguments": '{"thought":"done","answer":"Hi","output_files":""}',
+        },
+    }
+]
+
+
+def test_memory_add_preserves_tool_call_fields():
+    """Memory.add must forward tool_calls / tool_call_id / name to the backend."""
+    mem = Memory(backend=InMemory())
+
+    mem.add(
+        role=MessageRole.ASSISTANT,
+        content="Calling: provide_final_answer",
+        metadata={"user_id": USER_ID, "session_id": SESSION_ID},
+        tool_calls=_FA_TOOL_CALLS,
+    )
+    mem.add(
+        role=MessageRole.TOOL,
+        content="Acknowledged.",
+        metadata={"user_id": USER_ID, "session_id": SESSION_ID},
+        tool_call_id=_FA_TOOL_CALL_ID,
+        name="provide_final_answer",
+    )
+
+    stored = mem.backend.messages
+    assistant_msg = next(m for m in stored if m.role == MessageRole.ASSISTANT)
+    tool_msg = next(m for m in stored if m.role == MessageRole.TOOL)
+
+    assert assistant_msg.tool_calls == _FA_TOOL_CALLS
+    assert tool_msg.tool_call_id == _FA_TOOL_CALL_ID
+    assert tool_msg.name == "provide_final_answer"
+
+
+def test_save_history_preserves_function_calling_pair(llm):
+    """End-to-end: agent snapshot save must keep the assistant tool_use ↔ TOOL
+    tool_call_id linkage intact so the conversation replays cleanly on the
+    next turn.
+    """
+    memory = Memory(backend=InMemory(), save_mode=MemorySaveMode.FULL)
+    agent = Agent(
+        name="FCMemoryAgent",
+        llm=llm,
+        tools=[],
+        inference_mode=InferenceMode.FUNCTION_CALLING,
+        memory=memory,
+    )
+
+    agent._pinned_input = Message(role=MessageRole.USER, content="Hi")
+    agent._prompt = Prompt(
+        messages=[
+            Message(role=MessageRole.SYSTEM, content="system"),
+            Message(role=MessageRole.USER, content="Hi"),
+            Message(
+                role=MessageRole.ASSISTANT,
+                content="Calling: provide_final_answer",
+                tool_calls=_FA_TOOL_CALLS,
+            ),
+            Message(
+                role=MessageRole.TOOL,
+                content="Acknowledged.",
+                tool_call_id=_FA_TOOL_CALL_ID,
+                name="provide_final_answer",
+            ),
+        ]
+    )
+
+    agent._save_history_to_memory(
+        {"user_id": USER_ID, "session_id": SESSION_ID},
+        final_output="Hi",
+    )
+
+    stored = memory.get_agent_conversation(filters={"user_id": USER_ID, "session_id": SESSION_ID})
+
+    assistant_msg = next(m for m in stored if m.role == MessageRole.ASSISTANT)
+    tool_msg = next(m for m in stored if m.role == MessageRole.TOOL)
+
+    assert assistant_msg.tool_calls == _FA_TOOL_CALLS, (
+        "Assistant tool_calls dropped during snapshot save — " "Anthropic will reject the conversation on replay."
+    )
+    assert tool_msg.tool_call_id == _FA_TOOL_CALL_ID, (
+        "TOOL message lost tool_call_id — synthetic provide_final_answer pair "
+        "is now orphaned and the API will reject it."
+    )
+    assert tool_msg.name == "provide_final_answer"

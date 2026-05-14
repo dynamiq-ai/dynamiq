@@ -1049,7 +1049,14 @@ class Agent(IterativeCheckpointMixin, Node):
             if msg.role == MessageRole.SYSTEM:
                 continue
             raw_snapshot_messages.append(
-                Message(role=msg.role, content=extract_message_text(msg), metadata=metadata.copy())
+                Message(
+                    role=msg.role,
+                    content=extract_message_text(msg),
+                    metadata=metadata.copy(),
+                    tool_calls=msg.tool_calls,
+                    tool_call_id=msg.tool_call_id,
+                    name=msg.name,
+                )
             )
 
         if not fully_scoped:
@@ -1101,7 +1108,14 @@ class Agent(IterativeCheckpointMixin, Node):
         """Append only the user input and last assistant response to memory (safe fallback)."""
         pair = self._fallback_input_output_pair(metadata, snapshot_messages, final_output=final_output)
         for m in pair:
-            self.memory.add(role=m.role, content=m.content, metadata=m.metadata)
+            self.memory.add(
+                role=m.role,
+                content=m.content,
+                metadata=m.metadata,
+                tool_calls=m.tool_calls,
+                tool_call_id=m.tool_call_id,
+                name=m.name,
+            )
         logger.info(f"Agent {self.name} - {self.id}: saved {len(pair)} message(s) to memory (fallback)")
 
     def _run_llm(

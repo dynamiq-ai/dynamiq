@@ -76,7 +76,15 @@ class Memory(BaseModel):
         )
         return data
 
-    def add(self, role: MessageRole, content: str, metadata: dict[str, Any] | None = None) -> None:
+    def add(
+        self,
+        role: MessageRole,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+        tool_calls: list[dict] | None = None,
+        tool_call_id: str | None = None,
+        name: str | None = None,
+    ) -> None:
         """
         Adds a message to the memory.
 
@@ -84,6 +92,14 @@ class Memory(BaseModel):
             role: The role of the message sender
             content: The message content
             metadata: Additional metadata for the message
+            tool_calls: Native tool_calls payload for assistant messages in the
+                OpenAI/Anthropic function-calling protocol. Must be persisted so
+                a saved conversation round-trips through providers that require
+                each TOOL message to reference a prior assistant tool_use.
+            tool_call_id: Identifier of the tool call this message answers.
+                Required when ``role == TOOL`` for the message to remain valid
+                on replay.
+            name: Function name a tool message is responding to.
 
         Raises:
             MemoryError: If the message cannot be added
@@ -97,7 +113,14 @@ class Memory(BaseModel):
             for key, value in metadata.items():
                 sanitized_metadata[key] = "" if value is None else value
 
-            message = Message(role=role, content=content, metadata=sanitized_metadata)
+            message = Message(
+                role=role,
+                content=content,
+                metadata=sanitized_metadata,
+                tool_calls=tool_calls,
+                tool_call_id=tool_call_id,
+                name=name,
+            )
             self.backend.add(message)
 
             logger.debug(
@@ -333,7 +356,14 @@ class Memory(BaseModel):
             for seq, msg in enumerate(messages):
                 metadata = dict(msg.metadata) if msg.metadata else {}
                 metadata["sequence"] = seq
-                self.add(role=msg.role, content=msg.content, metadata=metadata)
+                self.add(
+                    role=msg.role,
+                    content=msg.content,
+                    metadata=metadata,
+                    tool_calls=msg.tool_calls,
+                    tool_call_id=msg.tool_call_id,
+                    name=msg.name,
+                )
                 written += 1
 
             logger.debug(
