@@ -708,6 +708,17 @@ class BaseLLM(ConnectionNode):
 
         return self.update_completion_params(common_params)
 
+    def _recover_completion_params(self, exc: BaseException, common_params: dict) -> dict | None:
+        """Provider-specific recovery hook for known-bad completion params.
+
+        Called once after a completion call raises. Subclasses may inspect the exception
+        and return a modified `common_params` dict to retry with, or return ``None`` to
+        re-raise the original error.
+
+        Default implementation: no recovery (return ``None``).
+        """
+        return None
+
     def execute(
         self,
         input_data: BaseLLMInputSchema,
@@ -754,7 +765,13 @@ class BaseLLM(ConnectionNode):
             include_sync_client=True,
         )
 
-        response = self._completion(**common_params)
+        try:
+            response = self._completion(**common_params)
+        except Exception as e:
+            recovered = self._recover_completion_params(e, common_params)
+            if recovered is None:
+                raise
+            response = self._completion(**recovered)
         handle_completion = (
             self._handle_streaming_completion_response
             if common_params.get("stream")
@@ -811,7 +828,13 @@ class BaseLLM(ConnectionNode):
             include_sync_client=False,
         )
 
-        response = await self._acompletion(**common_params)
+        try:
+            response = await self._acompletion(**common_params)
+        except Exception as e:
+            recovered = self._recover_completion_params(e, common_params)
+            if recovered is None:
+                raise
+            response = await self._acompletion(**recovered)
 
         if common_params.get("stream"):
             return await self._handle_streaming_completion_response_async(
