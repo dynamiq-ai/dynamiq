@@ -508,7 +508,15 @@ class BaseLLM(ConnectionNode):
             tool_calls_parsed = []
             for tc in tool_calls:
                 call = tc.model_dump()
-                call["function"]["arguments"] = json.loads(call["function"]["arguments"])
+                raw_args = call["function"]["arguments"]
+                try:
+                    call["function"]["arguments"] = json.loads(raw_args, strict=False)
+                except json.JSONDecodeError as e:
+                    logger.warning(
+                        "Failed to parse tool_call arguments as JSON for function %s: %s. ",
+                        call["function"].get("name"), e,
+                    )
+                    call["function"]["arguments"] = raw_args
                 tool_calls_parsed.append(call)
             result["tool_calls"] = tool_calls_parsed
 
