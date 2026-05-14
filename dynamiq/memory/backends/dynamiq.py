@@ -5,7 +5,7 @@ from pydantic import ConfigDict, Field, PrivateAttr
 
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections import HTTPMethod
-from dynamiq.memory.backends.base import MemoryBackend
+from dynamiq.memory.backends.base import NAME_META_KEY, TOOL_CALL_ID_META_KEY, TOOL_CALLS_META_KEY, MemoryBackend
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.utils.logger import logger
 
@@ -64,7 +64,7 @@ class Dynamiq(MemoryBackend):
 
         # Send function-calling fields as first-class
         # members of `data` instead of metadata
-        for stash_key in ("_tool_calls", "_tool_call_id", "_name"):
+        for stash_key in (TOOL_CALLS_META_KEY, TOOL_CALL_ID_META_KEY, NAME_META_KEY):
             metadata.pop(stash_key, None)
 
         data_payload: dict[str, Any] = {

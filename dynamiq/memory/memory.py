@@ -6,15 +6,9 @@ from typing import Any, ClassVar
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.memory.backends import InMemory, MemoryBackend
+from dynamiq.memory.backends.base import NAME_META_KEY, TOOL_CALL_ID_META_KEY, TOOL_CALLS_META_KEY
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.utils.logger import logger
-
-# Reserved metadata keys used to round-trip function-calling fields through backends
-# that only serialize Message.metadata (SQL, vector stores, etc.). tool_calls is
-# JSON-encoded so it survives backends like Pinecone that only accept flat scalars.
-_TOOL_CALLS_META_KEY = "_tool_calls"
-_TOOL_CALL_ID_META_KEY = "_tool_call_id"
-_NAME_META_KEY = "_name"
 
 
 class FormatType(str, Enum):
@@ -121,11 +115,11 @@ class Memory(BaseModel):
             # tool_calls is JSON-encoded for compatibility with backends
             # that reject nested objects (e.g. Pinecone)
             if tool_calls is not None:
-                sanitized_metadata[_TOOL_CALLS_META_KEY] = json.dumps(tool_calls)
+                sanitized_metadata[TOOL_CALLS_META_KEY] = json.dumps(tool_calls)
             if tool_call_id is not None:
-                sanitized_metadata[_TOOL_CALL_ID_META_KEY] = tool_call_id
+                sanitized_metadata[TOOL_CALL_ID_META_KEY] = tool_call_id
             if name is not None:
-                sanitized_metadata[_NAME_META_KEY] = name
+                sanitized_metadata[NAME_META_KEY] = name
 
             message = Message(
                 role=role,
@@ -159,7 +153,7 @@ class Memory(BaseModel):
             dumped = msg.model_dump()
             meta = dict(dumped.get("metadata") or {})
 
-            raw_tool_calls = meta.pop(_TOOL_CALLS_META_KEY, None)
+            raw_tool_calls = meta.pop(TOOL_CALLS_META_KEY, None)
             tool_calls = dumped.get("tool_calls")
             if tool_calls is None and raw_tool_calls not in (None, ""):
                 if isinstance(raw_tool_calls, str):
@@ -171,12 +165,12 @@ class Memory(BaseModel):
                 else:
                     tool_calls = raw_tool_calls
 
-            stashed_tool_call_id = meta.pop(_TOOL_CALL_ID_META_KEY, None)
+            stashed_tool_call_id = meta.pop(TOOL_CALL_ID_META_KEY, None)
             tool_call_id = dumped.get("tool_call_id")
             if tool_call_id is None and stashed_tool_call_id is not None:
                 tool_call_id = stashed_tool_call_id
 
-            stashed_name = meta.pop(_NAME_META_KEY, None)
+            stashed_name = meta.pop(NAME_META_KEY, None)
             name = dumped.get("name")
             if name is None and stashed_name is not None:
                 name = stashed_name
