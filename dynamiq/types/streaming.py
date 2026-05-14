@@ -20,11 +20,12 @@ class StreamingMode(str, Enum):
 STREAMING_EVENT = "streaming"
 
 
-class InputStreamingTimeoutError(TimeoutError):
+class InputStreamingTimeoutError(TimeoutError, ValueError):
     """Raised when a node's input-streaming wait exceeds ``StreamingConfig.timeout``.
 
-    Subclasses the built-in ``TimeoutError`` so generic ``except TimeoutError``
-    handlers catch it idiomatically. Callers that need to distinguish a
+    Inherits from both ``TimeoutError`` (idiomatic for timeouts) and ``ValueError``
+    (the original raised type, preserved for backward compatibility with callers
+    and tests that catch ``ValueError``). Callers that need to distinguish a
     streaming-input timeout specifically should isinstance-check or, after
     serialization, match ``error["type"] == "InputStreamingTimeoutError"``.
     """
