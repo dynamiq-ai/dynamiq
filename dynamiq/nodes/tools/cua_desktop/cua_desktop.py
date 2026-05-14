@@ -43,6 +43,7 @@ from dynamiq.nodes.tools.cua_desktop.types import (
 )
 from dynamiq.nodes.tools.utils import sanitize_filename
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 ACTION_SCHEMA_MAP: dict[CuaAction, type] = {
@@ -464,6 +465,7 @@ class CuaDesktopTool(ConnectionNode):
             ToolExecutionException: If the input is invalid or execution fails.
         """
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+        check_cancellation(config)
 
         await self._init_client()
 

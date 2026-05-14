@@ -17,6 +17,7 @@ from dynamiq.nodes.node import Node, NodeDependency, ensure_config
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types import Document
+from dynamiq.types.cancellation import check_cancellation
 
 logger = logging.getLogger(__name__)
 
@@ -274,6 +275,7 @@ class MultiFileTypeConverter(Node):
             meta_list = self._normalize_metadata(metadata, len(all_filepaths))
 
             for filepath, meta in zip(all_filepaths, meta_list):
+                check_cancellation(config)
                 try:
                     with open(filepath, "rb") as f:
                         file_content = BytesIO(f.read())
@@ -288,6 +290,7 @@ class MultiFileTypeConverter(Node):
         if files is not None:
             meta_list = self._normalize_metadata(metadata, len(files))
             for i, (file, meta) in enumerate(zip(files, meta_list)):
+                check_cancellation(config)
                 try:
                     filename = meta.get("filename", f"file_{i}")
                     documents = self._process_single_file(file, filename, meta, config, **kwargs)

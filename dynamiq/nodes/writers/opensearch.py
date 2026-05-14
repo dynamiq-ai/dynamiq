@@ -5,6 +5,7 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import OpenSearchVectorStore
 from dynamiq.storages.vector.opensearch.opensearch import OpenSearchVectorStoreWriterParams
 from dynamiq.storages.vector.policies import DuplicatePolicy
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 
@@ -78,6 +79,7 @@ class OpenSearchDocumentWriter(Writer, OpenSearchVectorStoreWriterParams):
             dict[str, int]: A dictionary containing the count of written documents.
         """
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         upserted_count = self.vector_store.write_documents(

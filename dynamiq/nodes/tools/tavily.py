@@ -11,6 +11,7 @@ from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 DESCRIPTION_TAVILY = """Search the web with structured filters and enriched responses.
@@ -274,6 +275,7 @@ class TavilyTool(ConnectionNode):
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         request_payload, connection_url = self._build_search_payload(input_data)
@@ -298,6 +300,7 @@ class TavilyTool(ConnectionNode):
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         request_payload, connection_url = self._build_search_payload(input_data)
