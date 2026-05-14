@@ -4,6 +4,7 @@ from dynamiq.nodes.writers.base import Writer, WriterInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import WeaviateVectorStore
 from dynamiq.storages.vector.weaviate import WeaviateWriterVectorStoreParams
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 
@@ -63,6 +64,7 @@ class WeaviateDocumentWriter(Writer, WeaviateWriterVectorStoreParams):
             dict: A dictionary containing the count of upserted documents.
         """
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         documents = input_data.documents

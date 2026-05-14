@@ -26,6 +26,7 @@ from dynamiq.nodes.tools.python import (
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file.base import FileInfo, FileStore
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils import format_value
 from dynamiq.utils.logger import logger
 
@@ -309,6 +310,7 @@ class PythonCodeExecutor(Node):
             f"preview='{code_preview}{'...' if len(input_data.code) > 200 else ''}'"
         )
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         if not self.file_store:

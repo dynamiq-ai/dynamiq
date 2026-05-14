@@ -582,6 +582,7 @@ class BaseLLM(ConnectionNode):
         """
         chunks = []
         async for chunk in response:
+            check_cancellation(config)
             chunks.append(chunk)
             self.run_on_node_execute_stream(
                 config.callbacks,
