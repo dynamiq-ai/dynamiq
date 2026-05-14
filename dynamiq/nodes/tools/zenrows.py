@@ -8,6 +8,7 @@ from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 DESCRIPTION_ZENROWS = """Scrapes web content from URLs with advanced anti-bot protection and JavaScript rendering. Handles complex websites with proxy rotation, CAPTCHA solving, and browser automation for reliable data extraction.
@@ -104,6 +105,7 @@ class ZenRowsTool(ConnectionNode):
         """
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         try:
@@ -120,6 +122,7 @@ class ZenRowsTool(ConnectionNode):
         """Native async execution path mirroring ``execute``."""
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         client = await self.get_async_client()

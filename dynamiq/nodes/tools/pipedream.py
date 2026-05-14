@@ -9,6 +9,7 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.nodes.tools.mcp import rename_keys_recursive
 from dynamiq.nodes.tools.utils import create_file_from_url
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 FIELD_TYPES_MAPPING = {
@@ -229,6 +230,7 @@ class Pipedream(ConnectionNode):
         logger.debug(f"Tool {self.name} - Starting execution with input data: {input_data.model_dump()}")
 
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         try:
