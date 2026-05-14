@@ -47,6 +47,5 @@ class Bedrock(BaseLLM):
             )
             recovered = dict(common_params)
             recovered.pop("stop", None)
-            self.stop = None
             return recovered
         return None

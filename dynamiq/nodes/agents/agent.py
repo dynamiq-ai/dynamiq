@@ -325,8 +325,49 @@ class Agent(HistoryManagerMixin, BaseAgent):
         return False
 
     @model_validator(mode="after")
+    def _ensure_context_manager_tool(self):
+        """Automatically add ContextManagerTool when summarization is enabled."""
+        try:
+            if self.summarization_config.enabled:
+                has_context_tool = any(isinstance(t, ContextManagerTool) for t in self.tools)
+                if not has_context_tool:
+                    context_tool = ContextManagerTool(
+                        llm=self.llm,
+                        name="context-manager",
+                        token_budget_ratio=self.summarization_config.token_budget_ratio,
+                    )
+                    self.tools.append(context_tool)
+                    self._excluded_tool_ids.add(context_tool.id)
+        except Exception as e:
+            logger.error(f"Failed to ensure ContextManagerTool: {e}")
+        return self
+
+    @model_validator(mode="after")
+    def _ensure_todo_tools(self):
+        """Automatically add TodoWriteTool when todo is enabled in file_store config."""
+        try:
+            if self.file_store.enabled and self.file_store.todo_enabled:
+                has_todo_write = any(isinstance(t, TodoWriteTool) for t in self.tools)
+
+                if not has_todo_write:
+                    todo_tool = TodoWriteTool(
+                        name="todo-write",
+                        file_store=self.file_store.backend,
+                    )
+                    self.tools.append(todo_tool)
+                    self._excluded_tool_ids.add(todo_tool.id)
+                    logger.info("Agent: Added TodoWriteTool")
+        except Exception as e:
+            logger.error(f"Failed to ensure TodoWriteTool: {e}")
+        return self
+
+    @model_validator(mode="after")
     def validate_inference_mode(self):
-        """Validate (and where safe, auto-correct) the inference mode for the chosen model."""
+        """Validate (and where safe, auto-correct) the inference mode for the chosen model.
+
+        Runs after auto-tool validators so self.tools reflects the final set
+        (including any ContextManagerTool / TodoWriteTool appended above).
+        """
         model = self.llm.model
         match self.inference_mode:
             case InferenceMode.FUNCTION_CALLING:
@@ -364,43 +405,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         model,
                     )
 
-        return self
-
-    @model_validator(mode="after")
-    def _ensure_context_manager_tool(self):
-        """Automatically add ContextManagerTool when summarization is enabled."""
-        try:
-            if self.summarization_config.enabled:
-                has_context_tool = any(isinstance(t, ContextManagerTool) for t in self.tools)
-                if not has_context_tool:
-                    context_tool = ContextManagerTool(
-                        llm=self.llm,
-                        name="context-manager",
-                        token_budget_ratio=self.summarization_config.token_budget_ratio,
-                    )
-                    self.tools.append(context_tool)
-                    self._excluded_tool_ids.add(context_tool.id)
-        except Exception as e:
-            logger.error(f"Failed to ensure ContextManagerTool: {e}")
-        return self
-
-    @model_validator(mode="after")
-    def _ensure_todo_tools(self):
-        """Automatically add TodoWriteTool when todo is enabled in file_store config."""
-        try:
-            if self.file_store.enabled and self.file_store.todo_enabled:
-                has_todo_write = any(isinstance(t, TodoWriteTool) for t in self.tools)
-
-                if not has_todo_write:
-                    todo_tool = TodoWriteTool(
-                        name="todo-write",
-                        file_store=self.file_store.backend,
-                    )
-                    self.tools.append(todo_tool)
-                    self._excluded_tool_ids.add(todo_tool.id)
-                    logger.info("Agent: Added TodoWriteTool")
-        except Exception as e:
-            logger.error(f"Failed to ensure TodoWriteTool: {e}")
         return self
 
     def _append_recovery_instruction(
