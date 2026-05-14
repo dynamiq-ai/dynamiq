@@ -9,6 +9,7 @@ from dynamiq.connections import Whisper as WhisperConnection
 from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.cancellation import check_cancellation
 
 DEFAULT_FILE_NAME = "temp.wav"
 DEFAULT_CONTENT_TYPE = "audio/wav"
@@ -68,6 +69,7 @@ class WhisperSTT(ConnectionNode):
             str: A string containing the transcribe result.
         """
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         audio = input_data.audio

@@ -10,6 +10,7 @@ from dynamiq.nodes.retrievers.base import Retriever
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import OpenSearchVectorStore
 from dynamiq.storages.vector.opensearch.opensearch import OpenSearchVectorStoreParams
+from dynamiq.types.cancellation import check_cancellation
 
 
 class OpenSearchRetrieverInputSchema(BaseModel):
@@ -125,6 +126,7 @@ class OpenSearchDocumentRetriever(Retriever, OpenSearchVectorStoreParams):
             dict[str, Any]: A dictionary containing the retrieved documents.
         """
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         output = self.document_retriever.run(

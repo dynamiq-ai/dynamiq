@@ -15,6 +15,7 @@ from dynamiq.storages.graph.age import ApacheAgeGraphStore
 from dynamiq.storages.graph.base import BaseGraphStore
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
 from dynamiq.storages.graph.neptune import NeptuneGraphStore
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 BASE_CYPHER_DESCRIPTION = """Executes parameterized Cypher
@@ -236,6 +237,7 @@ class CypherExecutor(ConnectionNode):
         """
         logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         if not self._graph_store:
@@ -266,6 +268,7 @@ class CypherExecutor(ConnectionNode):
                     routing=routing,
                     graph_return_enabled=input_data.graph_return_enabled,
                     writes_allowed=input_data.writes_allowed,
+                    config=config,
                 )
                 result_payload = {
                     "mode": input_data.mode,
@@ -302,6 +305,7 @@ class CypherExecutor(ConnectionNode):
         routing: str | None,
         graph_return_enabled: bool,
         writes_allowed: bool,
+        config: RunnableConfig | None = None,
     ) -> list[dict[str, Any]]:
         if isinstance(parameters, list):
             params_list = parameters
@@ -309,6 +313,7 @@ class CypherExecutor(ConnectionNode):
             params_list = [parameters for _ in queries]
         results: list[dict[str, Any]] = []
         for query, query_params in zip(queries, params_list, strict=True):
+            check_cancellation(config)
             results.append(
                 self._execute_single(
                     query=query,

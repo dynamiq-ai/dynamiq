@@ -4,6 +4,7 @@ from dynamiq.nodes.writers.base import Writer, WriterInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import ChromaVectorStore
 from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
+from dynamiq.types.cancellation import check_cancellation
 
 
 class ChromaDocumentWriter(Writer, BaseWriterVectorStoreParams):
@@ -63,6 +64,7 @@ class ChromaDocumentWriter(Writer, BaseWriterVectorStoreParams):
             dict: A dictionary containing the count of upserted documents.
         """
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         documents = input_data.documents

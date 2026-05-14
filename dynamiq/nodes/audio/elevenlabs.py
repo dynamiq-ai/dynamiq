@@ -10,6 +10,7 @@ from dynamiq.connections import ElevenLabs as ElevenLabsConnection
 from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.cancellation import check_cancellation
 
 
 class Voices(str, enum.Enum):
@@ -130,6 +131,7 @@ class ElevenLabsTTS(ConnectionNode):
             },
         }
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         response = self.client.request(
             method=self.connection.method,
@@ -236,6 +238,7 @@ class ElevenLabsSTS(ConnectionNode):
         }
         audio = input_data.audio
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         response = self.client.request(
             method=self.connection.method,
