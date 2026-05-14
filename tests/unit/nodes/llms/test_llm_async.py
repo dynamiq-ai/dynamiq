@@ -16,6 +16,15 @@ def make_mock_response(content="test response"):
     choice.message.tool_calls = None
     response = MagicMock()
     response.choices = [choice]
+    response.model_extra = {}
+    usage = MagicMock()
+    usage.prompt_tokens = 0
+    usage.completion_tokens = 0
+    usage.total_tokens = 0
+    usage.prompt_tokens_details = None
+    usage.cache_read_input_tokens = None
+    usage.cache_creation_input_tokens = None
+    response.usage = usage
     return response
 
 
