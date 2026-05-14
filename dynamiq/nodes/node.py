@@ -301,6 +301,12 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             return False
         return type(self).execute_async is not Node.execute_async
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    input_schema: type[BaseModel] | None = None
+    callbacks: list[NodeCallbackHandler] = []
+    _json_schema_fields: ClassVar[list[str]] = []
+    _clone_init_methods_names: ClassVar[list[str]] = ["reset_run_state"]
+
     @model_validator(mode="after")
     def validate_streaming_vs_error_handling_timeout(self):
         if not self.streaming.input_streaming_enabled:
@@ -314,12 +320,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 f"before the generic execution timeout."
             )
         return self
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    input_schema: type[BaseModel] | None = None
-    callbacks: list[NodeCallbackHandler] = []
-    _json_schema_fields: ClassVar[list[str]] = []
-    _clone_init_methods_names: ClassVar[list[str]] = ["reset_run_state"]
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
