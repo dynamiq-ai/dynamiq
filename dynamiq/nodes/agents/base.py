@@ -949,6 +949,9 @@ class Agent(IterativeCheckpointMixin, Node):
                     role=message.role,
                     content=message.content,
                     metadata=metadata.copy(),
+                    tool_calls=getattr(message, "tool_calls", None),
+                    tool_call_id=getattr(message, "tool_call_id", None),
+                    name=getattr(message, "name", None),
                 )
             )
 
@@ -1049,7 +1052,14 @@ class Agent(IterativeCheckpointMixin, Node):
             if msg.role == MessageRole.SYSTEM:
                 continue
             raw_snapshot_messages.append(
-                Message(role=msg.role, content=extract_message_text(msg), metadata=metadata.copy())
+                Message(
+                    role=msg.role,
+                    content=extract_message_text(msg),
+                    metadata=metadata.copy(),
+                    tool_calls=getattr(msg, "tool_calls", None),
+                    tool_call_id=getattr(msg, "tool_call_id", None),
+                    name=getattr(msg, "name", None),
+                )
             )
 
         if not fully_scoped:

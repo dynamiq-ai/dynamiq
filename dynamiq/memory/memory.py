@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, ClassVar
@@ -7,6 +8,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.memory.backends import InMemory, MemoryBackend
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.utils.logger import logger
+
+# Reserved metadata keys used to round-trip function-calling fields through backends
+# that only serialize Message.metadata (SQL, vector stores, etc.). tool_calls is
+# JSON-encoded so it survives backends like Pinecone that only accept flat scalars.
+_TOOL_CALLS_META_KEY = "_tool_calls"
+_TOOL_CALL_ID_META_KEY = "_tool_call_id"
+_NAME_META_KEY = "_name"
 
 
 class FormatType(str, Enum):
@@ -76,7 +84,15 @@ class Memory(BaseModel):
         )
         return data
 
-    def add(self, role: MessageRole, content: str, metadata: dict[str, Any] | None = None) -> None:
+    def add(
+        self,
+        role: MessageRole,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+        tool_calls: list[dict] | None = None,
+        tool_call_id: str | None = None,
+        name: str | None = None,
+    ) -> None:
         """
         Adds a message to the memory.
 
@@ -84,6 +100,11 @@ class Memory(BaseModel):
             role: The role of the message sender
             content: The message content
             metadata: Additional metadata for the message
+            tool_calls: Native tool_calls payload for assistant messages
+                in OpenAI function-calling protocol.
+            tool_call_id: Identifier of the tool call this message answers.
+                Required when ``role == TOOL``.
+            name: Function name a tool message is responding to.
 
         Raises:
             MemoryError: If the message cannot be added
@@ -97,7 +118,23 @@ class Memory(BaseModel):
             for key, value in metadata.items():
                 sanitized_metadata[key] = "" if value is None else value
 
-            message = Message(role=role, content=content, metadata=sanitized_metadata)
+            # tool_calls is JSON-encoded for compatibility with backends 
+            # that reject nested objects (e.g. Pinecone)
+            if tool_calls is not None:
+                sanitized_metadata[_TOOL_CALLS_META_KEY] = json.dumps(tool_calls)
+            if tool_call_id is not None:
+                sanitized_metadata[_TOOL_CALL_ID_META_KEY] = tool_call_id
+            if name is not None:
+                sanitized_metadata[_NAME_META_KEY] = name
+
+            message = Message(
+                role=role,
+                content=content,
+                metadata=sanitized_metadata,
+                tool_calls=tool_calls,
+                tool_call_id=tool_call_id,
+                name=name,
+            )
             self.backend.add(message)
 
             logger.debug(
@@ -107,6 +144,45 @@ class Memory(BaseModel):
         except Exception as e:
             logger.error(f"Unexpected error adding message: {e}")
             raise MemoryError(f"Unexpected error adding message: {e}") from e
+
+    @staticmethod
+    def _transform_function_calling_tool_fields(messages: list[Message]) -> list[Message]:
+        """Pop stashed function-calling fields from metadata and place them on Message.
+
+        Backends that only persist Message.metadata (SQL, vector stores, etc.)
+        lose the first-class tool_calls/tool_call_id/name fields.
+        This method restores the fields from under reserved metadata keys 
+        so the conversation can replay correctly on the next turn.
+        """
+        transformed: list[Message] = []
+        for msg in messages:
+            dumped = msg.model_dump()
+            meta = dict(dumped.get("metadata") or {})
+
+            raw_tool_calls = meta.pop(_TOOL_CALLS_META_KEY, None)
+            tool_calls = dumped.get("tool_calls")
+            if tool_calls is None and raw_tool_calls not in (None, ""):
+                if isinstance(raw_tool_calls, str):
+                    try:
+                        tool_calls = json.loads(raw_tool_calls)
+                    except (TypeError, ValueError) as e:
+                        logger.warning(f"Failed to decode stashed tool_calls metadata: {e}")
+                        tool_calls = None
+                else:
+                    tool_calls = raw_tool_calls
+
+            stashed_tool_call_id = meta.pop(_TOOL_CALL_ID_META_KEY, None)
+            tool_call_id = dumped.get("tool_call_id") or (stashed_tool_call_id or None)
+
+            stashed_name = meta.pop(_NAME_META_KEY, None)
+            name = dumped.get("name") or (stashed_name or None)
+
+            dumped["metadata"] = meta
+            dumped["tool_calls"] = tool_calls
+            dumped["tool_call_id"] = tool_call_id
+            dumped["name"] = name
+            transformed.append(Message(**dumped, static=True))
+        return transformed
 
     def get_all(self, limit: int | None = None) -> list[Message]:
         """
@@ -126,7 +202,7 @@ class Memory(BaseModel):
             effective_limit = limit if limit is not None else self.message_limit
 
             messages = self.backend.get_all(limit=effective_limit)
-            retrieved_messages = [Message(**msg.model_dump(), static=True) for msg in messages]
+            retrieved_messages = self._transform_function_calling_tool_fields(messages)
             logger.debug(f"Memory {self.backend.name}: Retrieved {len(retrieved_messages)} messages")
             return retrieved_messages
         except Exception as e:
@@ -175,7 +251,7 @@ class Memory(BaseModel):
 
             results = self.backend.search(query=query, filters=effective_filters, limit=effective_limit)
 
-            retrieved_messages = [Message(**msg.model_dump(), static=True) for msg in results]
+            retrieved_messages = self._transform_function_calling_tool_fields(results)
             logger.debug(
                 f"Memory {self.backend.name}: Found {len(retrieved_messages)} search results for query: {query}, "
                 f"filters: {effective_filters}"
@@ -333,7 +409,14 @@ class Memory(BaseModel):
             for seq, msg in enumerate(messages):
                 metadata = dict(msg.metadata) if msg.metadata else {}
                 metadata["sequence"] = seq
-                self.add(role=msg.role, content=msg.content, metadata=metadata)
+                self.add(
+                    role=msg.role,
+                    content=msg.content,
+                    metadata=metadata,
+                    tool_calls=msg.tool_calls,
+                    tool_call_id=msg.tool_call_id,
+                    name=msg.name,
+                )
                 written += 1
 
             logger.debug(
