@@ -118,7 +118,7 @@ class Memory(BaseModel):
             for key, value in metadata.items():
                 sanitized_metadata[key] = "" if value is None else value
 
-            # tool_calls is JSON-encoded for compatibility with backends 
+            # tool_calls is JSON-encoded for compatibility with backends
             # that reject nested objects (e.g. Pinecone)
             if tool_calls is not None:
                 sanitized_metadata[_TOOL_CALLS_META_KEY] = json.dumps(tool_calls)
@@ -151,7 +151,7 @@ class Memory(BaseModel):
 
         Backends that only persist Message.metadata (SQL, vector stores, etc.)
         lose the first-class tool_calls/tool_call_id/name fields.
-        This method restores the fields from under reserved metadata keys 
+        This method restores the fields from under reserved metadata keys
         so the conversation can replay correctly on the next turn.
         """
         transformed: list[Message] = []

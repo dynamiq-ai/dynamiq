@@ -62,7 +62,7 @@ class Dynamiq(MemoryBackend):
         if not effective_session_id:
             raise DynamiqMemoryError("Session identifier is required to create a memory item.")
 
-        # Send function-calling fields as first-class 
+        # Send function-calling fields as first-class
         # members of `data` instead of metadata
         for stash_key in ("_tool_calls", "_tool_call_id", "_name"):
             metadata.pop(stash_key, None)

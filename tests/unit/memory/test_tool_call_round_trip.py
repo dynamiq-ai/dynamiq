@@ -1,12 +1,3 @@
-"""Regression tests for function-calling field round-trip through Memory.
-
-The agent constructs assistant messages with ``tool_calls`` and tool messages
-with ``tool_call_id``/``name``. When the conversation is persisted to memory
-and later replayed, these fields must survive the round-trip — otherwise the
-next LLM call fails with provider-specific errors (e.g. Anthropic rejects a
-TOOL message that has no ``tool_call_id``).
-"""
-
 import json
 
 from dynamiq.memory import Memory

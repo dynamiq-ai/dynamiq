@@ -1,6 +1,3 @@
-"""Verify the Dynamiq memory backend sends and receives function-calling fields
-as first-class members of the ``data`` payload (not buried in metadata)."""
-
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.memory.backends.dynamiq import Dynamiq
 from dynamiq.prompts import Message, MessageRole
