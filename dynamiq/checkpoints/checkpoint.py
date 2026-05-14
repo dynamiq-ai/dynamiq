@@ -352,11 +352,12 @@ class CheckpointFlowMixin(BaseModel):
                     logger.debug(f"Flow {self.id}: cleared pending input for node {node_id}")
 
         def _snapshot_node_state_unlocked(node_id: str) -> bool:
-            """Snapshot a node's internal state into the checkpoint and persist.
+            """Snapshot a node's internal state into the checkpoint (mutation only, no save).
 
-            Caller must hold ``self._checkpoint_lock``. Returns ``True`` if the snapshot
-            was written, ``False`` if there's no live checkpoint, the node is unknown,
-            or the node doesn't implement ``CheckpointNodeMixin``.
+            Caller must hold ``self._checkpoint_lock`` and is responsible for calling
+            ``self._save_checkpoint_unlocked()`` afterwards. Returns ``True`` if the
+            snapshot mutation was written, ``False`` if there's no live checkpoint, the
+            node is unknown, or the node doesn't implement ``CheckpointNodeMixin``.
             """
             if not self._checkpoint:
                 return False
@@ -376,7 +377,6 @@ class CheckpointFlowMixin(BaseModel):
                     status=CheckpointStatus.ACTIVE.value,
                     internal_state=internal_state,
                 )
-            self._save_checkpoint_unlocked()
             return True
 
         def on_save_mid_run(node_id: str) -> None:
@@ -385,6 +385,7 @@ class CheckpointFlowMixin(BaseModel):
                 if not cfg.checkpoint_mid_agent_loop_enabled:
                     return
                 if _snapshot_node_state_unlocked(node_id):
+                    self._save_checkpoint_unlocked()
                     logger.debug(f"Flow {self.id}: mid-run checkpoint saved for node {node_id}")
                 else:
                     logger.debug(
@@ -420,7 +421,18 @@ class CheckpointFlowMixin(BaseModel):
                         f"snapshotting enclosing top-level node {effective_id}"
                     )
                 if _snapshot_node_state_unlocked(effective_id):
-                    logger.info(f"Flow {self.id}: checkpoint saved on input streaming timeout for node {node_id}")
+                    self._checkpoint.mark_pending_input(
+                        node_id=effective_id,
+                        prompt="",
+                        metadata={
+                            "reason": "input_streaming_timeout",
+                            "source_node_id": node_id,
+                        },
+                    )
+                    self._save_checkpoint_unlocked()
+                    logger.info(
+                        f"Flow {self.id}: checkpoint marked PENDING_INPUT on input streaming timeout for node {node_id}"
+                    )
                 else:
                     logger.debug(
                         f"Flow {self.id}: input streaming timeout for node {node_id} - "
