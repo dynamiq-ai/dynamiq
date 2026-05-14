@@ -456,17 +456,22 @@ class BaseLLM(ConnectionNode):
             cls._usage_value(usage, "total_tokens", prompt_tokens + completion_tokens)
             or prompt_tokens + completion_tokens
         )
-        cache_read_input_tokens = cls._usage_value(usage, "cache_read_input_tokens")
-        cache_creation_input_tokens = cls._usage_value(usage, "cache_creation_input_tokens")
+        prompt_tokens_details = cls._usage_value(usage, "prompt_tokens_details", None)
+        cached_tokens = cls._usage_value(prompt_tokens_details, "cached_tokens", 0) or 0
+        cache_read_input_tokens = cls._usage_value(usage, "cache_read_input_tokens", None)
+        if cache_read_input_tokens is None:
+            cache_read_input_tokens = cached_tokens
+        cache_creation_input_tokens = cls._usage_value(usage, "cache_creation_input_tokens", None)
+
+        cache_read_input_tokens = min(cache_read_input_tokens or 0, prompt_tokens)
 
         try:
             cost_kwargs: dict[str, Any] = {
                 "model": model,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
+                "cache_read_input_tokens": cache_read_input_tokens,
             }
-            if cache_read_input_tokens is not None:
-                cost_kwargs["cache_read_input_tokens"] = cache_read_input_tokens
             if cache_creation_input_tokens is not None:
                 cost_kwargs["cache_creation_input_tokens"] = cache_creation_input_tokens
 
@@ -508,7 +513,15 @@ class BaseLLM(ConnectionNode):
             tool_calls_parsed = []
             for tc in tool_calls:
                 call = tc.model_dump()
-                call["function"]["arguments"] = json.loads(call["function"]["arguments"])
+                raw_args = call["function"]["arguments"]
+                try:
+                    call["function"]["arguments"] = json.loads(raw_args, strict=False)
+                except json.JSONDecodeError as e:
+                    logger.warning(
+                        "Failed to parse tool_call arguments as JSON for function %s: %s. ",
+                        call["function"].get("name"), e,
+                    )
+                    call["function"]["arguments"] = raw_args
                 tool_calls_parsed.append(call)
             result["tool_calls"] = tool_calls_parsed
 
