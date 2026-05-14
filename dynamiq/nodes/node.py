@@ -1524,7 +1524,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             if streaming.timeout is not None and elapsed >= streaming.timeout:
                 checkpoint_ctx = config.checkpoint.context if config and config.checkpoint else None
                 if checkpoint_ctx:
-                    checkpoint_ctx.save_on_input_timeout(self.id)
+                    try:
+                        checkpoint_ctx.save_on_input_timeout(self.id)
+                    except Exception as e:
+                        logger.warning(f"Node {self.id}: checkpoint save on input-streaming timeout failed: {e}")
                 raise ValueError(f"Input streaming timeout: {streaming.timeout} seconds exceeded.")
 
             remaining = streaming.timeout - elapsed if streaming.timeout is not None else poll_interval
