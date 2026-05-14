@@ -47,7 +47,13 @@ from dynamiq.types.feedback import (
     ApprovalStreamingOutputEventMessage,
     FeedbackMethod,
 )
-from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig, StreamingEntitySource, StreamingEventMessage
+from dynamiq.types.streaming import (
+    STREAMING_EVENT,
+    InputStreamingTimeoutError,
+    StreamingConfig,
+    StreamingEntitySource,
+    StreamingEventMessage,
+)
 from dynamiq.utils import format_value, generate_uuid, merge
 from dynamiq.utils.duration import format_duration
 from dynamiq.utils.jsonpath import filter as jsonpath_filter
@@ -1528,7 +1534,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                         checkpoint_ctx.save_on_input_timeout(self.id)
                     except Exception as e:
                         logger.warning(f"Node {self.id}: checkpoint save on input-streaming timeout failed: {e}")
-                raise ValueError(f"Input streaming timeout: {streaming.timeout} seconds exceeded.")
+                raise InputStreamingTimeoutError(node_id=self.id, timeout=streaming.timeout)
 
             remaining = streaming.timeout - elapsed if streaming.timeout is not None else poll_interval
             wait_time = min(poll_interval, remaining)

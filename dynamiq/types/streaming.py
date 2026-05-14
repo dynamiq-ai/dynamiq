@@ -20,6 +20,21 @@ class StreamingMode(str, Enum):
 STREAMING_EVENT = "streaming"
 
 
+class InputStreamingTimeoutError(TimeoutError):
+    """Raised when a node's input-streaming wait exceeds ``StreamingConfig.timeout``.
+
+    Subclasses the built-in ``TimeoutError`` so generic ``except TimeoutError``
+    handlers catch it idiomatically. Callers that need to distinguish a
+    streaming-input timeout specifically should isinstance-check or, after
+    serialization, match ``error["type"] == "InputStreamingTimeoutError"``.
+    """
+
+    def __init__(self, node_id: str, timeout: float):
+        self.node_id = node_id
+        self.timeout = timeout
+        super().__init__(f"Input streaming timeout: {timeout} seconds exceeded.")
+
+
 class StreamingEntitySource(BaseModel):
     id: str | None = None
     name: str | None = None
