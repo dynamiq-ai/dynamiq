@@ -17,7 +17,7 @@ class Databricks(BaseLLM):
 
     connection: DatabricksConnection
     MODEL_PREFIX = "databricks/"
-    reasoning_effort: ReasoningEffort | None = ReasoningEffort.AUTO
+    reasoning_effort: ReasoningEffort | None = ReasoningEffort.MEDIUM
 
     def __init__(self, **kwargs):
         """Initialize the Databricks LLM node.

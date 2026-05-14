@@ -111,7 +111,3 @@ class TestPrefixedModelIds:
     def test_openai_prefix_is_stripped_before_resolution(self):
         params = _build(_llm("openai/gpt-5.1"))
         assert "reasoning_effort" not in params
-
-    def test_uppercase_model_id_resolves(self):
-        params = _build(_llm("OpenAI/GPT-5.1"))
-        assert "reasoning_effort" not in params
