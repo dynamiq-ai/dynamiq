@@ -109,6 +109,25 @@ def test_replace_messages_round_trips_fc_fields():
     assert restored[2].name == "f"
 
 
+def test_transform_does_not_discard_falsy_but_present_tool_call_id_or_name():
+    """Regression: the prior ``or``-based fallback collapsed an empty-string
+    tool_call_id/name to None and silently fell through to the stash. The
+    serializer only strips ``None``; a present-but-falsy value must round-trip
+    unchanged, matching how tool_calls already handles ``[]``."""
+    msg = Message(
+        role=MessageRole.TOOL,
+        content="ok",
+        metadata={"timestamp": 1.0},
+        tool_call_id="",
+        name="",
+    )
+
+    [restored] = Memory._transform_function_calling_tool_fields([msg])
+
+    assert restored.tool_call_id == ""
+    assert restored.name == ""
+
+
 def test_add_without_fc_fields_does_not_inject_stash_keys():
     """Plain user/assistant messages must not accumulate reserved metadata keys."""
     memory = Memory(backend=InMemory())

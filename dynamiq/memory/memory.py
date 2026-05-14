@@ -172,10 +172,14 @@ class Memory(BaseModel):
                     tool_calls = raw_tool_calls
 
             stashed_tool_call_id = meta.pop(_TOOL_CALL_ID_META_KEY, None)
-            tool_call_id = dumped.get("tool_call_id") or (stashed_tool_call_id or None)
+            tool_call_id = dumped.get("tool_call_id")
+            if tool_call_id is None and stashed_tool_call_id is not None:
+                tool_call_id = stashed_tool_call_id
 
             stashed_name = meta.pop(_NAME_META_KEY, None)
-            name = dumped.get("name") or (stashed_name or None)
+            name = dumped.get("name")
+            if name is None and stashed_name is not None:
+                name = stashed_name
 
             dumped["metadata"] = meta
             dumped["tool_calls"] = tool_calls
