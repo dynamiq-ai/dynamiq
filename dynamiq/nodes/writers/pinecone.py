@@ -6,6 +6,7 @@ from dynamiq.nodes.writers.base import Writer, WriterInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import PineconeVectorStore
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType, PineconeWriterVectorStoreParams
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 
@@ -89,6 +90,7 @@ class PineconeDocumentWriter(Writer, PineconeWriterVectorStoreParams):
             Any exceptions raised by the vector store's write_documents method.
         """
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         documents = input_data.documents
