@@ -2,8 +2,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from dynamiq.connections import AWS as AWSConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms.base import FallbackConfig
+from dynamiq.nodes.llms.bedrock import Bedrock
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.prompts import Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -145,6 +147,44 @@ class TestBuildCompletionParams:
             )
 
             assert "client" not in params
+
+    def test_bedrock_stop_recovery_persists_for_future_calls(self):
+        """Bedrock stop recovery should clear instance-level stop for later calls."""
+        with patch("litellm.completion"), patch("litellm.stream_chunk_builder"):
+            node = Bedrock(
+                model="openai.gpt-oss-20b-1:0",
+                connection=AWSConnection(),
+                prompt=Prompt(messages=[{"role": "user", "content": "Hello"}]),
+                stop=["DONE"],
+            )
+            input_data = MagicMock(messages=None, files=None)
+            config = RunnableConfig(callbacks=[])
+            prompt = node.prompt or Prompt(messages=[], tools=None, response_format=None)
+            messages = node.get_messages(prompt, input_data)
+            initial_params = node._build_completion_params(
+                messages=messages,
+                config=config,
+                prompt=prompt,
+                include_sync_client=True,
+            )
+
+            recovered = node._recover_completion_params(
+                Exception("Model does not support the stopSequences field"),
+                initial_params,
+            )
+
+            assert recovered is not None
+            assert recovered.get("stop") is None
+            assert node.stop is None
+
+            next_params = node._build_completion_params(
+                messages=messages,
+                config=config,
+                prompt=prompt,
+                include_sync_client=True,
+            )
+
+            assert next_params.get("stop") is None
 
 
 class TestBaseLLMAsyncFallback:
