@@ -154,15 +154,24 @@ class SQLite(MemoryBackend):
         except sqlite3.Error as e:
             raise SQLiteError(f"Error adding message to database: {e}") from e
 
-    def get_all(self) -> list[Message]:
-        """Retrieves all messages from the SQLite database."""
+    def get_all(self, limit: int | None = None) -> list[Message]:
+        """Retrieves all messages from the SQLite database.
+
+        Args:
+            limit: Maximum number of messages to return. If provided, returns
+                the most recent ``limit`` messages, still ordered oldest-first
+                (matches the ``InMemory`` backend contract).
+        """
         try:
             query = self.SELECT_ALL_MESSAGES_QUERY.format(index_name=self.index_name)
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(query)
                 rows = cursor.fetchall()
-            return [Message(role=row[1], content=row[2], metadata=json.loads(row[3] or "{}")) for row in rows]
+            messages = [Message(role=row[1], content=row[2], metadata=json.loads(row[3] or "{}")) for row in rows]
+            if limit is not None and len(messages) > limit:
+                return messages[-limit:]
+            return messages
 
         except sqlite3.Error as e:
             raise SQLiteError(f"Error retrieving messages from database: {e}") from e

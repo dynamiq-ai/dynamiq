@@ -7,6 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 from dynamiq.prompts import Message
 from dynamiq.utils import generate_uuid
 
+TOOL_CALLS_META_KEY = "_tool_calls"
+TOOL_CALL_ID_META_KEY = "_tool_call_id"
+NAME_META_KEY = "_name"
+
 
 class MemoryBackend(ABC, BaseModel):
     """Abstract base class for memory storage backends."""
