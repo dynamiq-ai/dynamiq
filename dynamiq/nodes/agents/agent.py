@@ -1232,10 +1232,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
     def _add_observation(self, tool_result: Any) -> None:
         """Add observation to prompt.
 
+        For FC mode, surfaces the stashed `tool_calls` payload (the LLM's
+        attempt) so error observations show what was tried.
+
         Args:
             tool_result: The result from the tool execution.
         """
-        observation = f"\nObservation: {tool_result}\n"
+        attempted = ""
+        if self.inference_mode == InferenceMode.FUNCTION_CALLING:
+            payload = getattr(self, "_pending_assistant_payload", None)
+            tool_calls = payload["llm_result"].output.get("tool_calls") if payload else None
+            if tool_calls:
+                attempted = f"Attempted: {json.dumps(tool_calls, indent=2)}\n"
+        observation = f"\n{attempted}Observation: {tool_result}\n"
         self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
 
     def _emit_tool_observations(
@@ -1412,6 +1421,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             if self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME:
                 action_input = self._validate_parallel_tool_input(action_input)
                 if action_input is None:
+                    # Drop stale FC payload so it can't be flushed against another tool's reply.
+                    self._pending_assistant_payload = None
                     return None
 
             # Check if ContextManagerTool is in the action - if so, skip parallel mode
@@ -1424,6 +1435,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             subagent_error = self._check_subagent_limits(tools_data, action)
             if subagent_error:
                 self._add_observation(subagent_error)
+                self._pending_assistant_payload = None
                 return None
 
             ordered_results: list[dict[str, Any]] = []
