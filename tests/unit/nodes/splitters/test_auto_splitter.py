@@ -1,7 +1,7 @@
 import json
 
 from dynamiq import Workflow
-from dynamiq.components.splitters.auto import _default_rules
+from dynamiq.components.splitters.auto import AutoSplitterRule, AutoSplitterStrategy, _default_rules
 from dynamiq.flows import Flow
 from dynamiq.nodes.converters import TextFileConverter
 from dynamiq.nodes.node import NodeDependency
@@ -87,6 +87,53 @@ def test_auto_splitter_explicit_metadata_strategy_wins():
 
     assert len(chunks) > 1
     assert all(chunk.metadata["splitter_strategy"] == "recursive_character" for chunk in chunks)
+
+
+def test_auto_splitter_combined_rule_requires_matching_metadata():
+    splitter = AutoSplitter(
+        chunk_size=20,
+        chunk_overlap=0,
+        infer_from_content=False,
+        rules=[
+            AutoSplitterRule(
+                strategy=AutoSplitterStrategy.CODE,
+                file_types=["python"],
+                metadata={"category": "tests"},
+            )
+        ],
+    )
+    splitter.init_components()
+    document = Document(
+        content="alpha beta gamma delta epsilon zeta eta theta",
+        metadata={"file_type": "python", "category": "docs"},
+    )
+
+    chunks = splitter.execute(splitter.input_schema(documents=[document]))["documents"]
+
+    assert len(chunks) > 1
+    assert all(chunk.metadata["splitter_strategy"] == "recursive_character" for chunk in chunks)
+
+
+def test_auto_splitter_combined_rule_matches_when_metadata_matches():
+    splitter = AutoSplitter(
+        rules=[
+            AutoSplitterRule(
+                strategy=AutoSplitterStrategy.CODE,
+                file_types=["python"],
+                metadata={"category": "tests"},
+            )
+        ],
+    )
+    splitter.init_components()
+    document = Document(
+        content="def test_example():\n    assert True\n",
+        metadata={"file_type": "python", "category": "tests"},
+    )
+
+    chunks = splitter.execute(splitter.input_schema(documents=[document]))["documents"]
+
+    assert chunks
+    assert all(chunk.metadata["splitter_strategy"] == "code" for chunk in chunks)
 
 
 def test_auto_splitter_serialization_excludes_runtime_splitter():

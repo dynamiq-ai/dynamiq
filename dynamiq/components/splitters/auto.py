@@ -339,20 +339,35 @@ class _DocumentFeatures(BaseModel):
         )
 
     def matches(self, rule: AutoSplitterRule) -> bool:
-        if rule.file_types and self.file_type in rule.file_types:
-            return True
-        if rule.extensions and self.extension in rule.extensions:
-            return True
-        if rule.content_types and self.content_type:
-            if any(
+        has_conditions = False
+
+        if rule.file_types:
+            has_conditions = True
+            if self.file_type not in rule.file_types:
+                return False
+
+        if rule.extensions:
+            has_conditions = True
+            if self.extension not in rule.extensions:
+                return False
+
+        if rule.content_types:
+            has_conditions = True
+            if self.content_type is None:
+                return False
+            if not any(
                 self.content_type == value or self.content_type.startswith(f"{value};") for value in rule.content_types
             ):
-                return True
-        for key, expected in rule.metadata.items():
-            actual = self.metadata.get(key)
-            if actual is None or _normalize_token(actual) != expected:
                 return False
-        return bool(rule.metadata)
+
+        if rule.metadata:
+            has_conditions = True
+            for key, expected in rule.metadata.items():
+                actual = self.metadata.get(key)
+                if actual is None or _normalize_token(actual) != expected:
+                    return False
+
+        return has_conditions
 
 
 _STRATEGY_ALIASES = {
