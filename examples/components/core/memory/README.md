@@ -8,6 +8,8 @@ This directory contains examples demonstrating the usage of the `Memory` module 
 
 - **`demo_memory.py`**: Demonstrates basic memory operations (add, get, search, clear) using the default in-memory storage.
 - **`demo_simple_agent_chat_memory.py`**: Showcases the integration of the `Memory` module with a `Agent` in a chat loop, utilizing in-memory storage.
+- **`demo_ontology_memory_local.py`**: Runs the ontology-memory pipeline locally with an in-memory graph store and a mocked Dynamiq LLM node for structured extraction.
+- **`demo_ontology_memory_chat.py`**: Interactive ontology-memory chat/debug demo with logging and context-block inspection after each turn, backed by a real Dynamiq LLM node.
 
 ### Persistent Storage with Pinecone
 

@@ -1,0 +1,58 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+  neo4j-conn:
+    type: dynamiq.connections.Neo4j
+    uri: ${oc.env:NEO4J_URI}
+    username: ${oc.env:NEO4J_USERNAME}
+    password: ${oc.env:NEO4J_PASSWORD}
+    database: ${oc.env:NEO4J_DATABASE}
+
+nodes:
+  ontology-agent:
+    type: dynamiq.nodes.agents.Agent
+    name: Ontology Memory Agent
+    description: Answers with ontology-backed durable memory.
+    llm:
+      id: ontology-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o-mini
+      temperature: 0
+      max_tokens: 2048
+    tools:
+      - id: ontology-memory-tool
+        type: dynamiq.nodes.tools.ontology_memory.OntologyMemoryTool
+        name: ontology_memory
+        connection: neo4j-conn
+        ensure_schema_on_init: true
+        memory_query_limit: 50
+        llm:
+          id: ontology-extractor-llm
+          type: dynamiq.nodes.llms.OpenAI
+          connection: openai-conn
+          model: gpt-4o-mini
+          temperature: 0
+          max_tokens: 1200
+    role: >
+      You are a helpful assistant with durable ontology memory.
+      For each user message:
+      1. Call ontology_memory with operation=add_episode, content={{input}}, user_id={{user_id}}, session_id={{session_id}}, auto_extract=true.
+      2. Call ontology_memory with operation=get_context_block and the same user/session ids.
+      3. Use the returned context block to answer consistently and mention when preferences or facts were used.
+      Do not invent facts that are not in the memory context block.
+    inference_mode: XML
+    max_loops: 8
+
+flows:
+  ontology-agent-flow:
+    name: Ontology Agent Flow
+    nodes:
+      - ontology-agent
+
+workflows:
+  ontology-agent-workflow:
+    flow: ontology-agent-flow
+    version: 1

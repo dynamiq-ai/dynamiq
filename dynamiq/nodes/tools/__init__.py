@@ -13,6 +13,7 @@ from .human_feedback import HumanFeedbackTool
 from .jina import JinaResponseFormat, JinaScrapeTool, JinaSearchTool
 from .llm_summarizer import SummarizerTool
 from .mcp import MCPServer, MCPTool
+from .ontology_memory import OntologyMemoryTool
 from .parallel_tool_calls import ParallelToolCallsTool
 from .pipedream import Pipedream
 from .preprocess_tool import PreprocessTool

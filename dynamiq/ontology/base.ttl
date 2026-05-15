@@ -1,0 +1,50 @@
+@prefix dyn: <https://dynamiq.ai/ontology#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+dyn:DynamiqOntology a owl:Ontology ;
+    rdfs:label "Dynamiq Base Ontology" ;
+    rdfs:comment "Initial ontology slice for ontology-backed agent memory." .
+
+dyn:Thing a owl:Class .
+dyn:Actor a owl:Class ; rdfs:subClassOf dyn:Thing .
+dyn:ExecutionUnit a owl:Class ; rdfs:subClassOf dyn:Thing .
+dyn:ContextObject a owl:Class ; rdfs:subClassOf dyn:Thing .
+dyn:KnowledgeObject a owl:Class ; rdfs:subClassOf dyn:Thing .
+
+dyn:User a owl:Class ; rdfs:subClassOf dyn:Actor .
+dyn:Agent a owl:Class ; rdfs:subClassOf dyn:Actor .
+dyn:Workflow a owl:Class ; rdfs:subClassOf dyn:ExecutionUnit .
+dyn:Flow a owl:Class ; rdfs:subClassOf dyn:ExecutionUnit .
+dyn:Node a owl:Class ; rdfs:subClassOf dyn:ExecutionUnit .
+dyn:Tool a owl:Class ; rdfs:subClassOf dyn:ExecutionUnit .
+dyn:Session a owl:Class ; rdfs:subClassOf dyn:ContextObject .
+dyn:Message a owl:Class ; rdfs:subClassOf dyn:ContextObject .
+dyn:Episode a owl:Class ; rdfs:subClassOf dyn:ContextObject .
+dyn:Document a owl:Class ; rdfs:subClassOf dyn:ContextObject .
+dyn:Artifact a owl:Class ; rdfs:subClassOf dyn:ContextObject .
+dyn:Entity a owl:Class ; rdfs:subClassOf dyn:KnowledgeObject .
+dyn:Fact a owl:Class ; rdfs:subClassOf dyn:KnowledgeObject .
+dyn:Concept a owl:Class ; rdfs:subClassOf dyn:KnowledgeObject .
+dyn:Preference a owl:Class ; rdfs:subClassOf dyn:KnowledgeObject .
+dyn:Policy a owl:Class ; rdfs:subClassOf dyn:KnowledgeObject .
+dyn:Task a owl:Class ; rdfs:subClassOf dyn:KnowledgeObject .
+
+dyn:uses_tool a owl:ObjectProperty .
+dyn:ran_workflow a owl:ObjectProperty .
+dyn:contains_node a owl:ObjectProperty .
+dyn:depends_on a owl:ObjectProperty .
+dyn:mentioned_entity a owl:ObjectProperty .
+dyn:has_preference a owl:ObjectProperty .
+dyn:assigned_to a owl:ObjectProperty .
+dyn:created_artifact a owl:ObjectProperty .
+dyn:derived_from_episode a owl:ObjectProperty .
+dyn:invalidates a owl:ObjectProperty .
+dyn:supports_fact a owl:ObjectProperty .
+dyn:contradicts_fact a owl:ObjectProperty .
+
+dyn:confidence a owl:DatatypeProperty ; rdfs:range xsd:decimal .
+dyn:validAt a owl:DatatypeProperty ; rdfs:range xsd:dateTime .
+dyn:invalidAt a owl:DatatypeProperty ; rdfs:range xsd:dateTime .
