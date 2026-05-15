@@ -368,8 +368,6 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._tool_input_started: bool = False
         self._current_action_name: str | None = None
         self._fc_object_tool_input: bool = False
-        # True when the current FC `answer` field value is an object rather than a
-        # string (set when `response_format` maps `answer` to an object schema).
         self._fc_object_answer: bool = False
         self._brace_depth: int = 0
         self._brace_scan_index: int = 0
