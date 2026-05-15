@@ -143,16 +143,36 @@ class ContextManagerTool(Node):
         threading. Flattening to a single user message with role-tagged blocks
         avoids that failure mode for summarization, where strict turn structure
         isn't needed.
+
+        For FUNCTION_CALLING assistant turns the structured ``tool_calls``
+        payload (function name + arguments + the model's chain-of-thought
+        emitted inside the arguments) lives outside ``content``. Inline it so
+        the summarizer can see what each tool was asked to do and what the
+        agent decided in the final-answer call.
         """
         parts: list[str] = []
         for m in messages:
             role = getattr(m, "role", None)
             role_str = role.value if hasattr(role, "value") else str(role)
             content = getattr(m, "content", "") or ""
+
+            block_lines: list[str] = [f"[{role_str}]"]
+
+            tool_calls = getattr(m, "tool_calls", None)
+            if tool_calls:
+                for tc in tool_calls:
+                    fn = tc.get("function", {})
+                    name = fn.get("name", "<unknown>")
+                    args = fn.get("arguments", "")
+                    block_lines.append(f"  {name}({args})")
+
             if isinstance(content, str):
-                parts.append(f"[{role_str}]\n{content}")
+                if content:
+                    block_lines.append(content)
             else:
-                parts.append(f"[{role_str}]\n{content!r}")
+                block_lines.append(f"{content!r}")
+
+            parts.append("\n".join(block_lines))
         return Message(content="\n\n".join(parts), role=MessageRole.ASSISTANT, static=True)
 
     def _count_message_tokens(self, messages: list[Message | VisionMessage]) -> int:
