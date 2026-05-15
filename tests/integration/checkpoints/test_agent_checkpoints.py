@@ -1,3 +1,5 @@
+from queue import Queue
+
 import pytest
 from litellm import ModelResponse
 
@@ -5,14 +7,27 @@ from dynamiq import connections, flows
 from dynamiq.checkpoints.backends.filesystem import FileSystem
 from dynamiq.checkpoints.backends.in_memory import InMemory
 from dynamiq.checkpoints.checkpoint import CheckpointStatus
-from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig
+from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig, CheckpointContext
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.tools import Python
+from dynamiq.nodes.tools.human_feedback import (
+    HFStreamingInputEventMessage,
+    HFStreamingInputEventMessageData,
+    HumanFeedbackAction,
+    HumanFeedbackTool,
+)
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.runnables import RunnableConfig, RunnableStatus
-from dynamiq.types.feedback import ApprovalConfig, ApprovalInputData, FeedbackMethod
+from dynamiq.types.feedback import (
+    APPROVAL_EVENT,
+    ApprovalConfig,
+    ApprovalInputData,
+    ApprovalStreamingInputEventMessage,
+    FeedbackMethod,
+)
+from dynamiq.types.streaming import StreamingConfig
 
 TEST_API_KEY = "test-api-key"
 LLM_MODEL = "gpt-4o-mini"
@@ -371,6 +386,147 @@ class TestHITLApprovalCheckpoint:
 
         assert len(pending_notifications) >= 1
         assert pending_notifications[0]["node_id"] == "hitl-python"
+
+
+def _input_timeout_only_config(backend) -> CheckpointConfig:
+    """CheckpointConfig with all save triggers off except input-timeout, so any
+    save_on_input_timeout invocation can be uniquely attributed to this feature."""
+    return CheckpointConfig(
+        enabled=True,
+        backend=backend,
+        checkpoint_after_node_enabled=False,
+        checkpoint_on_failure_enabled=False,
+        checkpoint_on_cancel_enabled=False,
+        checkpoint_mid_agent_loop_enabled=False,
+        checkpoint_on_input_timeout_enabled=True,
+    )
+
+
+class TestInputStreamingTimeoutInAgent:
+    """Streaming-input timeout inside an Agent's tool also fires save_on_input_timeout.
+
+    Mirrors TestInputStreamingTimeoutCheckpoint in test_flow_checkpoints.py — verifies
+    the same callback wiring works when the timing-out node is a tool invoked from an
+    agent's ReAct loop rather than a standalone node in a flow.
+    """
+
+    HF_TOOL_ID = "hitl-input-tool"
+    PY_TOOL_ID = "approval-gated-python"
+    SHORT_STREAMING_TIMEOUT = 0.3
+
+    def _patch_llm_tool_call_then_final(self, mocker, tool_name: str, final_answer: str = "approved"):
+        """LLM emits the tool call on calls #1 and #2, then Final Answer thereafter.
+
+        - First run: call #1 → tool call → tool times out → agent fails.
+        - Resume: call #2 → tool call → tool must actually consume the queued
+          response to succeed → call #3 → Final Answer → agent terminates.
+
+        Returning Final Answer on call #2 would let the agent bypass the tool on
+        resume; emitting the tool call twice forces the queue to be consumed for
+        the resume to succeed.
+        """
+        call_count = {"value": 0}
+
+        def side_effect(stream: bool, *args, **kwargs):
+            call_count["value"] += 1
+            r = ModelResponse()
+            if call_count["value"] <= 2:
+                r["choices"][0]["message"][
+                    "content"
+                ] = f'Thought: I need to ask.\nAction: {tool_name}\nAction Input: {{"input": "approve?"}}'
+            else:
+                r["choices"][0]["message"]["content"] = f"Thought: Done.\nFinal Answer: {final_answer}"
+            return r
+
+        mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=side_effect)
+
+    def test_human_feedback_tool_timeout_checkpoint_recoverable_in_agent(self, mocker):
+        """End-to-end: agent's HumanFeedbackTool times out → on_input_timeout fires
+        with the tool's id → walk-up snapshots agent state → resume completes."""
+        spy = mocker.spy(CheckpointContext, "save_on_input_timeout")
+        queue = Queue()
+        tool = HumanFeedbackTool(
+            id=self.HF_TOOL_ID,
+            name="human-input",
+            action=HumanFeedbackAction.ASK,
+            input_method=FeedbackMethod.STREAM,
+            output_method=FeedbackMethod.STREAM,
+            streaming=StreamingConfig(enabled=True, input_queue=queue, timeout=self.SHORT_STREAMING_TIMEOUT),
+        )
+        agent = Agent(
+            id=AGENT_ID,
+            name="ReAct Agent",
+            llm=make_agent_llm(),
+            tools=[tool],
+            role="Assistant",
+            max_loops=2,
+        )
+        self._patch_llm_tool_call_then_final(mocker, tool_name="human-input")
+
+        backend = InMemory()
+        flow = flows.Flow(id=FLOW_ID, nodes=[agent], checkpoint=_input_timeout_only_config(backend))
+
+        first = flow.run_sync(input_data={"input": "do something"})
+        assert first.status == RunnableStatus.FAILURE
+        assert any(
+            call.args[1] == self.HF_TOOL_ID for call in spy.call_args_list
+        ), "expected save_on_input_timeout to be invoked with the tool's id"
+        saved = backend.get_latest_by_flow(FLOW_ID)
+        assert saved is not None
+        assert AGENT_ID in saved.node_states, "agent state must be snapshotted via walk-up"
+
+        queue.put(
+            HFStreamingInputEventMessage(
+                entity_id=self.HF_TOOL_ID,
+                data=HFStreamingInputEventMessageData(content="approved"),
+            ).model_dump_json()
+        )
+        second = flow.run_sync(input_data={"input": "do something"}, resume_from=saved.id)
+        assert second.status == RunnableStatus.SUCCESS
+
+    def test_streaming_approval_tool_timeout_checkpoint_recoverable_in_agent(self, mocker):
+        """End-to-end: agent's Python tool with ApprovalConfig(STREAM) times out →
+        on_input_timeout fires → walk-up snapshots agent state → resume completes."""
+        spy = mocker.spy(CheckpointContext, "save_on_input_timeout")
+        queue = Queue()
+        tool = Python(
+            id=self.PY_TOOL_ID,
+            name="approval-python",
+            code='def run(input_data): return {"result": "ran"}',
+            approval=ApprovalConfig(enabled=True, feedback_method=FeedbackMethod.STREAM),
+            streaming=StreamingConfig(enabled=True, input_queue=queue, timeout=self.SHORT_STREAMING_TIMEOUT),
+        )
+        agent = Agent(
+            id=AGENT_ID,
+            name="ReAct Agent",
+            llm=make_agent_llm(),
+            tools=[tool],
+            role="Assistant",
+            max_loops=2,
+        )
+        self._patch_llm_tool_call_then_final(mocker, tool_name="approval-python")
+
+        backend = InMemory()
+        flow = flows.Flow(id=FLOW_ID, nodes=[agent], checkpoint=_input_timeout_only_config(backend))
+
+        first = flow.run_sync(input_data={"input": "do something"})
+        assert first.status == RunnableStatus.FAILURE
+        assert any(
+            call.args[1] == self.PY_TOOL_ID for call in spy.call_args_list
+        ), "expected save_on_input_timeout to be invoked with the tool's id"
+        saved = backend.get_latest_by_flow(FLOW_ID)
+        assert saved is not None
+        assert AGENT_ID in saved.node_states, "agent state must be snapshotted via walk-up"
+
+        queue.put(
+            ApprovalStreamingInputEventMessage(
+                entity_id=self.PY_TOOL_ID,
+                event=APPROVAL_EVENT,
+                data=ApprovalInputData(is_approved=True, feedback=""),
+            ).model_dump_json()
+        )
+        second = flow.run_sync(input_data={"input": "do something"}, resume_from=saved.id)
+        assert second.status == RunnableStatus.SUCCESS
 
 
 class TestAgentFlowRunIsolation:

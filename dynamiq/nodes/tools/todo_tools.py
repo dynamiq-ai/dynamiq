@@ -16,6 +16,7 @@ from dynamiq.nodes.tools.file_tools import RESERVED_AGENT_PATH_PREFIX
 from dynamiq.runnables import RunnableConfig
 from dynamiq.sandboxes.base import Sandbox
 from dynamiq.storages.file.base import FileStore
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 
@@ -162,6 +163,7 @@ RULES:
         self, input_data: TodoWriteInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         config = ensure_config(config)
+        check_cancellation(config)
         self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 

@@ -20,6 +20,7 @@ from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.nodes.tools.utils import guess_mime_type_from_bytes, sanitize_filename
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 DESCRIPTION_STAGEHAND = """## Stagehand Tool
@@ -462,7 +463,12 @@ class Stagehand(ConnectionNode):
         """
         return self._run_async(self.execute_async(input_data, config, **kwargs))
 
-    async def get_downloads_via_sdk(self, session_id: str, max_retry_sec: int = 20) -> bytes:
+    async def get_downloads_via_sdk(
+        self,
+        session_id: str,
+        max_retry_sec: int = 20,
+        config: RunnableConfig | None = None,
+    ) -> bytes:
         """
         Retrieve the downloads archive for the given session.
         Retries until content is non-empty or timeout.
@@ -478,6 +484,7 @@ class Stagehand(ConnectionNode):
         interval = 2
 
         while elapsed < max_retry_sec:
+            check_cancellation(config)
             response = await self._browserbase_client.sessions.downloads.list(session_id)
             data = await response.read()
 
@@ -522,6 +529,7 @@ class Stagehand(ConnectionNode):
         """
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
         config = ensure_config(config)
+        check_cancellation(config)
         await self._init_client(input_data.files)
 
         tool_data = {"tool_session_id": self.client.session_id}
@@ -543,7 +551,7 @@ class Stagehand(ConnectionNode):
             elif input_data.action_type == StagehandActionType.ACT:
                 result = await self.client.page.act(input_data.instruction, **payload)
                 result = result.model_dump()
-                zip_data = await self.get_downloads_via_sdk(self.client.session_id)
+                zip_data = await self.get_downloads_via_sdk(self.client.session_id, config=config)
                 files = self.extract_files_from_zip(zip_data) if zip_data else []
             elif input_data.action_type == StagehandActionType.GOTO:
                 if input_data.url is None:

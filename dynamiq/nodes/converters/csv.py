@@ -5,6 +5,7 @@ from typing import Any, ClassVar, Iterator, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dynamiq.nodes.node import Node, NodeGroup, RunnableConfig, ensure_config
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 
@@ -123,6 +124,7 @@ class CSVConverter(Node):
 
         if input_data.file_paths:
             for path in input_data.file_paths:
+                check_cancellation(config)
                 try:
                     with open(path, encoding="utf-8") as csv_file:
                         reader = csv.DictReader(csv_file, delimiter=delimiter)
@@ -142,6 +144,7 @@ class CSVConverter(Node):
 
         if input_data.files:
             for file_obj in input_data.files:
+                check_cancellation(config)
                 source_name = getattr(file_obj, "name", "in-memory file")
                 try:
                     if isinstance(file_obj, bytes):

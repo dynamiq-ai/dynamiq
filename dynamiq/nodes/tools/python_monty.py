@@ -8,6 +8,7 @@ from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.tools.python import PythonInputSchema
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 _INPUTS_VAR = "dynamiq_monty_inputs_"
@@ -103,6 +104,7 @@ class PythonMonty(Node):
             f"{input_data.model_dump() if hasattr(input_data, 'model_dump') else input_data}"
         )
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         try:

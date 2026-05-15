@@ -12,6 +12,7 @@ from dynamiq.nodes.agents.utils import is_image_file
 from dynamiq.nodes.node import ConnectionNode, ErrorHandling, ensure_config
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.cancellation import check_cancellation
 
 SUPPORTED_MIME_TYPES = [
     "application/pdf",
@@ -162,6 +163,8 @@ class MistralOCR(ConnectionNode):
         """
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        check_cancellation(config)
 
         file = input_data.file
 
