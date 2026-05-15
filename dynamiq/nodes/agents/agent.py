@@ -1681,6 +1681,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         "with a JSON 'Action Input:' or a final 'Answer:' section."
                     )
                 elif self.inference_mode == InferenceMode.FUNCTION_CALLING:
+                    tool_calls = llm_result.output.get("tool_calls") if llm_result else None
+                    if tool_calls and not llm_generated_output:
+                        llm_generated_output = json.dumps(tool_calls, indent=2)
                     extra_guidance = (
                         "You MUST respond by calling a function — never plain text. "
                         "Call a tool with 'thought' and 'action_input', "
