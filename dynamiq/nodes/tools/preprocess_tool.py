@@ -7,6 +7,7 @@ from dynamiq.components.splitters.document import DocumentSplitter as DocumentSp
 from dynamiq.nodes.node import Node, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types import Document
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 PREPROCESS_TOOL_DESCRIPTION = """Preprocesses text by splitting it into smaller parts.
@@ -71,6 +72,7 @@ class PreprocessTool(Node):
             dict[str, Any]: A dictionary containing the split documents under the key "documents".
         """
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         documents = input_data.documents

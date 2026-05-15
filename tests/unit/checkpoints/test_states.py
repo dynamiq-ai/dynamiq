@@ -323,6 +323,27 @@ class TestHITLCheckpointContext:
         ctx = CheckpointContext()
         ctx.save_mid_run("agent-1")
 
+    def test_save_on_input_timeout_callback(self):
+        timeout_calls = []
+        ctx = CheckpointContext(on_input_timeout=lambda nid: timeout_calls.append(nid))
+
+        ctx.save_on_input_timeout("node-1")
+        ctx.save_on_input_timeout("node-2")
+
+        assert timeout_calls == ["node-1", "node-2"]
+
+    def test_save_on_input_timeout_noop_when_no_callback(self):
+        ctx = CheckpointContext()
+        ctx.save_on_input_timeout("node-1")
+
+    def test_checkpoint_on_input_timeout_enabled_default(self):
+        cfg = CheckpointConfig()
+        assert cfg.checkpoint_on_input_timeout_enabled is True
+
+    def test_checkpoint_on_input_timeout_can_be_disabled(self):
+        cfg = CheckpointConfig(checkpoint_on_input_timeout_enabled=False)
+        assert cfg.checkpoint_on_input_timeout_enabled is False
+
 
 class TestNodeApprovalCheckpoint:
     """Tests for Node approval response checkpoint persistence."""

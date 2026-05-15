@@ -4,6 +4,7 @@ from dynamiq.nodes.writers.base import Writer, WriterInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import MilvusVectorStore
 from dynamiq.storages.vector.milvus.milvus import MilvusWriterVectorStoreParams
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 
@@ -67,6 +68,7 @@ class MilvusDocumentWriter(Writer, MilvusWriterVectorStoreParams):
             Any exceptions raised by the vector store's write_documents method.
         """
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         documents = input_data.documents

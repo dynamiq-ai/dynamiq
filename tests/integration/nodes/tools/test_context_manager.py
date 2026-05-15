@@ -3,9 +3,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from dynamiq.nodes.llms.base import BaseLLM
+from dynamiq.nodes.node import ErrorHandling
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.runnables import RunnableStatus
+from dynamiq.types.streaming import StreamingConfig
 
 
 def _mock_tool(outputs):
@@ -17,6 +19,8 @@ def _mock_tool(outputs):
     llm.get_token_limit.return_value = 128_000
     llm.is_postponed_component_init = False
     llm.to_dict.return_value = {}
+    llm.streaming = StreamingConfig()
+    llm.error_handling = ErrorHandling()
     llm.run.side_effect = [MagicMock(status=RunnableStatus.SUCCESS, output=out) for out in outputs]
     return ContextManagerTool(llm=llm, max_retries=3), llm
 

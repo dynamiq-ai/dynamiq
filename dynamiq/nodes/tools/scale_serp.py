@@ -10,6 +10,7 @@ from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
 DESCRIPTION_SERP = """Performs web search with support for web, news, images, and video results.
@@ -220,6 +221,7 @@ class ScaleSerpTool(ConnectionNode):
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         request_kwargs, search_type, query, url = self._build_request_kwargs(input_data)

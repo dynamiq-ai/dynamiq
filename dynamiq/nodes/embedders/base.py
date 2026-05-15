@@ -6,6 +6,7 @@ from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types import Document
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import TRUNCATE_EMBEDDINGS_LIMIT
 
@@ -38,6 +39,7 @@ class DocumentEmbedder(ConnectionNode):
             The output from the document_embedder component, typically the computed embeddings.
         """
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         output = self.document_embedder.embed_documents(input_data.documents)
@@ -50,6 +52,7 @@ class DocumentEmbedder(ConnectionNode):
     ):
         """Async mirror of :meth:`execute` — uses the component's async embed path."""
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         output = await self.document_embedder.embed_documents_async(input_data.documents)
@@ -100,6 +103,7 @@ class TextEmbedder(ConnectionNode):
             dict: A dictionary containing the embedding and the original query.
         """
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         raw_output = self.text_embedder.embed_text(input_data.query)
         logger.debug(f"{self.name}: {raw_output['meta']}")
@@ -114,6 +118,7 @@ class TextEmbedder(ConnectionNode):
     ):
         """Async mirror of :meth:`execute` — uses the component's async embed path."""
         config = ensure_config(config)
+        check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         raw_output = await self.text_embedder.embed_text_async(input_data.query)
         logger.debug(f"{self.name}: {raw_output['meta']}")
