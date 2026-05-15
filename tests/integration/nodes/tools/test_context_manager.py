@@ -210,3 +210,184 @@ def test_fc_split_history_preserves_fc_protocol(monkeypatch):
     assert (
         not unmatched_replies
     ), f"preserve contains TOOL messages without parent assistant tool_calls: {unmatched_replies}"
+
+
+def _sequential_fc_history() -> list[Message]:
+    """Single-tool FC chain: user → assistant(call A) → tool(A) → assistant(call B) → tool(B) → final."""
+    return [
+        Message(role=MessageRole.USER, content="What is 2+2 and then 3+3?"),
+        Message(
+            role=MessageRole.ASSISTANT,
+            content="Calling: calc",
+            tool_calls=[
+                {"id": "s_A", "type": "function", "function": {"name": "calc", "arguments": '{"x": "2+2"}'}},
+            ],
+        ),
+        Message(role=MessageRole.TOOL, content="4", tool_call_id="s_A", name="calc"),
+        Message(
+            role=MessageRole.ASSISTANT,
+            content="Calling: calc",
+            tool_calls=[
+                {"id": "s_B", "type": "function", "function": {"name": "calc", "arguments": '{"x": "3+3"}'}},
+            ],
+        ),
+        Message(role=MessageRole.TOOL, content="6", tool_call_id="s_B", name="calc"),
+        Message(
+            role=MessageRole.ASSISTANT,
+            content="Calling: provide_final_answer",
+            tool_calls=[
+                {
+                    "id": "s_FA",
+                    "type": "function",
+                    "function": {"name": "provide_final_answer", "arguments": '{"answer": "4 and 6"}'},
+                },
+            ],
+        ),
+        Message(role=MessageRole.TOOL, content="Acknowledged.", tool_call_id="s_FA", name="provide_final_answer"),
+    ]
+
+
+def _mixed_fa_with_real_tool_history() -> list[Message]:
+    """One assistant turn with BOTH a real tool call AND provide_final_answer in parallel.
+
+    Mirrors `_append_assistant_message`: payload contains both, the FA stub
+    TOOL is appended immediately, the real tool reply follows after execution.
+    """
+    return [
+        Message(role=MessageRole.USER, content="Search and finish."),
+        Message(
+            role=MessageRole.ASSISTANT,
+            content="Calling: web_search, provide_final_answer",
+            tool_calls=[
+                {"id": "m_real", "type": "function", "function": {"name": "web_search", "arguments": '{"q": "x"}'}},
+                {
+                    "id": "m_fa",
+                    "type": "function",
+                    "function": {"name": "provide_final_answer", "arguments": '{"answer": "done"}'},
+                },
+            ],
+        ),
+        Message(role=MessageRole.TOOL, content="Acknowledged.", tool_call_id="m_fa", name="provide_final_answer"),
+        Message(role=MessageRole.TOOL, content='[{"title": "..."}]', tool_call_id="m_real", name="web_search"),
+    ]
+
+
+def _multi_block_fc_history() -> list[Message]:
+    """Multiple FC blocks: parallel + single + final, to stress boundary-between-blocks cases."""
+    return [
+        Message(role=MessageRole.USER, content="Multi-step."),
+        Message(
+            role=MessageRole.ASSISTANT,
+            content="Calling: t1, t2",
+            tool_calls=[
+                {"id": "b1_a", "type": "function", "function": {"name": "t1", "arguments": "{}"}},
+                {"id": "b1_b", "type": "function", "function": {"name": "t2", "arguments": "{}"}},
+            ],
+        ),
+        Message(role=MessageRole.TOOL, content="r1_a", tool_call_id="b1_a", name="t1"),
+        Message(role=MessageRole.TOOL, content="r1_b", tool_call_id="b1_b", name="t2"),
+        Message(
+            role=MessageRole.ASSISTANT,
+            content="Calling: t3",
+            tool_calls=[
+                {"id": "b2_a", "type": "function", "function": {"name": "t3", "arguments": "{}"}},
+            ],
+        ),
+        Message(role=MessageRole.TOOL, content="r2", tool_call_id="b2_a", name="t3"),
+        Message(
+            role=MessageRole.ASSISTANT,
+            content="Calling: provide_final_answer",
+            tool_calls=[
+                {
+                    "id": "b3_fa",
+                    "type": "function",
+                    "function": {"name": "provide_final_answer", "arguments": '{"answer": "ok"}'},
+                },
+            ],
+        ),
+        Message(role=MessageRole.TOOL, content="Acknowledged.", tool_call_id="b3_fa", name="provide_final_answer"),
+    ]
+
+
+def _assert_protocol_valid(messages: list[Message]) -> None:
+    """End-to-end FC protocol check: every `role=TOOL` has a preceding
+    `assistant.tool_calls[*].id == tool_call_id`, and that mapping is unique."""
+    seen_call_ids: set[str] = set()
+    pending: dict[str, int] = {}
+
+    for idx, msg in enumerate(messages):
+        if msg.role == MessageRole.ASSISTANT and msg.tool_calls:
+            for tc in msg.tool_calls:
+                tc_id = tc["id"]
+                assert tc_id not in seen_call_ids, f"duplicate tool_call_id {tc_id!r} at index {idx}"
+                seen_call_ids.add(tc_id)
+                pending[tc_id] = idx
+        elif msg.role == MessageRole.TOOL:
+            tc_id = msg.tool_call_id
+            assert tc_id is not None, f"tool message at index {idx} missing tool_call_id"
+            assert tc_id in pending, (
+                f"tool message at index {idx} with tool_call_id {tc_id!r} has no "
+                f"preceding assistant.tool_calls (orphan reply)"
+            )
+            del pending[tc_id]
+
+
+def _make_history_manager_agent(messages: list[Message], max_preserved_tokens: int):
+    """Build a minimal stub that satisfies HistoryManagerMixin's expectations."""
+    from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
+    from dynamiq.nodes.agents.utils import SummarizationConfig
+    from dynamiq.prompts import Prompt
+
+    class _Agent(HistoryManagerMixin):
+        def __init__(self):
+            self._prompt = Prompt(messages=[Message(role=MessageRole.SYSTEM, content="sys")] + messages)
+            self._history_offset = 1
+            self.llm = MagicMock()
+            self.llm.model = "gpt-4o-mini"
+            self.llm.get_token_limit = MagicMock(return_value=128_000)
+            self.name = "test-agent"
+            self.id = "test-id"
+            self.summarization_config = SummarizationConfig(
+                enabled=True,
+                max_preserved_tokens=max_preserved_tokens,
+                max_token_context_length=None,
+                context_usage_ratio=0.7,
+            )
+
+    return _Agent()
+
+
+@pytest.mark.parametrize(
+    "history_factory, max_preserved_tokens",
+    [
+        pytest.param(_build_fc_history, 20, id="parallel_tight"),
+        pytest.param(_build_fc_history, 40, id="parallel_mid"),
+        pytest.param(_build_fc_history, 200, id="parallel_loose"),
+        pytest.param(_sequential_fc_history, 20, id="sequential_tight"),
+        pytest.param(_sequential_fc_history, 40, id="sequential_mid"),
+        pytest.param(_sequential_fc_history, 200, id="sequential_loose"),
+        pytest.param(_mixed_fa_with_real_tool_history, 20, id="mixed_fa_tight"),
+        pytest.param(_mixed_fa_with_real_tool_history, 200, id="mixed_fa_loose"),
+        pytest.param(_multi_block_fc_history, 15, id="multi_block_tight"),
+        pytest.param(_multi_block_fc_history, 60, id="multi_block_mid"),
+        pytest.param(_multi_block_fc_history, 100, id="multi_block_loose"),
+        pytest.param(_multi_block_fc_history, 1000, id="multi_block_fits"),
+    ],
+)
+def test_fc_summarization_preserves_protocol_across_scenarios(history_factory, max_preserved_tokens):
+    """Sweep FC patterns × budgets and assert the compacted history is protocol-valid."""
+    agent = _make_history_manager_agent(history_factory(), max_preserved_tokens)
+
+    _, to_preserve = agent._split_history()
+    agent._compact_history(summary="<summary>", preserved=to_preserve)
+
+    final_messages = agent._prompt.messages
+
+    assert final_messages and final_messages[0].role == MessageRole.SYSTEM, "system prefix lost"
+
+    _assert_protocol_valid(final_messages[1:])
+
+    if len(final_messages) > 1:
+        assert (
+            final_messages[1].role != MessageRole.TOOL
+        ), "message immediately after system prefix is role=TOOL (orphan)"

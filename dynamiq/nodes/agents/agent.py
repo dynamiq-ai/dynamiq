@@ -244,6 +244,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self._streaming_tool_run_id = None
         self._streaming_tool_run_ids = []
         self._pending_fc_tool_call_ids: list[str] = []
+        self._pending_assistant_payload: dict | None = None
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -687,6 +688,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     )
         elif llm_generated_output:
             self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output, static=True))
+
+    def _flush_pending_assistant_payload(self) -> None:
+        """Append the deferred FC assistant payload, if any."""
+        payload = getattr(self, "_pending_assistant_payload", None)
+        if payload is None:
+            return
+        self._pending_assistant_payload = None
+        self._append_assistant_message(payload["llm_result"], payload["llm_generated_output"])
 
     def _rollback_orphan_fc_payload(self) -> None:
         """Remove the assistant(tool_calls=[…]) and any inline FA stub replies
@@ -1223,10 +1232,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
     def _add_observation(self, tool_result: Any) -> None:
         """Add observation to prompt.
 
+        For FC mode, surfaces the stashed `tool_calls` payload (the LLM's
+        attempt) so error observations show what was tried.
+
         Args:
             tool_result: The result from the tool execution.
         """
-        observation = f"\nObservation: {tool_result}\n"
+        attempted = ""
+        if self.inference_mode == InferenceMode.FUNCTION_CALLING:
+            payload = getattr(self, "_pending_assistant_payload", None)
+            tool_calls = payload["llm_result"].output.get("tool_calls") if payload else None
+            if tool_calls:
+                attempted = f"Attempted: {json.dumps(tool_calls, indent=2)}\n"
+        observation = f"\n{attempted}Observation: {tool_result}\n"
         self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
 
     def _emit_tool_observations(
@@ -1243,6 +1261,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         function-calling protocol. Falls back to the legacy ``role: "user"``
         ``Observation: ...`` message in all other cases.
         """
+        self._flush_pending_assistant_payload()
         pending_ids = getattr(self, "_pending_fc_tool_call_ids", None) or []
         if self.inference_mode == InferenceMode.FUNCTION_CALLING and pending_ids:
             if ordered_results and len(ordered_results) == len(pending_ids):
@@ -1402,6 +1421,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             if self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME:
                 action_input = self._validate_parallel_tool_input(action_input)
                 if action_input is None:
+                    # Drop stale FC payload so it can't be flushed against another tool's reply.
+                    self._pending_assistant_payload = None
                     return None
 
             # Check if ContextManagerTool is in the action - if so, skip parallel mode
@@ -1414,6 +1435,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             subagent_error = self._check_subagent_limits(tools_data, action)
             if subagent_error:
                 self._add_observation(subagent_error)
+                self._pending_assistant_payload = None
                 return None
 
             ordered_results: list[dict[str, Any]] = []
@@ -1575,9 +1597,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
                 logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num}, reasoning:\n{llm_reasoning}...")
 
-                # Append assistant message to conversation history BEFORE parsing
-                # This ensures the LLM can see its own output during error recovery
-                self._append_assistant_message(llm_result, llm_generated_output)
+                # Defer FC assistant append until tool execution succeeds; non-FC
+                # modes have no `tool_calls` payload so an immediate append is safe.
+                if self.inference_mode == InferenceMode.FUNCTION_CALLING:
+                    self._pending_assistant_payload = {
+                        "llm_result": llm_result,
+                        "llm_generated_output": llm_generated_output,
+                    }
+                else:
+                    self._append_assistant_message(llm_result, llm_generated_output)
 
                 # Parse LLM output based on inference mode
                 match self.inference_mode:
@@ -1592,6 +1620,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 # Handle final answer
                 if result[1] == "final_answer":
+                    self._flush_pending_assistant_payload()
                     self._resolve_requested_output_files(strict=True)
                     final_answer = result[2]
                     if self.response_format is not None:
@@ -1650,7 +1679,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             except ActionParsingException as e:
                 self._emit_tool_input_error(e, loop_num, config, **kwargs)
-                self._rollback_orphan_fc_payload()
 
                 extra_guidance = None
                 if self.inference_mode == InferenceMode.XML:
@@ -1665,6 +1693,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         "with a JSON 'Action Input:' or a final 'Answer:' section."
                     )
                 elif self.inference_mode == InferenceMode.FUNCTION_CALLING:
+                    tool_calls = llm_result.output.get("tool_calls") if llm_result else None
+                    if tool_calls and not llm_generated_output:
+                        llm_generated_output = json.dumps(tool_calls, indent=2)
                     extra_guidance = (
                         "You MUST respond by calling a function — never plain text. "
                         "Call a tool with 'thought' and 'action_input', "
