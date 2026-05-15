@@ -326,7 +326,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     @model_validator(mode="after")
     def validate_inference_mode(self):
-        """Validate whether specified model can be inferenced in provided mode."""
+        """Validate whether specified model can be inferenced in provided mode.
+
+        When ``response_format`` is set together with DEFAULT or XML inference
+        modes, auto-switch to STRUCTURED_OUTPUT — those text-shaped modes have
+        no native schema enforcement, so STRUCTURED_OUTPUT is the right default
+        for users who declared a typed response_format.
+        """
+        if self.response_format is not None and self.inference_mode in (
+            InferenceMode.DEFAULT,
+            InferenceMode.XML,
+        ):
+            self.inference_mode = InferenceMode.STRUCTURED_OUTPUT
+
         match self.inference_mode:
             case InferenceMode.FUNCTION_CALLING:
                 if not supports_function_calling(model=self.llm.model):
