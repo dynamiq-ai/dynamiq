@@ -367,7 +367,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         Runs after auto-tool validators so self.tools reflects the final set
         (including any ContextManagerTool / TodoWriteTool appended above).
+        When ``response_format`` is set together with DEFAULT or XML
+        inference modes, auto-switch to STRUCTURED_OUTPUT.
         """
+        if self.response_format is not None and self.inference_mode in (
+            InferenceMode.DEFAULT,
+            InferenceMode.XML,
+        ):
+            self.inference_mode = InferenceMode.STRUCTURED_OUTPUT
+
         model = self.llm.model
         match self.inference_mode:
             case InferenceMode.FUNCTION_CALLING:

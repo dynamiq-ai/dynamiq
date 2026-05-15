@@ -368,6 +368,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._tool_input_started: bool = False
         self._current_action_name: str | None = None
         self._fc_object_tool_input: bool = False
+        self._fc_object_answer: bool = False
         self._brace_depth: int = 0
         self._brace_scan_index: int = 0
         self._so_action_emitted: bool = False
@@ -473,6 +474,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._answer_started = False
         self._current_action_name = None
         self._fc_object_tool_input = False
+        self._fc_object_answer = False
         self._brace_depth = 0
         self._brace_scan_index = 0
         self._state_has_emitted = {
@@ -1048,7 +1050,10 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             self._current_state = state
             self._state_start_index = field_start
             self._state_last_emit_index = max(self._state_last_emit_index, field_start)
-            self._fc_object_tool_input = True
+            if state == StreamingState.ANSWER:
+                self._fc_object_answer = True
+            else:
+                self._fc_object_tool_input = True
             self._brace_depth = 1
             self._brace_scan_index = field_start + 1
             return True
@@ -1066,7 +1071,11 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             )
 
         if self._answer_started:
-            self._initialize_json_field_state(buf, JSONStreamingField.ANSWER.value, StreamingState.ANSWER)
+            if not self._initialize_json_field_state(buf, JSONStreamingField.ANSWER.value, StreamingState.ANSWER):
+                if self._current_state is None:
+                    self._initialize_json_object_field_state(
+                        buf, JSONStreamingField.ANSWER.value, StreamingState.ANSWER
+                    )
 
         if self._tool_input_started and not self._answer_started:
             if not self._initialize_json_field_state(
@@ -1083,6 +1092,13 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             self._emit_json_object_field_content(buf, StreamingState.TOOL_INPUT)
         else:
             self._emit_json_field_content(buf, StreamingState.TOOL_INPUT)
+
+    def _emit_answer_state(self, buf: str) -> None:
+        """Emit content for the current ANSWER state."""
+        if self._fc_object_answer:
+            self._emit_json_object_field_content(buf, StreamingState.ANSWER)
+        else:
+            self._emit_json_field_content(buf, StreamingState.ANSWER)
 
     def _process_json_mode(self, final_answer_only: bool) -> None:
         """
@@ -1106,7 +1122,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                 # before _reset_tool_call_state clears the buffer on the next parallel call.
                 self._process_json_mode(final_answer_only)
         elif self._current_state == StreamingState.ANSWER:
-            self._emit_json_field_content(buf, StreamingState.ANSWER)
+            self._emit_answer_state(buf)
         elif self._current_state == StreamingState.TOOL_INPUT:
             self._emit_tool_input_state(buf)
 
