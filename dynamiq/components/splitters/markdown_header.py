@@ -68,15 +68,25 @@ class MarkdownHeaderSplitterComponent(BaseModel):
             if content.strip():
                 chunks.append({"content": content, "metadata": dict(metadata)})
 
+        def append_content_line(line: str, stripped: str) -> None:
+            if self.return_each_line and stripped:
+                chunks.append({"content": line, "metadata": dict(active_headers)})
+            else:
+                current_lines.append(line)
+
         for line in lines:
             stripped = line.strip()
             if not in_code_block:
                 opening_fence = self._opening_code_fence(stripped)
                 if opening_fence:
                     in_code_block = True
+                    append_content_line(line, stripped)
+                    continue
             elif self._is_closing_code_fence(stripped, opening_fence):
                 in_code_block = False
                 opening_fence = ""
+                append_content_line(line, stripped)
+                continue
 
             header_match = None
             if not in_code_block:

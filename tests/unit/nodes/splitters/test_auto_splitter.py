@@ -1,6 +1,7 @@
 import json
 
 from dynamiq import Workflow
+from dynamiq.components.splitters.auto import _default_rules
 from dynamiq.flows import Flow
 from dynamiq.nodes.converters import TextFileConverter
 from dynamiq.nodes.node import NodeDependency
@@ -97,6 +98,12 @@ def test_auto_splitter_serialization_excludes_runtime_splitter():
     assert "splitter" not in serialized
     assert serialized["chunk_size"] == 50
     assert serialized["rules"]
+
+
+def test_auto_splitter_uses_component_default_rules():
+    splitter = AutoSplitter()
+
+    assert splitter.rules == _default_rules()
 
 
 def test_auto_splitter_yaml_roundtrip(tmp_path):

@@ -1,3 +1,4 @@
+from dynamiq.components.splitters.markdown_header import MarkdownHeaderSplitterComponent
 from dynamiq.nodes.splitters.markdown_header import MarkdownHeaderSplitter
 from dynamiq.types import Document
 
@@ -27,6 +28,7 @@ def test_markdown_header_splitter_ignores_headers_inside_code_fence():
     chunks = splitter.execute(splitter.input_schema(documents=[Document(content=text)]))["documents"]
     assert len(chunks) == 1
     assert chunks[0].metadata["h1"] == "Real"
+    assert "# Fake" in chunks[0].content
 
 
 def test_markdown_header_splitter_does_not_close_fences_with_info_strings():
@@ -39,3 +41,9 @@ def test_markdown_header_splitter_does_not_close_fences_with_info_strings():
     assert len(chunks) == 1
     assert chunks[0].metadata["h1"] == "Real"
     assert "# Fake B" in chunks[0].content
+
+
+def test_markdown_header_splitter_uses_component_default_headers():
+    splitter = MarkdownHeaderSplitter()
+
+    assert splitter.headers_to_split_on == MarkdownHeaderSplitterComponent.DEFAULT_HEADERS_TO_SPLIT_ON

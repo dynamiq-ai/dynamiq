@@ -26,7 +26,7 @@ class MarkdownHeaderSplitter(Node):
     description: str = "Splits Markdown documents on header tags and propagates header path to metadata."
 
     headers_to_split_on: list[tuple[str, str]] = Field(
-        default_factory=lambda: [("#", "h1"), ("##", "h2"), ("###", "h3"), ("####", "h4")],
+        default_factory=lambda: list(MarkdownHeaderSplitterComponent.DEFAULT_HEADERS_TO_SPLIT_ON),
         description="Pairs of (markdown-prefix, metadata-key).",
     )
     strip_headers: bool = Field(default=True, description="Drop the header line itself from chunks.")

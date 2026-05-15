@@ -2,7 +2,12 @@ from typing import Any, ClassVar
 
 from pydantic import Field
 
-from dynamiq.components.splitters.auto import AutoSplitterComponent, AutoSplitterRule, AutoSplitterStrategy
+from dynamiq.components.splitters.auto import (
+    AutoSplitterComponent,
+    AutoSplitterRule,
+    AutoSplitterStrategy,
+    _default_rules,
+)
 from dynamiq.components.splitters.code import CodeParser
 from dynamiq.components.splitters.language import Language
 from dynamiq.nodes.splitters.base import BaseSplitterNode
@@ -17,7 +22,7 @@ class AutoSplitter(BaseSplitterNode):
     description: str = "Routes documents to structure-aware splitters and falls back to recursive splitting."
 
     rules: list[AutoSplitterRule] = Field(
-        default_factory=lambda: AutoSplitterComponent().rules,
+        default_factory=_default_rules,
         description="Serializable rules used to select splitter strategies.",
     )
     fallback_strategy: AutoSplitterStrategy = Field(
