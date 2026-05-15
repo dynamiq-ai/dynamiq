@@ -77,8 +77,6 @@ class Dynamiq(MemoryBackend):
             data_payload["tool_call_id"] = message.tool_call_id
         if message.name is not None:
             data_payload["name"] = message.name
-        if metadata:
-            data_payload["metadata"] = metadata
 
         payload: dict[str, Any] = {
             "user_id": effective_user_id,
@@ -86,6 +84,8 @@ class Dynamiq(MemoryBackend):
             "type": "message",
             "data": data_payload,
         }
+        if metadata:
+            payload["metadata"] = metadata
 
         logger.debug("Creating remote memory item for memory_id=%s", self.memory_id)
         self._request(

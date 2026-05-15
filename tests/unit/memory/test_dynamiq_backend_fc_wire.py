@@ -81,6 +81,24 @@ def test_add_strips_memory_layer_stash_from_metadata(mocker):
     assert "_name" not in sent_metadata
 
 
+def test_add_sends_metadata_at_top_level_not_inside_data(mocker):
+    """Metadata rides as a sibling of `data`, not inside it — the API stores it separately."""
+    backend = _make_backend(mocker)
+    request = mocker.patch.object(backend, "_request", return_value=None)
+
+    msg = Message(
+        role=MessageRole.USER,
+        content="hi",
+        metadata={"user_id": "u1", "session_id": "s1", "timestamp": 1.0, "custom": "v"},
+    )
+    backend.add(msg)
+
+    sent_payload = request.call_args.kwargs["json"]
+    assert sent_payload["metadata"]["custom"] == "v"
+    assert sent_payload["metadata"]["timestamp"] == 1.0
+    assert "metadata" not in sent_payload["data"]
+
+
 def test_items_to_messages_reads_tool_calls_from_first_class_data(mocker):
     backend = _make_backend(mocker)
 
