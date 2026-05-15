@@ -150,6 +150,26 @@ def _make_fc_chunk(index=0, function_name=None, arguments=""):
     return {"choices": [{"delta": {"tool_calls": [tc]}}]}
 
 
+def test_fc_object_answer_streams_when_response_format_is_object():
+    """When response_format maps `answer` to an object schema, the FC parser should
+    detect the brace-delimited value, set `_fc_object_answer`, and emit chunks."""
+    cb = _make_fc_callback(answer_started=True)
+    cb._buffer = '{"answer": {"foo": "bar"}}'
+
+    cb._process_json_mode(final_answer_only=False)
+
+    assert cb._fc_object_answer is True
+    assert cb._fc_object_tool_input is False
+    assert cb._state_has_emitted[StreamingState.ANSWER] is True
+    cb.agent.stream_content.assert_called()
+    streamed_content = "".join(
+        call.kwargs.get("content", "") if isinstance(call.kwargs.get("content"), str) else ""
+        for call in cb.agent.stream_content.call_args_list
+        if call.kwargs.get("step") == StreamingState.ANSWER
+    )
+    assert streamed_content == '{"foo": "bar"}'
+
+
 def test_parallel_tool_calls_get_unique_ids():
     """Each parallel tool call must receive a distinct tool_run_id during streaming."""
     agent = MagicMock()
