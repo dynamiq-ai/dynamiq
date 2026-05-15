@@ -47,7 +47,7 @@ INFERENCE_MODES = [
 
 
 def _make_agent(inference_mode: InferenceMode, response_format) -> Agent:
-    llm = OpenAI(model="gpt-5.4-mini", connection=connections.OpenAI(), temperature=0.1)
+    llm = OpenAI(model="gpt-5.4-mini", connection=connections.OpenAI(), temperature=0.1, reasoning_effort="medium")
     return Agent(
         name="StructuredAgent",
         llm=llm,
