@@ -2,7 +2,7 @@ import json
 from concurrent.futures import as_completed
 from typing import Any, Callable, Mapping
 
-from litellm import get_supported_openai_params, supports_function_calling
+from litellm import get_supported_openai_params, supports_function_calling, supports_response_schema
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
@@ -325,33 +325,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         return False
 
     @model_validator(mode="after")
-    def validate_inference_mode(self):
-        """Validate whether specified model can be inferenced in provided mode.
-
-        When ``response_format`` is set together with DEFAULT or XML inference
-        modes, auto-switch to STRUCTURED_OUTPUT — those text-shaped modes have
-        no native schema enforcement, so STRUCTURED_OUTPUT is the right default
-        for users who declared a typed response_format.
-        """
-        if self.response_format is not None and self.inference_mode in (
-            InferenceMode.DEFAULT,
-            InferenceMode.XML,
-        ):
-            self.inference_mode = InferenceMode.STRUCTURED_OUTPUT
-
-        match self.inference_mode:
-            case InferenceMode.FUNCTION_CALLING:
-                if not supports_function_calling(model=self.llm.model):
-                    raise ValueError(f"Model {self.llm.model} does not support function calling")
-
-            case InferenceMode.STRUCTURED_OUTPUT:
-                params = get_supported_openai_params(model=self.llm.model)
-                if "response_format" not in params:
-                    raise ValueError(f"Model {self.llm.model} does not support structured output")
-
-        return self
-
-    @model_validator(mode="after")
     def _ensure_context_manager_tool(self):
         """Automatically add ContextManagerTool when summarization is enabled."""
         try:
@@ -386,6 +359,59 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     logger.info("Agent: Added TodoWriteTool")
         except Exception as e:
             logger.error(f"Failed to ensure TodoWriteTool: {e}")
+        return self
+
+    @model_validator(mode="after")
+    def validate_inference_mode(self):
+        """Validate (and where safe, auto-correct) the inference mode for the chosen model.
+
+        Runs after auto-tool validators so self.tools reflects the final set
+        (including any ContextManagerTool / TodoWriteTool appended above).
+        When ``response_format`` is set together with DEFAULT or XML
+        inference modes, auto-switch to STRUCTURED_OUTPUT.
+        """
+        if self.response_format is not None and self.inference_mode in (
+            InferenceMode.DEFAULT,
+            InferenceMode.XML,
+        ):
+            self.inference_mode = InferenceMode.STRUCTURED_OUTPUT
+
+        model = self.llm.model
+        match self.inference_mode:
+            case InferenceMode.FUNCTION_CALLING:
+                if not supports_function_calling(model=model):
+                    raise ValueError(
+                        f"Model {model} does not support function calling. "
+                        f"Try inference_mode=InferenceMode.XML or InferenceMode.DEFAULT."
+                    )
+
+            case InferenceMode.STRUCTURED_OUTPUT:
+                if self.tools and "bedrock/" in model:
+                    fallback = InferenceMode.XML
+                    logger.warning(
+                        "Agent: STRUCTURED_OUTPUT + tools is not safe on Bedrock model '%s' "
+                        "(LiteLLM emulates response_format via a forced json_tool_call that "
+                        "providers reject when other tools are present). Auto-downgrading to %s.",
+                        model,
+                        fallback.value,
+                    )
+                    self.inference_mode = fallback
+                    return self
+
+                params = get_supported_openai_params(model=model) or []
+                schema_ok = True
+                try:
+                    schema_ok = bool(supports_response_schema(model=model))
+                except Exception:
+                    schema_ok = True
+                if "response_format" not in params or not schema_ok:
+                    logger.warning(
+                        "Agent: LiteLLM reports model '%s' may not fully support json_schema "
+                        "structured output. Proceeding anyway; if it fails at runtime, switch "
+                        "to inference_mode=InferenceMode.FUNCTION_CALLING or InferenceMode.XML.",
+                        model,
+                    )
+
         return self
 
     def _append_recovery_instruction(
