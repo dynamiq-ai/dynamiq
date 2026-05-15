@@ -5,7 +5,7 @@ from pydantic import ConfigDict, Field, PrivateAttr
 
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections import HTTPMethod
-from dynamiq.memory.backends.base import MemoryBackend
+from dynamiq.memory.backends.base import NAME_META_KEY, TOOL_CALL_ID_META_KEY, TOOL_CALLS_META_KEY, MemoryBackend
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.utils.logger import logger
 
@@ -62,10 +62,21 @@ class Dynamiq(MemoryBackend):
         if not effective_session_id:
             raise DynamiqMemoryError("Session identifier is required to create a memory item.")
 
-        data_payload = {
+        # Send function-calling fields as first-class
+        # members of `data` instead of metadata
+        for stash_key in (TOOL_CALLS_META_KEY, TOOL_CALL_ID_META_KEY, NAME_META_KEY):
+            metadata.pop(stash_key, None)
+
+        data_payload: dict[str, Any] = {
             "role": message.role.value if isinstance(message.role, MessageRole) else message.role,
             "content": self._format_content_payload(message.content),
         }
+        if message.tool_calls is not None:
+            data_payload["tool_calls"] = message.tool_calls
+        if message.tool_call_id is not None:
+            data_payload["tool_call_id"] = message.tool_call_id
+        if message.name is not None:
+            data_payload["name"] = message.name
 
         payload: dict[str, Any] = {
             "user_id": effective_user_id,
@@ -73,6 +84,8 @@ class Dynamiq(MemoryBackend):
             "type": "message",
             "data": data_payload,
         }
+        if metadata:
+            payload["metadata"] = metadata
 
         logger.debug("Creating remote memory item for memory_id=%s", self.memory_id)
         self._request(
@@ -235,7 +248,16 @@ class Dynamiq(MemoryBackend):
                 metadata["timestamp"] = self._coerce_timestamp(created_at)
 
             content = self._extract_content_text(data) or item.get("content", "")
-            messages.append(Message(role=role, content=content, metadata=metadata))
+            messages.append(
+                Message(
+                    role=role,
+                    content=content,
+                    metadata=metadata,
+                    tool_calls=data.get("tool_calls"),
+                    tool_call_id=data.get("tool_call_id"),
+                    name=data.get("name"),
+                )
+            )
 
         messages.sort(key=lambda msg: (msg.metadata or {}).get("timestamp") or 0)
         return messages
