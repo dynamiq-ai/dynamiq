@@ -392,11 +392,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 params = get_supported_openai_params(model=model) or []
                 schema_ok = True
-                if supports_response_schema is not None:
-                    try:
-                        schema_ok = bool(supports_response_schema(model=model))
-                    except Exception:
-                        schema_ok = True
+                try:
+                    schema_ok = bool(supports_response_schema(model=model))
+                except Exception:
+                    schema_ok = True
                 if "response_format" not in params or not schema_ok:
                     logger.warning(
                         "Agent: LiteLLM reports model '%s' may not fully support json_schema "
