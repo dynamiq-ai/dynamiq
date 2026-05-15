@@ -949,6 +949,9 @@ class Agent(IterativeCheckpointMixin, Node):
                     role=message.role,
                     content=message.content,
                     metadata=metadata.copy(),
+                    tool_calls=getattr(message, "tool_calls", None),
+                    tool_call_id=getattr(message, "tool_call_id", None),
+                    name=getattr(message, "name", None),
                 )
             )
 
@@ -1005,7 +1008,9 @@ class Agent(IterativeCheckpointMixin, Node):
                 None,
             )
             if last_assistant is not None:
-                assistant_content = last_assistant.content
+                assistant_content = (
+                    self._extract_final_answer_from_tool_calls(last_assistant) or last_assistant.content
+                )
 
         if assistant_content is not None:
             pair.append(
@@ -1017,6 +1022,33 @@ class Agent(IterativeCheckpointMixin, Node):
             )
 
         return pair
+
+    @staticmethod
+    def _extract_final_answer_from_tool_calls(message: Message) -> str | None:
+        """Return the ``answer`` field from a ``provide_final_answer`` tool_call.
+
+        Used by the 2-message fallback so FUNCTION_CALLING runs that never
+        produced a ``final_output`` still persist the real answer text
+        instead of the placeholder ``content`` string the agent loop wrote
+        next to the tool_call.
+        """
+        if not message.tool_calls:
+            return None
+        for call in message.tool_calls:
+            fn = call.get("function") or {}
+            if fn.get("name") != "provide_final_answer":
+                continue
+            args = fn.get("arguments")
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    return None
+            if isinstance(args, dict):
+                answer = args.get("answer")
+                if isinstance(answer, str) and answer.strip():
+                    return answer
+        return None
 
     def _save_history_to_memory(
         self,
@@ -1049,7 +1081,14 @@ class Agent(IterativeCheckpointMixin, Node):
             if msg.role == MessageRole.SYSTEM:
                 continue
             raw_snapshot_messages.append(
-                Message(role=msg.role, content=extract_message_text(msg), metadata=metadata.copy())
+                Message(
+                    role=msg.role,
+                    content=extract_message_text(msg),
+                    metadata=metadata.copy(),
+                    tool_calls=getattr(msg, "tool_calls", None),
+                    tool_call_id=getattr(msg, "tool_call_id", None),
+                    name=getattr(msg, "name", None),
+                )
             )
 
         if not fully_scoped:
