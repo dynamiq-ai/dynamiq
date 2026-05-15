@@ -25,7 +25,13 @@ _MODELS_DEFAULTING_TO_NONE: frozenset[str] = frozenset(
         "gpt-5.1-2025-11-13",
         "gpt-5.2",
         "gpt-5.2-2025-12-11",
+        "gpt-5.3-codex",
         "gpt-5.4",
+        "gpt-5.4-2026-03-05",
+        "gpt-5.4-mini",
+        "gpt-5.4-mini-2026-03-17",
+        "gpt-5.4-nano",
+        "gpt-5.4-nano-2026-03-17",
     }
 )
 
