@@ -144,7 +144,9 @@ Important:
     def input_method_console(self, prompt: str, config: RunnableConfig = None) -> str:
         """
         Get input from the user using the console input method.
-        Cancellable: runs input() in a daemon thread and polls for cancellation.
+
+        The wait is cancellable and bounded by the effective input timeout
+        (see ``Node._read_console_input``).
 
         Args:
             prompt (str): The prompt to display to the user.
@@ -153,23 +155,7 @@ Important:
         Returns:
             str: The user's input.
         """
-        import threading as _threading
-
-        check_cancellation(config)
-
-        result = {}
-
-        def _read_input():
-            result["feedback"] = input(prompt)
-
-        input_thread = _threading.Thread(target=_read_input, daemon=True)
-        input_thread.start()
-
-        while input_thread.is_alive():
-            check_cancellation(config)
-            input_thread.join(timeout=0.5)
-
-        return result.get("feedback", "")
+        return self._read_console_input(prompt, config=config)
 
     def input_method_streaming(self, prompt: str, config: RunnableConfig, **kwargs) -> str:
         """

@@ -795,10 +795,56 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
         return output
 
+    def _read_console_input(self, prompt: str, config: RunnableConfig | None = None) -> str:
+        """Read one line from the console, cancellable and bounded by the input timeout.
+
+        ``input()`` runs in a daemon thread while this polls, so both cancellation
+        and the input timeout can interrupt an unanswered prompt. The timeout is the
+        effective ``StreamingConfig.timeout`` (per-run override, else the node's own
+        ``streaming`` config); ``None`` means wait indefinitely. On timeout it fires
+        the checkpoint ``save_on_input_timeout`` hook and raises
+        ``InputStreamingTimeoutError`` — the same contract as ``get_input_streaming_event``.
+        """
+        import threading as _threading
+
+        check_cancellation(config)
+
+        streaming_override = config.nodes_override.get(self.id) if config and config.nodes_override else None
+        streaming = getattr(streaming_override, "streaming", None) or self.streaming
+        timeout = streaming.timeout
+        poll_interval = 0.5
+
+        result = {}
+
+        def _read_input():
+            result["feedback"] = input(prompt)
+
+        input_thread = _threading.Thread(target=_read_input, daemon=True)
+        input_thread.start()
+
+        elapsed = 0.0
+        while input_thread.is_alive():
+            check_cancellation(config)
+            if timeout is not None and elapsed >= timeout:
+                checkpoint_ctx = config.checkpoint.context if config and config.checkpoint else None
+                if checkpoint_ctx:
+                    try:
+                        checkpoint_ctx.save_on_input_timeout(self.id)
+                    except Exception as e:
+                        logger.warning(f"Node {self.id}: checkpoint save on console input timeout failed: {e}")
+                raise InputStreamingTimeoutError(node_id=self.id, timeout=timeout)
+            input_thread.join(timeout=poll_interval)
+            if input_thread.is_alive():
+                elapsed += poll_interval
+
+        return result.get("feedback", "")
+
     def send_console_approval_message(self, template: str, config: RunnableConfig = None) -> ApprovalInputData:
         """
         Sends approval message in console and waits for response.
-        Cancellable: runs input() in a daemon thread and polls for cancellation.
+
+        The wait is cancellable and bounded by the effective input timeout
+        (see ``_read_console_input``).
 
         Args:
             template (str): Template to send.
@@ -806,23 +852,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         Returns:
             ApprovalInputData: Response to approval message.
         """
-        import threading as _threading
-
-        check_cancellation(config)
-
-        result = {}
-
-        def _read_input():
-            result["feedback"] = input(template)
-
-        input_thread = _threading.Thread(target=_read_input, daemon=True)
-        input_thread.start()
-
-        while input_thread.is_alive():
-            check_cancellation(config)
-            input_thread.join(timeout=0.5)
-
-        return ApprovalInputData(feedback=result.get("feedback", ""))
+        return ApprovalInputData(feedback=self._read_console_input(template, config))
 
     def send_approval_message(
         self, approval_config: ApprovalConfig, input_data: dict, config: RunnableConfig = None, **kwargs
@@ -848,14 +878,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         else:
             message = Template(approval_config.msg_template).render(self.to_dict(), input_data=input_data)
 
-            checkpoint_ctx = config.checkpoint.context if config and config.checkpoint else None
-            if checkpoint_ctx:
-                checkpoint_ctx.mark_pending_input(
-                    node_id=self.id,
-                    prompt=message,
-                    metadata={"event": approval_config.event, "node_name": self.name},
-                )
-
             check_cancellation(config)
             match approval_config.feedback_method:
                 case FeedbackMethod.STREAM:
@@ -868,9 +890,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                     raise ValueError(f"Error: Incorrect feedback method is chosen {approval_config.feedback_method}.")
 
             self._pending_approval_response = approval_result
-
-            if checkpoint_ctx:
-                checkpoint_ctx.mark_input_received(self.id)
 
         update_params = {
             feature_name: approval_result.data[feature_name]

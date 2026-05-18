@@ -8,15 +8,10 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer, model_validator
 
-from dynamiq.checkpoints.checkpoint import (
-    BaseCheckpointState,
-    CheckpointNodeMixin,
-    IterationState,
-    IterativeCheckpointMixin,
-)
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy, MemorySaveMode
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
+from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentIterativeCheckpointMixin
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
@@ -195,35 +190,7 @@ class AgentInputSchema(BaseModel):
         return self
 
 
-# Default prompt prefix length: [system_message, user_message].
-# At runtime, _history_offset is recalculated to len(prompt.messages) before the ReAct loop,
-# which may be larger when memory history messages are injected.
-DEFAULT_HISTORY_OFFSET = 1
-
-
-class AgentIterationData(BaseModel):
-    """Typed iteration data for Agent loop-level checkpoints."""
-
-    prompt_messages: list[dict] | None = None
-    agent_state: dict | None = None
-    history_offset: int = DEFAULT_HISTORY_OFFSET
-
-
-class AgentCheckpointState(BaseCheckpointState):
-    """Checkpoint state for Agent nodes.
-
-    Loop-level resume data is stored in the inherited ``iteration`` field
-    (from BaseCheckpointState) via the IterativeCheckpointMixin protocol.
-    """
-
-    history_offset: int = Field(default=DEFAULT_HISTORY_OFFSET, description="Offset for agent conversation history")
-    llm_state: dict = Field(default_factory=dict, description="LLM component checkpoint state")
-    tool_states: dict[str, dict] = Field(
-        default_factory=dict, description="Tool component checkpoint states keyed by tool ID"
-    )
-
-
-class Agent(IterativeCheckpointMixin, Node):
+class Agent(AgentIterativeCheckpointMixin, Node):
     """Base class for an AI Agent that interacts with a Language Model and tools."""
 
     AGENT_PROMPT_TEMPLATE: ClassVar[str] = AGENT_PROMPT_TEMPLATE
@@ -288,7 +255,7 @@ class Agent(IterativeCheckpointMixin, Node):
     _pinned_input: Message | VisionMessage | None = PrivateAttr(default=None)
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
-    _completed_loops: int = PrivateAttr(default=0)
+    # Loop progress and pending-tool-call state are declared on AgentIterativeCheckpointMixin.
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
@@ -401,78 +368,6 @@ class Agent(IterativeCheckpointMixin, Node):
             self.input_message.role = MessageRole.USER
 
         return self
-
-    def to_checkpoint_state(self) -> AgentCheckpointState:
-        """Extract agent state for checkpointing, including LLM, tool, and loop-level states."""
-        llm_checkpoint = self.llm.to_checkpoint_state()
-
-        tool_states = {}
-        for tool in self.tools:
-            if isinstance(tool, CheckpointNodeMixin):
-                tool_checkpoint = tool.to_checkpoint_state()
-                tool_state = tool_checkpoint.model_dump() if hasattr(tool_checkpoint, "model_dump") else tool_checkpoint
-                if tool_state:
-                    tool_states[tool.id] = tool_state
-
-        base_fields = super().to_checkpoint_state().model_dump(exclude_none=True)
-        state = AgentCheckpointState(
-            history_offset=self._history_offset,
-            llm_state=llm_checkpoint.model_dump() if hasattr(llm_checkpoint, "model_dump") else llm_checkpoint,
-            tool_states=tool_states,
-            **base_fields,
-        )
-        self._save_iteration_to_checkpoint(state)
-        return state
-
-    def get_iteration_state(self) -> IterationState:
-        """Serialize ReAct loop progress for checkpoint persistence."""
-        data = AgentIterationData(
-            prompt_messages=self._serialize_prompt_messages(),
-            agent_state=(
-                self.state.model_dump() if hasattr(self, "state") and hasattr(self.state, "model_dump") else None
-            ),
-            history_offset=self._history_offset,
-        )
-        return IterationState(completed_iterations=self._completed_loops, iteration_data=data.model_dump())
-
-    def restore_iteration_state(self, state: IterationState) -> None:
-        """Restore prompt messages and AgentState from a checkpoint IterationState."""
-        data = AgentIterationData(**state.iteration_data)
-        if data.prompt_messages:
-            self._prompt.messages = Prompt.deserialize_messages(data.prompt_messages)
-        if data.agent_state:
-            from dynamiq.nodes.agents.agent import AgentState
-
-            self.state = AgentState(**data.agent_state)
-        self._history_offset = data.history_offset
-
-    def _serialize_prompt_messages(self) -> list[dict] | None:
-        """Serialize current prompt messages for checkpoint persistence."""
-        if not hasattr(self, "_prompt") or not self._prompt or not self._prompt.messages:
-            return None
-        return self._prompt.serialize_messages() or None
-
-    def from_checkpoint_state(self, state: AgentCheckpointState | dict[str, Any]) -> None:
-        """Restore agent state from checkpoint, including LLM, tool, and loop-level states."""
-        super().from_checkpoint_state(state)
-        state_dict = state if isinstance(state, dict) else state.model_dump()
-
-        self._history_offset = state_dict.get("history_offset", DEFAULT_HISTORY_OFFSET)
-
-        if (llm_state := state_dict.get("llm_state")) is not None:
-            self.llm.from_checkpoint_state(llm_state)
-        if (tool_states := state_dict.get("tool_states")) is not None:
-            self._restore_tool_states(tool_states)
-
-        self._restore_iteration_from_checkpoint(state_dict)
-
-    def _restore_tool_states(self, tool_states: dict[str, dict]) -> None:
-        """Restore checkpoint states for agent's tools."""
-        tools_by_id = {tool.id: tool for tool in self.tools}
-        for tool_id, tool_state in tool_states.items():
-            tool = tools_by_id.get(tool_id)
-            if tool and isinstance(tool, CheckpointNodeMixin):
-                tool.from_checkpoint_state(tool_state)
 
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""

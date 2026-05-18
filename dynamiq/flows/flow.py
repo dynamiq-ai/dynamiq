@@ -431,11 +431,11 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         }
 
         if self._is_checkpoint_active():
+            cfg = self._effective_checkpoint_config or self.checkpoint
             if self._checkpoint:
                 self._checkpoint.run_id = str(run_id)
                 self._checkpoint.wf_run_id = wf_run_id
                 self._checkpoint.status = CheckpointStatus.ACTIVE
-                self._save_checkpoint()
             else:
                 self._checkpoint = FlowCheckpoint(
                     flow_id=self.id,
@@ -445,6 +445,9 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                     original_config=config.to_checkpoint_dict(),
                     pending_node_ids=[n.id for n in self.nodes],
                 )
+            # The in-memory checkpoint must always exist (every other trigger
+            # mutates it); persisting it at run start is optional.
+            if cfg.checkpoint_on_start_enabled:
                 self._save_checkpoint()
 
         config = self._setup_checkpoint_context(config)
@@ -631,11 +634,11 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         executor = ContextAwareThreadPoolExecutor(max_workers=max_workers)
 
         if self._is_checkpoint_active():
+            cfg = self._effective_checkpoint_config or self.checkpoint
             if self._checkpoint:
                 self._checkpoint.run_id = str(run_id)
                 self._checkpoint.wf_run_id = wf_run_id
                 self._checkpoint.status = CheckpointStatus.ACTIVE
-                await self._save_checkpoint_async()
             else:
                 self._checkpoint = FlowCheckpoint(
                     flow_id=self.id,
@@ -645,6 +648,9 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                     original_config=config.to_checkpoint_dict(),
                     pending_node_ids=[n.id for n in self.nodes],
                 )
+            # The in-memory checkpoint must always exist (every other trigger
+            # mutates it); persisting it at run start is optional.
+            if cfg.checkpoint_on_start_enabled:
                 await self._save_checkpoint_async()
 
         config = self._setup_checkpoint_context(config)
