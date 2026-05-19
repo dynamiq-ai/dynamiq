@@ -33,8 +33,8 @@ DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP = {
 }
 
 FILE_TYPE_TO_SUPPORTED_CONVERTER_CLASS_MAP = {
-    FileType.IMAGE: (LLMImageConverter,),
     FileType.PDF: (PyPDFConverter, LLMPDFConverter),
+    FileType.IMAGE: (LLMImageConverter,),
     FileType.DOCUMENT: (DOCXFileConverter,),
     FileType.PRESENTATION: (PPTXFileConverter,),
     FileType.HTML: (HTMLConverter,),
@@ -181,11 +181,7 @@ class MultiFileTypeConverter(Node):
 
         # Map each converter instance to its supported file types
         for converter_instance in converter_instances:
-            supported_file_types = [
-                file_type
-                for file_type, supported_converter_classes in FILE_TYPE_TO_SUPPORTED_CONVERTER_CLASS_MAP.items()
-                if isinstance(converter_instance, supported_converter_classes)
-            ]
+            supported_file_types = self._get_supported_file_types(converter_instance)
 
             for file_type in supported_file_types:
                 if file_type not in self.converter_mapping:
@@ -196,6 +192,21 @@ class MultiFileTypeConverter(Node):
 
         # Add fallback converter for remaining unmapped file types
         self._add_fallback_mapping()
+
+    @staticmethod
+    def _get_supported_file_types(converter_instance: Node) -> list[FileType]:
+        """Return supported file types for a converter, resolving subclasses before their parents."""
+
+        if isinstance(converter_instance, LLMPDFConverter):
+            return [FileType.PDF]
+        if isinstance(converter_instance, LLMImageConverter):
+            return [FileType.IMAGE]
+
+        return [
+            file_type
+            for file_type, supported_converter_classes in FILE_TYPE_TO_SUPPORTED_CONVERTER_CLASS_MAP.items()
+            if isinstance(converter_instance, supported_converter_classes)
+        ]
 
     def _add_missing_default_converters(self):
         """Instantiate default converters for standard file types that don't have converters yet."""
