@@ -211,7 +211,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
     _streaming_tool_run_ids: list[str] = PrivateAttr(default_factory=list)
     # Raw text of the most recent LLM call; kept so loop-level recovery
     # handlers can echo it back to the model after a parsing failure.
-    _last_llm_output: str = ""
+    _last_llm_output: str = PrivateAttr(default="")
 
     @field_validator("response_format", mode="before")
     @classmethod
@@ -1632,7 +1632,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             # On resume, replay the tool call captured before an interruption
             # (e.g. HITL input timeout) instead of regenerating it from the LLM.
-            replay_pending = loop_num == start_loop and self._pending_action is not None
+            # Gated on `resuming` so a replay never runs against a freshly built
+            # prompt — without the restored history there is no call to replay.
+            replay_pending = resuming and loop_num == start_loop and self._pending_action is not None
             self._last_llm_output = ""
 
             try:

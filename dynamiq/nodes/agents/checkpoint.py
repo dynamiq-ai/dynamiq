@@ -7,7 +7,7 @@ captured for HITL-timeout replay — lives in one focused module.
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from dynamiq.checkpoints.checkpoint import (
     BaseCheckpointState,
@@ -65,10 +65,10 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
 
     # Loop-level progress and the in-flight tool call captured before tool
     # execution, so an interruption (e.g. HITL input timeout) can persist them.
-    _completed_loops: int = 0
-    _pending_action: str | None = None
-    _pending_action_input: Any = None
-    _pending_thought: str | None = None
+    _completed_loops: int = PrivateAttr(default=0)
+    _pending_action: str | None = PrivateAttr(default=None)
+    _pending_action_input: Any = PrivateAttr(default=None)
+    _pending_thought: str | None = PrivateAttr(default=None)
 
     def to_checkpoint_state(self) -> AgentCheckpointState:
         """Extract agent state for checkpointing, including LLM, tool, and loop-level states."""
