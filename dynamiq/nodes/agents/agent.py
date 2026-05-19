@@ -1649,6 +1649,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         f"Agent {self.name} - {self.id}: Loop {loop_num}, "
                         f"replaying checkpointed tool call '{step.action}' after resume"
                     )
+                    self.log_reasoning(step.thought, step.action, step.action_input, loop_num)
                 else:
                     step = self._run_react_llm_step(config, loop_num, **kwargs)
 
