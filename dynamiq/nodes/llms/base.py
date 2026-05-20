@@ -13,6 +13,11 @@ from litellm.exceptions import (
     ServiceUnavailableError,
     Timeout,
 )
+from litellm.litellm_core_utils.prompt_templates.factory import (
+    _add_missing_tool_results,
+    _is_orphaned_tool_result,
+    _sanitize_empty_text_content,
+)
 from litellm.utils import supports_pdf_input
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
@@ -653,6 +658,36 @@ class BaseLLM(ConnectionNode):
             params["stream_options"]["include_usage"] = True
         return params
 
+    @staticmethod
+    def _sanitize_fc_messages(messages: list[dict]) -> list[dict]:
+        """Run LiteLLM's FC sanitization helpers on outgoing messages before dispatch.
+
+        Mirrors litellm.sanitize_messages_for_tool_calling but skips its
+        litellm.modify_params flag check so we don't have to mutate global state
+        for unrelated litellm callers.
+
+        Repairs:
+          - empty content (replaced with placeholder)
+          - orphan assistant tool_calls (synthetic tool reply inserted)
+          - orphan tool replies (dropped)
+        """
+        sanitized: list[dict] = []
+        i = 0
+        while i < len(messages):
+            current = _sanitize_empty_text_content(messages[i])
+            if current.get("role") == "assistant":
+                result_messages, consumed = _add_missing_tool_results(current, messages, i)
+                if len(result_messages) > 1:
+                    sanitized.extend(result_messages)
+                    i += 1 + consumed
+                    continue
+            if _is_orphaned_tool_result(current, sanitized):
+                i += 1
+                continue
+            sanitized.append(current)
+            i += 1
+        return sanitized
+
     def _build_completion_params(
         self,
         messages: list[dict],
@@ -693,6 +728,8 @@ class BaseLLM(ConnectionNode):
             tools=tools,
             response_format=response_format,
         )
+        if tools:
+            messages = self._sanitize_fc_messages(messages)
         # Check if a streaming callback is available in the config and enable streaming only if it is.
         # This is to avoid unnecessary streaming to reduce CPU usage.
         is_streaming_callback_available = any(

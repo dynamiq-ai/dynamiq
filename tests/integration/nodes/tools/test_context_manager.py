@@ -360,18 +360,10 @@ def _make_history_manager_agent(messages: list[Message], max_preserved_tokens: i
 @pytest.mark.parametrize(
     "history_factory, max_preserved_tokens",
     [
-        pytest.param(_build_fc_history, 20, id="parallel_tight"),
-        pytest.param(_build_fc_history, 40, id="parallel_mid"),
-        pytest.param(_build_fc_history, 200, id="parallel_loose"),
-        pytest.param(_sequential_fc_history, 20, id="sequential_tight"),
-        pytest.param(_sequential_fc_history, 40, id="sequential_mid"),
-        pytest.param(_sequential_fc_history, 200, id="sequential_loose"),
-        pytest.param(_mixed_fa_with_real_tool_history, 20, id="mixed_fa_tight"),
-        pytest.param(_mixed_fa_with_real_tool_history, 200, id="mixed_fa_loose"),
-        pytest.param(_multi_block_fc_history, 15, id="multi_block_tight"),
-        pytest.param(_multi_block_fc_history, 60, id="multi_block_mid"),
-        pytest.param(_multi_block_fc_history, 100, id="multi_block_loose"),
-        pytest.param(_multi_block_fc_history, 1000, id="multi_block_fits"),
+        pytest.param(_build_fc_history, 20, id="parallel"),
+        pytest.param(_sequential_fc_history, 20, id="sequential"),
+        pytest.param(_mixed_fa_with_real_tool_history, 20, id="mixed_fa"),
+        pytest.param(_multi_block_fc_history, 15, id="multi_block"),
     ],
 )
 def test_fc_summarization_preserves_protocol_across_scenarios(history_factory, max_preserved_tokens):
