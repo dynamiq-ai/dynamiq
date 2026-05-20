@@ -1078,16 +1078,7 @@ class Agent(IterativeCheckpointMixin, Node):
 
         if getattr(self, "inference_mode", None) == InferenceMode.FUNCTION_CALLING:
             sanitized_dicts = BaseLLM._sanitize_fc_messages([m.to_dict() for m in self._prompt.messages])
-            self._prompt.messages = [
-                Message(
-                    role=d["role"],
-                    content=d.get("content") or "",
-                    tool_calls=d.get("tool_calls"),
-                    tool_call_id=d.get("tool_call_id"),
-                    name=d.get("name"),
-                )
-                for d in sanitized_dicts
-            ]
+            self._prompt.messages = Prompt.deserialize_messages(sanitized_dicts)
 
         raw_snapshot_messages: list[Message] = []
         for msg in self._prompt.messages:
