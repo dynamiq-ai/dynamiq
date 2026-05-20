@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_orphan_tool_call_is_repaired_live(capsys):
+def test_orphan_tool_call_is_repaired_live():
     prompt = Prompt(
         messages=[
             Message(role=MessageRole.USER, content="What's the weather in Paris?"),
@@ -78,23 +78,15 @@ def test_orphan_tool_call_is_repaired_live(capsys):
     with patch.object(BaseLLM, "_sanitize_fc_messages", side_effect=capturing_sanitize):
         result = llm.run(input_data={}, config=RunnableConfig())
 
-    # --- 1. Sanitizer was invoked and produced a valid FC pair ---
+    # Sanitizer was invoked and inserted a synthetic tool reply for the orphan.
     assert sanitized_holder, "Sanitizer was never called"
     sanitized = sanitized_holder[-1]
-    print("\n--- sanitized outbound payload ---")
-    for i, m in enumerate(sanitized):
-        role = m.get("role")
-        tc = [t["id"] for t in m.get("tool_calls") or []]
-        tcid = m.get("tool_call_id")
-        content = (m.get("content") or "")[:80].replace("\n", " ")
-        print(f"  [{i}] {role:9s} tool_calls={tc} tool_call_id={tcid} content={content!r}")
-
     tool_replies = [m for m in sanitized if m.get("role") == "tool"]
     assert any(
         m.get("tool_call_id") == "call_orphan_live" for m in tool_replies
     ), "Sanitizer did not insert a synthetic tool reply for the orphan call"
 
-    # --- 2. End-to-end call succeeded ---
+    # End-to-end call succeeded against the real provider.
     assert result.status == RunnableStatus.SUCCESS, f"Expected SUCCESS, got: {result.output}"
     content = result.output.get("content") or ""
     assert content, "Expected non-empty response content"
