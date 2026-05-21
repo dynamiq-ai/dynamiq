@@ -2,10 +2,11 @@
 
 After a mid-tool cancellation, the agent's `_prompt.messages` would hold an
 `assistant(tool_calls=...)` whose matching `role=TOOL` reply was never appended.
-`_save_history_to_memory` runs `BaseLLM._sanitize_fc_messages` on
-`_prompt.messages` in FC mode before snapshotting — synthetic tool replies are
-inserted in place of missing ones, so both the in-flight buffer and the
-persisted memory end up balanced.
+`_save_history_to_memory` runs `BaseLLM._sanitize_fc_messages` on a local copy
+of `_prompt.messages` in FC mode before snapshotting, so the persisted memory
+is replay-safe (synthetic tool replies are inserted in place of missing ones)
+while `_prompt.messages` itself stays as the canonical in-flight conversation
+— the dispatch-time sanitizer repairs orphans again on the next LLM call.
 """
 
 import uuid
@@ -75,9 +76,11 @@ def _llm_returns_tool_call(*args, **kwargs):
     )
 
 
-def test_sanitization_on_save_clears_orphan_from_memory_and_buffer():
-    """After mid-tool cancel, _save_history_to_memory sanitizes _prompt.messages
-    in place; both the buffer and the persisted memory are balanced."""
+def test_sanitization_on_save_clears_orphan_from_memory():
+    """After mid-tool cancel, _save_history_to_memory sanitizes a local copy
+    before snapshotting: persisted memory is balanced (replay-safe), while
+    _prompt.messages stays canonical and may still carry the orphan tool_call
+    — the dispatch-time sanitizer repairs it on the next LLM call."""
     agent, memory = _build_agent_with_memory()
 
     with (
@@ -98,20 +101,28 @@ def test_sanitization_on_save_clears_orphan_from_memory_and_buffer():
         )
         assert result.status == RunnableStatus.CANCELED
 
-    for source_name, messages in (
-        ("_prompt.messages", agent._prompt.messages),
-        ("memory.get_all()", memory.get_all()),
-    ):
-        seen_call_ids = {
-            tc["id"] for m in messages if m.role == MessageRole.ASSISTANT and m.tool_calls for tc in m.tool_calls
-        }
-        tool_reply_ids = {m.tool_call_id for m in messages if m.role == MessageRole.TOOL and m.tool_call_id is not None}
+    memory_messages = memory.get_all()
+    seen_call_ids = {
+        tc["id"] for m in memory_messages if m.role == MessageRole.ASSISTANT and m.tool_calls for tc in m.tool_calls
+    }
+    tool_reply_ids = {
+        m.tool_call_id for m in memory_messages if m.role == MessageRole.TOOL and m.tool_call_id is not None
+    }
+    assert not (seen_call_ids - tool_reply_ids), "orphan tool_calls leaked into persisted memory"
+    assert not (tool_reply_ids - seen_call_ids), "orphan TOOL replies leaked into persisted memory"
 
-        unmatched_calls = seen_call_ids - tool_reply_ids
-        assert not unmatched_calls, f"orphan tool_calls in {source_name}: {unmatched_calls}"
-
-        unmatched_replies = tool_reply_ids - seen_call_ids
-        assert not unmatched_replies, f"orphan TOOL replies in {source_name}: {unmatched_replies}"
+    buffer_call_ids = {
+        tc["id"]
+        for m in agent._prompt.messages
+        if m.role == MessageRole.ASSISTANT and m.tool_calls
+        for tc in m.tool_calls
+    }
+    buffer_reply_ids = {
+        m.tool_call_id for m in agent._prompt.messages if m.role == MessageRole.TOOL and m.tool_call_id is not None
+    }
+    assert (
+        buffer_call_ids - buffer_reply_ids
+    ), "expected _prompt.messages to retain the cancelled orphan tool_call (canonical state policy)"
 
 
 def test_fc_agent_recovers_when_tool_call_missing_required_argument():
