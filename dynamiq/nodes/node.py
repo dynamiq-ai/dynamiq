@@ -795,47 +795,17 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
         return output
 
-    def _read_console_input(self, prompt: str, config: RunnableConfig | None = None) -> str:
-        """Read one line from the console, cancellable but unbounded.
-
-        ``input()`` runs in a daemon thread while this polls so cancellation can
-        interrupt an unanswered prompt. There is no input-timeout enforcement:
-        the console path is interactive only — for timeout-bounded HITL (and
-        the checkpoint-on-input-timeout hook) use the streaming path
-        (``get_input_streaming_event``).
-        """
-        import threading as _threading
-
-        check_cancellation(config)
-
-        result = {}
-
-        def _read_input():
-            result["feedback"] = input(prompt)
-
-        input_thread = _threading.Thread(target=_read_input, daemon=True)
-        input_thread.start()
-
-        while input_thread.is_alive():
-            check_cancellation(config)
-            input_thread.join(timeout=0.5)
-
-        return result.get("feedback", "")
-
-    def send_console_approval_message(self, template: str, config: RunnableConfig = None) -> ApprovalInputData:
+    def send_console_approval_message(self, template: str) -> ApprovalInputData:
         """
         Sends approval message in console and waits for response.
 
-        The wait is cancellable but unbounded — the console path has no input
-        timeout (see ``_read_console_input``).
-
         Args:
-            template (str): Template to send.
-            config (RunnableConfig, optional): Configuration for cancellation check.
+            template (dict): Template to send.
         Returns:
             ApprovalInputData: Response to approval message.
         """
-        return ApprovalInputData(feedback=self._read_console_input(template, config))
+        feedback = input(template)
+        return ApprovalInputData(feedback=feedback)
 
     def send_approval_message(
         self, approval_config: ApprovalConfig, input_data: dict, config: RunnableConfig = None, **kwargs
@@ -868,7 +838,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                         message, input_data, approval_config, config=config, **kwargs
                     )
                 case FeedbackMethod.CONSOLE:
-                    approval_result = self.send_console_approval_message(message, config=config)
+                    approval_result = self.send_console_approval_message(message)
                 case _:
                     raise ValueError(f"Error: Incorrect feedback method is chosen {approval_config.feedback_method}.")
 

@@ -141,22 +141,17 @@ Important:
         )
         return self
 
-    def input_method_console(self, prompt: str, config: RunnableConfig = None) -> str:
+    def input_method_console(self, prompt: str) -> str:
         """
         Get input from the user using the console input method.
 
-        The wait is cancellable but unbounded — the console path has no input
-        timeout (see ``Node._read_console_input``). Use ``input_method_streaming``
-        for timeout-bounded HITL.
-
         Args:
             prompt (str): The prompt to display to the user.
-            config (RunnableConfig, optional): Configuration for cancellation check.
 
         Returns:
             str: The user's input.
         """
-        return self._read_console_input(prompt, config=config)
+        return input(prompt)
 
     def input_method_streaming(self, prompt: str, config: RunnableConfig, **kwargs) -> str:
         """
@@ -236,7 +231,7 @@ Important:
         check_cancellation(config)
         if isinstance(self.input_method, FeedbackMethod):
             if self.input_method == FeedbackMethod.CONSOLE:
-                return self.input_method_console(input_text, config=config)
+                return self.input_method_console(input_text)
             elif self.input_method == FeedbackMethod.STREAM:
                 streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
                 if not streaming.input_streaming_enabled:
