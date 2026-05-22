@@ -131,6 +131,10 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
         self._pending_action = data.pending_action
         self._pending_action_input = data.pending_action_input
         self._pending_thought = data.pending_thought
+        # Mirror the completed-loop count back onto the instance so a snapshot
+        # taken before any new loop finishes (e.g. an input timeout during the
+        # replayed tool call) doesn't overwrite the saved progress with 0.
+        self._completed_loops = state.completed_iterations
 
     def _serialize_prompt_messages(self) -> list[dict] | None:
         """Serialize current prompt messages for checkpoint persistence."""

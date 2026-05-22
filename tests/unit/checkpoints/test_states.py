@@ -443,6 +443,26 @@ class TestIterativeCheckpointMixin:
         assert new_agent._pending_action_input == {"query": "weather"}
         assert new_agent._pending_thought == "I should search"
 
+    def test_restore_iteration_state_sets_completed_loops(self):
+        """A snapshot taken before any new loop finishes (e.g. input timeout
+        during the replayed tool call) must preserve the saved progress
+        instead of persisting completed_iterations=0."""
+        agent = Agent(id="rl", name="RL", llm=create_test_llm(), role="Test", max_loops=10)
+        agent._completed_loops = 4
+        agent.set_pending_tool_call("search", {"q": "x"}, "thinking")
+
+        state_dict = agent.to_checkpoint_state().model_dump()
+
+        new_agent = Agent(id="rl2", name="RL2", llm=create_test_llm(), role="Test", max_loops=10)
+        new_agent.from_checkpoint_state(state_dict)
+        new_agent.reset_run_state()
+        assert new_agent._completed_loops == 0
+        assert new_agent.get_start_iteration() == 4
+        assert new_agent._completed_loops == 4
+
+        resnapped = new_agent.to_checkpoint_state().model_dump()
+        assert resnapped["iteration"]["completed_iterations"] == 4
+
     def test_no_pending_tool_call_roundtrip(self):
         """When no tool call is in flight, restored pending state stays empty."""
         agent = Agent(id="np", name="NP", llm=create_test_llm(), role="Test", max_loops=10)
