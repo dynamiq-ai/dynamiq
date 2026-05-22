@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.converters.docx import DOCXFileConverter
 from dynamiq.nodes.converters.html import HTMLConverter
+from dynamiq.nodes.converters.llm_text_extractor import LLMImageConverter, LLMPDFConverter
 from dynamiq.nodes.converters.pptx import PPTXFileConverter
 from dynamiq.nodes.converters.pypdf import PyPDFConverter
 from dynamiq.nodes.converters.text import TextFileConverter
@@ -29,6 +30,16 @@ DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP = {
     FileType.HTML: HTMLConverter,
     FileType.TEXT: TextFileConverter,
     FileType.MARKDOWN: TextFileConverter,
+}
+
+FILE_TYPE_TO_SUPPORTED_CONVERTER_CLASS_MAP = {
+    FileType.PDF: (PyPDFConverter, LLMPDFConverter),
+    FileType.IMAGE: (LLMImageConverter,),
+    FileType.DOCUMENT: (DOCXFileConverter,),
+    FileType.PRESENTATION: (PPTXFileConverter,),
+    FileType.HTML: (HTMLConverter,),
+    FileType.TEXT: (TextFileConverter,),
+    FileType.MARKDOWN: (TextFileConverter,),
 }
 
 
@@ -56,7 +67,9 @@ class MultiFileTypeConverter(Node):
 
     This component uses the FileTypeExtractor to determine the document type and then
     routes it to the appropriate available converter:
+        - LLMImageConverter
         - PyPDFConverter
+        - LLMPDFConverter
         - DOCXFileConverter
         - PPTXFileConverter
         - HTMLConverter
@@ -168,14 +181,7 @@ class MultiFileTypeConverter(Node):
 
         # Map each converter instance to its supported file types
         for converter_instance in converter_instances:
-            converter_class = converter_instance.__class__
-
-            # Find file types that the converter class supports
-            supported_file_types = [
-                file_type
-                for file_type, default_converter_class in DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP.items()
-                if converter_class == default_converter_class
-            ]
+            supported_file_types = self._get_supported_file_types(converter_instance)
 
             for file_type in supported_file_types:
                 if file_type not in self.converter_mapping:
@@ -186,6 +192,21 @@ class MultiFileTypeConverter(Node):
 
         # Add fallback converter for remaining unmapped file types
         self._add_fallback_mapping()
+
+    @staticmethod
+    def _get_supported_file_types(converter_instance: Node) -> list[FileType]:
+        """Return supported file types for a converter, resolving subclasses before their parents."""
+
+        if isinstance(converter_instance, LLMPDFConverter):
+            return [FileType.PDF]
+        if isinstance(converter_instance, LLMImageConverter):
+            return [FileType.IMAGE]
+
+        return [
+            file_type
+            for file_type, supported_converter_classes in FILE_TYPE_TO_SUPPORTED_CONVERTER_CLASS_MAP.items()
+            if isinstance(converter_instance, supported_converter_classes)
+        ]
 
     def _add_missing_default_converters(self):
         """Instantiate default converters for standard file types that don't have converters yet."""

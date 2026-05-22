@@ -971,8 +971,14 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         fully_scoped = bool(user_id and session_id)
 
+        if getattr(self, "inference_mode", None) == InferenceMode.FUNCTION_CALLING:
+            sanitized_dicts = BaseLLM._sanitize_fc_messages([m.to_dict() for m in self._prompt.messages])
+            source_messages = Prompt.deserialize_messages(sanitized_dicts)
+        else:
+            source_messages = self._prompt.messages
+
         raw_snapshot_messages: list[Message] = []
-        for msg in self._prompt.messages:
+        for msg in source_messages:
             if msg.role == MessageRole.SYSTEM:
                 continue
             raw_snapshot_messages.append(
