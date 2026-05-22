@@ -20,6 +20,7 @@ from dynamiq.callbacks.streaming import BaseStreamingCallbackHandler
 from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 from dynamiq.connections import BaseConnection, HttpApiKey
 from dynamiq.nodes import ErrorHandling, NodeGroup
+from dynamiq.nodes.llms._fc_sanitization import sanitize_fc_messages
 from dynamiq.nodes.llms.registry import model_registry
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.nodes.types import InferenceMode
@@ -653,6 +654,11 @@ class BaseLLM(ConnectionNode):
             params["stream_options"]["include_usage"] = True
         return params
 
+    @staticmethod
+    def _sanitize_fc_messages(messages: list[dict]) -> list[dict]:
+        """Repair FC messages before dispatch. See ``_fc_sanitization`` module."""
+        return sanitize_fc_messages(messages)
+
     def _build_completion_params(
         self,
         messages: list[dict],
@@ -693,6 +699,8 @@ class BaseLLM(ConnectionNode):
             tools=tools,
             response_format=response_format,
         )
+        if tools:
+            messages = self._sanitize_fc_messages(messages)
         # Check if a streaming callback is available in the config and enable streaming only if it is.
         # This is to avoid unnecessary streaming to reduce CPU usage.
         is_streaming_callback_available = any(
