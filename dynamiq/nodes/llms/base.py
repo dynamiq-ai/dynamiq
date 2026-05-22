@@ -13,11 +13,6 @@ from litellm.exceptions import (
     ServiceUnavailableError,
     Timeout,
 )
-from litellm.litellm_core_utils.prompt_templates.factory import (
-    _add_missing_tool_results,
-    _is_orphaned_tool_result,
-    _sanitize_empty_text_content,
-)
 from litellm.utils import supports_pdf_input
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
@@ -25,6 +20,7 @@ from dynamiq.callbacks.streaming import BaseStreamingCallbackHandler
 from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 from dynamiq.connections import BaseConnection, HttpApiKey
 from dynamiq.nodes import ErrorHandling, NodeGroup
+from dynamiq.nodes.llms._fc_sanitization import sanitize_fc_messages
 from dynamiq.nodes.llms.registry import model_registry
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.nodes.types import InferenceMode
@@ -660,33 +656,8 @@ class BaseLLM(ConnectionNode):
 
     @staticmethod
     def _sanitize_fc_messages(messages: list[dict]) -> list[dict]:
-        """Run LiteLLM's FC sanitization helpers on outgoing messages before dispatch.
-
-        Mirrors litellm.sanitize_messages_for_tool_calling but skips its
-        litellm.modify_params flag check so we don't have to mutate global state
-        for unrelated litellm callers.
-
-        Repairs:
-          - empty content (replaced with placeholder)
-          - orphan assistant tool_calls (synthetic tool reply inserted)
-          - orphan tool replies (dropped)
-        """
-        sanitized: list[dict] = []
-        i = 0
-        while i < len(messages):
-            current = _sanitize_empty_text_content(messages[i])
-            if current.get("role") == "assistant":
-                result_messages, consumed = _add_missing_tool_results(current, messages, i)
-                if len(result_messages) > 1:
-                    sanitized.extend(result_messages)
-                    i += 1 + consumed
-                    continue
-            if _is_orphaned_tool_result(current, sanitized):
-                i += 1
-                continue
-            sanitized.append(current)
-            i += 1
-        return sanitized
+        """Repair FC messages before dispatch. See ``_fc_sanitization`` module."""
+        return sanitize_fc_messages(messages)
 
     def _build_completion_params(
         self,

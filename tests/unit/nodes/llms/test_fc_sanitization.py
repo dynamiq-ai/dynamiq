@@ -134,6 +134,32 @@ class TestSanitizeFCMessages:
         finally:
             litellm.modify_params = starting
 
+    def test_duplicate_tool_results_in_same_block_are_deduped_to_latest(self):
+        """Case D: Anthropic rejects two tool_results for the same tool_call_id.
+
+        Repros a session-resume scenario where history replay produces two tool
+        replies for the same tool_call_id within one block. Without dedup the
+        provider returns 400 ("each tool_use must have a single result"). With
+        dedup only the latest reply survives.
+        """
+        messages = [
+            {"role": "user", "content": "search"},
+            {
+                "role": "assistant",
+                "content": "Calling: f",
+                "tool_calls": [{"id": "call_dup", "type": "function", "function": {"name": "f", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "call_dup", "content": "stale result"},
+            {"role": "tool", "tool_call_id": "call_dup", "content": "latest result"},
+            {"role": "assistant", "content": "done."},
+        ]
+
+        out = BaseLLM._sanitize_fc_messages(messages)
+
+        tool_replies = [m for m in out if m.get("role") == "tool" and m.get("tool_call_id") == "call_dup"]
+        assert len(tool_replies) == 1, f"expected one tool reply after dedup, got {len(tool_replies)}"
+        assert tool_replies[0]["content"] == "latest result", "dedup should keep the last occurrence, not the first"
+
 
 @pytest.fixture
 def llm():
