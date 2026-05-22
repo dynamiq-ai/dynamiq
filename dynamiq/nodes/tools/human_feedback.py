@@ -145,8 +145,9 @@ Important:
         """
         Get input from the user using the console input method.
 
-        The wait is cancellable and bounded by the effective input timeout
-        (see ``Node._read_console_input``).
+        The wait is cancellable but unbounded — the console path has no input
+        timeout (see ``Node._read_console_input``). Use ``input_method_streaming``
+        for timeout-bounded HITL.
 
         Args:
             prompt (str): The prompt to display to the user.

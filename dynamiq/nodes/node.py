@@ -796,23 +796,17 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         return output
 
     def _read_console_input(self, prompt: str, config: RunnableConfig | None = None) -> str:
-        """Read one line from the console, cancellable and bounded by the input timeout.
+        """Read one line from the console, cancellable but unbounded.
 
-        ``input()`` runs in a daemon thread while this polls, so both cancellation
-        and the input timeout can interrupt an unanswered prompt. The timeout is the
-        effective ``StreamingConfig.timeout`` (per-run override, else the node's own
-        ``streaming`` config); ``None`` means wait indefinitely. On timeout it fires
-        the checkpoint ``save_on_input_timeout`` hook and raises
-        ``InputStreamingTimeoutError`` — the same contract as ``get_input_streaming_event``.
+        ``input()`` runs in a daemon thread while this polls so cancellation can
+        interrupt an unanswered prompt. There is no input-timeout enforcement:
+        the console path is interactive only — for timeout-bounded HITL (and
+        the checkpoint-on-input-timeout hook) use the streaming path
+        (``get_input_streaming_event``).
         """
         import threading as _threading
 
         check_cancellation(config)
-
-        streaming_override = config.nodes_override.get(self.id) if config and config.nodes_override else None
-        streaming = getattr(streaming_override, "streaming", None) or self.streaming
-        timeout = streaming.timeout
-        poll_interval = 0.5
 
         result = {}
 
@@ -822,20 +816,9 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         input_thread = _threading.Thread(target=_read_input, daemon=True)
         input_thread.start()
 
-        elapsed = 0.0
         while input_thread.is_alive():
             check_cancellation(config)
-            if timeout is not None and elapsed >= timeout:
-                checkpoint_ctx = config.checkpoint.context if config and config.checkpoint else None
-                if checkpoint_ctx:
-                    try:
-                        checkpoint_ctx.save_on_input_timeout(self.id)
-                    except Exception as e:
-                        logger.warning(f"Node {self.id}: checkpoint save on console input timeout failed: {e}")
-                raise InputStreamingTimeoutError(node_id=self.id, timeout=timeout)
-            input_thread.join(timeout=poll_interval)
-            if input_thread.is_alive():
-                elapsed += poll_interval
+            input_thread.join(timeout=0.5)
 
         return result.get("feedback", "")
 
@@ -843,8 +826,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         """
         Sends approval message in console and waits for response.
 
-        The wait is cancellable and bounded by the effective input timeout
-        (see ``_read_console_input``).
+        The wait is cancellable but unbounded — the console path has no input
+        timeout (see ``_read_console_input``).
 
         Args:
             template (str): Template to send.
