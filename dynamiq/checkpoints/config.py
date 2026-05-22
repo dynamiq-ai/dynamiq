@@ -18,31 +18,17 @@ class CheckpointContext:
     """Context for checkpoint operations passed to nodes during execution.
 
     Provides callbacks for:
-    - HITL: notify the Flow when nodes are waiting for human input
     - Mid-loop: request a checkpoint save during long agent loops
+    - Input timeout: request a checkpoint save when an input wait times out
     """
 
     def __init__(
         self,
-        on_pending_input: Callable[[str, str, dict | None], None] | None = None,
-        on_input_received: Callable[[str], None] | None = None,
         on_save_mid_run: Callable[[str], None] | None = None,
         on_input_timeout: Callable[[str], None] | None = None,
     ):
-        self._on_pending_input = on_pending_input
-        self._on_input_received = on_input_received
         self._on_save_mid_run = on_save_mid_run
         self._on_input_timeout = on_input_timeout
-
-    def mark_pending_input(self, node_id: str, prompt: str, metadata: dict | None = None) -> None:
-        """Notify that a node is waiting for human input."""
-        if self._on_pending_input:
-            self._on_pending_input(node_id, prompt, metadata)
-
-    def mark_input_received(self, node_id: str) -> None:
-        """Notify that human input has been received for a specific node."""
-        if self._on_input_received:
-            self._on_input_received(node_id)
 
     def save_mid_run(self, node_id: str) -> None:
         """Request a checkpoint save during a long-running node (e.g., agent loop iteration)."""
@@ -75,6 +61,9 @@ class CheckpointConfig(BaseModel):
         description="APPEND creates a new snapshot per save for time-travel; REPLACE overwrites the same checkpoint",
     )
 
+    checkpoint_on_start_enabled: bool = Field(
+        default=True, description="Persist the checkpoint at run start, before any node executes"
+    )
     checkpoint_after_node_enabled: bool = Field(default=True, description="Create checkpoint after each node")
     checkpoint_on_failure_enabled: bool = Field(default=True, description="Create checkpoint when workflow fails")
     checkpoint_on_cancel_enabled: bool = Field(default=True, description="Create checkpoint when workflow is canceled")

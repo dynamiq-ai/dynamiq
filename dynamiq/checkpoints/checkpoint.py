@@ -337,20 +337,6 @@ class CheckpointFlowMixin(BaseModel):
         if not self._is_checkpoint_active():
             return config
 
-        def on_pending_input(node_id: str, prompt: str, metadata: dict | None) -> None:
-            with self._checkpoint_lock:
-                if self._checkpoint:
-                    self._checkpoint.mark_pending_input(node_id, prompt, metadata)
-                    self._save_checkpoint_unlocked()
-                    logger.info(f"Flow {self.id}: checkpoint saved with PENDING_INPUT status for node {node_id}")
-
-        def on_input_received(node_id: str) -> None:
-            with self._checkpoint_lock:
-                if self._checkpoint:
-                    self._checkpoint.clear_pending_input(node_id)
-                    self._save_checkpoint_unlocked()
-                    logger.debug(f"Flow {self.id}: cleared pending input for node {node_id}")
-
         def _snapshot_node_state_unlocked(node_id: str) -> bool:
             """Snapshot a node's internal state into the checkpoint (mutation only, no save).
 
@@ -440,8 +426,6 @@ class CheckpointFlowMixin(BaseModel):
                     )
 
         checkpoint_context = CheckpointContext(
-            on_pending_input=on_pending_input,
-            on_input_received=on_input_received,
             on_save_mid_run=on_save_mid_run,
             on_input_timeout=on_input_timeout,
         )

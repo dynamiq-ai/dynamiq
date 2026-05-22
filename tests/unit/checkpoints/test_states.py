@@ -8,7 +8,7 @@ from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig, Che
 from dynamiq.checkpoints.types import CheckpointStatus
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.agents.base import DEFAULT_HISTORY_OFFSET, AgentCheckpointState
+from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentCheckpointState
 from dynamiq.nodes.tools import Python
 from dynamiq.nodes.tools.llm_summarizer import SummarizerTool
 from dynamiq.nodes.tools.thinking_tool import ThinkingTool
@@ -277,20 +277,6 @@ class TestThinkingToolCheckpointState:
 class TestHITLCheckpointContext:
     """Tests for HITL checkpoint context and FlowCheckpoint pending input model."""
 
-    def test_checkpoint_context_tracks_pending_input(self):
-        pending_calls = []
-        received_calls = []
-        ctx = CheckpointContext(
-            on_pending_input=lambda nid, prompt, meta: pending_calls.append((nid, prompt, meta)),
-            on_input_received=lambda nid: received_calls.append(nid),
-        )
-
-        ctx.mark_pending_input("node-1", "Approve?", {"event": "approval"})
-        assert pending_calls == [("node-1", "Approve?", {"event": "approval"})]
-
-        ctx.mark_input_received("node-1")
-        assert received_calls == ["node-1"]
-
     def test_flow_checkpoint_pending_input_lifecycle(self):
         cp = FlowCheckpoint(flow_id="test", run_id="run-1")
 
@@ -439,6 +425,55 @@ class TestIterativeCheckpointMixin:
         new_agent = Agent(id="rt2", name="RT2", llm=create_test_llm(), role="Test", max_loops=10)
         new_agent.from_checkpoint_state(state_dict)
         assert new_agent.get_start_iteration() == 6
+
+    def test_pending_tool_call_roundtrip(self):
+        """A tool call captured before interruption is persisted and restored
+        so it can be replayed on resume."""
+        agent = Agent(id="pt", name="PT", llm=create_test_llm(), role="Test", max_loops=10)
+        agent._completed_loops = 2
+        agent.set_pending_tool_call("search", {"query": "weather"}, "I should search")
+
+        state_dict = agent.to_checkpoint_state().model_dump()
+
+        new_agent = Agent(id="pt2", name="PT2", llm=create_test_llm(), role="Test", max_loops=10)
+        new_agent.from_checkpoint_state(state_dict)
+        # restore_iteration_state runs inside get_start_iteration()
+        assert new_agent.get_start_iteration() == 2
+        assert new_agent._pending_action == "search"
+        assert new_agent._pending_action_input == {"query": "weather"}
+        assert new_agent._pending_thought == "I should search"
+
+    def test_restore_iteration_state_sets_completed_loops(self):
+        """A snapshot taken before any new loop finishes (e.g. input timeout
+        during the replayed tool call) must preserve the saved progress
+        instead of persisting completed_iterations=0."""
+        agent = Agent(id="rl", name="RL", llm=create_test_llm(), role="Test", max_loops=10)
+        agent._completed_loops = 4
+        agent.set_pending_tool_call("search", {"q": "x"}, "thinking")
+
+        state_dict = agent.to_checkpoint_state().model_dump()
+
+        new_agent = Agent(id="rl2", name="RL2", llm=create_test_llm(), role="Test", max_loops=10)
+        new_agent.from_checkpoint_state(state_dict)
+        new_agent.reset_run_state()
+        assert new_agent._completed_loops == 0
+        assert new_agent.get_start_iteration() == 4
+        assert new_agent._completed_loops == 4
+
+        resnapped = new_agent.to_checkpoint_state().model_dump()
+        assert resnapped["iteration"]["completed_iterations"] == 4
+
+    def test_no_pending_tool_call_roundtrip(self):
+        """When no tool call is in flight, restored pending state stays empty."""
+        agent = Agent(id="np", name="NP", llm=create_test_llm(), role="Test", max_loops=10)
+        agent._completed_loops = 1
+
+        state_dict = agent.to_checkpoint_state().model_dump()
+
+        new_agent = Agent(id="np2", name="NP2", llm=create_test_llm(), role="Test", max_loops=10)
+        new_agent.from_checkpoint_state(state_dict)
+        new_agent.get_start_iteration()
+        assert new_agent._pending_action is None
 
 
 class TestSummarizerToolCheckpointState:

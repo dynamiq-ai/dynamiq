@@ -1,6 +1,6 @@
 import json
 from concurrent.futures import as_completed
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Literal, Mapping
 
 from litellm import get_supported_openai_params, supports_function_calling, supports_response_schema
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
@@ -159,6 +159,21 @@ class AgentState(BaseModel):
 UNKNOWN_TOOL_NAME = "unknown_tool"
 
 
+class ReactStep(BaseModel):
+    """Outcome of one ReAct reasoning step, in one of three shapes:
+
+    - ``kind="tool_call"``: run ``action`` with ``action_input``.
+    - ``kind="final_answer"``: return ``final_answer`` from the loop.
+    - ``kind="recovery"``: skip to the next loop iteration (parser asked for a retry).
+    """
+
+    kind: Literal["tool_call", "final_answer", "recovery"]
+    thought: str | None = None
+    action: str | None = None
+    action_input: Any = None
+    final_answer: Any = None
+
+
 class Agent(HistoryManagerMixin, BaseAgent):
     """Unified Agent that uses a ReAct-style strategy for processing tasks by interacting with tools in a loop."""
 
@@ -194,6 +209,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
     _requested_output_files: list[str] = []
     _streaming_tool_run_id: str | None = None
     _streaming_tool_run_ids: list[str] = PrivateAttr(default_factory=list)
+    # Raw text of the most recent LLM call; kept so loop-level recovery
+    # handlers can echo it back to the model after a parsing failure.
+    _last_llm_output: str = PrivateAttr(default="")
 
     @field_validator("response_format", mode="before")
     @classmethod
@@ -241,6 +259,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         super().reset_run_state()
         if not self.is_resumed:
             self.state.reset()
+            self.clear_pending_tool_call()
         self._streaming_tool_run_id = None
         self._streaming_tool_run_ids = []
         self._pending_fc_tool_call_ids: list[str] = []
@@ -1462,6 +1481,87 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
         ]
 
+    def _run_react_llm_step(self, config: RunnableConfig | None, loop_num: int, **kwargs) -> ReactStep:
+        """Run one ReAct LLM call and resolve it to a ReactStep.
+
+        Handles streaming-callback setup, the LLM invocation (restoring the
+        streaming flag afterwards), appending the assistant message,
+        inference-mode parsing, and final-answer resolution. The raw LLM text
+        is stored on ``self._last_llm_output`` before parsing so loop-level
+        recovery handlers can echo it back to the model even when parsing
+        raises.
+
+        Returns:
+            ReactStep: a tool call to execute, a final answer to return, or a
+                recovery retry.
+        """
+        streaming_callback, llm_config, original_streaming_enabled = self._setup_streaming_callback(
+            config, loop_num, **kwargs
+        )
+
+        # Append state to the last user message before LLM call
+        messages = self._inject_state_into_messages(self._prompt.messages)
+
+        try:
+            native_parallel = self.parallel_tool_calls_enabled and self.inference_mode == InferenceMode.FUNCTION_CALLING
+            llm_result = self._run_llm(
+                messages=messages,
+                tools=self._tools,
+                response_format=self._response_format,
+                config=llm_config,
+                parallel_tool_calls=True if native_parallel else None,
+                **kwargs,
+            )
+        finally:
+            if not original_streaming_enabled:
+                try:
+                    self.llm.streaming.enabled = original_streaming_enabled
+                except Exception:
+                    logger.error("Failed to restore llm.streaming.enabled state")
+
+        check_cancellation(config)
+
+        if streaming_callback and streaming_callback.accumulated_content:
+            llm_generated_output = streaming_callback.accumulated_content
+        else:
+            llm_generated_output = llm_result.output.get("content", "")
+        self._last_llm_output = llm_generated_output
+
+        llm_reasoning = (
+            llm_generated_output[:200] if llm_generated_output else str(llm_result.output.get("tool_calls", ""))[:200]
+        )
+        logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num}, reasoning:\n{llm_reasoning}...")
+
+        # Append assistant message to conversation history BEFORE parsing
+        # This ensures the LLM can see its own output during error recovery
+        self._append_assistant_message(llm_result, llm_generated_output)
+
+        # Parse LLM output based on inference mode
+        match self.inference_mode:
+            case InferenceMode.DEFAULT:
+                result = self._handle_default_mode(llm_generated_output, loop_num)
+            case InferenceMode.FUNCTION_CALLING:
+                result = self._handle_function_calling_mode(llm_result, loop_num)
+            case InferenceMode.STRUCTURED_OUTPUT:
+                result = self._handle_structured_output_mode(llm_generated_output, loop_num)
+            case InferenceMode.XML:
+                result = self._handle_xml_mode(llm_generated_output, loop_num, config, **kwargs)
+
+        # Resolve the parsed result into a ReactStep.
+        if result[1] == "final_answer":
+            self._resolve_requested_output_files(strict=True)
+            final_answer = result[2]
+            if self.response_format is not None:
+                final_answer = self._coerce_to_response_format(final_answer)
+            return ReactStep(kind="final_answer", final_answer=final_answer)
+
+        # A (None, None, None) result signals the inference mode wants a retry.
+        if result[1] is None:
+            return ReactStep(kind="recovery")
+
+        thought, action, action_input = result
+        return ReactStep(kind="tool_call", thought=thought, action=action, action_input=action_input)
+
     def _run_agent(
         self,
         input_message: Message | VisionMessage,
@@ -1489,21 +1589,20 @@ class Agent(HistoryManagerMixin, BaseAgent):
         start_loop = completed + 1 if completed > 0 else 1
         self._requested_output_files = []
 
-        if start_loop > 1:
+        # Resume the restored prompt/state when either previous loops completed
+        # or a tool call was checkpointed mid-loop (e.g. a HITL input timeout).
+        resuming = (start_loop > 1 or self._pending_action is not None) and bool(self._prompt.messages)
+        if resuming:
             logger.info(
                 f"Agent {self.name} - {self.id}: resuming from loop {start_loop}, "
                 f"skipping {completed} completed loops"
             )
-            if not self._prompt.messages:
-                self._setup_prompt_and_stop_sequences(input_message, history_messages)
-            else:
-                self._pinned_input = input_message
+            self._pinned_input = input_message
             self._setup_stop_sequences()
-            self.state.max_loops = self.max_loops
-            self._refresh_agent_state(start_loop)
         else:
-            self._refresh_agent_state(1)
             self._setup_prompt_and_stop_sequences(input_message, history_messages)
+        self.state.max_loops = self.max_loops
+        self._refresh_agent_state(start_loop)
         self.reset_resumed_flag()
 
         for loop_num in range(start_loop, self.max_loops + 1):
@@ -1512,86 +1611,48 @@ class Agent(HistoryManagerMixin, BaseAgent):
             if loop_num > start_loop:
                 self._refresh_agent_state(loop_num)
 
+            # On resume, replay the tool call captured before an interruption
+            # (e.g. HITL input timeout) instead of regenerating it from the LLM.
+            # Gated on `resuming` so a replay never runs against a freshly built
+            # prompt — without the restored history there is no call to replay.
+            replay_pending = resuming and loop_num == start_loop and self._pending_action is not None
+            self._last_llm_output = ""
+
             try:
-                streaming_callback, llm_config, original_streaming_enabled = self._setup_streaming_callback(
-                    config, loop_num, **kwargs
-                )
-
-                # Append state to the last user message before LLM call
-                messages = self._inject_state_into_messages(self._prompt.messages)
-
-                try:
-                    native_parallel = (
-                        self.parallel_tool_calls_enabled and self.inference_mode == InferenceMode.FUNCTION_CALLING
+                if replay_pending:
+                    step = ReactStep(
+                        kind="tool_call",
+                        thought=self._pending_thought,
+                        action=self._pending_action,
+                        action_input=self._pending_action_input,
                     )
-                    llm_result = self._run_llm(
-                        messages=messages,
-                        tools=self._tools,
-                        response_format=self._response_format,
-                        config=llm_config,
-                        parallel_tool_calls=True if native_parallel else None,
-                        **kwargs,
+                    logger.info(
+                        f"Agent {self.name} - {self.id}: Loop {loop_num}, "
+                        f"replaying checkpointed tool call '{step.action}' after resume"
                     )
-                finally:
-                    if not original_streaming_enabled:
-                        try:
-                            self.llm.streaming.enabled = original_streaming_enabled
-                        except Exception:
-                            logger.error("Failed to restore llm.streaming.enabled state")
-
-                check_cancellation(config)
-
-                action, action_input = None, None
-                llm_generated_output = ""
-
-                if streaming_callback and streaming_callback.accumulated_content:
-                    llm_generated_output = streaming_callback.accumulated_content
+                    self.log_reasoning(step.thought, step.action, step.action_input, loop_num)
                 else:
-                    llm_generated_output = llm_result.output.get("content", "")
+                    step = self._run_react_llm_step(config, loop_num, **kwargs)
 
-                llm_reasoning = (
-                    llm_generated_output[:200]
-                    if llm_generated_output
-                    else str(llm_result.output.get("tool_calls", ""))[:200]
-                )
-                logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num}, reasoning:\n{llm_reasoning}...")
-
-                # Append assistant message to conversation history BEFORE parsing
-                # This ensures the LLM can see its own output during error recovery
-                self._append_assistant_message(llm_result, llm_generated_output)
-
-                # Parse LLM output based on inference mode
-                match self.inference_mode:
-                    case InferenceMode.DEFAULT:
-                        result = self._handle_default_mode(llm_generated_output, loop_num)
-                    case InferenceMode.FUNCTION_CALLING:
-                        result = self._handle_function_calling_mode(llm_result, loop_num)
-                    case InferenceMode.STRUCTURED_OUTPUT:
-                        result = self._handle_structured_output_mode(llm_generated_output, loop_num)
-                    case InferenceMode.XML:
-                        result = self._handle_xml_mode(llm_generated_output, loop_num, config, **kwargs)
-
-                # Handle final answer
-                if result[1] == "final_answer":
-                    self._resolve_requested_output_files(strict=True)
-                    final_answer = result[2]
-                    if self.response_format is not None:
-                        final_answer = self._coerce_to_response_format(final_answer)
-                    return final_answer
-
-                # Handle recovery (for modes that support it)
-                # Check if action is None, which indicates (None, None, None) recovery
-                if result[1] is None:
+                if step.kind == "final_answer":
+                    return step.final_answer
+                if step.kind == "recovery":
                     continue
 
-                thought, action, action_input = result
+                thought, action, action_input = step.thought, step.action, step.action_input
+
                 check_cancellation(config)
+
+                # Capture the tool call so an interruption during execution
+                # (e.g. HITL input timeout) can persist it to the checkpoint.
+                self.set_pending_tool_call(action, action_input, thought)
 
                 final_answer = self._execute_tools_and_update_prompt(
                     action, action_input, thought, loop_num, config, **kwargs
                 )
                 check_cancellation(config)
 
+                self.clear_pending_tool_call()
                 self._completed_loops = loop_num
 
                 if config and config.checkpoint and config.checkpoint.context:
@@ -1607,7 +1668,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self._append_recovery_instruction(
                     error_label=type(e).__name__,
                     error_detail=str(e),
-                    llm_generated_output=llm_generated_output,
+                    llm_generated_output=self._last_llm_output,
                     extra_guidance=(
                         "The response format is correct, but some files could not be found. "
                         "Please create the missing files or correct the file paths, "
@@ -1620,7 +1681,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self._append_recovery_instruction(
                     error_label=type(e).__name__,
                     error_detail=str(e),
-                    llm_generated_output=llm_generated_output,
+                    llm_generated_output=self._last_llm_output,
                     extra_guidance=(
                         "Your final answer must be valid JSON that conforms exactly to the declared "
                         "response_format schema. Return only the JSON document — no prose, Markdown, "
@@ -1654,7 +1715,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self._append_recovery_instruction(
                     error_label=type(e).__name__,
                     error_detail=str(e),
-                    llm_generated_output=llm_generated_output,
+                    llm_generated_output=self._last_llm_output,
                     extra_guidance=extra_guidance,
                 )
                 continue

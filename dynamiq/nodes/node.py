@@ -848,14 +848,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         else:
             message = Template(approval_config.msg_template).render(self.to_dict(), input_data=input_data)
 
-            checkpoint_ctx = config.checkpoint.context if config and config.checkpoint else None
-            if checkpoint_ctx:
-                checkpoint_ctx.mark_pending_input(
-                    node_id=self.id,
-                    prompt=message,
-                    metadata={"event": approval_config.event, "node_name": self.name},
-                )
-
             check_cancellation(config)
             match approval_config.feedback_method:
                 case FeedbackMethod.STREAM:
@@ -868,9 +860,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                     raise ValueError(f"Error: Incorrect feedback method is chosen {approval_config.feedback_method}.")
 
             self._pending_approval_response = approval_result
-
-            if checkpoint_ctx:
-                checkpoint_ctx.mark_input_received(self.id)
 
         update_params = {
             feature_name: approval_result.data[feature_name]

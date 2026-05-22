@@ -338,55 +338,6 @@ class TestHITLApprovalCheckpoint:
         cp = backend.get_latest_by_flow(flow.id)
         assert cp.node_states["approved-python"].status == "success"
 
-    def test_checkpoint_context_notified_on_pending_input(self, mocker):
-        """When approval is requested, checkpoint context receives pending_input notification."""
-        backend = InMemory()
-        pending_notifications = []
-
-        input_node = Input(id="input", name="Input")
-        approved_node = Python(
-            id="hitl-python",
-            name="HITL Python",
-            code='def run(input_data): return {"result": "ok"}',
-            approval=ApprovalConfig(enabled=True, feedback_method=FeedbackMethod.CONSOLE),
-            depends=[NodeDependency(input_node)],
-        )
-        output_node = Output(id="output", name="Output", depends=[NodeDependency(approved_node)])
-
-        mocker.patch.object(
-            Python,
-            "send_console_approval_message",
-            return_value=ApprovalInputData(feedback="", is_approved=True, data={}),
-        )
-
-        flow = flows.Flow(
-            nodes=[input_node, approved_node, output_node],
-            checkpoint=CheckpointConfig(enabled=True, backend=backend),
-        )
-
-        original_setup = flow._setup_checkpoint_context
-
-        def tracking_setup(config):
-            result = original_setup(config)
-            ctx = result.checkpoint.context if result and result.checkpoint else None
-            if ctx:
-                original_pending = ctx._on_pending_input
-
-                def tracking_pending(node_id, prompt, metadata):
-                    pending_notifications.append({"node_id": node_id, "prompt": prompt, "metadata": metadata})
-                    if original_pending:
-                        original_pending(node_id, prompt, metadata)
-
-                ctx._on_pending_input = tracking_pending
-            return result
-
-        mocker.patch.object(flow, "_setup_checkpoint_context", side_effect=tracking_setup)
-
-        flow.run_sync(input_data={"query": "test"})
-
-        assert len(pending_notifications) >= 1
-        assert pending_notifications[0]["node_id"] == "hitl-python"
-
 
 def _input_timeout_only_config(backend) -> CheckpointConfig:
     """CheckpointConfig with all save triggers off except input-timeout, so any
@@ -415,22 +366,22 @@ class TestInputStreamingTimeoutInAgent:
     SHORT_STREAMING_TIMEOUT = 0.3
 
     def _patch_llm_tool_call_then_final(self, mocker, tool_name: str, final_answer: str = "approved"):
-        """LLM emits the tool call on calls #1 and #2, then Final Answer thereafter.
+        """LLM emits the tool call on call #1, then Final Answer thereafter.
 
         - First run: call #1 → tool call → tool times out → agent fails.
-        - Resume: call #2 → tool call → tool must actually consume the queued
-          response to succeed → call #3 → Final Answer → agent terminates.
+        - Resume: the timed-out tool call is replayed directly from the
+          checkpoint (no LLM call), consuming the queued response → call #2 →
+          Final Answer → agent terminates.
 
-        Returning Final Answer on call #2 would let the agent bypass the tool on
-        resume; emitting the tool call twice forces the queue to be consumed for
-        the resume to succeed.
+        Emitting the tool call only once verifies the resumed tool call comes
+        from the persisted checkpoint state rather than a fresh LLM generation.
         """
         call_count = {"value": 0}
 
         def side_effect(stream: bool, *args, **kwargs):
             call_count["value"] += 1
             r = ModelResponse()
-            if call_count["value"] <= 2:
+            if call_count["value"] <= 1:
                 r["choices"][0]["message"][
                     "content"
                 ] = f'Thought: I need to ask.\nAction: {tool_name}\nAction Input: {{"input": "approve?"}}'
@@ -527,6 +478,39 @@ class TestInputStreamingTimeoutInAgent:
         )
         second = flow.run_sync(input_data={"input": "do something"}, resume_from=saved.id)
         assert second.status == RunnableStatus.SUCCESS
+
+    def test_checkpoint_persists_pending_tool_call_for_replay(self, mocker):
+        """The checkpoint saved on input timeout records the exact tool call
+        (action + action_input) so resume can replay it without the LLM."""
+        queue = Queue()
+        tool = HumanFeedbackTool(
+            id=self.HF_TOOL_ID,
+            name="human-input",
+            action=HumanFeedbackAction.ASK,
+            input_method=FeedbackMethod.STREAM,
+            output_method=FeedbackMethod.STREAM,
+            streaming=StreamingConfig(enabled=True, input_queue=queue, timeout=self.SHORT_STREAMING_TIMEOUT),
+        )
+        agent = Agent(
+            id=AGENT_ID,
+            name="ReAct Agent",
+            llm=make_agent_llm(),
+            tools=[tool],
+            role="Assistant",
+            max_loops=2,
+        )
+        self._patch_llm_tool_call_then_final(mocker, tool_name="human-input")
+
+        backend = InMemory()
+        flow = flows.Flow(id=FLOW_ID, nodes=[agent], checkpoint=_input_timeout_only_config(backend))
+
+        first = flow.run_sync(input_data={"input": "do something"})
+        assert first.status == RunnableStatus.FAILURE
+
+        saved = backend.get_latest_by_flow(FLOW_ID)
+        iteration_data = saved.node_states[AGENT_ID].internal_state["iteration"]["iteration_data"]
+        assert iteration_data["pending_action"] == "human-input"
+        assert iteration_data["pending_action_input"] == {"input": "approve?"}
 
 
 class TestAgentFlowRunIsolation:
