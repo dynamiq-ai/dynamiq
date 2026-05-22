@@ -972,7 +972,6 @@ class TestAsyncResume:
             ),
         )
 
-        # First run — fails at LLM
         result1 = await flow.run_async(input_data={"query": "test"})
         assert result1.status == RunnableStatus.FAILURE
 
