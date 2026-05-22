@@ -134,6 +134,34 @@ class TestSanitizeFCMessages:
         finally:
             litellm.modify_params = starting
 
+    def test_non_tool_message_between_assistant_and_replies_does_not_duplicate(self):
+        """Regression: a non-tool message between the assistant and its tool
+        replies must not cause already-consumed replies to be re-emitted as
+        duplicates that escape `_dedupe_tool_results`.
+        """
+        messages = [
+            {"role": "user", "content": "do A, B, C"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_1", "type": "function", "function": {"name": "a", "arguments": "{}"}},
+                    {"id": "call_2", "type": "function", "function": {"name": "b", "arguments": "{}"}},
+                    {"id": "call_3", "type": "function", "function": {"name": "c", "arguments": "{}"}},
+                ],
+            },
+            {"role": "user", "content": "interjection"},
+            {"role": "tool", "tool_call_id": "call_1", "content": "A done"},
+            {"role": "user", "content": "another interjection"},
+            {"role": "tool", "tool_call_id": "call_2", "content": "B done"},
+        ]
+
+        out = BaseLLM._sanitize_fc_messages(messages)
+
+        ids = [m["tool_call_id"] for m in out if m.get("role") == "tool"]
+        assert len(ids) == len(set(ids)), f"duplicate tool_call_ids in output: {ids}"
+        assert set(ids) == {"call_1", "call_2", "call_3"}
+
     def test_duplicate_tool_results_in_same_block_are_deduped_to_latest(self):
         """Case D: Anthropic rejects two tool_results for the same tool_call_id.
 

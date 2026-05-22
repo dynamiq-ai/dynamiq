@@ -73,16 +73,16 @@ def _is_orphaned_tool_result(current: dict, sanitized: list[dict]) -> bool:
 
 def _add_missing_tool_results(
     current: dict, messages: list[dict], current_index: int
-) -> tuple[list[dict], int]:
+) -> tuple[list[dict], set[int]]:
     """Case A: synthesize tool replies for any tool_call without a matching tool message.
 
     Returns the assistant message plus existing tool replies plus any synthesized
-    replies, and the count of original tool messages consumed (so the caller can
-    advance its index past them).
+    replies, and the set of original message indices folded into that block so
+    the caller can skip them on later iterations.
     """
     tool_calls = current.get("tool_calls") or []
     if not tool_calls:
-        return [current], 0
+        return [current], set()
 
     expected_ids: set[str] = set()
     for tc in tool_calls:
@@ -92,6 +92,7 @@ def _add_missing_tool_results(
 
     found_ids: set[str] = set()
     actual_replies: list[dict] = []
+    consumed_indices: set[int] = set()
     j = current_index + 1
     while j < len(messages):
         nxt = messages[j]
@@ -103,11 +104,12 @@ def _add_missing_tool_results(
             if tc_id and tc_id in expected_ids:
                 found_ids.add(tc_id)
                 actual_replies.append(nxt)
+                consumed_indices.add(j)
         j += 1
 
     missing_ids = expected_ids - found_ids
     if not missing_ids:
-        return [current], 0
+        return [current], set()
 
     result: list[dict] = [current, *actual_replies]
     for missing_id in missing_ids:
@@ -123,7 +125,7 @@ def _add_missing_tool_results(
                 "content": _dummy_tool_result_content(tool_name),
             }
         )
-    return result, len(actual_replies)
+    return result, consumed_indices
 
 
 def _dedupe_tool_results(messages: list[dict]) -> list[dict]:
@@ -151,14 +153,19 @@ def _dedupe_tool_results(messages: list[dict]) -> list[dict]:
 def sanitize_fc_messages(messages: list[dict]) -> list[dict]:
     """Run Cases A/B/C/D on outgoing FC messages. See module docstring."""
     sanitized: list[dict] = []
+    consumed: set[int] = set()
     i = 0
     while i < len(messages):
+        if i in consumed:
+            i += 1
+            continue
         current = _sanitize_empty_text_content(messages[i])
         if current.get("role") == "assistant":
-            result_messages, consumed = _add_missing_tool_results(current, messages, i)
+            result_messages, newly_consumed = _add_missing_tool_results(current, messages, i)
             if len(result_messages) > 1:
                 sanitized.extend(result_messages)
-                i += 1 + consumed
+                consumed |= newly_consumed
+                i += 1
                 continue
         if _is_orphaned_tool_result(current, sanitized):
             i += 1
