@@ -795,17 +795,34 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
         return output
 
-    def send_console_approval_message(self, template: str) -> ApprovalInputData:
+    def send_console_approval_message(self, template: str, config: RunnableConfig = None) -> ApprovalInputData:
         """
         Sends approval message in console and waits for response.
+        Cancellable: runs input() in a daemon thread and polls for cancellation.
 
         Args:
-            template (dict): Template to send.
+            template (str): Template to send.
+            config (RunnableConfig, optional): Configuration for cancellation check.
         Returns:
             ApprovalInputData: Response to approval message.
         """
-        feedback = input(template)
-        return ApprovalInputData(feedback=feedback)
+        import threading as _threading
+
+        check_cancellation(config)
+
+        result = {}
+
+        def _read_input():
+            result["feedback"] = input(template)
+
+        input_thread = _threading.Thread(target=_read_input, daemon=True)
+        input_thread.start()
+
+        while input_thread.is_alive():
+            check_cancellation(config)
+            input_thread.join(timeout=0.5)
+
+        return ApprovalInputData(feedback=result.get("feedback", ""))
 
     def send_approval_message(
         self, approval_config: ApprovalConfig, input_data: dict, config: RunnableConfig = None, **kwargs
@@ -831,6 +848,14 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         else:
             message = Template(approval_config.msg_template).render(self.to_dict(), input_data=input_data)
 
+            checkpoint_ctx = config.checkpoint.context if config and config.checkpoint else None
+            if checkpoint_ctx:
+                checkpoint_ctx.mark_pending_input(
+                    node_id=self.id,
+                    prompt=message,
+                    metadata={"event": approval_config.event, "node_name": self.name},
+                )
+
             check_cancellation(config)
             match approval_config.feedback_method:
                 case FeedbackMethod.STREAM:
@@ -838,11 +863,14 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                         message, input_data, approval_config, config=config, **kwargs
                     )
                 case FeedbackMethod.CONSOLE:
-                    approval_result = self.send_console_approval_message(message)
+                    approval_result = self.send_console_approval_message(message, config=config)
                 case _:
                     raise ValueError(f"Error: Incorrect feedback method is chosen {approval_config.feedback_method}.")
 
             self._pending_approval_response = approval_result
+
+            if checkpoint_ctx:
+                checkpoint_ctx.mark_input_received(self.id)
 
         update_params = {
             feature_name: approval_result.data[feature_name]
