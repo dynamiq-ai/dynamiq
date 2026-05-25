@@ -1,12 +1,13 @@
 from datetime import UTC, datetime
 from hashlib import md5
-from typing import Any, Literal
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
 from dynamiq.memory.long_term.base import LongTermMemoryBackend
 from dynamiq.memory.long_term.schemas import Fact
+from dynamiq.memory.long_term.types import ForgetStatus, MemoryToolKind
 
 
 def _content_hash(user_id: str, content: str) -> str:
@@ -71,19 +72,19 @@ class LongTermMemory(BaseModel):
             limit=limit,
         )
 
-    def forget(self, *, fact_id: str, user_id: str) -> str:
-        """Delete a fact by id, returning 'deleted' | 'not_found' | 'forbidden'.
+    def forget(self, *, fact_id: str, user_id: str) -> ForgetStatus:
+        """Delete a fact by id and return a `ForgetStatus`.
 
         Never raises on user mismatch — defence in depth above the
         construction-time `user_id` binding on the tool.
         """
         fact = self.backend.get(fact_id)
         if fact is None:
-            return "not_found"
+            return ForgetStatus.NOT_FOUND
         if fact.user_id != user_id:
-            return "forbidden"
+            return ForgetStatus.FORBIDDEN
         self.backend.delete(fact_id)
-        return "deleted"
+        return ForgetStatus.DELETED
 
     def list_all(self, *, user_id: str, limit: int = 100) -> list[Fact]:
         """Return up to `limit` facts for `user_id`, most recent first (admin/introspection)."""
@@ -101,8 +102,8 @@ class LongTermMemory(BaseModel):
 class LongTermMemoryConfig(BaseModel):
     """Per-agent configuration for long-term memory tool exposure."""
 
-    tools: tuple[Literal["remember", "recall", "forget"], ...] = (
-        "remember",
-        "recall",
-        "forget",
+    tools: tuple[MemoryToolKind, ...] = (
+        MemoryToolKind.REMEMBER,
+        MemoryToolKind.RECALL,
+        MemoryToolKind.FORGET,
     )

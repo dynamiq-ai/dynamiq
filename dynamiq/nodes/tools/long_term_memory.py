@@ -2,10 +2,9 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from dynamiq.memory.long_term import LongTermMemory
+from dynamiq.memory.long_term import LongTermMemory, MemoryToolKind
 from dynamiq.nodes.node import Node
 from dynamiq.nodes.types import NodeGroup
-
 
 REMEMBER_DESCRIPTION = (
     "Record a durable fact about the current user that should persist across "
@@ -119,10 +118,10 @@ class ForgetFactTool(_LongTermMemoryTool):
         return {"content": {"status": status}}
 
 
-_TOOL_BUILDERS: dict[str, type[_LongTermMemoryTool]] = {
-    "remember": RememberFactTool,
-    "recall": RecallFactsTool,
-    "forget": ForgetFactTool,
+_TOOL_BUILDERS: dict[MemoryToolKind, type[_LongTermMemoryTool]] = {
+    MemoryToolKind.REMEMBER: RememberFactTool,
+    MemoryToolKind.RECALL: RecallFactsTool,
+    MemoryToolKind.FORGET: ForgetFactTool,
 }
 
 
@@ -130,13 +129,18 @@ def build_long_term_memory_tools(
     *,
     long_term_memory: LongTermMemory,
     user_id: str,
-    include: tuple[str, ...] = ("remember", "recall", "forget"),
+    include: tuple[MemoryToolKind | str, ...] = (
+        MemoryToolKind.REMEMBER,
+        MemoryToolKind.RECALL,
+        MemoryToolKind.FORGET,
+    ),
 ) -> list[Node]:
     """Construct long-term-memory tools with `user_id` baked in. Unknown keys in `include` are ignored."""
     tools: list[Node] = []
     for kind in include:
-        cls = _TOOL_BUILDERS.get(kind)
-        if cls is None:
+        try:
+            tool_kind = MemoryToolKind(kind)
+        except ValueError:
             continue
-        tools.append(cls(long_term_memory=long_term_memory, user_id=user_id))
+        tools.append(_TOOL_BUILDERS[tool_kind](long_term_memory=long_term_memory, user_id=user_id))
     return tools
