@@ -3,46 +3,53 @@
 Uses psycopg (v3) + the pgvector extension. Stores facts in a single
 table with a vector column for embeddings, a JSONB column for metadata,
 and (user_id, hash) uniqueness for dedup.
+
+Table and column identifiers are interpolated via `psycopg.sql.SQL` /
+`Identifier`, never raw f-strings, so an attacker-controlled table_name
+cannot inject SQL.
 """
 import psycopg
 from pgvector.psycopg import register_vector
 from psycopg.rows import dict_row
+from psycopg.sql import SQL, Composed, Identifier
 from psycopg.types.json import Jsonb
 from pydantic import ConfigDict, PrivateAttr
 
 from dynamiq.memory.long_term.base import LongTermMemoryBackend
 from dynamiq.memory.long_term.schemas import Fact
 
+_CREATE_EXTENSION_SQL = SQL("CREATE EXTENSION IF NOT EXISTS vector")
 
-_SCHEMA_SQL = """
-CREATE EXTENSION IF NOT EXISTS vector;
+_CREATE_TABLE_TEMPLATE = SQL(
+    """
+    CREATE TABLE IF NOT EXISTS {table} (
+        id          TEXT PRIMARY KEY,
+        content     TEXT NOT NULL,
+        hash        TEXT NOT NULL,
+        user_id     TEXT NOT NULL,
+        metadata    JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+        embedding   vector({dim}) NOT NULL,
+        created_at  TIMESTAMPTZ NOT NULL,
+        updated_at  TIMESTAMPTZ NOT NULL
+    )
+    """
+)
 
-CREATE TABLE IF NOT EXISTS {table} (
-    id          TEXT PRIMARY KEY,
-    content     TEXT NOT NULL,
-    hash        TEXT NOT NULL,
-    user_id     TEXT NOT NULL,
-    metadata    JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-    embedding   vector({dim}) NOT NULL,
-    created_at  TIMESTAMPTZ NOT NULL,
-    updated_at  TIMESTAMPTZ NOT NULL
-);
+_CREATE_USER_ID_INDEX_TEMPLATE = SQL("CREATE INDEX IF NOT EXISTS {idx} ON {table} (user_id)")
 
-CREATE INDEX IF NOT EXISTS {table}_user_id_idx ON {table} (user_id);
-CREATE UNIQUE INDEX IF NOT EXISTS {table}_user_hash_uidx ON {table} (user_id, hash);
-"""
+_CREATE_USER_HASH_INDEX_TEMPLATE = SQL("CREATE UNIQUE INDEX IF NOT EXISTS {idx} ON {table} (user_id, hash)")
 
 
-def _scope_to_where(scope: dict[str, str]) -> tuple[str, list]:
-    """Translate a scope dict into a parameterised SQL WHERE clause.
+def _scope_where_clause(scope: dict[str, str]) -> tuple[Composed, list]:
+    """Build a parameterised WHERE clause from a scope dict.
 
-    `scope` is always `{"user_id": ...}` in v1; the loop is shaped so
-    forward extensions (agent_id, run_id) drop in without rewriting.
+    Returns the SQL fragment and its parameter list. Keys are interpolated
+    as Identifiers (safe); values stay as `%s` placeholders for the driver.
     """
     if not scope:
-        return "TRUE", []
-    clauses = [f"{key} = %s" for key in scope.keys()]
-    return " AND ".join(clauses), list(scope.values())
+        return SQL("TRUE"), []
+    clauses = [SQL("{key} = %s").format(key=Identifier(key)) for key in scope.keys()]
+    return SQL(" AND ").join(clauses), list(scope.values())
 
 
 def _row_to_fact(row) -> Fact:
@@ -55,6 +62,9 @@ def _row_to_fact(row) -> Fact:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
+
+
+_FACT_COLUMNS = SQL("id, content, hash, user_id, metadata, created_at, updated_at")
 
 
 class PgvectorFactBackend(LongTermMemoryBackend):
@@ -74,48 +84,65 @@ class PgvectorFactBackend(LongTermMemoryBackend):
 
     # --- schema management (test/admin helpers, not part of the ABC) ---
 
+    @property
+    def _table(self) -> Identifier:
+        return Identifier(self.table_name)
+
     def ensure_table(self) -> None:
         """Create the facts table and indexes if absent. Safe to call repeatedly."""
         with self._conn.cursor() as cur:
-            cur.execute(_SCHEMA_SQL.format(table=self.table_name, dim=self.dimension))
+            cur.execute(_CREATE_EXTENSION_SQL)
+            cur.execute(_CREATE_TABLE_TEMPLATE.format(table=self._table, dim=SQL(str(self.dimension))))
+            cur.execute(
+                _CREATE_USER_ID_INDEX_TEMPLATE.format(
+                    idx=Identifier(f"{self.table_name}_user_id_idx"),
+                    table=self._table,
+                )
+            )
+            cur.execute(
+                _CREATE_USER_HASH_INDEX_TEMPLATE.format(
+                    idx=Identifier(f"{self.table_name}_user_hash_uidx"),
+                    table=self._table,
+                )
+            )
 
     def recreate_table(self) -> None:
         """Drop and re-create the facts table. For tests only."""
         with self._conn.cursor() as cur:
-            cur.execute(f"DROP TABLE IF EXISTS {self.table_name}")
+            cur.execute(SQL("DROP TABLE IF EXISTS {table}").format(table=self._table))
         self.ensure_table()
 
     def drop_table(self) -> None:
         with self._conn.cursor() as cur:
-            cur.execute(f"DROP TABLE IF EXISTS {self.table_name}")
+            cur.execute(SQL("DROP TABLE IF EXISTS {table}").format(table=self._table))
 
     # --- LongTermMemoryBackend implementation ---
 
     def insert(self, fact: Fact, embedding: list[float]) -> None:
         with self._conn.cursor() as cur:
             cur.execute(
-                f"""
-                INSERT INTO {self.table_name}
-                (id, content, hash, user_id, metadata, embedding, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """,
+                SQL("INSERT INTO {table} ({cols}, embedding) " "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)").format(
+                    table=self._table, cols=_FACT_COLUMNS
+                ),
                 (
                     fact.id,
                     fact.content,
                     fact.hash,
                     fact.user_id,
                     Jsonb(fact.metadata),
-                    embedding,
                     fact.created_at,
                     fact.updated_at,
+                    embedding,
                 ),
             )
 
     def get(self, fact_id: str) -> Fact | None:
         with self._conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                f"SELECT id, content, hash, user_id, metadata, created_at, updated_at "
-                f"FROM {self.table_name} WHERE id = %s",
+                SQL("SELECT {cols} FROM {table} WHERE id = %s").format(
+                    cols=_FACT_COLUMNS,
+                    table=self._table,
+                ),
                 (fact_id,),
             )
             row = cur.fetchone()
@@ -124,8 +151,9 @@ class PgvectorFactBackend(LongTermMemoryBackend):
     def get_by_hash(self, *, user_id: str, content_hash: str) -> Fact | None:
         with self._conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                f"SELECT id, content, hash, user_id, metadata, created_at, updated_at "
-                f"FROM {self.table_name} WHERE user_id = %s AND hash = %s",
+                SQL("SELECT {cols} FROM {table} WHERE user_id = %s AND hash = %s").format(
+                    cols=_FACT_COLUMNS, table=self._table
+                ),
                 (user_id, content_hash),
             )
             row = cur.fetchone()
@@ -133,7 +161,10 @@ class PgvectorFactBackend(LongTermMemoryBackend):
 
     def delete(self, fact_id: str) -> None:
         with self._conn.cursor() as cur:
-            cur.execute(f"DELETE FROM {self.table_name} WHERE id = %s", (fact_id,))
+            cur.execute(
+                SQL("DELETE FROM {table} WHERE id = %s").format(table=self._table),
+                (fact_id,),
+            )
 
     def search(
         self,
@@ -142,36 +173,39 @@ class PgvectorFactBackend(LongTermMemoryBackend):
         scope: dict[str, str],
         limit: int,
     ) -> list[tuple[Fact, float]]:
-        where, params = _scope_to_where(scope)
+        where, params = _scope_where_clause(scope)
         with self._conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                f"""
-                SELECT id, content, hash, user_id, metadata, created_at, updated_at,
-                       1 - (embedding <=> %s::vector) AS score
-                FROM {self.table_name}
-                WHERE {where}
-                ORDER BY embedding <=> %s::vector
-                LIMIT %s
-                """,
+                SQL(
+                    "SELECT {cols}, 1 - (embedding <=> %s::vector) AS score "
+                    "FROM {table} WHERE {where} "
+                    "ORDER BY embedding <=> %s::vector LIMIT %s"
+                ).format(cols=_FACT_COLUMNS, table=self._table, where=where),
                 [query_embedding] + params + [query_embedding, limit],
             )
             rows = cur.fetchall()
         return [(_row_to_fact(row), float(row["score"])) for row in rows]
 
     def list_by_scope(self, scope: dict[str, str], limit: int = 100) -> list[Fact]:
-        where, params = _scope_to_where(scope)
+        where, params = _scope_where_clause(scope)
         with self._conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                f"SELECT id, content, hash, user_id, metadata, created_at, updated_at "
-                f"FROM {self.table_name} WHERE {where} "
-                f"ORDER BY created_at DESC LIMIT %s",
+                SQL("SELECT {cols} FROM {table} WHERE {where} " "ORDER BY created_at DESC LIMIT %s").format(
+                    cols=_FACT_COLUMNS, table=self._table, where=where
+                ),
                 params + [limit],
             )
             rows = cur.fetchall()
         return [_row_to_fact(row) for row in rows]
 
     def delete_scope(self, scope: dict[str, str]) -> int:
-        where, params = _scope_to_where(scope)
+        where, params = _scope_where_clause(scope)
         with self._conn.cursor() as cur:
-            cur.execute(f"DELETE FROM {self.table_name} WHERE {where}", params)
+            cur.execute(
+                SQL("DELETE FROM {table} WHERE {where}").format(
+                    table=self._table,
+                    where=where,
+                ),
+                params,
+            )
             return cur.rowcount

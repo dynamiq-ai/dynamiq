@@ -15,9 +15,12 @@ from dynamiq.memory.long_term.schemas import Fact
 
 
 def _content_hash(user_id: str, content: str) -> str:
-    """Stable hash for exact-duplicate dedup. Scoped per-user."""
+    """Stable hash for exact-duplicate dedup. Scoped per-user.
+
+    MD5 is used only as a dedup key, never as a security primitive.
+    """
     normalised = content.strip().lower()
-    return md5(f"{user_id}:{normalised}".encode("utf-8")).hexdigest()
+    return md5(f"{user_id}:{normalised}".encode(), usedforsecurity=False).hexdigest()
 
 
 def _embed(embedder: Any, text: str) -> list[float]:
