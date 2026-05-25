@@ -74,6 +74,7 @@ class PgvectorFactBackend(LongTermMemoryBackend):
 
     @property
     def _table(self) -> Identifier:
+        """Return the table name wrapped as a safe SQL identifier."""
         return Identifier(self.table_name)
 
     def ensure_table(self) -> None:
@@ -95,12 +96,13 @@ class PgvectorFactBackend(LongTermMemoryBackend):
             )
 
     def recreate_table(self) -> None:
-        """Drop and re-create the facts table. For tests only."""
+        """Drop and re-create the facts table. Test-only helper."""
         with self._conn.cursor() as cur:
             cur.execute(SQL("DROP TABLE IF EXISTS {table}").format(table=self._table))
         self.ensure_table()
 
     def drop_table(self) -> None:
+        """Drop the facts table if it exists. Test-only helper."""
         with self._conn.cursor() as cur:
             cur.execute(SQL("DROP TABLE IF EXISTS {table}").format(table=self._table))
 

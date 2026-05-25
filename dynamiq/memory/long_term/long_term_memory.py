@@ -86,12 +86,15 @@ class LongTermMemory(BaseModel):
         return "deleted"
 
     def list_all(self, *, user_id: str, limit: int = 100) -> list[Fact]:
+        """Return up to `limit` facts for `user_id`, most recent first (admin/introspection)."""
         return self.backend.list_by_scope({"user_id": user_id}, limit=limit)
 
     def get(self, fact_id: str) -> Fact | None:
+        """Fetch a fact by id, or `None` if it does not exist."""
         return self.backend.get(fact_id)
 
     def clear_user(self, *, user_id: str) -> int:
+        """Hard-delete every fact owned by `user_id` and return the count deleted."""
         return self.backend.delete_scope({"user_id": user_id})
 
 

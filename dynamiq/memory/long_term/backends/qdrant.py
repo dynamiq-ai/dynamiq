@@ -80,7 +80,7 @@ class QdrantFactBackend(LongTermMemoryBackend):
         self._client = QdrantClient(url=self.url, api_key=self.api_key)
 
     def ensure_collection(self) -> None:
-        """Create the facts collection and payload indexes if absent."""
+        """Create the facts collection and payload indexes if absent. Safe to call repeatedly."""
         if not self._client.collection_exists(self.collection_name):
             self._client.create_collection(
                 collection_name=self.collection_name,
@@ -94,12 +94,13 @@ class QdrantFactBackend(LongTermMemoryBackend):
                 )
 
     def recreate_collection(self) -> None:
-        """Drop and re-create. For tests only."""
+        """Drop and re-create the facts collection. Test-only helper."""
         if self._client.collection_exists(self.collection_name):
             self._client.delete_collection(self.collection_name)
         self.ensure_collection()
 
     def drop_collection(self) -> None:
+        """Drop the facts collection if it exists. Test-only helper."""
         if self._client.collection_exists(self.collection_name):
             self._client.delete_collection(self.collection_name)
 
