@@ -5,7 +5,7 @@ Wraps a `LongTermMemoryBackend` and an embedder.
 """
 from datetime import UTC, datetime
 from hashlib import md5
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
@@ -108,3 +108,18 @@ class LongTermMemory(BaseModel):
 
     def clear_user(self, *, user_id: str) -> int:
         return self.backend.delete_scope({"user_id": user_id})
+
+
+class LongTermMemoryConfig(BaseModel):
+    """Per-agent configuration for long-term memory.
+
+    `tools` controls which of the three tools the agent is given access to.
+    Sub-agents typically use `("recall",)` for read-only inheritance;
+    parent agents use the default `("remember", "recall", "forget")`.
+    """
+
+    tools: tuple[Literal["remember", "recall", "forget"], ...] = (
+        "remember",
+        "recall",
+        "forget",
+    )

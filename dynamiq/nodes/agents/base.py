@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy, MemorySaveMode
+from dynamiq.memory.long_term import LongTermMemory, LongTermMemoryConfig
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentIterativeCheckpointMixin
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
@@ -222,6 +223,17 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
+    long_term_memory: LongTermMemory | None = Field(
+        default=None,
+        description=(
+            "Long-term, fact-shaped, user-scoped memory accessed via remember/recall/forget "
+            "tools. Independent of `memory` (short-term messages)."
+        ),
+    )
+    long_term_memory_config: LongTermMemoryConfig = Field(
+        default_factory=LongTermMemoryConfig,
+        description="Which long-term-memory tools to expose on this agent.",
+    )
     verbose: bool = Field(False, description="Whether to print verbose logs.")
     file_store: FileStoreConfig = Field(
         default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
@@ -618,6 +630,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         use_memory = self.memory and (input_data.user_id or input_data.session_id)
 
+        ltm_tools = self._build_long_term_memory_tools(input_data)
+        _tools_before_ltm = self.tools
+        if ltm_tools:
+            self.tools = list(_tools_before_ltm) + ltm_tools
+
         if use_memory:
             history_messages = self._retrieve_memory(input_data)
             if len(history_messages) > 0:
@@ -687,6 +704,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         finally:
             self._current_call_context = None
             self._clear_todos_file()
+            if ltm_tools:
+                self.tools = _tools_before_ltm
 
         if use_memory:
             try:
@@ -797,6 +816,27 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         )
         logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
         return history_messages
+
+    def _build_long_term_memory_tools(self, input_data: "AgentInputSchema") -> list[Node]:
+        """Build per-run long-term-memory tools, or [] if not applicable.
+
+        Returns an empty list when `long_term_memory` is unset or `user_id`
+        is absent. The caller attaches the returned tools to `self.tools`
+        for the duration of the run.
+        """
+        if self.long_term_memory is None:
+            return []
+        user_id = getattr(input_data, "user_id", None)
+        if not user_id:
+            return []
+        # Imported locally to avoid circular imports at module load time.
+        from dynamiq.nodes.tools.long_term_memory import build_long_term_memory_tools
+
+        return build_long_term_memory_tools(
+            long_term_memory=self.long_term_memory,
+            user_id=user_id,
+            include=self.long_term_memory_config.tools,
+        )
 
     def _is_input_output_trace_message(self, message: Message) -> bool:
         """Return True when a message is an internal ReAct/tool-trace entry."""
