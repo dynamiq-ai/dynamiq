@@ -818,18 +818,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         return history_messages
 
     def _build_long_term_memory_tools(self, input_data: "AgentInputSchema") -> list[Node]:
-        """Build per-run long-term-memory tools, or [] if not applicable.
-
-        Returns an empty list when `long_term_memory` is unset or `user_id`
-        is absent. The caller attaches the returned tools to `self.tools`
-        for the duration of the run.
-        """
+        """Construct per-run long-term-memory tools, or [] when LTM or user_id is absent."""
         if self.long_term_memory is None:
             return []
         user_id = getattr(input_data, "user_id", None)
         if not user_id:
             return []
-        # Imported locally to avoid circular imports at module load time.
         from dynamiq.nodes.tools.long_term_memory import build_long_term_memory_tools
 
         return build_long_term_memory_tools(

@@ -1,8 +1,3 @@
-"""LongTermMemory facade.
-
-User-facing API for fact-shaped, user-scoped, cross-session memory.
-Wraps a `LongTermMemoryBackend` and an embedder.
-"""
 from datetime import UTC, datetime
 from hashlib import md5
 from typing import Any, Literal
@@ -15,21 +10,12 @@ from dynamiq.memory.long_term.schemas import Fact
 
 
 def _content_hash(user_id: str, content: str) -> str:
-    """Stable hash for exact-duplicate dedup. Scoped per-user.
-
-    MD5 is used only as a dedup key, never as a security primitive.
-    """
+    """Per-user stable hash used only as a dedup key, never as a security primitive."""
     normalised = content.strip().lower()
     return md5(f"{user_id}:{normalised}".encode(), usedforsecurity=False).hexdigest()
 
 
 def _embed(embedder: Any, text: str) -> list[float]:
-    """Call the embedder's `.execute({"query": text})` and pull the vector.
-
-    Matches dynamiq's `TextEmbedder` contract: input is a dict (or
-    `TextEmbedderInputSchema`) with `query`; output is a dict-like with
-    `embedding`.
-    """
     result = embedder.execute({"query": text})
     return list(result["embedding"])
 
@@ -40,7 +26,7 @@ class LongTermMemory(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     backend: LongTermMemoryBackend
-    embedder: Any  # TextEmbedder in production; FakeTextEmbedder in tests.
+    embedder: Any
 
     def remember(
         self, *, content: str, user_id: str,
@@ -74,10 +60,7 @@ class LongTermMemory(BaseModel):
     def recall(
         self, *, query: str, user_id: str, limit: int = 5,
     ) -> list[tuple[Fact, float]]:
-        """Semantic search for facts relevant to `query`, scoped to `user_id`.
-
-        No similarity threshold — caller (or model) decides what's relevant.
-        """
+        """Semantic search for facts relevant to `query`, scoped to `user_id`."""
         stripped = query.strip() if query else ""
         if not stripped:
             raise ValueError("recall query cannot be empty")
@@ -89,11 +72,10 @@ class LongTermMemory(BaseModel):
         )
 
     def forget(self, *, fact_id: str, user_id: str) -> str:
-        """Delete a fact by id, with cross-user guard.
+        """Delete a fact by id, returning 'deleted' | 'not_found' | 'forbidden'.
 
-        Returns one of: 'deleted', 'not_found', 'forbidden'.
         Never raises on user mismatch — defence in depth above the
-        construction-time user_id binding on the tool.
+        construction-time `user_id` binding on the tool.
         """
         fact = self.backend.get(fact_id)
         if fact is None:
@@ -114,12 +96,7 @@ class LongTermMemory(BaseModel):
 
 
 class LongTermMemoryConfig(BaseModel):
-    """Per-agent configuration for long-term memory.
-
-    `tools` controls which of the three tools the agent is given access to.
-    Sub-agents typically use `("recall",)` for read-only inheritance;
-    parent agents use the default `("remember", "recall", "forget")`.
-    """
+    """Per-agent configuration for long-term memory tool exposure."""
 
     tools: tuple[Literal["remember", "recall", "forget"], ...] = (
         "remember",

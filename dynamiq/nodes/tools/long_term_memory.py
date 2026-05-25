@@ -1,9 +1,3 @@
-"""Tools giving an agent access to a `LongTermMemory` instance.
-
-The three tools (`remember_fact`, `recall_facts`, `forget_fact`) bind
-`user_id` at construction. `user_id` never appears in `InputSchema`, so
-the model has no slot to address another user's memory. See spec §9.1.
-"""
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -37,7 +31,7 @@ FORGET_DESCRIPTION = (
 
 
 class RememberFactInputSchema(BaseModel):
-    """LLM-visible input for remember_fact. Note: no `user_id`."""
+    """LLM-visible input for `remember_fact`. `user_id` is bound at construction."""
 
     content: str = Field(..., min_length=1, max_length=1000,
                          description="The fact to remember, as a short statement.")
@@ -48,7 +42,7 @@ class RememberFactInputSchema(BaseModel):
 
 
 class RecallFactsInputSchema(BaseModel):
-    """LLM-visible input for recall_facts. Note: no `user_id`."""
+    """LLM-visible input for `recall_facts`. `user_id` is bound at construction."""
 
     query: str = Field(..., min_length=1, max_length=500,
                        description="What to search for.")
@@ -57,17 +51,13 @@ class RecallFactsInputSchema(BaseModel):
 
 
 class ForgetFactInputSchema(BaseModel):
-    """LLM-visible input for forget_fact. Note: no `user_id`."""
+    """LLM-visible input for `forget_fact`. `user_id` is bound at construction."""
 
     fact_id: str = Field(..., description="The id returned by recall_facts or remember_fact.")
 
 
 class _LongTermMemoryTool(Node):
-    """Shared base for the three long-term memory tools.
-
-    Holds the `LongTermMemory` reference and the construction-bound `user_id`.
-    Concrete subclasses set `name`, `description`, `input_schema`, and `execute`.
-    """
+    """Shared base for the long-term memory tools."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -142,11 +132,7 @@ def build_long_term_memory_tools(
     user_id: str,
     include: tuple[str, ...] = ("remember", "recall", "forget"),
 ) -> list[Node]:
-    """Build the long-term-memory tools with `user_id` baked in.
-
-    `include` selects which tools to return — sub-agents commonly use
-    `include=("recall",)` for read-only inheritance. Unknown keys are ignored.
-    """
+    """Construct long-term-memory tools with `user_id` baked in. Unknown keys in `include` are ignored."""
     tools: list[Node] = []
     for kind in include:
         cls = _TOOL_BUILDERS.get(kind)

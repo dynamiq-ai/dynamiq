@@ -1,9 +1,3 @@
-"""Qdrant-backed long-term memory backend.
-
-Qdrant point IDs must be UUIDs or unsigned ints. To allow any string for
-`Fact.id`, this backend maps `fact.id -> deterministic UUID` for the
-Qdrant point and keeps the original `fact.id` in the payload.
-"""
 import uuid
 from datetime import datetime
 
@@ -27,12 +21,15 @@ _UUID_NAMESPACE = uuid.UUID("00000000-0000-0000-0000-000000000000")
 
 
 def _to_point_id(fact_id: str) -> str:
-    """Map an arbitrary `fact_id` string to a deterministic Qdrant UUID."""
+    """Map an arbitrary `fact_id` string to a deterministic Qdrant UUID.
+
+    Qdrant requires UUID or unsigned-int point IDs; the original `fact_id`
+    is kept in the payload so lookups round-trip.
+    """
     return uuid.uuid5(_UUID_NAMESPACE, fact_id).hex
 
 
 def _scope_to_filter(scope: dict[str, str]) -> Filter | None:
-    """Translate scope to Qdrant Filter. Returns None when scope is empty."""
     if not scope:
         return None
     return Filter(
@@ -82,8 +79,6 @@ class QdrantFactBackend(LongTermMemoryBackend):
     def model_post_init(self, __context) -> None:
         self._client = QdrantClient(url=self.url, api_key=self.api_key)
 
-    # --- collection management (test/admin helpers, not part of the ABC) ---
-
     def ensure_collection(self) -> None:
         """Create the facts collection and payload indexes if absent."""
         if not self._client.collection_exists(self.collection_name):
@@ -107,8 +102,6 @@ class QdrantFactBackend(LongTermMemoryBackend):
     def drop_collection(self) -> None:
         if self._client.collection_exists(self.collection_name):
             self._client.delete_collection(self.collection_name)
-
-    # --- LongTermMemoryBackend implementation ---
 
     def insert(self, fact: Fact, embedding: list[float]) -> None:
         self._client.upsert(
@@ -182,7 +175,7 @@ class QdrantFactBackend(LongTermMemoryBackend):
         return [_payload_to_fact(p.payload) for p in points]
 
     def delete_scope(self, scope: dict[str, str]) -> int:
-        # Qdrant's delete-by-filter does not return a count; scroll first.
+        # Qdrant delete-by-filter returns no count, so enumerate ids first.
         in_scope = self.list_by_scope(scope, limit=10_000)
         if not in_scope:
             return 0

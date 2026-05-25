@@ -1,13 +1,3 @@
-"""pgvector-backed long-term memory backend.
-
-Uses psycopg (v3) + the pgvector extension. Stores facts in a single
-table with a vector column for embeddings, a JSONB column for metadata,
-and (user_id, hash) uniqueness for dedup.
-
-Table and column identifiers are interpolated via `psycopg.sql.SQL` /
-`Identifier`, never raw f-strings, so an attacker-controlled table_name
-cannot inject SQL.
-"""
 import psycopg
 from pgvector.psycopg import register_vector
 from psycopg.rows import dict_row
@@ -43,8 +33,8 @@ _CREATE_USER_HASH_INDEX_TEMPLATE = SQL("CREATE UNIQUE INDEX IF NOT EXISTS {idx} 
 def _scope_where_clause(scope: dict[str, str]) -> tuple[Composed, list]:
     """Build a parameterised WHERE clause from a scope dict.
 
-    Returns the SQL fragment and its parameter list. Keys are interpolated
-    as Identifiers (safe); values stay as `%s` placeholders for the driver.
+    Keys are interpolated as `Identifier` (safe); values stay as `%s` placeholders
+    for the driver — never an f-string substitution.
     """
     if not scope:
         return SQL("TRUE"), []
@@ -82,8 +72,6 @@ class PgvectorFactBackend(LongTermMemoryBackend):
         self._conn = psycopg.connect(self.dsn, autocommit=True)
         register_vector(self._conn)
 
-    # --- schema management (test/admin helpers, not part of the ABC) ---
-
     @property
     def _table(self) -> Identifier:
         return Identifier(self.table_name)
@@ -115,8 +103,6 @@ class PgvectorFactBackend(LongTermMemoryBackend):
     def drop_table(self) -> None:
         with self._conn.cursor() as cur:
             cur.execute(SQL("DROP TABLE IF EXISTS {table}").format(table=self._table))
-
-    # --- LongTermMemoryBackend implementation ---
 
     def insert(self, fact: Fact, embedding: list[float]) -> None:
         with self._conn.cursor() as cur:

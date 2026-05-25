@@ -1,9 +1,3 @@
-"""Backend ABC for long-term memory.
-
-Concrete backends wrap `dynamiq.storages.vector.*` infrastructure.
-Independent of `dynamiq.memory.backends.MemoryBackend` (no shared base) —
-see spec sections "Fork 3" and "Fork 4" for the rationale.
-"""
 from abc import ABC, abstractmethod
 
 from pydantic import BaseModel, ConfigDict
@@ -49,9 +43,8 @@ class LongTermMemoryBackend(ABC, BaseModel):
     def delete_scope(self, scope: dict[str, str]) -> int:
         """Hard-delete every fact matching `scope`. Returns count deleted."""
 
-    # Phase 2 reservation — see spec Appendix A.
-    # In v1, `update()` is NOT @abstractmethod and the default raises.
     def update(self, fact_id: str, content: str, embedding: list[float]) -> None:
+        """Replace an existing fact in-place (Phase 2). Use delete + insert in v1."""
         raise NotImplementedError(
             "update() lands in Phase 2 with the auto-extractor. "
             "In v1, correct a fact via delete() + insert()."

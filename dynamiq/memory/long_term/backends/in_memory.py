@@ -1,8 +1,3 @@
-"""In-process fact backend for tests and light use.
-
-Storage is a dict by fact_id. Search uses numpy cosine over all in-scope
-vectors — fine for hundreds of facts, not intended for production scale.
-"""
 import numpy as np
 from pydantic import PrivateAttr
 
@@ -69,7 +64,6 @@ class InMemoryFactBackend(LongTermMemoryBackend):
 
 
 def _matches_scope(fact: Fact, scope: dict[str, str]) -> bool:
-    """Return True iff every key in scope matches the corresponding Fact attribute."""
     for key, value in scope.items():
         if getattr(fact, key, None) != value:
             return False
