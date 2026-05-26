@@ -1,15 +1,18 @@
+import contextlib
 import uuid
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from mcp.types import CallToolResult, ImageContent, TextContent
 from pydantic import Field, create_model
 
 from dynamiq import connections
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools import FileListTool, FileReadTool
-from dynamiq.nodes.tools.mcp import MCPServer, MCPSse, MCPTool
+from dynamiq.nodes.tools.mcp import MCPServer, MCPSse, MCPTool, extract_text_from_mcp_content
 
 
 def assert_tool_matches(tool, expected, connection):
@@ -222,3 +225,102 @@ def test_agent_integration_with_mcp_tools(sse_server_connection, mock_mcp_tools,
     assert dict_tools[0]["name"] == "subtract"
     assert dict_tools[0]["type"] == "dynamiq.nodes.tools.MCPTool"
     assert dict_tools[1]["type"] == "dynamiq.nodes.tools.MCPServer"
+
+
+def test_extract_text_from_mcp_content():
+    content = [
+        TextContent(type="text", text="line one"),
+        ImageContent(type="image", data="aGk=", mimeType="image/png"),
+        TextContent(type="text", text="line two"),
+    ]
+    assert extract_text_from_mcp_content(content) == "line one\nline two"
+    assert extract_text_from_mcp_content([]) == ""
+
+
+def _patch_session_with_result(result: CallToolResult):
+    """Patch the connection + ClientSession so call_tool yields `result`."""
+
+    @contextlib.asynccontextmanager
+    async def fake_connect(self):
+        yield (object(), object())
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def initialize(self):
+            return None
+
+        async def call_tool(self, name, args):
+            return result
+
+    return (
+        patch.object(MCPSse, "connect", new=fake_connect),
+        patch("dynamiq.nodes.tools.mcp.ClientSession", return_value=FakeSession()),
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_async_optimized_returns_structured_content(mcp_server_tool):
+    tool = mcp_server_tool._mcp_tools["add"]
+    tool.is_optimized_for_agents = True  # the agent sets this on its tools at init
+    payload = {"data": {"result": 42}, "meta": {"mode": "sandbox"}}
+    result = CallToolResult(
+        content=[TextContent(type="text", text="{...}")],
+        structuredContent=payload,
+    )
+
+    conn_patch, session_patch = _patch_session_with_result(result)
+    with conn_patch, session_patch:
+        output = await tool.execute_async(tool.input_schema(a=20, b=22))
+
+    assert output == {"content": payload}
+
+
+@pytest.mark.asyncio
+async def test_execute_async_optimized_falls_back_to_text(mcp_server_tool):
+    tool = mcp_server_tool._mcp_tools["add"]
+    tool.is_optimized_for_agents = True
+    result = CallToolResult(content=[TextContent(type="text", text="plain text result")])
+
+    conn_patch, session_patch = _patch_session_with_result(result)
+    with conn_patch, session_patch:
+        output = await tool.execute_async(tool.input_schema(a=20, b=22))
+
+    assert output == {"content": "plain text result"}
+
+
+@pytest.mark.asyncio
+async def test_execute_async_not_optimized_returns_full_dump(mcp_server_tool):
+    tool = mcp_server_tool._mcp_tools["add"]
+    tool.is_optimized_for_agents = False
+    payload = {"data": {"result": 42}}
+    result = CallToolResult(
+        content=[TextContent(type="text", text="{...}")],
+        structuredContent=payload,
+    )
+
+    conn_patch, session_patch = _patch_session_with_result(result)
+    with conn_patch, session_patch:
+        output = await tool.execute_async(tool.input_schema(a=20, b=22))
+
+    assert output["content"]["structuredContent"] == payload
+    assert output["content"]["isError"] is False
+    assert "content" in output["content"]
+
+
+@pytest.mark.asyncio
+async def test_execute_async_raises_on_is_error(mcp_server_tool):
+    tool = mcp_server_tool._mcp_tools["add"]
+    result = CallToolResult(
+        content=[TextContent(type="text", text="API rate limit exceeded")],
+        isError=True,
+    )
+
+    conn_patch, session_patch = _patch_session_with_result(result)
+    with conn_patch, session_patch:
+        with pytest.raises(ToolExecutionException, match="API rate limit exceeded"):
+            await tool.execute_async(tool.input_schema(a=20, b=22))
