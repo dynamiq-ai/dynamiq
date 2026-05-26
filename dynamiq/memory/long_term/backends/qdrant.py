@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import ConfigDict, PrivateAttr
 from qdrant_client import QdrantClient
@@ -13,9 +14,9 @@ from qdrant_client.http.models import (
     VectorParams,
 )
 
+from dynamiq.connections import Qdrant as QdrantConnection
 from dynamiq.memory.long_term.base import LongTermMemoryBackend
 from dynamiq.memory.long_term.schemas import Fact
-
 
 _UUID_NAMESPACE = uuid.UUID("00000000-0000-0000-0000-000000000000")
 
@@ -69,15 +70,25 @@ class QdrantFactBackend(LongTermMemoryBackend):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    url: str = "http://localhost:6333"
-    api_key: str | None = None
+    name: str = "QdrantFactBackend"
+    connection: QdrantConnection
     collection_name: str = "user_facts"
     dimension: int = 1536
 
     _client: QdrantClient | None = PrivateAttr(default=None)
 
+    @property
+    def to_dict_exclude_params(self) -> dict[str, bool]:
+        return super().to_dict_exclude_params | {"_client": True, "connection": True}
+
+    def to_dict(self, include_secure_params: bool = False, for_tracing: bool = False, **kwargs) -> dict[str, Any]:
+        exclude = kwargs.pop("exclude", self.to_dict_exclude_params.copy())
+        data = self.model_dump(exclude=exclude, **kwargs)
+        data["connection"] = self.connection.to_dict(for_tracing=for_tracing)
+        return data
+
     def model_post_init(self, __context) -> None:
-        self._client = QdrantClient(url=self.url, api_key=self.api_key)
+        self._client = self.connection.connect()
 
     def ensure_collection(self) -> None:
         """Create the facts collection and payload indexes if absent. Safe to call repeatedly."""

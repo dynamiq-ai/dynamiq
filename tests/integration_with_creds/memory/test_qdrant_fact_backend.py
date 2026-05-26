@@ -25,6 +25,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+from dynamiq.connections import Qdrant as QdrantConnection  # noqa: E402
 from dynamiq.memory.long_term.backends.qdrant import QdrantFactBackend  # noqa: E402
 from dynamiq.memory.long_term.schemas import Fact  # noqa: E402
 
@@ -32,7 +33,7 @@ from dynamiq.memory.long_term.schemas import Fact  # noqa: E402
 @pytest.fixture
 def backend():
     b = QdrantFactBackend(
-        url=QDRANT_URL,
+        connection=QdrantConnection(url=QDRANT_URL, api_key=""),
         collection_name="test_user_facts",
         dimension=16,
     )

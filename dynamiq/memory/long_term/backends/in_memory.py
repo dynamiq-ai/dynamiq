@@ -8,6 +8,8 @@ from dynamiq.memory.long_term.schemas import Fact
 class InMemoryFactBackend(LongTermMemoryBackend):
     """Dict + numpy-cosine backend. Loses data on restart."""
 
+    name: str = "InMemoryFactBackend"
+
     _facts: dict[str, Fact] = PrivateAttr(default_factory=dict)
     _vectors: dict[str, list[float]] = PrivateAttr(default_factory=dict)
 

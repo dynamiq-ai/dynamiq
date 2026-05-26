@@ -5,9 +5,11 @@ extension installed. Without it, this whole module skips.
 """
 import os
 from datetime import UTC, datetime
+from urllib.parse import urlparse
 
 import pytest
 
+from dynamiq.connections import PostgreSQL as PostgreSQLConnection
 from dynamiq.memory.long_term.backends.pgvector import PgvectorFactBackend
 from dynamiq.memory.long_term.schemas import Fact
 
@@ -15,9 +17,24 @@ DSN = os.getenv("POSTGRES_DSN")
 pytestmark = pytest.mark.skipif(DSN is None, reason="POSTGRES_DSN not set")
 
 
+def _connection_from_dsn(dsn: str) -> PostgreSQLConnection:
+    parsed = urlparse(dsn)
+    return PostgreSQLConnection(
+        host=parsed.hostname or "localhost",
+        port=parsed.port or 5432,
+        database=(parsed.path or "/postgres").lstrip("/"),
+        user=parsed.username or "postgres",
+        password=parsed.password or "",
+    )
+
+
 @pytest.fixture
 def backend():
-    b = PgvectorFactBackend(dsn=DSN, table_name="test_user_facts", dimension=16)
+    b = PgvectorFactBackend(
+        connection=_connection_from_dsn(DSN),
+        table_name="test_user_facts",
+        dimension=16,
+    )
     b.recreate_table()
     yield b
     b.drop_table()

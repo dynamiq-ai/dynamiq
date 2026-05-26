@@ -1,10 +1,13 @@
+from typing import Any
+
 import psycopg
 from pgvector.psycopg import register_vector
 from psycopg.rows import dict_row
 from psycopg.sql import SQL, Composed, Identifier
 from psycopg.types.json import Jsonb
-from pydantic import ConfigDict, PrivateAttr
+from pydantic import ConfigDict, Field, PrivateAttr
 
+from dynamiq.connections import PostgreSQL as PostgreSQLConnection
 from dynamiq.memory.long_term.base import LongTermMemoryBackend
 from dynamiq.memory.long_term.schemas import Fact
 
@@ -62,14 +65,30 @@ class PgvectorFactBackend(LongTermMemoryBackend):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    dsn: str
+    name: str = "PgvectorFactBackend"
+    connection: PostgreSQLConnection = Field(default_factory=PostgreSQLConnection)
     table_name: str = "user_facts"
     dimension: int = 1536
 
     _conn: psycopg.Connection | None = PrivateAttr(default=None)
 
+    @property
+    def to_dict_exclude_params(self) -> dict[str, bool]:
+        return super().to_dict_exclude_params | {"_conn": True, "connection": True}
+
+    def to_dict(self, include_secure_params: bool = False, for_tracing: bool = False, **kwargs) -> dict[str, Any]:
+        exclude = kwargs.pop("exclude", self.to_dict_exclude_params.copy())
+        data = self.model_dump(exclude=exclude, **kwargs)
+        data["connection"] = self.connection.to_dict(for_tracing=for_tracing)
+        return data
+
     def model_post_init(self, __context) -> None:
-        self._conn = psycopg.connect(self.dsn, autocommit=True)
+        self._conn = self.connection.connect()
+        self._conn.autocommit = True
+        # CREATE EXTENSION must run BEFORE register_vector, otherwise the
+        # type adapter has nothing to bind to ("vector type not found").
+        with self._conn.cursor() as cur:
+            cur.execute(_CREATE_EXTENSION_SQL)
         register_vector(self._conn)
 
     @property
