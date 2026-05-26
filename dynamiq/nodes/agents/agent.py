@@ -39,7 +39,7 @@ from dynamiq.types.streaming import (
     StreamingMode,
 )
 from dynamiq.utils import generate_uuid, serialize_files_in_value
-from dynamiq.utils.json_parser import parse_llm_json_output
+from dynamiq.utils.json_parser import parse_llm_json_output, repair_truncated_json
 from dynamiq.utils.logger import logger
 
 
@@ -79,18 +79,23 @@ class FunctionCall(BaseModel):
         if isinstance(v, str):
             try:
                 return json.loads(v, strict=False)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Tool call arguments are not valid JSON: {e}")
+            except json.JSONDecodeError:
+                try:
+                    return json.loads(repair_truncated_json(v), strict=False)
+                except json.JSONDecodeError as e:
+                    raise ValueError(f"Tool call arguments are not valid JSON: {e}")
         return v or {}
 
     def parse_as_tool_call(self) -> ToolCallArguments:
+        args = dict(self.arguments)
+        thought = args.pop("thought", "")
         try:
-            return ToolCallArguments.model_validate(self.arguments)
+            return ToolCallArguments(thought=thought, action_input=args)
         except Exception:
             raise ActionParsingException(
                 "Your tool call is missing required fields. "
                 "Every tool call must include 'thought' (your reasoning) "
-                "and 'action_input' (the tool parameters as an object).",
+                "and the tool's parameters at the top level.",
                 recoverable=True,
             )
 

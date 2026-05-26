@@ -4,6 +4,124 @@ from typing import Any, ClassVar
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms.base import BaseLLM
+from dynamiq.utils.logger import logger
+
+
+def _to_openai_strict_property(prop: Any) -> Any:
+    """Recursively convert a property schema into OpenAI strict-mode form.
+
+    - ``anyOf`` of primitives + null is flattened to a type array.
+    - ``anyOf`` of complex shapes is preserved; each branch is converted recursively.
+    - Nested objects get ``additionalProperties: false`` and every property listed in ``required``.
+    - Arrays' ``items`` are converted recursively.
+    - ``default`` is preserved (OpenAI tolerates it on primitives).
+
+    Adapted from Letta's helpers._convert_to_structured_output_helper (Apache 2.0).
+    """
+    if not isinstance(prop, dict):
+        return prop
+
+    if "anyOf" in prop and "type" not in prop:
+        primitive_types: list[str] = []
+        has_complex = False
+        for option in prop["anyOf"]:
+            if isinstance(option, dict) and "type" in option:
+                opt_type = option["type"]
+                if opt_type in ("object", "array"):
+                    has_complex = True
+                    break
+                if isinstance(opt_type, list):
+                    has_complex = True
+                    break
+                primitive_types.append(opt_type)
+            else:
+                has_complex = True
+                break
+
+        if not has_complex and primitive_types:
+            new_prop: dict[str, Any] = {"type": primitive_types}
+            for key in ("description", "default", "enum", "title"):
+                if key in prop:
+                    new_prop[key] = prop[key]
+            return new_prop
+
+        return {
+            "anyOf": [_to_openai_strict_property(opt) for opt in prop["anyOf"]],
+            **{k: v for k, v in prop.items() if k in ("description", "title", "default")},
+        }
+
+    if "type" not in prop:
+        return prop
+
+    param_type = prop["type"]
+
+    if isinstance(param_type, list):
+        new_prop = {"type": param_type}
+        for key in ("description", "default", "enum", "title"):
+            if key in prop:
+                new_prop[key] = prop[key]
+        return new_prop
+
+    if param_type == "object":
+        nested_props = prop.get("properties", {})
+        result: dict[str, Any] = {
+            "type": "object",
+            "properties": {k: _to_openai_strict_property(v) for k, v in nested_props.items()},
+            "required": list(nested_props.keys()),
+            "additionalProperties": False,
+        }
+        if "description" in prop:
+            result["description"] = prop["description"]
+        if "title" in prop:
+            result["title"] = prop["title"]
+        return result
+
+    if param_type == "array":
+        items = prop.get("items", {"type": "string"})
+        result = {"type": "array", "items": _to_openai_strict_property(items)}
+        if "description" in prop:
+            result["description"] = prop["description"]
+        if "title" in prop:
+            result["title"] = prop["title"]
+        return result
+
+    new_prop = {"type": param_type}
+    for key in ("description", "default", "enum", "title", "format"):
+        if key in prop:
+            new_prop[key] = prop[key]
+    return new_prop
+
+
+def _to_openai_strict_function(fn: dict) -> dict:
+    """Convert a function-tool definition into OpenAI strict-mode form.
+
+    Every top-level property becomes required (with optionality re-encoded via
+    ``["x", "null"]`` type arrays), and ``additionalProperties: false`` is set
+    at every object level. Sets ``strict: true``.
+
+    If the input schema can't be safely converted, returns the original
+    function dict unchanged (caller logs a warning).
+    """
+    out = dict(fn)
+    parameters = out.get("parameters")
+    if not isinstance(parameters, dict):
+        return out
+
+    properties = parameters.get("properties", {})
+    converted_props = {k: _to_openai_strict_property(v) for k, v in properties.items()}
+    new_parameters = {
+        "type": "object",
+        "properties": converted_props,
+        "required": list(converted_props.keys()),
+        "additionalProperties": False,
+    }
+    for key in ("description", "title"):
+        if key in parameters:
+            new_parameters[key] = parameters[key]
+
+    out["parameters"] = new_parameters
+    out["strict"] = True
+    return out
 
 
 class ReasoningEffort(str, enum.Enum):
@@ -104,6 +222,36 @@ class OpenAI(BaseLLM):
             params.pop("reasoning_effort", None)
         else:
             params["reasoning_effort"] = effort
+
+    def transform_tool_schemas(self, tools: list[dict]) -> list[dict]:
+        """Convert each tool's parameter schema into OpenAI strict-mode form.
+
+        Optional fields are re-expressed as nullable-required so strict mode
+        applies broadly instead of being dropped whenever a tool has optionals.
+        On any conversion failure, the original tool is kept (without strict)
+        so the request still goes through.
+        """
+        out: list[dict] = []
+        for tool in tools:
+            if not isinstance(tool, dict):
+                out.append(tool)
+                continue
+            tool = dict(tool)
+            fn = tool.get("function")
+            if isinstance(fn, dict):
+                try:
+                    tool["function"] = _to_openai_strict_function(fn)
+                except Exception as exc:
+                    logger.warning(
+                        "OpenAI strict conversion failed for tool %s: %s; keeping non-strict schema",
+                        fn.get("name", "<unknown>"),
+                        exc,
+                    )
+                    fn = dict(fn)
+                    fn.pop("strict", None)
+                    tool["function"] = fn
+            out.append(tool)
+        return out
 
     def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """

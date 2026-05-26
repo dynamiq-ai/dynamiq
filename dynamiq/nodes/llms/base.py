@@ -28,6 +28,7 @@ from dynamiq.prompts import Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.llm_tool import Tool
+from dynamiq.utils.json_parser import repair_truncated_json
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -654,6 +655,65 @@ class BaseLLM(ConnectionNode):
             params["stream_options"]["include_usage"] = True
         return params
 
+    def transform_tool_schemas(self, tools: list[dict]) -> list[dict]:
+        """Provider-specific schema transform applied before dispatch.
+
+        Subclasses override to clean schemas, attach ``strict`` flags, convert
+        optional fields, etc. Default is a no-op passthrough.
+
+        Args:
+            tools: Function-calling tool schemas (already in OpenAI shape).
+
+        Returns:
+            Transformed tool list. May mutate in place or return new dicts.
+        """
+        return tools
+
+    def transform_tool_choice(self, tool_choice: Any, tools: list[dict] | None) -> Any:
+        """Provider-specific tool_choice translation.
+
+        Subclasses override to translate generic values ("auto", "required",
+        a tool name) into the provider's native shape. Default is passthrough.
+
+        Args:
+            tool_choice: User-supplied tool_choice (any shape).
+            tools: Resolved tool list (post ``transform_tool_schemas``).
+
+        Returns:
+            Tool_choice value to send on the wire.
+        """
+        return tool_choice
+
+    def parse_tool_arguments(self, raw: Any) -> dict:
+        """Extract a parsed dict from a tool-call ``arguments`` field.
+
+        Some providers (Anthropic native tool_use) deliver ``arguments`` as a
+        parsed dict already; LiteLLM stringifies it. This hook centralizes the
+        dict-or-string handling and adds a repair pass for truncated JSON.
+
+        Args:
+            raw: Raw arguments value from the LLM response.
+
+        Returns:
+            Parsed dict.
+
+        Raises:
+            ValueError: If the value cannot be parsed even after repair.
+        """
+        if isinstance(raw, dict):
+            return raw
+        if raw is None or raw == "":
+            return {}
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw, strict=False)
+            except json.JSONDecodeError:
+                try:
+                    return json.loads(repair_truncated_json(raw), strict=False)
+                except json.JSONDecodeError as e:
+                    raise ValueError(f"Tool call arguments are not valid JSON: {e}")
+        raise ValueError(f"Unexpected arguments type: {type(raw).__name__}")
+
     @staticmethod
     def _sanitize_fc_messages(messages: list[dict]) -> list[dict]:
         """Repair FC messages before dispatch. See ``_fc_sanitization`` module."""
@@ -700,12 +760,16 @@ class BaseLLM(ConnectionNode):
             response_format=response_format,
         )
         if tools:
+            tools = self.transform_tool_schemas(tools)
             messages = self._sanitize_fc_messages(messages)
         # Check if a streaming callback is available in the config and enable streaming only if it is.
         # This is to avoid unnecessary streaming to reduce CPU usage.
         is_streaming_callback_available = any(
             isinstance(callback, BaseStreamingCallbackHandler) for callback in config.callbacks
         )
+        effective_tool_choice = tool_choice if tool_choice is not None else self.tool_choice
+        if tools:
+            effective_tool_choice = self.transform_tool_choice(effective_tool_choice, tools)
         common_params: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -713,7 +777,7 @@ class BaseLLM(ConnectionNode):
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "tools": tools,
-            "tool_choice": tool_choice if tool_choice is not None else self.tool_choice,
+            "tool_choice": effective_tool_choice,
             "stop": self.stop if self.stop else None,
             "top_p": self.top_p,
             "seed": self.seed,
