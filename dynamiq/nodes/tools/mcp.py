@@ -187,8 +187,6 @@ class MCPTool(ConnectionNode):
                 recoverable=True,
             )
 
-        # Optimized for agents: the structured payload (or text) the server returned.
-        # Otherwise: the full result dump, for debugging.
         if not self.is_optimized_for_agents:
             content = result.model_dump(exclude_none=True)
         elif result.structuredContent is not None:
