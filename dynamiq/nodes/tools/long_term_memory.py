@@ -3,30 +3,79 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.memory.long_term import LongTermMemory, MemoryToolKind
-from dynamiq.nodes.node import Node
+from dynamiq.nodes.node import Node, ensure_config
 from dynamiq.nodes.types import NodeGroup
+from dynamiq.runnables import RunnableConfig
+from dynamiq.types.cancellation import check_cancellation
+from dynamiq.utils.logger import logger
 
-REMEMBER_DESCRIPTION = (
-    "Record a durable fact about the current user that should persist across "
-    "conversations (preferences, constraints, recurring context, biographical info). "
-    "Use only when you've learned something that will matter in future sessions — "
-    "not for ephemeral turn-level state. Returns {fact_id: <uuid>}. Calling twice "
-    "with the same content returns the same fact_id."
-)
+REMEMBER_DESCRIPTION = """Persist a durable fact about the current user to long-term memory.
 
-RECALL_DESCRIPTION = (
-    "Search the user's long-term memory for facts relevant to a query. "
-    "Use BEFORE answering questions where prior context (preferences, past "
-    "decisions, biographical info) would change the response. Returns a list of "
-    "{fact_id, content, score} entries, most relevant first."
-)
+Key capabilities:
+- Survives across conversations and sessions — not just this chat
+- Idempotent on identical content (same text returns the same fact_id, no duplicates)
+- Optional structured metadata (e.g. category, source) for later filtering
 
-FORGET_DESCRIPTION = (
-    "Delete a fact from the user's long-term memory by id. Use when the user "
-    "explicitly asks to be forgotten on something, or when a fact is wrong and "
-    "you have no replacement. Get the fact_id from a prior recall_facts call. "
-    "Returns {status: 'deleted'|'not_found'|'forbidden'}."
-)
+Usage strategy:
+- Call when the user explicitly says "remember…", "save this…", "keep in mind for next time…"
+- Call when you have learned something that will clearly matter in future sessions
+  (a stable preference, a constraint, a recurring context, biographical info)
+- Do NOT use for ephemeral turn-level state — that is what the conversation history is for
+- Do NOT use to remember tool outputs, file paths, or anything tied to this run
+- The fact is scoped to the current user automatically; never pass or invent a user id
+
+Returns: {"fact_id": "<uuid>"} — store the id if you may want to forget it later.
+
+Examples:
+- {"content": "Prefers dogs over cats"}
+- {"content": "Allergic to peanuts", "metadata": {"category": "health"}}
+- {"content": "Works in EST timezone", "metadata": {"category": "context"}}
+"""
+
+RECALL_DESCRIPTION = """Search the user's long-term memory for facts relevant to a query.
+
+Key capabilities:
+- Semantic search (not keyword) — matches meaning, paraphrases, synonyms
+- Returns ranked results with similarity scores (1.0 = perfect match)
+- Scoped to the current user automatically — never crosses users
+
+Usage strategy:
+- Call PROACTIVELY at the start of a turn when the request hints at something personal
+  (preferences, past decisions, biographical info, recurring context)
+- Call BEFORE answering questions where prior context would change your response
+- A low score (< ~0.3) means weakly related — use judgment, do not blindly include
+- Each result has a `fact_id` — keep it if you may want to forget that fact later
+- Skip when the question is purely factual or has no user-specific component
+
+Returns: list of {"fact_id": "<uuid>", "content": "<text>", "score": <float>}, most relevant first.
+
+Examples:
+- {"query": "food preferences"}
+- {"query": "what does the user do for work?", "limit": 3}
+- {"query": "timezone or schedule constraints", "limit": 10}
+"""
+
+FORGET_DESCRIPTION = """Delete a single fact from the user's long-term memory by id.
+
+Key capabilities:
+- Hard delete — the fact is gone, not just hidden
+- Cross-user safety: returns "forbidden" if the fact belongs to another user
+- Returns "not_found" if the id does not exist (already gone, or never existed)
+
+Usage strategy:
+- Call ONLY when the user explicitly asks to forget something, or you've discovered
+  a fact is wrong and have no replacement to write
+- ALWAYS get the fact_id from a prior `recall_facts` (or the original `remember_fact`
+  response) — do NOT guess or fabricate an id
+- To CORRECT a wrong fact, prefer `remember_fact` with the corrected content first
+  (the old one stays, but new searches surface the correction); only call `forget_fact`
+  if the user wants the stale fact removed
+
+Returns: {"status": "deleted" | "not_found" | "forbidden"}.
+
+Examples:
+- {"fact_id": "8f1c2b40-9d3e-4a8c-9c1f-0d2e3a4b5c6d"}
+"""
 
 
 class RememberFactInputSchema(BaseModel):
@@ -72,7 +121,14 @@ class RememberFactTool(_LongTermMemoryTool):
     description: str = REMEMBER_DESCRIPTION
     input_schema: ClassVar[type[RememberFactInputSchema]] = RememberFactInputSchema
 
-    def execute(self, input_data: RememberFactInputSchema, config=None, **kwargs) -> dict:
+    def execute(
+        self, input_data: RememberFactInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
+        logger.debug(f"Tool {self.name} - {self.id}: started")
+        config = ensure_config(config)
+        check_cancellation(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
         fact = self.long_term_memory.remember(
             content=input_data.content,
             user_id=self.user_id,
@@ -88,18 +144,21 @@ class RecallFactsTool(_LongTermMemoryTool):
     description: str = RECALL_DESCRIPTION
     input_schema: ClassVar[type[RecallFactsInputSchema]] = RecallFactsInputSchema
 
-    def execute(self, input_data: RecallFactsInputSchema, config=None, **kwargs) -> dict:
+    def execute(
+        self, input_data: RecallFactsInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
+        logger.debug(f"Tool {self.name} - {self.id}: started")
+        config = ensure_config(config)
+        check_cancellation(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
         hits = self.long_term_memory.recall(
             query=input_data.query,
             user_id=self.user_id,
             limit=input_data.limit,
         )
         return {
-            "content": [
-                {"fact_id": fact.id, "content": fact.content,
-                 "score": round(score, 4)}
-                for fact, score in hits
-            ]
+            "content": [{"fact_id": fact.id, "content": fact.content, "score": round(score, 4)} for fact, score in hits]
         }
 
 
@@ -110,7 +169,14 @@ class ForgetFactTool(_LongTermMemoryTool):
     description: str = FORGET_DESCRIPTION
     input_schema: ClassVar[type[ForgetFactInputSchema]] = ForgetFactInputSchema
 
-    def execute(self, input_data: ForgetFactInputSchema, config=None, **kwargs) -> dict:
+    def execute(
+        self, input_data: ForgetFactInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
+        logger.debug(f"Tool {self.name} - {self.id}: started")
+        config = ensure_config(config)
+        check_cancellation(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
         status = self.long_term_memory.forget(
             fact_id=input_data.fact_id,
             user_id=self.user_id,
