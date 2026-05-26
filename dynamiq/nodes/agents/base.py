@@ -396,6 +396,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             "llm": True,
             "tools": True,
             "memory": True,
+            "long_term_memory": True,
+            "long_term_memory_config": True,
             "files": True,
             "images": True,
             "file_store": True,
@@ -414,6 +416,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         data["tools"] = data["tools"] + [mcp_server.to_dict(**kwargs) for mcp_server in self._mcp_servers]
 
         data["memory"] = self.memory.to_dict(**kwargs) if self.memory else None
+        data["long_term_memory"] = self.long_term_memory.to_dict(**kwargs) if self.long_term_memory else None
+        data["long_term_memory_config"] = self.long_term_memory_config.model_dump()
         if self.files:
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         if self.images:
