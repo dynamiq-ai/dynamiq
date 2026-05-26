@@ -3,6 +3,7 @@ import pytest
 
 from dynamiq.memory.long_term import LongTermMemory
 from dynamiq.memory.long_term.backends.in_memory import InMemoryFactBackend
+from dynamiq.memory.long_term.long_term_memory import LongTermMemoryError
 
 
 @pytest.fixture
@@ -43,7 +44,7 @@ def test_remember_normalises_whitespace_for_dedup(ltm, user_id):
 
 
 def test_remember_rejects_empty_content(ltm, user_id):
-    with pytest.raises(ValueError):
+    with pytest.raises(LongTermMemoryError):
         ltm.remember(content="   ", user_id=user_id)
 
 
@@ -84,7 +85,7 @@ def test_recall_empty_store_returns_empty(ltm, user_id):
 
 
 def test_recall_rejects_empty_query(ltm, user_id):
-    with pytest.raises(ValueError):
+    with pytest.raises(LongTermMemoryError):
         ltm.recall(query="   ", user_id=user_id, limit=5)
 
 

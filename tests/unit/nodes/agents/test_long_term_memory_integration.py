@@ -9,22 +9,32 @@ backend response — we only verify the agent-loop bookkeeping.
 """
 import hashlib
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import patch
 
 import pytest
 
+from dynamiq.connections import BaseConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.memory.long_term import LongTermMemory, LongTermMemoryConfig
 from dynamiq.memory.long_term.backends.in_memory import InMemoryFactBackend
 from dynamiq.nodes.agents.base import Agent
+from dynamiq.nodes.embedders.base import TextEmbedder, TextEmbedderInputSchema
 from dynamiq.nodes.llms import OpenAI
 
 
-class _FakeEmbedder:
-    DIM = 16
+class _StubConnection(BaseConnection):
+    def connect(self) -> None:
+        return None
 
-    def execute(self, input_data, **kwargs):
-        text = input_data["query"] if isinstance(input_data, dict) else input_data.query
+
+class _FakeEmbedder(TextEmbedder):
+    name: str = "fake-text-embedder"
+    connection: BaseConnection = _StubConnection()
+    DIM: ClassVar[int] = 16
+
+    def execute(self, input_data: TextEmbedderInputSchema, config=None, **kwargs):
+        text = input_data.query if hasattr(input_data, "query") else input_data["query"]
         digest = hashlib.sha256(text.encode("utf-8")).digest()
         raw = [(b / 127.5) - 1.0 for b in digest[: self.DIM]]
         norm = sum(x * x for x in raw) ** 0.5 or 1.0

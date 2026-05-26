@@ -1,32 +1,39 @@
 """Shared fixtures for long-term memory unit tests."""
 import hashlib
-from typing import Any
+from typing import ClassVar
 
 import pytest
 
+from dynamiq.connections import BaseConnection
+from dynamiq.nodes.embedders.base import TextEmbedder, TextEmbedderInputSchema
 
-class FakeTextEmbedder:
-    """Deterministic text embedder for tests.
+
+class _StubConnection(BaseConnection):
+    """No-op connection used only to satisfy ConnectionNode's connection/client validator."""
+
+    def connect(self) -> None:
+        return None
+
+
+class FakeTextEmbedder(TextEmbedder):
+    """Deterministic `TextEmbedder` subclass for tests.
 
     Maps text to a fixed-length unit vector derived from its sha256 digest.
     Same text → same vector. Different texts → near-orthogonal vectors
-    (good enough for cosine ranking in unit tests).
+    (good enough for cosine ranking in unit tests). Bypasses any real
+    `text_embedder` component.
     """
 
-    DIM = 16
+    name: str = "fake-text-embedder"
+    connection: BaseConnection = _StubConnection()
+    DIM: ClassVar[int] = 16
 
-    def execute(self, input_data: Any, **kwargs) -> dict:
-        # Mirror TextEmbedder.execute output shape: {"query": ..., "embedding": ...}
-        if hasattr(input_data, "query"):
-            text = input_data.query
-        elif isinstance(input_data, dict):
-            text = input_data["query"]
-        else:
-            text = str(input_data)
+    def execute(self, input_data: TextEmbedderInputSchema, config=None, **kwargs) -> dict:
+        text = input_data.query if hasattr(input_data, "query") else input_data["query"]
         return {"query": text, "embedding": self._embed(text)}
 
     def embed(self, text: str) -> list[float]:
-        """Convenience helper for tests that want a raw vector."""
+        """Convenience helper for tests that want a raw vector without an InputSchema."""
         return self._embed(text)
 
     @classmethod
