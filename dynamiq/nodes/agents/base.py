@@ -638,6 +638,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         _tools_before_ltm = self.tools
         if ltm_tools:
             self.tools = list(_tools_before_ltm) + ltm_tools
+            logger.info(
+                "Agent %s - %s: attached %d long-term memory tools (%s)",
+                self.name,
+                self.id,
+                len(ltm_tools),
+                ", ".join(t.name for t in ltm_tools),
+            )
 
         if use_memory:
             history_messages = self._retrieve_memory(input_data)
