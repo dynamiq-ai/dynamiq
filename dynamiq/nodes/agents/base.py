@@ -646,9 +646,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 ", ".join(t.name for t in ltm_tools),
             )
 
-        # Wrap everything after the mutation in try/finally so `self.tools` is
-        # always restored — including when prep steps (memory retrieval, file
-        # upload, prompt-variable update) raise before reaching `_run_agent`.
         try:
             if use_memory:
                 history_messages = self._retrieve_memory(input_data)
