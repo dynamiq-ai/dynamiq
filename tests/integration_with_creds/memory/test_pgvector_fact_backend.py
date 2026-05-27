@@ -1,4 +1,4 @@
-"""Integration tests for PgvectorFactBackend.
+"""Integration tests for PostgresLongTermMemoryBackend.
 
 Requires `POSTGRES_DSN` to point at a live Postgres with the pgvector
 extension installed. Without it, this whole module skips.
@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 import pytest
 
 from dynamiq.connections import PostgreSQL as PostgreSQLConnection
-from dynamiq.memory.long_term.backends.pgvector import PgvectorFactBackend
+from dynamiq.memory.long_term.backends.pgvector import PostgresLongTermMemoryBackend
 from dynamiq.memory.long_term.schemas import Fact
 
 DSN = os.getenv("POSTGRES_DSN")
@@ -30,7 +30,7 @@ def _connection_from_dsn(dsn: str) -> PostgreSQLConnection:
 
 @pytest.fixture
 def backend():
-    b = PgvectorFactBackend(
+    b = PostgresLongTermMemoryBackend(
         connection=_connection_from_dsn(DSN),
         table_name="test_user_facts",
         dimension=16,

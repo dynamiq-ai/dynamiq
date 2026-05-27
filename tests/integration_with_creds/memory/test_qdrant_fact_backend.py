@@ -1,4 +1,4 @@
-"""Integration tests for QdrantFactBackend.
+"""Integration tests for QdrantLongTermMemoryBackend.
 
 Requires a reachable Qdrant. Set `QDRANT_URL` (defaults to
 `http://localhost:6333`). Without one, this whole module skips.
@@ -26,13 +26,13 @@ pytestmark = pytest.mark.skipif(
 
 
 from dynamiq.connections import Qdrant as QdrantConnection  # noqa: E402
-from dynamiq.memory.long_term.backends.qdrant import QdrantFactBackend  # noqa: E402
+from dynamiq.memory.long_term.backends.qdrant import QdrantLongTermMemoryBackend  # noqa: E402
 from dynamiq.memory.long_term.schemas import Fact  # noqa: E402
 
 
 @pytest.fixture
 def backend():
-    b = QdrantFactBackend(
+    b = QdrantLongTermMemoryBackend(
         connection=QdrantConnection(url=QDRANT_URL, api_key=""),
         collection_name="test_user_facts",
         dimension=16,

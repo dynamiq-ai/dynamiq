@@ -60,12 +60,12 @@ def _row_to_fact(row) -> Fact:
 _FACT_COLUMNS = SQL("id, content, hash, user_id, metadata, created_at, updated_at")
 
 
-class PgvectorFactBackend(LongTermMemoryBackend):
+class PostgresLongTermMemoryBackend(LongTermMemoryBackend):
     """Long-term memory backend backed by Postgres + pgvector."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    name: str = "PgvectorFactBackend"
+    name: str = "PostgresLongTermMemoryBackend"
     connection: PostgreSQLConnection = Field(default_factory=PostgreSQLConnection)
     table_name: str = "user_facts"
     dimension: int = 1536

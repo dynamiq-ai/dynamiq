@@ -65,12 +65,12 @@ def _payload_to_fact(payload: dict) -> Fact:
     )
 
 
-class QdrantFactBackend(LongTermMemoryBackend):
+class QdrantLongTermMemoryBackend(LongTermMemoryBackend):
     """Long-term memory backend backed by Qdrant."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    name: str = "QdrantFactBackend"
+    name: str = "QdrantLongTermMemoryBackend"
     connection: QdrantConnection
     collection_name: str = "user_facts"
     dimension: int = 1536
