@@ -1,5 +1,6 @@
 """Tests for InMemoryLongTermMemoryBackend."""
-from datetime import UTC, datetime
+
+from datetime import UTC, datetime, timedelta
 
 from dynamiq.memory.long_term.backends.in_memory import InMemoryLongTermMemoryBackend
 from dynamiq.memory.long_term.schemas import Fact
@@ -129,6 +130,50 @@ def test_list_by_scope_respects_limit(fake_embedder):
         backend.insert(_fact(f"f{i}", "u1", f"x{i}"),
                        fake_embedder.embed(f"x{i}"))
     assert len(backend.list_by_scope({"user_id": "u1"}, limit=2)) == 2
+
+
+# --- update ---
+
+
+def test_update_replaces_content_hash_embedding_and_timestamp(fake_embedder):
+    backend = InMemoryLongTermMemoryBackend()
+    original = _fact("f1", "u1", "hello", content_hash="h-old")
+    backend.insert(original, fake_embedder.embed("hello"))
+
+    new_time = original.updated_at + timedelta(seconds=5)
+    backend.update(
+        "f1",
+        content="hello world",
+        content_hash="h-new",
+        embedding=fake_embedder.embed("hello world"),
+        updated_at=new_time,
+    )
+
+    updated = backend.get("f1")
+    assert updated.content == "hello world"
+    assert updated.hash == "h-new"
+    assert updated.updated_at == new_time
+    assert updated.id == original.id
+    assert updated.created_at == original.created_at
+
+    hits = backend.search(
+        query_embedding=fake_embedder.embed("hello world"),
+        scope={"user_id": "u1"},
+        limit=1,
+    )
+    assert hits[0][0].content == "hello world"
+
+
+def test_update_unknown_is_noop(fake_embedder):
+    backend = InMemoryLongTermMemoryBackend()
+    backend.update(
+        "does-not-exist",
+        content="x",
+        content_hash="h",
+        embedding=fake_embedder.embed("x"),
+        updated_at=datetime.now(UTC),
+    )  # must not raise
+    assert backend.get("does-not-exist") is None
 
 
 def test_delete_scope_removes_all_in_scope(fake_embedder):

@@ -72,8 +72,8 @@ def _input(user_id=None, session_id=None):
 # --- LongTermMemoryConfig ---
 
 
-def test_config_default_includes_all_three_tools():
-    assert LongTermMemoryConfig().tools == ("remember", "recall", "forget")
+def test_config_default_includes_remember_and_recall():
+    assert LongTermMemoryConfig().tools == ("remember", "recall")
 
 
 def test_config_can_restrict_to_read_only():
@@ -93,16 +93,16 @@ def test_agent_has_long_term_memory_fields():
 def test_agent_long_term_memory_defaults_to_none(llm):
     agent = _make_agent(llm)
     assert agent.long_term_memory is None
-    assert agent.long_term_memory_config.tools == ("remember", "recall", "forget")
+    assert agent.long_term_memory_config.tools == ("remember", "recall")
 
 
 # --- _build_long_term_memory_tools ---
 
 
-def test_build_returns_three_tools_when_ltm_and_user_id_present(llm, ltm):
+def test_build_returns_default_tools_when_ltm_and_user_id_present(llm, ltm):
     agent = _make_agent(llm, ltm=ltm)
     tools = agent._build_long_term_memory_tools(_input(user_id="u1"))
-    assert {t.name for t in tools} == {"remember_fact", "recall_facts", "forget_fact"}
+    assert {t.name for t in tools} == {"remember_fact", "recall_facts"}
 
 
 def test_build_returns_empty_when_no_user_id(llm, ltm):
@@ -147,7 +147,7 @@ def test_execute_attaches_ltm_tools_during_run_and_restores_after(llm, ltm):
     with _patch_run_agent_capture_tools(agent, captured):
         agent.run_sync(input_data={"input": "hi", "user_id": "u1"})
 
-    assert {"remember_fact", "recall_facts", "forget_fact"} <= {t.name for t in captured}
+    assert {"remember_fact", "recall_facts"} <= {t.name for t in captured}
     assert agent.tools == original_tools
 
 
