@@ -187,3 +187,16 @@ def test_execute_does_not_mutate_tools_when_no_long_term_memory(llm):
 
     assert {t.name for t in captured} == {t.name for t in original_tools}
     assert agent.tools == original_tools
+
+
+def test_execute_restores_tools_when_prep_step_raises_before_run(llm, ltm):
+    """Regression: prep code between the LTM mutation and the inner try block
+    (memory retrieval, file upload, prompt-variable update) used to leak
+    appended tools if it raised. The outer try/finally must catch that path."""
+    agent = _make_agent(llm, ltm=ltm)
+    original_tools = list(agent.tools)
+
+    with patch.object(agent.system_prompt_manager, "update_variables", side_effect=RuntimeError("prep boom")):
+        agent.run_sync(input_data={"input": "hi", "user_id": "u1"})
+
+    assert agent.tools == original_tools

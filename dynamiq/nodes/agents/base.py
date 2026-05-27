@@ -646,125 +646,130 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 ", ".join(t.name for t in ltm_tools),
             )
 
-        if use_memory:
-            history_messages = self._retrieve_memory(input_data)
-            if len(history_messages) > 0:
-                history_messages.insert(
-                    0,
-                    Message(
-                        role=MessageRole.SYSTEM,
-                        content="Below is the previous conversation history. "
-                        "Use this context to inform your response.",
-                        static=True,
-                    ),
-                )
-        else:
-            history_messages = None
-
-        files = input_data.files
-        if files:
-            normalized_files = self._ensure_named_files(files)
-            file_paths = []
-            if self.sandbox_backend:
-                file_paths = self._upload_files_to_sandbox(normalized_files)
-            else:
-                if not self.file_store_backend:
-                    self._setup_in_memory_file_store_and_tools()
-                if self.file_store_backend:
-                    file_paths = self._upload_files_to_file_store(normalized_files)
-            input_message = self._inject_attached_files_into_message(
-                input_message, normalized_files, file_paths=file_paths
-            )
-
-        if input_data.tool_params:
-            kwargs["tool_params"] = input_data.tool_params
-
-        self.system_prompt_manager.update_variables(dict(input_data))
-        kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
-        kwargs.pop("run_depends", None)
-
+        # Wrap everything after the mutation in try/finally so `self.tools` is
+        # always restored — including when prep steps (memory retrieval, file
+        # upload, prompt-variable update) raise before reaching `_run_agent`.
         try:
-            result = self._run_agent(input_message, history_messages, config=config, **kwargs)
-        except CanceledException:
             if use_memory:
-                try:
-                    self._save_history_to_memory(custom_metadata)
-                except Exception as save_error:
-                    logger.error(
-                        f"Agent {self.name} - {self.id}: failed to save history to memory "
-                        f"after cancel: {save_error}",
+                history_messages = self._retrieve_memory(input_data)
+                if len(history_messages) > 0:
+                    history_messages.insert(
+                        0,
+                        Message(
+                            role=MessageRole.SYSTEM,
+                            content="Below is the previous conversation history. "
+                            "Use this context to inform your response.",
+                            static=True,
+                        ),
                     )
+            else:
+                history_messages = None
+
+            files = input_data.files
+            if files:
+                normalized_files = self._ensure_named_files(files)
+                file_paths = []
+                if self.sandbox_backend:
+                    file_paths = self._upload_files_to_sandbox(normalized_files)
+                else:
+                    if not self.file_store_backend:
+                        self._setup_in_memory_file_store_and_tools()
+                    if self.file_store_backend:
+                        file_paths = self._upload_files_to_file_store(normalized_files)
+                input_message = self._inject_attached_files_into_message(
+                    input_message, normalized_files, file_paths=file_paths
+                )
+
+            if input_data.tool_params:
+                kwargs["tool_params"] = input_data.tool_params
+
+            self.system_prompt_manager.update_variables(dict(input_data))
+            kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
+            kwargs.pop("run_depends", None)
+
+            try:
+                result = self._run_agent(input_message, history_messages, config=config, **kwargs)
+            except CanceledException:
+                if use_memory:
+                    try:
+                        self._save_history_to_memory(custom_metadata)
+                    except Exception as save_error:
+                        logger.error(
+                            f"Agent {self.name} - {self.id}: failed to save history to memory "
+                            f"after cancel: {save_error}",
+                        )
+                        try:
+                            self._append_user_input_to_memory(custom_metadata)
+                        except Exception as save_error2:
+                            logger.error(
+                                f"Agent {self.name} - {self.id}: also failed to save user input "
+                                f"after cancel: {save_error2}",
+                            )
+                raise
+            except Exception:
+                if use_memory:
                     try:
                         self._append_user_input_to_memory(custom_metadata)
-                    except Exception as save_error2:
+                    except Exception as save_error:
                         logger.error(
-                            f"Agent {self.name} - {self.id}: also failed to save user input "
-                            f"after cancel: {save_error2}",
+                            f"Agent {self.name} - {self.id}: failed to save user input to memory "
+                            f"after agent error: {save_error}",
                         )
-            raise
-        except Exception:
+                raise
+            finally:
+                self._current_call_context = None
+                self._clear_todos_file()
+
             if use_memory:
                 try:
-                    self._append_user_input_to_memory(custom_metadata)
+                    self._save_history_to_memory(custom_metadata, final_output=result)
                 except Exception as save_error:
                     logger.error(
-                        f"Agent {self.name} - {self.id}: failed to save user input to memory "
-                        f"after agent error: {save_error}",
+                        "Agent %s - %s: failed to save history to memory: %s",
+                        self.name,
+                        self.id,
+                        save_error,
                     )
-            raise
+
+            execution_result = {
+                "content": result,
+            }
+
+            requested_paths = getattr(self, "_requested_output_files", None)
+
+            if self.file_store_backend and requested_paths:
+                try:
+                    stored_files = self.file_store_backend.list_files_bytes(requested_paths)
+                except Exception as e:
+                    logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from file store: {e}")
+                    stored_files = []
+                if stored_files:
+                    execution_result["files"] = stored_files
+                    logger.info(
+                        f"Agent {self.name} - {self.id}: "
+                        f"returning {len(stored_files)} requested file(s) from file store"
+                    )
+
+            if self.sandbox_backend and requested_paths:
+                try:
+                    sandbox_files = self.sandbox_backend.collect_files(file_paths=requested_paths)
+                except Exception as e:
+                    logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from sandbox: {e}")
+                    sandbox_files = []
+                if sandbox_files:
+                    existing_files = execution_result.get("files", [])
+                    execution_result["files"] = existing_files + sandbox_files
+                    logger.info(
+                        f"Agent {self.name} - {self.id}: "
+                        f"returning {len(sandbox_files)} requested file(s) from sandbox"
+                    )
+
+            logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
+
+            return execution_result
         finally:
-            self._current_call_context = None
-            self._clear_todos_file()
             if ltm_tools:
                 self.tools = _tools_before_ltm
-
-        if use_memory:
-            try:
-                self._save_history_to_memory(custom_metadata, final_output=result)
-            except Exception as save_error:
-                logger.error(
-                    "Agent %s - %s: failed to save history to memory: %s",
-                    self.name,
-                    self.id,
-                    save_error,
-                )
-
-        execution_result = {
-            "content": result,
-        }
-
-        requested_paths = getattr(self, "_requested_output_files", None)
-
-        if self.file_store_backend and requested_paths:
-            try:
-                stored_files = self.file_store_backend.list_files_bytes(requested_paths)
-            except Exception as e:
-                logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from file store: {e}")
-                stored_files = []
-            if stored_files:
-                execution_result["files"] = stored_files
-                logger.info(
-                    f"Agent {self.name} - {self.id}: "
-                    f"returning {len(stored_files)} requested file(s) from file store"
-                )
-
-        if self.sandbox_backend and requested_paths:
-            try:
-                sandbox_files = self.sandbox_backend.collect_files(file_paths=requested_paths)
-            except Exception as e:
-                logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from sandbox: {e}")
-                sandbox_files = []
-            if sandbox_files:
-                existing_files = execution_result.get("files", [])
-                execution_result["files"] = existing_files + sandbox_files
-                logger.info(
-                    f"Agent {self.name} - {self.id}: "
-                    f"returning {len(sandbox_files)} requested file(s) from sandbox"
-                )
-
-        logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
-
-        return execution_result
 
     def retrieve_conversation_history(
         self,
