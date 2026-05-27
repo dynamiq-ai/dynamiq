@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -171,6 +172,23 @@ class PostgresLongTermMemoryBackend(LongTermMemoryBackend):
             cur.execute(
                 SQL("DELETE FROM {table} WHERE id = %s").format(table=self._table),
                 (fact_id,),
+            )
+
+    def update(
+        self,
+        fact_id: str,
+        *,
+        content: str,
+        content_hash: str,
+        embedding: list[float],
+        updated_at: datetime,
+    ) -> None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                SQL(
+                    "UPDATE {table} SET content = %s, hash = %s, " "embedding = %s, updated_at = %s WHERE id = %s"
+                ).format(table=self._table),
+                (content, content_hash, embedding, updated_at, fact_id),
             )
 
     def search(

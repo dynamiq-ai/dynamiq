@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 from functools import cached_property
 from typing import Any
 
@@ -66,9 +67,18 @@ class LongTermMemoryBackend(ABC, BaseModel):
     def delete_scope(self, scope: dict[str, str]) -> int:
         """Hard-delete every fact matching `scope` and return the count deleted."""
 
-    def update(self, fact_id: str, content: str, embedding: list[float]) -> None:
-        """Replace an existing fact in-place (Phase 2). Use `delete` + `insert` in v1."""
-        raise NotImplementedError(
-            "update() lands in Phase 2 with the auto-extractor. "
-            "In v1, correct a fact via delete() + insert()."
-        )
+    @abstractmethod
+    def update(
+        self,
+        fact_id: str,
+        *,
+        content: str,
+        content_hash: str,
+        embedding: list[float],
+        updated_at: datetime,
+    ) -> None:
+        """Replace content/hash/embedding/updated_at for an existing fact in place.
+
+        Preserves `id`, `user_id`, `metadata`, and `created_at`. Used by the
+        semantic-upsert path in `LongTermMemory.remember`.
+        """

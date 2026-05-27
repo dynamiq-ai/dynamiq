@@ -160,6 +160,30 @@ class QdrantLongTermMemoryBackend(LongTermMemoryBackend):
             points_selector=PointIdsList(points=[_to_point_id(fact_id)]),
         )
 
+    def update(
+        self,
+        fact_id: str,
+        *,
+        content: str,
+        content_hash: str,
+        embedding: list[float],
+        updated_at: datetime,
+    ) -> None:
+        existing = self.get(fact_id)
+        if existing is None:
+            return
+        new_fact = existing.model_copy(update={"content": content, "hash": content_hash, "updated_at": updated_at})
+        self._client.upsert(
+            collection_name=self.collection_name,
+            points=[
+                PointStruct(
+                    id=_to_point_id(fact_id),
+                    vector=list(embedding),
+                    payload=_fact_to_payload(new_fact),
+                )
+            ],
+        )
+
     def search(
         self,
         *,

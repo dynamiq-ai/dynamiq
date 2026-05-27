@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import numpy as np
 from pydantic import PrivateAttr
 
@@ -29,6 +31,23 @@ class InMemoryLongTermMemoryBackend(LongTermMemoryBackend):
     def delete(self, fact_id: str) -> None:
         self._facts.pop(fact_id, None)
         self._vectors.pop(fact_id, None)
+
+    def update(
+        self,
+        fact_id: str,
+        *,
+        content: str,
+        content_hash: str,
+        embedding: list[float],
+        updated_at: datetime,
+    ) -> None:
+        existing = self._facts.get(fact_id)
+        if existing is None:
+            return
+        self._facts[fact_id] = existing.model_copy(
+            update={"content": content, "hash": content_hash, "updated_at": updated_at}
+        )
+        self._vectors[fact_id] = list(embedding)
 
     def search(
         self, *, query_embedding: list[float],
