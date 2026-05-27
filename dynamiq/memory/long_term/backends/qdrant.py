@@ -8,6 +8,7 @@ from qdrant_client.http.models import (
     Distance,
     FieldCondition,
     Filter,
+    FilterSelector,
     MatchValue,
     PointIdsList,
     PointStruct,
@@ -211,14 +212,21 @@ class QdrantLongTermMemoryBackend(LongTermMemoryBackend):
         return [_payload_to_fact(p.payload) for p in points]
 
     def delete_scope(self, scope: dict[str, str]) -> int:
-        # Qdrant delete-by-filter returns no count, so enumerate ids first.
-        in_scope = self.list_by_scope(scope, limit=10_000)
-        if not in_scope:
+        # Qdrant delete-by-filter is atomic but returns no count, so count
+        # first then delete. `count(exact=True)` is one round-trip and avoids
+        # the 10k cap a paginated scroll-then-delete would silently hit.
+        scope_filter = _scope_to_filter(scope)
+        if scope_filter is None:
+            return 0
+        total = self._client.count(
+            collection_name=self.collection_name,
+            count_filter=scope_filter,
+            exact=True,
+        ).count
+        if total == 0:
             return 0
         self._client.delete(
             collection_name=self.collection_name,
-            points_selector=PointIdsList(
-                points=[_to_point_id(f.id) for f in in_scope]
-            ),
+            points_selector=FilterSelector(filter=scope_filter),
         )
-        return len(in_scope)
+        return total
