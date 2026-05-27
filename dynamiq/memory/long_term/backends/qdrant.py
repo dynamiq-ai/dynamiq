@@ -215,9 +215,9 @@ class QdrantLongTermMemoryBackend(LongTermMemoryBackend):
         # Qdrant delete-by-filter is atomic but returns no count, so count
         # first then delete. `count(exact=True)` is one round-trip and avoids
         # the 10k cap a paginated scroll-then-delete would silently hit.
-        scope_filter = _scope_to_filter(scope)
-        if scope_filter is None:
-            return 0
+        # Empty scope = "match everything" — same contract as the in-memory
+        # and pgvector backends — so we use an empty Filter() rather than None.
+        scope_filter = _scope_to_filter(scope) or Filter()
         total = self._client.count(
             collection_name=self.collection_name,
             count_filter=scope_filter,
