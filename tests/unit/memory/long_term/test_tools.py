@@ -158,3 +158,22 @@ def test_factory_ignores_unknown_include_keys(ltm, user_id):
         include=("recall", "unknown", "forget"),
     )
     assert [t.name for t in tools] == ["recall_facts"]
+
+
+# --- serialization ---
+
+
+def test_remember_tool_to_dict_round_trips_long_term_memory(ltm, user_id):
+    """`to_dict` must not auto-dump `long_term_memory` (it holds runtime clients).
+
+    The default `model_dump` would try to JSON-encode the embedder's connection
+    and the backend's live client, blowing up tracing callbacks. The tool base
+    excludes the field and re-adds it via `LongTermMemory.to_dict()`.
+    """
+    tool = RememberFactTool(long_term_memory=ltm, user_id=user_id)
+    data = tool.to_dict()
+    assert "long_term_memory" in data
+    ltm_dump = data["long_term_memory"]
+    assert isinstance(ltm_dump, dict)
+    assert "backend" in ltm_dump and isinstance(ltm_dump["backend"], dict)
+    assert "embedder" in ltm_dump and isinstance(ltm_dump["embedder"], dict)

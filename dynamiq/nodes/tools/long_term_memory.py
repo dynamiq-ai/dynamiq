@@ -89,6 +89,15 @@ class _LongTermMemoryTool(Node):
     long_term_memory: LongTermMemory
     user_id: str
 
+    @property
+    def to_dict_exclude_params(self) -> dict[str, Any]:
+        return super().to_dict_exclude_params | {"long_term_memory": True}
+
+    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict[str, Any]:
+        data = super().to_dict(include_secure_params=include_secure_params, **kwargs)
+        data["long_term_memory"] = self.long_term_memory.to_dict(include_secure_params=include_secure_params, **kwargs)
+        return data
+
 
 _OUTCOME_MESSAGES: dict[RememberOutcome, str] = {
     RememberOutcome.CREATED: "Fact saved.",
