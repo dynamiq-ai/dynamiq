@@ -1,65 +1,136 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.prompts.prompts import VisionMessageType
 from dynamiq.utils.logger import logger
 
-ANTHROPIC_MAX_STRICT_TOOLS = 15
+
+def _patch_litellm_anthropic_strict_forward() -> bool:
+    """Make LiteLLM forward ``strict: true`` from OpenAI-shape tools to Anthropic.
+
+    LiteLLM's ``AnthropicConfig._map_tool_helper`` translates an OpenAI-style
+    tool definition into Anthropic's native shape but drops the ``strict``
+    field on the way through. Until that's fixed upstream, this monkey-patch
+    wraps the method and lifts ``function.strict`` onto the resulting Anthropic
+    tool dict so Anthropic's grammar-constrained sampling actually engages.
+
+    The patch is defensive: it logs and returns ``False`` if anything looks
+    different from what we expect (LiteLLM moved the method, refactored the
+    config class, etc.) — in that case strict-on-Anthropic via LiteLLM stops
+    working but nothing else breaks. It is also idempotent: re-importing this
+    module won't double-patch.
+
+    Returns:
+        True if the patch was applied (or already in place), False if it was
+        skipped due to unexpected LiteLLM internals.
+    """
+    try:
+        from litellm.llms.anthropic.chat import transformation as _xform
+    except Exception as exc:  # ImportError, ModuleNotFoundError, etc.
+        logger.debug("LiteLLM Anthropic strict patch: import failed: %s", exc)
+        return False
+
+    config_cls = getattr(_xform, "AnthropicConfig", None)
+    if config_cls is None:
+        logger.warning("LiteLLM Anthropic strict patch: AnthropicConfig not found; skipping.")
+        return False
+
+    original = getattr(config_cls, "_map_tool_helper", None)
+    if original is None:
+        logger.warning("LiteLLM Anthropic strict patch: _map_tool_helper not found; skipping.")
+        return False
+
+    if getattr(original, "__dynamiq_strict_patch__", False):
+        return True  # already applied
+
+    def _patched(self, tool):
+        returned_tool, mcp_server = original(self, tool)
+        try:
+            if returned_tool is not None and isinstance(tool, dict) and tool.get("type") == "function":
+                fn = tool.get("function") or {}
+                strict = fn.get("strict")
+                if strict is not None:
+                    returned_tool["strict"] = strict
+        except Exception as exc:
+            # Never let a patching failure break the LiteLLM call path.
+            logger.debug("LiteLLM Anthropic strict patch: lift failed: %s", exc)
+        return returned_tool, mcp_server
+
+    _patched.__dynamiq_strict_patch__ = True
+    config_cls._map_tool_helper = _patched
+    return True
 
 
-def _clean_anthropic_schema(schema: Any, add_additional_properties_false: bool = False) -> Any:
-    """Lightweight schema cleanup for Anthropic's tool_use input_schema.
+_LITELLM_ANTHROPIC_STRICT_PATCHED = _patch_litellm_anthropic_strict_forward()
+if _LITELLM_ANTHROPIC_STRICT_PATCHED:
+    logger.debug("Patched LiteLLM AnthropicConfig to forward `strict: true` for Anthropic tools.")
 
-    Removes / simplifies fields that commonly cause Anthropic tool schema issues:
-    - Removes ``default`` values.
-    - Simplifies nullable unions like ``{"type": ["null", "string"]}`` -> ``{"type": "string"}``
-      (Anthropic prefers absence-via-required-subset over null values).
-    - Recurses through ``properties`` / ``items`` / ``anyOf`` / ``oneOf`` / ``allOf``.
-    - Optionally enforces ``additionalProperties: False`` on object types (required
-      by Anthropic's structured-outputs beta).
+# Anthropic strict tool use — per-request caps documented in the API:
+# https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use
+ANTHROPIC_MAX_STRICT_TOOLS = 20
 
-    Adapted from Letta's anthropic_client._clean_property_schema (Apache 2.0).
+# JSON Schema keywords Anthropic's strict-mode compiler rejects. Strip them
+# before sending; keep semantics in the description.
+_ANTHROPIC_STRICT_UNSUPPORTED_KEYWORDS = frozenset(
+    {
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "multipleOf",
+        "minLength",
+        "maxLength",
+        "uniqueItems",
+        "minContains",
+        "maxContains",
+        "minProperties",
+        "maxProperties",
+        "patternProperties",
+        "unevaluatedProperties",
+        "contains",
+    }
+)
+
+_ANTHROPIC_STRICT_FORMAT_ALLOWED = frozenset(
+    {"date-time", "time", "date", "duration", "email", "hostname", "uri", "ipv4", "ipv6", "uuid"}
+)
+
+
+def _clean_anthropic_strict_schema(schema: Any) -> Any:
+    """Recursively clean a schema for Anthropic's strict tool-use mode.
+
+    - Strips keywords Anthropic's compiler rejects (numeric/length bounds,
+      ``patternProperties``, etc. — see ``_ANTHROPIC_STRICT_UNSUPPORTED_KEYWORDS``).
+    - Clamps ``minItems`` to ``0`` or ``1`` (only values Anthropic supports).
+    - Strips ``format`` values outside Anthropic's allowed set.
+    - Forces ``additionalProperties: false`` on every object.
+    - Optional fields stay omitted from ``required`` (Anthropic's native shape;
+      no null-union trick).
     """
     if not isinstance(schema, dict):
         return schema
 
     cleaned: dict = {}
-
-    if "type" in schema:
-        t = schema.get("type")
-        if isinstance(t, list):
-            non_null = [x for x in t if x != "null"]
-            if len(non_null) == 1:
-                cleaned["type"] = non_null[0]
-            elif len(non_null) > 1:
-                cleaned["type"] = non_null
-            else:
-                cleaned["type"] = "string"
-        else:
-            cleaned["type"] = t
-
     for key, value in schema.items():
-        if key in ("type", "default"):
+        if key in _ANTHROPIC_STRICT_UNSUPPORTED_KEYWORDS:
+            continue
+        if key == "minItems" and isinstance(value, int) and value > 1:
+            continue
+        if key == "format" and value not in _ANTHROPIC_STRICT_FORMAT_ALLOWED:
             continue
         if key == "properties" and isinstance(value, dict):
-            cleaned["properties"] = {
-                k: _clean_anthropic_schema(v, add_additional_properties_false) for k, v in value.items()
-            }
+            cleaned["properties"] = {k: _clean_anthropic_strict_schema(v) for k, v in value.items()}
         elif key == "items" and isinstance(value, dict):
-            cleaned["items"] = _clean_anthropic_schema(value, add_additional_properties_false)
+            cleaned["items"] = _clean_anthropic_strict_schema(value)
         elif key in ("anyOf", "oneOf", "allOf") and isinstance(value, list):
-            cleaned[key] = [
-                _clean_anthropic_schema(v, add_additional_properties_false) if isinstance(v, dict) else v for v in value
-            ]
-        elif key == "additionalProperties" and isinstance(value, dict):
-            cleaned[key] = _clean_anthropic_schema(value, add_additional_properties_false)
+            cleaned[key] = [_clean_anthropic_strict_schema(v) if isinstance(v, dict) else v for v in value]
         else:
             cleaned[key] = value
 
-    if add_additional_properties_false and cleaned.get("type") == "object":
+    if cleaned.get("type") == "object":
         cleaned["additionalProperties"] = False
 
     return cleaned
@@ -81,21 +152,17 @@ class Anthropic(BaseLLM):
     Attributes:
         connection (AnthropicConnection | None): The connection to use for the Anthropic LLM.
         cache_control (AnthropicCacheControl | None): The cache control configuration.
-        force_tool_choice: When True (default), force the model to call a tool
-            whenever tools are present in function-calling mode. Translates
-            ``tool_choice`` ``None``/``"auto"``/``"required"`` into Anthropic's
-            ``{"type": "any", "disable_parallel_tool_use": true}`` shape so the
-            model cannot bail out with a text-only response.
-        strict_allowlist: Tool names eligible for Anthropic's structured-outputs
-            beta. Tools on this list get ``"strict": true`` attached and the
-            ``anthropic-beta: structured-outputs-2025-11-13`` header is added.
-            Capped at ``ANTHROPIC_MAX_STRICT_TOOLS`` per request.
+        strict_tools: When True (default), attach ``strict: true`` to each tool's
+            function entry (up to :data:`ANTHROPIC_MAX_STRICT_TOOLS` per request)
+            and clean each schema to Anthropic's strict subset. Set False to ship
+            tools as-is with no strict guarantee — the model still tries to
+            follow the schema but conformance isn't decoder-enforced.
     """
+
     connection: AnthropicConnection | None = None
     MODEL_PREFIX = "anthropic/"
     cache_control: AnthropicCacheControl | None = None
-    force_tool_choice: bool = True
-    strict_allowlist: set[str] = Field(default_factory=set)
+    strict_tools: bool = True
 
     def __init__(self, **kwargs):
         """Initialize the Anthropic LLM node.
@@ -143,12 +210,7 @@ class Anthropic(BaseLLM):
         return self._convert_non_image_to_file_content(messages)
 
     def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Attach Anthropic prompt caching configuration to completion params.
-
-        Strict tool use is GA on Anthropic and engaged by attaching
-        ``strict: true`` directly to a tool's function entry — no beta header
-        required. See ``transform_tool_schemas``.
-        """
+        """Attach Anthropic prompt caching configuration to completion params."""
         params = super().update_completion_params(params)
         if self.cache_control:
             params.setdefault("cache_control_injection_points", []).append(
@@ -164,13 +226,15 @@ class Anthropic(BaseLLM):
         return params
 
     def transform_tool_schemas(self, tools: list[dict]) -> list[dict]:
-        """Clean schemas for Anthropic and attach strict flag for allowlisted tools.
+        """Clean each tool's schema for Anthropic and attach ``strict: true``.
 
-        - Strips ``default``, simplifies ``["null", "x"]`` -> ``"x"``, recurses
-          into nested shapes.
-        - For tools in ``strict_allowlist`` (capped at 15), attaches
-          ``strict: true``; the beta header is added in ``update_completion_params``.
+        Skip strict (and skip cleaning) when ``self.strict_tools`` is False, or
+        once the request has reached the per-request cap of
+        :data:`ANTHROPIC_MAX_STRICT_TOOLS` strict tools.
         """
+        if not self.strict_tools:
+            return tools
+
         out: list[dict] = []
         strict_count = 0
         for tool in tools:
@@ -179,42 +243,13 @@ class Anthropic(BaseLLM):
                 continue
             tool = dict(tool)
             fn = tool.get("function")
-            if isinstance(fn, dict):
+            if isinstance(fn, dict) and strict_count < ANTHROPIC_MAX_STRICT_TOOLS:
                 fn = dict(fn)
-                tool_name = fn.get("name", "")
-                use_strict = tool_name in self.strict_allowlist and strict_count < ANTHROPIC_MAX_STRICT_TOOLS
                 parameters = fn.get("parameters")
                 if isinstance(parameters, dict):
-                    fn["parameters"] = _clean_anthropic_schema(parameters, add_additional_properties_false=use_strict)
-                if use_strict:
-                    fn["strict"] = True
-                    strict_count += 1
-                else:
-                    fn.pop("strict", None)
+                    fn["parameters"] = _clean_anthropic_strict_schema(parameters)
+                fn["strict"] = True
                 tool["function"] = fn
+                strict_count += 1
             out.append(tool)
         return out
-
-    def transform_tool_choice(self, tool_choice: Any, tools: list[dict] | None) -> Any:
-        """Translate generic tool_choice into Anthropic's native shape.
-
-        Forces a tool call when ``force_tool_choice`` is enabled (the default),
-        which prevents the "model emits only thought, no action" failure mode.
-        """
-        if not tools:
-            return tool_choice
-        if isinstance(tool_choice, dict):
-            return tool_choice
-
-        base = {"disable_parallel_tool_use": True}
-        if tool_choice in (None, "auto"):
-            if self.force_tool_choice:
-                return {"type": "any", **base}
-            return {"type": "auto", **base}
-        if tool_choice == "required":
-            return {"type": "any", **base}
-        if tool_choice == "none":
-            return {"type": "auto", **base}
-        if isinstance(tool_choice, str):
-            return {"type": "tool", "name": tool_choice, **base}
-        return tool_choice

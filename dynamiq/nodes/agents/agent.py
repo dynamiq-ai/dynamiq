@@ -1,6 +1,7 @@
 import json
+import types
 from concurrent.futures import as_completed
-from typing import Any, Callable, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping, Union, get_args, get_origin
 
 from litellm import get_supported_openai_params, supports_function_calling, supports_response_schema
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
@@ -324,6 +325,38 @@ class Agent(HistoryManagerMixin, BaseAgent):
             **kwargs,
         )
         self._streaming_tool_run_id = None
+
+    @staticmethod
+    def _annotation_accepts_none(annotation: Any) -> bool:
+        """Return True if a Pydantic field annotation includes ``NoneType``."""
+        if annotation is type(None):
+            return True
+        origin = get_origin(annotation)
+        if origin in (Union, types.UnionType):
+            return type(None) in get_args(annotation)
+        return False
+
+    def _strip_protocol_nulls(self, tool: Node, action_input: dict) -> dict:
+        """Drop ``None`` values for fields whose Pydantic annotation rejects None.
+
+        OpenAI strict mode requires every property in ``required`` and uses
+        ``"null"`` in the type union as the documented signal for "not specified."
+        Tools with non-nullable defaults (``encoding: str = "utf-8"``) can't
+        accept that ``None`` directly — but their Pydantic default should kick
+        in if the key is absent. Drop those keys so validation/execution use
+        defaults instead of failing.
+
+        Nullable fields (``encoding: str | None = None``) keep their None — the
+        tool genuinely accepts it.
+        """
+        fields = tool.input_schema.model_fields
+        for name in list(action_input):
+            if action_input[name] is not None:
+                continue
+            field = fields.get(name)
+            if field is not None and not self._annotation_accepts_none(field.annotation):
+                del action_input[name]
+        return action_input
 
     def _should_delegate_final(
         self,
@@ -796,6 +829,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if len(actual_tool_calls) > 1 and self.parallel_tool_calls_enabled:
             tool_items = []
             for tc in actual_tool_calls:
+                tc_name = tc.function.name.strip()
                 args = tc.function.parse_as_tool_call()
                 tc_input = args.action_input
                 if isinstance(tc_input, str):
@@ -805,9 +839,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
                 if not isinstance(tc_input, dict):
                     tc_input = {"input": tc_input}
+                tc_tool = self.tool_by_names.get(self.sanitize_tool_name(tc_name))
+                if tc_tool is not None:
+                    self._strip_protocol_nulls(tc_tool, tc_input)
+                    try:
+                        tc_tool.input_schema.model_validate(tc_input)
+                    except Exception as e:
+                        raise ActionParsingException(
+                            f"Tool call for '{tc_name}' has invalid arguments: {e}",
+                            recoverable=True,
+                        )
                 tool_items.append(
                     ToolCallItem(
-                        name=tc.function.name.strip(),
+                        name=tc_name,
                         input=tc_input,
                         thought=args.thought,
                     )
@@ -830,6 +874,17 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
         if not isinstance(action_input, dict):
             action_input = {"input": action_input}
+
+        tool = self.tool_by_names.get(self.sanitize_tool_name(action))
+        if tool is not None:
+            self._strip_protocol_nulls(tool, action_input)
+            try:
+                tool.input_schema.model_validate(action_input)
+            except Exception as e:
+                raise ActionParsingException(
+                    f"Tool call for '{action}' has invalid arguments: {e}",
+                    recoverable=True,
+                )
 
         self.log_reasoning(thought, action, action_input, loop_num)
         return thought, action, action_input
@@ -1509,12 +1564,24 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         try:
             native_parallel = self.parallel_tool_calls_enabled and self.inference_mode == InferenceMode.FUNCTION_CALLING
+            # In FUNCTION_CALLING mode with tools present, force a tool call so
+            # the model cannot bail out with a text-only response. Honour any
+            # explicit caller override (kwargs / self.llm.tool_choice).
+            forced_tool_choice = None
+            if (
+                self.inference_mode == InferenceMode.FUNCTION_CALLING
+                and self._tools
+                and "tool_choice" not in kwargs
+                and getattr(self.llm, "tool_choice", None) is None
+            ):
+                forced_tool_choice = "required"
             llm_result = self._run_llm(
                 messages=messages,
                 tools=self._tools,
                 response_format=self._response_format,
                 config=llm_config,
                 parallel_tool_calls=True if native_parallel else None,
+                **({"tool_choice": forced_tool_choice} if forced_tool_choice else {}),
                 **kwargs,
             )
         finally:
