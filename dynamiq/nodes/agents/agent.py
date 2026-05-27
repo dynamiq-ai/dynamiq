@@ -926,8 +926,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self._requested_output_files = self._parse_output_files_csv(
                 llm_generated_output_json.get("output_files") or ""
             )
-            self.log_final_output(thought, action_input, loop_num)
-            return thought, "final_answer", action_input
+            # action_input is now an object (per schema); the final answer lives
+            # under the ``answer`` key. Fall back to the raw value for backward
+            # compatibility with older models that still emit a plain string.
+            final_answer: Any = action_input
+            if isinstance(action_input, dict) and "answer" in action_input:
+                final_answer = action_input["answer"]
+            self.log_final_output(thought, final_answer, loop_num)
+            return thought, "final_answer", final_answer
 
         try:
             if isinstance(action_input, str):
@@ -1584,6 +1590,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 **({"tool_choice": forced_tool_choice} if forced_tool_choice else {}),
                 **kwargs,
             )
+            # DEBUG: raw LLM response right after the call, before any parsing
+            print(f"\n[LLM RESPONSE loop={loop_num}] mode={self.inference_mode}")
+            print(f"[LLM RESPONSE loop={loop_num}] output={llm_result.output!r}\n")
         finally:
             if not original_streaming_enabled:
                 try:
