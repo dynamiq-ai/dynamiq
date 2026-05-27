@@ -4,7 +4,7 @@ from hashlib import md5
 from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_serializer
 
 from dynamiq.memory.long_term.backends import InMemoryLongTermMemoryBackend
 from dynamiq.memory.long_term.base import LongTermMemoryBackend
@@ -244,3 +244,9 @@ class LongTermMemoryConfig(BaseModel):
         MemoryToolKind.REMEMBER,
         MemoryToolKind.RECALL,
     )
+
+    @field_serializer("tools")
+    def _serialize_tools(self, tools: tuple[MemoryToolKind, ...]) -> tuple[str, ...]:
+        # Emit plain string values so YAML round-trip and tracing work; pydantic
+        # default-mode dump returns enum members which yaml.safe_dump cannot render.
+        return tuple(t.value for t in tools)

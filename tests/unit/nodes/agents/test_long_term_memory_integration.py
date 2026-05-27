@@ -71,6 +71,18 @@ def test_config_can_restrict_to_read_only():
     assert LongTermMemoryConfig(tools=("recall",)).tools == ("recall",)
 
 
+def test_config_model_dump_emits_plain_strings_not_enums():
+    """YAML round-trip relies on tool kinds being dumped as their string values,
+    not as enum members (which yaml.safe_dump cannot represent and which would
+    round-trip back as the enum *name* — 'REMEMBER' — failing validation)."""
+    import yaml
+
+    dumped = LongTermMemoryConfig().model_dump()
+    assert dumped == {"tools": ("remember", "recall")}
+    assert all(isinstance(t, str) and not hasattr(t, "value") for t in dumped["tools"])
+    yaml.safe_dump(dumped)  # must not raise
+
+
 # --- Agent field declarations ---
 
 
