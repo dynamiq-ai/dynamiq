@@ -8,7 +8,6 @@ from qdrant_client.http.models import (
     Distance,
     FieldCondition,
     Filter,
-    FilterSelector,
     MatchValue,
     PointIdsList,
     PointStruct,
@@ -212,21 +211,31 @@ class QdrantLongTermMemoryBackend(LongTermMemoryBackend):
         return [_payload_to_fact(p.payload) for p in points]
 
     def delete_scope(self, scope: dict[str, str]) -> int:
-        # Qdrant delete-by-filter is atomic but returns no count, so count
-        # first then delete. `count(exact=True)` is one round-trip and avoids
-        # the 10k cap a paginated scroll-then-delete would silently hit.
+        # Scroll for all matching point ids (paginated, no 10k cap), then delete
+        # them in one call. Compared to count-then-delete-by-filter this trades
+        # an extra round-trip for an accurate count of what we actually removed
+        # — the count+delete variant could diverge under concurrent writes.
         # Empty scope = "match everything" — same contract as the in-memory
         # and pgvector backends — so we use an empty Filter() rather than None.
         scope_filter = _scope_to_filter(scope) or Filter()
-        total = self._client.count(
-            collection_name=self.collection_name,
-            count_filter=scope_filter,
-            exact=True,
-        ).count
-        if total == 0:
+        ids: list = []
+        offset = None
+        while True:
+            points, offset = self._client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=scope_filter,
+                limit=1000,
+                offset=offset,
+                with_payload=False,
+                with_vectors=False,
+            )
+            ids.extend(p.id for p in points)
+            if offset is None:
+                break
+        if not ids:
             return 0
         self._client.delete(
             collection_name=self.collection_name,
-            points_selector=FilterSelector(filter=scope_filter),
+            points_selector=PointIdsList(points=ids),
         )
-        return total
+        return len(ids)
