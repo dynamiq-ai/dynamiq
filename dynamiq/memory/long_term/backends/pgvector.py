@@ -86,8 +86,6 @@ class PostgresLongTermMemoryBackend(LongTermMemoryBackend):
     def model_post_init(self, __context) -> None:
         self._conn = self.connection.connect()
         self._conn.autocommit = True
-        # CREATE EXTENSION must run BEFORE register_vector, otherwise the
-        # type adapter has nothing to bind to ("vector type not found").
         with self._conn.cursor() as cur:
             cur.execute(_CREATE_EXTENSION_SQL)
         register_vector(self._conn)
