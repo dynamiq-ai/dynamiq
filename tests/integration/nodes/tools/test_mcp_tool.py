@@ -277,7 +277,10 @@ async def test_execute_async_optimized_returns_structured_content(mcp_server_too
     with conn_patch, session_patch:
         output = await tool.execute_async(tool.input_schema(a=20, b=22))
 
-    assert output == {"content": payload}
+    assert output["content"] == payload
+    assert output["raw_response"]["structuredContent"] == payload
+    assert output["raw_response"]["content"] == [{"type": "text", "text": "{...}"}]
+    assert output["raw_response"]["isError"] is False
 
 
 @pytest.mark.asyncio
@@ -290,7 +293,9 @@ async def test_execute_async_optimized_falls_back_to_text(mcp_server_tool):
     with conn_patch, session_patch:
         output = await tool.execute_async(tool.input_schema(a=20, b=22))
 
-    assert output == {"content": "plain text result"}
+    assert output["content"] == "plain text result"
+    assert output["raw_response"]["content"] == [{"type": "text", "text": "plain text result"}]
+    assert output["raw_response"]["isError"] is False
 
 
 @pytest.mark.asyncio

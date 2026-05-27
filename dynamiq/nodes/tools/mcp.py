@@ -187,15 +187,20 @@ class MCPTool(ConnectionNode):
                 recoverable=True,
             )
 
+        raw_response = result.model_dump(exclude_none=True)
+
         if not self.is_optimized_for_agents:
-            content = result.model_dump(exclude_none=True)
+            content = raw_response
         elif result.structuredContent is not None:
             content = result.structuredContent
         else:
             content = extract_text_from_mcp_content(result.content)
 
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(content)[:200]}...")
-        return {"content": content}
+        output = {"content": content}
+        if self.is_optimized_for_agents:
+            output["raw_response"] = raw_response
+        return output
 
 
 class MCPServer(ConnectionNode):
