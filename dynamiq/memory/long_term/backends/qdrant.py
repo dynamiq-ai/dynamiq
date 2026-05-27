@@ -70,7 +70,7 @@ class QdrantLongTermMemoryBackend(LongTermMemoryBackend):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    name: str = "QdrantLongTermMemoryBackend"
+    name: str = "qdrant-long-term-memory-backend"
     connection: QdrantConnection
     collection_name: str = "user_facts"
     dimension: int = 1536

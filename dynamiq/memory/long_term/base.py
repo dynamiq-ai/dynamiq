@@ -13,7 +13,7 @@ class LongTermMemoryBackend(ABC, BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    name: str = "LongTermMemoryBackend"
+    name: str = "long-term-memory-backend"
     id: str = Field(default_factory=generate_uuid)
 
     @computed_field

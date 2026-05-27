@@ -17,7 +17,7 @@ import pytest
 from dynamiq.connections import BaseConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.memory.long_term import LongTermMemory, LongTermMemoryConfig
-from dynamiq.memory.long_term.backends.in_memory import InMemoryFactBackend
+from dynamiq.memory.long_term.backends.in_memory import InMemoryLongTermMemoryBackend
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.embedders.base import TextEmbedder, TextEmbedderInputSchema
 from dynamiq.nodes.llms import OpenAI
@@ -43,7 +43,7 @@ class _FakeEmbedder(TextEmbedder):
 
 @pytest.fixture
 def ltm():
-    return LongTermMemory(backend=InMemoryFactBackend(), embedder=_FakeEmbedder())
+    return LongTermMemory(backend=InMemoryLongTermMemoryBackend(), embedder=_FakeEmbedder())
 
 
 @pytest.fixture

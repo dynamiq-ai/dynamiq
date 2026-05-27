@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from dynamiq.memory.long_term.backends import InMemoryFactBackend
+from dynamiq.memory.long_term.backends import InMemoryLongTermMemoryBackend
 from dynamiq.memory.long_term.base import LongTermMemoryBackend
 from dynamiq.memory.long_term.schemas import Fact
 from dynamiq.memory.long_term.types import ForgetStatus, MemoryToolKind
@@ -37,7 +37,7 @@ class LongTermMemory(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     backend: LongTermMemoryBackend = Field(
-        default_factory=InMemoryFactBackend,
+        default_factory=InMemoryLongTermMemoryBackend,
         description="Backend storage implementation for facts and their embeddings.",
     )
     embedder: TextEmbedder = Field(

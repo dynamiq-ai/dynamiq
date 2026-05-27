@@ -2,14 +2,14 @@
 import pytest
 
 from dynamiq.memory.long_term import LongTermMemory
-from dynamiq.memory.long_term.backends.in_memory import InMemoryFactBackend
+from dynamiq.memory.long_term.backends.in_memory import InMemoryLongTermMemoryBackend
 from dynamiq.memory.long_term.long_term_memory import LongTermMemoryError
 
 
 @pytest.fixture
 def ltm(fake_embedder):
     return LongTermMemory(
-        backend=InMemoryFactBackend(),
+        backend=InMemoryLongTermMemoryBackend(),
         embedder=fake_embedder,
     )
 

@@ -7,7 +7,7 @@ would after the model emits a tool call.
 import pytest
 
 from dynamiq.memory.long_term import LongTermMemory
-from dynamiq.memory.long_term.backends.in_memory import InMemoryFactBackend
+from dynamiq.memory.long_term.backends.in_memory import InMemoryLongTermMemoryBackend
 from dynamiq.nodes.tools.long_term_memory import (
     ForgetFactTool,
     RecallFactsTool,
@@ -18,7 +18,7 @@ from dynamiq.nodes.tools.long_term_memory import (
 
 @pytest.fixture
 def ltm(fake_embedder):
-    return LongTermMemory(backend=InMemoryFactBackend(), embedder=fake_embedder)
+    return LongTermMemory(backend=InMemoryLongTermMemoryBackend(), embedder=fake_embedder)
 
 
 # --- RememberFactTool ---

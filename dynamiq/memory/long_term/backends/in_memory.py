@@ -5,10 +5,10 @@ from dynamiq.memory.long_term.base import LongTermMemoryBackend
 from dynamiq.memory.long_term.schemas import Fact
 
 
-class InMemoryFactBackend(LongTermMemoryBackend):
+class InMemoryLongTermMemoryBackend(LongTermMemoryBackend):
     """Dict + numpy-cosine backend. Loses data on restart."""
 
-    name: str = "InMemoryFactBackend"
+    name: str = "in-memory-long-term-memory-backend"
 
     _facts: dict[str, Fact] = PrivateAttr(default_factory=dict)
     _vectors: dict[str, list[float]] = PrivateAttr(default_factory=dict)

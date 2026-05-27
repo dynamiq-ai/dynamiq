@@ -1,7 +1,7 @@
-"""Tests for InMemoryFactBackend."""
+"""Tests for InMemoryLongTermMemoryBackend."""
 from datetime import UTC, datetime
 
-from dynamiq.memory.long_term.backends.in_memory import InMemoryFactBackend
+from dynamiq.memory.long_term.backends.in_memory import InMemoryLongTermMemoryBackend
 from dynamiq.memory.long_term.schemas import Fact
 
 
@@ -19,40 +19,40 @@ def _fact(fact_id: str, user_id: str, content: str,
 # --- insert / get / get_by_hash ---
 
 def test_insert_then_get(fake_embedder):
-    backend = InMemoryFactBackend()
+    backend = InMemoryLongTermMemoryBackend()
     fact = _fact("f1", "u1", "hello")
     backend.insert(fact, fake_embedder.embed("hello"))
     assert backend.get("f1") == fact
 
 
 def test_get_unknown_returns_none():
-    backend = InMemoryFactBackend()
+    backend = InMemoryLongTermMemoryBackend()
     assert backend.get("does-not-exist") is None
 
 
 def test_get_by_hash_returns_match(fake_embedder):
-    backend = InMemoryFactBackend()
+    backend = InMemoryLongTermMemoryBackend()
     fact = _fact("f1", "u1", "hello", content_hash="h-shared")
     backend.insert(fact, fake_embedder.embed("hello"))
     assert backend.get_by_hash(user_id="u1", content_hash="h-shared") == fact
 
 
 def test_get_by_hash_isolates_users(fake_embedder):
-    backend = InMemoryFactBackend()
+    backend = InMemoryLongTermMemoryBackend()
     backend.insert(_fact("f1", "u1", "hello", "h-shared"),
                    fake_embedder.embed("hello"))
     assert backend.get_by_hash(user_id="u2", content_hash="h-shared") is None
 
 
 def test_get_by_hash_unknown_returns_none():
-    backend = InMemoryFactBackend()
+    backend = InMemoryLongTermMemoryBackend()
     assert backend.get_by_hash(user_id="u1", content_hash="nope") is None
 
 
 # --- search ---
 
 def test_search_returns_relevance_ordered(fake_embedder):
-    backend = InMemoryFactBackend()
+    backend = InMemoryLongTermMemoryBackend()
     backend.insert(_fact("f1", "u1", "alpha"), fake_embedder.embed("alpha"))
     backend.insert(_fact("f2", "u1", "alpha-2"), fake_embedder.embed("alpha-2"))
     backend.insert(_fact("f3", "u1", "zulu"), fake_embedder.embed("zulu"))
@@ -68,7 +68,7 @@ def test_search_returns_relevance_ordered(fake_embedder):
 
 
 def test_search_filters_by_scope(fake_embedder):
-    backend = InMemoryFactBackend()
+    backend = InMemoryLongTermMemoryBackend()
     backend.insert(_fact("f1", "u1", "alpha"), fake_embedder.embed("alpha"))
     backend.insert(_fact("f2", "u2", "alpha"), fake_embedder.embed("alpha"))
     hits = backend.search(
@@ -80,7 +80,7 @@ def test_search_filters_by_scope(fake_embedder):
 
 
 def test_search_respects_limit(fake_embedder):
-    backend = InMemoryFactBackend()
+    backend = InMemoryLongTermMemoryBackend()
     for i in range(5):
         backend.insert(_fact(f"f{i}", "u1", f"text{i}"),
                        fake_embedder.embed(f"text{i}"))
@@ -92,7 +92,7 @@ def test_search_respects_limit(fake_embedder):
 
 
 def test_search_empty_store_returns_empty(fake_embedder):
-    backend = InMemoryFactBackend()
+    backend = InMemoryLongTermMemoryBackend()
     hits = backend.search(
         query_embedding=fake_embedder.embed("anything"),
         scope={"user_id": "u1"}, limit=5,
@@ -103,19 +103,19 @@ def test_search_empty_store_returns_empty(fake_embedder):
 # --- delete / list_by_scope / delete_scope ---
 
 def test_delete_removes_fact(fake_embedder):
-    backend = InMemoryFactBackend()
+    backend = InMemoryLongTermMemoryBackend()
     backend.insert(_fact("f1", "u1", "x"), fake_embedder.embed("x"))
     backend.delete("f1")
     assert backend.get("f1") is None
 
 
 def test_delete_unknown_is_noop():
-    backend = InMemoryFactBackend()
+    backend = InMemoryLongTermMemoryBackend()
     backend.delete("does-not-exist")     # must not raise
 
 
 def test_list_by_scope_returns_in_scope_facts(fake_embedder):
-    backend = InMemoryFactBackend()
+    backend = InMemoryLongTermMemoryBackend()
     backend.insert(_fact("f1", "u1", "a"), fake_embedder.embed("a"))
     backend.insert(_fact("f2", "u1", "b"), fake_embedder.embed("b"))
     backend.insert(_fact("f3", "u2", "c"), fake_embedder.embed("c"))
@@ -124,7 +124,7 @@ def test_list_by_scope_returns_in_scope_facts(fake_embedder):
 
 
 def test_list_by_scope_respects_limit(fake_embedder):
-    backend = InMemoryFactBackend()
+    backend = InMemoryLongTermMemoryBackend()
     for i in range(5):
         backend.insert(_fact(f"f{i}", "u1", f"x{i}"),
                        fake_embedder.embed(f"x{i}"))
@@ -132,7 +132,7 @@ def test_list_by_scope_respects_limit(fake_embedder):
 
 
 def test_delete_scope_removes_all_in_scope(fake_embedder):
-    backend = InMemoryFactBackend()
+    backend = InMemoryLongTermMemoryBackend()
     backend.insert(_fact("f1", "u1", "a"), fake_embedder.embed("a"))
     backend.insert(_fact("f2", "u1", "b"), fake_embedder.embed("b"))
     backend.insert(_fact("f3", "u2", "c"), fake_embedder.embed("c"))
