@@ -140,6 +140,27 @@ def test_build_sets_is_optimized_for_agents_on_each_tool(llm, ltm):
     assert tools and all(t.is_optimized_for_agents for t in tools)
 
 
+def test_init_components_initializes_ltm_embedder(llm):
+    """The embedder is a ConnectionNode whose `text_embedder` client is built
+    during `init_components`; without that, the first recall AttributeErrors
+    on a None client."""
+    init_calls: list = []
+
+    class _RecordingEmbedder(_FakeEmbedder):
+        is_postponed_component_init: bool = True
+
+        def init_components(self, connection_manager=None):
+            init_calls.append(connection_manager)
+
+    ltm_with_postponed = LongTermMemory(backend=InMemoryLongTermMemoryBackend(), embedder=_RecordingEmbedder())
+    agent = _make_agent(llm, ltm=ltm_with_postponed)
+    # Node.__init__ already invokes init_components on construction; clear and
+    # assert the explicit call also propagates to the embedder.
+    init_calls.clear()
+    agent.init_components()
+    assert len(init_calls) == 1
+
+
 # --- execute() splice: snapshot/restore self.tools ---
 
 
@@ -227,6 +248,41 @@ def test_execute_preserves_tools_added_mid_run(llm, ltm):
     assert injected in agent.tools
     assert all(t.name not in {"remember_fact", "recall_facts"} for t in agent.tools)
     assert agent.tools == original_tools + [injected]
+
+
+def test_concurrent_execute_calls_isolate_per_user_ltm_tools(llm, ltm):
+    """Two concurrent execute calls with different user_ids must each observe
+    only their own LTM tools — the per-agent `_ltm_tools_lock` serialises the
+    mutation window so the user-scoped tools never leak across calls."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    agent = _make_agent(llm, ltm=ltm)
+    original_tools = list(agent.tools)
+    snapshots: dict[str, set[str]] = {}
+    snapshots_lock = threading.Lock()
+
+    def fake_run(*args, **kwargs):
+        bound_user_ids = {t.user_id for t in agent.tools if hasattr(t, "user_id")}
+        assert len(bound_user_ids) == 1, f"cross-user leakage: {bound_user_ids}"
+        (uid,) = bound_user_ids
+        with snapshots_lock:
+            snapshots[uid] = {t.name for t in agent.tools if hasattr(t, "user_id")}
+        return "ok"
+
+    with patch.object(agent, "_run_agent", side_effect=fake_run):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(agent.run_sync, input_data={"input": "hi", "user_id": "u1"}),
+                pool.submit(agent.run_sync, input_data={"input": "hi", "user_id": "u2"}),
+            ]
+            for f in futures:
+                f.result(timeout=10)
+
+    assert set(snapshots.keys()) == {"u1", "u2"}
+    for tool_names in snapshots.values():
+        assert tool_names == {"remember_fact", "recall_facts"}
+    assert agent.tools == original_tools
 
 
 def test_execute_restores_tools_when_prep_step_raises_before_run(llm, ltm):

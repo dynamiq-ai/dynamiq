@@ -3,6 +3,7 @@ import json
 import re
 from copy import deepcopy
 from enum import Enum
+from threading import RLock
 from typing import Any, Callable, ClassVar, Union
 from uuid import uuid4
 
@@ -267,6 +268,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     _pinned_input: Message | VisionMessage | None = PrivateAttr(default=None)
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
+    # Serialises the LTM-tool window in `execute` so concurrent calls on the
+    # same agent instance don't see each other's per-call tools on `self.tools`.
+    _ltm_tools_lock: RLock = PrivateAttr(default_factory=RLock)
     # Loop progress and pending-tool-call state are declared on AgentIterativeCheckpointMixin.
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -445,6 +449,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if tool.is_postponed_component_init:
                 tool.init_components(connection_manager)
             tool.is_optimized_for_agents = True
+
+        # The LTM embedder is a ConnectionNode that needs its text_embedder
+        # client built before the first recall/remember call, otherwise it
+        # AttributeErrors on a `None` client during `execute`.
+        if self.long_term_memory and self.long_term_memory.embedder.is_postponed_component_init:
+            self.long_term_memory.embedder.init_components(connection_manager)
 
         self._ensure_skills_ingested_for_sandbox()
 
@@ -636,6 +646,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         ltm_tools = self._build_long_term_memory_tools(input_data)
         if ltm_tools:
+            # Lock acquired here, released in the matching finally below — see
+            # `_ltm_tools_lock` declaration for the concurrency rationale.
+            self._ltm_tools_lock.acquire()
             self.tools = list(self.tools) + ltm_tools
             logger.info(
                 "Agent %s - %s: attached %d long-term memory tools (%s)",
@@ -765,11 +778,14 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             return execution_result
         finally:
             if ltm_tools:
-                # Remove by identity rather than restoring a snapshot so any tools
-                # appended mid-run (e.g. by `_setup_in_memory_file_store_and_tools`)
-                # are preserved for subsequent calls.
-                ltm_ids = {id(t) for t in ltm_tools}
-                self.tools = [t for t in self.tools if id(t) not in ltm_ids]
+                try:
+                    # Remove by identity rather than restoring a snapshot so any
+                    # tools appended mid-run (e.g. by
+                    # `_setup_in_memory_file_store_and_tools`) are preserved.
+                    ltm_ids = {id(t) for t in ltm_tools}
+                    self.tools = [t for t in self.tools if id(t) not in ltm_ids]
+                finally:
+                    self._ltm_tools_lock.release()
 
     def retrieve_conversation_history(
         self,
