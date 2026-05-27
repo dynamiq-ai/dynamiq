@@ -131,6 +131,15 @@ def test_build_bakes_user_id_into_each_tool(llm, ltm):
         assert tool.user_id == "u1"
 
 
+def test_build_sets_is_optimized_for_agents_on_each_tool(llm, ltm):
+    """LTM tools are built per-run, after `init_components` has run, so the agent
+    must flip `is_optimized_for_agents` itself — otherwise remember/recall would
+    return raw dicts instead of the friendly status strings the LLM expects."""
+    agent = _make_agent(llm, ltm=ltm)
+    tools = agent._build_long_term_memory_tools(_input(user_id="u1"))
+    assert tools and all(t.is_optimized_for_agents for t in tools)
+
+
 # --- execute() splice: snapshot/restore self.tools ---
 
 

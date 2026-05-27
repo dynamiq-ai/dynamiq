@@ -842,11 +842,17 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             return []
         from dynamiq.nodes.tools.long_term_memory import build_long_term_memory_tools
 
-        return build_long_term_memory_tools(
+        tools = build_long_term_memory_tools(
             long_term_memory=self.long_term_memory,
             user_id=user_id,
             include=self.long_term_memory_config.tools,
         )
+        # `init_components` set this on every tool that existed at agent build
+        # time; LTM tools are constructed lazily per-run and must match so the
+        # remember/recall outputs render as friendly strings rather than raw dicts.
+        for tool in tools:
+            tool.is_optimized_for_agents = True
+        return tools
 
     def _is_input_output_trace_message(self, message: Message) -> bool:
         """Return True when a message is an internal ReAct/tool-trace entry."""
