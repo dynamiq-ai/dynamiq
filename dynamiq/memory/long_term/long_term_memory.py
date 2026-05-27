@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 from dynamiq.memory.long_term.backends import InMemoryLongTermMemoryBackend
 from dynamiq.memory.long_term.base import LongTermMemoryBackend
 from dynamiq.memory.long_term.schemas import Fact
-from dynamiq.memory.long_term.types import ForgetStatus, MemoryToolKind
+from dynamiq.memory.long_term.types import ForgetStatus, MemoryToolKind, RememberOutcome
 from dynamiq.nodes.embedders.base import TextEmbedder, TextEmbedderInputSchema
 from dynamiq.utils.logger import logger
 
@@ -44,6 +44,16 @@ class LongTermMemory(BaseModel):
         ...,
         description="Text embedder used to vectorize facts on write and queries on read.",
     )
+    upsert_threshold: float = Field(
+        default=0.85,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Cosine similarity above which a new `remember()` call replaces "
+            "the nearest existing fact in place instead "
+            "of inserting a new row. Set to 1.0 to disable upsert (insert-only)."
+        ),
+    )
 
     @computed_field
     @cached_property
@@ -71,8 +81,19 @@ class LongTermMemory(BaseModel):
     def remember(
         self, *, content: str, user_id: str,
         metadata: dict[str, Any] | None = None,
-    ) -> Fact:
-        """Add a fact for `user_id`. Idempotent on the (user_id, normalised content) pair.
+    ) -> tuple[Fact, RememberOutcome]:
+        """Add or upsert a fact for `user_id`. Returns the fact and a `RememberOutcome`.
+
+        Semantics (no explicit forget tool):
+
+        1. Exact-duplicate guard: if `(user_id, normalised content)` already exists,
+           return it with `UNCHANGED` (no embed cost).
+        2. Otherwise embed once and search the user's facts for the nearest neighbour.
+           If the top match's cosine score exceeds `upsert_threshold`, replace that
+           fact's content/hash/embedding in place (preserving id, created_at, metadata)
+           and return `UPDATED`. This is how an agent "corrects" or "deletes" a fact:
+           re-state it.
+        3. Otherwise insert a brand-new fact and return `CREATED`.
 
         Args:
             content: The fact text.
@@ -90,11 +111,34 @@ class LongTermMemory(BaseModel):
 
             existing = self.backend.get_by_hash(user_id=user_id, content_hash=content_hash)
             if existing is not None:
-                logger.debug(f"LongTermMemory: dedup hit for user={user_id}, returning existing fact {existing.id}")
-                return existing
+                logger.debug(f"LongTermMemory: exact-dedup hit for user={user_id}, fact {existing.id}")
+                return existing, RememberOutcome.UNCHANGED
+
+            embedding = _embed(self.embedder, normalised)
+
+            nearest = self.backend.search(
+                query_embedding=embedding,
+                scope={"user_id": user_id},
+                limit=1,
+            )
+            if nearest and nearest[0][1] >= self.upsert_threshold:
+                old_fact, score = nearest[0]
+                now = datetime.now(UTC)
+                self.backend.update(
+                    old_fact.id,
+                    content=normalised,
+                    content_hash=content_hash,
+                    embedding=embedding,
+                    updated_at=now,
+                )
+                logger.debug(
+                    f"LongTermMemory: upsert hit (score={score:.3f}) — "
+                    f"updated fact {old_fact.id} for user={user_id}"
+                )
+                updated = old_fact.model_copy(update={"content": normalised, "hash": content_hash, "updated_at": now})
+                return updated, RememberOutcome.UPDATED
 
             now = datetime.now(UTC)
-            embedding = _embed(self.embedder, normalised)
             fact = Fact(
                 id=str(uuid4()),
                 content=normalised,
@@ -106,7 +150,7 @@ class LongTermMemory(BaseModel):
             )
             self.backend.insert(fact, embedding)
             logger.debug(f"LongTermMemory: stored fact {fact.id} for user={user_id}")
-            return fact
+            return fact, RememberOutcome.CREATED
         except Exception as e:
             logger.error(f"LongTermMemory.remember failed for user={user_id}: {e}")
             raise LongTermMemoryError(f"Failed to remember fact: {e}") from e
@@ -199,5 +243,4 @@ class LongTermMemoryConfig(BaseModel):
     tools: tuple[MemoryToolKind, ...] = (
         MemoryToolKind.REMEMBER,
         MemoryToolKind.RECALL,
-        MemoryToolKind.FORGET,
     )

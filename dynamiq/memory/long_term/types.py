@@ -2,11 +2,19 @@ from enum import Enum
 
 
 class ForgetStatus(str, Enum):
-    """Outcome of `LongTermMemory.forget()`."""
+    """Outcome of `LongTermMemory.forget()` (programmatic API only)."""
 
     DELETED = "deleted"
     NOT_FOUND = "not_found"
     FORBIDDEN = "forbidden"
+
+
+class RememberOutcome(str, Enum):
+    """Outcome of `LongTermMemory.remember()` — distinguishes insert from upsert."""
+
+    CREATED = "created"
+    UPDATED = "updated"
+    UNCHANGED = "unchanged"
 
 
 class MemoryToolKind(str, Enum):
@@ -14,4 +22,3 @@ class MemoryToolKind(str, Enum):
 
     REMEMBER = "remember"
     RECALL = "recall"
-    FORGET = "forget"
