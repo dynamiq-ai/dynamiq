@@ -1,4 +1,3 @@
-"""Tests for long-term memory pydantic schemas."""
 from datetime import UTC, datetime
 
 from dynamiq.memory.long_term.schemas import Fact

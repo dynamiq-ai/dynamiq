@@ -1,4 +1,3 @@
-"""Tests for LongTermMemoryBackend ABC."""
 import pytest
 
 from dynamiq.memory.long_term.base import LongTermMemoryBackend

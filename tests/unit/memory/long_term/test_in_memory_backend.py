@@ -1,5 +1,3 @@
-"""Tests for InMemoryLongTermMemoryBackend."""
-
 from datetime import UTC, datetime, timedelta
 
 from dynamiq.memory.long_term.backends.in_memory import InMemoryLongTermMemoryBackend

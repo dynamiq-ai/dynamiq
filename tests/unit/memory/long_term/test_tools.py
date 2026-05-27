@@ -1,9 +1,3 @@
-"""Tests for the long-term memory tools and the factory.
-
-These tests do not invoke an LLM — they exercise the Node `execute()`
-method directly, treating the tool the same way Agent's tool-use loop
-would after the model emits a tool call.
-"""
 import pytest
 
 from dynamiq.memory.long_term import LongTermMemory

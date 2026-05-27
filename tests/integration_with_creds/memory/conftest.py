@@ -1,4 +1,3 @@
-"""Shared fixtures for long-term memory integration tests."""
 import hashlib
 
 import pytest

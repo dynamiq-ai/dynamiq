@@ -1,10 +1,3 @@
-"""Integration tests for QdrantLongTermMemoryBackend.
-
-Requires a reachable Qdrant. Set `QDRANT_URL` (defaults to
-`http://localhost:6333`). Without one, this whole module skips.
-
-Run a local Qdrant with: `docker run -d -p 6333:6333 qdrant/qdrant`.
-"""
 import os
 from datetime import UTC, datetime
 

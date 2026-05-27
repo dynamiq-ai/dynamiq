@@ -1,8 +1,3 @@
-"""Integration tests for PostgresLongTermMemoryBackend.
-
-Requires `POSTGRES_DSN` to point at a live Postgres with the pgvector
-extension installed. Without it, this whole module skips.
-"""
 import os
 from datetime import UTC, datetime
 from urllib.parse import urlparse

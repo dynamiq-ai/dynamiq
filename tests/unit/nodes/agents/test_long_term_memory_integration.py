@@ -1,12 +1,3 @@
-"""Tests for Agent long-term memory integration.
-
-Covers `_build_long_term_memory_tools` (the per-run tool-construction
-helper) and the snapshot/restore behavior of `self.tools` across an
-`execute()` call.
-
-The execute-level tests mock `_run_agent` so we don't need a real LLM
-backend response — we only verify the agent-loop bookkeeping.
-"""
 import hashlib
 from types import SimpleNamespace
 from typing import ClassVar

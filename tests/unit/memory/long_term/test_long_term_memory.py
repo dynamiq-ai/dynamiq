@@ -1,4 +1,3 @@
-"""Tests for the LongTermMemory facade."""
 import pytest
 
 from dynamiq.memory.long_term import LongTermMemory, RememberOutcome
