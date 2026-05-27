@@ -189,6 +189,37 @@ def test_execute_does_not_mutate_tools_when_no_long_term_memory(llm):
     assert agent.tools == original_tools
 
 
+def test_execute_preserves_tools_added_mid_run(llm, ltm):
+    """Tools appended during execution (e.g. by `_setup_in_memory_file_store_and_tools`)
+    must survive LTM cleanup — we remove LTM tools by identity, not by snapshot restore."""
+    from dynamiq.nodes.node import Node
+    from dynamiq.nodes.types import NodeGroup
+
+    class _FakeFileTool(Node):
+        group: ClassVar = NodeGroup.TOOLS
+        name: str = "fake_file_tool"
+
+        def execute(self, input_data=None, config=None, **kwargs):
+            return {"content": "ok"}
+
+    agent = _make_agent(llm, ltm=ltm)
+    original_tools = list(agent.tools)
+    injected = _FakeFileTool()
+
+    def fake_run(*args, **kwargs):
+        # Simulate `_setup_in_memory_file_store_and_tools` mutating self.tools
+        # during the run window — same pattern as the real file-store setup.
+        agent.tools = list(agent.tools) + [injected]
+        return "ok"
+
+    with patch.object(agent, "_run_agent", side_effect=fake_run):
+        agent.run_sync(input_data={"input": "hi", "user_id": "u1"})
+
+    assert injected in agent.tools
+    assert all(t.name not in {"remember_fact", "recall_facts"} for t in agent.tools)
+    assert agent.tools == original_tools + [injected]
+
+
 def test_execute_restores_tools_when_prep_step_raises_before_run(llm, ltm):
     """Regression: prep code between the LTM mutation and the inner try block
     (memory retrieval, file upload, prompt-variable update) used to leak

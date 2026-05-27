@@ -635,9 +635,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         use_memory = self.memory and (input_data.user_id or input_data.session_id)
 
         ltm_tools = self._build_long_term_memory_tools(input_data)
-        _tools_before_ltm = self.tools
         if ltm_tools:
-            self.tools = list(_tools_before_ltm) + ltm_tools
+            self.tools = list(self.tools) + ltm_tools
             logger.info(
                 "Agent %s - %s: attached %d long-term memory tools (%s)",
                 self.name,
@@ -766,7 +765,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             return execution_result
         finally:
             if ltm_tools:
-                self.tools = _tools_before_ltm
+                # Remove by identity rather than restoring a snapshot so any tools
+                # appended mid-run (e.g. by `_setup_in_memory_file_store_and_tools`)
+                # are preserved for subsequent calls.
+                ltm_ids = {id(t) for t in ltm_tools}
+                self.tools = [t for t in self.tools if id(t) not in ltm_ids]
 
     def retrieve_conversation_history(
         self,
