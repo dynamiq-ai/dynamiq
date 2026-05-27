@@ -177,3 +177,12 @@ def test_remember_tool_to_dict_round_trips_long_term_memory(ltm, user_id):
     assert isinstance(ltm_dump, dict)
     assert "backend" in ltm_dump and isinstance(ltm_dump["backend"], dict)
     assert "embedder" in ltm_dump and isinstance(ltm_dump["embedder"], dict)
+
+
+def test_remember_tool_to_dict_accepts_include_secure_params(ltm, user_id):
+    """`include_secure_params=True` must propagate through tool → LTM → backend → connection
+    without raising. Connection.to_dict swallows the kwarg; backends pass it through."""
+    tool = RememberFactTool(long_term_memory=ltm, user_id=user_id)
+    data = tool.to_dict(include_secure_params=True)
+    assert "long_term_memory" in data
+    assert "backend" in data["long_term_memory"]

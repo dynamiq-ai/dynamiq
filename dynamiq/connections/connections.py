@@ -69,6 +69,11 @@ class BaseConnection(BaseModel, ABC):
         Returns:
             dict: A dictionary representation of the connection instance.
         """
+        # Swallow `include_secure_params` if a caller forwards it down — the
+        # connection always serializes its credential fields (subject only to
+        # `for_tracing`), so the flag has no effect here but must not leak to
+        # `model_dump`, which raises on unknown kwargs.
+        kwargs.pop("include_secure_params", None)
         if for_tracing:
             return {"id": self.id, "type": self.type}
         return self.model_dump(**kwargs)

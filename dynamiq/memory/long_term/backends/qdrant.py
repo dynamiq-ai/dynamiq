@@ -84,7 +84,9 @@ class QdrantLongTermMemoryBackend(LongTermMemoryBackend):
     def to_dict(self, include_secure_params: bool = False, for_tracing: bool = False, **kwargs) -> dict[str, Any]:
         exclude = kwargs.pop("exclude", self.to_dict_exclude_params.copy())
         data = self.model_dump(exclude=exclude, **kwargs)
-        data["connection"] = self.connection.to_dict(for_tracing=for_tracing)
+        data["connection"] = self.connection.to_dict(
+            for_tracing=for_tracing, include_secure_params=include_secure_params, **kwargs
+        )
         return data
 
     def model_post_init(self, __context) -> None:
