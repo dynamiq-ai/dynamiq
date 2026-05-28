@@ -1,9 +1,9 @@
 import io
 import json
 import re
+from contextvars import ContextVar
 from copy import deepcopy
 from enum import Enum
-from threading import RLock
 from typing import Any, Callable, ClassVar, Union
 from uuid import uuid4
 
@@ -48,6 +48,14 @@ from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
+
+# Per-call overlay of tools visible to a single `Agent.execute` invocation —
+# currently used for long-term-memory tools that bind a request's `user_id`
+# at construction. ContextVar gives per-thread and per-asyncio-task isolation
+# without mutating shared agent state, so concurrent execute() calls on the
+# same agent instance never see each other's user-scoped tools and never
+# block on a lock.
+_run_extra_tools: ContextVar[list["Node"]] = ContextVar("dynamiq_agent_run_extra_tools", default=[])
 
 
 class StreamChunkChoiceDelta(BaseModel):
@@ -268,9 +276,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     _pinned_input: Message | VisionMessage | None = PrivateAttr(default=None)
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
-    # Serialises the LTM-tool window in `execute` so concurrent calls on the
-    # same agent instance don't see each other's per-call tools on `self.tools`.
-    _ltm_tools_lock: RLock = PrivateAttr(default_factory=RLock)
     # Loop progress and pending-tool-call state are declared on AgentIterativeCheckpointMixin.
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -645,27 +650,23 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         use_memory = self.memory and (input_data.user_id or input_data.session_id)
 
         ltm_tools = self._build_long_term_memory_tools(input_data)
-        # Acquire on the line immediately before `try:` so nothing between the
-        # acquire and the matching finally can raise and leak the lock — see
-        # `_ltm_tools_lock` declaration for the concurrency rationale.
-        # The lock is taken whenever LTM is configured on this agent (not only
-        # when *this* call attaches tools) so a concurrent no-user-id call
-        # cannot read `self.tools` mid-mutation and see another user's
-        # user-scoped remember/recall tools.
-        ltm_locked = self.long_term_memory is not None
-        if ltm_locked:
-            self._ltm_tools_lock.acquire()
-        try:
-            if ltm_tools:
-                self.tools = list(self.tools) + ltm_tools
-                logger.info(
-                    "Agent %s - %s: attached %d long-term memory tools (%s)",
-                    self.name,
-                    self.id,
-                    len(ltm_tools),
-                    ", ".join(t.name for t in ltm_tools),
-                )
+        # Publish the per-call LTM tools via the module-level ContextVar; the
+        # tool-resolution properties (`tool_description`, `tool_names`,
+        # `tool_by_names`) read it. Setting a ContextVar is cheap, isolated
+        # per thread / per asyncio task, and never mutates shared state — so
+        # concurrent execute() calls don't see each other's user-scoped tools
+        # and don't need a lock.
+        ltm_token = _run_extra_tools.set(ltm_tools) if ltm_tools else None
+        if ltm_tools:
+            logger.info(
+                "Agent %s - %s: attached %d long-term memory tools (%s)",
+                self.name,
+                self.id,
+                len(ltm_tools),
+                ", ".join(t.name for t in ltm_tools),
+            )
 
+        try:
             if use_memory:
                 history_messages = self._retrieve_memory(input_data)
                 if len(history_messages) > 0:
@@ -784,16 +785,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
             return execution_result
         finally:
-            try:
-                if ltm_tools:
-                    # Remove by identity rather than restoring a snapshot so any
-                    # tools appended mid-run (e.g. by
-                    # `_setup_in_memory_file_store_and_tools`) are preserved.
-                    ltm_ids = {id(t) for t in ltm_tools}
-                    self.tools = [t for t in self.tools if id(t) not in ltm_ids]
-            finally:
-                if ltm_locked:
-                    self._ltm_tools_lock.release()
+            if ltm_token is not None:
+                _run_extra_tools.reset(ltm_token)
 
     def retrieve_conversation_history(
         self,
@@ -1876,19 +1869,30 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         return self.sandbox.backend if self.sandbox and self.sandbox.enabled else None
 
     @property
+    def _runtime_tools(self) -> list[Node]:
+        """Tools the LLM should see for the current call: instance tools + any
+        per-call overlay (e.g. long-term-memory tools bound to a request's
+        user_id). The overlay is read from a `ContextVar` and is isolated per
+        thread / per asyncio task — concurrent execute() calls never see each
+        other's user-scoped tools."""
+        extra = _run_extra_tools.get()
+        return self.tools + extra if extra else self.tools
+
+    @property
     def tool_description(self) -> str:
         """Returns a description of the tools available to the agent."""
-        return "\n".join([f"- {tool.name}: {tool.description.strip()}" for tool in self.tools]) if self.tools else ""
+        tools = self._runtime_tools
+        return "\n".join([f"- {tool.name}: {tool.description.strip()}" for tool in tools]) if tools else ""
 
     @property
     def tool_names(self) -> str:
         """Returns a comma-separated list of tool names available to the agent."""
-        return ",".join([self.sanitize_tool_name(tool.name) for tool in self.tools])
+        return ",".join([self.sanitize_tool_name(tool.name) for tool in self._runtime_tools])
 
     @property
     def tool_by_names(self) -> dict[str, Node]:
         """Returns a dictionary mapping tool names to their corresponding Node objects."""
-        return {self.sanitize_tool_name(tool.name): tool for tool in self.tools}
+        return {self.sanitize_tool_name(tool.name): tool for tool in self._runtime_tools}
 
     def reset_run_state(self):
         """Resets the agent's run state.

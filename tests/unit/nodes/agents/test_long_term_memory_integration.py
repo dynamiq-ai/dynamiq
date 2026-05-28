@@ -161,169 +161,110 @@ def test_init_components_initializes_ltm_embedder(llm):
     assert len(init_calls) == 1
 
 
-# --- execute() splice: snapshot/restore self.tools ---
+# --- per-call ContextVar overlay: LTM tools never mutate self.tools ---
 
 
-def _patch_run_agent_capture_tools(agent, captured):
+def _patch_run_agent_capture_runtime_tools(agent, captured):
+    """Capture what the LLM-facing `tool_by_names` resolution sees mid-run."""
+
     def fake_run(*args, **kwargs):
-        captured.extend(agent.tools)
+        captured.append(set(agent.tool_by_names.keys()))
         return "ok"
 
     return patch.object(agent, "_run_agent", side_effect=fake_run)
 
 
-def test_execute_attaches_ltm_tools_during_run_and_restores_after(llm, ltm):
+def test_execute_exposes_ltm_tools_during_run_only(llm, ltm):
+    """LTM tools must be visible to the tool-resolution properties during the
+    run, and absent from both `self.tools` and the properties after."""
     agent = _make_agent(llm, ltm=ltm)
     original_tools = list(agent.tools)
-    captured: list = []
+    captured: list[set[str]] = []
 
-    with _patch_run_agent_capture_tools(agent, captured):
+    with _patch_run_agent_capture_runtime_tools(agent, captured):
         agent.run_sync(input_data={"input": "hi", "user_id": "u1"})
 
-    assert {"remember_fact", "recall_facts"} <= {t.name for t in captured}
+    assert {"remember_fact", "recall_facts"} <= captured[0]
     assert agent.tools == original_tools
+    assert {"remember_fact", "recall_facts"}.isdisjoint(agent.tool_by_names.keys())
 
 
-def test_execute_restores_tools_even_when_run_raises(llm, ltm):
+def test_execute_clears_ltm_overlay_even_when_run_raises(llm, ltm):
     agent = _make_agent(llm, ltm=ltm)
     original_tools = list(agent.tools)
 
     with patch.object(agent, "_run_agent", side_effect=RuntimeError("boom")):
-        # run_sync wraps exceptions in a failed RunnableResult; check tools after.
         agent.run_sync(input_data={"input": "hi", "user_id": "u1"})
 
     assert agent.tools == original_tools
+    assert {"remember_fact", "recall_facts"}.isdisjoint(agent.tool_by_names.keys())
 
 
-def test_execute_does_not_mutate_tools_when_no_user_id(llm, ltm):
+def test_execute_no_ltm_overlay_when_no_user_id(llm, ltm):
     agent = _make_agent(llm, ltm=ltm)
-    original_tools = list(agent.tools)
-    captured: list = []
+    captured: list[set[str]] = []
 
-    with _patch_run_agent_capture_tools(agent, captured):
+    with _patch_run_agent_capture_runtime_tools(agent, captured):
         agent.run_sync(input_data={"input": "hi"})
 
-    assert {t.name for t in captured} == {t.name for t in original_tools}
-    assert agent.tools == original_tools
+    assert {"remember_fact", "recall_facts"}.isdisjoint(captured[0])
 
 
-def test_execute_does_not_mutate_tools_when_no_long_term_memory(llm):
+def test_execute_no_ltm_overlay_when_no_long_term_memory(llm):
     agent = _make_agent(llm)
-    original_tools = list(agent.tools)
-    captured: list = []
+    captured: list[set[str]] = []
 
-    with _patch_run_agent_capture_tools(agent, captured):
+    with _patch_run_agent_capture_runtime_tools(agent, captured):
         agent.run_sync(input_data={"input": "hi", "user_id": "u1"})
 
-    assert {t.name for t in captured} == {t.name for t in original_tools}
-    assert agent.tools == original_tools
+    assert {"remember_fact", "recall_facts"}.isdisjoint(captured[0])
 
 
-def test_execute_preserves_tools_added_mid_run(llm, ltm):
-    """Tools appended during execution (e.g. by `_setup_in_memory_file_store_and_tools`)
-    must survive LTM cleanup — we remove LTM tools by identity, not by snapshot restore."""
-    from dynamiq.nodes.node import Node
-    from dynamiq.nodes.types import NodeGroup
-
-    class _FakeFileTool(Node):
-        group: ClassVar = NodeGroup.TOOLS
-        name: str = "fake_file_tool"
-
-        def execute(self, input_data=None, config=None, **kwargs):
-            return {"content": "ok"}
-
-    agent = _make_agent(llm, ltm=ltm)
-    original_tools = list(agent.tools)
-    injected = _FakeFileTool()
-
-    def fake_run(*args, **kwargs):
-        # Simulate `_setup_in_memory_file_store_and_tools` mutating self.tools
-        # during the run window — same pattern as the real file-store setup.
-        agent.tools = list(agent.tools) + [injected]
-        return "ok"
-
-    with patch.object(agent, "_run_agent", side_effect=fake_run):
-        agent.run_sync(input_data={"input": "hi", "user_id": "u1"})
-
-    assert injected in agent.tools
-    assert all(t.name not in {"remember_fact", "recall_facts"} for t in agent.tools)
-    assert agent.tools == original_tools + [injected]
-
-
-def test_ltm_lock_released_when_post_acquire_mutation_raises(llm, ltm):
-    """Anything between lock-acquire and run can raise (list creation, logger
-    call). It must still release the lock — otherwise the next LTM-enabled
-    execute on this agent would block forever waiting on it."""
-    from dynamiq.nodes.agents.base import logger as base_logger
-
-    agent = _make_agent(llm, ltm=ltm)
-    real_info = base_logger.info
-
-    def fail_on_ltm_log(msg, *args, **kwargs):
-        # Only blow up on the LTM-attach log line so we hit the post-acquire
-        # window specifically; let other logger.info calls in execute pass.
-        if "long-term memory tools" in str(msg):
-            raise RuntimeError("log boom")
-        return real_info(msg, *args, **kwargs)
-
-    with patch.object(base_logger, "info", side_effect=fail_on_ltm_log):
-        agent.run_sync(input_data={"input": "hi", "user_id": "u1"})
-
-    # Lock must be free now; non-blocking acquire should succeed immediately.
-    assert agent._ltm_tools_lock.acquire(blocking=False), "lock was leaked"
-    agent._ltm_tools_lock.release()
-
-
-def test_concurrent_no_user_id_call_does_not_see_other_users_ltm_tools(llm, ltm):
-    """The lock fires whenever LTM is configured on the agent — even for calls
-    without a user_id — so a concurrent no-user_id execute cannot observe
-    another call's user-scoped LTM tools mid-mutation."""
+def test_execute_does_not_serialize_concurrent_calls_when_ltm_configured(llm, ltm):
+    """With the ContextVar overlay, concurrent execute() calls on the same
+    LTM-configured agent must run truly in parallel — no shared lock."""
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
     agent = _make_agent(llm, ltm=ltm)
-    snapshots: dict[str, set] = {}
-    snapshots_lock = threading.Lock()
+    barrier = threading.Barrier(2, timeout=5)
 
     def fake_run(*args, **kwargs):
-        bound = {getattr(t, "user_id", None) for t in agent.tools if hasattr(t, "user_id")}
-        with snapshots_lock:
-            key = next(iter(bound), "none")
-            snapshots[key] = bound
+        # If a lock was serialising us, the second thread would never reach
+        # the barrier and we'd time out — barrier verifies true concurrency.
+        barrier.wait()
         return "ok"
 
     with patch.object(agent, "_run_agent", side_effect=fake_run):
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = [
                 pool.submit(agent.run_sync, input_data={"input": "hi", "user_id": "u1"}),
-                pool.submit(agent.run_sync, input_data={"input": "hi"}),  # no user_id
+                pool.submit(agent.run_sync, input_data={"input": "hi", "user_id": "u2"}),
             ]
             for f in futures:
                 f.result(timeout=10)
 
-    assert snapshots.get("u1") == {"u1"}
-    # The no-user_id call must not see any user-scoped tools at all.
-    assert snapshots.get("none", set()) == set()
 
-
-def test_concurrent_execute_calls_isolate_per_user_ltm_tools(llm, ltm):
-    """Two concurrent execute calls with different user_ids must each observe
-    only their own LTM tools — the per-agent `_ltm_tools_lock` serialises the
-    mutation window so the user-scoped tools never leak across calls."""
+def test_concurrent_calls_isolate_per_user_ltm_tools(llm, ltm):
+    """Two concurrent execute() calls with different user_ids must each see
+    only their own LTM tools via the per-task ContextVar overlay."""
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
     agent = _make_agent(llm, ltm=ltm)
-    original_tools = list(agent.tools)
     snapshots: dict[str, set[str]] = {}
     snapshots_lock = threading.Lock()
+    barrier = threading.Barrier(2, timeout=5)
 
     def fake_run(*args, **kwargs):
-        bound_user_ids = {t.user_id for t in agent.tools if hasattr(t, "user_id")}
+        # Wait so both threads are inside _run_agent simultaneously.
+        barrier.wait()
+        resolved = agent.tool_by_names
+        bound_user_ids = {t.user_id for t in resolved.values() if hasattr(t, "user_id")}
         assert len(bound_user_ids) == 1, f"cross-user leakage: {bound_user_ids}"
         (uid,) = bound_user_ids
         with snapshots_lock:
-            snapshots[uid] = {t.name for t in agent.tools if hasattr(t, "user_id")}
+            snapshots[uid] = {name for name, t in resolved.items() if hasattr(t, "user_id")}
         return "ok"
 
     with patch.object(agent, "_run_agent", side_effect=fake_run):
@@ -338,17 +279,36 @@ def test_concurrent_execute_calls_isolate_per_user_ltm_tools(llm, ltm):
     assert set(snapshots.keys()) == {"u1", "u2"}
     for tool_names in snapshots.values():
         assert tool_names == {"remember_fact", "recall_facts"}
-    assert agent.tools == original_tools
 
 
-def test_execute_restores_tools_when_prep_step_raises_before_run(llm, ltm):
-    """Regression: prep code between the LTM mutation and the inner try block
-    (memory retrieval, file upload, prompt-variable update) used to leak
-    appended tools if it raised. The outer try/finally must catch that path."""
+def test_concurrent_no_user_id_call_does_not_see_other_users_ltm_tools(llm, ltm):
+    """A concurrent no-user_id execute must not observe another call's
+    user-scoped tools — ContextVar isolation guarantees this without a lock."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
     agent = _make_agent(llm, ltm=ltm)
-    original_tools = list(agent.tools)
+    snapshots: dict[str, set] = {}
+    snapshots_lock = threading.Lock()
+    barrier = threading.Barrier(2, timeout=5)
 
-    with patch.object(agent.system_prompt_manager, "update_variables", side_effect=RuntimeError("prep boom")):
-        agent.run_sync(input_data={"input": "hi", "user_id": "u1"})
+    def fake_run(*args, **kwargs):
+        barrier.wait()
+        resolved = agent.tool_by_names
+        bound = {getattr(t, "user_id", None) for t in resolved.values() if hasattr(t, "user_id")}
+        with snapshots_lock:
+            key = next(iter(bound), "none")
+            snapshots[key] = bound
+        return "ok"
 
-    assert agent.tools == original_tools
+    with patch.object(agent, "_run_agent", side_effect=fake_run):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(agent.run_sync, input_data={"input": "hi", "user_id": "u1"}),
+                pool.submit(agent.run_sync, input_data={"input": "hi"}),
+            ]
+            for f in futures:
+                f.result(timeout=10)
+
+    assert snapshots.get("u1") == {"u1"}
+    assert snapshots.get("none", set()) == set()
