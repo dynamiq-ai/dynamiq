@@ -274,6 +274,38 @@ def test_ltm_lock_released_when_post_acquire_mutation_raises(llm, ltm):
     agent._ltm_tools_lock.release()
 
 
+def test_concurrent_no_user_id_call_does_not_see_other_users_ltm_tools(llm, ltm):
+    """The lock fires whenever LTM is configured on the agent — even for calls
+    without a user_id — so a concurrent no-user_id execute cannot observe
+    another call's user-scoped LTM tools mid-mutation."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    agent = _make_agent(llm, ltm=ltm)
+    snapshots: dict[str, set] = {}
+    snapshots_lock = threading.Lock()
+
+    def fake_run(*args, **kwargs):
+        bound = {getattr(t, "user_id", None) for t in agent.tools if hasattr(t, "user_id")}
+        with snapshots_lock:
+            key = next(iter(bound), "none")
+            snapshots[key] = bound
+        return "ok"
+
+    with patch.object(agent, "_run_agent", side_effect=fake_run):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(agent.run_sync, input_data={"input": "hi", "user_id": "u1"}),
+                pool.submit(agent.run_sync, input_data={"input": "hi"}),  # no user_id
+            ]
+            for f in futures:
+                f.result(timeout=10)
+
+    assert snapshots.get("u1") == {"u1"}
+    # The no-user_id call must not see any user-scoped tools at all.
+    assert snapshots.get("none", set()) == set()
+
+
 def test_concurrent_execute_calls_isolate_per_user_ltm_tools(llm, ltm):
     """Two concurrent execute calls with different user_ids must each observe
     only their own LTM tools — the per-agent `_ltm_tools_lock` serialises the

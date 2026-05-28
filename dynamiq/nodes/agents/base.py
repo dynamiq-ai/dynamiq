@@ -648,7 +648,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         # Acquire on the line immediately before `try:` so nothing between the
         # acquire and the matching finally can raise and leak the lock — see
         # `_ltm_tools_lock` declaration for the concurrency rationale.
-        if ltm_tools:
+        # The lock is taken whenever LTM is configured on this agent (not only
+        # when *this* call attaches tools) so a concurrent no-user-id call
+        # cannot read `self.tools` mid-mutation and see another user's
+        # user-scoped remember/recall tools.
+        ltm_locked = self.long_term_memory is not None
+        if ltm_locked:
             self._ltm_tools_lock.acquire()
         try:
             if ltm_tools:
@@ -779,14 +784,15 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
             return execution_result
         finally:
-            if ltm_tools:
-                try:
+            try:
+                if ltm_tools:
                     # Remove by identity rather than restoring a snapshot so any
                     # tools appended mid-run (e.g. by
                     # `_setup_in_memory_file_store_and_tools`) are preserved.
                     ltm_ids = {id(t) for t in ltm_tools}
                     self.tools = [t for t in self.tools if id(t) not in ltm_ids]
-                finally:
+            finally:
+                if ltm_locked:
                     self._ltm_tools_lock.release()
 
     def retrieve_conversation_history(
