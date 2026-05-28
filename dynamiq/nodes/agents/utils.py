@@ -118,7 +118,10 @@ class XMLParser:
                     cleaned = candidate
                     break
             else:
-                cleaned = xml_matches[-1].group(0)
+                if len(xml_matches) > 1:
+                    cleaned = cleaned[xml_matches[0].start():xml_matches[-1].end()]
+                else:
+                    cleaned = xml_matches[-1].group(0)
 
         return cleaned
 
