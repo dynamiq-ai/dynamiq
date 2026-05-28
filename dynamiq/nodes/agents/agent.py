@@ -3,7 +3,7 @@ from concurrent.futures import as_completed
 from typing import Any, Callable, Literal, Mapping
 
 from litellm import get_supported_openai_params, supports_function_calling, supports_response_schema
-from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
@@ -44,8 +44,20 @@ from dynamiq.utils.logger import logger
 
 
 class ToolCallArguments(BaseModel):
+    """Flat function-calling arguments: `thought` sibling of the tool's real params.
+
+    Tool params arrive via Pydantic's `extra="allow"` and are extracted via
+    `to_action_input()`. The legacy `{thought, action_input: {...}}` wrapper
+    shape is normalized into this flat form by `FunctionCall.parse_as_tool_call`.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
     thought: str = ""
-    action_input: dict | str
+
+    def to_action_input(self) -> dict:
+        """Return the non-thought fields as a plain dict (the tool's real params)."""
+        return self.model_dump(exclude={"thought"})
 
     @field_validator("thought", mode="before")
     @classmethod
@@ -84,13 +96,22 @@ class FunctionCall(BaseModel):
         return v or {}
 
     def parse_as_tool_call(self) -> ToolCallArguments:
+        args = self.arguments
+        if "action_input" in args and set(args.keys()) <= {"thought", "action_input"}:
+            inner = args["action_input"]
+            if isinstance(inner, str):
+                try:
+                    inner = json.loads(inner, strict=False)
+                except json.JSONDecodeError:
+                    inner = {}
+            args = {"thought": args.get("thought", ""), **(inner if isinstance(inner, dict) else {})}
         try:
-            return ToolCallArguments.model_validate(self.arguments)
+            return ToolCallArguments.model_validate(args)
         except Exception:
             raise ActionParsingException(
                 "Your tool call is missing required fields. "
                 "Every tool call must include 'thought' (your reasoning) "
-                "and 'action_input' (the tool parameters as an object).",
+                "and the tool's parameters as top-level fields.",
                 recoverable=True,
             )
 
@@ -792,7 +813,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             tool_items = []
             for tc in actual_tool_calls:
                 args = tc.function.parse_as_tool_call()
-                tc_input = args.action_input
+                tc_input = args.to_action_input()
                 if isinstance(tc_input, str):
                     try:
                         tc_input = json.loads(tc_input, strict=False)
@@ -817,7 +838,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         action = single_call.function.name.strip()
         args = single_call.function.parse_as_tool_call()
         thought = args.thought
-        action_input = args.action_input
+        action_input = args.to_action_input()
         if isinstance(action_input, str):
             try:
                 action_input = json.loads(action_input, strict=False)
