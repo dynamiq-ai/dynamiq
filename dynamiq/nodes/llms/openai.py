@@ -72,7 +72,16 @@ def _to_openai_strict_property(prop: Any) -> Any:
 
     param_type = cleaned.get("type")
     if param_type == "object":
-        nested = cleaned.get("properties", {})
+        if "properties" not in cleaned:
+            # Free-form object (dict[str, Any]). Strict can't express an open
+            # object, so represent it as a JSON-encoded string. The agent parses
+            # it back to a dict before tool validation (see _coerce_json_fields).
+            desc = cleaned.get("description", "")
+            return {
+                "type": "string",
+                "description": (f"{desc} " if desc else "") + "Provide as a JSON-encoded object string.",
+            }
+        nested = cleaned["properties"]
         cleaned["properties"] = {k: _to_openai_strict_property(v) for k, v in nested.items()}
         cleaned["required"] = list(nested.keys())
         cleaned["additionalProperties"] = False
@@ -94,6 +103,11 @@ def _to_openai_strict_function(fn: dict) -> dict:
     parameters = out.get("parameters")
     if not isinstance(parameters, dict):
         return out
+
+    # Free-form objects (dict[str, Any]) are handled field-by-field inside
+    # _to_openai_strict_property (converted to JSON-string fields), so the tool
+    # as a whole can still use strict mode — a trivial free-form field no longer
+    # disables strict for the important typed fields.
 
     properties = parameters.get("properties", {})
     original_required = set(parameters.get("required", []))

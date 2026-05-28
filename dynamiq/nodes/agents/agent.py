@@ -334,6 +334,39 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return type(None) in get_args(annotation)
         return False
 
+    @staticmethod
+    def _annotation_is_dict_like(annotation: Any) -> bool:
+        """Return True if the annotation is ``dict`` / ``dict[...]`` or a union including one."""
+        if annotation is dict:
+            return True
+        origin = get_origin(annotation)
+        if origin is dict:
+            return True
+        if origin in (Union, types.UnionType):
+            return any(Agent._annotation_is_dict_like(arg) for arg in get_args(annotation))
+        return False
+
+    def _coerce_json_fields(self, tool: Node, action_input: dict) -> dict:
+        """Parse stringified free-form dict fields back into dicts.
+
+        Strict mode can't express a free-form ``dict[str, Any]`` as an object, so
+        the schema transforms ship those fields as JSON-encoded strings (see the
+        provider converters). Here we reverse that: if the tool declares a
+        dict-typed field and the model supplied a JSON string for it, parse it
+        back so the tool's Pydantic schema validates the real dict.
+        """
+        fields = tool.input_schema.model_fields
+        for name, field in fields.items():
+            value = action_input.get(name)
+            if isinstance(value, str) and self._annotation_is_dict_like(field.annotation):
+                stripped = value.strip()
+                if stripped.startswith("{") and stripped.endswith("}"):
+                    try:
+                        action_input[name] = json.loads(stripped)
+                    except json.JSONDecodeError:
+                        pass  # leave as string; Pydantic will surface the error
+        return action_input
+
     def _strip_protocol_nulls(self, tool: Node, action_input: dict) -> dict:
         """Drop ``None`` values for fields whose Pydantic annotation rejects None.
 
@@ -839,6 +872,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     tc_input = {"input": tc_input}
                 tc_tool = self.tool_by_names.get(self.sanitize_tool_name(tc_name))
                 if tc_tool is not None:
+                    self._coerce_json_fields(tc_tool, tc_input)
                     self._strip_protocol_nulls(tc_tool, tc_input)
                     try:
                         tc_tool.input_schema.model_validate(tc_input)
@@ -875,6 +909,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         tool = self.tool_by_names.get(self.sanitize_tool_name(action))
         if tool is not None:
+            self._coerce_json_fields(tool, action_input)
             self._strip_protocol_nulls(tool, action_input)
             try:
                 tool.input_schema.model_validate(action_input)
