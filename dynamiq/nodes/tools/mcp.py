@@ -33,6 +33,11 @@ def rename_keys_recursive(data: dict[str, Any] | list[str], key_map: dict[str, s
     return data
 
 
+def extract_text_from_mcp_content(content: list[Any]) -> str:
+    """Join the text of the TextContent blocks in an MCP result's content list."""
+    return "\n".join(block.text for block in content if getattr(block, "type", None) == "text")
+
+
 class ServerMetadata(BaseModel):
     id: str | None = None
     name: str | None = None
@@ -174,8 +179,28 @@ class MCPTool(ConnectionNode):
                 recoverable=True,
             )
 
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
-        return {"content": result}
+        if result.isError:
+            error_text = extract_text_from_mcp_content(result.content)
+            raise ToolExecutionException(
+                f"Tool '{self.name}' returned an error from the MCP server: "
+                f"{error_text or 'unknown error'}. Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
+
+        raw_response = result.model_dump(exclude_none=True)
+
+        if not self.is_optimized_for_agents:
+            content = raw_response
+        elif result.structuredContent is not None:
+            content = result.structuredContent
+        else:
+            content = extract_text_from_mcp_content(result.content)
+
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(content)[:200]}...")
+        output = {"content": content}
+        if self.is_optimized_for_agents:
+            output["raw_response"] = raw_response
+        return output
 
 
 class MCPServer(ConnectionNode):
@@ -235,6 +260,7 @@ Usage Strategy:
                             json_input_schema=tool.inputSchema,
                             connection=self.connection,
                             server_metadata=ServerMetadata(id=self.id, name=self.name, description=self.description),
+                            is_optimized_for_agents=self.is_optimized_for_agents,
                         )
 
             logger.info(f"Tool {self.name}: {len(self._mcp_tools)} MCP tools initialized from a server.")
