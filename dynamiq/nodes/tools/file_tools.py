@@ -706,10 +706,9 @@ class FileReadTool(Node):
 
         try:
             if not self.file_store.exists(input_data.file_path):
-                raise ToolExecutionException(
-                    f"File '{input_data.file_path}' not found",
-                    recoverable=True,
-                )
+                message = self._build_file_not_found_message(input_data.file_path)
+                logger.info(f"Tool {self.name} - {self.id}: {message}")
+                raise ToolExecutionException(message, recoverable=True)
 
             content = self.file_store.retrieve(input_data.file_path)
             content_size = len(content)
@@ -864,6 +863,8 @@ class FileReadTool(Node):
 
             return {"content": rendered_content, "file_info": file_info}
 
+        except ToolExecutionException:
+            raise
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to read file. Error: {str(e)}")
             raise ToolExecutionException(
@@ -871,6 +872,46 @@ class FileReadTool(Node):
                 f"Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
+
+    def _build_file_not_found_message(self, file_path: str) -> str:
+        """Build an agent-facing message for a missing file."""
+        available_paths = self._list_available_file_paths()
+
+        if available_paths is None:
+            return (
+                f"File '{file_path}' was not found in the file store. "
+                "The available file list could not be retrieved from the file store."
+            )
+        if not available_paths:
+            return (
+                f"File '{file_path}' was not found in the file store. "
+                "No files are currently available in the file store."
+            )
+
+        available = ", ".join(available_paths[:20])
+        suffix = ""
+        if len(available_paths) > 20:
+            suffix = f", ... and {len(available_paths) - 20} more"
+        return f"File '{file_path}' was not found in the file store. Available file path(s): {available}{suffix}"
+
+    def _list_available_file_paths(self) -> list[str] | None:
+        """Return available file paths, or None when the backend cannot list them."""
+        try:
+            available_files = self.file_store.list_files(recursive=True)
+        except TypeError:
+            try:
+                available_files = self.file_store.list_files()
+            except Exception as exc:
+                logger.warning(f"Tool {self.name} - {self.id}: failed to list files after missing read: {exc}")
+                return None
+        except Exception as exc:
+            logger.warning(f"Tool {self.name} - {self.id}: failed to list files after missing read: {exc}")
+            return None
+
+        paths: list[str] = []
+        for file in available_files:
+            paths.append(file.path if hasattr(file, "path") else str(file))
+        return paths
 
     def _create_chunked_content(self, content: bytes, chunk_size: int, file_path: str) -> bytes:
         """
@@ -1460,6 +1501,7 @@ class FileSearchTool(Node):
             files_to_scan = self._resolve_files(input_data)
             matches = []
             total_scanned = 0
+            missing_files: list[str] = []
 
             if input_data.mode == "regex":
                 flags = 0 if input_data.case_sensitive else re.IGNORECASE
@@ -1473,8 +1515,24 @@ class FileSearchTool(Node):
                 pattern = None
                 query = input_data.query if input_data.case_sensitive else input_data.query.lower()
 
+            if not files_to_scan:
+                message = "No files are currently available in the file store, so file-search scanned 0 files."
+                logger.info(f"Tool {self.name} - {self.id}: {message}")
+                return {
+                    "content": {
+                        "matches": [],
+                        "files_scanned": 0,
+                        "total_matches": 0,
+                        "message": message,
+                    }
+                }
+
             for file_path in files_to_scan:
                 check_cancellation(config)
+                if not self._search_target_exists(file_path):
+                    missing_files.append(file_path)
+                    continue
+
                 total_scanned += 1
                 file_matches = self._search_file(
                     file_path=file_path,
@@ -1488,11 +1546,18 @@ class FileSearchTool(Node):
                 if file_matches:
                     matches.extend(file_matches)
 
+            message = self._build_search_message(
+                query=input_data.query,
+                total_scanned=total_scanned,
+                total_matches=len(matches),
+                missing_files=missing_files,
+            )
             result = {
                 "content": {
                     "matches": matches,
                     "files_scanned": total_scanned,
                     "total_matches": len(matches),
+                    "message": message,
                 }
             }
             logger.info(
@@ -1520,6 +1585,33 @@ class FileSearchTool(Node):
 
         files = self.file_store.list_files(recursive=input_data.recursive)
         return [file.path for file in files[: input_data.max_files]]
+
+    def _search_target_exists(self, file_path: str) -> bool:
+        """Return True when the requested file or its extracted-text cache is present."""
+        return self.file_store.exists(file_path) or self.file_store.exists(f"{file_path}{EXTRACTED_TEXT_SUFFIX}")
+
+    @staticmethod
+    def _build_search_message(
+        query: str,
+        total_scanned: int,
+        total_matches: int,
+        missing_files: list[str],
+    ) -> str:
+        """Build a concise agent-facing status message for search results."""
+        parts = []
+        if missing_files:
+            missing = ", ".join(missing_files[:10])
+            suffix = ""
+            if len(missing_files) > 10:
+                suffix = f", ... and {len(missing_files) - 10} more"
+            parts.append(f"File path(s) not found in the file store: {missing}{suffix}.")
+        if total_scanned == 0:
+            parts.append("No existing files were scanned.")
+        elif total_matches == 0:
+            parts.append(f"No matches found for '{query}' in {total_scanned} scanned file(s).")
+        else:
+            parts.append(f"Found {total_matches} match(es) for '{query}' in {total_scanned} scanned file(s).")
+        return " ".join(parts)
 
     def _search_file(
         self,
@@ -1653,9 +1745,14 @@ class FileListTool(Node):
 
         try:
             files_list = self.file_store.list_files(directory=input_data.file_path, recursive=input_data.recursive)
-            files_string = "Files currently available in the filesystem storage:\n"
-            for file in files_list:
-                files_string += f"File: {file.name} | Path: {file.path} | Size: {file.size} bytes\n"
+            if files_list:
+                files_string = "Files currently available in the file store:\n"
+                for file in files_list:
+                    files_string += f"File: {file.name} | Path: {file.path} | Size: {file.size} bytes\n"
+            elif input_data.file_path:
+                files_string = f"No files are currently available in the file store under '{input_data.file_path}'."
+            else:
+                files_string = "No files are currently available in the file store."
 
             logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{files_string}")
             return {"content": files_string}
