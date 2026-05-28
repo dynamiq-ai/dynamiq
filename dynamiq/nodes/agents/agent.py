@@ -88,15 +88,13 @@ class FunctionCall(BaseModel):
         return v or {}
 
     def parse_as_tool_call(self) -> ToolCallArguments:
-        args = dict(self.arguments)
-        thought = args.pop("thought", "")
         try:
-            return ToolCallArguments(thought=thought, action_input=args)
+            return ToolCallArguments.model_validate(self.arguments)
         except Exception:
             raise ActionParsingException(
                 "Your tool call is missing required fields. "
                 "Every tool call must include 'thought' (your reasoning) "
-                "and the tool's parameters at the top level.",
+                "and 'action_input' (the tool parameters as an object).",
                 recoverable=True,
             )
 
@@ -1590,9 +1588,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 **({"tool_choice": forced_tool_choice} if forced_tool_choice else {}),
                 **kwargs,
             )
-            # DEBUG: raw LLM response right after the call, before any parsing
-            print(f"\n[LLM RESPONSE loop={loop_num}] mode={self.inference_mode}")
-            print(f"[LLM RESPONSE loop={loop_num}] output={llm_result.output!r}\n")
         finally:
             if not original_streaming_enabled:
                 try:

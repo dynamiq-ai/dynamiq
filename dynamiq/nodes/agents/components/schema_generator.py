@@ -393,40 +393,72 @@ def generate_function_calling_schemas(
     for tool in tools:
         properties: dict[str, Any] = {}
         required_fields: list[str] = []
-        for name, field in tool.input_schema.model_fields.items():
-            generate_property_schema(properties, name, field)
-            if field.is_required() and name in properties:
-                required_fields.append(name)
+        input_params = list(tool.input_schema.model_fields.items())
+        if input_params:
+            for name, field in tool.input_schema.model_fields.items():
+                generate_property_schema(properties, name, field)
+                if field.is_required() and name in properties:
+                    required_fields.append(name)
 
-        if isinstance(tool, SubAgentTool) and delegation_allowed:
-            properties["delegate_final"] = {
-                "type": "boolean",
-                "description": (
-                    "Set to true to return the sub-agent's response verbatim " "as the parent agent's final output."
-                ),
+            if isinstance(tool, SubAgentTool) and delegation_allowed:
+                properties["delegate_final"] = {
+                    "type": "boolean",
+                    "description": (
+                        "Set to true to return the sub-agent's response verbatim " "as the parent agent's final output."
+                    ),
+                }
+
+            action_input_schema: dict[str, Any] = {
+                "type": "object",
+                "description": "Tool parameters as a JSON object, not a string.",
+                "properties": properties,
+                "additionalProperties": False,
             }
+            if required_fields:
+                action_input_schema["required"] = required_fields
 
-        flat_properties: dict[str, Any] = {
-            "thought": {
-                "type": "string",
-                "description": "Your reasoning about using this tool.",
-            },
-        }
-        flat_properties.update(properties)
-
-        schema = {
-            "type": "function",
-            "function": {
-                "name": sanitize_tool_name(tool.name),
-                "description": tool.description[:1024],
-                "parameters": {
-                    "type": "object",
-                    "properties": flat_properties,
-                    "required": ["thought", *required_fields],
-                    "additionalProperties": False,
+            schema = {
+                "type": "function",
+                "function": {
+                    "name": sanitize_tool_name(tool.name),
+                    "description": tool.description[:1024],
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "thought": {
+                                "type": "string",
+                                "description": "Your reasoning about using this tool.",
+                            },
+                            "action_input": action_input_schema,
+                        },
+                        "additionalProperties": False,
+                        "required": ["thought", "action_input"],
+                    },
                 },
-            },
-        }
+            }
+        else:
+            schema = {
+                "type": "function",
+                "function": {
+                    "name": sanitize_tool_name(tool.name),
+                    "description": tool.description[:1024],
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "thought": {
+                                "type": "string",
+                                "description": "Your reasoning about using this tool.",
+                            },
+                            "action_input": {
+                                "type": "string",
+                                "description": "Input for the selected tool in JSON string format.",
+                            },
+                        },
+                        "additionalProperties": False,
+                        "required": ["thought", "action_input"],
+                    },
+                },
+            }
 
         schemas.append(schema)
 

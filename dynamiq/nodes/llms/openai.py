@@ -100,13 +100,20 @@ def _to_openai_strict_function(fn: dict) -> dict:
     converted_props: dict[str, Any] = {}
     for name, prop in properties.items():
         converted = _to_openai_strict_property(prop)
-        # Optional fields → add "null" to the type so they can be in required.
+        # Optional fields → allow "null" so the field can sit in `required`
+        # while still letting the model signal "not specified".
         if name not in original_required and isinstance(converted, dict):
             t = converted.get("type")
             if isinstance(t, str) and t != "null":
                 converted["type"] = [t, "null"]
             elif isinstance(t, list) and "null" not in t:
                 converted["type"] = [*t, "null"]
+            elif "anyOf" in converted:
+                # Complex union (no top-level "type"). Add a null branch so
+                # optional unions of complex types can also signal "not specified".
+                branches = converted["anyOf"]
+                if not any(isinstance(b, dict) and b.get("type") == "null" for b in branches):
+                    converted["anyOf"] = [*branches, {"type": "null"}]
         converted_props[name] = converted
 
     new_parameters: dict[str, Any] = {
