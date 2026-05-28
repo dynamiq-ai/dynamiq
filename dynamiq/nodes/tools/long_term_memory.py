@@ -173,12 +173,20 @@ def build_long_term_memory_tools(
         MemoryToolKind.RECALL,
     ),
 ) -> list[Node]:
-    """Construct long-term-memory tools with `user_id` baked in. Unknown keys in `include` are ignored."""
+    """Construct long-term-memory tools with `user_id` baked in. Unknown keys in `include` are ignored.
+
+    Skips both invalid kind strings (ValueError on enum coercion) and valid
+    enum members without a corresponding builder (e.g. an enum value added
+    here but not yet wired into `_TOOL_BUILDERS`).
+    """
     tools: list[Node] = []
     for kind in include:
         try:
             tool_kind = MemoryToolKind(kind)
         except ValueError:
             continue
-        tools.append(_TOOL_BUILDERS[tool_kind](long_term_memory=long_term_memory, user_id=user_id))
+        builder = _TOOL_BUILDERS.get(tool_kind)
+        if builder is None:
+            continue
+        tools.append(builder(long_term_memory=long_term_memory, user_id=user_id))
     return tools

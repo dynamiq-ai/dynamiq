@@ -160,6 +160,22 @@ def test_factory_ignores_unknown_include_keys(ltm, user_id):
     assert [t.name for t in tools] == ["recall_facts"]
 
 
+def test_factory_skips_enum_members_missing_from_builders(ltm, user_id, monkeypatch):
+    """Valid `MemoryToolKind` values without a `_TOOL_BUILDERS` entry must be
+    silently skipped, not KeyError. Mirrors the unknown-string branch so the
+    docstring's "unknown keys are ignored" promise actually holds."""
+    from dynamiq.memory.long_term.types import MemoryToolKind
+    from dynamiq.nodes.tools import long_term_memory as ltm_tools_module
+
+    monkeypatch.setattr(ltm_tools_module, "_TOOL_BUILDERS", {MemoryToolKind.RECALL: ltm_tools_module.RecallFactsTool})
+    tools = build_long_term_memory_tools(
+        long_term_memory=ltm,
+        user_id=user_id,
+        include=(MemoryToolKind.REMEMBER, MemoryToolKind.RECALL),
+    )
+    assert [t.name for t in tools] == ["recall_facts"]
+
+
 # --- serialization ---
 
 
