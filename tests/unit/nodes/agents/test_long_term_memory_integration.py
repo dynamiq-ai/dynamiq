@@ -250,6 +250,30 @@ def test_execute_preserves_tools_added_mid_run(llm, ltm):
     assert agent.tools == original_tools + [injected]
 
 
+def test_ltm_lock_released_when_post_acquire_mutation_raises(llm, ltm):
+    """Anything between lock-acquire and run can raise (list creation, logger
+    call). It must still release the lock — otherwise the next LTM-enabled
+    execute on this agent would block forever waiting on it."""
+    from dynamiq.nodes.agents.base import logger as base_logger
+
+    agent = _make_agent(llm, ltm=ltm)
+    real_info = base_logger.info
+
+    def fail_on_ltm_log(msg, *args, **kwargs):
+        # Only blow up on the LTM-attach log line so we hit the post-acquire
+        # window specifically; let other logger.info calls in execute pass.
+        if "long-term memory tools" in str(msg):
+            raise RuntimeError("log boom")
+        return real_info(msg, *args, **kwargs)
+
+    with patch.object(base_logger, "info", side_effect=fail_on_ltm_log):
+        agent.run_sync(input_data={"input": "hi", "user_id": "u1"})
+
+    # Lock must be free now; non-blocking acquire should succeed immediately.
+    assert agent._ltm_tools_lock.acquire(blocking=False), "lock was leaked"
+    agent._ltm_tools_lock.release()
+
+
 def test_concurrent_execute_calls_isolate_per_user_ltm_tools(llm, ltm):
     """Two concurrent execute calls with different user_ids must each observe
     only their own LTM tools — the per-agent `_ltm_tools_lock` serialises the

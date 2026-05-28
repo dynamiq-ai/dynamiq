@@ -645,20 +645,22 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         use_memory = self.memory and (input_data.user_id or input_data.session_id)
 
         ltm_tools = self._build_long_term_memory_tools(input_data)
+        # Acquire on the line immediately before `try:` so nothing between the
+        # acquire and the matching finally can raise and leak the lock — see
+        # `_ltm_tools_lock` declaration for the concurrency rationale.
         if ltm_tools:
-            # Lock acquired here, released in the matching finally below — see
-            # `_ltm_tools_lock` declaration for the concurrency rationale.
             self._ltm_tools_lock.acquire()
-            self.tools = list(self.tools) + ltm_tools
-            logger.info(
-                "Agent %s - %s: attached %d long-term memory tools (%s)",
-                self.name,
-                self.id,
-                len(ltm_tools),
-                ", ".join(t.name for t in ltm_tools),
-            )
-
         try:
+            if ltm_tools:
+                self.tools = list(self.tools) + ltm_tools
+                logger.info(
+                    "Agent %s - %s: attached %d long-term memory tools (%s)",
+                    self.name,
+                    self.id,
+                    len(ltm_tools),
+                    ", ".join(t.name for t in ltm_tools),
+                )
+
             if use_memory:
                 history_messages = self._retrieve_memory(input_data)
                 if len(history_messages) > 0:
