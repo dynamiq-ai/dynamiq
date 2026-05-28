@@ -144,7 +144,8 @@ def _clean_anthropic_strict_schema(schema: Any) -> Any:
         else:
             cleaned[key] = value
 
-    if cleaned.get("type") == "object":
+    cleaned_type = cleaned.get("type")
+    if cleaned_type == "object" or (isinstance(cleaned_type, list) and "object" in cleaned_type):
         cleaned["additionalProperties"] = False
 
     return cleaned

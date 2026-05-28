@@ -97,14 +97,21 @@ def _to_openai_strict_property(prop: Any) -> Any:
         cleaned[key] = value
 
     param_type = cleaned.get("type")
-    if param_type == "object":
+    # `type` may be a plain string ("object") or a nullable type-array
+    # (["object", "null"] for `dict | None`). Detect both.
+    is_nullable_type = isinstance(param_type, list) and "null" in param_type
+    is_object = param_type == "object" or (isinstance(param_type, list) and "object" in param_type)
+    is_array = param_type == "array" or (isinstance(param_type, list) and "array" in param_type)
+
+    if is_object:
         if "properties" not in cleaned:
             # Free-form object (dict[str, Any]). Strict can't express an open
             # object, so represent it as a JSON-encoded string. The agent parses
             # it back to a dict before tool validation (see _coerce_json_fields).
+            # Preserve nullability so a `dict | None` field can still be null.
             desc = cleaned.get("description", "")
             return {
-                "type": "string",
+                "type": ["string", "null"] if is_nullable_type else "string",
                 "description": (f"{desc} " if desc else "") + "Provide as a JSON-encoded object string.",
             }
         nested = cleaned["properties"]
@@ -119,7 +126,7 @@ def _to_openai_strict_property(prop: Any) -> Any:
         cleaned["required"] = list(nested.keys())
         cleaned["additionalProperties"] = False
         return cleaned
-    if param_type == "array" and isinstance(cleaned.get("items"), dict):
+    if is_array and isinstance(cleaned.get("items"), dict):
         cleaned["items"] = _to_openai_strict_property(cleaned["items"])
         return cleaned
     return cleaned
