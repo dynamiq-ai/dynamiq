@@ -29,11 +29,37 @@ _OPENAI_STRICT_UNSUPPORTED_KEYWORDS = frozenset(
 )
 
 
+def _add_null_to_type(prop: Any) -> Any:
+    """Make a converted property nullable so it can sit in ``required`` while
+    letting the model signal "leave it at the default" by emitting ``null``.
+
+    Handles plain types (``"x"`` → ``["x", "null"]``), type arrays, and complex
+    ``anyOf`` unions (adds a ``{"type": "null"}`` branch). No-op if already nullable
+    or if it's a stringified free-form object.
+    """
+    if not isinstance(prop, dict):
+        return prop
+    t = prop.get("type")
+    if isinstance(t, str) and t != "null":
+        prop["type"] = [t, "null"]
+    elif isinstance(t, list) and "null" not in t:
+        prop["type"] = [*t, "null"]
+    elif "anyOf" in prop:
+        branches = prop["anyOf"]
+        if not any(isinstance(b, dict) and b.get("type") == "null" for b in branches):
+            prop["anyOf"] = [*branches, {"type": "null"}]
+    return prop
+
+
 def _to_openai_strict_property(prop: Any) -> Any:
     """Convert a property schema into OpenAI strict-mode form.
 
     - ``anyOf`` of ``[primitive, null]`` is flattened to a type array ``["X", "null"]``.
-    - Nested objects get ``additionalProperties: false`` and every property in ``required``.
+    - Nested objects get ``additionalProperties: false`` and every property in
+      ``required``. Nested fields that have a default (i.e. were NOT in the
+      object's own ``required``) are made nullable, so the model can emit ``null``
+      to leave them at their default. The agent strips those nulls before tool
+      validation so the Python default applies (see ``_strip_protocol_nulls``).
     - Arrays' ``items`` are converted recursively.
     - Unsupported keywords are stripped.
     """
@@ -82,7 +108,14 @@ def _to_openai_strict_property(prop: Any) -> Any:
                 "description": (f"{desc} " if desc else "") + "Provide as a JSON-encoded object string.",
             }
         nested = cleaned["properties"]
-        cleaned["properties"] = {k: _to_openai_strict_property(v) for k, v in nested.items()}
+        nested_required = set(cleaned.get("required", []))
+        converted_nested: dict[str, Any] = {}
+        for k, v in nested.items():
+            cv = _to_openai_strict_property(v)
+            if k not in nested_required:
+                cv = _add_null_to_type(cv)
+            converted_nested[k] = cv
+        cleaned["properties"] = converted_nested
         cleaned["required"] = list(nested.keys())
         cleaned["additionalProperties"] = False
         return cleaned
@@ -95,39 +128,30 @@ def _to_openai_strict_property(prop: Any) -> Any:
 def _to_openai_strict_function(fn: dict) -> dict:
     """Convert a function-tool definition into OpenAI strict-mode form.
 
-    Top-level properties all become required; optional fields are re-encoded as
-    nullable type arrays. ``additionalProperties: false`` is set at every object
-    level. ``strict: true`` is attached.
+    Every property is promoted to ``required`` and ``additionalProperties: false``
+    is set at every object level. Fields that have a default (NOT in the original
+    ``required``) — or that are already nullable — are made nullable so the model
+    can emit ``null`` to leave them at their default; the agent then strips those
+    nulls before tool validation so the Python default applies. Genuinely-required
+    fields (no default) stay non-nullable and must be emitted. ``strict: true``
+    is attached.
+
+    Free-form objects (``dict[str, Any]``) are handled inside
+    ``_to_openai_strict_property`` (converted to JSON-string fields), so a
+    free-form field doesn't disable strict for the tool's typed fields.
     """
     out = dict(fn)
     parameters = out.get("parameters")
     if not isinstance(parameters, dict):
         return out
 
-    # Free-form objects (dict[str, Any]) are handled field-by-field inside
-    # _to_openai_strict_property (converted to JSON-string fields), so the tool
-    # as a whole can still use strict mode — a trivial free-form field no longer
-    # disables strict for the important typed fields.
-
     properties = parameters.get("properties", {})
     original_required = set(parameters.get("required", []))
     converted_props: dict[str, Any] = {}
     for name, prop in properties.items():
         converted = _to_openai_strict_property(prop)
-        # Optional fields → allow "null" so the field can sit in `required`
-        # while still letting the model signal "not specified".
-        if name not in original_required and isinstance(converted, dict):
-            t = converted.get("type")
-            if isinstance(t, str) and t != "null":
-                converted["type"] = [t, "null"]
-            elif isinstance(t, list) and "null" not in t:
-                converted["type"] = [*t, "null"]
-            elif "anyOf" in converted:
-                # Complex union (no top-level "type"). Add a null branch so
-                # optional unions of complex types can also signal "not specified".
-                branches = converted["anyOf"]
-                if not any(isinstance(b, dict) and b.get("type") == "null" for b in branches):
-                    converted["anyOf"] = [*branches, {"type": "null"}]
+        if name not in original_required:
+            converted = _add_null_to_type(converted)
         converted_props[name] = converted
 
     new_parameters: dict[str, Any] = {

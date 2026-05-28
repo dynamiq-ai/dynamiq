@@ -498,7 +498,9 @@ def test_generate_structured_output_schemas(openai_node, mock_tool):
 
     json_schema = schema["json_schema"]
     assert json_schema["name"] == "plan_next_action"
-    assert json_schema["strict"] is True
+    # strict is intentionally NOT set: action_input is a generic object
+    # (additionalProperties: true), which OpenAI strict mode can't express.
+    assert "strict" not in json_schema
 
     # Verify required fields
     assert set(json_schema["schema"]["required"]) == {"thought", "action", "action_input", "output_files"}
@@ -509,6 +511,9 @@ def test_generate_structured_output_schemas(openai_node, mock_tool):
     assert "action" in properties
     assert "action_input" in properties
     assert "output_files" in properties
+
+    # action_input is now a generic object (was a JSON string before)
+    assert properties["action_input"]["type"] == "object"
 
 
 def test_generate_function_calling_schemas(openai_node, mock_tool):

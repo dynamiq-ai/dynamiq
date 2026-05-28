@@ -600,9 +600,9 @@ def test_agent_response_format_function_calling_uses_schema_in_tools():
     assert "title" in answer["properties"]
 
 
-def test_agent_response_format_structured_output_schema_unchanged():
-    """STRUCTURED_OUTPUT keeps its simple `action_input: string` schema; the
-    user's response_format is enforced via prompt injection + coerce instead."""
+def test_agent_response_format_structured_output_action_input_is_object():
+    """STRUCTURED_OUTPUT uses a generic-object `action_input` (not a JSON string);
+    the user's response_format is still enforced via prompt injection + coerce."""
     from pydantic import BaseModel
 
     from dynamiq.nodes.types import InferenceMode
@@ -613,10 +613,11 @@ def test_agent_response_format_structured_output_schema_unchanged():
 
     agent = _make_agent(inference_mode=InferenceMode.STRUCTURED_OUTPUT, response_format=Doc)
     schema = agent._response_format["json_schema"]["schema"]
-    assert schema["properties"]["action_input"] == {
-        "type": "string",
-        "description": "Input for chosen action.",
-    }
+    action_input = schema["properties"]["action_input"]
+    assert action_input["type"] == "object"
+    assert action_input["additionalProperties"] is True
+    # strict is not set on the structured-output schema (open object isn't strict-expressible)
+    assert "strict" not in agent._response_format["json_schema"]
     rendered = agent.generate_prompt()
     assert "MUST be a valid JSON document" in rendered
     assert "title" in rendered

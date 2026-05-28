@@ -346,6 +346,18 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return any(Agent._annotation_is_dict_like(arg) for arg in get_args(annotation))
         return False
 
+    @staticmethod
+    def _extract_basemodel(annotation: Any) -> type[BaseModel] | None:
+        """Return the BaseModel subclass in an annotation (handles ``Model | None``), else None."""
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            return annotation
+        origin = get_origin(annotation)
+        if origin in (Union, types.UnionType):
+            for arg in get_args(annotation):
+                if isinstance(arg, type) and issubclass(arg, BaseModel):
+                    return arg
+        return None
+
     def _coerce_json_fields(self, tool: Node, action_input: dict) -> dict:
         """Parse stringified free-form dict fields back into dicts.
 
@@ -371,23 +383,33 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """Drop ``None`` values for fields whose Pydantic annotation rejects None.
 
         OpenAI strict mode requires every property in ``required`` and uses
-        ``"null"`` in the type union as the documented signal for "not specified."
-        Tools with non-nullable defaults (``encoding: str = "utf-8"``) can't
-        accept that ``None`` directly — but their Pydantic default should kick
-        in if the key is absent. Drop those keys so validation/execution use
-        defaults instead of failing.
+        ``"null"`` in the type union as the signal for "leave it at the default."
+        Fields with a non-nullable default (``encoding: str = "utf-8"``) can't
+        accept that ``None`` directly — so we drop the key, letting the tool's
+        Pydantic default apply. Fields that genuinely accept ``None``
+        (``encoding: str | None = None``) keep it.
 
-        Nullable fields (``encoding: str | None = None``) keep their None — the
-        tool genuinely accepts it.
+        Recurses into nested ``BaseModel`` fields so the same applies at depth
+        (e.g. ``config.port`` where ``DBConfig.port: int = 8080``).
         """
-        fields = tool.input_schema.model_fields
-        for name in list(action_input):
-            if action_input[name] is not None:
-                continue
-            field = fields.get(name)
-            if field is not None and not self._annotation_accepts_none(field.annotation):
-                del action_input[name]
+        self._strip_nulls_for_fields(tool.input_schema.model_fields, action_input)
         return action_input
+
+    def _strip_nulls_for_fields(self, fields: Mapping[str, Any], data: Any) -> None:
+        if not isinstance(data, dict):
+            return
+        for name in list(data):
+            field = fields.get(name)
+            if field is None:
+                continue
+            value = data[name]
+            if value is None:
+                if not self._annotation_accepts_none(field.annotation):
+                    del data[name]
+            elif isinstance(value, dict):
+                nested_model = self._extract_basemodel(field.annotation)
+                if nested_model is not None:
+                    self._strip_nulls_for_fields(nested_model.model_fields, value)
 
     def _should_delegate_final(
         self,
