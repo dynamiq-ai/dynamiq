@@ -235,16 +235,16 @@ class OpenAI(BaseLLM):
 
     Attributes:
         connection (OpenAIConnection | None): The connection to use for the OpenAI LLM.
-        strict_tools: When True (default), convert each tool's parameter schema
+        strict_tools: Inherited from :class:`BaseLLM`. False (default, or an empty
+            list) ships every tool as-is; True converts each tool's parameter schema
             into OpenAI structured-outputs strict form (every property required,
             optionals re-encoded as nullable types, ``additionalProperties: false``
-            on every object) and attach ``strict: true``. Set False to ship tools
-            as-is.
+            on every object) and attaches ``strict: true``; a list of tool (function)
+            names converts only those tools and ships the rest untouched.
     """
     connection: OpenAIConnection | None = None
     reasoning_effort: ReasoningEffort | None = ReasoningEffort.AUTO
     verbosity: Verbosity | None = Verbosity.MEDIUM
-    strict_tools: bool = True
     O_SERIES_MODEL_PREFIXES: ClassVar[tuple[str, ...]] = ("o1", "o3", "o4")
     MODEL_PREFIX = "openai/"
 
@@ -284,14 +284,17 @@ class OpenAI(BaseLLM):
     def transform_tool_schemas(self, tools: list[dict]) -> list[dict]:
         """Convert each tool's schema into OpenAI strict-mode form.
 
-        Skipped when ``self.strict_tools`` is False. On per-tool conversion
-        failure (e.g. an exotic schema the converter can't safely transform),
-        the original tool is kept without ``strict`` so the request still
-        succeeds.
+        Skipped when ``self.strict_tools`` is falsy (False or an empty list). When
+        ``self.strict_tools`` is a list, only tools whose function name is in it are
+        converted; every other tool ships non-strict (untouched). On per-tool
+        conversion failure (e.g. an exotic schema the converter can't safely
+        transform), the original tool is kept without ``strict`` so the request
+        still succeeds.
         """
         if not self.strict_tools:
             return tools
 
+        whitelist = self.strict_tools if isinstance(self.strict_tools, list) else None
         out: list[dict] = []
         for tool in tools:
             if not isinstance(tool, dict):
@@ -299,7 +302,7 @@ class OpenAI(BaseLLM):
                 continue
             tool = dict(tool)
             fn = tool.get("function")
-            if isinstance(fn, dict):
+            if isinstance(fn, dict) and (whitelist is None or fn.get("name") in whitelist):
                 try:
                     tool["function"] = _to_openai_strict_function(fn)
                 except Exception as exc:

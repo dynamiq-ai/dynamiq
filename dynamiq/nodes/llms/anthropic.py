@@ -193,17 +193,19 @@ class Anthropic(BaseLLM):
     Attributes:
         connection (AnthropicConnection | None): The connection to use for the Anthropic LLM.
         cache_control (AnthropicCacheControl | None): The cache control configuration.
-        strict_tools: When True (default), attach ``strict: true`` to each tool's
-            function entry (up to :data:`ANTHROPIC_MAX_STRICT_TOOLS` per request)
-            and clean each schema to Anthropic's strict subset. Set False to ship
-            tools as-is with no strict guarantee — the model still tries to
-            follow the schema but conformance isn't decoder-enforced.
+        strict_tools: Inherited from :class:`BaseLLM`. False (default, or an empty
+            list) ships every tool as-is with no strict guarantee; True cleans each
+            tool's schema to Anthropic's strict subset and attaches ``strict: true``
+            (up to :data:`ANTHROPIC_MAX_STRICT_TOOLS` per request); a list of tool
+            (function) names makes only those tools strict and ships the rest
+            untouched. Use a list to exclude tools whose schema exceeds Anthropic's
+            strict grammar-compilation budget (the ``Schema is too complex for
+            compilation`` 400).
     """
 
     connection: AnthropicConnection | None = None
     MODEL_PREFIX = "anthropic/"
     cache_control: AnthropicCacheControl | None = None
-    strict_tools: bool = True
 
     def __init__(self, **kwargs):
         """Initialize the Anthropic LLM node.
@@ -269,16 +271,20 @@ class Anthropic(BaseLLM):
     def transform_tool_schemas(self, tools: list[dict]) -> list[dict]:
         """Clean each tool's schema for Anthropic and attach ``strict: true``.
 
-        Skip strict when ``self.strict_tools`` is False or once the request has
-        reached the per-request cap of :data:`ANTHROPIC_MAX_STRICT_TOOLS` strict
-        tools. Free-form objects (``dict[str, Any]``) are handled field-by-field
-        inside ``_clean_anthropic_strict_schema`` (converted to JSON-string
-        fields), so a trivial free-form field no longer disables strict for the
-        tool's typed fields.
+        Skip strict when ``self.strict_tools`` is falsy (False or an empty list) or
+        once the request has reached the per-request cap of
+        :data:`ANTHROPIC_MAX_STRICT_TOOLS` strict tools. When ``self.strict_tools``
+        is a list, only tools whose function name is in it get strict; all others
+        ship non-strict (untouched) — use it to exclude tools too complex for
+        Anthropic's strict grammar compilation. Free-form objects (``dict[str,
+        Any]``) are handled field-by-field inside ``_clean_anthropic_strict_schema``
+        (converted to JSON-string fields), so a trivial free-form field no longer
+        disables strict for the tool's typed fields.
         """
         if not self.strict_tools:
             return tools
 
+        whitelist = self.strict_tools if isinstance(self.strict_tools, list) else None
         out: list[dict] = []
         strict_count = 0
         for tool in tools:
@@ -288,8 +294,9 @@ class Anthropic(BaseLLM):
             tool = dict(tool)
             fn = tool.get("function")
             if isinstance(fn, dict) and strict_count < ANTHROPIC_MAX_STRICT_TOOLS:
+                allowed = whitelist is None or fn.get("name") in whitelist
                 parameters = fn.get("parameters")
-                if isinstance(parameters, dict):
+                if allowed and isinstance(parameters, dict):
                     fn = dict(fn)
                     fn["parameters"] = _clean_anthropic_strict_schema(parameters)
                     fn["strict"] = True

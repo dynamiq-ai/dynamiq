@@ -234,6 +234,17 @@ class BaseLLM(ConnectionNode):
         default=None,
         description="Configuration for fallback behavior including the fallback LLM.",
     )
+    strict_tools: bool | list[str] = Field(
+        default=False,
+        description=(
+            "Controls provider strict tool-calling (only honored by providers that "
+            "implement it, e.g. OpenAI and Anthropic). False (default) disables strict "
+            "for all tools; True makes every tool strict; a list of tool (function) "
+            "names makes only those tools strict and ships the rest non-strict. Use a "
+            "list to exclude tools whose schema is too complex for a provider's strict "
+            "grammar compilation."
+        ),
+    )
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
