@@ -1,15 +1,28 @@
 import hashlib
+from typing import ClassVar
 
 import pytest
 
+from dynamiq.connections import BaseConnection
+from dynamiq.nodes.embedders.base import TextEmbedder, TextEmbedderInputSchema
 
-class FakeTextEmbedder:
+
+class _StubConnection(BaseConnection):
+    """No-op connection to satisfy ConnectionNode's connection/client validator."""
+
+    def connect(self) -> None:
+        return None
+
+
+class FakeTextEmbedder(TextEmbedder):
     """Deterministic 16-dim embedder for integration tests against real backends."""
 
-    DIM = 16
+    name: str = "fake-text-embedder"
+    connection: BaseConnection = _StubConnection()
+    DIM: ClassVar[int] = 16
 
-    def execute(self, input_data, **kwargs):
-        text = input_data["query"] if isinstance(input_data, dict) else input_data.query
+    def execute(self, input_data: TextEmbedderInputSchema, config=None, **kwargs) -> dict:
+        text = input_data.query if hasattr(input_data, "query") else input_data["query"]
         return {"query": text, "embedding": self._embed(text)}
 
     def embed(self, text: str) -> list[float]:

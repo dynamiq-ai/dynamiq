@@ -82,8 +82,8 @@ class QdrantLongTermMemoryBackend(LongTermMemoryBackend):
         return super().to_dict_exclude_params | {"_client": True, "connection": True}
 
     def to_dict(self, include_secure_params: bool = False, for_tracing: bool = False, **kwargs) -> dict[str, Any]:
-        exclude = kwargs.pop("exclude", self.to_dict_exclude_params.copy())
-        data = self.model_dump(exclude=exclude, **kwargs)
+        # super() re-adds the embedder; we add the connection on top.
+        data = super().to_dict(include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs)
         data["connection"] = self.connection.to_dict(
             for_tracing=for_tracing, include_secure_params=include_secure_params, **kwargs
         )
@@ -169,12 +169,15 @@ class QdrantLongTermMemoryBackend(LongTermMemoryBackend):
         content: str,
         content_hash: str,
         embedding: list[float],
+        metadata: dict,
         updated_at: datetime,
     ) -> None:
         existing = self.get(fact_id)
         if existing is None:
             return
-        new_fact = existing.model_copy(update={"content": content, "hash": content_hash, "updated_at": updated_at})
+        new_fact = existing.model_copy(
+            update={"content": content, "hash": content_hash, "metadata": metadata, "updated_at": updated_at}
+        )
         self._client.upsert(
             collection_name=self.collection_name,
             points=[

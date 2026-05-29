@@ -7,7 +7,7 @@ import pytest
 
 from dynamiq.connections import BaseConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.memory.long_term import LongTermMemory, LongTermMemoryConfig
+from dynamiq.memory.long_term import LongTermMemoryConfig
 from dynamiq.memory.long_term.backends.in_memory import InMemoryLongTermMemoryBackend
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.embedders.base import TextEmbedder, TextEmbedderInputSchema
@@ -34,7 +34,7 @@ class _FakeEmbedder(TextEmbedder):
 
 @pytest.fixture
 def ltm():
-    return LongTermMemory(backend=InMemoryLongTermMemoryBackend(), embedder=_FakeEmbedder())
+    return LongTermMemoryConfig(backend=InMemoryLongTermMemoryBackend(embedder=_FakeEmbedder()))
 
 
 @pytest.fixture
@@ -47,12 +47,18 @@ def llm():
     )
 
 
-def _make_agent(llm, *, ltm=None, ltm_config=None) -> Agent:
+def _ltm_config(*, tools=None, enabled=True) -> LongTermMemoryConfig:
+    backend = InMemoryLongTermMemoryBackend(embedder=_FakeEmbedder())
+    kwargs = {"backend": backend, "enabled": enabled}
+    if tools is not None:
+        kwargs["tools"] = tools
+    return LongTermMemoryConfig(**kwargs)
+
+
+def _make_agent(llm, *, ltm=None) -> Agent:
     kwargs = {"name": "test", "llm": llm, "tools": []}
     if ltm is not None:
         kwargs["long_term_memory"] = ltm
-    if ltm_config is not None:
-        kwargs["long_term_memory_config"] = ltm_config
     return Agent(**kwargs)
 
 
@@ -64,11 +70,15 @@ def _input(user_id=None, session_id=None):
 
 
 def test_config_default_includes_remember_and_recall():
-    assert LongTermMemoryConfig().tools == ("remember", "recall")
+    assert _ltm_config().tools == ("remember", "recall")
 
 
 def test_config_can_restrict_to_read_only():
-    assert LongTermMemoryConfig(tools=("recall",)).tools == ("recall",)
+    assert _ltm_config(tools=("recall",)).tools == ("recall",)
+
+
+def test_config_defaults_to_enabled():
+    assert _ltm_config().enabled is True
 
 
 def test_config_model_dump_emits_plain_strings_not_enums():
@@ -77,8 +87,8 @@ def test_config_model_dump_emits_plain_strings_not_enums():
     round-trip back as the enum *name* — 'REMEMBER' — failing validation)."""
     import yaml
 
-    dumped = LongTermMemoryConfig().model_dump()
-    assert dumped == {"tools": ("remember", "recall")}
+    dumped = _ltm_config().model_dump(exclude={"backend"})
+    assert dumped["tools"] == ("remember", "recall")
     assert all(isinstance(t, str) and not hasattr(t, "value") for t in dumped["tools"])
     yaml.safe_dump(dumped)  # must not raise
 
@@ -86,17 +96,15 @@ def test_config_model_dump_emits_plain_strings_not_enums():
 # --- Agent field declarations ---
 
 
-def test_agent_has_long_term_memory_fields():
+def test_agent_has_long_term_memory_field():
     fields = Agent.model_fields
     assert "long_term_memory" in fields
-    assert "long_term_memory_config" in fields
     assert fields["long_term_memory"].default is None
 
 
 def test_agent_long_term_memory_defaults_to_none(llm):
     agent = _make_agent(llm)
     assert agent.long_term_memory is None
-    assert agent.long_term_memory_config.tools == ("remember", "recall")
 
 
 # --- _build_long_term_memory_tools ---
@@ -118,10 +126,15 @@ def test_build_returns_empty_when_no_long_term_memory(llm):
     assert agent._build_long_term_memory_tools(_input(user_id="u1")) == []
 
 
-def test_build_respects_config_include(llm, ltm):
-    agent = _make_agent(llm, ltm=ltm, ltm_config=LongTermMemoryConfig(tools=("recall",)))
+def test_build_respects_config_include(llm):
+    agent = _make_agent(llm, ltm=_ltm_config(tools=("recall",)))
     tools = agent._build_long_term_memory_tools(_input(user_id="u1"))
     assert [t.name for t in tools] == ["recall_facts"]
+
+
+def test_build_returns_empty_when_disabled(llm):
+    agent = _make_agent(llm, ltm=_ltm_config(enabled=False))
+    assert agent._build_long_term_memory_tools(_input(user_id="u1")) == []
 
 
 def test_build_bakes_user_id_into_each_tool(llm, ltm):
@@ -140,6 +153,29 @@ def test_build_sets_is_optimized_for_agents_on_each_tool(llm, ltm):
     assert tools and all(t.is_optimized_for_agents for t in tools)
 
 
+def test_function_calling_schemas_include_ltm_overlay(llm, ltm):
+    """In FUNCTION_CALLING mode the per-call LTM tools must appear in the
+    generated tool schemas, otherwise the LLM can never call remember/recall."""
+    from dynamiq.nodes.agents.agent import Agent as ReActAgent
+    from dynamiq.nodes.agents.base import _run_extra_tools
+    from dynamiq.nodes.types import InferenceMode
+
+    agent = ReActAgent(name="t", llm=llm, tools=[], long_term_memory=ltm, inference_mode=InferenceMode.FUNCTION_CALLING)
+    base_tools, _ = agent._effective_inference_schemas()
+    base_names = {schema["function"]["name"] for schema in (base_tools or [])}
+    assert "remember_fact" not in base_names  # not present without an overlay
+
+    ltm_tools = agent._build_long_term_memory_tools(_input(user_id="u1"))
+    token = _run_extra_tools.set(ltm_tools)
+    try:
+        fc_tools, _ = agent._effective_inference_schemas()
+    finally:
+        _run_extra_tools.reset(token)
+
+    names = {schema["function"]["name"] for schema in fc_tools}
+    assert {"remember_fact", "recall_facts"} <= names
+
+
 def test_init_components_initializes_ltm_embedder(llm):
     """The embedder is a ConnectionNode whose `text_embedder` client is built
     during `init_components`; without that, the first recall AttributeErrors
@@ -152,7 +188,7 @@ def test_init_components_initializes_ltm_embedder(llm):
         def init_components(self, connection_manager=None):
             init_calls.append(connection_manager)
 
-    ltm_with_postponed = LongTermMemory(backend=InMemoryLongTermMemoryBackend(), embedder=_RecordingEmbedder())
+    ltm_with_postponed = LongTermMemoryConfig(backend=InMemoryLongTermMemoryBackend(embedder=_RecordingEmbedder()))
     agent = _make_agent(llm, ltm=ltm_with_postponed)
     # Node.__init__ already invokes init_components on construction; clear and
     # assert the explicit call also propagates to the embedder.

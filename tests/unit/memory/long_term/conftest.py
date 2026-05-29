@@ -50,6 +50,14 @@ def fake_embedder() -> FakeTextEmbedder:
 
 
 @pytest.fixture
+def backend(fake_embedder):
+    """A fresh in-memory backend wired with the deterministic fake embedder."""
+    from dynamiq.memory.long_term.backends.in_memory import InMemoryLongTermMemoryBackend
+
+    return InMemoryLongTermMemoryBackend(embedder=fake_embedder)
+
+
+@pytest.fixture
 def user_id() -> str:
     return "user-test-123"
 

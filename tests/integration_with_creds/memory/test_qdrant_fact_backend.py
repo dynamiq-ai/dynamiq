@@ -24,9 +24,10 @@ from dynamiq.memory.long_term.schemas import Fact  # noqa: E402
 
 
 @pytest.fixture
-def backend():
+def backend(fake_embedder):
     b = QdrantLongTermMemoryBackend(
         connection=QdrantConnection(url=QDRANT_URL, api_key=""),
+        embedder=fake_embedder,
         collection_name="test_user_facts",
         dimension=16,
     )

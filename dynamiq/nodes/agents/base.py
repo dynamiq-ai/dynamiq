@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy, MemorySaveMode
-from dynamiq.memory.long_term import LongTermMemory, LongTermMemoryConfig
+from dynamiq.memory.long_term import LongTermMemoryConfig
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentIterativeCheckpointMixin
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
@@ -232,16 +232,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
-    long_term_memory: LongTermMemory | None = Field(
+    long_term_memory: LongTermMemoryConfig | None = Field(
         default=None,
         description=(
-            "Long-term, fact-shaped, user-scoped memory accessed via remember/recall/forget "
-            "tools. Independent of `memory` (short-term messages)."
+            "Long-term, fact-shaped, user-scoped memory config (enabled + backend + tools). "
+            "Accessed via remember/recall tools. Independent of `memory` (short-term messages)."
         ),
-    )
-    long_term_memory_config: LongTermMemoryConfig = Field(
-        default_factory=LongTermMemoryConfig,
-        description="Which long-term-memory tools to expose on this agent.",
     )
     verbose: bool = Field(False, description="Whether to print verbose logs.")
     file_store: FileStoreConfig = Field(
@@ -406,7 +402,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             "tools": True,
             "memory": True,
             "long_term_memory": True,
-            "long_term_memory_config": True,
             "files": True,
             "images": True,
             "file_store": True,
@@ -426,7 +421,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         data["memory"] = self.memory.to_dict(**kwargs) if self.memory else None
         data["long_term_memory"] = self.long_term_memory.to_dict(**kwargs) if self.long_term_memory else None
-        data["long_term_memory_config"] = self.long_term_memory_config.model_dump()
         if self.files:
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         if self.images:
@@ -458,8 +452,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         # The LTM embedder is a ConnectionNode that needs its text_embedder
         # client built before the first recall/remember call, otherwise it
         # AttributeErrors on a `None` client during `execute`.
-        if self.long_term_memory and self.long_term_memory.embedder.is_postponed_component_init:
-            self.long_term_memory.embedder.init_components(connection_manager)
+        if self.long_term_memory and self.long_term_memory.backend.embedder.is_postponed_component_init:
+            self.long_term_memory.backend.embedder.init_components(connection_manager)
 
         self._ensure_skills_ingested_for_sandbox()
 
@@ -650,13 +644,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         use_memory = self.memory and (input_data.user_id or input_data.session_id)
 
         ltm_tools = self._build_long_term_memory_tools(input_data)
-        # Publish the per-call LTM tools via the module-level ContextVar; the
-        # tool-resolution properties (`tool_description`, `tool_names`,
-        # `tool_by_names`) read it. Setting a ContextVar is cheap, isolated
-        # per thread / per asyncio task, and never mutates shared state — so
-        # concurrent execute() calls don't see each other's user-scoped tools
-        # and don't need a lock.
-        ltm_token = _run_extra_tools.set(ltm_tools) if ltm_tools else None
         if ltm_tools:
             logger.info(
                 "Agent %s - %s: attached %d long-term memory tools (%s)",
@@ -665,7 +652,15 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 len(ltm_tools),
                 ", ".join(t.name for t in ltm_tools),
             )
-
+        # Publish the per-call LTM tools via the module-level ContextVar; the
+        # tool-resolution properties (`tool_description`, `tool_names`,
+        # `tool_by_names`) and inference-schema generation read it. Setting a
+        # ContextVar is cheap, isolated per thread / per asyncio task, and never
+        # mutates shared state — so concurrent execute() calls don't see each
+        # other's user-scoped tools and don't need a lock. The set() is the last
+        # statement before `try:` so nothing can raise between it and the
+        # matching reset() in finally.
+        ltm_token = _run_extra_tools.set(ltm_tools) if ltm_tools else None
         try:
             if use_memory:
                 history_messages = self._retrieve_memory(input_data)
@@ -851,8 +846,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         return history_messages
 
     def _build_long_term_memory_tools(self, input_data: "AgentInputSchema") -> list[Node]:
-        """Construct per-run long-term-memory tools, or [] when LTM or user_id is absent."""
-        if self.long_term_memory is None:
+        """Construct per-run long-term-memory tools, or [] when LTM is off/absent or user_id is missing."""
+        if self.long_term_memory is None or not self.long_term_memory.enabled:
             return []
         user_id = getattr(input_data, "user_id", None)
         if not user_id:
@@ -860,9 +855,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         from dynamiq.nodes.tools.long_term_memory import build_long_term_memory_tools
 
         tools = build_long_term_memory_tools(
-            long_term_memory=self.long_term_memory,
+            backend=self.long_term_memory.backend,
             user_id=user_id,
-            include=self.long_term_memory_config.tools,
+            include=self.long_term_memory.tools,
         )
         # `init_components` set this on every tool that existed at agent build
         # time; LTM tools are constructed lazily per-run and must match so the

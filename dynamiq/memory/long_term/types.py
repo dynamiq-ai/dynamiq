@@ -2,7 +2,7 @@ from enum import Enum
 
 
 class ForgetStatus(str, Enum):
-    """Outcome of `LongTermMemory.forget()` (programmatic API only)."""
+    """Outcome of `LongTermMemoryBackend.forget()` (programmatic API only)."""
 
     DELETED = "deleted"
     NOT_FOUND = "not_found"
@@ -10,7 +10,7 @@ class ForgetStatus(str, Enum):
 
 
 class RememberOutcome(str, Enum):
-    """Outcome of `LongTermMemory.remember()` — distinguishes insert from upsert."""
+    """Outcome of `LongTermMemoryBackend.remember()` — distinguishes insert from upsert."""
 
     CREATED = "created"
     UPDATED = "updated"

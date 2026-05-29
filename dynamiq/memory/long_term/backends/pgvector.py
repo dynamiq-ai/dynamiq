@@ -78,8 +78,8 @@ class PostgresLongTermMemoryBackend(LongTermMemoryBackend):
         return super().to_dict_exclude_params | {"_conn": True, "connection": True}
 
     def to_dict(self, include_secure_params: bool = False, for_tracing: bool = False, **kwargs) -> dict[str, Any]:
-        exclude = kwargs.pop("exclude", self.to_dict_exclude_params.copy())
-        data = self.model_dump(exclude=exclude, **kwargs)
+        # super() re-adds the embedder; we add the connection on top.
+        data = super().to_dict(include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs)
         data["connection"] = self.connection.to_dict(
             for_tracing=for_tracing, include_secure_params=include_secure_params, **kwargs
         )
@@ -181,14 +181,16 @@ class PostgresLongTermMemoryBackend(LongTermMemoryBackend):
         content: str,
         content_hash: str,
         embedding: list[float],
+        metadata: dict,
         updated_at: datetime,
     ) -> None:
         with self._conn.cursor() as cur:
             cur.execute(
                 SQL(
-                    "UPDATE {table} SET content = %s, hash = %s, " "embedding = %s, updated_at = %s WHERE id = %s"
+                    "UPDATE {table} SET content = %s, hash = %s, embedding = %s, "
+                    "metadata = %s, updated_at = %s WHERE id = %s"
                 ).format(table=self._table),
-                (content, content_hash, embedding, updated_at, fact_id),
+                (content, content_hash, embedding, Jsonb(metadata), updated_at, fact_id),
             )
 
     def search(

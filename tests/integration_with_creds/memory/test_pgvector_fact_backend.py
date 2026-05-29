@@ -24,9 +24,10 @@ def _connection_from_dsn(dsn: str) -> PostgreSQLConnection:
 
 
 @pytest.fixture
-def backend():
+def backend(fake_embedder):
     b = PostgresLongTermMemoryBackend(
         connection=_connection_from_dsn(DSN),
+        embedder=fake_embedder,
         table_name="test_user_facts",
         dimension=16,
     )

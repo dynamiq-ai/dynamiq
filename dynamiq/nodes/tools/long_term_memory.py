@@ -2,7 +2,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from dynamiq.memory.long_term import LongTermMemory, MemoryToolKind, RememberOutcome
+from dynamiq.memory.long_term import LongTermMemoryBackend, MemoryToolKind, RememberOutcome
 from dynamiq.nodes.node import Node, ensure_config
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig
@@ -86,16 +86,16 @@ class _LongTermMemoryTool(Node):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    long_term_memory: LongTermMemory
+    backend: LongTermMemoryBackend
     user_id: str
 
     @property
     def to_dict_exclude_params(self) -> dict[str, Any]:
-        return super().to_dict_exclude_params | {"long_term_memory": True}
+        return super().to_dict_exclude_params | {"backend": True}
 
     def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict[str, Any]:
         data = super().to_dict(include_secure_params=include_secure_params, **kwargs)
-        data["long_term_memory"] = self.long_term_memory.to_dict(include_secure_params=include_secure_params, **kwargs)
+        data["backend"] = self.backend.to_dict(include_secure_params=include_secure_params, **kwargs)
         return data
 
 
@@ -121,7 +121,7 @@ class RememberFactTool(_LongTermMemoryTool):
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        fact, outcome = self.long_term_memory.remember(
+        fact, outcome = self.backend.remember(
             content=input_data.content,
             user_id=self.user_id,
             metadata=input_data.metadata,
@@ -146,7 +146,7 @@ class RecallFactsTool(_LongTermMemoryTool):
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        hits = self.long_term_memory.recall(
+        hits = self.backend.recall(
             query=input_data.query,
             user_id=self.user_id,
             limit=input_data.limit,
@@ -166,7 +166,7 @@ _TOOL_BUILDERS: dict[MemoryToolKind, type[_LongTermMemoryTool]] = {
 
 def build_long_term_memory_tools(
     *,
-    long_term_memory: LongTermMemory,
+    backend: LongTermMemoryBackend,
     user_id: str,
     include: tuple[MemoryToolKind | str, ...] = (
         MemoryToolKind.REMEMBER,
@@ -188,5 +188,5 @@ def build_long_term_memory_tools(
         builder = _TOOL_BUILDERS.get(tool_kind)
         if builder is None:
             continue
-        tools.append(builder(long_term_memory=long_term_memory, user_id=user_id))
+        tools.append(builder(backend=backend, user_id=user_id))
     return tools

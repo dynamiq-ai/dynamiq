@@ -39,13 +39,14 @@ class InMemoryLongTermMemoryBackend(LongTermMemoryBackend):
         content: str,
         content_hash: str,
         embedding: list[float],
+        metadata: dict,
         updated_at: datetime,
     ) -> None:
         existing = self._facts.get(fact_id)
         if existing is None:
             return
         self._facts[fact_id] = existing.model_copy(
-            update={"content": content, "hash": content_hash, "updated_at": updated_at}
+            update={"content": content, "hash": content_hash, "metadata": metadata, "updated_at": updated_at}
         )
         self._vectors[fact_id] = list(embedding)
 

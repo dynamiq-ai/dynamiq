@@ -1,24 +1,16 @@
-import pytest
-
-from dynamiq.memory.long_term import LongTermMemory
 from dynamiq.memory.long_term.backends.in_memory import InMemoryLongTermMemoryBackend
 from dynamiq.nodes.tools.long_term_memory import RecallFactsTool, RememberFactTool, build_long_term_memory_tools
-
-
-@pytest.fixture
-def ltm(fake_embedder):
-    return LongTermMemory(backend=InMemoryLongTermMemoryBackend(), embedder=fake_embedder)
 
 
 # --- RememberFactTool ---
 
 
-def test_remember_tool_persists_a_fact(ltm, user_id):
-    tool = RememberFactTool(long_term_memory=ltm, user_id=user_id)
+def test_remember_tool_persists_a_fact(backend, user_id):
+    tool = RememberFactTool(backend=backend, user_id=user_id)
     result = tool.execute(tool.input_schema(content="User likes pizza"))
     fact_id = result["content"]["fact_id"]
     assert result["content"]["outcome"] == "created"
-    assert ltm.get(fact_id).content == "User likes pizza"
+    assert backend.get(fact_id).content == "User likes pizza"
 
 
 def test_remember_tool_input_schema_has_no_user_id():
@@ -27,32 +19,31 @@ def test_remember_tool_input_schema_has_no_user_id():
     assert {"content", "metadata"} <= set(RememberFactTool.input_schema.model_fields)
 
 
-def test_remember_tool_uses_construction_user_id(ltm, user_id):
-    tool = RememberFactTool(long_term_memory=ltm, user_id=user_id)
+def test_remember_tool_uses_construction_user_id(backend, user_id):
+    tool = RememberFactTool(backend=backend, user_id=user_id)
     result = tool.execute(tool.input_schema(content="x"))
-    fact = ltm.get(result["content"]["fact_id"])
+    fact = backend.get(result["content"]["fact_id"])
     assert fact.user_id == user_id
 
 
-def test_remember_tool_idempotent_on_duplicate(ltm, user_id):
-    tool = RememberFactTool(long_term_memory=ltm, user_id=user_id)
+def test_remember_tool_idempotent_on_duplicate(backend, user_id):
+    tool = RememberFactTool(backend=backend, user_id=user_id)
     a = tool.execute(tool.input_schema(content="x"))
     b = tool.execute(tool.input_schema(content="x"))
     assert a["content"]["fact_id"] == b["content"]["fact_id"]
     assert b["content"]["outcome"] == "unchanged"
 
 
-def test_remember_tool_accepts_metadata(ltm, user_id):
-    tool = RememberFactTool(long_term_memory=ltm, user_id=user_id)
-    result = tool.execute(tool.input_schema(
-        content="x", metadata={"category": "preference"}))
-    fact = ltm.get(result["content"]["fact_id"])
+def test_remember_tool_accepts_metadata(backend, user_id):
+    tool = RememberFactTool(backend=backend, user_id=user_id)
+    result = tool.execute(tool.input_schema(content="x", metadata={"category": "preference"}))
+    fact = backend.get(result["content"]["fact_id"])
     assert fact.metadata == {"category": "preference"}
 
 
-def test_remember_tool_agent_optimized_returns_status_string(ltm, user_id):
+def test_remember_tool_agent_optimized_returns_status_string(backend, user_id):
     """Agent-mode output is a short human-readable status, not a dict."""
-    tool = RememberFactTool(long_term_memory=ltm, user_id=user_id)
+    tool = RememberFactTool(backend=backend, user_id=user_id)
     tool.is_optimized_for_agents = True
 
     created = tool.execute(tool.input_schema(content="User likes pizza"))
@@ -64,12 +55,8 @@ def test_remember_tool_agent_optimized_returns_status_string(ltm, user_id):
 
 def test_remember_tool_agent_optimized_reports_update(fake_embedder, user_id):
     """Agent-mode upsert renders as 'Fact updated.'"""
-    ltm = LongTermMemory(
-        backend=InMemoryLongTermMemoryBackend(),
-        embedder=fake_embedder,
-        upsert_threshold=0.0,
-    )
-    tool = RememberFactTool(long_term_memory=ltm, user_id=user_id)
+    backend = InMemoryLongTermMemoryBackend(embedder=fake_embedder, upsert_threshold=0.0)
+    tool = RememberFactTool(backend=backend, user_id=user_id)
     tool.is_optimized_for_agents = True
 
     tool.execute(tool.input_schema(content="User likes pizza"))
@@ -80,10 +67,10 @@ def test_remember_tool_agent_optimized_reports_update(fake_embedder, user_id):
 # --- RecallFactsTool ---
 
 
-def test_recall_tool_returns_hits(ltm, user_id):
-    ltm.remember(content="User likes pizza", user_id=user_id)
-    ltm.remember(content="User likes Python", user_id=user_id)
-    tool = RecallFactsTool(long_term_memory=ltm, user_id=user_id)
+def test_recall_tool_returns_hits(backend, user_id):
+    backend.remember(content="User likes pizza", user_id=user_id)
+    backend.remember(content="User likes Python", user_id=user_id)
+    tool = RecallFactsTool(backend=backend, user_id=user_id)
     result = tool.execute(tool.input_schema(query="pizza", limit=2))
     items = result["content"]
     assert len(items) == 2
@@ -98,25 +85,25 @@ def test_recall_tool_input_schema_has_no_user_id():
     assert {"query", "limit"} <= set(RecallFactsTool.input_schema.model_fields)
 
 
-def test_recall_tool_isolates_users(ltm, user_id, other_user_id):
-    ltm.remember(content="A's fact", user_id=user_id)
-    ltm.remember(content="B's fact", user_id=other_user_id)
-    tool = RecallFactsTool(long_term_memory=ltm, user_id=user_id)
+def test_recall_tool_isolates_users(backend, user_id, other_user_id):
+    backend.remember(content="A's fact", user_id=user_id)
+    backend.remember(content="B's fact", user_id=other_user_id)
+    tool = RecallFactsTool(backend=backend, user_id=user_id)
     result = tool.execute(tool.input_schema(query="fact", limit=5))
     contents = {item["content"] for item in result["content"]}
     assert contents == {"A's fact"}
 
 
-def test_recall_tool_empty_store_returns_empty(ltm, user_id):
-    tool = RecallFactsTool(long_term_memory=ltm, user_id=user_id)
+def test_recall_tool_empty_store_returns_empty(backend, user_id):
+    tool = RecallFactsTool(backend=backend, user_id=user_id)
     result = tool.execute(tool.input_schema(query="anything"))
     assert result["content"] == []
 
 
-def test_recall_tool_agent_optimized_returns_bullet_list(ltm, user_id):
-    ltm.remember(content="User likes pizza", user_id=user_id)
-    ltm.remember(content="User likes Python", user_id=user_id)
-    tool = RecallFactsTool(long_term_memory=ltm, user_id=user_id)
+def test_recall_tool_agent_optimized_returns_bullet_list(backend, user_id):
+    backend.remember(content="User likes pizza", user_id=user_id)
+    backend.remember(content="User likes Python", user_id=user_id)
+    tool = RecallFactsTool(backend=backend, user_id=user_id)
     tool.is_optimized_for_agents = True
     result = tool.execute(tool.input_schema(query="pizza", limit=2))
     assert isinstance(result["content"], str)
@@ -124,8 +111,8 @@ def test_recall_tool_agent_optimized_returns_bullet_list(ltm, user_id):
     assert "- User likes Python" in result["content"]
 
 
-def test_recall_tool_agent_optimized_empty_message(ltm, user_id):
-    tool = RecallFactsTool(long_term_memory=ltm, user_id=user_id)
+def test_recall_tool_agent_optimized_empty_message(backend, user_id):
+    tool = RecallFactsTool(backend=backend, user_id=user_id)
     tool.is_optimized_for_agents = True
     result = tool.execute(tool.input_schema(query="anything"))
     assert result["content"] == "No relevant facts."
@@ -134,33 +121,28 @@ def test_recall_tool_agent_optimized_empty_message(ltm, user_id):
 # --- factory ---
 
 
-def test_factory_builds_default_two_tools(ltm, user_id):
-    tools = build_long_term_memory_tools(long_term_memory=ltm, user_id=user_id)
+def test_factory_builds_default_two_tools(backend, user_id):
+    tools = build_long_term_memory_tools(backend=backend, user_id=user_id)
     assert {t.name for t in tools} == {"remember_fact", "recall_facts"}
 
 
-def test_factory_respects_include(ltm, user_id):
-    tools = build_long_term_memory_tools(
-        long_term_memory=ltm, user_id=user_id, include=("recall",),
-    )
+def test_factory_respects_include(backend, user_id):
+    tools = build_long_term_memory_tools(backend=backend, user_id=user_id, include=("recall",))
     assert [t.name for t in tools] == ["recall_facts"]
 
 
-def test_factory_bakes_user_id_into_each_tool(ltm, user_id):
-    tools = build_long_term_memory_tools(long_term_memory=ltm, user_id=user_id)
+def test_factory_bakes_user_id_into_each_tool(backend, user_id):
+    tools = build_long_term_memory_tools(backend=backend, user_id=user_id)
     for tool in tools:
         assert tool.user_id == user_id
 
 
-def test_factory_ignores_unknown_include_keys(ltm, user_id):
-    tools = build_long_term_memory_tools(
-        long_term_memory=ltm, user_id=user_id,
-        include=("recall", "unknown", "forget"),
-    )
+def test_factory_ignores_unknown_include_keys(backend, user_id):
+    tools = build_long_term_memory_tools(backend=backend, user_id=user_id, include=("recall", "unknown", "forget"))
     assert [t.name for t in tools] == ["recall_facts"]
 
 
-def test_factory_skips_enum_members_missing_from_builders(ltm, user_id, monkeypatch):
+def test_factory_skips_enum_members_missing_from_builders(backend, user_id, monkeypatch):
     """Valid `MemoryToolKind` values without a `_TOOL_BUILDERS` entry must be
     silently skipped, not KeyError. Mirrors the unknown-string branch so the
     docstring's "unknown keys are ignored" promise actually holds."""
@@ -169,7 +151,7 @@ def test_factory_skips_enum_members_missing_from_builders(ltm, user_id, monkeypa
 
     monkeypatch.setattr(ltm_tools_module, "_TOOL_BUILDERS", {MemoryToolKind.RECALL: ltm_tools_module.RecallFactsTool})
     tools = build_long_term_memory_tools(
-        long_term_memory=ltm,
+        backend=backend,
         user_id=user_id,
         include=(MemoryToolKind.REMEMBER, MemoryToolKind.RECALL),
     )
@@ -179,26 +161,25 @@ def test_factory_skips_enum_members_missing_from_builders(ltm, user_id, monkeypa
 # --- serialization ---
 
 
-def test_remember_tool_to_dict_round_trips_long_term_memory(ltm, user_id):
-    """`to_dict` must not auto-dump `long_term_memory` (it holds runtime clients).
+def test_remember_tool_to_dict_excludes_live_backend(backend, user_id):
+    """`to_dict` must not auto-dump `backend` (it holds runtime clients + embedder).
 
     The default `model_dump` would try to JSON-encode the embedder's connection
     and the backend's live client, blowing up tracing callbacks. The tool base
-    excludes the field and re-adds it via `LongTermMemory.to_dict()`.
+    excludes the field and re-adds it via `LongTermMemoryBackend.to_dict()`.
     """
-    tool = RememberFactTool(long_term_memory=ltm, user_id=user_id)
+    tool = RememberFactTool(backend=backend, user_id=user_id)
     data = tool.to_dict()
-    assert "long_term_memory" in data
-    ltm_dump = data["long_term_memory"]
-    assert isinstance(ltm_dump, dict)
-    assert "backend" in ltm_dump and isinstance(ltm_dump["backend"], dict)
-    assert "embedder" in ltm_dump and isinstance(ltm_dump["embedder"], dict)
+    assert "backend" in data
+    backend_dump = data["backend"]
+    assert isinstance(backend_dump, dict)
+    assert "embedder" in backend_dump and isinstance(backend_dump["embedder"], dict)
 
 
-def test_remember_tool_to_dict_accepts_include_secure_params(ltm, user_id):
-    """`include_secure_params=True` must propagate through tool → LTM → backend → connection
+def test_remember_tool_to_dict_accepts_include_secure_params(backend, user_id):
+    """`include_secure_params=True` must propagate through tool → backend → connection
     without raising. Connection.to_dict swallows the kwarg; backends pass it through."""
-    tool = RememberFactTool(long_term_memory=ltm, user_id=user_id)
+    tool = RememberFactTool(backend=backend, user_id=user_id)
     data = tool.to_dict(include_secure_params=True)
-    assert "long_term_memory" in data
-    assert "backend" in data["long_term_memory"]
+    assert "backend" in data
+    assert "embedder" in data["backend"]
