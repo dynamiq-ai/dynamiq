@@ -366,18 +366,31 @@ class Agent(HistoryManagerMixin, BaseAgent):
         provider converters). Here we reverse that: if the tool declares a
         dict-typed field and the model supplied a JSON string for it, parse it
         back so the tool's Pydantic schema validates the real dict.
+
+        Recurses into nested ``BaseModel`` fields so a free-form dict declared on a
+        sub-model is coerced too (mirrors ``_strip_nulls_for_fields``). Without this
+        a stringified dict nested inside a sub-model would never be parsed back and
+        the nested model's validation would reject the ``str``.
         """
-        fields = tool.input_schema.model_fields
+        self._coerce_json_for_fields(tool.input_schema.model_fields, action_input)
+        return action_input
+
+    def _coerce_json_for_fields(self, fields: Mapping[str, Any], data: Any) -> None:
+        if not isinstance(data, dict):
+            return
         for name, field in fields.items():
-            value = action_input.get(name)
+            value = data.get(name)
             if isinstance(value, str) and self._annotation_is_dict_like(field.annotation):
                 stripped = value.strip()
                 if stripped.startswith("{") and stripped.endswith("}"):
                     try:
-                        action_input[name] = json.loads(stripped)
+                        data[name] = json.loads(stripped)
                     except json.JSONDecodeError:
                         pass  # leave as string; Pydantic will surface the error
-        return action_input
+            elif isinstance(value, dict):
+                nested_model = self._extract_basemodel(field.annotation)
+                if nested_model is not None:
+                    self._coerce_json_for_fields(nested_model.model_fields, value)
 
     def _strip_protocol_nulls(self, tool: Node, action_input: dict) -> dict:
         """Drop ``None`` values for fields whose Pydantic annotation rejects None.
