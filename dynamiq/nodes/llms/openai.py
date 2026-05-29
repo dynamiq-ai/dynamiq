@@ -36,18 +36,21 @@ def _add_null_to_type(prop: Any) -> Any:
     Handles plain types (``"x"`` → ``["x", "null"]``), type arrays, and complex
     ``anyOf`` unions (adds a ``{"type": "null"}`` branch). No-op if already nullable
     or if it's a stringified free-form object.
+
+    The input is never mutated: a shallow copy is returned when a change is needed,
+    otherwise the original object is returned unchanged.
     """
     if not isinstance(prop, dict):
         return prop
     t = prop.get("type")
     if isinstance(t, str) and t != "null":
-        prop["type"] = [t, "null"]
-    elif isinstance(t, list) and "null" not in t:
-        prop["type"] = [*t, "null"]
-    elif "anyOf" in prop:
+        return {**prop, "type": [t, "null"]}
+    if isinstance(t, list) and "null" not in t:
+        return {**prop, "type": [*t, "null"]}
+    if "anyOf" in prop:
         branches = prop["anyOf"]
         if not any(isinstance(b, dict) and b.get("type") == "null" for b in branches):
-            prop["anyOf"] = [*branches, {"type": "null"}]
+            return {**prop, "anyOf": [*branches, {"type": "null"}]}
     return prop
 
 

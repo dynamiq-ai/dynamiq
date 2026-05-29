@@ -1077,18 +1077,25 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
         ``action_input`` is a JSON object in the current schema (tool args, or
         ``{"answer": ...}`` for finish), though older models may still emit a plain
-        string. Try the string form first, then fall back to the brace-delimited
-        object form. For finish, prefer the nested ``answer`` string so only the
-        answer text streams, not the wrapping object.
+        string.
+
+        Answer path: the final answer lives in the nested ``answer`` string (or, for
+        older models, ``action_input`` emitted as a plain string). We deliberately do
+        NOT fall back to the brace-delimited ``action_input`` object here. Object mode
+        could win a chunk-boundary race — locking in before the nested ``answer`` key
+        has streamed into the buffer — and would then emit the raw ``{"answer": ...}``
+        wrapper instead of just the answer text, diverging from the non-streaming
+        output which extracts ``action_input["answer"]``.
+
+        Tool-input path: ``action_input`` is genuinely an object, so the object form
+        is the correct fallback.
         """
         if self._current_state is not None:
             return
         if self._answer_started:
             if self._initialize_json_field_state(buf, JSONStreamingField.ANSWER.value, StreamingState.ANSWER):
                 return
-            if self._initialize_json_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.ANSWER):
-                return
-            self._initialize_json_object_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.ANSWER)
+            self._initialize_json_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.ANSWER)
         elif self._tool_input_started:
             if self._initialize_json_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT):
                 return

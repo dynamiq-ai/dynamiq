@@ -896,13 +896,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 if tc_tool is not None:
                     self._coerce_json_fields(tc_tool, tc_input)
                     self._strip_protocol_nulls(tc_tool, tc_input)
-                    try:
-                        tc_tool.input_schema.model_validate(tc_input)
-                    except Exception as e:
-                        raise ActionParsingException(
-                            f"Tool call for '{tc_name}' has invalid arguments: {e}",
-                            recoverable=True,
-                        )
                 tool_items.append(
                     ToolCallItem(
                         name=tc_name,
@@ -933,13 +926,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if tool is not None:
             self._coerce_json_fields(tool, action_input)
             self._strip_protocol_nulls(tool, action_input)
-            try:
-                tool.input_schema.model_validate(action_input)
-            except Exception as e:
-                raise ActionParsingException(
-                    f"Tool call for '{action}' has invalid arguments: {e}",
-                    recoverable=True,
-                )
 
         self.log_reasoning(thought, action, action_input, loop_num)
         return thought, action, action_input

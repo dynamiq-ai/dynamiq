@@ -271,10 +271,39 @@ def _handle_tool_result(event_name, content, tool_blocks, reasoning_blocks, run_
     return run_parallel_count
 
 
-def _handle_answer(event_name, reasoning_blocks):
-    """Pop reasoning block on answer event."""
-    if event_name == "answer" and reasoning_blocks:
+def _handle_answer(event_name, content, reasoning_blocks, answer_chunks):
+    """Pop reasoning block on answer event and accumulate answer chunks."""
+    if event_name != "answer":
+        return
+    if reasoning_blocks:
         reasoning_blocks.pop(0)
+    if isinstance(content, str):
+        answer_chunks.append(content)
+    elif isinstance(content, dict) and isinstance(content.get("answer"), str):
+        answer_chunks.append(content["answer"])
+
+
+def _assert_answer_clean(answer_chunks: list[str]) -> None:
+    """Assert the streamed answer is the answer text itself, not the raw wrapper.
+
+    Regression guard: an SO finish answer lives under ``action_input["answer"]``.
+    A chunk-boundary race used to lock the stream onto the brace-delimited
+    ``action_input`` object and emit the whole ``{"answer": "..."}`` wrapper
+    instead of just the answer text, diverging from the non-streaming output.
+    Reject an accumulated answer that parses as a JSON object exposing an
+    ``answer`` key — that means the wrapper leaked into the stream.
+    """
+    accumulated = "".join(answer_chunks).strip()
+    if not accumulated.startswith("{"):
+        return
+    try:
+        decoded = json.loads(accumulated)
+    except json.JSONDecodeError:
+        return
+    assert not (isinstance(decoded, dict) and "answer" in decoded), (
+        "Streamed answer leaked the action_input wrapper instead of the answer text. "
+        f"Accumulated answer: {accumulated!r}"
+    )
 
 
 def _track_parallel_individual_post_parse(content, idx, parallel_post_parse_tids):
@@ -494,6 +523,7 @@ def _run_fsm_fc(ordered_events, streaming_mode):
     state = State.INIT
     visited = {state}
     reasoning_blocks: list[str] = []
+    answer_chunks: list[str] = []
     tool_blocks: dict[str, dict] = {}
     run_parallel_count = 0
     parallel_post_parse_tids: set[str] = set()
@@ -580,12 +610,13 @@ def _run_fsm_fc(ordered_events, streaming_mode):
                 _validate_single_post_parse(content, tool_blocks, reasoning_blocks)
 
         run_parallel_count = _handle_tool_result(event_name, content, tool_blocks, reasoning_blocks, run_parallel_count)
-        _handle_answer(event_name, reasoning_blocks)
+        _handle_answer(event_name, content, reasoning_blocks, answer_chunks)
 
         state = next_state
         visited.add(state)
 
     _assert_fsm_end(tool_blocks, reasoning_blocks, run_parallel_count, parallel_post_parse_tids)
+    _assert_answer_clean(answer_chunks)
     return state, visited, reasoning_blocks
 
 
@@ -603,6 +634,7 @@ def _run_fsm_blob(ordered_events, streaming_mode):
     state = State.INIT
     visited = {state}
     reasoning_blocks: list[str] = []
+    answer_chunks: list[str] = []
     tool_blocks: dict[str, dict] = {}
     run_parallel_count = 0
     parallel_post_parse_tids: set[str] = set()
@@ -661,12 +693,13 @@ def _run_fsm_blob(ordered_events, streaming_mode):
                 _validate_single_post_parse(content, tool_blocks, reasoning_blocks)
 
         run_parallel_count = _handle_tool_result(event_name, content, tool_blocks, reasoning_blocks, run_parallel_count)
-        _handle_answer(event_name, reasoning_blocks)
+        _handle_answer(event_name, content, reasoning_blocks, answer_chunks)
 
         state = next_state
         visited.add(state)
 
     _assert_fsm_end(tool_blocks, reasoning_blocks, run_parallel_count, parallel_post_parse_tids)
+    _assert_answer_clean(answer_chunks)
     return state, visited, reasoning_blocks
 
 
@@ -680,6 +713,7 @@ def _run_fsm_default(ordered_events, streaming_mode):
     state = State.INIT
     visited = {state}
     reasoning_blocks: list[str] = []
+    answer_chunks: list[str] = []
     run_parallel_count = 0
     tool_blocks: dict[str, dict] = {}
 
@@ -696,12 +730,13 @@ def _run_fsm_default(ordered_events, streaming_mode):
                 run_parallel_count += 1
 
         run_parallel_count = _handle_tool_result(event_name, content, tool_blocks, reasoning_blocks, run_parallel_count)
-        _handle_answer(event_name, reasoning_blocks)
+        _handle_answer(event_name, content, reasoning_blocks, answer_chunks)
 
         state = next_state
         visited.add(state)
 
     _assert_fsm_end(tool_blocks, reasoning_blocks, run_parallel_count)
+    _assert_answer_clean(answer_chunks)
     return state, visited, reasoning_blocks
 
 
