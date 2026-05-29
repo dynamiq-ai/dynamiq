@@ -1,6 +1,6 @@
 """Tests for the flat-args function-calling schema shape.
 
-Verifies that `generate_function_calling_schemas` produces schemas where:
+Verifies that the schema generator produces schemas where:
   * `thought` is the FIRST property (load-bearing for streaming UX and model
     chain-of-thought behavior).
   * Tool params are TOP-LEVEL siblings of `thought` (no `action_input` wrapper).
@@ -9,7 +9,6 @@ Verifies that `generate_function_calling_schemas` produces schemas where:
     contains no shapes OpenAI strict mode would reject.
 """
 
-from typing import Optional
 from unittest.mock import MagicMock
 
 import pytest
@@ -20,6 +19,12 @@ from dynamiq.nodes.agents.components.schema_generator import generate_function_c
 
 def _sanitize(name: str) -> str:
     return name
+
+
+def _gen(tool, delegation_allowed: bool = False):
+    return generate_function_calling_schemas(
+        tools=[tool], delegation_allowed=delegation_allowed, sanitize_tool_name=_sanitize
+    )
 
 
 def _make_tool(name: str, input_schema_cls: type[BaseModel] | None = None, description: str = "desc"):
@@ -42,7 +47,7 @@ class TestFlatArgsSchema:
             content: str = Field(..., description="Content")
 
         tool = _make_tool("file_write", _Schema)
-        schemas = generate_function_calling_schemas(tools=[tool], delegation_allowed=False, sanitize_tool_name=_sanitize)
+        schemas = _gen(tool)
         tool_schema = next(s for s in schemas if s["function"]["name"] == "file_write")
 
         properties = tool_schema["function"]["parameters"]["properties"]
@@ -58,7 +63,7 @@ class TestFlatArgsSchema:
             limit: int = Field(default=10, description="Max results")
 
         tool = _make_tool("search", _Schema)
-        schemas = generate_function_calling_schemas(tools=[tool], delegation_allowed=False, sanitize_tool_name=_sanitize)
+        schemas = _gen(tool)
         tool_schema = next(s for s in schemas if s["function"]["name"] == "search")
 
         properties = tool_schema["function"]["parameters"]["properties"]
@@ -72,7 +77,7 @@ class TestFlatArgsSchema:
             pass
 
         tool = _make_tool("ping", _Empty)
-        schemas = generate_function_calling_schemas(tools=[tool], delegation_allowed=False, sanitize_tool_name=_sanitize)
+        schemas = _gen(tool)
         tool_schema = next(s for s in schemas if s["function"]["name"] == "ping")
 
         properties = tool_schema["function"]["parameters"]["properties"]
@@ -86,7 +91,7 @@ class TestFlatArgsSchema:
             x: str = Field(..., description="X")
 
         tool = _make_tool("foo", _Schema)
-        schemas = generate_function_calling_schemas(tools=[tool], delegation_allowed=False, sanitize_tool_name=_sanitize)
+        schemas = _gen(tool)
 
         for schema in schemas:
             properties = schema["function"]["parameters"]["properties"]
@@ -98,7 +103,7 @@ class TestFlatArgsSchema:
             b: str = Field(..., description="B")
 
         tool = _make_tool("op", _Schema)
-        schemas = generate_function_calling_schemas(tools=[tool], delegation_allowed=False, sanitize_tool_name=_sanitize)
+        schemas = _gen(tool)
         tool_schema = next(s for s in schemas if s["function"]["name"] == "op")
 
         assert tool_schema["function"]["strict"] is True
@@ -108,10 +113,10 @@ class TestFlatArgsSchema:
     def test_strict_dropped_when_any_param_is_optional(self):
         class _Schema(BaseModel):
             required_field: str = Field(..., description="Required")
-            optional_field: Optional[str] = Field(default=None, description="Optional")
+            optional_field: str | None = Field(default=None, description="Optional")
 
         tool = _make_tool("op", _Schema)
-        schemas = generate_function_calling_schemas(tools=[tool], delegation_allowed=False, sanitize_tool_name=_sanitize)
+        schemas = _gen(tool)
         tool_schema = next(s for s in schemas if s["function"]["name"] == "op")
 
         assert tool_schema["function"]["strict"] is False
@@ -128,7 +133,7 @@ class TestFlatArgsSchema:
             x: str = Field(..., description="X")
 
         tool = _make_tool("foo", _Schema)
-        schemas = generate_function_calling_schemas(tools=[tool], delegation_allowed=False, sanitize_tool_name=_sanitize)
+        schemas = _gen(tool)
 
         for schema in schemas:
             if schema["function"]["name"] == "provide_final_answer":
@@ -145,7 +150,7 @@ class TestFlatArgsSchema:
             pass
 
         tool = _make_tool("ping", _Empty)
-        schemas = generate_function_calling_schemas(tools=[tool], delegation_allowed=False, sanitize_tool_name=_sanitize)
+        schemas = _gen(tool)
         tool_schema = next(s for s in schemas if s["function"]["name"] == "ping")
 
         assert tool_schema["function"]["strict"] is True
@@ -157,13 +162,13 @@ class TestFinalAnswerSchema:
             x: str = Field(..., description="X")
 
         tool = _make_tool("foo", _Schema)
-        schemas = generate_function_calling_schemas(tools=[tool], delegation_allowed=False, sanitize_tool_name=_sanitize)
+        schemas = _gen(tool)
 
         assert schemas[0]["function"]["name"] == "provide_final_answer"
 
     def test_final_answer_keeps_thought_first(self):
         tool = _make_tool("foo", None)
-        schemas = generate_function_calling_schemas(tools=[tool], delegation_allowed=False, sanitize_tool_name=_sanitize)
+        schemas = _gen(tool)
 
         properties = schemas[0]["function"]["parameters"]["properties"]
         assert list(properties.keys())[0] == "thought"
@@ -193,11 +198,7 @@ class TestSubAgentDelegateFinal:
     def test_delegate_final_is_top_level_sibling_not_nested(self, _sub_agent_tool):
         """In flat-args mode, `delegate_final` lives at the top level alongside the
         agent tool's own params (e.g. `input`), not inside an `action_input` wrapper."""
-        schemas = generate_function_calling_schemas(
-            tools=[_sub_agent_tool],
-            delegation_allowed=True,
-            sanitize_tool_name=_sanitize,
-        )
+        schemas = _gen(_sub_agent_tool, delegation_allowed=True)
         tool_schema = next(s for s in schemas if s["function"]["name"] == "Researcher")
         properties = tool_schema["function"]["parameters"]["properties"]
 
