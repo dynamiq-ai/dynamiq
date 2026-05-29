@@ -366,6 +366,17 @@ def _match_action_input(accumulated: str, expected) -> bool:
             return True
         attempts.append(f"decoded==expected: {decoded!r} == {expected!r} -> False")
 
+        # Strict null-default handling: under OpenAI strict, optional non-nullable fields
+        # are emitted as ``null`` ("use default") and stripped before the tool receives
+        # them (see _strip_protocol_nulls). The streamed tool_input is the raw model
+        # output and still carries those nulls, so prune null-valued keys absent from the
+        # (post-strip) expected action_input before comparing.
+        if isinstance(decoded, dict) and isinstance(expected, dict):
+            pruned = {k: v for k, v in decoded.items() if not (v is None and k not in expected)}
+            if pruned == expected:
+                return True
+            attempts.append(f"pruned==expected: {pruned!r} == {expected!r} -> False")
+
         if isinstance(expected, dict) and "input" in expected:
             inner = expected["input"]
             if decoded == inner:

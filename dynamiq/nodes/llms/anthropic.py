@@ -131,18 +131,44 @@ def _clean_anthropic_strict_schema(schema: Any) -> Any:
     for key, value in schema.items():
         if key in _ANTHROPIC_STRICT_UNSUPPORTED_KEYWORDS:
             continue
+        if key == "default" and value is None:
+            # A null default conveys optionality, which Anthropic expresses via
+            # ``required`` omission. Drop it so it can't clash with a now non-null type.
+            continue
         if key == "minItems" and isinstance(value, int) and value > 1:
             continue
         if key == "format" and value not in _ANTHROPIC_STRICT_FORMAT_ALLOWED:
             continue
-        if key == "properties" and isinstance(value, dict):
+        if key == "type" and isinstance(value, list):
+            # Anthropic conveys optionality by omitting the field from ``required``,
+            # not via a null-union. Strip ``null`` so a nullable scalar/enum keeps a
+            # single declared type (e.g. ``["string", "null"]`` -> ``"string"``);
+            # Anthropic rejects an enum whose declared type is ``["string", "null"]``.
+            non_null = [t for t in value if t != "null"]
+            cleaned["type"] = non_null[0] if len(non_null) == 1 else (non_null or value)
+        elif key == "properties" and isinstance(value, dict):
             cleaned["properties"] = {k: _clean_anthropic_strict_schema(v) for k, v in value.items()}
         elif key == "items" and isinstance(value, dict):
             cleaned["items"] = _clean_anthropic_strict_schema(value)
         elif key in ("anyOf", "oneOf", "allOf") and isinstance(value, list):
-            cleaned[key] = [_clean_anthropic_strict_schema(v) if isinstance(v, dict) else v for v in value]
+            branches = [_clean_anthropic_strict_schema(v) if isinstance(v, dict) else v for v in value]
+            if key in ("anyOf", "oneOf"):
+                # Drop the ``{"type": "null"}`` branch — nullability is conveyed by
+                # leaving the field out of ``required`` (Anthropic's native shape).
+                non_null = [b for b in branches if not (isinstance(b, dict) and b.get("type") == "null")]
+                branches = non_null or branches
+            cleaned[key] = branches
         else:
             cleaned[key] = value
+
+    # Inline a single-branch anyOf/oneOf left over after dropping the null branch, so
+    # Anthropic sees a plain typed schema (e.g. a nullable enum) instead of a 1-item union.
+    for union_key in ("anyOf", "oneOf"):
+        branches = cleaned.get(union_key)
+        if isinstance(branches, list) and len(branches) == 1 and isinstance(branches[0], dict):
+            del cleaned[union_key]
+            for k, v in branches[0].items():
+                cleaned.setdefault(k, v)
 
     cleaned_type = cleaned.get("type")
     if cleaned_type == "object" or (isinstance(cleaned_type, list) and "object" in cleaned_type):

@@ -107,9 +107,12 @@ For questions that don't require tools:
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
 ## Single Action Per Turn
-- Execute exactly ONE <action>/<action_input> pair per response, then wait for its Observation before continuing
-- Do NOT include multiple action blocks or answer blocks in the same response
-- After receiving an Observation, decide the next single action based on the result
+- Emit EXACTLY ONE <output>...</output> block per response. Never write a second <output> block.
+- A response either takes an action (<action>/<action_input>) OR gives an <answer> — never both in the same response.
+- When you write an <action>, STOP immediately after </output>. Do NOT continue, do NOT write an "Observation:",
+  a tool result, or an <answer> — the Observation is given back to you by the system, not written by you.
+- NEVER predict, assume, or fabricate the tool's Observation/result. Wait for the real Observation to be returned,
+  then decide your next single action (or final answer) based on it in your NEXT response.
 
 ## JSON Formatting Requirements
 - Put JSON on single line within tags
