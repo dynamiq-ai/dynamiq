@@ -70,8 +70,22 @@ class VectorStoreRetriever(Node):
         description="Default alpha for hybrid retrieval. 0 is keyword-only, 1 is semantic-only.",
     )
     similarity_threshold: float | None = None
-
+    agent_metadata_fields: list[str] | None = Field(
+        default_factory=lambda: [
+            "score",
+            "title",
+            "source_url",
+            "url",
+            "source",
+        ],
+        description="Metadata fields to include when this retriever is used as an agent tool.",
+    )
+    skip_empty_metadata: bool = Field(
+        default=True,
+        description="Whether to omit null and empty metadata values from formatted retrieval output.",
+    )
     input_schema: ClassVar[type[VectorStoreRetrieverInputSchema]] = VectorStoreRetrieverInputSchema
+    _METADATA_SCORE_PRECISION: ClassVar[int] = 3
     _EXCLUDED_METADATA_FIELDS: ClassVar[tuple[str, ...]] = (
         "embedding",
         "embeddings",
@@ -146,7 +160,11 @@ class VectorStoreRetriever(Node):
             data["document_reranker"] = self.document_reranker.to_dict(**kwargs)
         return data
 
-    def format_content(self, documents: list[Document], metadata_fields: list[str] | None = None) -> str:
+    def format_content(
+        self,
+        documents: list[Document],
+        metadata_fields: list[str] | None = None,
+    ) -> str:
         """Format the retrieved documents' metadata and content.
 
         Args:
@@ -158,54 +176,59 @@ class VectorStoreRetriever(Node):
         """
         formatted_docs: list[str] = []
 
-        normalized_metadata_fields: list[str] | None = None
-        include_score = False
-        if metadata_fields is not None:
-            seen_fields: set[str] = set()
-            cleaned_fields: list[str] = []
-            for field in metadata_fields:
-                stripped = field.strip() if field else ""
-                if not stripped:
-                    continue
-                lowered = stripped.lower()
-                if lowered in seen_fields:
-                    continue
-                if lowered == "score":
-                    include_score = True
-                    seen_fields.add(lowered)
-                    continue
-                seen_fields.add(lowered)
-                cleaned_fields.append(stripped)
-
-            if cleaned_fields:
-                normalized_metadata_fields = cleaned_fields
-            elif include_score:
-                normalized_metadata_fields = []
+        requested_metadata_fields, include_score = self._normalize_metadata_fields(metadata_fields)
 
         for index, doc in enumerate(documents):
             metadata = doc.metadata or {}
             metadata_lines: list[str] = []
 
-            if normalized_metadata_fields is not None:
-                if include_score and doc.score is not None:
-                    metadata_lines.append(self._format_metadata_line("Score", doc.score))
-            else:
-                if doc.score is not None:
-                    metadata_lines.append(self._format_metadata_line("Score", doc.score))
+            if (requested_metadata_fields is None or include_score) and doc.score is not None:
+                metadata_lines.append(self._format_metadata_line("Score", self._format_score(doc.score)))
 
-            metadata_lines.extend(self._generate_metadata_lines(metadata, normalized_metadata_fields))
+            metadata_lines.extend(self._generate_metadata_lines(metadata, requested_metadata_fields))
 
-            metadata_block = "\n\n".join(metadata_lines) if metadata_lines else "No metadata available."
-            content_block = doc.content or ""
+            metadata_block = "\n".join(metadata_lines) if metadata_lines else "No metadata available."
+            content_block = (doc.content or "").strip()
 
             formatted_doc = (
-                f"\n\n== Source {index + 1} ==\n\n"
-                f"\n\n== Metadata ==\n{metadata_block}\n\n"
-                f"\n\n== Content (Source {index + 1}) ==\n\n{content_block}"
+                f"--- Retrieved Source {index + 1} ---\n"
+                f"Metadata:\n{metadata_block}\n\n"
+                f"Content:\n{content_block}\n"
+                f"--- End Source {index + 1} ---"
             ).rstrip()
             formatted_docs.append(formatted_doc)
 
         return "\n\n".join(formatted_docs)
+
+    def _format_score(self, score: Any) -> Any:
+        if not isinstance(score, (float, int)):
+            return score
+        return round(score, self._METADATA_SCORE_PRECISION)
+
+    @staticmethod
+    def _normalize_metadata_fields(metadata_fields: list[str] | None) -> tuple[list[str] | None, bool]:
+        if metadata_fields is None:
+            return None, False
+
+        include_score = False
+        seen_fields: set[str] = set()
+        cleaned_fields: list[str] = []
+        for field in metadata_fields:
+            stripped = field.strip() if field else ""
+            if not stripped:
+                continue
+
+            lowered = stripped.lower()
+            if lowered in seen_fields:
+                continue
+
+            seen_fields.add(lowered)
+            if lowered == "score":
+                include_score = True
+            else:
+                cleaned_fields.append(stripped)
+
+        return cleaned_fields, include_score
 
     @staticmethod
     def _prettify_field_name(field_name: str) -> str:
@@ -313,6 +336,9 @@ class VectorStoreRetriever(Node):
                 )
             return
 
+        if self.skip_empty_metadata and self._is_empty_metadata_value(value):
+            return
+
         yield (label_parts or ["Metadata"]), raw_parts, value
 
     def _generate_metadata_lines(
@@ -324,50 +350,25 @@ class VectorStoreRetriever(Node):
             return []
 
         base_entries = list(self._iter_metadata_entries(metadata, requested_fields))
-
-        expected_source_entries = (
-            base_entries if requested_fields is None else list(self._iter_metadata_entries(metadata, None))
-        )
-
-        expected_entries: list[tuple[list[str], list[str], Any]] = []
-        expected_paths: set[tuple[str, ...]] = set()
-        for display_parts, raw_parts, value in expected_source_entries:
-            if not self._contains_expected_keyword(raw_parts):
-                continue
-            path_key = self._normalize_raw_path(raw_parts)
-            if path_key in expected_paths:
-                continue
-            expected_entries.append((display_parts, raw_parts, value))
-            expected_paths.add(path_key)
-
-        seen_paths: set[tuple[str, ...]] = set()
-        lines_by_path: dict[tuple[str, ...], str] = {}
-        general_lines: list[str] = []
-
-        for display_parts, raw_parts, value in base_entries:
-            path_key = self._normalize_raw_path(raw_parts)
-            if path_key in seen_paths:
-                continue
-            seen_paths.add(path_key)
-            line = self._format_metadata_line(" - ".join(display_parts), value)
-            lines_by_path[path_key] = line
-            if path_key not in expected_paths:
-                general_lines.append(line)
-
-        expected_lines: list[str] = []
-        for display_parts, raw_parts, value in expected_entries:
-            path_key = self._normalize_raw_path(raw_parts)
-            if path_key not in seen_paths:
-                line = self._format_metadata_line(" - ".join(display_parts), value)
-                lines_by_path[path_key] = line
-                seen_paths.add(path_key)
-            expected_lines.append(lines_by_path[path_key])
-
-        return general_lines + expected_lines
+        base_entries.sort(key=lambda entry: not self._contains_expected_keyword(entry[1]))
+        return [
+            self._format_metadata_line(" - ".join(display_parts), value) for display_parts, _, value in base_entries
+        ]
 
     @staticmethod
-    def _normalize_raw_path(raw_parts: list[str]) -> tuple[str, ...]:
-        return tuple(part.lower() for part in raw_parts)
+    def _is_empty_metadata_value(value: Any) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, str):
+            return not value.strip()
+        if isinstance(value, (list, tuple, set, dict)):
+            return len(value) == 0
+        return False
+
+    def _resolve_formatted_metadata_fields(self) -> list[str] | None:
+        if self.is_optimized_for_agents:
+            return self.agent_metadata_fields
+        return None
 
     @classmethod
     def _should_exclude_metadata_key(cls, key: str) -> bool:
@@ -487,7 +488,10 @@ class VectorStoreRetriever(Node):
                     f"Documents: {docs_before_rerank} -> {len(retrieved_documents)}"
                 )
 
-            result = self.format_content(retrieved_documents)
+            result = self.format_content(
+                retrieved_documents,
+                metadata_fields=self._resolve_formatted_metadata_fields(),
+            )
             logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
             return {"content": result, "documents": retrieved_documents}
