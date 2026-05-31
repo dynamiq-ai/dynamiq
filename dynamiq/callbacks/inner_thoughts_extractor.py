@@ -32,6 +32,9 @@ class JSONInnerThoughtsExtractor:
         self.inner_thoughts_processed: bool = False
         self.hold_main_json: bool = wait_for_first_key
 
+        # Deferred top-level separator: emitted before the next main field, or dropped.
+        self.pending_comma: bool = False
+
         # Top-level transitions only fire at depth == 1; deeper structures pass through.
         self.depth: int = 0
 
@@ -119,7 +122,9 @@ class JSONInnerThoughtsExtractor:
         if c == ":" and self.state == "colon":
             return self._handle_colon()
 
-        if c == "," and self.state == "comma_or_end":
+        # A top-level comma always ends the current value — including after a
+        # number/array/object value, where state stays "value" (no closing quote).
+        if c == "," and self.state in ("comma_or_end", "value"):
             return self._handle_comma()
 
         if self.state == "value":
@@ -146,8 +151,6 @@ class JSONInnerThoughtsExtractor:
             # Opening quote.
             if self.depth >= 2:
                 # Inside nested value — passthrough.
-                if self.is_inner_thoughts_value and self.depth == 1:
-                    return "", self._emit_thought('"')
                 return self._emit_main('"'), ""
 
             if self.state in ("start", "comma_or_end"):
@@ -208,20 +211,14 @@ class JSONInnerThoughtsExtractor:
                 return "", self._emit_thought("}")
             return self._emit_main("}"), ""
 
-        # Outermost `}` — strip dangling comma (thought-last case) before closing.
-        if self.hold_main_json:
-            stripped = self.main_json_held_buffer.rstrip()
-            if stripped.endswith(","):
-                self.main_json_held_buffer = stripped[:-1]
-            self.main_json_held_buffer += "}"
-            self.state = "end"
-            return "", ""
-
-        if self.main_buffer.rstrip().endswith(","):
-            stripped = self.main_buffer.rstrip()
-            self.main_buffer = stripped[:-1]
-        self.main_buffer += "}"
+        # Outermost `}`. A deferred separator (thought-last case) is dropped:
+        # nothing follows it, so no comma was ever emitted to revoke.
+        self.pending_comma = False
         self.state = "end"
+        if self.hold_main_json:
+            self.main_json_held_buffer += "}"
+            return "", ""
+        self.main_buffer += "}"
         return "}", ""
 
     def _handle_close_bracket(self) -> tuple[str, str]:
@@ -237,7 +234,10 @@ class JSONInnerThoughtsExtractor:
         if self.is_inner_thoughts_value:
             # Skip the `"thought":` prefix from main.
             return "", ""
-        return self._emit_main(f'"{self.current_key}":'), ""
+        # Surface any deferred separator right before this field's key.
+        prefix = "," if self.pending_comma else ""
+        self.pending_comma = False
+        return self._emit_main(f'{prefix}"{self.current_key}":'), ""
 
     def _handle_comma(self) -> tuple[str, str]:
         """Top-level `,` — separates fields."""
@@ -247,5 +247,7 @@ class JSONInnerThoughtsExtractor:
             self.state = "start"
             return "", ""
 
+        # Defer the separator until the next main field confirms it's needed.
+        self.pending_comma = True
         self.state = "start"
-        return self._emit_main(","), ""
+        return "", ""

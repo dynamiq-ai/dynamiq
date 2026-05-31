@@ -190,3 +190,36 @@ class TestStreamingDeltas:
             md, _ = ext.process_fragment(chunk)
             mains.append(md)
         assert json.loads("".join(mains)) == {"q": "x", "r": "y"}
+
+
+class TestDeltaBufferInvariant:
+    """The streamed main deltas must always reconstruct ``main_buffer`` and valid JSON.
+
+    Guards against eagerly emitting a separator that is later only stripped from
+    the buffer — leaving a dangling comma in the delta stream (thought-last case).
+    """
+
+    RAWS = [
+        '{"thought":"hi","q":"x"}',
+        '{"q":"x","thought":"hi"}',  # thought last — the regression case
+        '{"a":"x","thought":"hi","b":"y"}',
+        '{"a":"x","b":"y"}',  # no thought
+        '{"thought":"hi","config":{"a":1,"b":2}}',
+        '{"a":"x","items":[1,2,3],"thought":"hi"}',
+    ]
+
+    @pytest.mark.parametrize("raw", RAWS)
+    @pytest.mark.parametrize("wait", [False, True])
+    def test_delta_sum_matches_buffer(self, raw, wait):
+        ext = JSONInnerThoughtsExtractor(wait_for_first_key=wait)
+        mains = []
+        for ch in raw:
+            md, _ = ext.process_fragment(ch)
+            mains.append(md)
+        streamed = "".join(mains)
+        # Core invariant: deltas reconstruct the buffer exactly (no phantom comma).
+        assert streamed == ext.main_buffer
+        # Effective output the streaming layer surfaces = deltas + drained held bytes.
+        effective = streamed + ext.held_main_buffer
+        parsed = json.loads(effective)
+        assert "thought" not in parsed
