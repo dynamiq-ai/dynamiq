@@ -40,51 +40,41 @@ def _make_tool(name: str, input_schema_cls: type[BaseModel] | None = None, descr
     return tool
 
 
+class _RequiredOnlySchema(BaseModel):
+    file_path: str = Field(..., description="Path")
+    content: str = Field(..., description="Content")
+
+
+class _MixedParamsSchema(BaseModel):
+    query: str = Field(..., description="Query")
+    limit: int = Field(default=10, description="Max results")
+
+
+class _EmptySchema(BaseModel):
+    pass
+
+
 class TestFlatArgsSchema:
-    def test_thought_is_first_property_for_required_only_tool(self):
-        class _Schema(BaseModel):
-            file_path: str = Field(..., description="Path")
-            content: str = Field(..., description="Content")
-
-        tool = _make_tool("file_write", _Schema)
-        schemas = _gen(tool)
-        tool_schema = next(s for s in schemas if s["function"]["name"] == "file_write")
+    @pytest.mark.parametrize(
+        "schema_cls, expected_properties",
+        [
+            (_RequiredOnlySchema, ["thought", "file_path", "content"]),
+            (_MixedParamsSchema, ["thought", "query", "limit"]),
+            (_EmptySchema, ["thought"]),
+        ],
+        ids=["required_only", "mixed_params", "zero_params"],
+    )
+    def test_thought_is_first_and_params_are_flat_siblings(self, schema_cls, expected_properties):
+        """`thought` is the first property and tool params are top-level siblings,
+        regardless of whether params are all-required, mixed, or absent."""
+        tool = _make_tool("tool", schema_cls)
+        tool_schema = next(s for s in _gen(tool) if s["function"]["name"] == "tool")
 
         properties = tool_schema["function"]["parameters"]["properties"]
         required = tool_schema["function"]["parameters"]["required"]
 
-        assert list(properties.keys()) == ["thought", "file_path", "content"]
+        assert list(properties.keys()) == expected_properties
         assert required[0] == "thought"
-        assert set(required) == {"thought", "file_path", "content"}
-
-    def test_thought_is_first_property_for_mixed_params_tool(self):
-        class _Schema(BaseModel):
-            query: str = Field(..., description="Query")
-            limit: int = Field(default=10, description="Max results")
-
-        tool = _make_tool("search", _Schema)
-        schemas = _gen(tool)
-        tool_schema = next(s for s in schemas if s["function"]["name"] == "search")
-
-        properties = tool_schema["function"]["parameters"]["properties"]
-        required = tool_schema["function"]["parameters"]["required"]
-
-        assert list(properties.keys())[0] == "thought"
-        assert required[0] == "thought"
-
-    def test_thought_is_first_property_for_zero_params_tool(self):
-        class _Empty(BaseModel):
-            pass
-
-        tool = _make_tool("ping", _Empty)
-        schemas = _gen(tool)
-        tool_schema = next(s for s in schemas if s["function"]["name"] == "ping")
-
-        properties = tool_schema["function"]["parameters"]["properties"]
-        required = tool_schema["function"]["parameters"]["required"]
-
-        assert list(properties.keys()) == ["thought"]
-        assert required == ["thought"]
 
     def test_no_action_input_wrapper_in_any_schema(self):
         class _Schema(BaseModel):

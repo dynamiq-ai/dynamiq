@@ -176,54 +176,6 @@ class TestFunctionCallingEdgeCases:
         assert thought == "t"
         assert action_input == {}
 
-    def test_legacy_wrapper_shape_still_parses(self):
-        """Back-compat: the old `{thought, action_input: {...}}` wrapper shape
-        is still accepted by `parse_as_tool_call` and normalized to flat args.
-        Protects replayed conversations and any model that still emits the old shape.
-        """
-        from dynamiq.nodes.agents.agent import Agent
-
-        agent = _make_agent()
-        llm_result = SimpleNamespace(
-            output={
-                "tool_calls": [
-                    {"function": {"name": "search", "arguments": {"thought": "t", "action_input": {"q": "a"}}}},
-                ]
-            }
-        )
-
-        thought, action, action_input = Agent._handle_function_calling_mode(agent, llm_result, loop_num=1)
-
-        assert action == "search"
-        assert thought == "t"
-        assert action_input == {"q": "a"}
-
-    def test_legacy_wrapper_shape_with_string_action_input(self):
-        """Back-compat: the old wrapper shape with a JSON-stringified action_input
-        (the original double-encoding bug) is still parsed correctly via the shim.
-        """
-        from dynamiq.nodes.agents.agent import Agent
-
-        agent = _make_agent()
-        llm_result = SimpleNamespace(
-            output={
-                "tool_calls": [
-                    {
-                        "function": {
-                            "name": "search",
-                            "arguments": {"thought": "t", "action_input": json.dumps({"q": "a"})},
-                        }
-                    },
-                ]
-            }
-        )
-
-        thought, action, action_input = Agent._handle_function_calling_mode(agent, llm_result, loop_num=1)
-
-        assert action == "search"
-        assert thought == "t"
-        assert action_input == {"q": "a"}
-
     def test_final_answer(self):
         from dynamiq.nodes.agents.agent import Agent
 

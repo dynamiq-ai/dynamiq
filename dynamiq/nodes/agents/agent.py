@@ -47,8 +47,7 @@ class ToolCallArguments(BaseModel):
     """Flat function-calling arguments: `thought` sibling of the tool's real params.
 
     Tool params arrive via Pydantic's `extra="allow"` and are extracted via
-    `to_action_input()`. The legacy `{thought, action_input: {...}}` wrapper
-    shape is normalized into this flat form by `FunctionCall.parse_as_tool_call`.
+    `to_action_input()`.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -96,17 +95,8 @@ class FunctionCall(BaseModel):
         return v or {}
 
     def parse_as_tool_call(self) -> ToolCallArguments:
-        args = self.arguments
-        if "action_input" in args and set(args.keys()) <= {"thought", "action_input"}:
-            inner = args["action_input"]
-            if isinstance(inner, str):
-                try:
-                    inner = json.loads(inner, strict=False)
-                except json.JSONDecodeError:
-                    inner = {}
-            args = {"thought": args.get("thought", ""), **(inner if isinstance(inner, dict) else {})}
         try:
-            return ToolCallArguments.model_validate(args)
+            return ToolCallArguments.model_validate(self.arguments)
         except Exception:
             raise ActionParsingException(
                 "Your tool call is missing required fields. "
