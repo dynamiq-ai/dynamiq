@@ -640,3 +640,49 @@ def test_agent_structured_output_finish_with_json_string_action_input():
     assert action == "final_answer"
     coerced = agent._coerce_to_response_format(action_input)
     assert coerced == {"title": "HP"}
+
+
+def test_coerce_json_fields_recurses_into_nested_model():
+    """A stringified free-form dict nested inside a sub-model is coerced back to a dict.
+
+    Strict mode ships a free-form ``dict[str, Any]`` as a JSON-encoded string. For a
+    dict declared on a nested model (``FilterOptions.metadata``), ``_coerce_json_fields``
+    must recurse into the sub-model and parse it back -- otherwise the string survives
+    and the nested model's Pydantic validation rejects it.
+    """
+    from typing import Any, ClassVar, Literal
+
+    from pydantic import BaseModel, Field
+
+    from dynamiq.nodes import Node, NodeGroup
+
+    class FilterOptions(BaseModel):
+        min_score: float = Field(default=0.0)
+        metadata: dict[str, Any] = Field(default_factory=dict)
+
+    class ComprehensiveInputSchema(BaseModel):
+        text: str
+        filters: FilterOptions | None = None
+
+    class ComprehensiveTool(Node):
+        group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+        name: str = "Comprehensive Tool"
+        input_schema: ClassVar[type[ComprehensiveInputSchema]] = ComprehensiveInputSchema
+
+        def execute(self, input_data, config=None, **kwargs):
+            return {}
+
+    tool = ComprehensiveTool()
+    agent = _make_agent()
+
+    action_input = {
+        "text": "hello",
+        "filters": {"min_score": 0.5, "metadata": '{"source": "web", "score": 1}'},
+    }
+
+    agent._coerce_json_fields(tool, action_input)
+
+    # Nested free-form dict string parsed back into a dict.
+    assert action_input["filters"]["metadata"] == {"source": "web", "score": 1}
+    # Non-string nested values are left untouched.
+    assert action_input["filters"]["min_score"] == 0.5

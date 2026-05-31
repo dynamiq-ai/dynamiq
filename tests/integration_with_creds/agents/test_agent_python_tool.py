@@ -59,6 +59,9 @@ class ComprehensiveInputSchema(BaseModel):
     Nullable:
         int|None (with ge/le), int|None (bare, no Field), str|None, bool|None,
         Enum|None, list[str]|None, Model|None
+    Nested:
+        Model|None whose sub-model carries a free-form dict[str, Any]
+        (FilterOptions.metadata) -- exercises nested strict-string coercion
     Special:
         is_accessible_to_agent=False, ConfigDict(extra='allow')
     """
@@ -354,33 +357,3 @@ def test_comprehensive_schema_tool_modes(llm_fixture, comprehensive_tool, run_co
     _run_comprehensive_schema_test(
         llm, comprehensive_tool, run_config, inference_mode, f"{provider}-{inference_mode.value}"
     )
-
-
-def test_coerce_json_fields_recurses_into_nested_model(comprehensive_tool):
-    """A stringified free-form dict nested inside a sub-model is coerced back to a dict.
-
-    Strict mode ships a free-form ``dict[str, Any]`` as a JSON-encoded string. For a
-    dict declared on a nested model (``FilterOptions.metadata``), ``_coerce_json_fields``
-    must recurse into the sub-model and parse it back — otherwise the string survives
-    and the nested model's Pydantic validation rejects it. No LLM call is made; the
-    dummy connection just satisfies Agent construction.
-    """
-    agent = Agent(
-        name="coerce-test",
-        llm=OpenAI(connection=OpenAIConnection(api_key="dummy"), model="gpt-5.4-mini"),
-        tools=[comprehensive_tool],
-    )
-
-    action_input = {
-        "text": "hello",
-        "action_type": "analyze",
-        "output_name": "out",
-        "filters": {"min_score": 0.5, "metadata": '{"source": "web", "score": 1}'},
-    }
-
-    agent._coerce_json_fields(comprehensive_tool, action_input)
-
-    # Nested free-form dict string parsed back into a dict.
-    assert action_input["filters"]["metadata"] == {"source": "web", "score": 1}
-    # Non-string nested values are left untouched.
-    assert action_input["filters"]["min_score"] == 0.5
