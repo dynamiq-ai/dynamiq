@@ -531,14 +531,22 @@ def test_generate_function_calling_schemas(openai_node, mock_tool):
     assert "thought" in final_answer_schema["function"]["parameters"]["properties"]
     assert "answer" in final_answer_schema["function"]["parameters"]["properties"]
 
-    # Verify all schemas have required structure
+    # Verify all schemas have required structure and flat-args shape
     for schema in schemas:
         assert "type" in schema
         assert schema["type"] == "function"
         assert "function" in schema
         assert "name" in schema["function"]
         assert "parameters" in schema["function"]
-        assert "properties" in schema["function"]["parameters"]
+        parameters = schema["function"]["parameters"]
+        properties = parameters["properties"]
+        assert "properties" in parameters
+        # Flat-args: no action_input wrapper, tool params (if any) are top-level siblings of thought
+        assert "action_input" not in properties
+        # thought is the first property (load-bearing for streaming UX and model behavior)
+        assert next(iter(properties)) == "thought"
+        # thought is in required
+        assert parameters["required"][0] == "thought"
 
 
 def test_agent_injects_file_store_into_python_code_executor(openai_node, mock_llm_executor):

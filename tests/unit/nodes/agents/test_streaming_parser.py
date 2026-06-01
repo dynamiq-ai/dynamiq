@@ -88,24 +88,6 @@ def _make_fc_callback(tool_input_started=False, answer_started=False, action_nam
     "buf, tool_input_started, answer_started, action_name, expected_state, expected_fc_object",
     [
         pytest.param(
-            '{"action_input": {"query": "hello"',
-            True,
-            False,
-            "exa_search",
-            StreamingState.TOOL_INPUT,
-            True,
-            id="object_action_input",
-        ),
-        pytest.param(
-            '{"action_input": "sub-query text',
-            True,
-            False,
-            "sub_agent",
-            StreamingState.TOOL_INPUT,
-            False,
-            id="string_action_input",
-        ),
-        pytest.param(
             '{"answer": "Here is the result',
             False,
             True,
@@ -128,6 +110,9 @@ def _make_fc_callback(tool_input_started=False, answer_started=False, action_nam
 def test_process_json_mode_function_calling(
     buf, tool_input_started, answer_started, action_name, expected_state, expected_fc_object
 ):
+    """ANSWER path (provide_final_answer) still routes through ``_process_json_mode``.
+    Real FC tool calls go through the inline extractor and don't touch this method.
+    """
     cb = _make_fc_callback(
         tool_input_started=tool_input_started,
         answer_started=answer_started,
