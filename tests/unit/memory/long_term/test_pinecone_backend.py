@@ -191,6 +191,16 @@ def test_pinecone_delete_scope_empty_returns_zero(backend):
     assert backend.delete_scope({"user_id": "nobody"}) == 0
 
 
+def test_pinecone_delete_scope_paginates_beyond_single_page(backend, fake_embedder, monkeypatch):
+    """clear_user on users with more facts than fit in one query page must still
+    delete everything and report the true count — not silently cap at one page."""
+    monkeypatch.setattr(backend, "_LIST_PAGE_SIZE", 2)
+    for i in range(5):
+        backend.insert(_fact(f"f{i}", "u1", f"c{i}"), fake_embedder.embed(f"c{i}"))
+    assert backend.delete_scope({"user_id": "u1"}) == 5
+    assert backend.list_by_scope({"user_id": "u1"}) == []
+
+
 # --- search ----------------------------------------------------------------
 
 

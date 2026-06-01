@@ -188,18 +188,23 @@ class PineconeLongTermMemoryBackend(LongTermMemoryBackend):
 
     def delete_scope(self, scope: dict[str, str]) -> int:
         # Pinecone Serverless does NOT support delete-by-filter — only delete-by-id.
-        # To stay portable across serverless and pod, we collect ids via query + filter,
-        # then delete by ids. This also gives us an accurate return count.
-        result = self._index.query(
-            vector=[0.0] * self.dimension,
-            top_k=self._LIST_PAGE_SIZE,
-            namespace=self.namespace,
-            filter=_scope_to_filter(scope),
-            include_metadata=False,
-        )
-        matches = result.get("matches") if isinstance(result, dict) else getattr(result, "matches", [])
-        ids = [match["id"] if isinstance(match, dict) else match.id for match in matches]
-        if not ids:
-            return 0
-        self._index.delete(ids=ids, namespace=self.namespace)
-        return len(ids)
+        # And Pinecone's query API has no cursor, so we loop: query → delete the
+        # matched ids → query again until the page comes back empty. Without the
+        # loop, scopes with >`_LIST_PAGE_SIZE` facts (10k) would silently leak.
+        total = 0
+        flt = _scope_to_filter(scope)
+        while True:
+            result = self._index.query(
+                vector=[0.0] * self.dimension,
+                top_k=self._LIST_PAGE_SIZE,
+                namespace=self.namespace,
+                filter=flt,
+                include_metadata=False,
+            )
+            matches = result.get("matches") if isinstance(result, dict) else getattr(result, "matches", [])
+            ids = [match["id"] if isinstance(match, dict) else match.id for match in matches]
+            if not ids:
+                break
+            self._index.delete(ids=ids, namespace=self.namespace)
+            total += len(ids)
+        return total
