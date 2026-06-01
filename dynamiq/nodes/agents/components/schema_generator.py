@@ -525,7 +525,7 @@ def generate_function_calling_schemas(
                 "type": "function",
                 "function": {
                     "name": sanitize_tool_name(tool.name),
-                    "description": tool.description[:1024],
+                    "description": (tool.description or "")[:1024],
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -549,7 +549,7 @@ def generate_function_calling_schemas(
                 "type": "function",
                 "function": {
                     "name": sanitize_tool_name(tool.name),
-                    "description": tool.description[:1024],
+                    "description": (tool.description or "")[:1024],
                     "parameters": {
                         "type": "object",
                         "properties": {
