@@ -10,7 +10,7 @@ from datetime import datetime
 from functools import cached_property
 from queue import Empty
 from types import FunctionType, ModuleType
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Union
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
 from uuid import uuid4
 
 from jinja2 import Template
@@ -303,9 +303,35 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: type[BaseModel] | None = None
+    agent_param_modes: dict[str, Literal["required", "hidden"]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-field overrides for how this tool's optional input parameters are exposed to an agent, keyed "
+            "by input_schema field name. 'required' = make the optional param required (agent must provide it); "
+            "'hidden' = omit the param from the agent (the field's own default is used). JSON/YAML serializable; "
+            "empty = use schema defaults."
+        ),
+    )
     callbacks: list[NodeCallbackHandler] = []
+    _resolved_input_schema: type[BaseModel] | None = PrivateAttr(default=None)
     _json_schema_fields: ClassVar[list[str]] = []
     _clone_init_methods_names: ClassVar[list[str]] = ["reset_run_state"]
+
+    @property
+    def agent_input_schema(self) -> type[BaseModel] | None:
+        """Input schema as exposed to an agent, with ``agent_param_modes`` applied.
+
+        Identical to ``input_schema`` when no overrides are set. The transformed model is
+        cached so both LLM schema generation and execution validation share one source of
+        truth (see ``apply_param_modes``).
+        """
+        if not self.agent_param_modes or not self.input_schema:
+            return self.input_schema
+        if self._resolved_input_schema is None:
+            from dynamiq.nodes.agents.components.schema_generator import apply_param_modes
+
+            self._resolved_input_schema = apply_param_modes(self.input_schema, self.agent_param_modes)
+        return self._resolved_input_schema
 
     @model_validator(mode="after")
     def validate_streaming_vs_error_handling_timeout(self):
@@ -524,11 +550,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         Raises:
             NodeException: If input data does not match the input schema.
         """
-        if self.input_schema:
+        schema = self.agent_input_schema
+        if schema:
             try:
-                return self.input_schema.model_validate(
-                    input_data, context=kwargs | self.get_context_for_input_schema()
-                )
+                return schema.model_validate(input_data, context=kwargs | self.get_context_for_input_schema())
             except Exception as e:
                 if kwargs.get("recoverable_error", False):
                     from dynamiq.nodes.agents.exceptions import RecoverableAgentException

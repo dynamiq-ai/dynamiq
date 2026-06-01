@@ -1,13 +1,17 @@
 """Schema generation for Agent function calling and structured output modes."""
 
+import copy
 import types
 from enum import Enum
 from typing import Any, Callable, Literal, Union, get_args, get_origin
 
-from pydantic import BaseModel
+from pydantic import BaseModel, create_model
+from pydantic_core import PydanticUndefined
 
 from dynamiq.nodes.node import Node
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
+
+AgentParamMode = Literal["required", "hidden"]
 
 TYPE_MAPPING = {
     int: "integer",
@@ -119,6 +123,70 @@ def _reorder_fields(fields: dict) -> list[tuple[str, Any]]:
     return priority + rest
 
 
+def apply_param_modes(schema: type[BaseModel], param_modes: dict[str, AgentParamMode]) -> type[BaseModel]:
+    """Return a copy of ``schema`` with per-field agent exposure tuned.
+
+    The override rewrites the Pydantic model itself (not a parallel config) so the
+    LLM-facing tool schema and the execution-time validation stay consistent — both
+    are derived from the returned model. Both modes act on optional fields only.
+
+    Modes (keyed by ``input_schema`` field name):
+        * ``required`` -- an optional field becomes required (its default is dropped),
+          so the agent must always supply it.
+        * ``hidden``   -- the field is marked ``is_accessible_to_agent=False`` so it is
+          omitted from the agent-facing schema; the field's own default is used at
+          execution time. A required field cannot be hidden (it would have no value).
+
+    Args:
+        schema: The tool's input schema model.
+        param_modes: Mapping of field name to desired mode. Empty leaves the schema
+            untouched (current behavior).
+
+    Returns:
+        A new model subclassing ``schema`` with the requested fields adjusted, or
+        ``schema`` unchanged when ``param_modes`` is empty.
+
+    Raises:
+        ValueError: if a key is not a field of ``schema``, a mode is invalid, or a
+            required field is requested to be hidden.
+    """
+    if not param_modes:
+        return schema
+
+    unknown = set(param_modes) - set(schema.model_fields)
+    if unknown:
+        raise ValueError(f"Unknown field(s) in param_modes for {schema.__name__}: {sorted(unknown)}")
+
+    field_overrides: dict[str, Any] = {}
+    for name, mode in param_modes.items():
+        if mode not in ("required", "hidden"):
+            raise ValueError(f"Invalid mode {mode!r} for field {name!r}; expected 'required' or 'hidden'.")
+
+        field = copy.deepcopy(schema.model_fields[name])
+
+        if mode == "required":
+            field.default = PydanticUndefined
+            field.default_factory = None
+        elif mode == "hidden":
+            if field.is_required():
+                raise ValueError(
+                    f"Field {name!r} is required and cannot be hidden (it would have no value at execution); "
+                    "give it a default first."
+                )
+            extra = dict(field.json_schema_extra or {})
+            extra["is_accessible_to_agent"] = False
+            field.json_schema_extra = extra
+
+        field_overrides[name] = (field.annotation, field)
+
+    return create_model(
+        schema.__name__,
+        __base__=schema,
+        __module__=schema.__module__,
+        **field_overrides,
+    )
+
+
 def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str], str]) -> str:
     """
     Generate formatted input descriptions for each tool.
@@ -133,7 +201,7 @@ def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str]
     input_formats = []
     for tool in tools:
         params = []
-        for name, field in _reorder_fields(tool.input_schema.model_fields):
+        for name, field in _reorder_fields(tool.agent_input_schema.model_fields):
             if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
                 args = get_args(field.annotation)
                 if get_origin(field.annotation) in (Union, types.UnionType):
@@ -416,9 +484,9 @@ def generate_function_calling_schemas(
     for tool in tools:
         properties = {}
         required_fields = []
-        input_params = tool.input_schema.model_fields.items()
+        input_params = tool.agent_input_schema.model_fields.items()
         if list(input_params):
-            for name, field in tool.input_schema.model_fields.items():
+            for name, field in tool.agent_input_schema.model_fields.items():
                 generate_property_schema(properties, name, field)
                 if field.is_required() and name in properties:
                     required_fields.append(name)

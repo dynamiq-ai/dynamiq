@@ -639,3 +639,63 @@ def test_agent_structured_output_finish_with_json_string_action_input():
     assert action == "final_answer"
     coerced = agent._coerce_to_response_format(action_input)
     assert coerced == {"title": "HP"}
+
+
+def test_agent_uses_resolved_schema_for_param_modes():
+    """The Agent builds the tool schema it sends to the LLM from the RESOLVED input
+    schema (agent_param_modes applied), not the raw input_schema.
+
+    Baseline: an optional field is exposed and not required. 'hidden' omits it from
+    what the agent exposes; 'required' makes the agent oblige the LLM to provide it.
+    """
+    import uuid
+    from typing import ClassVar, Literal
+
+    from pydantic import BaseModel, Field
+
+    from dynamiq import connections, prompts
+    from dynamiq.nodes import Node, NodeGroup
+    from dynamiq.nodes.agents import Agent
+    from dynamiq.nodes.llms import OpenAI
+    from dynamiq.nodes.types import InferenceMode
+
+    class EchoInput(BaseModel):
+        text: str = Field(..., description="Required text.")
+        suffix: str = Field(default="", description="Optional suffix to append.")
+
+    class EchoTool(Node):
+        group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+        name: str = "echo"
+        input_schema: ClassVar[type] = EchoInput
+
+        def execute(self, input_data, config=None, **kwargs):
+            return {"content": input_data.text + input_data.suffix}
+
+    def build_agent(tool):
+        conn = connections.OpenAI(id=str(uuid.uuid4()), api_key="fake-key")
+        llm = OpenAI(
+            name="LLM",
+            model="gpt-4o-mini",
+            connection=conn,
+            prompt=prompts.Prompt(messages=[prompts.Message(role="user", content="{{input}}")]),
+        )
+        return Agent(name="echo-agent", llm=llm, tools=[tool], inference_mode=InferenceMode.FUNCTION_CALLING)
+
+    def echo_action_input(agent):
+        """The action_input the agent exposes to the LLM for the echo tool."""
+        fn = next(s for s in agent._tools if s["function"]["name"] == "echo")["function"]
+        action_input = fn["parameters"]["properties"]["action_input"]
+        return action_input.get("properties", {}), set(action_input.get("required", []))
+
+    # Baseline: the agent exposes optional 'suffix' and does not require it.
+    base_props, base_required = echo_action_input(build_agent(EchoTool()))
+    assert "suffix" in base_props
+    assert "suffix" not in base_required
+
+    # hidden: the agent no longer exposes 'suffix' to the LLM at all.
+    hidden_props, _ = echo_action_input(build_agent(EchoTool(agent_param_modes={"suffix": "hidden"})))
+    assert "suffix" not in hidden_props
+
+    # required: the agent now obliges the LLM to provide 'suffix'.
+    _, required_required = echo_action_input(build_agent(EchoTool(agent_param_modes={"suffix": "required"})))
+    assert "suffix" in required_required

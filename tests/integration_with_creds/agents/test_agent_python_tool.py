@@ -214,7 +214,9 @@ def anthropic_llm():
 
 @pytest.fixture(scope="module")
 def comprehensive_tool():
-    return ComprehensiveTool()
+    # Hide optional fields from the agent: they are omitted from the tool schema the
+    # LLM sees and fall back to their defaults at execution.
+    return ComprehensiveTool(agent_param_modes={"language": "hidden", "label": "hidden"})
 
 
 def run_and_assert_agent(agent: Agent, agent_input, expected_length, run_config):
