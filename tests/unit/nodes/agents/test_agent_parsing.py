@@ -643,7 +643,7 @@ def test_agent_structured_output_finish_with_json_string_action_input():
 
 def test_agent_uses_resolved_schema_for_param_modes():
     """The Agent builds the tool schema it sends to the LLM from the RESOLVED input
-    schema (agent_param_modes applied), not the raw input_schema.
+    schema (input_param_modes applied), not the raw input_schema.
 
     Baseline: an optional field is exposed and not required. 'hidden' omits it from
     what the agent exposes; 'required' makes the agent oblige the LLM to provide it.
@@ -657,7 +657,7 @@ def test_agent_uses_resolved_schema_for_param_modes():
     from dynamiq.nodes import Node, NodeGroup
     from dynamiq.nodes.agents import Agent
     from dynamiq.nodes.llms import OpenAI
-    from dynamiq.nodes.types import InferenceMode
+    from dynamiq.nodes.types import InferenceMode, InputParamMode
 
     class EchoInput(BaseModel):
         text: str = Field(..., description="Required text.")
@@ -693,11 +693,13 @@ def test_agent_uses_resolved_schema_for_param_modes():
     assert "suffix" not in base_required
 
     # hidden: the agent no longer exposes 'suffix' to the LLM at all.
-    hidden_props, _ = echo_action_input(build_agent(EchoTool(agent_param_modes={"suffix": "hidden"})))
+    hidden_props, _ = echo_action_input(build_agent(EchoTool(input_param_modes={"suffix": InputParamMode.HIDDEN})))
     assert "suffix" not in hidden_props
 
     # required: the agent now obliges the LLM to provide 'suffix'.
-    _, required_required = echo_action_input(build_agent(EchoTool(agent_param_modes={"suffix": "required"})))
+    _, required_required = echo_action_input(
+        build_agent(EchoTool(input_param_modes={"suffix": InputParamMode.REQUIRED}))
+    )
     assert "suffix" in required_required
 
 

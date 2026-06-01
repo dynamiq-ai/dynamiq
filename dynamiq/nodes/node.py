@@ -10,7 +10,7 @@ from datetime import datetime
 from functools import cached_property
 from queue import Empty
 from types import FunctionType, ModuleType
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Union
 from uuid import uuid4
 
 from jinja2 import Template
@@ -34,7 +34,7 @@ from dynamiq.nodes.exceptions import (
     NodeFailedException,
     NodeSkippedException,
 )
-from dynamiq.nodes.types import ActionType, Behavior, ChoiceCondition, NodeGroup
+from dynamiq.nodes.types import ActionType, Behavior, ChoiceCondition, InputParamMode, NodeGroup
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
 from dynamiq.storages.vector.base import BaseVectorStoreParams
@@ -303,13 +303,15 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: type[BaseModel] | None = None
-    agent_param_modes: dict[str, Literal["required", "hidden"]] = Field(
+    input_param_modes: dict[str, InputParamMode] = Field(
         default_factory=dict,
         description=(
-            "Per-field overrides for how this tool's optional input parameters are exposed to an agent, keyed "
-            "by input_schema field name. 'required' = make the optional param required (agent must provide it); "
-            "'hidden' = omit the param from the agent (the field's own default is used). JSON/YAML serializable; "
-            "empty = use schema defaults."
+            "Per-field overrides for this node's optional input parameters, keyed by input_schema field name. "
+            "Rewrites the input_schema model that drives BOTH the agent-facing tool schema and execution-time "
+            "validation (agent and standalone runs alike). 'required' = make the optional param required (its "
+            "default is dropped, so it must always be provided); 'hidden' = omit the param from the agent-facing "
+            "schema (the field's own default is used; standalone callers may still pass it). JSON/YAML "
+            "serializable; empty = use schema defaults."
         ),
     )
     callbacks: list[NodeCallbackHandler] = []
@@ -319,18 +321,18 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
     @property
     def agent_input_schema(self) -> type[BaseModel] | None:
-        """Input schema as exposed to an agent, with ``agent_param_modes`` applied.
+        """Input schema as exposed to an agent, with ``input_param_modes`` applied.
 
         Identical to ``input_schema`` when no overrides are set. The transformed model is
         cached so both LLM schema generation and execution validation share one source of
         truth (see ``apply_param_modes``).
         """
-        if not self.agent_param_modes or not self.input_schema:
+        if not self.input_param_modes or not self.input_schema:
             return self.input_schema
         if self._resolved_input_schema is None:
             from dynamiq.nodes.agents.components.schema_generator import apply_param_modes
 
-            self._resolved_input_schema = apply_param_modes(self.input_schema, self.agent_param_modes)
+            self._resolved_input_schema = apply_param_modes(self.input_schema, self.input_param_modes)
         return self._resolved_input_schema
 
     @model_validator(mode="after")

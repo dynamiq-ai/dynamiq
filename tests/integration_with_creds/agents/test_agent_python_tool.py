@@ -13,7 +13,7 @@ from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import Anthropic, OpenAI
 from dynamiq.nodes.tools.python import Python
-from dynamiq.nodes.types import InferenceMode
+from dynamiq.nodes.types import InferenceMode, InputParamMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from dynamiq.utils.logger import logger
@@ -216,7 +216,7 @@ def anthropic_llm():
 def comprehensive_tool():
     # Hide optional fields from the agent: they are omitted from the tool schema the
     # LLM sees and fall back to their defaults at execution.
-    return ComprehensiveTool(agent_param_modes={"language": "hidden", "label": "hidden"})
+    return ComprehensiveTool(input_param_modes={"language": InputParamMode.HIDDEN, "label": InputParamMode.HIDDEN})
 
 
 def run_and_assert_agent(agent: Agent, agent_input, expected_length, run_config):

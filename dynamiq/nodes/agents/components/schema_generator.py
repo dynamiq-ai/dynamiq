@@ -10,8 +10,7 @@ from pydantic_core import PydanticUndefined
 
 from dynamiq.nodes.node import Node
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
-
-AgentParamMode = Literal["required", "hidden"]
+from dynamiq.nodes.types import InputParamMode
 
 TYPE_MAPPING = {
     int: "integer",
@@ -123,7 +122,7 @@ def _reorder_fields(fields: dict) -> list[tuple[str, Any]]:
     return priority + rest
 
 
-def apply_param_modes(schema: type[BaseModel], param_modes: dict[str, AgentParamMode]) -> type[BaseModel]:
+def apply_param_modes(schema: type[BaseModel], param_modes: dict[str, InputParamMode]) -> type[BaseModel]:
     """Return a copy of ``schema`` with per-field agent exposure tuned.
 
     The override rewrites the Pydantic model itself (not a parallel config) so the
@@ -160,12 +159,14 @@ def apply_param_modes(schema: type[BaseModel], param_modes: dict[str, AgentParam
 
     field_overrides: dict[str, Any] = {}
     for name, mode in param_modes.items():
-        if mode not in ("required", "hidden"):
+        try:
+            mode = InputParamMode(mode)
+        except ValueError:
             raise ValueError(f"Invalid mode {mode!r} for field {name!r}; expected 'required' or 'hidden'.")
 
         field = copy.deepcopy(schema.model_fields[name])
 
-        if mode == "required":
+        if mode == InputParamMode.REQUIRED:
             if field.json_schema_extra and field.json_schema_extra.get("is_accessible_to_agent", True) is False:
                 raise ValueError(
                     f"Field {name!r} is not exposed to the agent (is_accessible_to_agent=False) and cannot be "
@@ -173,7 +174,7 @@ def apply_param_modes(schema: type[BaseModel], param_modes: dict[str, AgentParam
                 )
             field.default = PydanticUndefined
             field.default_factory = None
-        elif mode == "hidden":
+        elif mode == InputParamMode.HIDDEN:
             if field.is_required():
                 raise ValueError(
                     f"Field {name!r} is required and cannot be hidden (it would have no value at execution); "
