@@ -508,19 +508,14 @@ def generate_function_calling_schemas(
                 }
 
             has_optional = len(required_fields) < len(properties)
-            use_strict = _is_strict_compatible(properties) and not has_optional
-
-            action_input_schema: dict[str, Any] = {
-                "type": "object",
-                "description": "Tool parameters as a JSON object, not a string.",
-                "properties": properties,
+            # Flat-args: prepend `thought` so it streams first and the model sees it before tool params.
+            properties = {
+                "thought": {"type": "string", "description": "Your reasoning about using this tool."},
+                **properties,
             }
-            if use_strict:
-                action_input_schema["required"] = list(properties.keys())
-                action_input_schema["additionalProperties"] = False
-            else:
-                if required_fields:
-                    action_input_schema["required"] = required_fields
+            use_strict = _is_strict_compatible(properties) and not has_optional
+            required = ["thought", *properties.keys()] if use_strict else ["thought", *required_fields]
+            required = list(dict.fromkeys(required))
 
             schema = {
                 "type": "function",
@@ -529,15 +524,9 @@ def generate_function_calling_schemas(
                     "description": (tool.description or "")[:1024],
                     "parameters": {
                         "type": "object",
-                        "properties": {
-                            "thought": {
-                                "type": "string",
-                                "description": "Your reasoning about using this tool.",
-                            },
-                            "action_input": action_input_schema,
-                        },
+                        "properties": properties,
                         "additionalProperties": False,
-                        "required": ["thought", "action_input"],
+                        "required": required,
                     },
                     "strict": use_strict,
                 },
@@ -546,6 +535,10 @@ def generate_function_calling_schemas(
             schemas.append(schema)
 
         else:
+            # `extra="allow"` tools (e.g. generic Python) take arbitrary params:
+            # keep the object open and non-strict so the model can pass them as
+            # top-level siblings of `thought`. Real zero-param tools stay closed.
+            allows_extra = getattr(tool.input_schema, "model_config", {}).get("extra") == "allow"
             schema = {
                 "type": "function",
                 "function": {
@@ -558,15 +551,11 @@ def generate_function_calling_schemas(
                                 "type": "string",
                                 "description": "Your reasoning about using this tool.",
                             },
-                            "action_input": {
-                                "type": "string",
-                                "description": "Input for the selected tool in JSON string format.",
-                            },
                         },
-                        "additionalProperties": False,
-                        "required": ["thought", "action_input"],
+                        "additionalProperties": allows_extra,
+                        "required": ["thought"],
                     },
-                    "strict": True,
+                    "strict": not allows_extra,
                 },
             }
 

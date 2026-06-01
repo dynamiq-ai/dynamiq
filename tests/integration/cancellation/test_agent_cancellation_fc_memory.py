@@ -125,10 +125,13 @@ def test_sanitization_on_save_clears_orphan_from_memory():
     ), "expected _prompt.messages to retain the cancelled orphan tool_call (canonical state policy)"
 
 
-def test_fc_agent_recovers_when_tool_call_missing_required_argument():
-    """FC mode: LLM emits a tool_call whose arguments lack the required
-    `action_input` field. parse_as_tool_call raises ActionParsingException.
-    The agent appends a Correction Instruction and recovers on the next loop."""
+def test_fc_agent_recovers_when_tool_call_arguments_are_malformed_json():
+    """FC mode: LLM emits a tool_call whose ``arguments`` string is not valid JSON.
+
+    ``FunctionCall.parse_arguments`` raises ValueError → wrapped as
+    ActionParsingException → the agent appends a Correction Instruction user
+    message and recovers on the next loop.
+    """
     conn = connections.OpenAI(id="fake-conn", api_key="fake-key")
     llm = OpenAI(
         name="TestLLM",
@@ -150,7 +153,7 @@ def test_fc_agent_recovers_when_tool_call_missing_required_argument():
         max_loops=3,
     )
 
-    def _llm_missing_action_input(*_a, **_kw):
+    def _llm_malformed_arguments(*_a, **_kw):
         return RunnableResult(
             status=RunnableStatus.SUCCESS,
             input={},
@@ -158,9 +161,13 @@ def test_fc_agent_recovers_when_tool_call_missing_required_argument():
                 "content": "",
                 "tool_calls": [
                     {
-                        "id": "call_missing",
+                        "id": "call_bad",
                         "type": "function",
-                        "function": {"name": "search_tool", "arguments": '{"thought": "x"}'},
+                        "function": {
+                            "name": "search_tool",
+                            # Not valid JSON — triggers parse_arguments validator failure.
+                            "arguments": "not valid json {",
+                        },
                     }
                 ],
             },
@@ -185,7 +192,7 @@ def test_fc_agent_recovers_when_tool_call_missing_required_argument():
             },
         )
 
-    responses = iter([_llm_missing_action_input(), _llm_final()])
+    responses = iter([_llm_malformed_arguments(), _llm_final()])
     with patch.object(agent, "_run_llm", side_effect=lambda *a, **kw: next(responses)):
         result = agent.run(input_data={"input": "go"}, config=RunnableConfig())
         assert result.status == RunnableStatus.SUCCESS
@@ -195,5 +202,5 @@ def test_fc_agent_recovers_when_tool_call_missing_required_argument():
         for m in agent._prompt.messages
         if m.role == MessageRole.USER and "Correction Instruction" in (m.content or "")
     ]
-    assert recovery, "no recovery instruction added for missing required argument"
+    assert recovery, "no recovery instruction added for malformed tool_call arguments"
     assert "ActionParsingException" in recovery[-1].content
