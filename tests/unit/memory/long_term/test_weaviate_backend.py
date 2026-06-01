@@ -208,6 +208,35 @@ def test_weaviate_metadata_round_trip(backend, fake_embedder):
     assert backend.get("f1").metadata == {"category": "preference", "score": 0.8}
 
 
+def test_weaviate_construction_does_not_touch_collection(fake_embedder, monkeypatch):
+    """A fresh backend must construct cleanly without resolving the collection —
+    that lookup is deferred to first use so `ensure_collection()` can run after."""
+
+    class _StrictCollections:
+        def __init__(self) -> None:
+            self.get_called_with: list = []
+
+        def get(self, name):
+            self.get_called_with.append(name)
+            return _FakeCollection()
+
+    class _StrictClient:
+        def __init__(self) -> None:
+            self.collections = _StrictCollections()
+
+    client = _StrictClient()
+    monkeypatch.setattr(WeaviateConnection, "connect", lambda self: client)
+    backend = WeaviateLongTermMemoryBackend(
+        connection=WeaviateConnection(api_key="k", url="http://localhost"),
+        embedder=fake_embedder,
+        collection_name="UserFacts",
+        dimension=fake_embedder.DIM,
+    )
+    assert client.collections.get_called_with == []  # not yet resolved
+    _ = backend._collection  # first access resolves
+    assert client.collections.get_called_with == ["UserFacts"]
+
+
 def test_weaviate_fact_id_maps_to_deterministic_uuid():
     """Two backends must resolve the same fact_id to the same UUID — so a fact
     inserted by one process can be deleted by another via the original id."""

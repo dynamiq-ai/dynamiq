@@ -81,11 +81,10 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
     dimension: int = 1536
 
     _client: "WeaviateClient | None" = PrivateAttr(default=None)
-    _collection: Any = PrivateAttr(default=None)
 
     @property
     def to_dict_exclude_params(self) -> dict[str, bool]:
-        return super().to_dict_exclude_params | {"_client": True, "_collection": True, "connection": True}
+        return super().to_dict_exclude_params | {"_client": True, "connection": True}
 
     def to_dict(self, include_secure_params: bool = False, for_tracing: bool = False, **kwargs) -> dict[str, Any]:
         data = super().to_dict(include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs)
@@ -95,8 +94,17 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
         return data
 
     def model_post_init(self, __context) -> None:
+        # Only resolve the client here; the collection proxy is fetched lazily
+        # so backend construction does not depend on the collection already
+        # existing — callers can construct, call ensure_collection(), then use.
         self._client = self.connection.connect()
-        self._collection = self._client.collections.get(self.collection_name)
+
+    @property
+    def _collection(self):
+        """Lazy collection proxy. Re-fetched per access — the call is local to
+        the weaviate client (no network) and avoids stale state if the
+        collection is dropped/recreated between operations."""
+        return self._client.collections.get(self.collection_name)
 
     def ensure_collection(self) -> None:
         """Create the facts collection if absent. Safe to call repeatedly."""
@@ -120,7 +128,6 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
                 Property(name="updated_at", data_type=DataType.TEXT),
             ],
         )
-        self._collection = self._client.collections.get(self.collection_name)
 
     def recreate_collection(self) -> None:
         """Drop and re-create the facts collection. Test-only helper."""
