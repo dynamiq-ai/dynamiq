@@ -460,6 +460,10 @@ def generate_function_calling_schemas(
             schemas.append(schema)
 
         else:
+            # `extra="allow"` tools (e.g. generic Python) take arbitrary params:
+            # keep the object open and non-strict so the model can pass them as
+            # top-level siblings of `thought`. Real zero-param tools stay closed.
+            allows_extra = getattr(tool.input_schema, "model_config", {}).get("extra") == "allow"
             schema = {
                 "type": "function",
                 "function": {
@@ -473,10 +477,10 @@ def generate_function_calling_schemas(
                                 "description": "Your reasoning about using this tool.",
                             },
                         },
-                        "additionalProperties": False,
+                        "additionalProperties": allows_extra,
                         "required": ["thought"],
                     },
-                    "strict": True,
+                    "strict": not allows_extra,
                 },
             }
 

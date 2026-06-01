@@ -939,7 +939,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         if self._fc_extractor is None:
             self._fc_extractor = JSONInnerThoughtsExtractor(
                 inner_thoughts_key=JSONStreamingField.THOUGHT.value,
-                wait_for_first_key=True,
+                wait_for_first_key=self.agent.streaming.fc_wait_for_first_key,
             )
 
         delta = self._latest_fc_args_delta

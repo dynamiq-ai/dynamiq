@@ -145,6 +145,24 @@ class TestFlatArgsSchema:
 
         assert tool_schema["function"]["strict"] is True
 
+    def test_extra_allow_tool_is_open_and_non_strict(self):
+        """A no-declared-fields tool that accepts extras (e.g. the generic Python
+        tool) must stay OPEN: additionalProperties true and non-strict, so the model
+        can pass arbitrary params as top-level siblings of `thought`."""
+        from pydantic import ConfigDict
+
+        class _Dynamic(BaseModel):
+            model_config = ConfigDict(extra="allow")
+
+        tool = _make_tool("run_code", _Dynamic)
+        schemas = _gen(tool)
+        tool_schema = next(s for s in schemas if s["function"]["name"] == "run_code")
+        params = tool_schema["function"]["parameters"]
+
+        assert params["additionalProperties"] is True
+        assert tool_schema["function"]["strict"] is False
+        assert params["required"] == ["thought"]
+
 
 class TestFinalAnswerSchema:
     def test_final_answer_is_first_in_list(self):
