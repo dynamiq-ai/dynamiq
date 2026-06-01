@@ -139,6 +139,26 @@ def test_recall_tool_rejects_empty_queries_list():
         RecallFactsTool.input_schema(queries=[])
 
 
+def test_recall_tool_rejects_whitespace_only_query():
+    """A blank or whitespace-only entry must be caught at validation time, not
+    when the backend raises mid-execute."""
+    import pytest as _pytest
+
+    with _pytest.raises(Exception):
+        RecallFactsTool.input_schema(queries=["   "])
+    with _pytest.raises(Exception):
+        RecallFactsTool.input_schema(queries=["valid", ""])
+
+
+def test_recall_tool_strips_query_whitespace(backend, user_id):
+    """Surrounding whitespace must be stripped so leading/trailing spaces don't
+    affect the embedding (or cause spurious cache misses)."""
+    backend.remember(content="User likes pizza", user_id=user_id)
+    tool = RecallFactsTool(backend=backend, user_id=user_id)
+    result = tool.execute(tool.input_schema(queries=["  pizza  "]))
+    assert result["content"], "stripped query should still match the stored fact"
+
+
 # --- factory ---
 
 

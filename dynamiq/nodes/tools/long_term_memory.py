@@ -1,6 +1,6 @@
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from dynamiq.memory.long_term import LongTermMemoryBackend, MemoryToolKind, RememberOutcome
 from dynamiq.nodes.node import Node, ensure_config
@@ -88,6 +88,16 @@ class RecallFactsInputSchema(BaseModel):
     )
     limit: int = Field(default=5, ge=1, le=20,
                        description="Max facts to return after merging across queries.")
+
+    @field_validator("queries", mode="after")
+    @classmethod
+    def _strip_and_require_nonblank(cls, queries: list[str]) -> list[str]:
+        """Reject whitespace-only entries here so the model sees a clean
+        validation error, instead of the backend raising at recall time."""
+        cleaned = [q.strip() for q in queries]
+        if any(not q for q in cleaned):
+            raise ValueError("`queries` must not contain empty or whitespace-only strings")
+        return cleaned
 
 
 class _LongTermMemoryTool(Node):
