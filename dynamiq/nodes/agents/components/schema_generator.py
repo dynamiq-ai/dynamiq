@@ -147,8 +147,9 @@ def apply_param_modes(schema: type[BaseModel], param_modes: dict[str, AgentParam
         ``schema`` unchanged when ``param_modes`` is empty.
 
     Raises:
-        ValueError: if a key is not a field of ``schema``, a mode is invalid, or a
-            required field is requested to be hidden.
+        ValueError: if a key is not a field of ``schema``, a mode is invalid, a
+            required field is requested to be hidden, or a field that is already hidden
+            from the agent (``is_accessible_to_agent=False``) is requested to be required.
     """
     if not param_modes:
         return schema
@@ -165,6 +166,11 @@ def apply_param_modes(schema: type[BaseModel], param_modes: dict[str, AgentParam
         field = copy.deepcopy(schema.model_fields[name])
 
         if mode == "required":
+            if field.json_schema_extra and field.json_schema_extra.get("is_accessible_to_agent", True) is False:
+                raise ValueError(
+                    f"Field {name!r} is not exposed to the agent (is_accessible_to_agent=False) and cannot be "
+                    "made required; the agent could never supply it, so validation would always fail."
+                )
             field.default = PydanticUndefined
             field.default_factory = None
         elif mode == "hidden":

@@ -699,3 +699,23 @@ def test_agent_uses_resolved_schema_for_param_modes():
     # required: the agent now obliges the LLM to provide 'suffix'.
     _, required_required = echo_action_input(build_agent(EchoTool(agent_param_modes={"suffix": "required"})))
     assert "suffix" in required_required
+
+
+def test_apply_param_modes_required_on_inaccessible_field_raises():
+    """A field already hidden from the agent (is_accessible_to_agent=False) cannot be made
+    required: the agent could never supply it, yet validation would demand it."""
+    import pytest
+    from pydantic import BaseModel, Field
+
+    from dynamiq.nodes.agents.components.schema_generator import apply_param_modes
+
+    class Schema(BaseModel):
+        text: str = Field(..., description="Required.")
+        internal_id: str | None = Field(
+            default=None,
+            description="Not exposed to the agent.",
+            json_schema_extra={"is_accessible_to_agent": False},
+        )
+
+    with pytest.raises(ValueError, match="not exposed to the agent"):
+        apply_param_modes(Schema, {"internal_id": "required"})
