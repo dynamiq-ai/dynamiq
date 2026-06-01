@@ -1976,10 +1976,17 @@ class Agent(HistoryManagerMixin, BaseAgent):
             response_format_schema=response_format_schema,
         )
 
+        # `has_tools` decides whether the XML/ReAct template emits tool-related
+        # blocks. Long-term memory injects per-call tools that aren't visible at
+        # init time, so we must opt in here too — otherwise the template has no
+        # placeholder for them and they stay invisible to the LLM.
+        ltm_enabled = self.long_term_memory is not None and self.long_term_memory.enabled
         self.system_prompt_manager.build_react_prompt(
             ReactPromptConfig(
                 inference_mode=self.inference_mode,
-                has_tools=bool(self.tools) or (self.skills.enabled and self.skills.source is not None),
+                has_tools=bool(self.tools)
+                or (self.skills.enabled and self.skills.source is not None)
+                or ltm_enabled,
                 parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
                 delegation_allowed=self.delegation_allowed,
                 context_compaction_enabled=self.summarization_config.enabled,

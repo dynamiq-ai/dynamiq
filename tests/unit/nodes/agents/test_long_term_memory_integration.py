@@ -176,6 +176,34 @@ def test_function_calling_schemas_include_ltm_overlay(llm, ltm):
     assert {"remember_fact", "recall_facts"} <= names
 
 
+def test_xml_prompt_includes_tool_blocks_when_only_ltm_configured(llm, ltm):
+    """In XML/ReAct mode the system prompt template must reserve tool blocks
+    when LTM is the only source of tools — otherwise the per-call tool
+    description has no placeholder and remember/recall stay invisible."""
+    from dynamiq.nodes.agents.agent import Agent as ReActAgent
+    from dynamiq.nodes.types import InferenceMode
+
+    agent = ReActAgent(name="t", llm=llm, tools=[], long_term_memory=ltm, inference_mode=InferenceMode.XML)
+    tools_block = agent.system_prompt_manager._prompt_blocks.get("tools", "")
+    assert "{{ tool_description }}" in tools_block
+
+
+def test_xml_prompt_omits_tool_blocks_when_ltm_disabled(llm):
+    """Disabled LTM must not flip `has_tools` on — the template should still
+    render the no-tools instructions when nothing else provides tools."""
+    from dynamiq.nodes.agents.agent import Agent as ReActAgent
+    from dynamiq.nodes.types import InferenceMode
+
+    agent = ReActAgent(
+        name="t",
+        llm=llm,
+        tools=[],
+        long_term_memory=_ltm_config(enabled=False),
+        inference_mode=InferenceMode.XML,
+    )
+    assert agent.system_prompt_manager._prompt_blocks.get("tools", "") == ""
+
+
 def test_init_components_initializes_ltm_embedder(llm):
     """The embedder is a ConnectionNode whose `text_embedder` client is built
     during `init_components`; without that, the first recall AttributeErrors
