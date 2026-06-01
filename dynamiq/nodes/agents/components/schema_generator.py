@@ -169,10 +169,7 @@ def generate_structured_output_schemas(
     """
     tool_names = [sanitize_tool_name(tool.name) for tool in tools]
 
-    action_input_description = (
-        "Input for the chosen action, as a JSON object whose keys match the tool's parameters. "
-        "For `finish`, set this to an object with a single `answer` key containing the final answer string."
-    )
+    action_input_description = "Input for chosen action."
 
     if delegation_allowed and any(isinstance(tool, SubAgentTool) for tool in tools):
         action_input_description += (
@@ -184,6 +181,7 @@ def generate_structured_output_schemas(
         "type": "json_schema",
         "json_schema": {
             "name": "plan_next_action",
+            "strict": True,
             "schema": {
                 "type": "object",
                 "required": ["thought", "action", "action_input", "output_files"],
@@ -197,9 +195,8 @@ def generate_structured_output_schemas(
                         "description": f"Next action to make (choose from [{tool_names}, finish]).",
                     },
                     "action_input": {
-                        "type": "object",
+                        "type": "string",
                         "description": action_input_description,
-                        "additionalProperties": True,
                     },
                     "output_files": {
                         "type": "string",

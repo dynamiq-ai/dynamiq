@@ -150,38 +150,42 @@ Refer to each tool's function schema for detailed usage.
 
 REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """Always structure your responses in this JSON format:
 
-{"thought": "[Your reasoning about the next step]",
- "action": "[The tool you choose to use, if any from ONLY [{{ tools_name }}]]",
- "action_input": { /* object whose keys are the tool's parameter names */ },
- "output_files": ""}
+{thought: [Your reasoning about the next step],
+action: [The tool you choose to use, if any from ONLY [{{ tools_name }}]],
+action_input: [JSON input in correct format you provide to the tool],
+output_files: ""}
 
 After each action, you'll receive:
 Observation: [Result from the tool]
 
 When you have enough information to provide a final answer:
-{"thought": "[Your reasoning for the final answer]",
- "action": "finish",
- "action_input": { "answer": "[Final response for the initial request]" },
- "output_files": "[comma-separated file paths to return, or empty string if none]"}
+{thought: [Your reasoning for the final answer],
+action: finish,
+action_input: [Response for initial request],
+output_files: [comma-separated file paths to return, or empty string if none]}
 
-For questions that don't require tools, use the same `finish` shape with the answer inside `action_input.answer`.
+For questions that don't require tools:
+{thought: [Your reasoning for the final answer],
+action: finish,
+action_input: [Your direct response],
+output_files: [comma-separated file paths to return, or empty string if none]}
 
 IMPORTANT RULES:
 - You MUST ALWAYS include "thought" as the FIRST field in your JSON
 - ALWAYS populate the "thought" field FIRST before any other field (particularly "action_input") in your response.
-- `action_input` is ALWAYS a JSON object — never a string.
-  - For tool calls: its keys are the tool's parameter names. Example: {"file_path": "deck.js", "content": "..."}
-  - For `finish`: it contains a single `answer` key with the final answer string. Example: {"answer": "Here is the result"}
-  - For tools with no parameters, use an empty object: {}
-- Within `action_input` string values, escape newlines as \\n and double quotes as \\" per JSON syntax — do NOT use literal newlines inside JSON string values.
-- Output must be parsable with json.loads() in Python.
-- Do not use markdown code blocks around your JSON.
+- Each tool has a specific input format you must strictly follow
+- In action_input field, provide properly formatted JSON with double quotes
+- When action_input contains multi-line content (e.g. shell commands, code), you MUST escape newlines as \\n within the JSON string — do NOT use literal line breaks inside JSON string values.
+- Json has to be parsable with json.loads() in Python.
+- Do not use markdown code blocks around your JSON
+- Never leave action_input empty
+- Ensure proper JSON syntax with quoted keys and values
 - To return an agent tool's response as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call finish yourself afterward; the system will return the agent's result directly.
 
 ## File Handling
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - When using action "finish", include an "output_files" field with comma-separated file paths to return. Use an empty string if there are no files to return.
-- Never return an empty response.
+- Never return empty response.
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """

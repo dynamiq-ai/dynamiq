@@ -980,14 +980,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self._requested_output_files = self._parse_output_files_csv(
                 llm_generated_output_json.get("output_files") or ""
             )
-            # action_input is now an object (per schema); the final answer lives
-            # under the ``answer`` key. Fall back to the raw value for backward
-            # compatibility with older models that still emit a plain string.
-            final_answer: Any = action_input
-            if isinstance(action_input, dict) and "answer" in action_input:
-                final_answer = action_input["answer"]
-            self.log_final_output(thought, final_answer, loop_num)
-            return thought, "final_answer", final_answer
+            self.log_final_output(thought, action_input, loop_num)
+            return thought, "final_answer", action_input
 
         try:
             if isinstance(action_input, str):
