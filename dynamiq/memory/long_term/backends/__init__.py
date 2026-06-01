@@ -1,5 +1,11 @@
 from dynamiq.memory.long_term.backends.in_memory import InMemoryLongTermMemoryBackend
 from dynamiq.memory.long_term.backends.pgvector import PostgresLongTermMemoryBackend
+from dynamiq.memory.long_term.backends.pinecone import PineconeLongTermMemoryBackend
 from dynamiq.memory.long_term.backends.qdrant import QdrantLongTermMemoryBackend
 
-__all__ = ["InMemoryLongTermMemoryBackend", "PostgresLongTermMemoryBackend", "QdrantLongTermMemoryBackend"]
+__all__ = [
+    "InMemoryLongTermMemoryBackend",
+    "PineconeLongTermMemoryBackend",
+    "PostgresLongTermMemoryBackend",
+    "QdrantLongTermMemoryBackend",
+]
