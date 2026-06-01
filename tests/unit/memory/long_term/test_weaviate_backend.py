@@ -135,6 +135,11 @@ def _fake_scope_to_filter(scope: dict):
     return _PredicateFilter(lambda item: all(item["properties"].get(k) == v for k, v in scope.items()))
 
 
+def _fake_id_in_filter(uuids):
+    uuid_set = set(uuids)
+    return _PredicateFilter(lambda item: item["uuid"] in uuid_set)
+
+
 # --- Fixtures ---------------------------------------------------------------
 
 
@@ -147,6 +152,7 @@ def fake_weaviate_client(monkeypatch):
     import dynamiq.memory.long_term.backends.weaviate as weaviate_backend
 
     monkeypatch.setattr(weaviate_backend, "_scope_to_filter", _fake_scope_to_filter)
+    monkeypatch.setattr(weaviate_backend, "_id_in_filter", _fake_id_in_filter)
     return client
 
 
@@ -286,6 +292,24 @@ def test_weaviate_delete_scope_returns_accurate_count(backend, fake_embedder):
 
 def test_weaviate_delete_scope_empty_returns_zero(backend):
     assert backend.delete_scope({"user_id": "nobody"}) == 0
+
+
+def test_weaviate_delete_scope_paginates_beyond_single_page_with_scope(backend, fake_embedder, monkeypatch):
+    """A scoped delete must remove every match and return the true count even
+    when the matched set exceeds Weaviate's per-call fetch cap."""
+    monkeypatch.setattr(type(backend), "_SCOPE_PAGE_SIZE", 2)
+    for i in range(5):
+        backend.insert(_fact(f"f{i}", "u1", f"c{i}"), fake_embedder.embed(f"c{i}"))
+    assert backend.delete_scope({"user_id": "u1"}) == 5
+    assert backend.list_by_scope({"user_id": "u1"}) == []
+
+
+def test_weaviate_delete_scope_empty_paginates_unbounded(backend, fake_embedder, monkeypatch):
+    """Empty scope must clear the entire collection — not just the first page."""
+    monkeypatch.setattr(type(backend), "_SCOPE_PAGE_SIZE", 2)
+    for i in range(5):
+        backend.insert(_fact(f"f{i}", f"u{i % 2}", f"c{i}"), fake_embedder.embed(f"c{i}"))
+    assert backend.delete_scope({}) == 5
 
 
 # --- search ----------------------------------------------------------------

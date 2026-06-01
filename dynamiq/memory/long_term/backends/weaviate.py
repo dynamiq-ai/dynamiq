@@ -64,6 +64,13 @@ def _scope_to_filter(scope: dict[str, str]):
     return expr
 
 
+def _id_in_filter(uuids: list[str]):
+    """`Filter.by_id().contains_any(...)` factored out so tests can stub it."""
+    from weaviate.classes.query import Filter
+
+    return Filter.by_id().contains_any(uuids)
+
+
 class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
     """Long-term memory backend backed by Weaviate (client v4).
 
@@ -79,6 +86,9 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
     connection: WeaviateConnection = Field(default_factory=WeaviateConnection)
     collection_name: str = "UserFacts"
     dimension: int = 1536
+    # Page size for scoped scans (list/delete). Capped at Weaviate's default
+    # `QUERY_MAXIMUM_RESULTS` so a single fetch never exceeds server limits.
+    _SCOPE_PAGE_SIZE: int = 10_000
 
     _client: "WeaviateClient | None" = PrivateAttr(default=None)
 
@@ -223,24 +233,23 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
         return [_properties_to_fact(obj.properties) for obj in objects]
 
     def delete_scope(self, scope: dict[str, str]) -> int:
-        # Weaviate has a native delete-by-filter, but it returns no count.
-        # Count first via the same filter, then delete — same trade-off as
-        # Qdrant: an extra round-trip for an accurate return value.
+        # Weaviate's `delete_many(where=...)` is server-capped (default ~10k per
+        # call) and doesn't report a count we can rely on across versions. Loop
+        # fetch-then-delete-by-uuid batches until the page comes back empty —
+        # this is unbounded and gives an accurate count of what we actually
+        # removed. Empty scope = match everything, same contract as Qdrant /
+        # in-memory; we drive that with `fetch_objects(limit=...)` (no filter).
         flt = _scope_to_filter(scope)
-        if flt is None:
-            # Empty scope = match everything — match the Qdrant contract.
-            result = self._collection.query.fetch_objects(limit=10_000)
+        total = 0
+        while True:
+            if flt is None:
+                result = self._collection.query.fetch_objects(limit=self._SCOPE_PAGE_SIZE)
+            else:
+                result = self._collection.query.fetch_objects(filters=flt, limit=self._SCOPE_PAGE_SIZE)
             objects = getattr(result, "objects", []) or []
-            count = len(objects)
-            if count == 0:
-                return 0
-            from weaviate.classes.query import Filter
-
-            self._collection.data.delete_many(where=Filter.by_id().contains_any([str(o.uuid) for o in objects]))
-            return count
-
-        listed = self.list_by_scope(scope, limit=10_000)
-        if not listed:
-            return 0
-        self._collection.data.delete_many(where=flt)
-        return len(listed)
+            if not objects:
+                break
+            uuids = [str(o.uuid) for o in objects]
+            self._collection.data.delete_many(where=_id_in_filter(uuids))
+            total += len(uuids)
+        return total
