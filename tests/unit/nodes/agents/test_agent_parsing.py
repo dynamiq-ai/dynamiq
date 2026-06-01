@@ -367,6 +367,43 @@ def test_structured_output_fallback_decoder_with_literal_newlines():
     assert action_input == {"command": "cat > f.py\nprint(1)"}
 
 
+def test_function_calling_action_input_with_literal_newlines(mocker):
+    """FC mode: legacy nested `action_input` (JSON string) is unwrapped and decoded."""
+    import uuid
+
+    from dynamiq import connections, prompts
+    from dynamiq.nodes.agents import Agent
+    from dynamiq.nodes.llms import OpenAI
+    from dynamiq.nodes.types import InferenceMode
+
+    conn = connections.OpenAI(id=str(uuid.uuid4()), api_key="fake-key")
+    llm = OpenAI(
+        name="TestLLM",
+        model="gpt-4o-mini",
+        connection=conn,
+        prompt=prompts.Prompt(messages=[prompts.Message(role="user", content="{{input}}")]),
+    )
+    agent = Agent(name="test-agent", llm=llm, tools=[], inference_mode=InferenceMode.FUNCTION_CALLING)
+
+    # Simulate an LLM result with a tool_call whose action_input has a literal newline
+    mock_result = mocker.MagicMock()
+    mock_result.output = {
+        "tool_calls": [
+            {
+                "function": {
+                    "name": "SandboxShellTool",
+                    "arguments": {"thought": "run it", "action_input": '{"cmd": "ls\nls -la"}'},
+                }
+            }
+        ]
+    }
+
+    thought, action, action_input = agent._handle_function_calling_mode(mock_result, loop_num=1)
+    assert thought == "run it"
+    assert action == "SandboxShellTool"
+    assert action_input == {"cmd": "ls\nls -la"}
+
+
 def _mock_llm_response(text: str):
     from litellm import ModelResponse
 

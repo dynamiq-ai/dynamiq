@@ -54,9 +54,18 @@ class ToolCallArguments(BaseModel):
 
     thought: str = ""
 
-    def to_action_input(self) -> dict:
-        """Return the non-thought fields as a plain dict (the tool's real params)."""
-        return self.model_dump(exclude={"thought"})
+    def to_action_input(self) -> dict | str:
+        """Return the non-thought fields as the tool's real params.
+
+        Legacy compatibility: if the model still emits the old nested shape
+        (`action_input` as the sole sibling of `thought`), unwrap it so tools
+        receive the real params instead of `{"action_input": ...}`. Callers
+        json-decode a returned string.
+        """
+        fields = self.model_dump(exclude={"thought"})
+        if set(fields) == {"action_input"}:
+            return fields["action_input"]
+        return fields
 
     @field_validator("thought", mode="before")
     @classmethod
