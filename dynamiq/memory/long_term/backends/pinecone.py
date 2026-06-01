@@ -184,7 +184,9 @@ class PineconeLongTermMemoryBackend(LongTermMemoryBackend):
             include_metadata=True,
         )
         matches = result.get("matches") if isinstance(result, dict) else getattr(result, "matches", [])
-        return [_metadata_to_fact(match["metadata"] if isinstance(match, dict) else match.metadata) for match in matches]
+        return [
+            _metadata_to_fact(match["metadata"] if isinstance(match, dict) else match.metadata) for match in matches
+        ]
 
     def delete_scope(self, scope: dict[str, str]) -> int:
         # Pinecone Serverless does NOT support delete-by-filter — only delete-by-id.
