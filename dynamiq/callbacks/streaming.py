@@ -850,32 +850,58 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                             action_value = buf[v_start + 1 : end_quote]
                             if action_value.strip().lower() == "finish":
                                 self._answer_started = True
+                                if self._current_state is None:
+                                    action_input_start = self._find_field_string_value_start(
+                                        buf, JSONStreamingField.ACTION_INPUT.value, end_quote + 1
+                                    )
+                                    if action_input_start != -1:
+                                        self._current_state = StreamingState.ANSWER
+                                        self._state_start_index = action_input_start
+                                        self._state_last_emit_index = max(
+                                            self._state_last_emit_index, action_input_start
+                                        )
                             else:
                                 self._tool_input_started = True
                                 self._current_action_name = action_value.strip()
                                 self.agent._streaming_tool_run_id = generate_uuid()
+                                if self._current_state is None:
+                                    action_input_start = self._find_field_string_value_start(
+                                        buf, JSONStreamingField.ACTION_INPUT.value, end_quote + 1
+                                    )
+                                    if action_input_start != -1:
+                                        self._current_state = StreamingState.TOOL_INPUT
+                                        self._state_start_index = action_input_start
+                                        self._state_last_emit_index = max(
+                                            self._state_last_emit_index, action_input_start
+                                        )
 
         if not self._state_has_emitted.get(StreamingState.REASONING, False):
             self._initialize_json_field_state(
                 buf, JSONStreamingField.THOUGHT.value, StreamingState.REASONING, final_answer_only
             )
 
-        # Initialize the action field (TOOL_INPUT for a tool call, ANSWER for finish).
-        # action_input is a JSON object in the current schema, so this falls back from the
-        # string form to the brace-delimited object form (see _so_initialize_action_field).
-        self._so_initialize_action_field(buf)
+        if self._answer_started:
+            self._initialize_json_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.ANSWER)
+
+        if self._tool_input_started and not self._answer_started:
+            self._initialize_json_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT)
 
         if self._current_state == StreamingState.REASONING:
             if self._emit_json_field_content(buf, StreamingState.REASONING):
-                # Reasoning completed — try to initialize ANSWER/TOOL_INPUT in the same
-                # call, in case this is the last chunk.
-                self._so_initialize_action_field(buf)
+                # Reasoning completed — immediately try to initialize ANSWER/TOOL_INPUT
+                # in the same call, in case this is the last chunk.
+                if self._answer_started:
+                    self._initialize_json_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.ANSWER)
+                elif self._tool_input_started:
+                    self._initialize_json_field_state(
+                        buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT
+                    )
 
         if self._current_state == StreamingState.ANSWER:
-            if self._emit_answer_state(buf):
+            if self._emit_json_field_content(buf, StreamingState.ANSWER):
                 self._so_action_emitted = True
         elif self._current_state == StreamingState.TOOL_INPUT:
-            if self._emit_tool_input_state(buf):
+            if self._emit_json_field_content(buf, StreamingState.TOOL_INPUT):
                 self._so_action_emitted = True
 
     def _process_function_calling_mode(self, final_answer_only: bool) -> None:
@@ -1071,37 +1097,6 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         if self._fc_object_answer:
             return self._emit_json_object_field_content(buf, StreamingState.ANSWER)
         return self._emit_json_field_content(buf, StreamingState.ANSWER)
-
-    def _so_initialize_action_field(self, buf: str) -> None:
-        """Initialize the ANSWER/TOOL_INPUT streaming state for structured output.
-
-        ``action_input`` is a JSON object in the current schema (tool args, or
-        ``{"answer": ...}`` for finish), though older models may still emit a plain
-        string.
-
-        Answer path: the final answer lives in the nested ``answer`` string (or, for
-        older models, ``action_input`` emitted as a plain string). We deliberately do
-        NOT fall back to the brace-delimited ``action_input`` object here. Object mode
-        could win a chunk-boundary race — locking in before the nested ``answer`` key
-        has streamed into the buffer — and would then emit the raw ``{"answer": ...}``
-        wrapper instead of just the answer text, diverging from the non-streaming
-        output which extracts ``action_input["answer"]``.
-
-        Tool-input path: ``action_input`` is genuinely an object, so the object form
-        is the correct fallback.
-        """
-        if self._current_state is not None:
-            return
-        if self._answer_started:
-            if self._initialize_json_field_state(buf, JSONStreamingField.ANSWER.value, StreamingState.ANSWER):
-                return
-            self._initialize_json_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.ANSWER)
-        elif self._tool_input_started:
-            if self._initialize_json_field_state(buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT):
-                return
-            self._initialize_json_object_field_state(
-                buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT
-            )
 
     def _process_json_mode(self, final_answer_only: bool) -> None:
         """
