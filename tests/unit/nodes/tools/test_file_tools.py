@@ -13,6 +13,7 @@ from dynamiq.nodes.tools.file_tools import (
     FileListTool,
     FileReadInputSchema,
     FileReadTool,
+    FileSearchTool,
     FileType,
     FileWriteInputSchema,
     FileWriteTool,
@@ -214,8 +215,53 @@ def test_file_list_tool(file_store):
     result = tool.run(input_data)
 
     assert result.status == RunnableStatus.SUCCESS
-    assert "Files currently available" in result.output["content"]
+    assert "No files are currently available in the file store under 'empty/'" in result.output["content"]
     assert "File: " not in result.output["content"]
+
+
+def test_file_list_tool_empty_store_message(file_store):
+    """Empty file stores should be explicit for agents."""
+    tool = FileListTool(file_store=file_store)
+    result = tool.run({"file_path": "", "recursive": True})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == "No files are currently available in the file store."
+
+
+def test_file_search_tool_empty_store_message(file_store):
+    """Searching an empty store should explain why there are no matches."""
+    tool = FileSearchTool(file_store=file_store)
+    result = tool.run({"query": "timeline", "file_path": "", "recursive": True})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"]["matches"] == []
+    assert result.output["content"]["files_scanned"] == 0
+    assert result.output["content"]["total_matches"] == 0
+    assert "No files are currently available in the file store" in result.output["content"]["message"]
+
+
+def test_file_search_tool_missing_path_message(file_store):
+    """Searching a missing explicit path should not count it as scanned."""
+    tool = FileSearchTool(file_store=file_store)
+    result = tool.run({"query": "timeline", "file_path": "missing.pdf", "recursive": True})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"]["matches"] == []
+    assert result.output["content"]["files_scanned"] == 0
+    assert result.output["content"]["total_matches"] == 0
+    assert "File path(s) not found in the file store: missing.pdf" in result.output["content"]["message"]
+
+
+def test_file_read_tool_missing_file_returns_recoverable_error(file_store, llm_model):
+    """Missing file reads should fail recoverably with a clear file-store-aware message."""
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+    result = tool.run({"file_path": "kb-uae-adgm-mobility-and-benefits.pdf", "brief": "Read guide"})
+
+    assert result.status == RunnableStatus.FAILURE
+    assert result.output is None
+    assert result.error.recoverable is True
+    assert "was not found in the file store" in result.error.message
+    assert "No files are currently available in the file store" in result.error.message
 
 
 def test_file_tools_integration(file_store, llm_model):
