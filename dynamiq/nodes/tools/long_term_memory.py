@@ -36,27 +36,30 @@ Examples:
 - {"content": "Works in EST timezone", "metadata": {"category": "context"}}
 """
 
-RECALL_DESCRIPTION = """Search the user's long-term memory for facts relevant to a query.
+RECALL_DESCRIPTION = """Search the user's long-term memory for facts relevant to one or more queries.
 
 Key capabilities:
 - Semantic search (not keyword) — matches meaning, paraphrases, synonyms
 - Scoped to the current user automatically — never crosses users
+- Multi-query: pass several phrasings in one call; results are merged and de-duplicated.
+  Because matches are sensitive to phrasing, supplying 2–4 angles per recall typically
+  improves recall over a single query without an extra round-trip.
 - Returns the most relevant facts first, as plain text
 
 Usage strategy:
 - Call PROACTIVELY at the start of a turn when the request hints at something personal
   (preferences, past decisions, biographical info, recurring context)
 - Call BEFORE answering questions where prior context would change your response
-- If no relevant facts are found, just proceed without them — no need to retry with
-  different phrasings unless the user's request makes the prior context essential
+- Prefer 2–4 distinct phrasings over a single query when the topic is fuzzy
+- If no relevant facts are found, just proceed without them
 - Skip when the question is purely factual or has no user-specific component
 
 Returns: a bullet list of relevant facts (most relevant first), or "No relevant facts."
 
 Examples:
-- {"query": "food preferences"}
-- {"query": "what does the user do for work?", "limit": 3}
-- {"query": "timezone or schedule constraints", "limit": 10}
+- {"queries": ["food preferences"]}
+- {"queries": ["what does the user do for work?", "user profession", "user job role"], "limit": 3}
+- {"queries": ["timezone", "working hours", "schedule constraints"], "limit": 10}
 """
 
 
@@ -74,10 +77,17 @@ class RememberFactInputSchema(BaseModel):
 class RecallFactsInputSchema(BaseModel):
     """LLM-visible input for `recall_facts`. `user_id` is bound at construction."""
 
-    query: str = Field(..., min_length=1, max_length=500,
-                       description="What to search for.")
+    queries: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=5,
+        description=(
+            "One or more search phrasings. Semantic search is phrasing-sensitive, "
+            "so 2–4 distinct angles usually beat a single query for fuzzy topics."
+        ),
+    )
     limit: int = Field(default=5, ge=1, le=20,
-                       description="Max facts to return.")
+                       description="Max facts to return after merging across queries.")
 
 
 class _LongTermMemoryTool(Node):
@@ -146,11 +156,19 @@ class RecallFactsTool(_LongTermMemoryTool):
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        hits = self.backend.recall(
-            query=input_data.query,
-            user_id=self.user_id,
-            limit=input_data.limit,
-        )
+        # Recall once per query; merge by fact id keeping the best score so a
+        # paraphrase that scores higher under one phrasing isn't penalised by
+        # another phrasing's weaker hit. Ask each backend call for `limit` to
+        # let the union be re-ranked at the end.
+        best: dict[str, tuple[Any, float]] = {}
+        for query in input_data.queries:
+            for fact, score in self.backend.recall(query=query, user_id=self.user_id, limit=input_data.limit):
+                prev = best.get(fact.id)
+                if prev is None or score > prev[1]:
+                    best[fact.id] = (fact, score)
+
+        hits = sorted(best.values(), key=lambda pair: pair[1], reverse=True)[: input_data.limit]
+
         if self.is_optimized_for_agents:
             if not hits:
                 return {"content": "No relevant facts."}

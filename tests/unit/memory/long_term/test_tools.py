@@ -71,7 +71,7 @@ def test_recall_tool_returns_hits(backend, user_id):
     backend.remember(content="User likes pizza", user_id=user_id)
     backend.remember(content="User likes Python", user_id=user_id)
     tool = RecallFactsTool(backend=backend, user_id=user_id)
-    result = tool.execute(tool.input_schema(query="pizza", limit=2))
+    result = tool.execute(tool.input_schema(queries=["pizza"], limit=2))
     items = result["content"]
     assert len(items) == 2
     for item in items:
@@ -82,21 +82,21 @@ def test_recall_tool_returns_hits(backend, user_id):
 
 def test_recall_tool_input_schema_has_no_user_id():
     assert "user_id" not in RecallFactsTool.input_schema.model_fields
-    assert {"query", "limit"} <= set(RecallFactsTool.input_schema.model_fields)
+    assert {"queries", "limit"} <= set(RecallFactsTool.input_schema.model_fields)
 
 
 def test_recall_tool_isolates_users(backend, user_id, other_user_id):
     backend.remember(content="A's fact", user_id=user_id)
     backend.remember(content="B's fact", user_id=other_user_id)
     tool = RecallFactsTool(backend=backend, user_id=user_id)
-    result = tool.execute(tool.input_schema(query="fact", limit=5))
+    result = tool.execute(tool.input_schema(queries=["fact"], limit=5))
     contents = {item["content"] for item in result["content"]}
     assert contents == {"A's fact"}
 
 
 def test_recall_tool_empty_store_returns_empty(backend, user_id):
     tool = RecallFactsTool(backend=backend, user_id=user_id)
-    result = tool.execute(tool.input_schema(query="anything"))
+    result = tool.execute(tool.input_schema(queries=["anything"]))
     assert result["content"] == []
 
 
@@ -105,7 +105,7 @@ def test_recall_tool_agent_optimized_returns_bullet_list(backend, user_id):
     backend.remember(content="User likes Python", user_id=user_id)
     tool = RecallFactsTool(backend=backend, user_id=user_id)
     tool.is_optimized_for_agents = True
-    result = tool.execute(tool.input_schema(query="pizza", limit=2))
+    result = tool.execute(tool.input_schema(queries=["pizza"], limit=2))
     assert isinstance(result["content"], str)
     assert "- User likes pizza" in result["content"]
     assert "- User likes Python" in result["content"]
@@ -114,8 +114,29 @@ def test_recall_tool_agent_optimized_returns_bullet_list(backend, user_id):
 def test_recall_tool_agent_optimized_empty_message(backend, user_id):
     tool = RecallFactsTool(backend=backend, user_id=user_id)
     tool.is_optimized_for_agents = True
-    result = tool.execute(tool.input_schema(query="anything"))
+    result = tool.execute(tool.input_schema(queries=["anything"]))
     assert result["content"] == "No relevant facts."
+
+
+def test_recall_tool_merges_multiple_queries_and_dedupes(backend, user_id):
+    """Multiple phrasings hitting the same fact must yield one entry, not duplicates."""
+    backend.remember(content="User likes pizza", user_id=user_id)
+    backend.remember(content="User likes Python", user_id=user_id)
+    tool = RecallFactsTool(backend=backend, user_id=user_id)
+    result = tool.execute(
+        tool.input_schema(queries=["pizza", "User likes pizza", "favourite food"], limit=5)
+    )
+    contents = [it["content"] for it in result["content"]]
+    assert len(contents) == len(set(contents))
+    assert "User likes pizza" in contents
+
+
+def test_recall_tool_rejects_empty_queries_list():
+    """min_length=1 on `queries` must reject an empty list at schema validation."""
+    import pytest as _pytest
+
+    with _pytest.raises(Exception):
+        RecallFactsTool.input_schema(queries=[])
 
 
 # --- factory ---
