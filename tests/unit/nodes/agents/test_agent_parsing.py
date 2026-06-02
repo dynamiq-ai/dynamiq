@@ -1,5 +1,9 @@
-import pytest
+from typing import Any, ClassVar, Literal
 
+import pytest
+from pydantic import BaseModel, Field
+
+from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.components import parser
 from dynamiq.nodes.agents.exceptions import ActionParsingException
 
@@ -600,29 +604,6 @@ def test_agent_response_format_function_calling_uses_schema_in_tools():
     assert "title" in answer["properties"]
 
 
-def test_agent_response_format_structured_output_schema_unchanged():
-    """STRUCTURED_OUTPUT keeps its simple `action_input: string` schema; the
-    user's response_format is enforced via prompt injection + coerce instead."""
-    from pydantic import BaseModel
-
-    from dynamiq.nodes.types import InferenceMode
-
-    class Doc(BaseModel):
-        title: str
-        tags: list[str]
-
-    agent = _make_agent(inference_mode=InferenceMode.STRUCTURED_OUTPUT, response_format=Doc)
-    schema = agent._response_format["json_schema"]["schema"]
-    assert schema["properties"]["action_input"] == {
-        "type": "string",
-        "description": "Input for chosen action.",
-    }
-    rendered = agent.generate_prompt()
-    assert "MUST be a valid JSON document" in rendered
-    assert "title" in rendered
-    assert "tags" in rendered
-
-
 def test_agent_structured_output_finish_with_json_string_action_input():
     """STRUCTURED_OUTPUT finish emits a JSON string; coerce parses it into a dict."""
     from pydantic import BaseModel
@@ -727,3 +708,43 @@ def test_apply_param_modes_required_on_inaccessible_field_raises():
 
     with pytest.raises(ValueError, match="not exposed to the agent"):
         apply_param_modes(Schema, {"internal_id": "required"})
+
+
+def test_normalize_fields_coerces_nested_model():
+    """A stringified free-form dict nested inside a sub-model is coerced back to a dict.
+
+    Strict mode ships a free-form ``dict[str, Any]`` as a JSON-encoded string. For a
+    dict declared on a nested model (``FilterOptions.metadata``), ``_normalize_fields``
+    must recurse into the sub-model and parse it back -- otherwise the string survives
+    and the nested model's Pydantic validation rejects it.
+    """
+    class FilterOptions(BaseModel):
+        min_score: float = Field(default=0.0)
+        metadata: dict[str, Any] = Field(default_factory=dict)
+
+    class ComprehensiveInputSchema(BaseModel):
+        text: str
+        filters: FilterOptions | None = None
+
+    class ComprehensiveTool(Node):
+        group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+        name: str = "Comprehensive Tool"
+        input_schema: ClassVar[type[ComprehensiveInputSchema]] = ComprehensiveInputSchema
+
+        def execute(self, input_data, config=None, **kwargs):
+            return {}
+
+    tool = ComprehensiveTool()
+    agent = _make_agent()
+
+    action_input = {
+        "text": "hello",
+        "filters": {"min_score": 0.5, "metadata": '{"source": "web", "score": 1}'},
+    }
+
+    agent._normalize_fields(tool.input_schema.model_fields, action_input)
+
+    # Nested free-form dict string parsed back into a dict.
+    assert action_input["filters"]["metadata"] == {"source": "web", "score": 1}
+    # Non-string nested values are left untouched.
+    assert action_input["filters"]["min_score"] == 0.5

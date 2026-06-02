@@ -5,8 +5,10 @@ Verifies that the schema generator produces schemas where:
     chain-of-thought behavior).
   * Tool params are TOP-LEVEL siblings of `thought` (no `action_input` wrapper).
   * `additionalProperties: false` is set on `parameters`.
-  * Strict mode is enabled only when every property is required AND the schema
-    contains no shapes OpenAI strict mode would reject.
+  * Only genuinely-required fields go in `required`. Strict mode (and its
+    all-required promotion) is applied per-provider in
+    `BaseLLM.transform_tool_schemas`, not at generation time, so no `strict`
+    key is emitted here.
 """
 
 from unittest.mock import MagicMock
@@ -91,7 +93,7 @@ class TestFlatArgsSchema:
             properties = schema["function"]["parameters"]["properties"]
             assert "action_input" not in properties, f"action_input wrapper leaked into {schema['function']['name']}"
 
-    def test_strict_when_all_params_required(self):
+    def test_all_required_params_in_required_list(self):
         class _Schema(BaseModel):
             a: str = Field(..., description="A")
             b: str = Field(..., description="B")
@@ -100,11 +102,12 @@ class TestFlatArgsSchema:
         schemas = _gen(tool)
         tool_schema = next(s for s in schemas if s["function"]["name"] == "op")
 
-        assert tool_schema["function"]["strict"] is True
+        # No gen-time strict key — strict is applied per-provider downstream.
+        assert "strict" not in tool_schema["function"]
         assert tool_schema["function"]["parameters"]["additionalProperties"] is False
         assert set(tool_schema["function"]["parameters"]["required"]) == {"thought", "a", "b"}
 
-    def test_strict_dropped_when_any_param_is_optional(self):
+    def test_optional_params_excluded_from_required_list(self):
         class _Schema(BaseModel):
             required_field: str = Field(..., description="Required")
             optional_field: str | None = Field(default=None, description="Optional")
@@ -113,7 +116,7 @@ class TestFlatArgsSchema:
         schemas = _gen(tool)
         tool_schema = next(s for s in schemas if s["function"]["name"] == "op")
 
-        assert tool_schema["function"]["strict"] is False
+        assert "strict" not in tool_schema["function"]
         # required list excludes the optional field but always starts with thought
         assert tool_schema["function"]["parameters"]["required"][0] == "thought"
         assert "required_field" in tool_schema["function"]["parameters"]["required"]
@@ -133,12 +136,12 @@ class TestFlatArgsSchema:
             if schema["function"]["name"] == "provide_final_answer":
                 continue  # final-answer schema is untouched by this migration
             params = schema["function"]["parameters"]
-            assert params.get("additionalProperties") is False, (
-                f"{schema['function']['name']} missing additionalProperties: false at parameters level"
-            )
+            assert (
+                params.get("additionalProperties") is False
+            ), f"{schema['function']['name']} missing additionalProperties: false at parameters level"
 
-    def test_zero_param_tool_is_strict_by_default(self):
-        """A tool with no params produces a fully-required, strict schema."""
+    def test_zero_param_tool_requires_only_thought(self):
+        """A tool with no params produces a closed schema requiring only `thought`."""
 
         class _Empty(BaseModel):
             pass
@@ -146,13 +149,16 @@ class TestFlatArgsSchema:
         tool = _make_tool("ping", _Empty)
         schemas = _gen(tool)
         tool_schema = next(s for s in schemas if s["function"]["name"] == "ping")
+        params = tool_schema["function"]["parameters"]
 
-        assert tool_schema["function"]["strict"] is True
+        assert "strict" not in tool_schema["function"]
+        assert params["additionalProperties"] is False
+        assert params["required"] == ["thought"]
 
-    def test_extra_allow_tool_is_open_and_non_strict(self):
+    def test_extra_allow_tool_is_open(self):
         """A no-declared-fields tool that accepts extras (e.g. the generic Python
-        tool) must stay OPEN: additionalProperties true and non-strict, so the model
-        can pass arbitrary params as top-level siblings of `thought`."""
+        tool) must stay OPEN: additionalProperties true, so the model can pass
+        arbitrary params as top-level siblings of `thought`."""
         from pydantic import ConfigDict
 
         class _Dynamic(BaseModel):
@@ -164,7 +170,7 @@ class TestFlatArgsSchema:
         params = tool_schema["function"]["parameters"]
 
         assert params["additionalProperties"] is True
-        assert tool_schema["function"]["strict"] is False
+        assert "strict" not in tool_schema["function"]
         assert params["required"] == ["thought"]
 
 
