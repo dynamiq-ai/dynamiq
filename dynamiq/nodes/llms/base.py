@@ -665,19 +665,72 @@ class BaseLLM(ConnectionNode):
             params["stream_options"]["include_usage"] = True
         return params
 
+    # Per-request cap on strict tools. ``None`` means no cap. Providers with a
+    # hard limit (e.g. Anthropic) override this.
+    MAX_STRICT_TOOLS: ClassVar[int | None] = None
+
     def transform_tool_schemas(self, tools: list[dict]) -> list[dict]:
         """Provider-specific schema transform applied before dispatch.
 
-        Subclasses override to clean schemas, attach ``strict`` flags, convert
-        optional fields, etc. Default is a no-op passthrough.
+        Shared scaffolding for strict tool-calling, identical across providers:
+        gate on ``strict_tools``, apply the optional whitelist, respect
+        :attr:`MAX_STRICT_TOOLS`, and convert each eligible tool via
+        :meth:`_to_strict_function`. Conversion is **fail-safe** — if a tool's
+        schema can't be made strict (an exotic/malformed shape that makes the
+        converter raise), we log a warning, drop ``strict``, and ship that tool
+        non-strict so the request still succeeds.
+
+        The default :meth:`_to_strict_function` is a no-op, so a generic provider
+        leaves every tool untouched. OpenAI/Anthropic override only that hook.
 
         Args:
             tools: Function-calling tool schemas (already in OpenAI shape).
 
         Returns:
-            Transformed tool list. May mutate in place or return new dicts.
+            Transformed tool list (new dicts for converted tools).
         """
-        return tools
+        if not self.strict_tools:
+            return tools
+
+        whitelist = self.strict_tools if isinstance(self.strict_tools, list) else None
+        cap = self.MAX_STRICT_TOOLS if self.MAX_STRICT_TOOLS is not None else float("inf")
+        out: list[dict] = []
+        strict_count = 0
+        for tool in tools:
+            if not isinstance(tool, dict):
+                out.append(tool)
+                continue
+            tool = dict(tool)
+            fn = tool.get("function")
+            eligible = (
+                isinstance(fn, dict) and strict_count < cap and (whitelist is None or fn.get("name") in whitelist)
+            )
+            if eligible:
+                try:
+                    new_fn = self._to_strict_function(fn)
+                except Exception as exc:
+                    logger.warning(
+                        "Strict tool conversion failed for tool %s: %s; keeping non-strict schema",
+                        fn.get("name", "<unknown>"),
+                        exc,
+                    )
+                    new_fn = dict(fn)
+                    new_fn.pop("strict", None)
+                tool["function"] = new_fn
+                if new_fn.get("strict"):
+                    strict_count += 1
+            out.append(tool)
+        return out
+
+    def _to_strict_function(self, fn: dict) -> dict:
+        """Convert one function-tool definition into this provider's strict form.
+
+        Returns a new function dict with ``strict: true`` attached when the schema
+        was made strict-compatible. The base implementation is a no-op (generic
+        providers don't support strict). May raise on an unconvertible schema —
+        :meth:`transform_tool_schemas` catches it and falls back to non-strict.
+        """
+        return fn
 
     @staticmethod
     def _sanitize_fc_messages(messages: list[dict]) -> list[dict]:

@@ -397,7 +397,7 @@ def _match_action_input(accumulated: str, expected) -> bool:
 
         # Strict null-default handling: under OpenAI strict, optional non-nullable fields
         # are emitted as ``null`` ("use default") and stripped before the tool receives
-        # them (see _strip_protocol_nulls). The streamed tool_input is the raw model
+        # them (see _normalize_fields). The streamed tool_input is the raw model
         # output and still carries those nulls, so prune null-valued keys absent from the
         # (post-strip) expected action_input before comparing.
         if isinstance(decoded, dict) and isinstance(expected, dict):

@@ -5,6 +5,7 @@ from typing import Any, Callable, Literal, Mapping, Union, get_args, get_origin
 
 from litellm import get_supported_openai_params, supports_function_calling, supports_response_schema
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
+from pydantic_core import from_json
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
@@ -40,7 +41,7 @@ from dynamiq.types.streaming import (
     StreamingMode,
 )
 from dynamiq.utils import generate_uuid, serialize_files_in_value
-from dynamiq.utils.json_parser import parse_llm_json_output, repair_truncated_json
+from dynamiq.utils.json_parser import parse_llm_json_output
 from dynamiq.utils.logger import logger
 
 
@@ -81,9 +82,11 @@ class FunctionCall(BaseModel):
             try:
                 return json.loads(v, strict=False)
             except json.JSONDecodeError:
+                # Truncated mid-emission (LLM stopped mid-tool-call): parse the
+                # partial document, dropping the incomplete trailing value.
                 try:
-                    return json.loads(repair_truncated_json(v), strict=False)
-                except json.JSONDecodeError as e:
+                    return from_json(v, allow_partial=True)
+                except ValueError as e:
                     raise ValueError(f"Tool call arguments are not valid JSON: {e}")
         return v or {}
 
@@ -358,29 +361,38 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     return arg
         return None
 
-    def _coerce_json_fields(self, tool: Node, action_input: dict) -> dict:
-        """Parse stringified free-form dict fields back into dicts.
+    def _normalize_fields(self, fields: Mapping[str, Any], data: Any) -> None:
+        """Reconcile raw tool ``data`` against its Pydantic ``fields`` in one walk.
 
-        Strict mode can't express a free-form ``dict[str, Any]`` as an object, so
-        the schema transforms ship those fields as JSON-encoded strings (see the
-        provider converters). Here we reverse that: if the tool declares a
-        dict-typed field and the model supplied a JSON string for it, parse it
-        back so the tool's Pydantic schema validates the real dict.
+        Strict tool-calling encodes two things on the wire that the tool's schema
+        can't accept directly; this single pass reverses both, recursing into
+        nested ``BaseModel`` fields so they apply at depth. Call with
+        ``tool.input_schema.model_fields`` and the raw ``action_input``.
 
-        Recurses into nested ``BaseModel`` fields so a free-form dict declared on a
-        sub-model is coerced too (mirrors ``_strip_nulls_for_fields``). Without this
-        a stringified dict nested inside a sub-model would never be parsed back and
-        the nested model's validation would reject the ``str``.
+        - **Free-form ``dict[str, Any]`` shipped as a JSON string.** Strict mode
+          can't express an open object, so the provider converters send those
+          fields as JSON-encoded strings. When the field is dict-typed and the
+          model supplied a JSON string, parse it back into a dict.
+        - **``None`` for a non-nullable field.** Strict mode keeps every property in
+          ``required`` and uses ``null`` as the "leave it at the default" signal. A
+          field with a non-nullable default (``encoding: str = "utf-8"``) can't take
+          that ``None`` — drop the key so the Pydantic default applies. Fields that
+          genuinely accept ``None`` (``encoding: str | None = None``) keep it.
         """
-        self._coerce_json_for_fields(tool.input_schema.model_fields, action_input)
-        return action_input
-
-    def _coerce_json_for_fields(self, fields: Mapping[str, Any], data: Any) -> None:
         if not isinstance(data, dict):
             return
-        for name, field in fields.items():
-            value = data.get(name)
-            if isinstance(value, str) and self._annotation_is_dict_like(field.annotation):
+        for name in list(data):
+            field = fields.get(name)
+            if field is None:
+                continue
+            value = data[name]
+            if value is None:
+                # Strict mode's "use the default" signal — drop unless the field
+                # genuinely accepts None.
+                if not self._annotation_accepts_none(field.annotation):
+                    del data[name]
+            elif isinstance(value, str) and self._annotation_is_dict_like(field.annotation):
+                # Free-form dict shipped as a JSON string — parse it back.
                 stripped = value.strip()
                 if stripped.startswith("{") and stripped.endswith("}"):
                     try:
@@ -390,39 +402,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             elif isinstance(value, dict):
                 nested_model = self._extract_basemodel(field.annotation)
                 if nested_model is not None:
-                    self._coerce_json_for_fields(nested_model.model_fields, value)
-
-    def _strip_protocol_nulls(self, tool: Node, action_input: dict) -> dict:
-        """Drop ``None`` values for fields whose Pydantic annotation rejects None.
-
-        OpenAI strict mode requires every property in ``required`` and uses
-        ``"null"`` in the type union as the signal for "leave it at the default."
-        Fields with a non-nullable default (``encoding: str = "utf-8"``) can't
-        accept that ``None`` directly — so we drop the key, letting the tool's
-        Pydantic default apply. Fields that genuinely accept ``None``
-        (``encoding: str | None = None``) keep it.
-
-        Recurses into nested ``BaseModel`` fields so the same applies at depth
-        (e.g. ``config.port`` where ``DBConfig.port: int = 8080``).
-        """
-        self._strip_nulls_for_fields(tool.input_schema.model_fields, action_input)
-        return action_input
-
-    def _strip_nulls_for_fields(self, fields: Mapping[str, Any], data: Any) -> None:
-        if not isinstance(data, dict):
-            return
-        for name in list(data):
-            field = fields.get(name)
-            if field is None:
-                continue
-            value = data[name]
-            if value is None:
-                if not self._annotation_accepts_none(field.annotation):
-                    del data[name]
-            elif isinstance(value, dict):
-                nested_model = self._extract_basemodel(field.annotation)
-                if nested_model is not None:
-                    self._strip_nulls_for_fields(nested_model.model_fields, value)
+                    self._normalize_fields(nested_model.model_fields, value)
 
     def _should_delegate_final(
         self,
@@ -907,8 +887,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     tc_input = {"input": tc_input}
                 tc_tool = self.tool_by_names.get(self.sanitize_tool_name(tc_name))
                 if tc_tool is not None:
-                    self._coerce_json_fields(tc_tool, tc_input)
-                    self._strip_protocol_nulls(tc_tool, tc_input)
+                    self._normalize_fields(tc_tool.input_schema.model_fields, tc_input)
                 tool_items.append(
                     ToolCallItem(
                         name=tc_name,
@@ -937,8 +916,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         tool = self.tool_by_names.get(self.sanitize_tool_name(action))
         if tool is not None:
-            self._coerce_json_fields(tool, action_input)
-            self._strip_protocol_nulls(tool, action_input)
+            self._normalize_fields(tool.input_schema.model_fields, action_input)
 
         self.log_reasoning(thought, action, action_input, loop_num)
         return thought, action, action_input

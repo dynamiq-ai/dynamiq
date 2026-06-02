@@ -180,65 +180,6 @@ def single_quoted_replacer(match: Match[str]) -> str:
     return f'"{content}"'
 
 
-def repair_truncated_json(raw: str) -> str:
-    """Best-effort repair of a JSON document truncated mid-emission.
-
-    Walks the string once tracking string/escape state and brace/bracket depth,
-    then appends whatever closing tokens are needed to make the document
-    structurally complete. Also strips trailing commas before the closers.
-
-    Does not fix arbitrary corruption — only the common partial-output shapes
-    (unclosed string, missing comma, missing closing brace/bracket) seen when
-    an LLM stops mid-tool-call.
-
-    Args:
-        raw: Possibly-truncated JSON text.
-
-    Returns:
-        A best-effort repaired string. Caller should still ``json.loads`` and
-        be ready to handle a ``JSONDecodeError`` if repair was insufficient.
-    """
-    if not raw:
-        return raw
-
-    stack: list[str] = []
-    in_string = False
-    escape = False
-
-    for ch in raw:
-        if escape:
-            escape = False
-            continue
-        if ch == "\\" and in_string:
-            escape = True
-            continue
-        if ch == '"':
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if ch in "{[":
-            stack.append("}" if ch == "{" else "]")
-        elif ch in "}]":
-            if stack and stack[-1] == ch:
-                stack.pop()
-
-    repaired = raw
-    if in_string:
-        repaired += '"'
-
-    repaired = repaired.rstrip()
-    while repaired.endswith(","):
-        repaired = repaired[:-1].rstrip()
-    if repaired.endswith(":"):
-        repaired += " null"
-
-    for closer in reversed(stack):
-        repaired += closer
-
-    return repaired
-
-
 def clean_json_string(json_str: str) -> str:
     """
     Clean a JSON-like string so that it can be parsed by the built-in `json` module.

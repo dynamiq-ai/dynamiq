@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel
 
@@ -72,46 +72,16 @@ if _LITELLM_ANTHROPIC_STRICT_PATCHED:
 # https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use
 ANTHROPIC_MAX_STRICT_TOOLS = 20
 
-# JSON Schema keywords Anthropic's strict-mode compiler rejects. Strip them
-# before sending; keep semantics in the description.
-_ANTHROPIC_STRICT_UNSUPPORTED_KEYWORDS = frozenset(
-    {
-        "minimum",
-        "maximum",
-        "exclusiveMinimum",
-        "exclusiveMaximum",
-        "multipleOf",
-        "minLength",
-        "maxLength",
-        "uniqueItems",
-        "minContains",
-        "maxContains",
-        "minProperties",
-        "maxProperties",
-        "patternProperties",
-        "unevaluatedProperties",
-        "contains",
-    }
-)
-
-_ANTHROPIC_STRICT_FORMAT_ALLOWED = frozenset(
-    {"date-time", "time", "date", "duration", "email", "hostname", "uri", "ipv4", "ipv6", "uuid"}
-)
-
 
 def _clean_anthropic_strict_schema(schema: Any) -> Any:
     """Recursively clean a schema for Anthropic's strict tool-use mode.
 
-    - Strips keywords Anthropic's compiler rejects (numeric/length bounds,
-      ``patternProperties``, etc. — see ``_ANTHROPIC_STRICT_UNSUPPORTED_KEYWORDS``).
-    - Clamps ``minItems`` to ``0`` or ``1`` (only values Anthropic supports).
-    - Strips ``format`` values outside Anthropic's allowed set.
     - Forces ``additionalProperties: false`` on every object that declares
       ``properties``.
     - Free-form objects (``dict[str, Any]`` → ``{"type": "object"}`` with no
       ``properties``) are converted to JSON-encoded string fields, since strict
       mode can't express an open object. The agent parses them back to dicts
-      before tool validation (see ``_coerce_json_fields``).
+      before tool validation (see ``_normalize_fields``).
     - Optional fields stay omitted from ``required`` (Anthropic's native shape;
       no null-union trick).
     """
@@ -129,15 +99,9 @@ def _clean_anthropic_strict_schema(schema: Any) -> Any:
 
     cleaned: dict = {}
     for key, value in schema.items():
-        if key in _ANTHROPIC_STRICT_UNSUPPORTED_KEYWORDS:
-            continue
         if key == "default" and value is None:
             # A null default conveys optionality, which Anthropic expresses via
             # ``required`` omission. Drop it so it can't clash with a now non-null type.
-            continue
-        if key == "minItems" and isinstance(value, int) and value > 1:
-            continue
-        if key == "format" and value not in _ANTHROPIC_STRICT_FORMAT_ALLOWED:
             continue
         if key == "type" and isinstance(value, list):
             # Anthropic conveys optionality by omitting the field from ``required``,
@@ -205,6 +169,7 @@ class Anthropic(BaseLLM):
 
     connection: AnthropicConnection | None = None
     MODEL_PREFIX = "anthropic/"
+    MAX_STRICT_TOOLS: ClassVar[int] = ANTHROPIC_MAX_STRICT_TOOLS
     cache_control: AnthropicCacheControl | None = None
 
     def __init__(self, **kwargs):
@@ -268,39 +233,22 @@ class Anthropic(BaseLLM):
             )
         return params
 
-    def transform_tool_schemas(self, tools: list[dict]) -> list[dict]:
-        """Clean each tool's schema for Anthropic and attach ``strict: true``.
+    def _to_strict_function(self, fn: dict) -> dict:
+        """Clean one tool's schema to Anthropic's strict shape and attach ``strict``.
 
-        Skip strict when ``self.strict_tools`` is falsy (False or an empty list) or
-        once the request has reached the per-request cap of
-        :data:`ANTHROPIC_MAX_STRICT_TOOLS` strict tools. When ``self.strict_tools``
-        is a list, only tools whose function name is in it get strict; all others
-        ship non-strict (untouched) — use it to exclude tools too complex for
-        Anthropic's strict grammar compilation. Free-form objects (``dict[str,
-        Any]``) are handled field-by-field inside ``_clean_anthropic_strict_schema``
-        (converted to JSON-string fields), so a trivial free-form field no longer
-        disables strict for the tool's typed fields.
+        Cleans the parameter schema to Anthropic's strict shape (optionality via
+        ``required`` omission, free-form objects → JSON-string fields,
+        ``additionalProperties: false``) and attaches ``strict: true``. A function
+        without a dict ``parameters`` is returned unchanged (nothing to make strict).
+
+        See :meth:`BaseLLM.transform_tool_schemas` for the shared gating, whitelist,
+        per-request cap (:attr:`MAX_STRICT_TOOLS`), and fail-safe fallback that drive
+        this hook.
         """
-        if not self.strict_tools:
-            return tools
-
-        whitelist = self.strict_tools if isinstance(self.strict_tools, list) else None
-        out: list[dict] = []
-        strict_count = 0
-        for tool in tools:
-            if not isinstance(tool, dict):
-                out.append(tool)
-                continue
-            tool = dict(tool)
-            fn = tool.get("function")
-            if isinstance(fn, dict) and strict_count < ANTHROPIC_MAX_STRICT_TOOLS:
-                allowed = whitelist is None or fn.get("name") in whitelist
-                parameters = fn.get("parameters")
-                if allowed and isinstance(parameters, dict):
-                    fn = dict(fn)
-                    fn["parameters"] = _clean_anthropic_strict_schema(parameters)
-                    fn["strict"] = True
-                    tool["function"] = fn
-                    strict_count += 1
-            out.append(tool)
+        out = dict(fn)
+        parameters = out.get("parameters")
+        if not isinstance(parameters, dict):
+            return out
+        out["parameters"] = _clean_anthropic_strict_schema(parameters)
+        out["strict"] = True
         return out

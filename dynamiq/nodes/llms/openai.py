@@ -4,29 +4,6 @@ from typing import Any, ClassVar
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms.base import BaseLLM
-from dynamiq.utils.logger import logger
-
-# Keywords OpenAI structured outputs / strict function calling do not support.
-# See https://platform.openai.com/docs/guides/structured-outputs#supported-schemas
-_OPENAI_STRICT_UNSUPPORTED_KEYWORDS = frozenset(
-    {
-        "minLength",
-        "maxLength",
-        "minimum",
-        "maximum",
-        "exclusiveMinimum",
-        "exclusiveMaximum",
-        "multipleOf",
-        "patternProperties",
-        "unevaluatedProperties",
-        "contains",
-        "minContains",
-        "maxContains",
-        "minProperties",
-        "maxProperties",
-        "uniqueItems",
-    }
-)
 
 
 def _add_null_to_type(prop: Any) -> Any:
@@ -62,9 +39,8 @@ def _to_openai_strict_property(prop: Any) -> Any:
       ``required``. Nested fields that have a default (i.e. were NOT in the
       object's own ``required``) are made nullable, so the model can emit ``null``
       to leave them at their default. The agent strips those nulls before tool
-      validation so the Python default applies (see ``_strip_protocol_nulls``).
+      validation so the Python default applies (see ``_normalize_fields``).
     - Arrays' ``items`` are converted recursively.
-    - Unsupported keywords are stripped.
     """
     if not isinstance(prop, dict):
         return prop
@@ -93,11 +69,7 @@ def _to_openai_strict_property(prop: Any) -> Any:
             **{k: v for k, v in prop.items() if k in ("description", "title", "default")},
         }
 
-    cleaned: dict = {}
-    for key, value in prop.items():
-        if key in _OPENAI_STRICT_UNSUPPORTED_KEYWORDS:
-            continue
-        cleaned[key] = value
+    cleaned: dict = dict(prop)
 
     param_type = cleaned.get("type")
     # `type` may be a plain string ("object") or a nullable type-array
@@ -110,7 +82,7 @@ def _to_openai_strict_property(prop: Any) -> Any:
         if "properties" not in cleaned:
             # Free-form object (dict[str, Any]). Strict can't express an open
             # object, so represent it as a JSON-encoded string. The agent parses
-            # it back to a dict before tool validation (see _coerce_json_fields).
+            # it back to a dict before tool validation (see _normalize_fields).
             # Preserve nullability so a `dict | None` field can still be null.
             desc = cleaned.get("description", "")
             return {
@@ -133,50 +105,6 @@ def _to_openai_strict_property(prop: Any) -> Any:
         cleaned["items"] = _to_openai_strict_property(cleaned["items"])
         return cleaned
     return cleaned
-
-
-def _to_openai_strict_function(fn: dict) -> dict:
-    """Convert a function-tool definition into OpenAI strict-mode form.
-
-    Every property is promoted to ``required`` and ``additionalProperties: false``
-    is set at every object level. Fields that have a default (NOT in the original
-    ``required``) — or that are already nullable — are made nullable so the model
-    can emit ``null`` to leave them at their default; the agent then strips those
-    nulls before tool validation so the Python default applies. Genuinely-required
-    fields (no default) stay non-nullable and must be emitted. ``strict: true``
-    is attached.
-
-    Free-form objects (``dict[str, Any]``) are handled inside
-    ``_to_openai_strict_property`` (converted to JSON-string fields), so a
-    free-form field doesn't disable strict for the tool's typed fields.
-    """
-    out = dict(fn)
-    parameters = out.get("parameters")
-    if not isinstance(parameters, dict):
-        return out
-
-    properties = parameters.get("properties", {})
-    original_required = set(parameters.get("required", []))
-    converted_props: dict[str, Any] = {}
-    for name, prop in properties.items():
-        converted = _to_openai_strict_property(prop)
-        if name not in original_required:
-            converted = _add_null_to_type(converted)
-        converted_props[name] = converted
-
-    new_parameters: dict[str, Any] = {
-        "type": "object",
-        "properties": converted_props,
-        "required": list(converted_props.keys()),
-        "additionalProperties": False,
-    }
-    for key in ("description", "title"):
-        if key in parameters:
-            new_parameters[key] = parameters[key]
-
-    out["parameters"] = new_parameters
-    out["strict"] = True
-    return out
 
 
 class ReasoningEffort(str, enum.Enum):
@@ -284,40 +212,47 @@ class OpenAI(BaseLLM):
         else:
             params["reasoning_effort"] = effort
 
-    def transform_tool_schemas(self, tools: list[dict]) -> list[dict]:
-        """Convert each tool's schema into OpenAI strict-mode form.
+    def _to_strict_function(self, fn: dict) -> dict:
+        """Convert one tool's schema into OpenAI structured-outputs strict form.
 
-        Skipped when ``self.strict_tools`` is falsy (False or an empty list). When
-        ``self.strict_tools`` is a list, only tools whose function name is in it are
-        converted; every other tool ships non-strict (untouched). On per-tool
-        conversion failure (e.g. an exotic schema the converter can't safely
-        transform), the original tool is kept without ``strict`` so the request
-        still succeeds.
+        Every property is promoted to ``required`` and ``additionalProperties: false``
+        is set at every object level. Fields that have a default (NOT in the original
+        ``required``) — or that are already nullable — are made nullable so the model
+        can emit ``null`` to leave them at their default; the agent then strips those
+        nulls before tool validation so the Python default applies. Genuinely-required
+        fields (no default) stay non-nullable and must be emitted. ``strict: true``
+        is attached. Free-form objects (``dict[str, Any]``) are handled inside
+        ``_to_openai_strict_property`` (converted to JSON-string fields).
+
+        See :meth:`BaseLLM.transform_tool_schemas` for the shared gating,
+        whitelist, and fail-safe fallback that drive this hook.
         """
-        if not self.strict_tools:
-            return tools
+        out = dict(fn)
+        parameters = out.get("parameters")
+        if not isinstance(parameters, dict):
+            return out
 
-        whitelist = self.strict_tools if isinstance(self.strict_tools, list) else None
-        out: list[dict] = []
-        for tool in tools:
-            if not isinstance(tool, dict):
-                out.append(tool)
-                continue
-            tool = dict(tool)
-            fn = tool.get("function")
-            if isinstance(fn, dict) and (whitelist is None or fn.get("name") in whitelist):
-                try:
-                    tool["function"] = _to_openai_strict_function(fn)
-                except Exception as exc:
-                    logger.warning(
-                        "OpenAI strict conversion failed for tool %s: %s; keeping non-strict schema",
-                        fn.get("name", "<unknown>"),
-                        exc,
-                    )
-                    fn = dict(fn)
-                    fn.pop("strict", None)
-                    tool["function"] = fn
-            out.append(tool)
+        properties = parameters.get("properties", {})
+        original_required = set(parameters.get("required", []))
+        converted_props: dict[str, Any] = {}
+        for name, prop in properties.items():
+            converted = _to_openai_strict_property(prop)
+            if name not in original_required:
+                converted = _add_null_to_type(converted)
+            converted_props[name] = converted
+
+        new_parameters: dict[str, Any] = {
+            "type": "object",
+            "properties": converted_props,
+            "required": list(converted_props.keys()),
+            "additionalProperties": False,
+        }
+        for key in ("description", "title"):
+            if key in parameters:
+                new_parameters[key] = parameters[key]
+
+        out["parameters"] = new_parameters
+        out["strict"] = True
         return out
 
     def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
