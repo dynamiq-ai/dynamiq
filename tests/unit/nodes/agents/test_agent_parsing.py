@@ -682,10 +682,16 @@ def test_agent_uses_resolved_schema_for_param_modes():
         return Agent(name="echo-agent", llm=llm, tools=[tool], inference_mode=InferenceMode.FUNCTION_CALLING)
 
     def echo_action_input(agent):
-        """The action_input the agent exposes to the LLM for the echo tool."""
+        """The tool params the agent exposes to the LLM for the echo tool.
+
+        Flat-args schema: params are top-level siblings of ``thought`` (no
+        ``action_input`` wrapper), so exclude ``thought`` to get the tool's own params.
+        """
         fn = next(s for s in agent._tools if s["function"]["name"] == "echo")["function"]
-        action_input = fn["parameters"]["properties"]["action_input"]
-        return action_input.get("properties", {}), set(action_input.get("required", []))
+        params = fn["parameters"]
+        props = {k: v for k, v in params.get("properties", {}).items() if k != "thought"}
+        required = set(params.get("required", [])) - {"thought"}
+        return props, required
 
     # Baseline: the agent exposes optional 'suffix' and does not require it.
     base_props, base_required = echo_action_input(build_agent(EchoTool()))
