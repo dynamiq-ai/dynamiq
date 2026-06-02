@@ -1122,8 +1122,8 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                         buf, JSONStreamingField.ANSWER.value, StreamingState.ANSWER
                     )
 
-    def _emit_tool_input_state(self, buf: str) -> None:
-        """Emit content for the current TOOL_INPUT state."""
+    def _emit_tool_input_state(self, buf: str) -> bool:
+        """Emit content for the current TOOL_INPUT state. Returns True when complete."""
         if self._fc_object_tool_input:
             return self._emit_json_object_field_content(buf, StreamingState.TOOL_INPUT)
         return self._emit_json_field_content(buf, StreamingState.TOOL_INPUT)

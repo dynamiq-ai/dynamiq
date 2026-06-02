@@ -386,8 +386,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         Strict tool-calling encodes two things on the wire that the tool's schema
         can't accept directly; this single pass reverses both, recursing into
-        nested ``BaseModel`` fields so they apply at depth. Call with
-        ``tool.input_schema.model_fields`` and the raw ``action_input``.
+        nested ``BaseModel`` fields *and list elements* so they apply at any depth
+        (e.g. ``list[SubModel]``). Call with ``tool.input_schema.model_fields`` and
+        the raw ``action_input``.
 
         - **Free-form ``dict[str, Any]`` shipped as a JSON string.** Strict mode
           can't express an open object, so the provider converters send those
@@ -408,21 +409,66 @@ class Agent(HistoryManagerMixin, BaseAgent):
             value = data[name]
             if value is None:
                 # Strict mode's "use the default" signal — drop unless the field
-                # genuinely accepts None.
+                # genuinely accepts None. (Only meaningful for dict keys; a None
+                # list element is left in place by ``_normalize_value``.)
                 if not self._annotation_accepts_none(field.annotation):
                     del data[name]
-            elif isinstance(value, str) and self._annotation_is_dict_like(field.annotation):
-                # Free-form dict shipped as a JSON string — parse it back.
+            else:
+                data[name] = self._normalize_value(field.annotation, value)
+
+    def _normalize_value(self, annotation: Any, value: Any) -> Any:
+        """Normalize one value against its annotation; return the (possibly new) value.
+
+        Dicts and lists are mutated in place; a parsed JSON string yields a new dict.
+        Recurses through nested ``BaseModel`` fields and list/tuple/set elements so
+        both wire-encoding reversals apply at any depth.
+        """
+        if isinstance(value, str):
+            # Free-form dict shipped as a JSON string — parse it back.
+            if self._annotation_is_dict_like(annotation):
                 stripped = value.strip()
                 if stripped.startswith("{") and stripped.endswith("}"):
                     try:
-                        data[name] = json.loads(stripped)
+                        return json.loads(stripped)
                     except json.JSONDecodeError:
                         pass  # leave as string; Pydantic will surface the error
-            elif isinstance(value, dict):
-                nested_model = self._extract_basemodel(field.annotation)
-                if nested_model is not None:
-                    self._normalize_fields(nested_model.model_fields, value)
+            return value
+        if isinstance(value, dict):
+            nested_model = self._extract_basemodel(annotation)
+            if nested_model is not None:
+                self._normalize_fields(nested_model.model_fields, value)
+            return value
+        if isinstance(value, list):
+            element_annotation = self._list_element_annotation(annotation)
+            if element_annotation is not None:
+                for i, item in enumerate(value):
+                    value[i] = self._normalize_value(element_annotation, item)
+            return value
+        return value
+
+    @staticmethod
+    def _list_element_annotation(annotation: Any) -> Any | None:
+        """Return the element type of a ``list``/``set``/``tuple`` annotation
+        (handles ``list[X] | None`` / ``Optional[list[X]]``), else None.
+
+        Heterogeneous ``tuple[X, Y]`` is skipped (returns None) — only homogeneous
+        ``tuple[X, ...]`` yields an element type.
+        """
+        origin = get_origin(annotation)
+        if origin in (Union, types.UnionType):
+            for arg in get_args(annotation):
+                elem = Agent._list_element_annotation(arg)
+                if elem is not None:
+                    return elem
+            return None
+        if origin in (list, set, frozenset):
+            args = get_args(annotation)
+            return args[0] if args else None
+        if origin is tuple:
+            args = get_args(annotation)
+            if len(args) == 2 and args[1] is Ellipsis:  # tuple[X, ...]
+                return args[0]
+        return None
 
     def _should_delegate_final(
         self,
