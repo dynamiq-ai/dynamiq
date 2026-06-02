@@ -201,12 +201,13 @@ Only after utilizing the necessary tools and gathering the required information 
 you call `provide_final_answer` to deliver the final response.
 
 ## Function Calling Guidelines
-- ALWAYS populate the "thought" field FIRST before any other field (particularly "action_input") in your function calls
+- ALWAYS populate the "thought" field FIRST before any other field in your function calls
+- Pass tool parameters as top-level fields of the function arguments (alongside "thought"), not nested inside an "action_input" wrapper
 - Analyze the request carefully to determine if tools are needed
 - Call functions with properly formatted arguments
 - Handle tool responses appropriately before providing final answer
 - Chain multiple tool calls when necessary for complex tasks
-- If you want an agent tool's response returned verbatim as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.
+- If you want an agent tool's response returned verbatim as the final output, include "delegate_final": true at the top level of that tool's arguments. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.
 
 ## File Handling
 - Tools may generate or process files (images, CSVs, PDFs, etc.)

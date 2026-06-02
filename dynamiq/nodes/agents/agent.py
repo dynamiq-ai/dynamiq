@@ -4,7 +4,7 @@ from concurrent.futures import as_completed
 from typing import Any, Callable, Literal, Mapping, Union, get_args, get_origin
 
 from litellm import get_supported_openai_params, supports_function_calling, supports_response_schema
-from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from pydantic_core import from_json
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
@@ -46,8 +46,28 @@ from dynamiq.utils.logger import logger
 
 
 class ToolCallArguments(BaseModel):
+    """Flat function-calling arguments: `thought` sibling of the tool's real params.
+
+    Tool params arrive via Pydantic's `extra="allow"` and are extracted via
+    `to_action_input()`.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
     thought: str = ""
-    action_input: dict | str
+
+    def to_action_input(self) -> dict | str:
+        """Return the non-thought fields as the tool's real params.
+
+        Legacy compatibility: if the model still emits the old nested shape
+        (`action_input` as the sole sibling of `thought`), unwrap it so tools
+        receive the real params instead of `{"action_input": ...}`. Callers
+        json-decode a returned string.
+        """
+        fields = self.model_dump(exclude={"thought"})
+        if set(fields) == {"action_input"}:
+            return fields["action_input"]
+        return fields
 
     @field_validator("thought", mode="before")
     @classmethod
@@ -97,7 +117,7 @@ class FunctionCall(BaseModel):
             raise ActionParsingException(
                 "Your tool call is missing required fields. "
                 "Every tool call must include 'thought' (your reasoning) "
-                "and 'action_input' (the tool parameters as an object).",
+                "and the tool's parameters as top-level fields.",
                 recoverable=True,
             )
 
@@ -877,7 +897,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             for tc in actual_tool_calls:
                 tc_name = tc.function.name.strip()
                 args = tc.function.parse_as_tool_call()
-                tc_input = args.action_input
+                tc_input = args.to_action_input()
                 if isinstance(tc_input, str):
                     try:
                         tc_input = json.loads(tc_input, strict=False)
@@ -905,7 +925,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         action = single_call.function.name.strip()
         args = single_call.function.parse_as_tool_call()
         thought = args.thought
-        action_input = args.action_input
+        action_input = args.to_action_input()
         if isinstance(action_input, str):
             try:
                 action_input = json.loads(action_input, strict=False)

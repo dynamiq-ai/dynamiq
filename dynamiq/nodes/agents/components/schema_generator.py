@@ -405,14 +405,15 @@ def generate_function_calling_schemas(
                     ),
                 }
 
-            action_input_schema: dict[str, Any] = {
-                "type": "object",
-                "description": "Tool parameters as a JSON object, not a string.",
-                "properties": properties,
-                "additionalProperties": False,
+            # Flat-args: prepend `thought` so it streams first and the model sees it before tool params.
+            properties = {
+                "thought": {"type": "string", "description": "Your reasoning about using this tool."},
+                **properties,
             }
-            if required_fields:
-                action_input_schema["required"] = required_fields
+            # Only genuinely-required fields are required here. Strict mode (which
+            # promotes every property to ``required``) is applied per-provider in
+            # ``BaseLLM.transform_tool_schemas``, not at generation time.
+            required = list(dict.fromkeys(["thought", *required_fields]))
 
             schema = {
                 "type": "function",
@@ -421,19 +422,17 @@ def generate_function_calling_schemas(
                     "description": tool.description[:1024],
                     "parameters": {
                         "type": "object",
-                        "properties": {
-                            "thought": {
-                                "type": "string",
-                                "description": "Your reasoning about using this tool.",
-                            },
-                            "action_input": action_input_schema,
-                        },
+                        "properties": properties,
                         "additionalProperties": False,
-                        "required": ["thought", "action_input"],
+                        "required": required,
                     },
                 },
             }
         else:
+            # `extra="allow"` tools (e.g. generic Python) take arbitrary params:
+            # keep the object open and non-strict so the model can pass them as
+            # top-level siblings of `thought`. Real zero-param tools stay closed.
+            allows_extra = getattr(tool.input_schema, "model_config", {}).get("extra") == "allow"
             schema = {
                 "type": "function",
                 "function": {
@@ -446,13 +445,9 @@ def generate_function_calling_schemas(
                                 "type": "string",
                                 "description": "Your reasoning about using this tool.",
                             },
-                            "action_input": {
-                                "type": "string",
-                                "description": "Input for the selected tool in JSON string format.",
-                            },
                         },
-                        "additionalProperties": False,
-                        "required": ["thought", "action_input"],
+                        "additionalProperties": allows_extra,
+                        "required": ["thought"],
                     },
                 },
             }

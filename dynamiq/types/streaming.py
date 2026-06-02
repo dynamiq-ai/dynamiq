@@ -198,6 +198,11 @@ class StreamingConfig(BaseModel):
         min_chunk_chars (int): Minimum number of characters to accumulate before emitting
             a streaming event. Helps reduce event count by combining small fragments.
             0 means no accumulation (emit immediately). Defaults to 0.
+        fc_wait_for_first_key (bool): FUNCTION_CALLING mode only. When True, hold
+            tool-input bytes until `thought` is processed so REASONING streams before
+            TOOL_INPUT (for providers that emit `thought` first, e.g. OpenAI strict).
+            When False, stream tool-input immediately regardless of key order.
+            Defaults to True.
     """
     enabled: bool = False
     stream_tool_input: list[str] | None = None
@@ -209,6 +214,7 @@ class StreamingConfig(BaseModel):
     mode: StreamingMode = StreamingMode.FINAL
     include_usage: bool = False
     min_chunk_chars: NonNegativeInt = 0
+    fc_wait_for_first_key: bool = True
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

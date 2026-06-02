@@ -372,7 +372,7 @@ def test_structured_output_fallback_decoder_with_literal_newlines():
 
 
 def test_function_calling_action_input_with_literal_newlines(mocker):
-    """FC mode: strict=False allows action_input with literal newlines."""
+    """FC mode: legacy nested `action_input` (JSON string) is unwrapped and decoded."""
     import uuid
 
     from dynamiq import connections, prompts
