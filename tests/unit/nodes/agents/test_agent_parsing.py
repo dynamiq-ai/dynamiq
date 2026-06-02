@@ -709,7 +709,7 @@ def test_apply_param_modes_required_on_inaccessible_field_raises():
     import pytest
     from pydantic import BaseModel, Field
 
-    from dynamiq.nodes.agents.components.schema_generator import apply_param_modes
+    from dynamiq.nodes.schema_utils import apply_param_modes
 
     class Schema(BaseModel):
         text: str = Field(..., description="Required.")

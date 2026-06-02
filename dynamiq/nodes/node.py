@@ -34,6 +34,7 @@ from dynamiq.nodes.exceptions import (
     NodeFailedException,
     NodeSkippedException,
 )
+from dynamiq.nodes.schema_utils import apply_param_modes
 from dynamiq.nodes.types import ActionType, Behavior, ChoiceCondition, InputParamMode, NodeGroup
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
@@ -320,20 +321,29 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
     _clone_init_methods_names: ClassVar[list[str]] = ["reset_run_state"]
 
     @property
-    def agent_input_schema(self) -> type[BaseModel] | None:
-        """Input schema as exposed to an agent, with ``input_param_modes`` applied.
+    def resolved_input_schema(self) -> type[BaseModel] | None:
+        """Read-only view of ``input_schema`` with ``input_param_modes`` applied.
 
-        Identical to ``input_schema`` when no overrides are set. The transformed model is
-        cached so both LLM schema generation and execution validation share one source of
-        truth (see ``apply_param_modes``).
+        Computed once at construction (see ``_resolve_input_schema``) and stored in the
+        private ``_resolved_input_schema``. This is the single source of truth for both
+        the agent-facing tool schema (LLM function-calling / prompt input formats) AND
+        execution-time validation, for agent and standalone runs alike. Equals
+        ``input_schema`` when no modes are set.
         """
-        if not self.input_param_modes or not self.input_schema:
-            return self.input_schema
-        if self._resolved_input_schema is None:
-            from dynamiq.nodes.agents.components.schema_generator import apply_param_modes
-
-            self._resolved_input_schema = apply_param_modes(self.input_schema, self.input_param_modes)
         return self._resolved_input_schema
+
+    @model_validator(mode="after")
+    def _resolve_input_schema(self):
+        """Compute ``_resolved_input_schema`` once, after all fields are set.
+
+        ``input_schema`` is never reassigned after construction, so resolving here
+        (rather than lazily) is safe and removes the need for a cached/lazy property.
+        """
+        if self.input_param_modes and self.input_schema:
+            self._resolved_input_schema = apply_param_modes(self.input_schema, self.input_param_modes)
+        else:
+            self._resolved_input_schema = self.input_schema
+        return self
 
     @model_validator(mode="after")
     def validate_streaming_vs_error_handling_timeout(self):
@@ -552,7 +562,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         Raises:
             NodeException: If input data does not match the input schema.
         """
-        schema = self.agent_input_schema
+        schema = self.resolved_input_schema
         if schema:
             try:
                 return schema.model_validate(input_data, context=kwargs | self.get_context_for_input_schema())
