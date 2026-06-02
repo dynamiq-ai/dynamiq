@@ -133,7 +133,7 @@ def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str]
     input_formats = []
     for tool in tools:
         params = []
-        for name, field in _reorder_fields(tool.input_schema.model_fields):
+        for name, field in _reorder_fields(tool.resolved_input_schema.model_fields):
             if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
                 args = get_args(field.annotation)
                 if get_origin(field.annotation) in (Union, types.UnionType):
@@ -416,9 +416,9 @@ def generate_function_calling_schemas(
     for tool in tools:
         properties = {}
         required_fields = []
-        input_params = tool.input_schema.model_fields.items()
+        input_params = tool.resolved_input_schema.model_fields.items()
         if list(input_params):
-            for name, field in tool.input_schema.model_fields.items():
+            for name, field in tool.resolved_input_schema.model_fields.items():
                 generate_property_schema(properties, name, field)
                 if field.is_required() and name in properties:
                     required_fields.append(name)
@@ -446,7 +446,7 @@ def generate_function_calling_schemas(
                 "type": "function",
                 "function": {
                     "name": sanitize_tool_name(tool.name),
-                    "description": tool.description[:1024],
+                    "description": (tool.description or "")[:1024],
                     "parameters": {
                         "type": "object",
                         "properties": properties,
@@ -463,12 +463,12 @@ def generate_function_calling_schemas(
             # `extra="allow"` tools (e.g. generic Python) take arbitrary params:
             # keep the object open and non-strict so the model can pass them as
             # top-level siblings of `thought`. Real zero-param tools stay closed.
-            allows_extra = getattr(tool.input_schema, "model_config", {}).get("extra") == "allow"
+            allows_extra = getattr(tool.resolved_input_schema, "model_config", {}).get("extra") == "allow"
             schema = {
                 "type": "function",
                 "function": {
                     "name": sanitize_tool_name(tool.name),
-                    "description": tool.description[:1024],
+                    "description": (tool.description or "")[:1024],
                     "parameters": {
                         "type": "object",
                         "properties": {
