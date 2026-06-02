@@ -38,7 +38,11 @@ def _make_tool(name: str, input_schema_cls: type[BaseModel] | None = None, descr
     tool = MagicMock()
     tool.name = name
     tool.description = description
-    tool.input_schema = input_schema_cls if input_schema_cls is not None else _NoFields
+    schema = input_schema_cls if input_schema_cls is not None else _NoFields
+    tool.input_schema = schema
+    # Mirror a real Node: resolved_input_schema returns input_schema when no
+    # input_param_modes are set. The generator reads resolved_input_schema.
+    tool.resolved_input_schema = schema
     return tool
 
 
@@ -205,6 +209,8 @@ def _sub_agent_tool():
     tool.name = "Researcher"
     tool.description = "Research tool"
     tool.input_schema = _Schema
+    # The generator reads resolved_input_schema (mirrors input_schema with no param modes).
+    tool.resolved_input_schema = _Schema
     return tool
 
 
