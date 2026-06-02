@@ -44,6 +44,17 @@ class InferenceMode(str, Enum):
     STRUCTURED_OUTPUT = "STRUCTURED_OUTPUT"
 
 
+class InputParamMode(str, Enum):
+    """Per-field override mode for a node's optional input parameters.
+
+    Applied to the input_schema model that drives both the agent-facing tool schema
+    and execution-time validation (see ``apply_param_modes``).
+    """
+
+    REQUIRED = "required"
+    HIDDEN = "hidden"
+
+
 class ActionType(str, Enum):
     """
     Enumeration of action types for tools and nodes used as tools.

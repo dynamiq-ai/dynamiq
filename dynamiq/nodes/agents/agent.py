@@ -1,9 +1,11 @@
 import json
+import types
 from concurrent.futures import as_completed
-from typing import Any, Callable, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping, Union, get_args, get_origin
 
 from litellm import get_supported_openai_params, supports_function_calling, supports_response_schema
-from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic_core import from_json
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
@@ -45,8 +47,28 @@ from dynamiq.utils.logger import logger
 
 
 class ToolCallArguments(BaseModel):
+    """Flat function-calling arguments: `thought` sibling of the tool's real params.
+
+    Tool params arrive via Pydantic's `extra="allow"` and are extracted via
+    `to_action_input()`.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
     thought: str = ""
-    action_input: dict | str
+
+    def to_action_input(self) -> dict | str:
+        """Return the non-thought fields as the tool's real params.
+
+        Legacy compatibility: if the model still emits the old nested shape
+        (`action_input` as the sole sibling of `thought`), unwrap it so tools
+        receive the real params instead of `{"action_input": ...}`. Callers
+        json-decode a returned string.
+        """
+        fields = self.model_dump(exclude={"thought"})
+        if set(fields) == {"action_input"}:
+            return fields["action_input"]
+        return fields
 
     @field_validator("thought", mode="before")
     @classmethod
@@ -80,8 +102,13 @@ class FunctionCall(BaseModel):
         if isinstance(v, str):
             try:
                 return json.loads(v, strict=False)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Tool call arguments are not valid JSON: {e}")
+            except json.JSONDecodeError:
+                # Truncated mid-emission (LLM stopped mid-tool-call): parse the
+                # partial document, dropping the incomplete trailing value.
+                try:
+                    return from_json(v, allow_partial=True)
+                except ValueError as e:
+                    raise ValueError(f"Tool call arguments are not valid JSON: {e}")
         return v or {}
 
     def parse_as_tool_call(self) -> ToolCallArguments:
@@ -91,7 +118,7 @@ class FunctionCall(BaseModel):
             raise ActionParsingException(
                 "Your tool call is missing required fields. "
                 "Every tool call must include 'thought' (your reasoning) "
-                "and 'action_input' (the tool parameters as an object).",
+                "and the tool's parameters as top-level fields.",
                 recoverable=True,
             )
 
@@ -320,6 +347,129 @@ class Agent(HistoryManagerMixin, BaseAgent):
             **kwargs,
         )
         self._streaming_tool_run_id = None
+
+    @staticmethod
+    def _annotation_accepts_none(annotation: Any) -> bool:
+        """Return True if a Pydantic field annotation includes ``NoneType``."""
+        if annotation is type(None):
+            return True
+        origin = get_origin(annotation)
+        if origin in (Union, types.UnionType):
+            return type(None) in get_args(annotation)
+        return False
+
+    @staticmethod
+    def _annotation_is_dict_like(annotation: Any) -> bool:
+        """Return True if the annotation is ``dict`` / ``dict[...]`` or a union including one."""
+        if annotation is dict:
+            return True
+        origin = get_origin(annotation)
+        if origin is dict:
+            return True
+        if origin in (Union, types.UnionType):
+            return any(Agent._annotation_is_dict_like(arg) for arg in get_args(annotation))
+        return False
+
+    @staticmethod
+    def _extract_basemodel(annotation: Any) -> type[BaseModel] | None:
+        """Return the BaseModel subclass in an annotation (handles ``Model | None``), else None."""
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            return annotation
+        origin = get_origin(annotation)
+        if origin in (Union, types.UnionType):
+            for arg in get_args(annotation):
+                if isinstance(arg, type) and issubclass(arg, BaseModel):
+                    return arg
+        return None
+
+    def _normalize_fields(self, fields: Mapping[str, Any], data: Any) -> None:
+        """Reconcile raw tool ``data`` against its Pydantic ``fields`` in one walk.
+
+        Strict tool-calling encodes two things on the wire that the tool's schema
+        can't accept directly; this single pass reverses both, recursing into
+        nested ``BaseModel`` fields *and list elements* so they apply at any depth
+        (e.g. ``list[SubModel]``). Call with ``tool.input_schema.model_fields`` and
+        the raw ``action_input``.
+
+        - **Free-form ``dict[str, Any]`` shipped as a JSON string.** Strict mode
+          can't express an open object, so the provider converters send those
+          fields as JSON-encoded strings. When the field is dict-typed and the
+          model supplied a JSON string, parse it back into a dict.
+        - **``None`` for a non-nullable field.** Strict mode keeps every property in
+          ``required`` and uses ``null`` as the "leave it at the default" signal. A
+          field with a non-nullable default (``encoding: str = "utf-8"``) can't take
+          that ``None`` — drop the key so the Pydantic default applies. Fields that
+          genuinely accept ``None`` (``encoding: str | None = None``) keep it.
+        """
+        if not isinstance(data, dict):
+            return
+        for name in list(data):
+            field = fields.get(name)
+            if field is None:
+                continue
+            value = data[name]
+            if value is None:
+                # Strict mode's "use the default" signal — drop unless the field
+                # genuinely accepts None. (Only meaningful for dict keys; a None
+                # list element is left in place by ``_normalize_value``.)
+                if not self._annotation_accepts_none(field.annotation):
+                    del data[name]
+            else:
+                data[name] = self._normalize_value(field.annotation, value)
+
+    def _normalize_value(self, annotation: Any, value: Any) -> Any:
+        """Normalize one value against its annotation; return the (possibly new) value.
+
+        Dicts and lists are mutated in place; a parsed JSON string yields a new dict.
+        Recurses through nested ``BaseModel`` fields and list/tuple/set elements so
+        both wire-encoding reversals apply at any depth.
+        """
+        if isinstance(value, str):
+            # Free-form dict shipped as a JSON string — parse it back.
+            if self._annotation_is_dict_like(annotation):
+                stripped = value.strip()
+                if stripped.startswith("{") and stripped.endswith("}"):
+                    try:
+                        return json.loads(stripped)
+                    except json.JSONDecodeError:
+                        pass  # leave as string; Pydantic will surface the error
+            return value
+        if isinstance(value, dict):
+            nested_model = self._extract_basemodel(annotation)
+            if nested_model is not None:
+                self._normalize_fields(nested_model.model_fields, value)
+            return value
+        if isinstance(value, list):
+            element_annotation = self._list_element_annotation(annotation)
+            if element_annotation is not None:
+                for i, item in enumerate(value):
+                    value[i] = self._normalize_value(element_annotation, item)
+            return value
+        return value
+
+    @staticmethod
+    def _list_element_annotation(annotation: Any) -> Any | None:
+        """Return the element type of a ``list``/``set``/``tuple`` annotation
+        (handles ``list[X] | None`` / ``Optional[list[X]]``), else None.
+
+        Heterogeneous ``tuple[X, Y]`` is skipped (returns None) — only homogeneous
+        ``tuple[X, ...]`` yields an element type.
+        """
+        origin = get_origin(annotation)
+        if origin in (Union, types.UnionType):
+            for arg in get_args(annotation):
+                elem = Agent._list_element_annotation(arg)
+                if elem is not None:
+                    return elem
+            return None
+        if origin in (list, set, frozenset):
+            args = get_args(annotation)
+            return args[0] if args else None
+        if origin is tuple:
+            args = get_args(annotation)
+            if len(args) == 2 and args[1] is Ellipsis:  # tuple[X, ...]
+                return args[0]
+        return None
 
     def _should_delegate_final(
         self,
@@ -792,8 +942,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if len(actual_tool_calls) > 1 and self.parallel_tool_calls_enabled:
             tool_items = []
             for tc in actual_tool_calls:
+                tc_name = tc.function.name.strip()
                 args = tc.function.parse_as_tool_call()
-                tc_input = args.action_input
+                tc_input = args.to_action_input()
                 if isinstance(tc_input, str):
                     try:
                         tc_input = json.loads(tc_input, strict=False)
@@ -801,9 +952,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
                 if not isinstance(tc_input, dict):
                     tc_input = {"input": tc_input}
+                tc_tool = self.tool_by_names.get(self.sanitize_tool_name(tc_name))
+                if tc_tool is not None:
+                    self._normalize_fields(tc_tool.input_schema.model_fields, tc_input)
                 tool_items.append(
                     ToolCallItem(
-                        name=tc.function.name.strip(),
+                        name=tc_name,
                         input=tc_input,
                         thought=args.thought,
                     )
@@ -818,7 +972,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         action = single_call.function.name.strip()
         args = single_call.function.parse_as_tool_call()
         thought = args.thought
-        action_input = args.action_input
+        action_input = args.to_action_input()
         if isinstance(action_input, str):
             try:
                 action_input = json.loads(action_input, strict=False)
@@ -826,6 +980,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
         if not isinstance(action_input, dict):
             action_input = {"input": action_input}
+
+        tool = self.tool_by_names.get(self.sanitize_tool_name(action))
+        if tool is not None:
+            self._normalize_fields(tool.input_schema.model_fields, action_input)
 
         self.log_reasoning(thought, action, action_input, loop_num)
         return thought, action, action_input
@@ -1510,12 +1668,24 @@ class Agent(HistoryManagerMixin, BaseAgent):
         try:
             native_parallel = self.parallel_tool_calls_enabled and self.inference_mode == InferenceMode.FUNCTION_CALLING
             fc_tools, response_format = self._effective_inference_schemas()
+            # In FUNCTION_CALLING mode with tools present, force a tool call so
+            # the model cannot bail out with a text-only response. Honour any
+            # explicit caller override (kwargs / self.llm.tool_choice).
+            forced_tool_choice = None
+            if (
+                self.inference_mode == InferenceMode.FUNCTION_CALLING
+                and fc_tools
+                and "tool_choice" not in kwargs
+                and getattr(self.llm, "tool_choice", None) is None
+            ):
+                forced_tool_choice = "required"
             llm_result = self._run_llm(
                 messages=messages,
                 tools=fc_tools,
                 response_format=response_format,
                 config=llm_config,
                 parallel_tool_calls=True if native_parallel else None,
+                **({"tool_choice": forced_tool_choice} if forced_tool_choice else {}),
                 **kwargs,
             )
         finally:

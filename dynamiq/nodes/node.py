@@ -34,7 +34,8 @@ from dynamiq.nodes.exceptions import (
     NodeFailedException,
     NodeSkippedException,
 )
-from dynamiq.nodes.types import ActionType, Behavior, ChoiceCondition, NodeGroup
+from dynamiq.nodes.schema_utils import apply_param_modes
+from dynamiq.nodes.types import ActionType, Behavior, ChoiceCondition, InputParamMode, NodeGroup
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
 from dynamiq.storages.vector.base import BaseVectorStoreParams
@@ -303,9 +304,48 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: type[BaseModel] | None = None
+    input_param_modes: dict[str, InputParamMode] = Field(
+        default_factory=dict,
+        description=(
+            "Per-field overrides for this node's optional input parameters, keyed by input_schema field name. "
+            "Rewrites the input_schema model that drives BOTH the agent-facing tool schema and execution-time "
+            "validation (agent and standalone runs alike). 'required' = make the optional param required (its "
+            "default is dropped, so it must always be provided); 'hidden' = omit the param from the agent-facing "
+            "schema (the field's own default is used; standalone callers may still pass it). JSON/YAML "
+            "serializable; empty = use schema defaults."
+        ),
+    )
     callbacks: list[NodeCallbackHandler] = []
+    _resolved_input_schema: type[BaseModel] | None = PrivateAttr(default=None)
     _json_schema_fields: ClassVar[list[str]] = []
     _clone_init_methods_names: ClassVar[list[str]] = ["reset_run_state"]
+
+    @property
+    def resolved_input_schema(self) -> type[BaseModel] | None:
+        """Read-only view of ``input_schema`` with ``input_param_modes`` applied.
+
+        Computed once at construction (see ``_resolve_input_schema``, called from
+        ``__init__``) and stored in the private ``_resolved_input_schema``. This is the
+        single source of truth for both the agent-facing tool schema (LLM
+        function-calling / prompt input formats) AND execution-time validation, for agent
+        and standalone runs alike. Equals ``input_schema`` when no modes are set.
+        """
+        return self._resolved_input_schema
+
+    def _resolve_input_schema(self) -> None:
+        """Compute ``_resolved_input_schema`` from ``input_schema`` + ``input_param_modes``.
+
+        Called from ``__init__`` (deliberately NOT a ``model_validator``): pydantic runs
+        after-validators on a model instance passed into a Node-typed field — including
+        bare mocks in tests — which would touch these attributes on objects that don't
+        have them. ``__init__`` only runs on real node construction (the same hook
+        ``init_components`` uses), and ``input_schema`` is never reassigned afterward, so
+        resolving once here is both safe and mock-friendly.
+        """
+        if self.input_param_modes and self.input_schema:
+            self._resolved_input_schema = apply_param_modes(self.input_schema, self.input_param_modes)
+        else:
+            self._resolved_input_schema = self.input_schema
 
     @model_validator(mode="after")
     def validate_streaming_vs_error_handling_timeout(self):
@@ -323,6 +363,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._resolve_input_schema()
         if not self.is_postponed_component_init:
             self.init_components()
 
@@ -524,11 +565,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         Raises:
             NodeException: If input data does not match the input schema.
         """
-        if self.input_schema:
+        schema = self.resolved_input_schema
+        if schema:
             try:
-                return self.input_schema.model_validate(
-                    input_data, context=kwargs | self.get_context_for_input_schema()
-                )
+                return schema.model_validate(input_data, context=kwargs | self.get_context_for_input_schema())
             except Exception as e:
                 if kwargs.get("recoverable_error", False):
                     from dynamiq.nodes.agents.exceptions import RecoverableAgentException

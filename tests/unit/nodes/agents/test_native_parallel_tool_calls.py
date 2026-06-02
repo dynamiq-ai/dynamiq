@@ -27,8 +27,8 @@ class TestNativeParallelToolCalling:
     def test_tool_calls_returned_as_list(self):
         from dynamiq.nodes.llms.base import BaseLLM
 
-        tc1 = {"function": {"name": "search", "arguments": json.dumps({"thought": "t1", "action_input": {"q": "a"}})}}
-        tc2 = {"function": {"name": "search", "arguments": json.dumps({"thought": "t2", "action_input": {"q": "b"}})}}
+        tc1 = {"function": {"name": "search", "arguments": json.dumps({"thought": "t1", "q": "a"})}}
+        tc2 = {"function": {"name": "search", "arguments": json.dumps({"thought": "t2", "q": "b"})}}
 
         tc_objects = []
         for tc in [tc1, tc2]:
@@ -61,8 +61,8 @@ class TestNativeParallelToolCalling:
         llm_result = SimpleNamespace(
             output={
                 "tool_calls": [
-                    {"function": {"name": "search", "arguments": {"thought": "first", "action_input": {"q": "a"}}}},
-                    {"function": {"name": "calc", "arguments": {"thought": "second", "action_input": {"expr": "1+1"}}}},
+                    {"function": {"name": "search", "arguments": {"thought": "first", "q": "a"}}},
+                    {"function": {"name": "calc", "arguments": {"thought": "second", "expr": "1+1"}}},
                 ]
             }
         )
@@ -72,7 +72,9 @@ class TestNativeParallelToolCalling:
         assert action == PARALLEL_TOOL_NAME
         assert len(action_input["tools"]) == 2
         assert action_input["tools"][0]["name"] == "search"
+        assert action_input["tools"][0]["input"] == {"q": "a"}
         assert action_input["tools"][1]["name"] == "calc"
+        assert action_input["tools"][1]["input"] == {"expr": "1+1"}
 
     def test_single_tool_call_unchanged(self):
         from dynamiq.nodes.agents.agent import Agent
@@ -85,7 +87,7 @@ class TestNativeParallelToolCalling:
         llm_result = SimpleNamespace(
             output={
                 "tool_calls": [
-                    {"function": {"name": "search", "arguments": {"thought": "t", "action_input": {"q": "a"}}}},
+                    {"function": {"name": "search", "arguments": {"thought": "t", "q": "a"}}},
                 ]
             }
         )
@@ -108,6 +110,7 @@ class TestFunctionCallingEdgeCases:
             Agent._handle_function_calling_mode(agent, llm_result, loop_num=1)
 
     def test_arguments_as_json_string(self):
+        """OpenAI's wire protocol: function.arguments arrives as a JSON-encoded string."""
         from dynamiq.nodes.agents.agent import Agent
 
         agent = _make_agent()
@@ -117,7 +120,7 @@ class TestFunctionCallingEdgeCases:
                     {
                         "function": {
                             "name": "search",
-                            "arguments": json.dumps({"thought": "t", "action_input": {"q": "a"}}),
+                            "arguments": json.dumps({"thought": "t", "q": "a"}),
                         }
                     }
                 ]
@@ -139,7 +142,7 @@ class TestFunctionCallingEdgeCases:
         llm_result = SimpleNamespace(
             output={
                 "tool_calls": [
-                    {"function": {"name": "search", "arguments": {"action_input": {"q": "a"}}}},
+                    {"function": {"name": "search", "arguments": {"q": "a"}}},
                 ]
             }
         )
@@ -150,7 +153,12 @@ class TestFunctionCallingEdgeCases:
         assert thought == ""
         assert action_input == {"q": "a"}
 
-    def test_missing_action_input_raises(self):
+    def test_only_thought_yields_empty_action_input(self):
+        """A tool call with only `thought` and no real params produces an empty dict.
+
+        Some tools genuinely take no parameters (their schema has only `thought`),
+        so this is not an error.
+        """
         from dynamiq.nodes.agents.agent import Agent
 
         agent = _make_agent()
@@ -162,8 +170,11 @@ class TestFunctionCallingEdgeCases:
             }
         )
 
-        with pytest.raises(ActionParsingException):
-            Agent._handle_function_calling_mode(agent, llm_result, loop_num=1)
+        thought, action, action_input = Agent._handle_function_calling_mode(agent, llm_result, loop_num=1)
+
+        assert action == "search"
+        assert thought == "t"
+        assert action_input == {}
 
     def test_final_answer(self):
         from dynamiq.nodes.agents.agent import Agent

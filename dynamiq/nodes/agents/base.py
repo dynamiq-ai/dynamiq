@@ -1877,7 +1877,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     def tool_description(self) -> str:
         """Returns a description of the tools available to the agent."""
         tools = self._runtime_tools
-        return "\n".join([f"- {tool.name}: {tool.description.strip()}" for tool in tools]) if tools else ""
+        return (
+            "\n".join([f"- {tool.name}: {(tool.description or '').strip()}" for tool in tools])
+            if tools
+            else ""
+        )
 
     @property
     def tool_names(self) -> str:

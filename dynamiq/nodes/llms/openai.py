@@ -6,6 +6,107 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms.base import BaseLLM
 
 
+def _add_null_to_type(prop: Any) -> Any:
+    """Make a converted property nullable so it can sit in ``required`` while
+    letting the model signal "leave it at the default" by emitting ``null``.
+
+    Handles plain types (``"x"`` → ``["x", "null"]``), type arrays, and complex
+    ``anyOf`` unions (adds a ``{"type": "null"}`` branch). No-op if already nullable
+    or if it's a stringified free-form object.
+
+    The input is never mutated: a shallow copy is returned when a change is needed,
+    otherwise the original object is returned unchanged.
+    """
+    if not isinstance(prop, dict):
+        return prop
+    t = prop.get("type")
+    if isinstance(t, str) and t != "null":
+        return {**prop, "type": [t, "null"]}
+    if isinstance(t, list) and "null" not in t:
+        return {**prop, "type": [*t, "null"]}
+    if "anyOf" in prop:
+        branches = prop["anyOf"]
+        if not any(isinstance(b, dict) and b.get("type") == "null" for b in branches):
+            return {**prop, "anyOf": [*branches, {"type": "null"}]}
+    return prop
+
+
+def _to_openai_strict_property(prop: Any) -> Any:
+    """Convert a property schema into OpenAI strict-mode form.
+
+    - ``anyOf`` of ``[primitive, null]`` is flattened to a type array ``["X", "null"]``.
+    - Nested objects get ``additionalProperties: false`` and every property in
+      ``required``. Nested fields that have a default (i.e. were NOT in the
+      object's own ``required``) are made nullable, so the model can emit ``null``
+      to leave them at their default. The agent strips those nulls before tool
+      validation so the Python default applies (see ``_normalize_fields``).
+    - Arrays' ``items`` are converted recursively.
+    """
+    if not isinstance(prop, dict):
+        return prop
+
+    if "anyOf" in prop and "type" not in prop:
+        primitive_types: list[str] = []
+        has_complex = False
+        for option in prop["anyOf"]:
+            if isinstance(option, dict) and "type" in option:
+                opt_type = option["type"]
+                if opt_type in ("object", "array") or isinstance(opt_type, list):
+                    has_complex = True
+                    break
+                primitive_types.append(opt_type)
+            else:
+                has_complex = True
+                break
+        if not has_complex and primitive_types:
+            out: dict[str, Any] = {"type": primitive_types}
+            for key in ("description", "default", "enum", "title"):
+                if key in prop:
+                    out[key] = prop[key]
+            return out
+        return {
+            "anyOf": [_to_openai_strict_property(opt) for opt in prop["anyOf"]],
+            **{k: v for k, v in prop.items() if k in ("description", "title", "default")},
+        }
+
+    cleaned: dict = dict(prop)
+
+    param_type = cleaned.get("type")
+    # `type` may be a plain string ("object") or a nullable type-array
+    # (["object", "null"] for `dict | None`). Detect both.
+    is_nullable_type = isinstance(param_type, list) and "null" in param_type
+    is_object = param_type == "object" or (isinstance(param_type, list) and "object" in param_type)
+    is_array = param_type == "array" or (isinstance(param_type, list) and "array" in param_type)
+
+    if is_object:
+        if "properties" not in cleaned:
+            # Free-form object (dict[str, Any]). Strict can't express an open
+            # object, so represent it as a JSON-encoded string. The agent parses
+            # it back to a dict before tool validation (see _normalize_fields).
+            # Preserve nullability so a `dict | None` field can still be null.
+            desc = cleaned.get("description", "")
+            return {
+                "type": ["string", "null"] if is_nullable_type else "string",
+                "description": (f"{desc} " if desc else "") + "Provide as a JSON-encoded object string.",
+            }
+        nested = cleaned["properties"]
+        nested_required = set(cleaned.get("required", []))
+        converted_nested: dict[str, Any] = {}
+        for k, v in nested.items():
+            cv = _to_openai_strict_property(v)
+            if k not in nested_required:
+                cv = _add_null_to_type(cv)
+            converted_nested[k] = cv
+        cleaned["properties"] = converted_nested
+        cleaned["required"] = list(nested.keys())
+        cleaned["additionalProperties"] = False
+        return cleaned
+    if is_array and isinstance(cleaned.get("items"), dict):
+        cleaned["items"] = _to_openai_strict_property(cleaned["items"])
+        return cleaned
+    return cleaned
+
+
 class ReasoningEffort(str, enum.Enum):
     """
     The reasoning effort to use for the OpenAI LLM.
@@ -65,6 +166,12 @@ class OpenAI(BaseLLM):
 
     Attributes:
         connection (OpenAIConnection | None): The connection to use for the OpenAI LLM.
+        strict_tools: Inherited from :class:`BaseLLM`. False (default, or an empty
+            list) ships every tool as-is; True converts each tool's parameter schema
+            into OpenAI structured-outputs strict form (every property required,
+            optionals re-encoded as nullable types, ``additionalProperties: false``
+            on every object) and attaches ``strict: true``; a list of tool (function)
+            names converts only those tools and ships the rest untouched.
     """
     connection: OpenAIConnection | None = None
     reasoning_effort: ReasoningEffort | None = ReasoningEffort.AUTO
@@ -104,6 +211,49 @@ class OpenAI(BaseLLM):
             params.pop("reasoning_effort", None)
         else:
             params["reasoning_effort"] = effort
+
+    def _to_strict_function(self, fn: dict) -> dict:
+        """Convert one tool's schema into OpenAI structured-outputs strict form.
+
+        Every property is promoted to ``required`` and ``additionalProperties: false``
+        is set at every object level. Fields that have a default (NOT in the original
+        ``required``) — or that are already nullable — are made nullable so the model
+        can emit ``null`` to leave them at their default; the agent then strips those
+        nulls before tool validation so the Python default applies. Genuinely-required
+        fields (no default) stay non-nullable and must be emitted. ``strict: true``
+        is attached. Free-form objects (``dict[str, Any]``) are handled inside
+        ``_to_openai_strict_property`` (converted to JSON-string fields).
+
+        See :meth:`BaseLLM.transform_tool_schemas` for the shared gating,
+        whitelist, and fail-safe fallback that drive this hook.
+        """
+        out = dict(fn)
+        parameters = out.get("parameters")
+        if not isinstance(parameters, dict):
+            return out
+
+        properties = parameters.get("properties", {})
+        original_required = set(parameters.get("required", []))
+        converted_props: dict[str, Any] = {}
+        for name, prop in properties.items():
+            converted = _to_openai_strict_property(prop)
+            if name not in original_required:
+                converted = _add_null_to_type(converted)
+            converted_props[name] = converted
+
+        new_parameters: dict[str, Any] = {
+            "type": "object",
+            "properties": converted_props,
+            "required": list(converted_props.keys()),
+            "additionalProperties": False,
+        }
+        for key in ("description", "title"):
+            if key in parameters:
+                new_parameters[key] = parameters[key]
+
+        out["parameters"] = new_parameters
+        out["strict"] = True
+        return out
 
     def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """
