@@ -329,7 +329,9 @@ def test_get_input_schema_builds_recursive_model_with_nested_validation():
         }
     )
 
-    instance = model_cls.model_validate({"root": {"value": "a", "children": [{"value": "b", "children": [{"value": "c"}]}]}})
+    instance = model_cls.model_validate(
+        {"root": {"value": "a", "children": [{"value": "b", "children": [{"value": "c"}]}]}}
+    )
     # Nested levels are validated as the recursive model, not loose dicts.
     assert instance.root.value == "a"
     assert instance.root.children[0].value == "b"
@@ -393,6 +395,38 @@ def test_get_input_schema_handles_unresolvable_ref():
     model_cls = MCPTool.get_input_schema({"type": "object", "properties": {"x": {"$ref": "#/$defs/Missing"}}})
 
     assert model_cls.model_validate({"x": {"anything": 1}}).x == {"anything": 1}
+
+
+def test_get_input_schema_handles_root_ref_composition():
+    """A root defined purely as a $ref to $defs must keep the referenced properties."""
+    model_cls = MCPTool.get_input_schema(
+        {
+            "$defs": {"Input": {"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}},
+            "$ref": "#/$defs/Input",
+        }
+    )
+
+    assert list(model_cls.model_fields) == ["q"]
+    assert model_cls.model_validate({"q": "x"}).q == "x"
+    with pytest.raises(ValidationError):
+        model_cls.model_validate({})
+
+
+def test_get_input_schema_handles_root_all_of_composition():
+    """A root defined purely as allOf must merge the composed properties."""
+    model_cls = MCPTool.get_input_schema(
+        {
+            "$defs": {"Base": {"type": "object", "properties": {"a": {"type": "string"}}}},
+            "allOf": [
+                {"$ref": "#/$defs/Base"},
+                {"type": "object", "properties": {"b": {"type": "integer"}}},
+            ],
+        }
+    )
+
+    instance = model_cls.model_validate({"a": "x", "b": 5})
+    assert instance.a == "x"
+    assert instance.b == 5
 
 
 def _patch_session_with_result(result: CallToolResult):

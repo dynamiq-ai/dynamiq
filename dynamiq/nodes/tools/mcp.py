@@ -290,10 +290,28 @@ class _SchemaModelBuilder:
             **fields,
         )
 
+    def _resolve_to_object_schema(self, schema: dict[str, Any]) -> dict[str, Any]:
+        """Follow a root-level $ref / allOf chain to the effective object schema with properties."""
+        seen: set[str] = set()
+        while isinstance(schema, dict) and not schema.get("properties"):
+            ref = schema.get("$ref")
+            if isinstance(ref, str) and ref not in seen:
+                seen.add(ref)
+                schema = resolve_json_schema_ref(ref, self._definitions)
+                continue
+            all_of = schema.get("allOf")
+            if isinstance(all_of, list) and all_of:
+                schema = self._merge_all_of(all_of)
+                continue
+            break
+        return schema
+
     def build(self, schema_dict: dict[str, Any], model_name: str) -> type[BaseModel]:
         self._definitions = {**self._definitions, **get_json_schema_definitions(schema_dict)}
-        # The root keeps its requested name verbatim; nested models derive theirs from titles.
-        root = self._register(schema_dict, self._schema_key(schema_dict), model_name)
+        # A root defined purely through $ref/allOf composition is resolved to its object schema so its
+        # properties are not lost. The root keeps its requested name; nested models derive theirs.
+        root_schema = self._resolve_to_object_schema(schema_dict)
+        root = self._register(root_schema, self._schema_key(root_schema), model_name)
         # Complete every forward reference (recursive models) against the namespace built above.
         for model in self._namespace.values():
             model.model_rebuild(force=True, _types_namespace=self._namespace)
