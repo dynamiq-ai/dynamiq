@@ -159,7 +159,13 @@ def json_schema_to_type(
     ref = prop.get("$ref")
     if isinstance(ref, str):
         if ref in seen_refs:
-            return dict[str, Any]  # break a reference cycle with a permissive type
+            # A self-recursive definition (e.g. a tree node whose children are the same node).
+            # We type the cycle-closing point permissively instead of building a true recursive
+            # model: the latter needs forward references + model_rebuild(), the same lazy-annotation
+            # path that caused the original "name 'Optional' is not defined" crash. The data still
+            # round-trips and the MCP server validates it on receipt. Non-recursive reuse of a
+            # definition (sibling or nested) is unaffected and still builds a fully-typed model.
+            return dict[str, Any]
         resolved = resolve_json_schema_ref(ref, definitions)
         if not resolved:
             logger.warning(f"MCP tool schema: could not resolve $ref '{ref}'; falling back to a permissive type.")
