@@ -118,7 +118,10 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
 
     def ensure_collection(self) -> None:
         """Create the facts collection if absent. Safe to call repeatedly."""
-        from weaviate.classes.config import Configure, DataType, Property
+        # `VectorDistances` is a top-level export in weaviate-client>=4.7 — it
+        # is NOT nested under `Configure` in current releases, despite some
+        # older docs still showing `Configure.VectorDistances.COSINE`.
+        from weaviate.classes.config import Configure, DataType, Property, VectorDistances
 
         if self._client.collections.exists(self.collection_name):
             return
@@ -126,7 +129,7 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
             name=self.collection_name,
             vectorizer_config=Configure.Vectorizer.none(),
             vector_index_config=Configure.VectorIndex.hnsw(
-                distance_metric=Configure.VectorDistances.COSINE,
+                distance_metric=VectorDistances.COSINE,
             ),
             properties=[
                 Property(name="fact_id", data_type=DataType.TEXT),
