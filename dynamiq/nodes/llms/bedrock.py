@@ -46,8 +46,8 @@ def _install_litellm_bedrock_parallel_tool_patch() -> None:
         optional_params = original_map_openai_params(self, *args, **kwargs)
         try:
             _ensure_parallel_tool_choice_type(optional_params)
-        except Exception:
-            pass
+        except Exception as exc:  # never let the workaround break litellm's normal mapping
+            logger.warning("Bedrock parallel-tool-choice fix skipped (litellm#22637): %s", exc)
         return optional_params
 
     AmazonConverseConfig.map_openai_params = map_openai_params_with_parallel_tool_fix
