@@ -300,9 +300,7 @@ def test_get_input_schema_handles_reserved_and_invalid_field_names():
         }
     )
 
-    instance = model_cls.model_validate(
-        {"model_config": "cfg", "schema": 5, "weird-name": True, "normal": "ok"}
-    )
+    instance = model_cls.model_validate({"model_config": "cfg", "schema": 5, "weird-name": True, "normal": "ok"})
 
     assert instance.model_dump(by_alias=True) == {
         "model_config": "cfg",
@@ -310,6 +308,59 @@ def test_get_input_schema_handles_reserved_and_invalid_field_names():
         "weird-name": True,
         "normal": "ok",
     }
+
+
+def test_get_input_schema_handles_recursive_ref_without_recursion_error():
+    """A self-referential $defs schema must build without a RecursionError."""
+    model_cls = MCPTool.get_input_schema(
+        {
+            "type": "object",
+            "title": "tree",
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "string"},
+                        "children": {"type": "array", "items": {"$ref": "#/$defs/Node"}},
+                    },
+                }
+            },
+            "properties": {"root": {"$ref": "#/$defs/Node"}},
+        }
+    )
+
+    instance = model_cls.model_validate({"root": {"value": "a", "children": [{"value": "b"}]}})
+    assert instance.root.value == "a"
+    assert instance.root.children == [{"value": "b"}]
+
+
+def test_get_input_schema_enforces_all_of():
+    """allOf must contribute its constraints instead of degrading the field to Any."""
+    model_cls = MCPTool.get_input_schema(
+        {
+            "type": "object",
+            "properties": {"count": {"allOf": [{"type": "integer"}]}},
+            "required": ["count"],
+        }
+    )
+
+    assert model_cls(count=5).count == 5
+    with pytest.raises(ValidationError):
+        model_cls(count="not-an-int")
+
+
+def test_get_input_schema_handles_empty_enum():
+    """An empty enum must not produce an invalid Literal[()] annotation."""
+    model_cls = MCPTool.get_input_schema({"type": "object", "properties": {"x": {"type": "string", "enum": []}}})
+
+    assert model_cls.model_validate({"x": "anything"}).x == "anything"
+
+
+def test_get_input_schema_handles_unresolvable_ref():
+    """An unresolvable $ref must degrade to a permissive type instead of crashing."""
+    model_cls = MCPTool.get_input_schema({"type": "object", "properties": {"x": {"$ref": "#/$defs/Missing"}}})
+
+    assert model_cls.model_validate({"x": {"anything": 1}}).x == {"anything": 1}
 
 
 def _patch_session_with_result(result: CallToolResult):

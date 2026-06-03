@@ -123,26 +123,75 @@ def resolve_json_schema_ref(ref: str, definitions: dict[str, Any]) -> dict[str, 
     return {}
 
 
-def json_schema_to_type(prop: dict[str, Any], name: str, definitions: dict[str, Any]) -> Any:
+def merge_all_of(members: list[Any], definitions: dict[str, Any], seen_refs: frozenset[str]) -> dict[str, Any]:
+    """Shallow-merge the subschemas of an ``allOf`` into a single schema dict (intersection)."""
+    merged: dict[str, Any] = {}
+    merged_properties: dict[str, Any] = {}
+    merged_required: list[Any] = []
+    for member in members:
+        if not isinstance(member, dict):
+            continue
+        ref = member.get("$ref")
+        if isinstance(ref, str):
+            if ref in seen_refs:
+                continue  # cyclic member already being resolved upstream
+            member = resolve_json_schema_ref(ref, definitions)
+        properties = member.get("properties")
+        if isinstance(properties, dict):
+            merged_properties.update(properties)
+        required = member.get("required")
+        if isinstance(required, list):
+            merged_required.extend(required)
+        for key, value in member.items():
+            if key not in ("properties", "required", "$ref", "allOf"):
+                merged.setdefault(key, value)
+    if merged_properties:
+        merged["properties"] = merged_properties
+        merged["type"] = "object"
+    if merged_required:
+        merged["required"] = merged_required
+    return merged
+
+
+def json_schema_to_type(
+    prop: dict[str, Any], name: str, definitions: dict[str, Any], seen_refs: frozenset[str] = frozenset()
+) -> Any:
     ref = prop.get("$ref")
     if isinstance(ref, str):
-        prop = resolve_json_schema_ref(ref, definitions)
+        if ref in seen_refs:
+            return dict[str, Any]  # break a reference cycle with a permissive type
+        resolved = resolve_json_schema_ref(ref, definitions)
+        if not resolved:
+            logger.warning(f"MCP tool schema: could not resolve $ref '{ref}'; falling back to a permissive type.")
+            return Any
+        prop = resolved
+        seen_refs = seen_refs | {ref}
 
     enum_values = prop.get("enum")
-    if isinstance(enum_values, list):
+    if isinstance(enum_values, list) and enum_values:
         return get_literal_type(enum_values)
+
+    schema_all_of = prop.get("allOf")
+    if isinstance(schema_all_of, list) and schema_all_of:
+        member_refs = {m["$ref"] for m in schema_all_of if isinstance(m, dict) and isinstance(m.get("$ref"), str)}
+        merged = merge_all_of(schema_all_of, definitions, seen_refs)
+        return json_schema_to_type(merged, name, definitions, seen_refs | member_refs)
 
     schema_options = prop.get("anyOf") or prop.get("oneOf")
     if isinstance(schema_options, list):
         return get_union_type(
-            [json_schema_to_type(option, name, definitions) for option in schema_options if isinstance(option, dict)]
+            [
+                json_schema_to_type(option, name, definitions, seen_refs)
+                for option in schema_options
+                if isinstance(option, dict)
+            ]
         )
 
     schema_type = prop.get("type")
     if isinstance(schema_type, list):
         return get_union_type(
             [
-                json_schema_to_type({**prop, "type": type_}, name, definitions)
+                json_schema_to_type({**prop, "type": type_}, name, definitions, seen_refs)
                 for type_ in schema_type
                 if isinstance(type_, str)
             ]
@@ -155,22 +204,26 @@ def json_schema_to_type(prop: dict[str, Any], name: str, definitions: dict[str, 
                 prop,
                 make_model_name(title if isinstance(title, str) else name),
                 definitions,
+                seen_refs,
             )
         additional_props = prop.get("additionalProperties")
         if isinstance(additional_props, dict):
-            return get_dict_annotation(json_schema_to_type(additional_props, f"{name}Value", definitions))
+            return get_dict_annotation(json_schema_to_type(additional_props, f"{name}Value", definitions, seen_refs))
         return dict[str, Any]
 
     if schema_type == "array":
         items = prop.get("items", {})
         item_schema = items if isinstance(items, dict) else {}
-        return get_list_annotation(json_schema_to_type(item_schema, f"{name}Item", definitions))
+        return get_list_annotation(json_schema_to_type(item_schema, f"{name}Item", definitions, seen_refs))
 
     return JSON_SCHEMA_TYPE_MAPPING.get(schema_type, Any)
 
 
 def create_input_schema_from_json_schema(
-    schema_dict: dict[str, Any], model_name: str = "MCPToolSchema", definitions: dict[str, Any] | None = None
+    schema_dict: dict[str, Any],
+    model_name: str = "MCPToolSchema",
+    definitions: dict[str, Any] | None = None,
+    seen_refs: frozenset[str] = frozenset(),
 ) -> type[BaseModel]:
     definitions = {**(definitions or {}), **get_json_schema_definitions(schema_dict)}
     required = schema_dict.get("required", [])
@@ -185,7 +238,7 @@ def create_input_schema_from_json_schema(
     for name, prop in properties.items():
         if not isinstance(prop, dict):
             continue
-        field_type = json_schema_to_type(prop, name, definitions)
+        field_type = json_schema_to_type(prop, name, definitions, seen_refs)
         default = ... if name in required_fields else prop.get("default", None)
         if name not in required_fields:
             field_type = get_union_type([field_type, NONE_TYPE])
@@ -193,7 +246,7 @@ def create_input_schema_from_json_schema(
         raw_description = prop.get("description")
         description = raw_description if isinstance(raw_description, str) else None
         enum_values = prop.get("enum")
-        if isinstance(enum_values, list):
+        if isinstance(enum_values, list) and enum_values:
             enum_description = f" Allowed values: {', '.join(map(str, enum_values))}."
             description = (description or "").rstrip() + enum_description
 
