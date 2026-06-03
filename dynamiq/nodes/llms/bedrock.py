@@ -8,6 +8,52 @@ _BEDROCK_STOP_UNSUPPORTED_INDICATORS = (
 )
 
 
+def _ensure_parallel_tool_choice_type(optional_params: dict) -> None:
+    """Add Anthropic's required ``type`` to litellm's Bedrock parallel-tool config.
+
+    Workaround for BerriAI/litellm#22637 (fix PR #22638 unmerged): for Claude 4.5+ on
+    Bedrock, litellm builds ``_parallel_tool_use_config`` with a ``tool_choice`` that
+    omits the required ``type`` discriminator, so Bedrock rejects the request with
+    "tool_choice.type: Field required". We add ``type="auto"`` only when it is missing,
+    which preserves litellm's ``disable_parallel_tool_use`` (so a user's
+    ``parallel_tool_calls`` True/False is honoured) and is a no-op once litellm is fixed.
+    """
+    cfg = optional_params.get("_parallel_tool_use_config")
+    if isinstance(cfg, dict):
+        tool_choice = cfg.get("tool_choice")
+        if isinstance(tool_choice, dict) and "type" not in tool_choice:
+            tool_choice["type"] = "auto"
+
+
+def _install_litellm_bedrock_parallel_tool_patch() -> None:
+    """Idempotently wrap ``AmazonConverseConfig.map_openai_params`` to apply the fix.
+
+    Wrapping (rather than replacing) keeps litellm's behaviour intact and merely repairs
+    the malformed parallel-tool config on the way out. Guarded so a litellm refactor can
+    never break importing/constructing this node.
+    """
+    try:
+        from litellm.llms.bedrock.chat.converse_transformation import AmazonConverseConfig
+    except Exception:
+        return
+
+    if getattr(AmazonConverseConfig, "_dynamiq_parallel_tc_patched", False):
+        return
+
+    original_map_openai_params = AmazonConverseConfig.map_openai_params
+
+    def map_openai_params_with_parallel_tool_fix(self, *args, **kwargs):
+        optional_params = original_map_openai_params(self, *args, **kwargs)
+        try:
+            _ensure_parallel_tool_choice_type(optional_params)
+        except Exception:
+            pass
+        return optional_params
+
+    AmazonConverseConfig.map_openai_params = map_openai_params_with_parallel_tool_fix
+    AmazonConverseConfig._dynamiq_parallel_tc_patched = True
+
+
 class Bedrock(BaseLLM):
     """Bedrock LLM node.
 
@@ -26,6 +72,7 @@ class Bedrock(BaseLLM):
         Args:
             **kwargs: Additional keyword arguments.
         """
+        _install_litellm_bedrock_parallel_tool_patch()
         if kwargs.get("client") is None and kwargs.get("connection") is None:
             kwargs["connection"] = AWSConnection()
         super().__init__(**kwargs)
