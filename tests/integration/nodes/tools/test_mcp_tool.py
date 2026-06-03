@@ -1,14 +1,11 @@
 import contextlib
-import os
 import uuid
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from mcp.types import CallToolResult, ImageContent, TextContent
-from pydantic import BaseModel, Field, create_model
+from pydantic import Field, ValidationError, create_model
 
 from dynamiq import connections
 from dynamiq.nodes.agents import Agent
@@ -240,48 +237,52 @@ def test_extract_text_from_mcp_content():
     assert extract_text_from_mcp_content([]) == ""
 
 
-def test_get_input_schema_rebuilds_with_generated_types_namespace(monkeypatch):
-    captured = {}
-    original_model_rebuild = BaseModel.model_rebuild.__func__
-
-    def capture_model_rebuild(cls, *args, **kwargs):
-        if cls.__module__ == "dynamiq.nodes.tools.MCPTool.mcp_schema":
-            captured["types_namespace"] = kwargs.get("_types_namespace")
-        return original_model_rebuild(cls, *args, **kwargs)
-
-    monkeypatch.setattr(BaseModel, "model_rebuild", classmethod(capture_model_rebuild))
-
+def test_get_input_schema_creates_model_from_json_schema():
     model_cls = MCPTool.get_input_schema(
         {
-            "title": "OptionalSchema",
+            "title": "SearchSchema",
             "type": "object",
-            "properties": {"value": {"type": "string"}},
-            "required": [],
+            "$defs": {
+                "Options": {
+                    "type": "object",
+                    "properties": {"case_sensitive": {"type": "boolean"}},
+                }
+            },
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "default": 10},
+                "mode": {"type": "string", "enum": ["fast", "full"]},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "ids": {"type": "array", "items": {"type": "integer"}},
+                "filters": {
+                    "type": "object",
+                    "properties": {"active": {"type": "boolean"}},
+                },
+                "options": {"$ref": "#/$defs/Options"},
+            },
+            "required": ["query"],
         }
     )
 
-    assert model_cls(value="ok").value == "ok"
-    assert "Optional" in captured["types_namespace"]
+    assert model_cls.__name__ == "MCPToolSchema"
+    input_data = model_cls(
+        query="customers",
+        mode="fast",
+        tags=["pii"],
+        ids=[1, 2],
+        filters={"active": True},
+        options={"case_sensitive": False},
+    )
 
+    assert input_data.query == "customers"
+    assert input_data.limit == 10
+    assert input_data.ids == [1, 2]
+    assert input_data.filters.active is True
+    assert input_data.options.case_sensitive is False
+    assert set(model_cls.model_json_schema()["required"]) == {"query"}
 
-def test_get_input_schema_does_not_require_existing_process_cwd():
-    original_cwd = Path.cwd()
-    try:
-        with TemporaryDirectory() as missing_cwd:
-            os.chdir(missing_cwd)
-
-        model_cls = MCPTool.get_input_schema(
-            {
-                "title": "OptionalSchema",
-                "type": "object",
-                "properties": {"value": {"type": "string"}},
-                "required": [],
-            }
-        )
-
-        assert model_cls(value="ok").value == "ok"
-    finally:
-        os.chdir(original_cwd)
+    with pytest.raises(ValidationError):
+        model_cls(query="customers", mode="slow")
 
 
 def _patch_session_with_result(result: CallToolResult):

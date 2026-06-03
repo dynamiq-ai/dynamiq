@@ -1,18 +1,10 @@
 import asyncio
-import importlib.util
-import inspect
-import json
-import os
-import sys
-import threading
 from dataclasses import field
-from pathlib import Path
-from tempfile import TemporaryDirectory
-from typing import Any, Literal
+from types import GenericAlias
+from typing import Any, Literal, Union
 
-from datamodel_code_generator import DataModelType, InputFileType, generate
 from mcp import ClientSession
-from pydantic import BaseModel, ConfigDict, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, create_model
 
 from dynamiq.connections import MCPSse, MCPStdio, MCPStreamableHTTP
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
@@ -23,20 +15,20 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import is_called_from_async_context
 from dynamiq.utils.logger import logger
 
-_MCP_SCHEMA_GENERATION_LOCK = threading.Lock()
+NONE_TYPE = type(None)
+
+JSON_SCHEMA_TYPE_MAPPING: dict[str, Any] = {
+    "string": str,
+    "integer": int,
+    "number": float,
+    "boolean": bool,
+    "object": dict[str, Any],
+    "array": list[Any],
+    "null": NONE_TYPE,
+}
 
 
-def ensure_process_cwd() -> None:
-    """
-    Repair the process cwd if another thread left it pointing at a deleted directory.
-    """
-    try:
-        Path.cwd()
-    except FileNotFoundError:
-        os.chdir(Path(__file__).resolve().parent)
-
-
-def rename_keys_recursive(data: dict[str, Any] | list[str], key_map: dict[str, str]) -> Any:
+def rename_keys_recursive(data: dict[str, Any] | list[Any], key_map: dict[str, str]) -> Any:
     """
     Recursively renames keys in a nested dictionary based on a provided key mapping.
     """
@@ -50,6 +42,139 @@ def rename_keys_recursive(data: dict[str, Any] | list[str], key_map: dict[str, s
 def extract_text_from_mcp_content(content: list[Any]) -> str:
     """Join the text of the TextContent blocks in an MCP result's content list."""
     return "\n".join(block.text for block in content if getattr(block, "type", None) == "text")
+
+
+def get_json_schema_definitions(schema: dict[str, Any]) -> dict[str, Any]:
+    definitions: dict[str, Any] = {}
+    for key in ("$defs", "definitions"):
+        value = schema.get(key)
+        if isinstance(value, dict):
+            definitions.update(value)
+    return definitions
+
+
+def make_model_name(name: str | None, fallback: str = "MCPToolSchema") -> str:
+    if not name:
+        return fallback
+    parts = [part for part in "".join(char if char.isalnum() else " " for char in name).title().split() if part]
+    model_name = "".join(parts)
+    if not model_name or model_name[0].isdigit():
+        return fallback
+    return model_name
+
+
+def get_union_type(types: list[Any]) -> Any:
+    unique_types = []
+    for type_ in types:
+        if type_ not in unique_types:
+            unique_types.append(type_)
+    if not unique_types:
+        return Any
+    if len(unique_types) == 1:
+        return unique_types[0]
+    return Union.__getitem__(tuple(unique_types))
+
+
+def get_literal_type(values: list[Any]) -> Any:
+    return Literal.__getitem__(tuple(values))
+
+
+def get_list_annotation(item_type: Any) -> Any:
+    return GenericAlias(list, (item_type,))
+
+
+def get_dict_annotation(value_type: Any) -> Any:
+    return GenericAlias(dict, (str, value_type))
+
+
+def resolve_json_schema_ref(ref: str, definitions: dict[str, Any]) -> dict[str, Any]:
+    prefix = "#/$defs/"
+    definitions_prefix = "#/definitions/"
+    if ref.startswith(prefix):
+        value = definitions.get(ref.removeprefix(prefix))
+        return value if isinstance(value, dict) else {}
+    if ref.startswith(definitions_prefix):
+        value = definitions.get(ref.removeprefix(definitions_prefix))
+        return value if isinstance(value, dict) else {}
+    return {}
+
+
+def json_schema_to_type(prop: dict[str, Any], name: str, definitions: dict[str, Any]) -> Any:
+    ref = prop.get("$ref")
+    if isinstance(ref, str):
+        prop = resolve_json_schema_ref(ref, definitions)
+
+    enum_values = prop.get("enum")
+    if isinstance(enum_values, list):
+        return get_literal_type(enum_values)
+
+    schema_options = prop.get("anyOf") or prop.get("oneOf")
+    if isinstance(schema_options, list):
+        return get_union_type(
+            [json_schema_to_type(option, name, definitions) for option in schema_options if isinstance(option, dict)]
+        )
+
+    schema_type = prop.get("type")
+    if isinstance(schema_type, list):
+        return get_union_type(
+            [
+                json_schema_to_type({**prop, "type": type_}, name, definitions)
+                for type_ in schema_type
+                if isinstance(type_, str)
+            ]
+        )
+
+    if schema_type == "object" or prop.get("properties"):
+        if prop.get("properties"):
+            title = prop.get("title")
+            return create_input_schema_from_json_schema(
+                prop,
+                make_model_name(title if isinstance(title, str) else name),
+                definitions,
+            )
+        additional_props = prop.get("additionalProperties")
+        if isinstance(additional_props, dict):
+            return get_dict_annotation(json_schema_to_type(additional_props, f"{name}Value", definitions))
+        return dict[str, Any]
+
+    if schema_type == "array":
+        items = prop.get("items", {})
+        item_schema = items if isinstance(items, dict) else {}
+        return get_list_annotation(json_schema_to_type(item_schema, f"{name}Item", definitions))
+
+    return JSON_SCHEMA_TYPE_MAPPING.get(schema_type, Any)
+
+
+def create_input_schema_from_json_schema(
+    schema_dict: dict[str, Any], model_name: str = "MCPToolSchema", definitions: dict[str, Any] | None = None
+) -> type[BaseModel]:
+    definitions = {**(definitions or {}), **get_json_schema_definitions(schema_dict)}
+    required = schema_dict.get("required", [])
+    required_fields = set(required if isinstance(required, list) else [])
+    fields: dict[str, tuple[Any, Any]] = {}
+
+    properties = schema_dict.get("properties", {})
+    if not isinstance(properties, dict):
+        properties = {}
+
+    for name, prop in properties.items():
+        if not isinstance(prop, dict):
+            continue
+        field_type = json_schema_to_type(prop, name, definitions)
+        default = ... if name in required_fields else prop.get("default", None)
+        if name not in required_fields:
+            field_type = get_union_type([field_type, NONE_TYPE])
+
+        raw_description = prop.get("description")
+        description = raw_description if isinstance(raw_description, str) else None
+        enum_values = prop.get("enum")
+        if isinstance(enum_values, list):
+            enum_description = f" Allowed values: {', '.join(map(str, enum_values))}."
+            description = (description or "").rstrip() + enum_description
+
+        fields[name] = (field_type, Field(default, description=description))
+
+    return create_model(model_name, **fields)
 
 
 class ServerMetadata(BaseModel):
@@ -112,44 +237,10 @@ class MCPTool(ConnectionNode):
             schema_dict (dict[str, Any]): A JSON schema dictionary describing the tool's expected input.
         """
         schema_dict = rename_keys_recursive(schema_dict, {"type_": "type"})
-
-        for _, props in schema_dict.get("properties", {}).items():
-            enum_values = props.pop("enum", None)
-            if enum_values:
-                description = props.get("description", "")
-                enum_description = f" Allowed values: {', '.join(map(str, enum_values))}."
-                props["description"] = description.rstrip() + enum_description
-
-        input_schema = json.dumps(schema_dict)
-
-        with TemporaryDirectory() as tmpdir:
-            schema_path = Path(tmpdir) / "schema.json"
-            out_path = Path(tmpdir) / "model.py"
-            schema_path.write_text(input_schema)
-
-            with _MCP_SCHEMA_GENERATION_LOCK:
-                ensure_process_cwd()
-                generate(
-                    schema_path,
-                    input_file_type=InputFileType.JsonSchema,
-                    output=out_path,
-                    output_model_type=DataModelType.PydanticV2BaseModel,
-                )
-
-            module_name = "dynamiq.nodes.tools.MCPTool.mcp_schema"
-            spec = importlib.util.spec_from_file_location(module_name, out_path)
-            generated_module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = generated_module
-            spec.loader.exec_module(generated_module)
-            generated_classes = [
-                cls
-                for _, cls in inspect.getmembers(generated_module, inspect.isclass)
-                if cls.__module__ == generated_module.__name__
-            ]
-
-            model_cls = generated_classes[0]
-            model_cls.model_rebuild(_types_namespace=generated_module.__dict__)
-            return model_cls
+        return create_input_schema_from_json_schema(
+            schema_dict,
+            "MCPToolSchema",
+        )
 
     def execute(self, input_data: BaseModel, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """
