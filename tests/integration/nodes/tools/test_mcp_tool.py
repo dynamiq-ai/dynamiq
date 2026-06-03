@@ -1,11 +1,14 @@
 import contextlib
+import os
 import uuid
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from mcp.types import CallToolResult, ImageContent, TextContent
-from pydantic import Field, create_model
+from pydantic import BaseModel, Field, create_model
 
 from dynamiq import connections
 from dynamiq.nodes.agents import Agent
@@ -235,6 +238,50 @@ def test_extract_text_from_mcp_content():
     ]
     assert extract_text_from_mcp_content(content) == "line one\nline two"
     assert extract_text_from_mcp_content([]) == ""
+
+
+def test_get_input_schema_rebuilds_with_generated_types_namespace(monkeypatch):
+    captured = {}
+    original_model_rebuild = BaseModel.model_rebuild.__func__
+
+    def capture_model_rebuild(cls, *args, **kwargs):
+        if cls.__module__ == "dynamiq.nodes.tools.MCPTool.mcp_schema":
+            captured["types_namespace"] = kwargs.get("_types_namespace")
+        return original_model_rebuild(cls, *args, **kwargs)
+
+    monkeypatch.setattr(BaseModel, "model_rebuild", classmethod(capture_model_rebuild))
+
+    model_cls = MCPTool.get_input_schema(
+        {
+            "title": "OptionalSchema",
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+            "required": [],
+        }
+    )
+
+    assert model_cls(value="ok").value == "ok"
+    assert "Optional" in captured["types_namespace"]
+
+
+def test_get_input_schema_does_not_require_existing_process_cwd():
+    original_cwd = Path.cwd()
+    try:
+        with TemporaryDirectory() as missing_cwd:
+            os.chdir(missing_cwd)
+
+        model_cls = MCPTool.get_input_schema(
+            {
+                "title": "OptionalSchema",
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": [],
+            }
+        )
+
+        assert model_cls(value="ok").value == "ok"
+    finally:
+        os.chdir(original_cwd)
 
 
 def _patch_session_with_result(result: CallToolResult):

@@ -2,7 +2,9 @@ import asyncio
 import importlib.util
 import inspect
 import json
+import os
 import sys
+import threading
 from dataclasses import field
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -20,6 +22,18 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import is_called_from_async_context
 from dynamiq.utils.logger import logger
+
+_MCP_SCHEMA_GENERATION_LOCK = threading.Lock()
+
+
+def ensure_process_cwd() -> None:
+    """
+    Repair the process cwd if another thread left it pointing at a deleted directory.
+    """
+    try:
+        Path.cwd()
+    except FileNotFoundError:
+        os.chdir(Path(__file__).resolve().parent)
 
 
 def rename_keys_recursive(data: dict[str, Any] | list[str], key_map: dict[str, str]) -> Any:
@@ -109,14 +123,18 @@ class MCPTool(ConnectionNode):
         input_schema = json.dumps(schema_dict)
 
         with TemporaryDirectory() as tmpdir:
+            schema_path = Path(tmpdir) / "schema.json"
             out_path = Path(tmpdir) / "model.py"
+            schema_path.write_text(input_schema)
 
-            generate(
-                input_schema,
-                input_file_type=InputFileType.JsonSchema,
-                output=out_path,
-                output_model_type=DataModelType.PydanticV2BaseModel,
-            )
+            with _MCP_SCHEMA_GENERATION_LOCK:
+                ensure_process_cwd()
+                generate(
+                    schema_path,
+                    input_file_type=InputFileType.JsonSchema,
+                    output=out_path,
+                    output_model_type=DataModelType.PydanticV2BaseModel,
+                )
 
             module_name = "dynamiq.nodes.tools.MCPTool.mcp_schema"
             spec = importlib.util.spec_from_file_location(module_name, out_path)
@@ -130,7 +148,7 @@ class MCPTool(ConnectionNode):
             ]
 
             model_cls = generated_classes[0]
-            model_cls.model_rebuild()
+            model_cls.model_rebuild(_types_namespace=generated_module.__dict__)
             return model_cls
 
     def execute(self, input_data: BaseModel, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
