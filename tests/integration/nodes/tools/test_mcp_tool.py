@@ -329,3 +329,49 @@ async def test_execute_async_raises_on_is_error(mcp_server_tool):
     with conn_patch, session_patch:
         with pytest.raises(ToolExecutionException, match="API rate limit exceeded"):
             await tool.execute_async(tool.input_schema(a=20, b=22))
+
+
+@pytest.mark.asyncio
+async def test_execute_async_unwraps_task_group_exception_group(mcp_server_tool):
+    """A TaskGroup ExceptionGroup must surface its real leaf error, not the opaque wrapper."""
+    tool = mcp_server_tool._mcp_tools["add"]
+
+    @contextlib.asynccontextmanager
+    async def failing_connect(self):
+        raise ExceptionGroup(
+            "unhandled errors in a TaskGroup",
+            [ConnectionRefusedError("[Errno 61] Connection refused")],
+        )
+        yield  # pragma: no cover - makes this an async generator
+
+    with patch.object(MCPSse, "connect", new=failing_connect):
+        with pytest.raises(ToolExecutionException) as exc_info:
+            await tool.execute_async(tool.input_schema(a=20, b=22))
+
+    message = str(exc_info.value)
+    assert "ConnectionRefusedError" in message
+    assert "Connection refused" in message
+    assert "unhandled errors in a TaskGroup" not in message
+
+
+@pytest.mark.asyncio
+async def test_initialize_tools_unwraps_nested_exception_group(sse_server_connection):
+    """initialize_tools should report leaf errors from nested TaskGroup ExceptionGroups."""
+    server = MCPServer(connection=sse_server_connection)
+
+    @contextlib.asynccontextmanager
+    async def failing_connect(self):
+        raise ExceptionGroup(
+            "unhandled errors in a TaskGroup",
+            [ExceptionGroup("inner", [TimeoutError("handshake timed out")])],
+        )
+        yield  # pragma: no cover - makes this an async generator
+
+    with patch.object(MCPSse, "connect", new=failing_connect):
+        with pytest.raises(ToolExecutionException) as exc_info:
+            await server.initialize_tools()
+
+    message = str(exc_info.value)
+    assert "TimeoutError" in message
+    assert "handshake timed out" in message
+    assert "unhandled errors in a TaskGroup" not in message

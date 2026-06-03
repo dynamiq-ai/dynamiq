@@ -21,6 +21,29 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import is_called_from_async_context
 from dynamiq.utils.logger import logger
 
+try:  # Python 3.11+ exposes ExceptionGroup as a builtin
+    from builtins import BaseExceptionGroup
+except ImportError:  # Python 3.10 relies on the backport (a transitive dependency of anyio/mcp)
+    from exceptiongroup import BaseExceptionGroup
+
+
+def flatten_exception_group(exc: BaseException) -> list[BaseException]:
+    """Recursively flatten a (possibly nested) ExceptionGroup into its leaf exceptions."""
+    if isinstance(exc, BaseExceptionGroup):
+        return [leaf for sub in exc.exceptions for leaf in flatten_exception_group(sub)]
+    return [exc]
+
+
+def format_exception(exc: BaseException) -> str:
+    """Render an exception as a readable string, unwrapping anyio/asyncio TaskGroup ExceptionGroups.
+
+    The MCP client runs its transports inside anyio task groups, so transport failures surface as an
+    ExceptionGroup whose ``str()`` is the opaque "unhandled errors in a TaskGroup (N sub-exceptions)".
+    This unwraps the group to its leaf errors so the real cause is visible in logs and tool errors.
+    """
+    leaves = flatten_exception_group(exc)
+    return "; ".join(f"{type(leaf).__name__}: {leaf}" for leaf in leaves)
+
 
 def rename_keys_recursive(data: dict[str, Any] | list[str], key_map: dict[str, str]) -> Any:
     """
@@ -172,10 +195,11 @@ class MCPTool(ConnectionNode):
                     await session.initialize()
                     result = await session.call_tool(self.name, input_dict)
         except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
+            error = format_exception(e)
+            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {error}")
             raise ToolExecutionException(
                 f"Tool '{self.name}' failed to call tool from the MCP server."
-                f"Error: {str(e)}. Please analyze the error and take appropriate action.",
+                f"Error: {error}. Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
 
@@ -265,8 +289,9 @@ Usage Strategy:
 
             logger.info(f"Tool {self.name}: {len(self._mcp_tools)} MCP tools initialized from a server.")
         except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: failed to initialize session. Error: {str(e)}")
-            raise ToolExecutionException(f"Tool {self.name} - {self.id}: failed to initialize session. Error: {str(e)}")
+            error = format_exception(e)
+            logger.error(f"Tool {self.name} - {self.id}: failed to initialize session. Error: {error}")
+            raise ToolExecutionException(f"Tool {self.name} - {self.id}: failed to initialize session. Error: {error}")
 
     def get_mcp_tools(self, select_all: bool = False) -> list[MCPTool]:
         """
