@@ -1,8 +1,9 @@
 import asyncio
+import json
 import keyword
 from dataclasses import field
 from types import GenericAlias
-from typing import Any, Literal, Union
+from typing import Any, ForwardRef, Literal, Union
 
 from mcp import ClientSession
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, create_model
@@ -123,154 +124,187 @@ def resolve_json_schema_ref(ref: str, definitions: dict[str, Any]) -> dict[str, 
     return {}
 
 
-def merge_all_of(members: list[Any], definitions: dict[str, Any], seen_refs: frozenset[str]) -> dict[str, Any]:
-    """Shallow-merge the subschemas of an ``allOf`` into a single schema dict (intersection)."""
-    merged: dict[str, Any] = {}
-    merged_properties: dict[str, Any] = {}
-    merged_required: list[Any] = []
-    for member in members:
-        if not isinstance(member, dict):
-            continue
-        ref = member.get("$ref")
+class _SchemaModelBuilder:
+    """Builds a Pydantic model from an MCP tool's JSON Schema, with support for recursive ``$ref``s.
+
+    Object schemas are memoized by their canonical content, so a cyclic reference (direct, mutual,
+    or via ``allOf``) resolves to a shared model through a forward reference that is later completed
+    with ``model_rebuild``. The resolution namespace is assembled here rather than read from
+    ``sys.modules``, so it cannot suffer the cross-tool clobbering that previously surfaced as
+    ``name 'Optional' is not defined``.
+    """
+
+    def __init__(self, definitions: dict[str, Any]) -> None:
+        self._definitions = definitions
+        self._models_by_key: dict[str, type[BaseModel]] = {}
+        self._name_by_key: dict[str, str] = {}
+        self._building: set[str] = set()
+        self._namespace: dict[str, Any] = {}
+        self._used_names: set[str] = set()
+
+    @staticmethod
+    def _schema_key(schema: dict[str, Any]) -> str:
+        return json.dumps(schema, sort_keys=True, default=str)
+
+    def _unique_name(self, hint: str) -> str:
+        name = make_model_name(hint)
+        candidate = name
+        index = 1
+        while candidate in self._used_names:
+            candidate = f"{name}{index}"
+            index += 1
+        self._used_names.add(candidate)
+        return candidate
+
+    def _merge_all_of(self, members: list[Any]) -> dict[str, Any]:
+        """Shallow-merge the subschemas of an ``allOf`` into a single schema dict (intersection)."""
+        merged: dict[str, Any] = {}
+        merged_properties: dict[str, Any] = {}
+        merged_required: list[Any] = []
+        for member in members:
+            if not isinstance(member, dict):
+                continue
+            ref = member.get("$ref")
+            if isinstance(ref, str):
+                member = resolve_json_schema_ref(ref, self._definitions)
+            properties = member.get("properties")
+            if isinstance(properties, dict):
+                merged_properties.update(properties)
+            required = member.get("required")
+            if isinstance(required, list):
+                merged_required.extend(required)
+            for key, value in member.items():
+                if key not in ("properties", "required", "$ref", "allOf"):
+                    merged.setdefault(key, value)
+        if merged_properties:
+            merged["properties"] = merged_properties
+            merged["type"] = "object"
+        if merged_required:
+            merged["required"] = merged_required
+        return merged
+
+    def _type_for(self, prop: dict[str, Any], name: str) -> Any:
+        ref = prop.get("$ref")
         if isinstance(ref, str):
-            if ref in seen_refs:
-                continue  # cyclic member already being resolved upstream
-            member = resolve_json_schema_ref(ref, definitions)
-        properties = member.get("properties")
-        if isinstance(properties, dict):
-            merged_properties.update(properties)
-        required = member.get("required")
-        if isinstance(required, list):
-            merged_required.extend(required)
-        for key, value in member.items():
-            if key not in ("properties", "required", "$ref", "allOf"):
-                merged.setdefault(key, value)
-    if merged_properties:
-        merged["properties"] = merged_properties
-        merged["type"] = "object"
-    if merged_required:
-        merged["required"] = merged_required
-    return merged
+            resolved = resolve_json_schema_ref(ref, self._definitions)
+            if not resolved:
+                logger.warning(f"MCP tool schema: could not resolve $ref '{ref}'; falling back to a permissive type.")
+                return Any
+            prop = resolved
 
+        enum_values = prop.get("enum")
+        if isinstance(enum_values, list) and enum_values:
+            return get_literal_type(enum_values)
 
-def json_schema_to_type(
-    prop: dict[str, Any], name: str, definitions: dict[str, Any], seen_refs: frozenset[str] = frozenset()
-) -> Any:
-    ref = prop.get("$ref")
-    if isinstance(ref, str):
-        if ref in seen_refs:
-            # A self-recursive definition (e.g. a tree node whose children are the same node).
-            # We type the cycle-closing point permissively instead of building a true recursive
-            # model: the latter needs forward references + model_rebuild(), the same lazy-annotation
-            # path that caused the original "name 'Optional' is not defined" crash. The data still
-            # round-trips and the MCP server validates it on receipt. Non-recursive reuse of a
-            # definition (sibling or nested) is unaffected and still builds a fully-typed model.
-            return dict[str, Any]
-        resolved = resolve_json_schema_ref(ref, definitions)
-        if not resolved:
-            logger.warning(f"MCP tool schema: could not resolve $ref '{ref}'; falling back to a permissive type.")
-            return Any
-        prop = resolved
-        seen_refs = seen_refs | {ref}
+        schema_all_of = prop.get("allOf")
+        if isinstance(schema_all_of, list) and schema_all_of:
+            return self._type_for(self._merge_all_of(schema_all_of), name)
 
-    enum_values = prop.get("enum")
-    if isinstance(enum_values, list) and enum_values:
-        return get_literal_type(enum_values)
+        schema_options = prop.get("anyOf") or prop.get("oneOf")
+        if isinstance(schema_options, list):
+            return get_union_type([self._type_for(o, name) for o in schema_options if isinstance(o, dict)])
 
-    schema_all_of = prop.get("allOf")
-    if isinstance(schema_all_of, list) and schema_all_of:
-        member_refs = {m["$ref"] for m in schema_all_of if isinstance(m, dict) and isinstance(m.get("$ref"), str)}
-        merged = merge_all_of(schema_all_of, definitions, seen_refs)
-        return json_schema_to_type(merged, name, definitions, seen_refs | member_refs)
-
-    schema_options = prop.get("anyOf") or prop.get("oneOf")
-    if isinstance(schema_options, list):
-        return get_union_type(
-            [
-                json_schema_to_type(option, name, definitions, seen_refs)
-                for option in schema_options
-                if isinstance(option, dict)
-            ]
-        )
-
-    schema_type = prop.get("type")
-    if isinstance(schema_type, list):
-        return get_union_type(
-            [
-                json_schema_to_type({**prop, "type": type_}, name, definitions, seen_refs)
-                for type_ in schema_type
-                if isinstance(type_, str)
-            ]
-        )
-
-    if schema_type == "object" or prop.get("properties"):
-        if prop.get("properties"):
-            title = prop.get("title")
-            return create_input_schema_from_json_schema(
-                prop,
-                make_model_name(title if isinstance(title, str) else name),
-                definitions,
-                seen_refs,
+        schema_type = prop.get("type")
+        if isinstance(schema_type, list):
+            return get_union_type(
+                [self._type_for({**prop, "type": type_}, name) for type_ in schema_type if isinstance(type_, str)]
             )
-        additional_props = prop.get("additionalProperties")
-        if isinstance(additional_props, dict):
-            return get_dict_annotation(json_schema_to_type(additional_props, f"{name}Value", definitions, seen_refs))
-        return dict[str, Any]
 
-    if schema_type == "array":
-        items = prop.get("items", {})
-        item_schema = items if isinstance(items, dict) else {}
-        return get_list_annotation(json_schema_to_type(item_schema, f"{name}Item", definitions, seen_refs))
+        if schema_type == "object" or prop.get("properties"):
+            if prop.get("properties"):
+                return self._object_model(prop, name)
+            additional_props = prop.get("additionalProperties")
+            if isinstance(additional_props, dict):
+                return get_dict_annotation(self._type_for(additional_props, f"{name}Value"))
+            return dict[str, Any]
 
-    return JSON_SCHEMA_TYPE_MAPPING.get(schema_type, Any)
+        if schema_type == "array":
+            items = prop.get("items", {})
+            item_schema = items if isinstance(items, dict) else {}
+            return get_list_annotation(self._type_for(item_schema, f"{name}Item"))
+
+        return JSON_SCHEMA_TYPE_MAPPING.get(schema_type, Any)
+
+    def _object_model(self, schema: dict[str, Any], name_hint: str) -> Any:
+        definitions = get_json_schema_definitions(schema)
+        if definitions:
+            self._definitions = {**self._definitions, **definitions}
+
+        key = self._schema_key(schema)
+        if key in self._models_by_key:
+            return self._models_by_key[key]
+        if key in self._building:
+            return ForwardRef(self._name_by_key[key])  # close the cycle with a forward reference
+
+        title = schema.get("title")
+        model_name = self._unique_name(title if isinstance(title, str) else name_hint)
+        return self._register(schema, key, model_name)
+
+    def _register(self, schema: dict[str, Any], key: str, model_name: str) -> type[BaseModel]:
+        self._name_by_key[key] = model_name
+        self._used_names.add(model_name)
+        self._building.add(key)
+        model = self._build_model(schema, model_name)
+        self._building.discard(key)
+        self._models_by_key[key] = model
+        self._namespace[model_name] = model
+        return model
+
+    def _build_model(self, schema: dict[str, Any], model_name: str) -> type[BaseModel]:
+        required = schema.get("required", [])
+        required_fields = set(required if isinstance(required, list) else [])
+        properties = schema.get("properties", {})
+        if not isinstance(properties, dict):
+            properties = {}
+
+        fields: dict[str, tuple[Any, Any]] = {}
+        used_field_names: set[str] = set()
+        for name, prop in properties.items():
+            if not isinstance(prop, dict):
+                continue
+            field_type = self._type_for(prop, name)
+            default = ... if name in required_fields else prop.get("default", None)
+            if name not in required_fields:
+                field_type = get_union_type([field_type, NONE_TYPE])
+
+            raw_description = prop.get("description")
+            description = raw_description if isinstance(raw_description, str) else None
+            enum_values = prop.get("enum")
+            if isinstance(enum_values, list) and enum_values:
+                enum_description = f" Allowed values: {', '.join(map(str, enum_values))}."
+                description = (description or "").rstrip() + enum_description
+
+            if is_safe_field_name(name) and name not in used_field_names:
+                field_name = name
+                alias = None
+            else:
+                field_name = make_safe_field_name(name, used_field_names)
+                alias = name
+            used_field_names.add(field_name)
+
+            fields[field_name] = (field_type, Field(default, description=description, alias=alias))
+
+        return create_model(
+            model_name,
+            __config__=ConfigDict(populate_by_name=True, protected_namespaces=()),
+            **fields,
+        )
+
+    def build(self, schema_dict: dict[str, Any], model_name: str) -> type[BaseModel]:
+        self._definitions = {**self._definitions, **get_json_schema_definitions(schema_dict)}
+        # The root keeps its requested name verbatim; nested models derive theirs from titles.
+        root = self._register(schema_dict, self._schema_key(schema_dict), model_name)
+        # Complete every forward reference (recursive models) against the namespace built above.
+        for model in self._namespace.values():
+            model.model_rebuild(force=True, _types_namespace=self._namespace)
+        return root
 
 
 def create_input_schema_from_json_schema(
-    schema_dict: dict[str, Any],
-    model_name: str = "MCPToolSchema",
-    definitions: dict[str, Any] | None = None,
-    seen_refs: frozenset[str] = frozenset(),
+    schema_dict: dict[str, Any], model_name: str = "MCPToolSchema", definitions: dict[str, Any] | None = None
 ) -> type[BaseModel]:
-    definitions = {**(definitions or {}), **get_json_schema_definitions(schema_dict)}
-    required = schema_dict.get("required", [])
-    required_fields = set(required if isinstance(required, list) else [])
-    fields: dict[str, tuple[Any, Any]] = {}
-
-    properties = schema_dict.get("properties", {})
-    if not isinstance(properties, dict):
-        properties = {}
-
-    used_field_names: set[str] = set()
-    for name, prop in properties.items():
-        if not isinstance(prop, dict):
-            continue
-        field_type = json_schema_to_type(prop, name, definitions, seen_refs)
-        default = ... if name in required_fields else prop.get("default", None)
-        if name not in required_fields:
-            field_type = get_union_type([field_type, NONE_TYPE])
-
-        raw_description = prop.get("description")
-        description = raw_description if isinstance(raw_description, str) else None
-        enum_values = prop.get("enum")
-        if isinstance(enum_values, list) and enum_values:
-            enum_description = f" Allowed values: {', '.join(map(str, enum_values))}."
-            description = (description or "").rstrip() + enum_description
-
-        if is_safe_field_name(name) and name not in used_field_names:
-            field_name = name
-            alias = None
-        else:
-            field_name = make_safe_field_name(name, used_field_names)
-            alias = name
-        used_field_names.add(field_name)
-
-        fields[field_name] = (field_type, Field(default, description=description, alias=alias))
-
-    return create_model(
-        model_name,
-        __config__=ConfigDict(populate_by_name=True, protected_namespaces=()),
-        **fields,
-    )
+    """Create a Pydantic input-schema model from an MCP tool's JSON Schema."""
+    return _SchemaModelBuilder(dict(definitions or {})).build(schema_dict, model_name)
 
 
 class ServerMetadata(BaseModel):

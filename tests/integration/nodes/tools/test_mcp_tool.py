@@ -310,8 +310,8 @@ def test_get_input_schema_handles_reserved_and_invalid_field_names():
     }
 
 
-def test_get_input_schema_handles_recursive_ref_without_recursion_error():
-    """A self-referential $defs schema must build without a RecursionError."""
+def test_get_input_schema_builds_recursive_model_with_nested_validation():
+    """A self-referential $defs schema must build a true recursive model that validates every level."""
     model_cls = MCPTool.get_input_schema(
         {
             "type": "object",
@@ -329,9 +329,41 @@ def test_get_input_schema_handles_recursive_ref_without_recursion_error():
         }
     )
 
-    instance = model_cls.model_validate({"root": {"value": "a", "children": [{"value": "b"}]}})
+    instance = model_cls.model_validate({"root": {"value": "a", "children": [{"value": "b", "children": [{"value": "c"}]}]}})
+    # Nested levels are validated as the recursive model, not loose dicts.
     assert instance.root.value == "a"
-    assert instance.root.children == [{"value": "b"}]
+    assert instance.root.children[0].value == "b"
+    assert instance.root.children[0].children[0].value == "c"
+    with pytest.raises(ValidationError):
+        model_cls.model_validate({"root": {"value": "a", "children": [{"value": {"not": "a string"}}]}})
+
+
+def test_get_input_schema_recursive_all_of_preserves_base():
+    """An allOf that extends the definition currently being built must keep both base and extension."""
+    model_cls = MCPTool.get_input_schema(
+        {
+            "type": "object",
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "string"},
+                        "next": {
+                            "allOf": [
+                                {"$ref": "#/$defs/Node"},
+                                {"type": "object", "properties": {"tag": {"type": "string"}}},
+                            ]
+                        },
+                    },
+                }
+            },
+            "properties": {"root": {"$ref": "#/$defs/Node"}},
+        }
+    )
+
+    instance = model_cls.model_validate({"root": {"value": "a", "next": {"value": "b", "tag": "t"}}})
+    assert instance.root.next.value == "b"  # base field preserved
+    assert instance.root.next.tag == "t"  # extension field present
 
 
 def test_get_input_schema_enforces_all_of():
