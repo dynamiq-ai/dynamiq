@@ -1,4 +1,5 @@
 import asyncio
+import keyword
 from dataclasses import field
 from types import GenericAlias
 from typing import Any, Literal, Union
@@ -26,6 +27,29 @@ JSON_SCHEMA_TYPE_MAPPING: dict[str, Any] = {
     "array": list[Any],
     "null": NONE_TYPE,
 }
+
+# Names that cannot be used directly as Pydantic field names: they shadow BaseModel
+# attributes/methods (e.g. model_config, model_dump, schema, copy) and either break
+# create_model or silently override model internals.
+RESERVED_FIELD_NAMES = frozenset(dir(BaseModel))
+
+
+def is_safe_field_name(name: str) -> bool:
+    """Whether a JSON Schema property name can be used as-is as a Pydantic field name."""
+    return name.isidentifier() and not keyword.iskeyword(name) and name not in RESERVED_FIELD_NAMES
+
+
+def make_safe_field_name(name: str, used: set[str]) -> str:
+    """Derive a unique, valid Python field name for an unsafe JSON Schema property name."""
+    candidate = "".join(char if char.isalnum() else "_" for char in name).strip("_")
+    if not candidate or candidate[0].isdigit() or not is_safe_field_name(candidate):
+        candidate = f"field_{candidate}".rstrip("_")
+    base = candidate
+    index = 1
+    while candidate in used:
+        candidate = f"{base}_{index}"
+        index += 1
+    return candidate
 
 
 def rename_keys_recursive(data: dict[str, Any] | list[Any], key_map: dict[str, str]) -> Any:
@@ -157,6 +181,7 @@ def create_input_schema_from_json_schema(
     if not isinstance(properties, dict):
         properties = {}
 
+    used_field_names: set[str] = set()
     for name, prop in properties.items():
         if not isinstance(prop, dict):
             continue
@@ -172,9 +197,21 @@ def create_input_schema_from_json_schema(
             enum_description = f" Allowed values: {', '.join(map(str, enum_values))}."
             description = (description or "").rstrip() + enum_description
 
-        fields[name] = (field_type, Field(default, description=description))
+        if is_safe_field_name(name) and name not in used_field_names:
+            field_name = name
+            alias = None
+        else:
+            field_name = make_safe_field_name(name, used_field_names)
+            alias = name
+        used_field_names.add(field_name)
 
-    return create_model(model_name, **fields)
+        fields[field_name] = (field_type, Field(default, description=description, alias=alias))
+
+    return create_model(
+        model_name,
+        __config__=ConfigDict(populate_by_name=True, protected_namespaces=()),
+        **fields,
+    )
 
 
 class ServerMetadata(BaseModel):
@@ -268,11 +305,11 @@ class MCPTool(ConnectionNode):
         Returns:
             dict[str, Any]: A dictionary containing the tool's output.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump(by_alias=True)}")
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        input_dict = input_data.model_dump()
+        input_dict = input_data.model_dump(by_alias=True)
 
         try:
             async with self.connection.connect() as result:

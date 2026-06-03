@@ -285,6 +285,33 @@ def test_get_input_schema_creates_model_from_json_schema():
         model_cls(query="customers", mode="slow")
 
 
+def test_get_input_schema_handles_reserved_and_invalid_field_names():
+    """Property names that collide with BaseModel attrs or are not valid identifiers must round-trip."""
+    model_cls = MCPTool.get_input_schema(
+        {
+            "type": "object",
+            "properties": {
+                "model_config": {"type": "string"},
+                "schema": {"type": "integer"},
+                "weird-name": {"type": "boolean"},
+                "normal": {"type": "string"},
+            },
+            "required": ["model_config"],
+        }
+    )
+
+    instance = model_cls.model_validate(
+        {"model_config": "cfg", "schema": 5, "weird-name": True, "normal": "ok"}
+    )
+
+    assert instance.model_dump(by_alias=True) == {
+        "model_config": "cfg",
+        "schema": 5,
+        "weird-name": True,
+        "normal": "ok",
+    }
+
+
 def _patch_session_with_result(result: CallToolResult):
     """Patch the connection + ClientSession so call_tool yields `result`."""
 
