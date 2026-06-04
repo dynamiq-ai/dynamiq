@@ -256,7 +256,8 @@ class E2BSandbox(Sandbox):
             try:
                 from datetime import datetime, timezone
 
-                metadata = self.metadata.copy() if self.metadata else {}
+                # Drop metadata values that are None since E2B rejects those
+                metadata = {k: v for k, v in self.metadata.items() if v is not None} if self.metadata else {}
                 metadata.setdefault("created_at", datetime.now(timezone.utc).isoformat())
                 return self._sdk_class.create(
                     template=self.template,
