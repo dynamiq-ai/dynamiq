@@ -1,4 +1,5 @@
 import contextlib
+import os
 import uuid
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -427,6 +428,28 @@ def test_get_input_schema_handles_root_all_of_composition():
     instance = model_cls.model_validate({"a": "x", "b": 5})
     assert instance.a == "x"
     assert instance.b == 5
+
+
+def test_get_input_schema_does_not_depend_on_cwd(tmp_path):
+    """Schema building must not require a valid working directory.
+
+    Regression for an MCP init failure where the old temp-file codegen path called os.getcwd()
+    while the process working directory had been removed, raising FileNotFoundError.
+    """
+    original_cwd = os.getcwd()
+    doomed = tmp_path / "doomed"
+    doomed.mkdir()
+    os.chdir(doomed)
+    doomed.rmdir()  # the process cwd now points at a deleted directory
+    try:
+        with pytest.raises(FileNotFoundError):
+            os.getcwd()
+        model_cls = MCPTool.get_input_schema(
+            {"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}
+        )
+        assert model_cls.model_validate({"q": "x"}).q == "x"
+    finally:
+        os.chdir(original_cwd)
 
 
 def _patch_session_with_result(result: CallToolResult):
