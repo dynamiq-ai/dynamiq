@@ -1036,6 +1036,42 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self.log_reasoning(thought, action, action_input, loop_num)
         return thought, action, action_input
 
+    @staticmethod
+    def _first_output_block(text: str) -> str:
+        """Return only the first ``<output>...</output>`` block, dropping any later blocks.
+
+        Reasoning models (OpenAI o-series / gpt-5) run with ``stop`` stripped (the API rejects it), so
+        the XML turn-boundary stop-sequence never fires and the model can emit a second ``<output>``
+        block that fabricates an ``<answer>`` before the tool ran. Keeping only the first block makes
+        the agent take the real step and keeps thought/action/answer consistent within one turn.
+
+        The scan treats the content of free-form tags (``action_input``/``thought``/``answer``) as
+        opaque, so tag-like text inside code or JSON (e.g. ``print('</output>')``) cannot be mistaken
+        for a block boundary. The first ``</output>`` reached outside any opaque tag ends the block.
+        Returns ``text`` unchanged when no closing ``</output>`` is present.
+        """
+        # Tags whose content is free-form (code/JSON/prose) and may contain </output>-like text.
+        opaque_tags = ("action_input", "thought", "answer")
+        closing = "</output>"
+        i, n = 0, len(text)
+        while i < n:
+            matched_opaque = False
+            for tag in opaque_tags:
+                open_tag = f"<{tag}"
+                # Match <tag>, <tag ...> or <tag/>, but not <tagx>; guard against end-of-string.
+                if text.startswith(open_tag, i) and (i + len(open_tag) >= n or text[i + len(open_tag)] in " >/"):
+                    close_tag = f"</{tag}>"
+                    close_idx = text.find(close_tag, i)
+                    i = close_idx + len(close_tag) if close_idx != -1 else n
+                    matched_opaque = True
+                    break
+            if matched_opaque:
+                continue
+            if text.startswith(closing, i):
+                return text[: i + len(closing)]
+            i += 1
+        return text
+
     def _handle_xml_mode(
         self, llm_generated_output: str, loop_num: int, config: RunnableConfig, **kwargs
     ) -> tuple[str | None, str | None, dict | list | None]:
@@ -1055,6 +1091,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 ),
             )
             return None, None, None
+
+        # Drop any fabricated trailing <output> blocks so we parse only the real step.
+        llm_generated_output = self._first_output_block(llm_generated_output)
 
         # Parse the action before the answer so a same-turn fabricated <answer> can't make us skip the
         # tool (reasoning models run with `stop` stripped, so they may emit both in one response).
@@ -1693,6 +1732,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
             llm_generated_output = streaming_callback.accumulated_content
         else:
             llm_generated_output = llm_result.output.get("content", "")
+        if self.inference_mode == InferenceMode.XML and llm_generated_output:
+            # Drop fabricated trailing <output> blocks so history and parsing see only the real step.
+            llm_generated_output = self._first_output_block(llm_generated_output)
         self._last_llm_output = llm_generated_output
 
         llm_reasoning = (
