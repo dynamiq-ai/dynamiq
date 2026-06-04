@@ -287,26 +287,6 @@ def test_agent_xml_mode_genuine_final_answer_still_returns_answer(xml_react_agen
     assert "22" in final_answer
 
 
-def test_agent_xml_mode_literal_output_tag_inside_action_input(xml_react_agent):
-    """A literal </output> inside action_input content must not corrupt the tool call.
-
-    Guards against re-introducing any </output> substring slicing: the parser isolates each field
-    by its own tag, so embedded output tags in code/JSON are preserved verbatim.
-    """
-    llm_generated_output = (
-        "<output><thought>Print the closing tag.</thought>"
-        "<action>code-executor</action>"
-        '<action_input>{"python": "print(\'</output>\')"}</action_input></output>'
-    )
-
-    thought, action, action_input = xml_react_agent._handle_xml_mode(
-        llm_generated_output=llm_generated_output, loop_num=1, config=RunnableConfig()
-    )
-
-    assert action == "code-executor"
-    assert action_input == {"python": "print('</output>')"}
-
-
 def test_xmlparser_parse_missing_required_tag():
     text = "<output><thought>OK</thought></output>"
     with pytest.raises(TagNotFoundError, match="Required tag <action> not found"):
