@@ -1731,7 +1731,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
             llm_generated_output = llm_result.output.get("content", "")
         if self.inference_mode == InferenceMode.XML and llm_generated_output:
             # Drop fabricated trailing <output> blocks so history and parsing see only the real step.
-            llm_generated_output = self._first_output_block(llm_generated_output)
+            first_block = self._first_output_block(llm_generated_output)
+            if first_block != llm_generated_output:
+                logger.warning(
+                    f"Agent {self.name} - {self.id}: model emitted more than one <output> block; "
+                )
+                llm_generated_output = first_block
         self._last_llm_output = llm_generated_output
 
         llm_reasoning = (
