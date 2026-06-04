@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dynamiq.components.converters.text import TextFileConverter as TextFileConverterComponent
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes.node import Node, NodeGroup, ensure_config
+from dynamiq.nodes.node import ErrorHandling, Node, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -32,6 +32,10 @@ class TextFileConverter(Node):
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
     name: str = "text-file-converter"
+    error_handling: ErrorHandling = Field(
+        default_factory=lambda: ErrorHandling(timeout_seconds=60.0),
+        description="Default execution timeout. Set timeout_seconds to None to disable.",
+    )
     file_converter: TextFileConverterComponent | None = None
     input_schema: ClassVar[type[TextFileConverterInputSchema]] = TextFileConverterInputSchema
 
