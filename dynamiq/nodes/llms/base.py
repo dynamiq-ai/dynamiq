@@ -703,7 +703,10 @@ class BaseLLM(ConnectionNode):
             tool = dict(tool)
             fn = tool.get("function")
             eligible = (
-                isinstance(fn, dict) and strict_count < cap and (whitelist is None or fn.get("name") in whitelist)
+                isinstance(fn, dict)
+                and strict_count < cap
+                and (whitelist is None or fn.get("name") in whitelist)
+                and not self._has_open_parameters(fn)
             )
             if eligible:
                 try:
@@ -721,6 +724,18 @@ class BaseLLM(ConnectionNode):
                     strict_count += 1
             out.append(tool)
         return out
+
+    @staticmethod
+    def _has_open_parameters(fn: dict) -> bool:
+        """Whether a tool's top-level parameters declare an open object.
+
+        Strict mode requires ``additionalProperties: false``, so an open tool
+        (e.g. an ``extra="allow"`` Python tool taking arbitrary kwargs) can't
+        be made strict without rendering its real arguments unreachable.
+        :meth:`transform_tool_schemas` skips these and ships them non-strict.
+        """
+        params = fn.get("parameters")
+        return isinstance(params, dict) and params.get("additionalProperties") is True
 
     def _to_strict_function(self, fn: dict) -> dict:
         """Convert one function-tool definition into this provider's strict form.
