@@ -249,8 +249,8 @@ def test_agent_xml_mode_action_and_answer_in_one_response_runs_tool(xml_react_ag
 
     Reasoning models (gpt-5 / o-series) run with `stop` stripped, so the XML turn-boundary
     stop-sequence never fires and the model can emit a valid tool call followed by a second
-    <output> block that fabricates the answer before the tool ran. The agent must keep only the
-    first <output> block and execute the tool, ignoring the fabricated final answer.
+    <output> block that fabricates the answer before the tool ran. The agent must parse the action
+    before the answer and execute the tool, ignoring the fabricated final answer.
     """
     llm_generated_output = (
         "<output>\n"
@@ -285,6 +285,26 @@ def test_agent_xml_mode_genuine_final_answer_still_returns_answer(xml_react_agen
 
     assert action == "final_answer"
     assert "22" in final_answer
+
+
+def test_agent_xml_mode_literal_output_tag_inside_action_input(xml_react_agent):
+    """A literal </output> inside action_input content must not corrupt the tool call.
+
+    Guards against re-introducing any </output> substring slicing: the parser isolates each field
+    by its own tag, so embedded output tags in code/JSON are preserved verbatim.
+    """
+    llm_generated_output = (
+        "<output><thought>Print the closing tag.</thought>"
+        "<action>code-executor</action>"
+        '<action_input>{"python": "print(\'</output>\')"}</action_input></output>'
+    )
+
+    thought, action, action_input = xml_react_agent._handle_xml_mode(
+        llm_generated_output=llm_generated_output, loop_num=1, config=RunnableConfig()
+    )
+
+    assert action == "code-executor"
+    assert action_input == {"python": "print('</output>')"}
 
 
 def test_xmlparser_parse_missing_required_tag():
