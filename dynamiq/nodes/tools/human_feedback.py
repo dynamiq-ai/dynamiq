@@ -87,6 +87,11 @@ class HumanFeedbackInputSchema(BaseModel):
         default=HumanFeedbackAction.ASK,
         description="Action to perform: 'ask' to request input from user, 'info' to just send a message.",
     )
+    input: str = Field(
+        default="",
+        description="The message or question shown to the user. Rendered via the message template "
+        "(default template is '{{input}}').",
+    )
     model_config = ConfigDict(extra="allow")
 
 
