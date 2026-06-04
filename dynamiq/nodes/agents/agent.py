@@ -588,16 +588,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
         *,
         error_label: str,
         error_detail: str,
-        llm_generated_output: str | None,
         extra_guidance: str | None = None,
     ) -> None:
         """Append a correction instruction to prompt for recoverable agent errors."""
-
-        error_context = llm_generated_output if llm_generated_output else "No response generated"
-
-        self._prompt.messages.append(
-            Message(role=MessageRole.ASSISTANT, content=f"Previous response:\n{error_context}", static=True)
-        )
 
         guidance_suffix = f" {extra_guidance.strip()}" if extra_guidance else ""
 
@@ -607,6 +600,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
             "strictly following the required format, ensuring all tags or labeled sections are "
             "present and correctly structured, and that any JSON content is valid." + guidance_suffix
         )
+
+        pending_ids = getattr(self, "_pending_fc_tool_call_ids", None) or []
+        if self.inference_mode == InferenceMode.FUNCTION_CALLING and pending_ids:
+            for tc_id in pending_ids:
+                self._prompt.messages.append(
+                    Message(role=MessageRole.TOOL, content=correction_message, tool_call_id=tc_id, static=True)
+                )
+            self._pending_fc_tool_call_ids = []
+            return
 
         self._prompt.messages.append(
             Message(role=MessageRole.USER, content=correction_message, static=True)
@@ -865,7 +867,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self._append_recovery_instruction(
                 error_label="EmptyResponse",
                 error_detail="The model returned an empty reply while using the Thought/Action format.",
-                llm_generated_output=llm_generated_output,
                 extra_guidance=(
                     "Re-evaluate the latest observation and respond with 'Thought:' followed by either "
                     "an 'Action:' plus JSON 'Action Input:' or a final 'Answer:' section."
@@ -1048,7 +1049,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self._append_recovery_instruction(
                 error_label="EmptyResponse",
                 error_detail="The model returned an empty reply while XML format was required.",
-                llm_generated_output=llm_generated_output,
                 extra_guidance=(
                     "Respond with <thought>...</thought> and "
                     "either <action>/<action_input> or <answer> tags, "
@@ -1838,7 +1838,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self._append_recovery_instruction(
                     error_label=type(e).__name__,
                     error_detail=str(e),
-                    llm_generated_output=self._last_llm_output,
                     extra_guidance=(
                         "The response format is correct, but some files could not be found. "
                         "Please create the missing files or correct the file paths, "
@@ -1851,7 +1850,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self._append_recovery_instruction(
                     error_label=type(e).__name__,
                     error_detail=str(e),
-                    llm_generated_output=self._last_llm_output,
                     extra_guidance=(
                         "Your final answer must be valid JSON that conforms exactly to the declared "
                         "response_format schema. Return only the JSON document — no prose, Markdown, "
@@ -1885,7 +1883,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self._append_recovery_instruction(
                     error_label=type(e).__name__,
                     error_detail=str(e),
-                    llm_generated_output=self._last_llm_output,
                     extra_guidance=extra_guidance,
                 )
                 continue
