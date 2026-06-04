@@ -42,6 +42,10 @@ FILE_TYPE_TO_SUPPORTED_CONVERTER_CLASS_MAP = {
     FileType.MARKDOWN: (TextFileConverter,),
 }
 
+DEFAULT_LOCAL_CONVERTER_TIMEOUT_SECONDS = 60.0
+DEFAULT_LLM_CONVERTER_TIMEOUT_SECONDS = 300.0
+DEFAULT_FALLBACK_CONVERTER_TIMEOUT_SECONDS = 300.0
+
 
 # TODO: Add parallel processing for multiple files.
 class MultiFileTypeConverterInputSchema(BaseModel):
@@ -86,6 +90,21 @@ class MultiFileTypeConverter(Node):
     file_type_extractor: FileTypeExtractor | None = None
     converters: list[Node] | None = None
     converter_mapping: dict[FileType, Node] | None = None
+    local_converter_timeout_seconds: float | None = Field(
+        default=DEFAULT_LOCAL_CONVERTER_TIMEOUT_SECONDS,
+        description="Execution timeout for local parsing converters (PDF, DOCX, PPTX, HTML, text). "
+        "Only applied to converters that don't already have a timeout set. Set to None to disable.",
+    )
+    llm_converter_timeout_seconds: float | None = Field(
+        default=DEFAULT_LLM_CONVERTER_TIMEOUT_SECONDS,
+        description="Execution timeout for LLM-backed converters (image, PDF). "
+        "Only applied to converters that don't already have a timeout set. Set to None to disable.",
+    )
+    fallback_converter_timeout_seconds: float | None = Field(
+        default=DEFAULT_FALLBACK_CONVERTER_TIMEOUT_SECONDS,
+        description="Execution timeout for the fallback converter. "
+        "Only applied when the fallback converter doesn't already have a timeout set. Set to None to disable.",
+    )
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[MultiFileTypeConverterInputSchema]] = MultiFileTypeConverterInputSchema
 
@@ -153,6 +172,8 @@ class MultiFileTypeConverter(Node):
 
         self._setup_converters()
 
+        self._apply_converter_timeouts()
+
         # Initialize components for converters in the mapping
         initialized_converters = set()
         for converter in self.converter_mapping.values():
@@ -161,6 +182,26 @@ class MultiFileTypeConverter(Node):
                     converter.init_components(connection_manager)
                 initialized_converters.add(id(converter))
                 logger.info(f"Initialized converter: {converter.name}")
+
+    def _apply_converter_timeouts(self):
+        """Apply tiered default execution timeouts to converters that don't have one configured."""
+        if self.fallback_converter is not None:
+            self._set_timeout_if_unset(self.fallback_converter, self.fallback_converter_timeout_seconds)
+
+        for converter in self.converter_mapping.values():
+            if converter is self.fallback_converter:
+                continue
+            if isinstance(converter, (LLMImageConverter, LLMPDFConverter)):
+                timeout_seconds = self.llm_converter_timeout_seconds
+            else:
+                timeout_seconds = self.local_converter_timeout_seconds
+            self._set_timeout_if_unset(converter, timeout_seconds)
+
+    @staticmethod
+    def _set_timeout_if_unset(converter: Node, timeout_seconds: float | None):
+        """Set the converter's execution timeout only when the caller hasn't configured one."""
+        if timeout_seconds is not None and converter.error_handling.timeout_seconds is None:
+            converter.error_handling.timeout_seconds = timeout_seconds
 
     def _setup_converters(self):
         """Setup internal converter components."""
