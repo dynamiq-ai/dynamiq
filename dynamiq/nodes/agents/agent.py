@@ -1037,6 +1037,20 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self.log_reasoning(thought, action, action_input, loop_num)
         return thought, action, action_input
 
+    @staticmethod
+    def _first_output_block(text: str) -> str:
+        """Return only the first complete ``<output>...</output>`` block.
+
+        This re-imposes the one-step-per-turn boundary that the XML stop-sequence used to enforce
+        before it was stripped for reasoning models. If no closing ``</output>`` is present (e.g. the
+        model did not wrap its response), the text is returned unchanged so parsing degrades gracefully.
+        """
+        closing = "</output>"
+        end = text.find(closing)
+        if end == -1:
+            return text
+        return text[: end + len(closing)]
+
     def _handle_xml_mode(
         self, llm_generated_output: str, loop_num: int, config: RunnableConfig, **kwargs
     ) -> tuple[str | None, str | None, dict | list | None]:
@@ -1056,6 +1070,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 ),
             )
             return None, None, None
+
+        # Keep only the first <output>...</output> block, re-imposing the "one step per turn" boundary.
+        llm_generated_output = self._first_output_block(llm_generated_output)
 
         try:
             parsed_data = XMLParser.parse(
