@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dynamiq.components.converters.docx import DOCXConverter as DOCXConverterComponent
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes.node import Node, NodeGroup, ensure_config
+from dynamiq.nodes.node import ErrorHandling, Node, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types import DocumentCreationMode
 from dynamiq.utils.logger import logger
@@ -33,6 +33,10 @@ class DOCXFileConverter(Node):
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
     name: str = "docx-file-converter"
+    error_handling: ErrorHandling = Field(
+        default_factory=lambda: ErrorHandling(timeout_seconds=60.0),
+        description="Default execution timeout. Set timeout_seconds to None to disable.",
+    )
     document_creation_mode: DocumentCreationMode = DocumentCreationMode.ONE_DOC_PER_FILE
     file_converter: DOCXConverterComponent | None = None
     input_schema: ClassVar[type[DOCXFileConverterInputSchema]] = DOCXFileConverterInputSchema

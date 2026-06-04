@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from PIL import Image
 
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes.node import Node, NodeDependency, NodeGroup, ensure_config
+from dynamiq.nodes.node import ErrorHandling, Node, NodeDependency, NodeGroup, ensure_config
 from dynamiq.prompts import (
     Prompt,
     VisionMessage,
@@ -108,6 +108,10 @@ class LLMImageConverter(Node):
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
     name: str = "llm-image-converter"
+    error_handling: ErrorHandling = Field(
+        default_factory=lambda: ErrorHandling(timeout_seconds=300.0),
+        description="Default execution timeout for LLM-backed extraction. Set timeout_seconds to None to disable.",
+    )
     extraction_instruction: str = DEFAULT_EXTRACTION_INSTRUCTION
     document_creation_mode: DocumentCreationMode = DocumentCreationMode.ONE_DOC_PER_FILE
     llm: Node
