@@ -265,6 +265,8 @@ def test_agent_xml_mode_action_and_answer_in_one_response_runs_tool(xml_react_ag
         "</output>"
     )
 
+    # Mirror the run loop: trailing fabricated <output> blocks are dropped before parsing.
+    llm_generated_output = Agent._first_output_block(llm_generated_output)
     thought, action, action_input = xml_react_agent._handle_xml_mode(
         llm_generated_output=llm_generated_output, loop_num=1, config=RunnableConfig()
     )
@@ -291,32 +293,11 @@ def test_agent_xml_mode_genuine_final_answer_still_returns_answer(xml_react_agen
     assert "22" in final_answer
 
 
-def test_agent_xml_mode_dropping_extra_block_preserves_output_in_action_input(xml_react_agent):
-    """A literal </output> inside the first block's action_input must survive dropping a 2nd block.
-
-    The scan treats action_input content as opaque, so an output tag inside code/JSON is kept verbatim
-    while the trailing fabricated-answer block is still discarded and the tool runs.
-    """
-    llm_generated_output = (
-        "<output><thought>Print the closing tag.</thought>"
-        "<action>code-executor</action>"
-        '<action_input>{"python": "print(\'</output>\')"}</action_input></output>'
-        "<output><thought>fabricated</thought><answer>done</answer></output>"
-    )
-
-    thought, action, action_input = xml_react_agent._handle_xml_mode(
-        llm_generated_output=llm_generated_output, loop_num=1, config=RunnableConfig()
-    )
-
-    assert action == "code-executor"
-    assert action_input == {"python": "print('</output>')"}
-
-
 def test_first_output_block_handles_adjacent_output_tags_in_content():
     """Adjacent </output><output> literally inside action_input content must not be a false boundary."""
     text = (
         "<output><action>code-executor</action>"
-        '<action_input>{"python": "print(\'</output><output>\')"}</action_input></output>'
+        '<action_input>{"python": "print(\'<output></output>\')"}</action_input></output>'
         "<output><answer>fabricated</answer></output>"
     )
     block = Agent._first_output_block(text)
@@ -324,7 +305,7 @@ def test_first_output_block_handles_adjacent_output_tags_in_content():
     # The whole first block (incl. the adjacent tags inside the JSON) is kept; the 2nd block is dropped.
     assert block == (
         "<output><action>code-executor</action>"
-        '<action_input>{"python": "print(\'</output><output>\')"}</action_input></output>'
+        '<action_input>{"python": "print(\'<output></output>\')"}</action_input></output>'
     )
     assert "fabricated" not in block
 

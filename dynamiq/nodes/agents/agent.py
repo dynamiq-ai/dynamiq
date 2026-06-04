@@ -1092,9 +1092,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
             return None, None, None
 
-        # Drop any fabricated trailing <output> blocks so we parse only the real step.
-        llm_generated_output = self._first_output_block(llm_generated_output)
-
         # Parse the action before the answer so a same-turn fabricated <answer> can't make us skip the
         # tool (reasoning models run with `stop` stripped, so they may emit both in one response).
         try:
