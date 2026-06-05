@@ -209,9 +209,9 @@ class FileTypeExtractor(Node):
         file = input_data.file
         filename = input_data.filename
         try:
-            filename = getattr(file, "name", filename) if file else filename
+            filename = (getattr(file, "name", None) or filename) if file else filename
             if not filename:
-                raise ValueError("Invalid filename provided.")
+                return {"type": None}
             file_ext = filename.split(".")[-1] if "." in filename else ""
             file_ext = file_ext.lower()
 
