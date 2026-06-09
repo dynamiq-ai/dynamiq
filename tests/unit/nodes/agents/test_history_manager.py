@@ -343,3 +343,55 @@ class TestSplitHistoryFCSafety:
 
         for m in to_preserve:
             assert m.role != MessageRole.TOOL
+
+
+class TestAggregateHistory:
+    """aggregate_history flattens structured history into a readable transcript.
+
+    The max-loops recovery path is the sole caller; it must surface both the
+    agent's tool calls (with arguments) and the tool outputs, including the
+    FUNCTION_CALLING case where results are TOOL-role messages.
+    """
+
+    def test_function_calling_tool_output_included(self):
+        msgs = [
+            _assistant_tc(
+                "Calling: semantic_search",
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "semantic_search", "arguments": '{"query": "apple"}'},
+                    }
+                ],
+            ),
+            _tool_reply("Apple is a fruit and a company.", "call_1", "semantic_search"),
+        ]
+
+        history = HistoryManagerMixin.aggregate_history(msgs)
+
+        # TOOL-role result must appear (the original bug dropped it entirely).
+        assert "-TOOL OUTPUT START-" in history
+        assert "Apple is a fruit and a company." in history
+        # Tool call name + arguments must be surfaced from tool_calls.
+        assert "semantic_search" in history
+        assert '{"query": "apple"}' in history
+
+    def test_xml_user_observation_still_rendered(self):
+        msgs = [
+            _assistant("Thought: I should search."),
+            _user("Observation: result text"),
+        ]
+
+        history = HistoryManagerMixin.aggregate_history(msgs)
+
+        assert "-TOOL DESCRIPTION START-" in history
+        assert "Thought: I should search." in history
+        assert "-TOOL OUTPUT START-" in history
+        assert "Observation: result text" in history
+
+    def test_assistant_without_tool_calls_has_no_arguments_line(self):
+        history = HistoryManagerMixin.aggregate_history([_assistant("Calling: nothing")])
+
+        assert "-TOOL DESCRIPTION START-" in history
+        assert "Arguments:" not in history
