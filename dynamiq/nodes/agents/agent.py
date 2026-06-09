@@ -940,7 +940,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         action = first_call.function.name.strip()
 
         if action == "provide_final_answer":
-            self._acknowledge_pending_fc_tool_calls("Skipped — a final answer was provided instead.")
+            self._acknowledge_pending_fc_tool_calls("Skipped — superseded by a final-answer call.")
             final_args = first_call.function.parse_as_final_answer()
             thought = final_args.thought
             self._requested_output_files = self._parse_output_files_csv(final_args.output_files)
