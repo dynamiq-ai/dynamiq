@@ -14,7 +14,7 @@ from dynamiq.nodes.converters.pptx import PPTXFileConverter
 from dynamiq.nodes.converters.pypdf import PyPDFConverter
 from dynamiq.nodes.converters.text import TextFileConverter
 from dynamiq.nodes.extractors.extractors import EXTENSION_MAP, FileType, FileTypeExtractor, FileTypeExtractorInputSchema
-from dynamiq.nodes.node import Node, NodeDependency, ensure_config
+from dynamiq.nodes.node import ErrorHandling, Node, NodeDependency, ensure_config
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types import Document
@@ -41,6 +41,8 @@ FILE_TYPE_TO_SUPPORTED_CONVERTER_CLASS_MAP = {
     FileType.TEXT: (TextFileConverter,),
     FileType.MARKDOWN: (TextFileConverter,),
 }
+
+DEFAULT_TIMEOUT_SECONDS = 600.0
 
 
 # TODO: Add parallel processing for multiple files.
@@ -86,6 +88,11 @@ class MultiFileTypeConverter(Node):
     file_type_extractor: FileTypeExtractor | None = None
     converters: list[Node] | None = None
     converter_mapping: dict[FileType, Node] | None = None
+    error_handling: ErrorHandling = Field(
+        default_factory=lambda: ErrorHandling(timeout_seconds=DEFAULT_TIMEOUT_SECONDS),
+        description="Overall execution timeout for the whole batch. Sub-converters carry their own "
+        "per-file timeouts. Set timeout_seconds to None to disable.",
+    )
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[MultiFileTypeConverterInputSchema]] = MultiFileTypeConverterInputSchema
 

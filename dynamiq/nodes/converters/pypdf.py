@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from dynamiq.components.converters.pypdf import DocumentCreationMode, ExtractionMode
 from dynamiq.components.converters.pypdf import PyPDFFileConverter as PyPDFFileConverterComponent
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes.node import Node, NodeGroup, ensure_config
+from dynamiq.nodes.node import ErrorHandling, Node, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -43,6 +43,10 @@ class PyPDFConverter(Node):
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
     name: str = "pypdf-file-converter"
+    error_handling: ErrorHandling = Field(
+        default_factory=lambda: ErrorHandling(timeout_seconds=60.0),
+        description="Default execution timeout. Set timeout_seconds to None to disable.",
+    )
     document_creation_mode: DocumentCreationMode = DocumentCreationMode.ONE_DOC_PER_FILE
     file_converter: PyPDFFileConverterComponent | None = None
     extraction_mode: ExtractionMode = ExtractionMode.PLAIN
