@@ -18,6 +18,7 @@ TEST_REGISTRY_DATA = {
         "max_tokens": 10_000,
         "supports_vision": False,
         "supports_pdf_input": False,
+        "supports_function_calling": False,
     },
     MODEL_B: {
         "max_input_tokens": 200_000,
@@ -25,6 +26,7 @@ TEST_REGISTRY_DATA = {
         "max_tokens": 64_000,
         "supports_vision": True,
         "supports_pdf_input": True,
+        "supports_function_calling": True,
     },
 }
 
@@ -55,6 +57,21 @@ def test_registry_resolves_tokens_and_vision(registry, model, expected_tokens, e
 def test_unknown_model_returns_none(registry):
     assert registry.get_model_info("unknown/model") is None
     assert registry.get_max_tokens("unknown/model") is None
+
+
+@pytest.mark.parametrize(
+    ("model", "expected_fc"),
+    [
+        (MODEL_A, False),
+        (MODEL_B, True),
+        (f"together_ai/{MODEL_A}", False),
+        (f"together_ai/{MODEL_B}", True),
+        (f"together_ai/{MODEL_B.upper()}", True),
+        ("unknown/model", None),
+    ],
+)
+def test_registry_supports_function_calling(registry, model, expected_fc):
+    assert registry.supports_function_calling(model) is expected_fc
 
 
 @pytest.fixture()
@@ -130,3 +147,53 @@ def test_model_info_none_falls_through():
     assert llm.model_info is None
     assert llm.get_token_limit() == 200_000
     assert llm.is_vision_supported is True
+
+
+@pytest.mark.usefixtures("_litellm_unknown", "_patch_registry")
+@pytest.mark.parametrize(("model", "expected_fc"), [(MODEL_A, False), (MODEL_B, True)])
+def test_basellm_function_calling_falls_back_to_registry(model, expected_fc):
+    """When litellm doesn't know the model, FC support comes from the custom registry."""
+    from dynamiq.connections import TogetherAI as TogetherAIConnection
+    from dynamiq.nodes.llms.togetherai import TogetherAI
+
+    llm = TogetherAI(model=model, connection=TogetherAIConnection(api_key="test-key"))
+    assert llm.is_function_calling_supported is expected_fc
+
+
+@pytest.mark.usefixtures("_litellm_unknown", "_patch_registry")
+def test_basellm_unknown_function_calling_defaults_true():
+    """A model unknown to both litellm and the registry is assumed FC-capable (warn + allow)."""
+    from dynamiq.connections import TogetherAI as TogetherAIConnection
+    from dynamiq.nodes.llms.togetherai import TogetherAI
+
+    llm = TogetherAI(model="unknown/x", connection=TogetherAIConnection(api_key="test-key"))
+    assert llm.is_function_calling_supported is True
+
+
+@pytest.mark.usefixtures("_litellm_unknown", "_patch_registry")
+def test_model_info_function_calling_override_takes_priority():
+    """model_info.supports_function_calling overrides both litellm and the registry."""
+    from dynamiq.connections import TogetherAI as TogetherAIConnection
+    from dynamiq.nodes.llms.togetherai import TogetherAI
+
+    # Registry says MODEL_B supports FC, but the explicit override wins.
+    llm = TogetherAI(
+        model=MODEL_B,
+        connection=TogetherAIConnection(api_key="test-key"),
+        model_info={"supports_function_calling": False},
+    )
+    assert llm.is_function_calling_supported is False
+
+
+def test_basellm_uses_litellm_when_model_is_known():
+    """When litellm knows the model, its FC verdict is used (registry not consulted)."""
+    from dynamiq.connections import TogetherAI as TogetherAIConnection
+    from dynamiq.nodes.llms.togetherai import TogetherAI
+
+    llm = TogetherAI(model=MODEL_A, connection=TogetherAIConnection(api_key="test-key"))
+    with (
+        patch("dynamiq.nodes.llms.base.get_model_info", return_value={"supports_function_calling": False}),
+        patch("dynamiq.nodes.llms.base.supports_function_calling", return_value=False) as mock_fc,
+    ):
+        assert llm.is_function_calling_supported is False
+        mock_fc.assert_called_once()
