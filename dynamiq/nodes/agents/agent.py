@@ -18,7 +18,8 @@ from dynamiq.nodes.agents.exceptions import (
     MaxLoopsExceededException,
     OutputFileNotFoundError,
     ParsingError,
-    RecoverableAgentException
+    RecoverableAgentException,
+    TagNotFoundError,
 )
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager, ReactPromptConfig
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser, extract_message_text
@@ -1092,57 +1093,56 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
             return None, None, None
 
-        # Parse the action before the answer so a same-turn fabricated <answer> can't make us skip the
-        # tool (reasoning models run with `stop` stripped, so they may emit both in one response).
         try:
             parsed_data = XMLParser.parse(
                 llm_generated_output,
-                required_tags=["thought", "action", "action_input"],
-                optional_tags=["output"],
-                json_fields=["action_input"],
+                required_tags=["thought", "answer"],
+                optional_tags=["output", "output_files"],
             )
             thought = parsed_data.get("thought")
-            action = parsed_data.get("action")
-            action_input = parsed_data.get("action_input")
-            self.log_reasoning(thought, action, action_input, loop_num)
-            return thought, action, action_input
+            final_answer = parsed_data.get("answer")
 
-        except JSONParsingError as e:
-            # An <action> was present but its <action_input> was malformed JSON — a real action
-            # attempt, not a final answer. Request a corrected action instead of falling through.
-            logger.error(f"XMLParser: Invalid JSON in action_input: {e}")
-            raise ActionParsingException(
-                "The <action_input> value must be valid JSON. Put the whole JSON on one line; "
-                'use \\n for newlines inside strings and \\" for quotes. '
-                "Provide <thought> with <action> and <action_input> again.",
-                recoverable=True,
-            )
+            self._requested_output_files = self._parse_output_files_csv(parsed_data.get("output_files") or "")
 
-        except ParsingError:
-            # No (parseable) action structure — treat the response as a final answer. TagNotFoundError
-            # is a ParsingError subclass; JSONParsingError is handled above so it never reaches here.
-            logger.debug("XMLParser: No action structure found, trying final-answer structure.")
+            self.log_final_output(thought, final_answer, loop_num)
+            return thought, "final_answer", final_answer
+
+        except TagNotFoundError:
+            logger.debug("XMLParser: Not a final answer structure, trying action structure.")
             try:
                 parsed_data = XMLParser.parse(
                     llm_generated_output,
-                    required_tags=["thought", "answer"],
-                    optional_tags=["output", "output_files"],
+                    required_tags=["thought", "action", "action_input"],
+                    optional_tags=["output"],
+                    json_fields=["action_input"],
                 )
                 thought = parsed_data.get("thought")
-                final_answer = parsed_data.get("answer")
-
-                self._requested_output_files = self._parse_output_files_csv(parsed_data.get("output_files") or "")
-
-                self.log_final_output(thought, final_answer, loop_num)
-                return thought, "final_answer", final_answer
-
+                action = parsed_data.get("action")
+                action_input = parsed_data.get("action_input")
+                self.log_reasoning(thought, action, action_input, loop_num)
+                return thought, action, action_input
+            except JSONParsingError as e:
+                logger.error(f"XMLParser: Invalid JSON in action_input: {e}")
+                raise ActionParsingException(
+                    "The <action_input> value must be valid JSON. Put the whole JSON on one line; "
+                    'use \\n for newlines inside strings and \\" for quotes. '
+                    "Provide <thought> with <action> and <action_input> again.",
+                    recoverable=True,
+                )
             except ParsingError as e:
-                logger.error(f"XMLParser: Empty or invalid XML response: {e}")
+                logger.error(f"XMLParser: Empty or invalid XML response for action parsing: {e}")
                 raise ActionParsingException(
                     "The previous response was empty or invalid. "
                     "Provide <thought> with either <action>/<action_input> or <answer>.",
                     recoverable=True,
                 )
+
+        except ParsingError as e:
+            logger.error(f"XMLParser: Empty or invalid XML response: {e}")
+            raise ActionParsingException(
+                "The previous response was empty or invalid. " "Please provide the required XML tags.",
+                recoverable=True,
+            )
 
     def _setup_stop_sequences(self) -> None:
         """Configure LLM stop sequences based on the current inference mode."""
@@ -1735,6 +1735,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             if first_block != llm_generated_output:
                 logger.warning(
                     f"Agent {self.name} - {self.id}: model emitted more than one <output> block; "
+                    "keeping only the first block and dropping the rest."
                 )
                 llm_generated_output = first_block
         self._last_llm_output = llm_generated_output
