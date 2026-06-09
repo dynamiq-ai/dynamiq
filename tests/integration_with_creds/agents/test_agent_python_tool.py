@@ -212,7 +212,7 @@ def llm_instance():
     connection = OpenAIConnection()
     llm = OpenAI(
         connection=connection,
-        model="gpt-5.4-mini",
+        model="gpt-4o",
         max_tokens=5000,
         temperature=0,
     )
