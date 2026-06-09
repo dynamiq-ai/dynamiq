@@ -22,7 +22,13 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
 )
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager, ReactPromptConfig
-from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser, extract_message_text
+from dynamiq.nodes.agents.utils import (
+    SummarizationConfig,
+    ToolCacheEntry,
+    XMLParser,
+    extract_message_text,
+    first_xml_output_block,
+)
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
@@ -1067,40 +1073,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     @staticmethod
     def _first_output_block(text: str) -> str:
-        """Return only the first ``<output>...</output>`` block, dropping any later blocks.
+        """Return only the first ``<output>...</output>`` block; see ``first_xml_output_block``.
 
-        Reasoning models (OpenAI o-series / gpt-5) run with ``stop`` stripped (the API rejects it), so
-        the XML turn-boundary stop-sequence never fires and the model can emit a second ``<output>``
-        block that fabricates an ``<answer>`` before the tool ran. Keeping only the first block makes
-        the agent take the real step and keeps thought/action/answer consistent within one turn.
-
-        The scan treats the content of free-form tags
-        (``action_input``/``thought``/``answer``/``output_files``) as opaque, so tag-like text inside
-        code, JSON or a filename (e.g. ``print('</output>')``) cannot be mistaken for a block
-        boundary. The first ``</output>`` reached outside any opaque tag ends the block. Returns
-        ``text`` unchanged when no closing ``</output>`` is present.
+        Thin wrapper kept so the parse path and the streaming callback share one boundary scan.
         """
-        # Tags whose content is free-form (code/JSON/prose/filenames) and may contain </output>-like text.
-        opaque_tags = ("action_input", "thought", "answer", "output_files")
-        closing = "</output>"
-        i, n = 0, len(text)
-        while i < n:
-            matched_opaque = False
-            for tag in opaque_tags:
-                open_tag = f"<{tag}"
-                # Match <tag>, <tag ...> or <tag/>, but not <tagx>; guard against end-of-string.
-                if text.startswith(open_tag, i) and (i + len(open_tag) >= n or text[i + len(open_tag)] in " >/"):
-                    close_tag = f"</{tag}>"
-                    close_idx = text.find(close_tag, i)
-                    i = close_idx + len(close_tag) if close_idx != -1 else n
-                    matched_opaque = True
-                    break
-            if matched_opaque:
-                continue
-            if text.startswith(closing, i):
-                return text[: i + len(closing)]
-            i += 1
-        return text
+        return first_xml_output_block(text)
 
     def _handle_xml_mode(
         self, llm_generated_output: str, loop_num: int, config: RunnableConfig, **kwargs
