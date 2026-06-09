@@ -1046,13 +1046,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
         block that fabricates an ``<answer>`` before the tool ran. Keeping only the first block makes
         the agent take the real step and keeps thought/action/answer consistent within one turn.
 
-        The scan treats the content of free-form tags (``action_input``/``thought``/``answer``) as
-        opaque, so tag-like text inside code or JSON (e.g. ``print('</output>')``) cannot be mistaken
-        for a block boundary. The first ``</output>`` reached outside any opaque tag ends the block.
-        Returns ``text`` unchanged when no closing ``</output>`` is present.
+        The scan treats the content of free-form tags
+        (``action_input``/``thought``/``answer``/``output_files``) as opaque, so tag-like text inside
+        code, JSON or a filename (e.g. ``print('</output>')``) cannot be mistaken for a block
+        boundary. The first ``</output>`` reached outside any opaque tag ends the block. Returns
+        ``text`` unchanged when no closing ``</output>`` is present.
         """
-        # Tags whose content is free-form (code/JSON/prose) and may contain </output>-like text.
-        opaque_tags = ("action_input", "thought", "answer")
+        # Tags whose content is free-form (code/JSON/prose/filenames) and may contain </output>-like text.
+        opaque_tags = ("action_input", "thought", "answer", "output_files")
         closing = "</output>"
         i, n = 0, len(text)
         while i < n:
