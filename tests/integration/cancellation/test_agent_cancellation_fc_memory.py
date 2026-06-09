@@ -129,7 +129,7 @@ def test_fc_agent_recovers_when_tool_call_arguments_are_malformed_json():
     """FC mode: LLM emits a tool_call whose ``arguments`` string is not valid JSON.
 
     ``FunctionCall.parse_arguments`` raises ValueError → wrapped as
-    ActionParsingException → the agent appends a Correction Instruction reply.
+    ActionParsingException → the agent appends a "Tool call failed" recovery reply.
     Under the canonical-state FC policy the malformed assistant ``tool_call`` is
     kept in history, so the correction is delivered as a TOOL message replying
     to that ``tool_call_id`` (a USER message would orphan the tool_call), and the
@@ -201,9 +201,7 @@ def test_fc_agent_recovers_when_tool_call_arguments_are_malformed_json():
         assert result.status == RunnableStatus.SUCCESS
 
     recovery = [
-        m
-        for m in agent._prompt.messages
-        if m.role == MessageRole.TOOL and "Correction Instruction" in (m.content or "")
+        m for m in agent._prompt.messages if m.role == MessageRole.TOOL and "Tool call failed" in (m.content or "")
     ]
     assert recovery, "no recovery instruction added for malformed tool_call arguments"
     assert "ActionParsingException" in recovery[-1].content
