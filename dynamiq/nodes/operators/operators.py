@@ -9,6 +9,7 @@ import dynamiq.utils.jsonpath as jsonpath
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes import Behavior, Node, NodeGroup
 from dynamiq.nodes.node import Transformer, ensure_config
+from dynamiq.nodes.tools.mcp import resolve_mcp_node
 from dynamiq.nodes.types import ChoiceCondition, ConditionOperator
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types.cancellation import CanceledException, check_cancellation
@@ -224,9 +225,9 @@ class Map(Node):
         """Clean up resources created during dry run."""
         self.node.dry_run_cleanup(dry_run_config)
 
-    def execute_workflow(self, index, data, config, merged_kwargs):
+    def execute_workflow(self, index, data, config, merged_kwargs, node):
         """Execute a single workflow and handle errors."""
-        node_copy = self.node.clone()
+        node_copy = node.clone()
         node_copy = self.regenerate_ids(node_copy)
 
         # Create an isolated config per iteration with unique streaming override for the cloned node
@@ -268,12 +269,15 @@ class Map(Node):
         merged_kwargs = {**kwargs, "parent_run_id": run_id}
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
+        # Resolve an MCPServer to its single MCPTool.
+        run_node = resolve_mcp_node(self.node)
+
         try:
             check_cancellation(config)
             with ContextAwareThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 results = list(
                     executor.map(
-                        lambda args: self.execute_workflow(args[0], args[1], config, merged_kwargs),
+                        lambda args: self.execute_workflow(args[0], args[1], config, merged_kwargs, run_node),
                         enumerate(input_data),
                     )
                 )
