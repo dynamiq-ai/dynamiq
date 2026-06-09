@@ -1,7 +1,7 @@
 from copy import deepcopy
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 from dynamiq.connections.managers import ConnectionManager
@@ -52,7 +52,15 @@ Focus on being thorough, logical, and helpful in your analysis."""  # noqa E501
 
 
 class ThinkingInputSchema(BaseModel):
-    thought: str = Field(..., description="The thought, idea, or reasoning to process and analyze")
+    # `reflection`, not `thought`: FC mode reserves top-level `thought` for agent
+    # reasoning. `thought` kept as alias for backward compatibility.
+    model_config = ConfigDict(populate_by_name=True)
+
+    reflection: str = Field(
+        ...,
+        validation_alias=AliasChoices("reflection", "thought"),
+        description="The thought, idea, or reasoning to process and analyze",
+    )
     context: str = Field(default="", description="Additional context or background information")
     focus: str = Field(default="general", description="Specific focus area (planning, analysis, problem-solving, etc.)")
 
@@ -98,15 +106,15 @@ Usage Strategy:
 - Plan next steps in complex workflows with clarity
 
 Parameter Guide:
-- thought: The idea, reasoning, or problem to analyze (required)
+- reflection: The idea, reasoning, or problem to analyze (required)
 - context: Background information or constraints
 - focus: Analysis area (planning, problem-solving, decision-making)
 - memory_enabled: Maintain history of previous thoughts
 
 Examples:
-- {"thought": "Should we implement feature X?", "focus": "decision-making"}
-- {"thought": "API integration failed with 401 error", "context": "OAuth2 auth"}
-- {"thought": "Choose database solutions", "context": "100k users, scaling"}"""  # noqa E501
+- {"reflection": "Should we implement feature X?", "focus": "decision-making"}
+- {"reflection": "API integration failed with 401 error", "context": "OAuth2 auth"}
+- {"reflection": "Choose database solutions", "context": "100k users, scaling"}"""  # noqa E501
 
     llm: BaseLLM = Field(..., description="LLM to use for thinking processes")
 
@@ -201,7 +209,7 @@ Examples:
         self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        thought = input_data.thought
+        thought = input_data.reflection
         context = input_data.context
         focus = input_data.focus
 

@@ -107,10 +107,12 @@ For questions that don't require tools:
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
 ## Single Action Per Turn
-- Emit EXACTLY ONE <output>...</output> block per response, then STOP — never produce a second <output> block.
-- Execute exactly ONE <action>/<action_input> pair per response, then wait for its Observation before continuing
-- Do NOT include multiple action blocks or answer blocks in the same response
-- After receiving an Observation, decide the next single action based on the result
+- Emit EXACTLY ONE <output>...</output> block per response. Never write a second <output> block.
+- A response either takes an action (<action>/<action_input>) OR gives an <answer> — never both in the same response.
+- When you write an <action>, STOP immediately after </output>. Do NOT continue, do NOT write an "Observation:",
+  a tool result, or an <answer> — the Observation is given back to you by the system, not written by you.
+- NEVER predict, assume, or fabricate the tool's Observation/result. Wait for the real Observation to be returned,
+  then decide your next single action (or final answer) based on it in your NEXT response.
 
 ## JSON Formatting Requirements
 - Put JSON on single line within tags
@@ -199,12 +201,13 @@ Only after utilizing the necessary tools and gathering the required information 
 you call `provide_final_answer` to deliver the final response.
 
 ## Function Calling Guidelines
-- ALWAYS populate the "thought" field FIRST before any other field (particularly "action_input") in your function calls
+- ALWAYS populate the "thought" field FIRST before any other field in your function calls
+- Pass tool parameters as top-level fields of the function arguments (alongside "thought"), not nested inside an "action_input" wrapper
 - Analyze the request carefully to determine if tools are needed
 - Call functions with properly formatted arguments
 - Handle tool responses appropriately before providing final answer
 - Chain multiple tool calls when necessary for complex tasks
-- If you want an agent tool's response returned verbatim as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.
+- If you want an agent tool's response returned verbatim as the final output, include "delegate_final": true at the top level of that tool's arguments. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.
 
 ## File Handling
 - Tools may generate or process files (images, CSVs, PDFs, etc.)

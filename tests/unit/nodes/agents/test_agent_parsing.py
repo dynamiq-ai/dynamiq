@@ -1,5 +1,9 @@
-import pytest
+from typing import Any, ClassVar, Literal
 
+import pytest
+from pydantic import BaseModel, Field
+
+from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.components import parser
 from dynamiq.nodes.agents.exceptions import ActionParsingException
 
@@ -368,7 +372,7 @@ def test_structured_output_fallback_decoder_with_literal_newlines():
 
 
 def test_function_calling_action_input_with_literal_newlines(mocker):
-    """FC mode: strict=False allows action_input with literal newlines."""
+    """FC mode: legacy nested `action_input` (JSON string) is unwrapped and decoded."""
     import uuid
 
     from dynamiq import connections, prompts
@@ -600,29 +604,6 @@ def test_agent_response_format_function_calling_uses_schema_in_tools():
     assert "title" in answer["properties"]
 
 
-def test_agent_response_format_structured_output_schema_unchanged():
-    """STRUCTURED_OUTPUT keeps its simple `action_input: string` schema; the
-    user's response_format is enforced via prompt injection + coerce instead."""
-    from pydantic import BaseModel
-
-    from dynamiq.nodes.types import InferenceMode
-
-    class Doc(BaseModel):
-        title: str
-        tags: list[str]
-
-    agent = _make_agent(inference_mode=InferenceMode.STRUCTURED_OUTPUT, response_format=Doc)
-    schema = agent._response_format["json_schema"]["schema"]
-    assert schema["properties"]["action_input"] == {
-        "type": "string",
-        "description": "Input for chosen action.",
-    }
-    rendered = agent.generate_prompt()
-    assert "MUST be a valid JSON document" in rendered
-    assert "title" in rendered
-    assert "tags" in rendered
-
-
 def test_agent_structured_output_finish_with_json_string_action_input():
     """STRUCTURED_OUTPUT finish emits a JSON string; coerce parses it into a dict."""
     from pydantic import BaseModel
@@ -639,3 +620,131 @@ def test_agent_structured_output_finish_with_json_string_action_input():
     assert action == "final_answer"
     coerced = agent._coerce_to_response_format(action_input)
     assert coerced == {"title": "HP"}
+
+
+def test_agent_uses_resolved_schema_for_param_modes():
+    """The Agent builds the tool schema it sends to the LLM from the RESOLVED input
+    schema (input_param_modes applied), not the raw input_schema.
+
+    Baseline: an optional field is exposed and not required. 'hidden' omits it from
+    what the agent exposes; 'required' makes the agent oblige the LLM to provide it.
+    """
+    import uuid
+    from typing import ClassVar, Literal
+
+    from pydantic import BaseModel, Field
+
+    from dynamiq import connections, prompts
+    from dynamiq.nodes import Node, NodeGroup
+    from dynamiq.nodes.agents import Agent
+    from dynamiq.nodes.llms import OpenAI
+    from dynamiq.nodes.types import InferenceMode, InputParamMode
+
+    class EchoInput(BaseModel):
+        text: str = Field(..., description="Required text.")
+        suffix: str = Field(default="", description="Optional suffix to append.")
+
+    class EchoTool(Node):
+        group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+        name: str = "echo"
+        input_schema: ClassVar[type] = EchoInput
+
+        def execute(self, input_data, config=None, **kwargs):
+            return {"content": input_data.text + input_data.suffix}
+
+    def build_agent(tool):
+        conn = connections.OpenAI(id=str(uuid.uuid4()), api_key="fake-key")
+        llm = OpenAI(
+            name="LLM",
+            model="gpt-4o-mini",
+            connection=conn,
+            prompt=prompts.Prompt(messages=[prompts.Message(role="user", content="{{input}}")]),
+        )
+        return Agent(name="echo-agent", llm=llm, tools=[tool], inference_mode=InferenceMode.FUNCTION_CALLING)
+
+    def echo_action_input(agent):
+        """The tool params the agent exposes to the LLM for the echo tool.
+
+        Flat-args schema: params are top-level siblings of ``thought`` (no
+        ``action_input`` wrapper), so exclude ``thought`` to get the tool's own params.
+        """
+        fn = next(s for s in agent._tools if s["function"]["name"] == "echo")["function"]
+        params = fn["parameters"]
+        props = {k: v for k, v in params.get("properties", {}).items() if k != "thought"}
+        required = set(params.get("required", [])) - {"thought"}
+        return props, required
+
+    # Baseline: the agent exposes optional 'suffix' and does not require it.
+    base_props, base_required = echo_action_input(build_agent(EchoTool()))
+    assert "suffix" in base_props
+    assert "suffix" not in base_required
+
+    # hidden: the agent no longer exposes 'suffix' to the LLM at all.
+    hidden_props, _ = echo_action_input(build_agent(EchoTool(input_param_modes={"suffix": InputParamMode.HIDDEN})))
+    assert "suffix" not in hidden_props
+
+    # required: the agent now obliges the LLM to provide 'suffix'.
+    _, required_required = echo_action_input(
+        build_agent(EchoTool(input_param_modes={"suffix": InputParamMode.REQUIRED}))
+    )
+    assert "suffix" in required_required
+
+
+def test_apply_param_modes_required_on_inaccessible_field_raises():
+    """A field already hidden from the agent (is_accessible_to_agent=False) cannot be made
+    required: the agent could never supply it, yet validation would demand it."""
+    import pytest
+    from pydantic import BaseModel, Field
+
+    from dynamiq.nodes.schema_utils import apply_param_modes
+
+    class Schema(BaseModel):
+        text: str = Field(..., description="Required.")
+        internal_id: str | None = Field(
+            default=None,
+            description="Not exposed to the agent.",
+            json_schema_extra={"is_accessible_to_agent": False},
+        )
+
+    with pytest.raises(ValueError, match="not exposed to the agent"):
+        apply_param_modes(Schema, {"internal_id": "required"})
+
+
+def test_normalize_fields_coerces_nested_model():
+    """A stringified free-form dict nested inside a sub-model is coerced back to a dict.
+
+    Strict mode ships a free-form ``dict[str, Any]`` as a JSON-encoded string. For a
+    dict declared on a nested model (``FilterOptions.metadata``), ``_normalize_fields``
+    must recurse into the sub-model and parse it back -- otherwise the string survives
+    and the nested model's Pydantic validation rejects it.
+    """
+    class FilterOptions(BaseModel):
+        min_score: float = Field(default=0.0)
+        metadata: dict[str, Any] = Field(default_factory=dict)
+
+    class ComprehensiveInputSchema(BaseModel):
+        text: str
+        filters: FilterOptions | None = None
+
+    class ComprehensiveTool(Node):
+        group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+        name: str = "Comprehensive Tool"
+        input_schema: ClassVar[type[ComprehensiveInputSchema]] = ComprehensiveInputSchema
+
+        def execute(self, input_data, config=None, **kwargs):
+            return {}
+
+    tool = ComprehensiveTool()
+    agent = _make_agent()
+
+    action_input = {
+        "text": "hello",
+        "filters": {"min_score": 0.5, "metadata": '{"source": "web", "score": 1}'},
+    }
+
+    agent._normalize_fields(tool.input_schema.model_fields, action_input)
+
+    # Nested free-form dict string parsed back into a dict.
+    assert action_input["filters"]["metadata"] == {"source": "web", "score": 1}
+    # Non-string nested values are left untouched.
+    assert action_input["filters"]["min_score"] == 0.5

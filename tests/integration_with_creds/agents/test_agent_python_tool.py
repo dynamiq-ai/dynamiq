@@ -13,7 +13,7 @@ from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import Anthropic, OpenAI
 from dynamiq.nodes.tools.python import Python
-from dynamiq.nodes.types import InferenceMode
+from dynamiq.nodes.types import InferenceMode, InputParamMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from dynamiq.utils.logger import logger
@@ -34,10 +34,11 @@ class Priority(str, Enum):
 
 
 class FilterOptions(BaseModel):
-    """Nested model -- tests Model | None union in the parent schema."""
+    """Nested model -- tests Model | None union plus a nested free-form dict sub-field."""
 
     min_score: float = Field(default=0.0, description="Minimum score threshold.")
     tags: list[str] = Field(default_factory=list, description="Tags to filter by.")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Free-form metadata (arbitrary keys).")
 
 
 class ActionType(str, Enum):
@@ -46,6 +47,20 @@ class ActionType(str, Enum):
     ANALYZE = "analyze"
     SUMMARIZE = "summarize"
     EXTRACT = "extract"
+
+
+class FilterRule(BaseModel):
+    """List-element model -- exercises ``list[Model]`` normalization.
+
+    Carries a non-nullable defaulted field (``op``; strict emits ``null`` to mean
+    "use default") and a free-form ``dict[str, Any]`` (``params``; strict ships a
+    JSON-encoded string), both *inside list items* so the return-path normalization
+    must recurse into each element.
+    """
+
+    field: str = Field(..., description="Field name to match on.")
+    op: str = Field(default="eq", description="Comparison operator.")
+    params: dict[str, Any] = Field(default_factory=dict, description="Free-form operator params (arbitrary keys).")
 
 
 class ComprehensiveInputSchema(BaseModel):
@@ -58,6 +73,12 @@ class ComprehensiveInputSchema(BaseModel):
     Nullable:
         int|None (with ge/le), int|None (bare, no Field), str|None, bool|None,
         Enum|None, list[str]|None, Model|None
+    Nested:
+        Model|None whose sub-model carries a free-form dict[str, Any]
+        (FilterOptions.metadata) -- exercises nested strict-string coercion
+    List of models:
+        list[Model] (FilterRule) whose elements carry a non-nullable defaulted
+        field and a free-form dict -- exercises per-element list normalization
     Special:
         is_accessible_to_agent=False, ConfigDict(extra='allow')
     """
@@ -79,6 +100,9 @@ class ComprehensiveInputSchema(BaseModel):
     priority: Priority | None = Field(default=None, description="Optional priority level.")
     domains: list[str] | None = Field(default=None, description="Whitelist of domains.")
     filters: FilterOptions | None = Field(default=None, description="Optional filter configuration.")
+    rules: list[FilterRule] = Field(
+        default_factory=list, description="Ordered filter rules; each may carry free-form params."
+    )
     internal_trace_id: str | None = Field(
         default=None,
         description="Internal tracing ID.",
@@ -136,6 +160,8 @@ class ComprehensiveTool(Node):
             extras.append(f"domains={input_data.domains}")
         if input_data.filters is not None:
             extras.append(f"filters(min_score={input_data.filters.min_score}, tags={input_data.filters.tags})")
+        if input_data.rules:
+            extras.append(f"rules={[(r.field, r.op, r.params) for r in input_data.rules]}")
         if extras:
             body += " Options: " + ", ".join(extras) + "."
 
@@ -163,7 +189,11 @@ def expected_length(test_input_string):
 
 @pytest.fixture(scope="module")
 def agent_role():
-    return "is to help user with various tasks, goal is to provide best of possible answers to user queries"
+    return (
+        "is to help user with various tasks. You MUST use the StringLengthTool to determine the length "
+        "of any string. Never compute, estimate, or state a string's length yourself, and never answer "
+        "directly before the tool has returned its result."
+    )
 
 
 @pytest.fixture(scope="module")
@@ -182,7 +212,7 @@ def llm_instance():
     connection = OpenAIConnection()
     llm = OpenAI(
         connection=connection,
-        model="gpt-5.4-mini",
+        model="gpt-4o",
         max_tokens=5000,
         temperature=0,
     )
@@ -214,7 +244,9 @@ def anthropic_llm():
 
 @pytest.fixture(scope="module")
 def comprehensive_tool():
-    return ComprehensiveTool()
+    # Hide optional fields from the agent: they are omitted from the tool schema the
+    # LLM sees and fall back to their defaults at execution.
+    return ComprehensiveTool(input_param_modes={"language": InputParamMode.HIDDEN, "label": InputParamMode.HIDDEN})
 
 
 def run_and_assert_agent(agent: Agent, agent_input, expected_length, run_config):
@@ -275,7 +307,7 @@ def run_and_assert_agent(agent: Agent, agent_input, expected_length, run_config)
 def test_react_agent_inference_modes(
     llm_instance, string_length_tool_instance, agent_role, agent_input, expected_length, run_config, inference_mode
 ):
-    """Test agent with Python tool across different inference modes."""
+    """Test agent with a simple Python tool across different inference modes."""
     agent = Agent(
         name=f"Test Agent {inference_mode.value}",
         llm=llm_instance,
@@ -291,8 +323,15 @@ def test_react_agent_inference_modes(
     run_and_assert_agent(agent, agent_input, expected_length, run_config)
 
 
-def _run_comprehensive_schema_test(llm, comprehensive_tool, run_config, inference_mode, label):
-    """Helper: run agent with ComprehensiveTool and assert success with streaming validation."""
+def _run_comprehensive_schema_test(llm, comprehensive_tool, run_config, inference_mode, label, strict_tools=False):
+    """Helper: run agent with ComprehensiveTool and assert success with streaming validation.
+
+    When ``strict_tools`` is set, the LLM is copied with ``strict_tools=True`` so the
+    provider strict transform (``_to_strict_function``) and the agent-side normalization
+    round-trip (``_normalize_fields``) are exercised end-to-end against the complex schema.
+    """
+    if strict_tools:
+        llm = llm.model_copy(update={"strict_tools": True})
     agent = Agent(
         name=f"Comprehensive Schema Test ({label})",
         llm=llm,
@@ -337,19 +376,38 @@ def _run_comprehensive_schema_test(llm, comprehensive_tool, run_config, inferenc
 @pytest.mark.integration
 @pytest.mark.flaky(reruns=3)
 @pytest.mark.parametrize(
-    "inference_mode",
-    [InferenceMode.STRUCTURED_OUTPUT, InferenceMode.FUNCTION_CALLING],
-    ids=["structured_output", "function_calling"],
+    "llm_fixture, inference_mode, strict_tools",
+    [
+        ("llm_instance", InferenceMode.STRUCTURED_OUTPUT, False),
+        ("anthropic_llm", InferenceMode.STRUCTURED_OUTPUT, False),
+        ("llm_instance", InferenceMode.FUNCTION_CALLING, False),
+        ("anthropic_llm", InferenceMode.FUNCTION_CALLING, False),
+        ("llm_instance", InferenceMode.FUNCTION_CALLING, True),
+        ("anthropic_llm", InferenceMode.FUNCTION_CALLING, True),
+    ],
+    ids=[
+        "openai-so",
+        "anthropic-so",
+        "openai-fc-nonstrict",
+        "anthropic-fc-nonstrict",
+        "openai-fc-strict",
+        "anthropic-fc-strict",
+    ],
 )
-@pytest.mark.parametrize(
-    "llm_fixture",
-    ["llm_instance", "anthropic_llm"],
-    ids=["openai", "anthropic"],
-)
-def test_comprehensive_schema_tool_modes(llm_fixture, comprehensive_tool, run_config, inference_mode, request):
-    """Comprehensive typed schema (non-nullable + nullable + hidden fields) with OpenAI and Anthropic."""
+def test_comprehensive_schema_tool_modes(
+    llm_fixture, inference_mode, strict_tools, comprehensive_tool, run_config, request
+):
+    """Comprehensive typed schema on the complex tool across an explicit provider/mode/strict matrix.
+
+    - OpenAI and Anthropic: STRUCTURED_OUTPUT, FUNCTION_CALLING (non-strict and strict).
+
+    ``strict_tools`` only varies for FUNCTION_CALLING — it is the only mode where tool
+    schemas are sent to the provider as function tools (SO uses ``response_format``), so
+    it's the only mode the strict transform applies to.
+    """
     llm = request.getfixturevalue(llm_fixture)
     provider = "openai" if "llm_instance" in llm_fixture else "anthropic"
+    label = f"{provider}-{inference_mode.value}{'-strict' if strict_tools else ''}"
     _run_comprehensive_schema_test(
-        llm, comprehensive_tool, run_config, inference_mode, f"{provider}-{inference_mode.value}"
+        llm, comprehensive_tool, run_config, inference_mode, label, strict_tools=strict_tools
     )

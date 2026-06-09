@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Iterator
 
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.callbacks.base import get_run_id
+from dynamiq.callbacks.inner_thoughts_extractor import JSONInnerThoughtsExtractor
 from dynamiq.types.streaming import (
     AgentToolData,
     AgentToolInputDeltaData,
@@ -369,6 +370,9 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._current_action_name: str | None = None
         self._fc_object_tool_input: bool = False
         self._fc_object_answer: bool = False
+        # FC inline thought extractor + per-chunk delta.
+        self._fc_extractor: JSONInnerThoughtsExtractor | None = None
+        self._latest_fc_args_delta: str = ""
         self._brace_depth: int = 0
         self._brace_scan_index: int = 0
         self._so_action_emitted: bool = False
@@ -417,6 +421,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                 new_id = generate_uuid()
                 self.agent._streaming_tool_run_id = new_id
                 self.agent._streaming_tool_run_ids.append(new_id)
+            self._latest_fc_args_delta = text_delta or ""
         else:
             text_delta = self._extract_text_delta(chunk)
 
@@ -452,7 +457,26 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
     def _flush_buffer(self) -> None:
         """Flush the remaining buffer content by streaming it as one chunk."""
-        if not self._buffer or len(self._buffer) <= self._state_last_emit_index:
+        if not self._buffer:
+            self._flush_chunk_buffer()
+            return
+
+        # FC fallback: drain extractor's held buffer when thought was missing.
+        if (
+            self.mode_name == InferenceMode.FUNCTION_CALLING.value
+            and self._fc_extractor is not None
+            and self._tool_input_started
+            and not self._answer_started
+            and not self._state_has_emitted.get(StreamingState.TOOL_INPUT, False)
+        ):
+            held = self._fc_extractor.held_main_buffer
+            if held:
+                self._emit(held, step=StreamingState.TOOL_INPUT)
+                self._state_last_emit_index = len(self._buffer)
+                self._flush_chunk_buffer()
+                return
+
+        if len(self._buffer) <= self._state_last_emit_index:
             self._flush_chunk_buffer()
             return
 
@@ -475,6 +499,8 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._current_action_name = None
         self._fc_object_tool_input = False
         self._fc_object_answer = False
+        self._fc_extractor = None
+        self._latest_fc_args_delta = ""
         self._brace_depth = 0
         self._brace_scan_index = 0
         self._state_has_emitted = {
@@ -905,8 +931,27 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                 self._so_action_emitted = True
 
     def _process_function_calling_mode(self, final_answer_only: bool) -> None:
-        """Process function calling mode."""
-        self._process_json_mode(final_answer_only)
+        """FC mode: route `thought` to REASONING, tool args to TOOL_INPUT."""
+        if self._answer_started:
+            self._process_json_mode(final_answer_only)
+            return
+
+        if self._fc_extractor is None:
+            self._fc_extractor = JSONInnerThoughtsExtractor(
+                inner_thoughts_key=JSONStreamingField.THOUGHT.value,
+                wait_for_first_key=self.agent.streaming.fc_wait_for_first_key,
+            )
+
+        delta = self._latest_fc_args_delta
+        self._latest_fc_args_delta = ""
+        if not delta:
+            return
+
+        main_delta, thought_delta = self._fc_extractor.process_fragment(delta)
+        if thought_delta and not final_answer_only:
+            self._emit(thought_delta, step=StreamingState.REASONING)
+        if main_delta:
+            self._emit(main_delta, step=StreamingState.TOOL_INPUT)
 
     def _find_unescaped_quote_end(self, input_string: str, start_quote_index: int) -> int:
         """
@@ -1060,10 +1105,10 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         return False
 
     def _try_initialize_next_json_field(self, buf: str, final_answer_only: bool) -> None:
-        """Try to initialize the next JSON field state (thought, answer, or action_input).
+        """Try to initialize the next JSON field state (thought or answer).
 
-        Each initializer is a no-op when _current_state is already set, so this is safe
-        to call multiple times within a single chunk processing cycle.
+        Used by the ANSWER path (provide_final_answer). FC tool calls use the
+        inline extractor in ``_process_function_calling_mode`` instead.
         """
         if not self._state_has_emitted.get(StreamingState.REASONING, False):
             self._initialize_json_field_state(
@@ -1077,28 +1122,17 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                         buf, JSONStreamingField.ANSWER.value, StreamingState.ANSWER
                     )
 
-        if self._tool_input_started and not self._answer_started:
-            if not self._initialize_json_field_state(
-                buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT
-            ):
-                if self._current_state is None:
-                    self._initialize_json_object_field_state(
-                        buf, JSONStreamingField.ACTION_INPUT.value, StreamingState.TOOL_INPUT
-                    )
-
-    def _emit_tool_input_state(self, buf: str) -> None:
-        """Emit content for the current TOOL_INPUT state."""
+    def _emit_tool_input_state(self, buf: str) -> bool:
+        """Emit content for the current TOOL_INPUT state. Returns True when complete."""
         if self._fc_object_tool_input:
-            self._emit_json_object_field_content(buf, StreamingState.TOOL_INPUT)
-        else:
-            self._emit_json_field_content(buf, StreamingState.TOOL_INPUT)
+            return self._emit_json_object_field_content(buf, StreamingState.TOOL_INPUT)
+        return self._emit_json_field_content(buf, StreamingState.TOOL_INPUT)
 
-    def _emit_answer_state(self, buf: str) -> None:
-        """Emit content for the current ANSWER state."""
+    def _emit_answer_state(self, buf: str) -> bool:
+        """Emit content for the current ANSWER state. Returns True when complete."""
         if self._fc_object_answer:
-            self._emit_json_object_field_content(buf, StreamingState.ANSWER)
-        else:
-            self._emit_json_field_content(buf, StreamingState.ANSWER)
+            return self._emit_json_object_field_content(buf, StreamingState.ANSWER)
+        return self._emit_json_field_content(buf, StreamingState.ANSWER)
 
     def _process_json_mode(self, final_answer_only: bool) -> None:
         """

@@ -97,6 +97,9 @@ def create_bytesio_with_name(content, name):
         (None, create_bytesio_with_name(b"executable content", "test.exe"), "executable"),
         (None, create_bytesio_with_name(b"ebook content", "test.epub"), "ebook"),
         (None, create_bytesio_with_name(b"unknown content", "unknownfile.xyz"), None),
+        ("file_0", create_bytesio_with_name(b"content", ""), None),
+        (None, create_bytesio_with_name(b"content", ""), None),
+        ("", None, None),
     ],
 )
 def test_workflow_with_file_type_extraction(filename, file, result):

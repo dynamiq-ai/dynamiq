@@ -7,7 +7,7 @@ from dynamiq.components.converters.unstructured import ConvertStrategy, Document
 from dynamiq.components.converters.unstructured import UnstructuredFileConverter as UnstructuredFileConverterComponent
 from dynamiq.connections import Unstructured
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
+from dynamiq.nodes.node import ConnectionNode, ErrorHandling, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -59,6 +59,10 @@ class UnstructuredFileConverter(ConnectionNode):
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
     name: str = "unstructured-file-converter"
+    error_handling: ErrorHandling = Field(
+        default_factory=lambda: ErrorHandling(timeout_seconds=300.0),
+        description="Default execution timeout. Set timeout_seconds to None to disable.",
+    )
     connection: Unstructured = None
     document_creation_mode: DocumentCreationMode = DocumentCreationMode.ONE_DOC_PER_FILE
     strategy: ConvertStrategy = ConvertStrategy.AUTO

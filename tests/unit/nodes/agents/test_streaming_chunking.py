@@ -158,13 +158,13 @@ def _feed_fc_chunks(cb, thought: str, answer: str) -> None:
 
 
 def _feed_fc_tool_chunks(cb, thought: str, tool_name: str, tool_input: str) -> None:
-    """FC single tool call: function name = tool, arguments contain thought + action_input."""
+    """FC single tool call (flat-args schema): tool's `query` param is a sibling of `thought`."""
     serialized = {"group": "llms", "id": "llm-1"}
     cb.on_node_execute_stream(
         serialized,
         {"choices": [{"delta": {"tool_calls": [{"index": 0, "type": "function", "function": {"name": tool_name}}]}}]},
     )
-    args = '{"thought": "' + thought + '", "action_input": "' + tool_input + '"}'
+    args = '{"thought": "' + thought + '", "query": "' + tool_input + '"}'
     for ch in args:
         cb.on_node_execute_stream(
             serialized,
@@ -173,10 +173,10 @@ def _feed_fc_tool_chunks(cb, thought: str, tool_name: str, tool_input: str) -> N
 
 
 def _feed_fc_parallel_tool_chunks(cb, calls: list) -> None:
-    """Multiple FC tool calls. Each ``calls`` entry is (tool_name, thought, action_input).
+    """Multiple FC tool calls (flat-args schema). Each entry is (tool_name, thought, query_value).
     The tc_index increments per tool, which triggers the parser's _reset_tool_call_state."""
     serialized = {"group": "llms", "id": "llm-1"}
-    for index, (tool_name, thought, action_input) in enumerate(calls):
+    for index, (tool_name, thought, query) in enumerate(calls):
         cb.on_node_execute_stream(
             serialized,
             {
@@ -185,7 +185,7 @@ def _feed_fc_parallel_tool_chunks(cb, calls: list) -> None:
                 ]
             },
         )
-        args = '{"thought": "' + thought + '", "action_input": "' + action_input + '"}'
+        args = '{"thought": "' + thought + '", "query": "' + query + '"}'
         for ch in args:
             cb.on_node_execute_stream(
                 serialized,
@@ -274,7 +274,19 @@ def test_streaming_chunking_tool_call_path(mode, min_chunk_chars):
             assert len(chunk) >= min_chunk_chars, f"TOOL_INPUT chunk {len(chunk)} < {min_chunk_chars}"
 
     assert "".join(reasoning).strip() == SAMPLE_THOUGHT.strip()
-    assert "".join(tool_inputs).strip() == SAMPLE_TOOL_INPUT.strip()
+
+    if mode == InferenceMode.FUNCTION_CALLING:
+        # Flat-args FC mode: the inline extractor routes `thought` to REASONING
+        # events and emits the tool's real params (without thought) as TOOL_INPUT
+        # content. Consumer parses it directly without needing to pop thought.
+        import json
+
+        joined = "".join(tool_inputs).strip()
+        parsed = json.loads(joined)
+        assert "thought" not in parsed, "TOOL_INPUT must NOT contain thought"
+        assert parsed["query"] == SAMPLE_TOOL_INPUT
+    else:
+        assert "".join(tool_inputs).strip() == SAMPLE_TOOL_INPUT.strip()
 
     # No final-answer events on this path.
     assert not _emitted_by_step(
@@ -314,9 +326,18 @@ def test_streaming_chunking_parallel_tool_calls(min_chunk_chars):
     by_run_id = _tool_input_events_by_run_id(cb)
     assert len(by_run_id) == 2, f"expected 2 distinct tool_run_ids, got {len(by_run_id)}"
 
+    # Flat-args FC mode: each tool's TOOL_INPUT stream carries only the tool
+    # params (thought is routed to REASONING events instead). Verify `query`
+    # round-trips and `thought` is NOT in the parsed object.
+    import json
+
     fragments_per_tool = list(by_run_id.values())
-    assert "".join(fragments_per_tool[0]) == input_a
-    assert "".join(fragments_per_tool[1]) == input_b
+    parsed_a = json.loads("".join(fragments_per_tool[0]))
+    parsed_b = json.loads("".join(fragments_per_tool[1]))
+    assert "thought" not in parsed_a
+    assert parsed_a["query"] == input_a
+    assert "thought" not in parsed_b
+    assert parsed_b["query"] == input_b
 
     if min_chunk_chars > 0:
         for tid, frags in by_run_id.items():
@@ -326,3 +347,34 @@ def test_streaming_chunking_parallel_tool_calls(min_chunk_chars):
     reasoning = _emitted_by_step(cb, StreamingState.REASONING)
     assert reasoning, "no REASONING events for parallel tool calls"
     assert "".join(reasoning).strip() == (thought_a + thought_b).strip()
+
+
+def test_fc_tool_input_emits_when_thought_is_missing():
+    """Flat-args fallback: if the LLM emits a tool call without `thought`, the
+    streaming layer still emits the full outer JSON object as TOOL_INPUT at the
+    end of the stream. Without this fallback, the consumer would see no events
+    for that tool call even though it was dispatched successfully."""
+    import json
+
+    cb = _make_callback_for_mode(InferenceMode.FUNCTION_CALLING, min_chunk_chars=0)
+    serialized = {"group": "llms", "id": "llm-1"}
+
+    cb.on_node_execute_stream(
+        serialized,
+        {"choices": [{"delta": {"tool_calls": [{"index": 0, "type": "function", "function": {"name": "search"}}]}}]},
+    )
+    args = '{"query": "weather", "model": "gpt"}'
+    for ch in args:
+        cb.on_node_execute_stream(
+            serialized,
+            {"choices": [{"delta": {"tool_calls": [{"index": 0, "type": "function", "function": {"arguments": ch}}]}}]},
+        )
+    cb.on_node_execute_end({"group": "llms"}, output_data={})
+
+    reasoning = _emitted_by_step(cb, StreamingState.REASONING)
+    tool_inputs = _emitted_tool_input_chunks(cb)
+
+    assert not reasoning, "no REASONING expected when thought is absent"
+    assert tool_inputs, "TOOL_INPUT must be emitted as a fallback even without thought"
+    parsed = json.loads("".join(tool_inputs))
+    assert parsed == {"query": "weather", "model": "gpt"}

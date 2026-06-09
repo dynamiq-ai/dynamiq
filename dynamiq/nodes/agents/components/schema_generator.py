@@ -19,7 +19,6 @@ TYPE_MAPPING = {
 
 FINAL_ANSWER_FUNCTION_SCHEMA = {
     "type": "function",
-    "strict": True,
     "function": {
         "name": "provide_final_answer",
         "description": "Function should be called when if you can answer the initial request"
@@ -38,6 +37,7 @@ FINAL_ANSWER_FUNCTION_SCHEMA = {
                 },
             },
             "required": ["thought", "answer", "output_files"],
+            "additionalProperties": False,
         },
     },
 }
@@ -75,7 +75,6 @@ def build_final_answer_function_schema(response_format: dict | type[BaseModel] |
         return FINAL_ANSWER_FUNCTION_SCHEMA
 
     answer_schema = unwrap_response_format(response_format)
-    strict = _is_strict_compatible(answer_schema)
 
     parameters = {
         "type": "object",
@@ -91,13 +90,11 @@ def build_final_answer_function_schema(response_format: dict | type[BaseModel] |
             },
         },
         "required": ["thought", "answer", "output_files"],
+        "additionalProperties": False,
     }
-    if strict:
-        parameters["additionalProperties"] = False
 
     return {
         "type": "function",
-        "strict": strict,
         "function": {
             "name": "provide_final_answer",
             "description": (
@@ -133,7 +130,7 @@ def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str]
     input_formats = []
     for tool in tools:
         params = []
-        for name, field in _reorder_fields(tool.input_schema.model_fields):
+        for name, field in _reorder_fields(tool.resolved_input_schema.model_fields):
             if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
                 args = get_args(field.annotation)
                 if get_origin(field.annotation) in (Union, types.UnionType):
@@ -239,8 +236,8 @@ def _resolve_type_schema(param: Any, _seen: set | None = None) -> dict[str, Any]
     ``properties`` so the LLM produces correctly structured output.
     Generic ``dict`` types become bare ``{"type": "object"}``.
 
-    Tools whose schemas contain bare objects automatically get
-    ``strict: false`` via ``_is_strict_compatible``.
+    Per-provider transforms (in ``BaseLLM`` subclasses) decide whether
+    ``strict`` is engaged for a given schema and provider.
     """
     if param is type(None):
         return {"type": "null"}
@@ -323,29 +320,6 @@ def _basemodel_to_schema(model: type[BaseModel], _seen: set | None = None) -> di
     return result
 
 
-def _is_strict_compatible(schema: Any) -> bool:
-    """Return ``False`` if the schema contains an object that OpenAI strict mode
-    would reject — bare objects without ``properties``, or objects missing
-    ``additionalProperties: False``."""
-    if not isinstance(schema, dict):
-        return True
-    schema_type = schema.get("type")
-    is_object = schema_type == "object" or (isinstance(schema_type, list) and "object" in schema_type)
-    if is_object:
-        if "properties" not in schema:
-            return False
-        if schema.get("additionalProperties") is not False:
-            return False
-    for value in schema.values():
-        if isinstance(value, dict) and not _is_strict_compatible(value):
-            return False
-        if isinstance(value, list):
-            for item in value:
-                if isinstance(item, dict) and not _is_strict_compatible(item):
-                    return False
-    return True
-
-
 def _is_nullable(annotation: Any) -> bool:
     """Return True if the annotation is a Union that includes NoneType."""
     origin = get_origin(annotation)
@@ -416,9 +390,9 @@ def generate_function_calling_schemas(
     for tool in tools:
         properties = {}
         required_fields = []
-        input_params = tool.input_schema.model_fields.items()
+        input_params = tool.resolved_input_schema.model_fields.items()
         if list(input_params):
-            for name, field in tool.input_schema.model_fields.items():
+            for name, field in tool.resolved_input_schema.model_fields.items():
                 generate_property_schema(properties, name, field)
                 if field.is_required() and name in properties:
                     required_fields.append(name)
@@ -427,55 +401,43 @@ def generate_function_calling_schemas(
                 properties["delegate_final"] = {
                     "type": "boolean",
                     "description": (
-                        "Set to true to return the sub-agent's response verbatim "
-                        "as the parent agent's final output."
+                        "Set to true to return the sub-agent's response verbatim " "as the parent agent's final output."
                     ),
                 }
 
-            has_optional = len(required_fields) < len(properties)
-            use_strict = _is_strict_compatible(properties) and not has_optional
-
-            action_input_schema: dict[str, Any] = {
-                "type": "object",
-                "description": "Tool parameters as a JSON object, not a string.",
-                "properties": properties,
+            # Flat-args: prepend `thought` so it streams first and the model sees it before tool params.
+            properties = {
+                "thought": {"type": "string", "description": "Your reasoning about using this tool."},
+                **properties,
             }
-            if use_strict:
-                action_input_schema["required"] = list(properties.keys())
-                action_input_schema["additionalProperties"] = False
-            else:
-                if required_fields:
-                    action_input_schema["required"] = required_fields
+            # Only genuinely-required fields are required here. Strict mode (which
+            # promotes every property to ``required``) is applied per-provider in
+            # ``BaseLLM.transform_tool_schemas``, not at generation time.
+            required = list(dict.fromkeys(["thought", *required_fields]))
 
             schema = {
                 "type": "function",
                 "function": {
                     "name": sanitize_tool_name(tool.name),
-                    "description": tool.description[:1024],
+                    "description": (tool.description or "")[:1024],
                     "parameters": {
                         "type": "object",
-                        "properties": {
-                            "thought": {
-                                "type": "string",
-                                "description": "Your reasoning about using this tool.",
-                            },
-                            "action_input": action_input_schema,
-                        },
+                        "properties": properties,
                         "additionalProperties": False,
-                        "required": ["thought", "action_input"],
+                        "required": required,
                     },
-                    "strict": use_strict,
                 },
             }
-
-            schemas.append(schema)
-
         else:
+            # `extra="allow"` tools (e.g. generic Python) take arbitrary params:
+            # keep the object open and non-strict so the model can pass them as
+            # top-level siblings of `thought`. Real zero-param tools stay closed.
+            allows_extra = getattr(tool.resolved_input_schema, "model_config", {}).get("extra") == "allow"
             schema = {
                 "type": "function",
                 "function": {
                     "name": sanitize_tool_name(tool.name),
-                    "description": tool.description[:1024],
+                    "description": (tool.description or "")[:1024],
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -483,18 +445,13 @@ def generate_function_calling_schemas(
                                 "type": "string",
                                 "description": "Your reasoning about using this tool.",
                             },
-                            "action_input": {
-                                "type": "string",
-                                "description": "Input for the selected tool in JSON string format.",
-                            },
                         },
-                        "additionalProperties": False,
-                        "required": ["thought", "action_input"],
+                        "additionalProperties": allows_extra,
+                        "required": ["thought"],
                     },
-                    "strict": True,
                 },
             }
 
-            schemas.append(schema)
+        schemas.append(schema)
 
     return schemas
