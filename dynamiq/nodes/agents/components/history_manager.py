@@ -139,15 +139,12 @@ class HistoryManagerMixin:
                         history += content.text
             else:
                 if message.role == MessageRole.ASSISTANT:
-                    # FUNCTION_CALLING content is just a "Calling: <tool>" stub;
-                    # the name + args live in tool_calls.
                     history += f"-TOOL DESCRIPTION START-\n{message.content}\n"
                     for tool_call in message.tool_calls or []:
                         fn = tool_call.get("function", {})
                         history += f"Tool: {fn.get('name', '')}\nArguments: {fn.get('arguments', '')}\n"
                     history += "-TOOL DESCRIPTION END-\n"
                 elif message.role in (MessageRole.USER, MessageRole.TOOL):
-                    # Tool results: TOOL role in FUNCTION_CALLING, USER in XML/ReAct.
                     history += f"-TOOL OUTPUT START-\n{message.content}\n-TOOL OUTPUT END-\n"
 
         return history
