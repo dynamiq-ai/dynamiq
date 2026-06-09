@@ -596,3 +596,33 @@ Usage Strategy:
             NotImplementedError: Always, because this method is not supported.
         """
         raise NotImplementedError("Use `get_mcp_tools()` to access individual tool instances.")
+
+
+def resolve_mcp_node(node):
+    """Resolve an MCPServer wrapper to its single runnable MCPTool.
+
+    An MCPServer is a discovery wrapper whose execute() is disabled, so operators that wrap and
+    run a single child node (e.g. Map) must resolve it to the individual tool first. Non-MCPServer
+    nodes pass through unchanged.
+
+    Args:
+        node: The wrapped node to resolve.
+
+    Returns:
+        The runnable node: the single MCPTool for an MCPServer, or node itself otherwise.
+
+    Raises:
+        ValueError: If the MCPServer does not resolve to exactly one tool.
+    """
+    if not isinstance(node, MCPServer):
+        return node
+
+    tools = node.get_mcp_tools()
+    if len(tools) == 1:
+        return tools[0]
+
+    selected = ", ".join(tool.name for tool in tools) or "none"
+    raise ValueError(
+        f"MCP server '{node.name}' resolved to {len(tools)} tools ({selected}); operators run one node "
+        f"per item, so select exactly one tool via `include_tools` to use it inside an operator."
+    )
