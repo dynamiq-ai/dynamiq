@@ -583,6 +583,22 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         return self
 
+    def _acknowledge_pending_fc_tool_calls(self, content: str) -> None:
+        """Answer and clear any pending FC tool_call ids with a neutral stub.
+
+        Keeps OpenAI's function-calling protocol valid when tool calls are
+        abandoned without execution (e.g. the model returned ``provide_final_answer``
+        alongside other tool calls), so no unpaired ``tool_call`` is left to 400 a
+        subsequent request and recovery for unrelated errors is not misdirected to
+        these ids.
+        """
+        pending_ids = getattr(self, "_pending_fc_tool_call_ids", None) or []
+        for tc_id in pending_ids:
+            self._prompt.messages.append(
+                Message(role=MessageRole.TOOL, content=content, tool_call_id=tc_id, static=True)
+            )
+        self._pending_fc_tool_call_ids = []
+
     def _append_recovery_instruction(
         self,
         *,
@@ -924,6 +940,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         action = first_call.function.name.strip()
 
         if action == "provide_final_answer":
+            self._acknowledge_pending_fc_tool_calls("Skipped — a final answer was provided instead.")
             final_args = first_call.function.parse_as_final_answer()
             thought = final_args.thought
             self._requested_output_files = self._parse_output_files_csv(final_args.output_files)
