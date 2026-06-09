@@ -247,6 +247,7 @@ REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS = """Always use this exact XML format in y
 
 IMPORTANT RULES:
 - ALWAYS include <thought> tags with detailed reasoning
+- Emit EXACTLY ONE <output>...</output> block per response, then STOP — never produce a second <output> block.
 - Place text immediately after each opening tag without leading newlines or indentation
 - Only use thought and answer tags
 - Properly close all XML tags
