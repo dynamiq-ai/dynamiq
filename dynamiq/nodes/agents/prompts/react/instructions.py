@@ -107,6 +107,7 @@ For questions that don't require tools:
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
 ## Single Action Per Turn
+- Emit EXACTLY ONE <output>...</output> block per response, then STOP — never produce a second <output> block.
 - Execute exactly ONE <action>/<action_input> pair per response, then wait for its Observation before continuing
 - Do NOT include multiple action blocks or answer blocks in the same response
 - After receiving an Observation, decide the next single action based on the result
@@ -243,6 +244,7 @@ REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS = """Always use this exact XML format in y
 
 IMPORTANT RULES:
 - ALWAYS include <thought> tags with detailed reasoning
+- Emit EXACTLY ONE <output>...</output> block per response, then STOP — never produce a second <output> block.
 - Place text immediately after each opening tag without leading newlines or indentation
 - Only use thought and answer tags
 - Properly close all XML tags
