@@ -376,6 +376,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._brace_depth: int = 0
         self._brace_scan_index: int = 0
         self._so_action_emitted: bool = False
+        self._xml_turn_complete: bool = False
         self._state_has_emitted: dict[str, bool] = {
             StreamingState.REASONING: False,
             StreamingState.ANSWER: False,
@@ -427,6 +428,22 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
         if not text_delta:
             return
+
+        # XML: enforce the </output> stop client-side (stripped for reasoning models) by clipping the
+        # stream at the first turn boundary, so a fabricated second <output> block is never emitted.
+        if self.mode_name == InferenceMode.XML.value:
+            if self._xml_turn_complete:
+                return
+            candidate = self.accumulated_content + text_delta
+            if "</output>" in candidate:
+                from dynamiq.nodes.agents.utils import first_xml_output_block
+
+                first_block = first_xml_output_block(candidate)
+                if first_block != candidate:
+                    text_delta = first_block[len(self.accumulated_content) :]
+                    self._xml_turn_complete = True
+                    if not text_delta:
+                        return
 
         self.accumulated_content += text_delta
         self._buffer += text_delta
