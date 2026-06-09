@@ -234,7 +234,7 @@ class Map(Node):
         local_config = config
         try:
             local_config = config.model_copy(deep=False) if config is not None else RunnableConfig()
-            if node_config := local_config.nodes_override.get(node.id):
+            if node_config := local_config.nodes_override.get(self.node.id):
                 local_config.nodes_override[node_copy.id] = node_config
         except Exception as e:
             logger.warning(f"Map: failed to prepare isolated streaming config for iteration {index}: {e}")
@@ -269,7 +269,7 @@ class Map(Node):
         merged_kwargs = {**kwargs, "parent_run_id": run_id}
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        # Resolve an MCPServer it to its single MCPTool.
+        # Resolve an MCPServer to its single MCPTool.
         run_node = resolve_mcp_node(self.node)
 
         try:
