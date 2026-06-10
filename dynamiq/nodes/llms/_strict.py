@@ -6,18 +6,18 @@ that constrain a model's tool arguments:
 - **OpenAI structured-outputs strict** (:func:`to_openai_strict_function`, via
   :class:`OpenAIStrictToolsMixin`): every property promoted to ``required`` with
   optionals re-encoded as nullable type-unions (``["string", "null"]``),
-  ``additionalProperties: false`` on every object. Used by OpenAI and Cerebras,
+  ``additionalProperties: false`` on every object. Used by OpenAI, Azure OpenAI,
+  Cerebras, and DeepSeek (its Beta endpoint, which LiteLLM targets by default),
   which accept the ``strict`` flag and tightened schema and forward them through
   LiteLLM unchanged.
 
-- **Required-omission strict subset** (:func:`to_strict_subset_function`, via
-  :class:`SubsetStrictToolsNoFlagMixin`): optionality expressed by omitting
-  fields from ``required`` (no null-unions), free-form objects encoded as JSON
-  strings, ``additionalProperties: false`` on closed objects, ``null`` stripped
-  from type unions. Used by Cohere (whose API rejects an unknown ``strict`` field,
-  so the flag is omitted and strictness is enabled request-level instead).
-  Anthropic uses the same subset shape but keeps its own copy of the transform in
-  ``anthropic.py`` (it attaches ``strict`` and relies on a LiteLLM patch).
+- **Required-omission strict subset** (:func:`to_strict_subset_function`):
+  optionality expressed by omitting fields from ``required`` (no null-unions),
+  free-form objects encoded as JSON strings, ``additionalProperties: false`` on
+  closed objects, ``null`` stripped from type unions. Called directly from each
+  provider's own ``_to_strict_function``: Anthropic (with ``strict`` — forwarded
+  by the LiteLLM patch in ``anthropic.py``) and Cohere (with ``attach_flag=False``
+  since Cohere's API rejects the flag; it enables strictness request-level instead).
 
 In both shapes optional fields the model leaves unset come back as ``null`` (or
 absent); the agent strips those before tool validation so Python defaults apply
@@ -274,7 +274,10 @@ def to_strict_subset_function(fn: dict, *, attach_flag: bool = True) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Provider mixins — wire one strict shape into a provider via its `_to_strict_function` hook
+# Provider mixin — shared by the OpenAI-shape providers (OpenAI, Azure, Cerebras,
+# DeepSeek). The subset-shape providers (Anthropic, Cohere) call
+# ``to_strict_subset_function`` directly from their own ``_to_strict_function``,
+# since each uses it once with a different ``attach_flag``.
 # ---------------------------------------------------------------------------
 
 
@@ -288,16 +291,3 @@ class OpenAIStrictToolsMixin:
 
     def _to_strict_function(self, fn: dict) -> dict:
         return to_openai_strict_function(fn)
-
-
-class SubsetStrictToolsNoFlagMixin:
-    """Mixin: tighten tools to the required-omission strict subset, no ``strict`` flag.
-
-    For providers whose API hard-rejects an unknown ``strict`` field on tools
-    (Cohere returns a 400 ``unknown field: parameter 'strict' is not a valid
-    field``). The schema is still tightened (enum/closed-object/optionality
-    constraints), so the model is steered the same way — only the flag is omitted.
-    """
-
-    def _to_strict_function(self, fn: dict) -> dict:
-        return to_strict_subset_function(fn, attach_flag=False)

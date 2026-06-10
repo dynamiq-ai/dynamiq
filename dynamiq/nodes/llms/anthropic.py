@@ -3,6 +3,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel
 
 from dynamiq.connections import Anthropic as AnthropicConnection
+from dynamiq.nodes.llms._strict import to_strict_subset_function
 from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.prompts.prompts import VisionMessageType
 from dynamiq.utils.logger import logger
@@ -71,74 +72,6 @@ if _LITELLM_ANTHROPIC_STRICT_PATCHED:
 # Anthropic strict tool use — per-request caps documented in the API:
 # https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use
 ANTHROPIC_MAX_STRICT_TOOLS = 20
-
-
-def _clean_anthropic_strict_schema(schema: Any) -> Any:
-    """Recursively clean a schema for Anthropic's strict tool-use mode.
-
-    - Forces ``additionalProperties: false`` on every object that declares
-      ``properties``.
-    - Free-form objects (``dict[str, Any]`` → ``{"type": "object"}`` with no
-      ``properties``) are converted to JSON-encoded string fields, since strict
-      mode can't express an open object. The agent parses them back to dicts
-      before tool validation (see ``_normalize_fields``).
-    - Optional fields stay omitted from ``required`` (Anthropic's native shape;
-      no null-union trick).
-    """
-    if not isinstance(schema, dict):
-        return schema
-
-    schema_type = schema.get("type")
-    is_object = schema_type == "object" or (isinstance(schema_type, list) and "object" in schema_type)
-    if is_object and "properties" not in schema:
-        desc = schema.get("description", "")
-        return {
-            "type": "string",
-            "description": (f"{desc} " if desc else "") + "Provide as a JSON-encoded object string.",
-        }
-
-    cleaned: dict = {}
-    for key, value in schema.items():
-        if key == "default" and value is None:
-            # A null default conveys optionality, which Anthropic expresses via
-            # ``required`` omission. Drop it so it can't clash with a now non-null type.
-            continue
-        if key == "type" and isinstance(value, list):
-            # Anthropic conveys optionality by omitting the field from ``required``,
-            # not via a null-union. Strip ``null`` so a nullable scalar/enum keeps a
-            # single declared type (e.g. ``["string", "null"]`` -> ``"string"``);
-            # Anthropic rejects an enum whose declared type is ``["string", "null"]``.
-            non_null = [t for t in value if t != "null"]
-            cleaned["type"] = non_null[0] if len(non_null) == 1 else (non_null or value)
-        elif key == "properties" and isinstance(value, dict):
-            cleaned["properties"] = {k: _clean_anthropic_strict_schema(v) for k, v in value.items()}
-        elif key == "items" and isinstance(value, dict):
-            cleaned["items"] = _clean_anthropic_strict_schema(value)
-        elif key in ("anyOf", "oneOf", "allOf") and isinstance(value, list):
-            branches = [_clean_anthropic_strict_schema(v) if isinstance(v, dict) else v for v in value]
-            if key in ("anyOf", "oneOf"):
-                # Drop the ``{"type": "null"}`` branch — nullability is conveyed by
-                # leaving the field out of ``required`` (Anthropic's native shape).
-                non_null = [b for b in branches if not (isinstance(b, dict) and b.get("type") == "null")]
-                branches = non_null or branches
-            cleaned[key] = branches
-        else:
-            cleaned[key] = value
-
-    # Inline a single-branch anyOf/oneOf left over after dropping the null branch, so
-    # Anthropic sees a plain typed schema (e.g. a nullable enum) instead of a 1-item union.
-    for union_key in ("anyOf", "oneOf"):
-        branches = cleaned.get(union_key)
-        if isinstance(branches, list) and len(branches) == 1 and isinstance(branches[0], dict):
-            del cleaned[union_key]
-            for k, v in branches[0].items():
-                cleaned.setdefault(k, v)
-
-    cleaned_type = cleaned.get("type")
-    if cleaned_type == "object" or (isinstance(cleaned_type, list) and "object" in cleaned_type):
-        cleaned["additionalProperties"] = False
-
-    return cleaned
 
 
 class AnthropicCacheControl(BaseModel):
@@ -234,21 +167,12 @@ class Anthropic(BaseLLM):
         return params
 
     def _to_strict_function(self, fn: dict) -> dict:
-        """Clean one tool's schema to Anthropic's strict shape and attach ``strict``.
+        """Clean one tool's schema to Anthropic's strict subset and attach ``strict``.
 
-        Cleans the parameter schema to Anthropic's strict shape (optionality via
-        ``required`` omission, free-form objects → JSON-string fields,
-        ``additionalProperties: false``) and attaches ``strict: true``. A function
-        without a dict ``parameters`` is returned unchanged (nothing to make strict).
-
-        See :meth:`BaseLLM.transform_tool_schemas` for the shared gating, whitelist,
-        per-request cap (:attr:`MAX_STRICT_TOOLS`), and fail-safe fallback that drive
-        this hook.
+        Delegates to :func:`to_strict_subset_function` (optionality via ``required``
+        omission, free-form objects → JSON strings, ``additionalProperties: false``)
+        and attaches ``strict: true``, which the LiteLLM patch above forwards to
+        Anthropic. See :meth:`BaseLLM.transform_tool_schemas` for the shared gating,
+        whitelist, and per-request cap (:attr:`MAX_STRICT_TOOLS`).
         """
-        out = dict(fn)
-        parameters = out.get("parameters")
-        if not isinstance(parameters, dict):
-            return out
-        out["parameters"] = _clean_anthropic_strict_schema(parameters)
-        out["strict"] = True
-        return out
+        return to_strict_subset_function(fn)
