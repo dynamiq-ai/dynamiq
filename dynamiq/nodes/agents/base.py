@@ -541,10 +541,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         """
         custom_metadata = input_data.metadata.copy()
 
-        # Add extra fields that were provided (model allows extra fields with ConfigDict extra="allow")
-        if input_data.model_extra:
-            custom_metadata.update(input_data.model_extra)
-
         # Clean up any leaked fields
         if "files" in custom_metadata:
             del custom_metadata["files"]
