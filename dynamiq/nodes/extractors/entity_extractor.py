@@ -16,6 +16,30 @@ from dynamiq.utils.logger import logger
 # otherwise Neo4jGraphStore.write_graph raises (see storages/graph/neo4j/neo4j.py).
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+
+class Triple(BaseModel):
+    """A legal relationship pattern: (source entity type) -[relationship]-> (target entity type)."""
+
+    source: str
+    relationship: str
+    target: str
+
+
+class Ontology(BaseModel):
+    """A schema the extracted knowledge graph must conform to.
+
+    Attributes:
+        entity_types: Allowed node labels.
+        relationship_types: Allowed relationship types.
+        triples: Legal ``(source)-[REL]->(target)`` patterns. If empty, any relationship
+            (of an allowed type) between two allowed entity types is permitted; otherwise
+            only the listed patterns are kept.
+    """
+
+    entity_types: list[str]
+    relationship_types: list[str]
+    triples: list[Triple] = Field(default_factory=list)
+
 DEFAULT_EXTRACTION_PROMPT = """You are a knowledge-graph extraction engine. Read the text below and extract \
 the entities and the relationships between them.
 
@@ -60,6 +84,10 @@ class EntityExtractor(Node):
         prompt_template (str): Jinja prompt template. Supports ``document_text`` and ``type_guidance``.
         entity_types (list[str] | None): Optional whitelist hint of entity types to extract.
         relationship_types (list[str] | None): Optional whitelist hint of relationship types to extract.
+        ontology (Ontology | None): Optional schema. When set, it is the source of truth: the LLM is
+            told the allowed types/triples AND the extracted graph is hard-filtered so only conforming
+            nodes/relationships are written. When ``None`` the extractor is free-form (falling back to
+            the soft ``entity_types``/``relationship_types`` hints if those are provided).
         response_format (dict | None): Optional litellm ``response_format`` forwarded to the LLM. Leave
             unset for providers that do not support structured-output schemas (extraction then relies on
             the JSON-instructed prompt + robust parsing).
@@ -71,6 +99,7 @@ class EntityExtractor(Node):
     prompt_template: str = DEFAULT_EXTRACTION_PROMPT
     entity_types: list[str] | None = None
     relationship_types: list[str] | None = None
+    ontology: Ontology | None = None
     response_format: dict[str, Any] | None = None
     input_schema: ClassVar[type[EntityExtractorInputSchema]] = EntityExtractorInputSchema
 
@@ -124,6 +153,9 @@ class EntityExtractor(Node):
         entities = self._dedupe_entities(entities)
         nodes, relationships = self._to_write_graph_payload(entities, raw_relationships)
 
+        if self.ontology is not None:
+            nodes, relationships = self._enforce_ontology(nodes, relationships)
+
         logger.debug(
             f"Node {self.name} - {self.id}: extracted {len(nodes)} nodes and {len(relationships)} relationships"
         )
@@ -157,13 +189,87 @@ class EntityExtractor(Node):
         return self._parse_llm_json(llm_result.output["content"])
 
     def _build_type_guidance(self) -> str:
-        """Build optional prompt guidance constraining entity/relationship types."""
+        """Build optional prompt guidance constraining entity/relationship types.
+
+        With an ``ontology`` set, the model is told the full schema (types + legal triples);
+        otherwise it falls back to the soft ``entity_types``/``relationship_types`` hints.
+        """
+        if self.ontology is not None:
+            o = self.ontology
+            lines = [
+                "You MUST conform to this ontology. Anything outside it will be discarded:",
+                f"- Allowed entity types: {', '.join(o.entity_types)}.",
+                f"- Allowed relationship types: {', '.join(o.relationship_types)}.",
+            ]
+            if o.triples:
+                lines.append("- Only these relationship patterns are legal (source -[REL]-> target):")
+                for t in o.triples:
+                    lines.append(f"    ({t.source}) -[{t.relationship}]-> ({t.target})")
+            return "\n".join(lines)
+
         lines = []
         if self.entity_types:
             lines.append(f"- Only extract entities of these types: {', '.join(self.entity_types)}.")
         if self.relationship_types:
             lines.append(f"- Only extract relationships of these types: {', '.join(self.relationship_types)}.")
         return "\n".join(lines)
+
+    def _enforce_ontology(
+        self, nodes: list[dict], relationships: list[dict]
+    ) -> tuple[list[dict], list[dict]]:
+        """Drop any node/relationship that is not allowed by ``self.ontology``.
+
+        Membership is checked against the same normalized (UPPER_SNAKE) identifiers that
+        ``_to_write_graph_payload`` produces, so comparisons match what gets written to Neo4j.
+        """
+        o = self.ontology
+        allowed_entities = {self._sanitize_identifier(e) for e in o.entity_types}
+        allowed_rels = {self._sanitize_identifier(r) for r in o.relationship_types}
+        allowed_triples = {
+            (
+                self._sanitize_identifier(t.source),
+                self._sanitize_identifier(t.relationship),
+                self._sanitize_identifier(t.target),
+            )
+            for t in o.triples
+        }
+
+        # 1) Keep only nodes whose label is in the ontology.
+        kept_nodes: list[dict] = []
+        kept_ids: set[str] = set()
+        for node in nodes:
+            label = node["labels"][0]
+            if label in allowed_entities:
+                kept_nodes.append(node)
+                kept_ids.add(node["properties"]["id"])
+            else:
+                logger.debug(f"EntityExtractor: dropping off-ontology entity label={label!r}")
+
+        # 2) Keep only relationships with a legal type, surviving endpoints, and (when triples
+        #    are defined) a legal (source_label, type, target_label) pattern.
+        kept_rels: list[dict] = []
+        for rel in relationships:
+            rel_type, start_label, end_label = rel["type"], rel["start_label"], rel["end_label"]
+            if rel["start_identity"] not in kept_ids or rel["end_identity"] not in kept_ids:
+                reason = "endpoint dropped"
+            elif rel_type not in allowed_rels:
+                reason = "type not in ontology"
+            elif allowed_triples and (start_label, rel_type, end_label) not in allowed_triples:
+                reason = "illegal triple"
+            else:
+                kept_rels.append(rel)
+                continue
+            logger.debug(
+                f"EntityExtractor: dropping relationship ({start_label})-[{rel_type}]->({end_label}): {reason}"
+            )
+
+        dropped_n, dropped_r = len(nodes) - len(kept_nodes), len(relationships) - len(kept_rels)
+        if dropped_n or dropped_r:
+            logger.info(
+                f"EntityExtractor ontology enforcement: dropped {dropped_n} off-ontology node(s) "
+                f"and {dropped_r} off-ontology relationship(s)."
+            )
+        return kept_nodes, kept_rels
 
     @staticmethod
     def _parse_llm_json(content: str | None) -> dict[str, Any]:

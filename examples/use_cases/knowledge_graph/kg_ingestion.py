@@ -1,10 +1,13 @@
 """Ingest documents into BOTH a vector store and a knowledge graph in one workflow.
 
 This shows the vector store and the knowledge graph as two INDEPENDENT branches of the same
-ingestion flow (they are not bundled into one node):
+ingestion flow:
 
-    input.documents ─┬─► OpenAIDocumentEmbedder ─► QdrantDocumentWriter      (vector store)
-                     └─► EntityExtractor (LLM)   ─► Neo4jGraphWriter         (knowledge graph)
+    input.documents ─┬─► OpenAIDocumentEmbedder ─► QdrantDocumentWriter   (vector store)
+                     └─► KnowledgeGraph                                    (knowledge graph)
+
+The KnowledgeGraph node does extraction + ontology enforcement + write-time entity resolution
++ Neo4j upsert in ONE node (replacing the old EntityExtractor -> Neo4jGraphWriter pair).
 
 Run this first, then run ``kg_question_answering.py`` to query both stores.
 
@@ -25,10 +28,10 @@ from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
-from dynamiq.nodes.extractors import EntityExtractor
+from dynamiq.nodes.extractors import KnowledgeGraph, Ontology, Triple
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.node import InputTransformer, NodeDependency
-from dynamiq.nodes.writers import Neo4jGraphWriter, QdrantDocumentWriter
+from dynamiq.nodes.writers import QdrantDocumentWriter
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.storages.vector.qdrant.qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
@@ -39,6 +42,22 @@ from dynamiq.utils.logger import logger
 QDRANT_PATH = "./.qdrant_kg_demo2"
 INDEX_NAME = "kg_demo"
 EMBEDDING_MODEL = "text-embedding-3-small"  # 1536 dims, matches Qdrant store default
+
+# Schema the knowledge graph must conform to. The LLM is told these types/triples and the
+# extracted graph is hard-filtered to them. Set ontology=None on the node for free-form extraction.
+ONTOLOGY = Ontology(
+    entity_types=["Person", "Organization", "System", "Event", "Location"],
+    relationship_types=["WORKS_AT", "USES", "PRESENTED", "PRESENTED_AT", "LOCATED_IN"],
+    triples=[
+        Triple(source="Person", relationship="WORKS_AT", target="Organization"),
+        Triple(source="Organization", relationship="USES", target="System"),
+        Triple(source="Person", relationship="USES", target="System"),
+        Triple(source="Person", relationship="PRESENTED", target="System"),
+        Triple(source="System", relationship="PRESENTED_AT", target="Event"),
+        Triple(source="Person", relationship="PRESENTED_AT", target="Event"),
+        Triple(source="Organization", relationship="LOCATED_IN", target="Location"),
+    ],
+)
 
 DOCS = [
     Document(
@@ -90,28 +109,20 @@ def build_workflow() -> Workflow:
         ),
     )
 
-    # ---- Graph branch: extract entities/relationships and write them to Neo4j ----
-    extractor = EntityExtractor(
-        id="entity_extractor",
+    # ---- Graph branch: extract + resolve duplicates + write to Neo4j, all in ONE node ----
+    knowledge_graph = KnowledgeGraph(
+        id="knowledge_graph",
         llm=OpenAI(connection=openai_connection, model="gpt-4o-mini", temperature=0.0, max_tokens=4000),
-    )
-    graph_writer = Neo4jGraphWriter(
-        id="graph_writer",
         connection=Neo4jConnection(),
-        depends=[NodeDependency(extractor)],
-        input_transformer=InputTransformer(
-            selector={
-                "nodes": f"$.{extractor.id}.output.nodes",
-                "relationships": f"$.{extractor.id}.output.relationships",
-            }
-        ),
+        ontology=ONTOLOGY,          # set to None for free-form extraction
+        resolve_duplicates=True,    # re-runs link near-duplicate entities instead of duplicating
+        input_transformer=InputTransformer(selector={"documents": "$.documents"}),
     )
 
-    # Both branches read the same workflow input ("documents").
+    # The embedder branch also reads the same workflow input ("documents").
     document_embedder.input_transformer = InputTransformer(selector={"documents": "$.documents"})
-    extractor.input_transformer = InputTransformer(selector={"documents": "$.documents"})
 
-    return Workflow(flow=Flow(nodes=[document_embedder, vector_writer, extractor, graph_writer]))
+    return Workflow(flow=Flow(nodes=[document_embedder, vector_writer, knowledge_graph]))
 
 
 if __name__ == "__main__":
@@ -126,7 +137,7 @@ if __name__ == "__main__":
         assert result.status == RunnableStatus.SUCCESS, f"Ingestion failed: {result.status} / {result.output}"
 
         vector_out = result.output["vector_writer"]["output"]
-        graph_out = result.output["graph_writer"]["output"]
+        graph_out = result.output["knowledge_graph"]["output"]
         logger.info(f"Vector store: upserted {vector_out.get('upserted_count')} documents to Qdrant ('{INDEX_NAME}').")
         logger.info(
             f"Knowledge graph: created {graph_out.get('nodes_created')} nodes and "

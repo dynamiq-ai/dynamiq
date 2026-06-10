@@ -1,0 +1,216 @@
+import re
+from typing import Any
+
+from pydantic import PrivateAttr
+
+from dynamiq.connections import ApacheAGE, AWSNeptune, Neo4j
+from dynamiq.connections.managers import ConnectionManager
+from dynamiq.nodes.extractors.entity_extractor import EntityExtractor, EntityExtractorInputSchema
+from dynamiq.runnables import RunnableConfig
+from dynamiq.storages.graph.age import ApacheAgeGraphStore
+from dynamiq.storages.graph.base import BaseGraphStore
+from dynamiq.storages.graph.neo4j import Neo4jGraphStore
+from dynamiq.storages.graph.neptune import NeptuneGraphStore
+from dynamiq.utils.logger import logger
+
+# Cypher identifier guard (Neo4j/openCypher label syntax used by the resolution read query).
+_LABEL_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _trigrams(text: str) -> set[str]:
+    """Padded character trigrams of a normalized name (pg_trgm-style)."""
+    norm = " " + re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", "", text.lower())).strip() + " "
+    return {norm[i : i + 3] for i in range(len(norm) - 2)} if len(norm) >= 3 else set()
+
+
+def _trigram_similarity(a: str, b: str) -> float:
+    ta, tb = _trigrams(a), _trigrams(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)  # Jaccard
+
+
+class KnowledgeGraph(EntityExtractor):
+    """One node that extracts a knowledge graph from documents AND writes it to a graph store.
+
+    Combines, in a single node, what previously required wiring an ``EntityExtractor`` to a
+    graph writer:
+
+      1. LLM extraction (+ optional ``ontology`` enforcement, inherited from EntityExtractor).
+      2. Optional write-time entity resolution: a newly extracted entity whose name is
+         trigram-similar (>= ``similarity_threshold``) to an existing same-label node is linked
+         to that node, so re-running does not create duplicates. Below the threshold it is
+         written as a new node.
+      3. Upsert into the graph backend via ``BaseGraphStore.write_graph``.
+
+    Provider-agnostic: the concrete store is selected from the connection type
+    (``Neo4j`` / ``ApacheAGE`` / ``AWSNeptune``), exactly like ``CypherExecutor``. The write path
+    requires a store that implements ``write_graph`` — currently Neo4j; other backends raise a
+    clear error until their stores add it.
+
+    Input: ``{"documents": [Document, ...]}`` (same as EntityExtractor).
+    Output: the extraction payload plus ``write_stats`` and ``nodes_created`` / ``relationships_created``.
+
+    Attributes:
+        connection (Neo4j | ApacheAGE | AWSNeptune): The graph backend connection.
+        database (str | None): Optional target database (Neo4j).
+        graph_name (str | None): Graph name (Apache AGE).
+        create_graph_if_not_exists (bool): Create the AGE graph if missing.
+        resolve_duplicates (bool): Link near-duplicate entities to existing nodes at write time.
+        similarity_threshold (float): Trigram similarity above which two names are the same entity.
+    """
+
+    name: str = "knowledge-graph"
+    connection: Neo4j | ApacheAGE | AWSNeptune
+    database: str | None = None
+    graph_name: str | None = None
+    create_graph_if_not_exists: bool = False
+    resolve_duplicates: bool = True
+    similarity_threshold: float = 0.6
+
+    _graph_store: BaseGraphStore | None = PrivateAttr(default=None)
+    _existing_cache: dict[str, list[tuple[str, str]]] = PrivateAttr(default_factory=dict)
+
+    @property
+    def to_dict_exclude_params(self):
+        return super().to_dict_exclude_params | {"connection": True}
+
+    def to_dict(self, **kwargs) -> dict:
+        data = super().to_dict(**kwargs)
+        data["connection"] = self.connection.to_dict(**kwargs)
+        return data
+
+    def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
+        """Initialize the embedded LLM (parent) and select the graph store for the connection."""
+        connection_manager = connection_manager or ConnectionManager()
+        super().init_components(connection_manager)
+        if self._graph_store is None:
+            self._graph_store = self._build_graph_store()
+
+    def _build_graph_store(self) -> BaseGraphStore:
+        """Pick the concrete store from the connection type (same dispatch as CypherExecutor)."""
+        client = self.connection.connect()
+        if isinstance(self.connection, ApacheAGE):
+            return ApacheAgeGraphStore(
+                connection=self.connection,
+                client=client,
+                graph_name=self.graph_name,
+                create_graph_if_not_exists=self.create_graph_if_not_exists,
+            )
+        if isinstance(self.connection, AWSNeptune):
+            return NeptuneGraphStore(
+                connection=self.connection,
+                client=client,
+                endpoint=self.connection.endpoint,
+                verify_ssl=self.connection.verify_ssl,
+                timeout=self.connection.timeout,
+            )
+        return Neo4jGraphStore(connection=self.connection, client=client, database=self.database)
+
+    def execute(self, input_data: EntityExtractorInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
+        """Extract entities/relationships, resolve duplicates, and write them to the graph store."""
+        if not hasattr(self._graph_store, "write_graph"):
+            raise NotImplementedError(
+                f"{type(self).__name__}: write is not supported for backend "
+                f"{type(self._graph_store).__name__}. Only Neo4j currently implements write_graph."
+            )
+
+        self._existing_cache = {}
+
+        # Reuse the full EntityExtractor pipeline (extraction + ontology enforcement).
+        extraction = super().execute(input_data, config=config, **kwargs)
+        nodes, relationships = extraction["nodes"], extraction["relationships"]
+
+        if self.resolve_duplicates and nodes:
+            nodes, relationships = self._resolve_against_graph(nodes, relationships)
+
+        if nodes or relationships:
+            write_result = self._graph_store.write_graph(
+                nodes=nodes, relationships=relationships, database=self.database
+            )
+        else:
+            write_result = {
+                "nodes_created": 0,
+                "relationships_created": 0,
+                "properties_set": 0,
+                "records": [],
+                "keys": [],
+            }
+
+        logger.info(
+            f"Node {self.name} - {self.id}: wrote {write_result.get('nodes_created')} new node(s) and "
+            f"{write_result.get('relationships_created')} new relationship(s)."
+        )
+
+        return {
+            **extraction,
+            "nodes": nodes,
+            "relationships": relationships,
+            "write_stats": write_result,
+            "nodes_created": write_result.get("nodes_created"),
+            "relationships_created": write_result.get("relationships_created"),
+        }
+
+    def _existing_nodes(self, label: str) -> list[tuple[str, str]]:
+        """All (id, name) of existing nodes with the given label, cached per execute() call."""
+        if label in self._existing_cache:
+            return self._existing_cache[label]
+        rows: list[tuple[str, str]] = []
+        if _LABEL_PATTERN.match(label):
+            records, _, _ = self._graph_store.run_cypher(
+                f"MATCH (n:`{label}`) WHERE n.name IS NOT NULL RETURN n.id AS id, n.name AS name"
+            )
+            rows = [(r.get("id"), r.get("name")) for r in self._graph_store.format_records(records)]
+        self._existing_cache[label] = rows
+        return rows
+
+    def _resolve_against_graph(
+        self, nodes: list[dict], relationships: list[dict]
+    ) -> tuple[list[dict], list[dict]]:
+        """Remap each extracted node's id onto a trigram-matching existing node (same label)."""
+        id_remap: dict[str, str] = {}
+        for node in nodes:
+            label = node["labels"][0]
+            new_id = node["properties"]["id"]
+            name = node["properties"].get("name")
+            if not name:
+                continue
+            existing = self._existing_nodes(label)
+            if any(ex_id == new_id for ex_id, _ in existing):
+                continue  # same id already in graph -> write_graph MERGE handles it
+
+            best_id, best_score = None, 0.0
+            for ex_id, ex_name in existing:
+                score = _trigram_similarity(name, ex_name)
+                if score >= self.similarity_threshold and score > best_score:
+                    best_id, best_score = ex_id, score
+            if best_id:
+                id_remap[new_id] = best_id
+                logger.info(
+                    f"Node {self.name} - {self.id}: linking {name!r} -> existing node "
+                    f"{best_id!r} (trigram={best_score:.2f})"
+                )
+
+        if not id_remap:
+            return nodes, relationships
+
+        for node in nodes:
+            nid = node["properties"]["id"]
+            if nid in id_remap:
+                node["properties"]["id"] = id_remap[nid]
+        for rel in relationships:
+            if rel["start_identity"] in id_remap:
+                rel["start_identity"] = id_remap[rel["start_identity"]]
+            if rel["end_identity"] in id_remap:
+                rel["end_identity"] = id_remap[rel["end_identity"]]
+
+        # Two extracted entities can map to the same existing node -> dedupe by (label, id).
+        seen: set[tuple[str, str]] = set()
+        deduped: list[dict] = []
+        for node in nodes:
+            key = (node["labels"][0], node["properties"]["id"])
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(node)
+        return deduped, relationships

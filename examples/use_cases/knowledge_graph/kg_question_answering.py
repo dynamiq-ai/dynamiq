@@ -34,7 +34,7 @@ from qdrant_client import QdrantClient
 from dynamiq.utils.logger import logger
 
 # Must match kg_ingestion.py.
-QDRANT_PATH = "./.qdrant_kg_demo1"
+QDRANT_PATH = "./.qdrant_kg_demo2"
 INDEX_NAME = "kg_demo"
 EMBEDDING_MODEL = "text-embedding-3-small"
 
