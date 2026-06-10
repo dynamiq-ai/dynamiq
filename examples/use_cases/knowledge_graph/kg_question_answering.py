@@ -29,10 +29,12 @@ from dynamiq.nodes.tools import CypherExecutor
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.storages.vector.qdrant.qdrant import QdrantVectorStore
+from qdrant_client import QdrantClient
+
 from dynamiq.utils.logger import logger
 
 # Must match kg_ingestion.py.
-QDRANT_PATH = "./.qdrant_kg_demo"
+QDRANT_PATH = "./.qdrant_kg_demo1"
 INDEX_NAME = "kg_demo"
 EMBEDDING_MODEL = "text-embedding-3-small"
 
@@ -53,8 +55,11 @@ QUESTION = "Who is the CIO of Acme Capital, and what AI system does the firm use
 def build_workflow() -> Workflow:
     openai_connection = OpenAIConnection()
 
+    # Explicit on-disk client (same as kg_ingestion.py): QdrantVectorStore otherwise eagerly
+    # connects to a *server* and ignores `path`. force_disable_check_same_thread is required
+    # because the Flow runs the retriever on a worker thread over SQLite-backed local Qdrant.
     vector_store = QdrantVectorStore(
-        path=QDRANT_PATH,
+        client=QdrantClient(path=QDRANT_PATH, force_disable_check_same_thread=True),
         index_name=INDEX_NAME,
         create_if_not_exist=False,
         dimension=1536,

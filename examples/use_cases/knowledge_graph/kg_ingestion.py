@@ -31,11 +31,12 @@ from dynamiq.nodes.node import InputTransformer, NodeDependency
 from dynamiq.nodes.writers import Neo4jGraphWriter, QdrantDocumentWriter
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.storages.vector.qdrant.qdrant import QdrantVectorStore
+from qdrant_client import QdrantClient
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
 # Local on-disk Qdrant — shared by the ingestion and QA scripts (no server needed).
-QDRANT_PATH = "./.qdrant_kg_demo"
+QDRANT_PATH = "./.qdrant_kg_demo2"
 INDEX_NAME = "kg_demo"
 EMBEDDING_MODEL = "text-embedding-3-small"  # 1536 dims, matches Qdrant store default
 
@@ -59,8 +60,16 @@ def build_workflow() -> Workflow:
     openai_connection = OpenAIConnection()
 
     # A single Qdrant store instance, reused by the writer (and later by the retriever).
+    # NOTE: pass an explicit on-disk client. QdrantVectorStore eagerly builds a *server*
+    # connection (localhost:6333) whenever no client is supplied, which ignores `path` and
+    # fails with "Connection refused" when no Qdrant server is running. Handing it a local
+    # QdrantClient(path=...) keeps everything on disk, no server needed.
+    #
+    # force_disable_check_same_thread=True: on-disk Qdrant is backed by SQLite, but the Flow
+    # executes nodes on a worker-thread pool. Without this flag the writer intermittently hits
+    # "SQLite objects created in a thread can only be used in that same thread".
     vector_store = QdrantVectorStore(
-        path=QDRANT_PATH,
+        client=QdrantClient(path=QDRANT_PATH, force_disable_check_same_thread=True),
         index_name=INDEX_NAME,
         create_if_not_exist=True,
         dimension=1536,
@@ -108,18 +117,31 @@ def build_workflow() -> Workflow:
 if __name__ == "__main__":
     workflow = build_workflow()
 
-    result = workflow.run(
-        input_data={"documents": DOCS},
-        config=RunnableConfig(request_timeout=120),
-    )
+    try:
+        result = workflow.run(
+            input_data={"documents": DOCS},
+            config=RunnableConfig(request_timeout=120),
+        )
 
-    assert result.status == RunnableStatus.SUCCESS, f"Ingestion failed: {result.status} / {result.output}"
+        assert result.status == RunnableStatus.SUCCESS, f"Ingestion failed: {result.status} / {result.output}"
 
-    vector_out = result.output["vector_writer"]["output"]
-    graph_out = result.output["graph_writer"]["output"]
-    logger.info(f"Vector store: upserted {vector_out.get('upserted_count')} documents to Qdrant ('{INDEX_NAME}').")
-    logger.info(
-        f"Knowledge graph: created {graph_out.get('nodes_created')} nodes and "
-        f"{graph_out.get('relationships_created')} relationships in Neo4j."
-    )
-    logger.info("--- Ingestion complete. Run kg_question_answering.py next. ---")
+        vector_out = result.output["vector_writer"]["output"]
+        graph_out = result.output["graph_writer"]["output"]
+        logger.info(f"Vector store: upserted {vector_out.get('upserted_count')} documents to Qdrant ('{INDEX_NAME}').")
+        logger.info(
+            f"Knowledge graph: created {graph_out.get('nodes_created')} nodes and "
+            f"{graph_out.get('relationships_created')} relationships in Neo4j."
+        )
+        logger.info("--- Ingestion complete. Run kg_question_answering.py next. ---")
+    finally:
+        # Explicitly close stores so resources are released cleanly:
+        #  - Neo4j: avoids the "unclosed BoltDriver" ResourceWarning.
+        #  - Qdrant: local on-disk mode only FLUSHES to disk on close(), so without this the
+        #    upserted vectors are lost when the process exits and the QA script finds nothing.
+        for node in workflow.flow.nodes:
+            graph_store = getattr(node, "_graph_store", None)
+            if graph_store is not None:
+                graph_store.close()
+            vector_store = getattr(node, "vector_store", None)
+            if vector_store is not None and getattr(vector_store, "_client", None) is not None:
+                vector_store._client.close()
