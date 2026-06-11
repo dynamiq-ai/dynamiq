@@ -415,12 +415,22 @@ class BaseLLM(ConnectionNode):
         custom = model_registry.supports_function_calling(self.model)
         if custom is not None:
             return custom
-        logger.warning(
-            "Model %s is unknown to litellm and the custom registry; assuming it supports "
-            "function calling. Add a registry entry or set model_info.supports_function_calling "
-            "to silence this.",
-            self.model,
-        )
+        # No FC verdict from any source. Default to allow rather than hard-block (the agent
+        # validator raises on False), but distinguish a registry entry that simply omits the
+        # flag from a model no source has heard of, so the warning is accurate.
+        if model_registry.get_model_info(self.model) is not None:
+            logger.warning(
+                "Model %s has a registry entry with no 'supports_function_calling' flag; "
+                "assuming it supports function calling. Set the flag to silence this.",
+                self.model,
+            )
+        else:
+            logger.warning(
+                "Model %s is unknown to litellm and the custom registry; assuming it supports "
+                "function calling. Add a registry entry or set model_info.supports_function_calling "
+                "to silence this.",
+                self.model,
+            )
         return True
 
     @property

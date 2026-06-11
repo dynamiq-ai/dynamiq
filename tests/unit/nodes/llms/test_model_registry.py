@@ -10,6 +10,7 @@ from dynamiq.nodes.llms.registry import ModelRegistry
 
 MODEL_A = "test-org/model-a"
 MODEL_B = "test-org/model-b"
+MODEL_C = "test-org/model-c"  # registry entry that omits the supports_function_calling flag
 
 TEST_REGISTRY_DATA = {
     MODEL_A: {
@@ -27,6 +28,11 @@ TEST_REGISTRY_DATA = {
         "supports_vision": True,
         "supports_pdf_input": True,
         "supports_function_calling": True,
+    },
+    MODEL_C: {
+        "max_input_tokens": 32_000,
+        "max_tokens": 32_000,
+        "supports_vision": False,
     },
 }
 
@@ -67,6 +73,7 @@ def test_unknown_model_returns_none(registry):
         (f"together_ai/{MODEL_A}", False),
         (f"together_ai/{MODEL_B}", True),
         (f"together_ai/{MODEL_B.upper()}", True),
+        (MODEL_C, None),  # entry exists but omits the flag
         ("unknown/model", None),
     ],
 )
@@ -161,13 +168,33 @@ def test_basellm_function_calling_falls_back_to_registry(model, expected_fc):
 
 
 @pytest.mark.usefixtures("_litellm_unknown", "_patch_registry")
-def test_basellm_unknown_function_calling_defaults_true():
+def test_basellm_unknown_function_calling_defaults_true(mocker):
     """A model unknown to both litellm and the registry is assumed FC-capable (warn + allow)."""
     from dynamiq.connections import TogetherAI as TogetherAIConnection
     from dynamiq.nodes.llms.togetherai import TogetherAI
 
+    mock_logger = mocker.patch("dynamiq.nodes.llms.base.logger")
     llm = TogetherAI(model="unknown/x", connection=TogetherAIConnection(api_key="test-key"))
+
     assert llm.is_function_calling_supported is True
+    msg = mock_logger.warning.call_args.args[0]
+    assert "unknown to litellm and the custom registry" in msg
+
+
+@pytest.mark.usefixtures("_litellm_unknown", "_patch_registry")
+def test_basellm_registry_entry_without_fc_flag_allows_with_accurate_log(mocker):
+    """A registry entry that omits the FC flag is allowed (not hard-blocked), but the
+    warning must not falsely claim the model is unknown to the registry."""
+    from dynamiq.connections import TogetherAI as TogetherAIConnection
+    from dynamiq.nodes.llms.togetherai import TogetherAI
+
+    mock_logger = mocker.patch("dynamiq.nodes.llms.base.logger")
+    llm = TogetherAI(model=MODEL_C, connection=TogetherAIConnection(api_key="test-key"))
+
+    assert llm.is_function_calling_supported is True
+    msg = mock_logger.warning.call_args.args[0]
+    assert "registry entry" in msg
+    assert "unknown to litellm and the custom registry" not in msg
 
 
 @pytest.mark.usefixtures("_litellm_unknown", "_patch_registry")
