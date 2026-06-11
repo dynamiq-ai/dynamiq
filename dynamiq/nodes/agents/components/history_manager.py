@@ -139,8 +139,12 @@ class HistoryManagerMixin:
                         history += content.text
             else:
                 if message.role == MessageRole.ASSISTANT:
-                    history += f"-TOOL DESCRIPTION START-\n{message.content}\n-TOOL DESCRIPTION END-\n"
-                elif message.role == MessageRole.USER:
+                    history += f"-TOOL DESCRIPTION START-\n{message.content}\n"
+                    for tool_call in message.tool_calls or []:
+                        fn = tool_call.get("function", {})
+                        history += f"Tool: {fn.get('name', '')}\nArguments: {fn.get('arguments', '')}\n"
+                    history += "-TOOL DESCRIPTION END-\n"
+                elif message.role in (MessageRole.USER, MessageRole.TOOL):
                     history += f"-TOOL OUTPUT START-\n{message.content}\n-TOOL OUTPUT END-\n"
 
         return history

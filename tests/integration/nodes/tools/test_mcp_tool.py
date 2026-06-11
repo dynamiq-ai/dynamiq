@@ -590,3 +590,35 @@ async def test_initialize_tools_unwraps_nested_exception_group(sse_server_connec
     assert "TimeoutError" in message
     assert "handshake timed out" in message
     assert "unhandled errors in a TaskGroup" not in message
+
+
+def test_map_node_resolves_mcp_server_to_single_tool(sse_server_connection, mock_mcp_tools):
+    """A Map wrapping an MCPServer that selects one tool must run that tool, not the disabled server."""
+    from dynamiq.nodes.operators import Map
+    from dynamiq.runnables import RunnableStatus
+
+    mcp_server = MCPServer(connection=sse_server_connection, include_tools=["multiply"])
+    mcp_server._mcp_tools = mock_mcp_tools
+
+    map_node = Map(node=mcp_server)
+    mocked_result = {"content": {"result": 42}}
+    with patch.object(MCPTool, "execute_async", new_callable=AsyncMock, return_value=mocked_result):
+        result = map_node.run(input_data={"input": [{"a": 2, "b": 3}, {"a": 4, "b": 5}]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output == {"output": [mocked_result, mocked_result]}
+
+
+def test_map_node_errors_when_mcp_server_resolves_to_multiple_tools(sse_server_connection, mock_mcp_tools):
+    """Map runs one node per item, so an ambiguous MCPServer (>1 tool) must fail with a clear message."""
+    from dynamiq.nodes.operators import Map
+    from dynamiq.runnables import RunnableStatus
+
+    mcp_server = MCPServer(connection=sse_server_connection)  # no include_tools -> all 3 tools
+    mcp_server._mcp_tools = mock_mcp_tools
+
+    map_node = Map(node=mcp_server)
+    result = map_node.run(input_data={"input": [{"a": 2, "b": 3}]})
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "exactly one tool" in str(result.error).lower()
