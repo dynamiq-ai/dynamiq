@@ -198,4 +198,6 @@ def test_e2e_hard_workflow_no_recovery(provider, inference_mode, run_config):
 
         logger.info(f"--- E2E hard workflow passed clean (no recovery) for {provider}/{inference_mode.value} ---")
     finally:
-        sandbox_backend.close()
+        # kill=True terminates the remote sandbox; close() alone only disconnects and would
+        # leave it alive (1h timeout), piling up live sandboxes across the parallel matrix.
+        sandbox_backend.close(kill=True)
