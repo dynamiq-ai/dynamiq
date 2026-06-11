@@ -165,6 +165,38 @@ class LLMCheckpointState(BaseCheckpointState):
     is_fallback_run: bool = Field(default=False, description="Whether LLM is in fallback mode")
 
 
+# Sampling parameters that some newer models reject with an HTTP 400.
+SAMPLING_PARAMS: tuple[str, ...] = ("temperature", "top_p", "top_k")
+
+# Substrings of model names that reject the sampling parameters above with an HTTP 400.
+# These models are newer than LiteLLM's static capability map, so the ``drop_params=True``
+# we already pass to LiteLLM does not strip the params for them and the request fails. We
+# strip them ourselves. Matched by substring so the check is independent of the provider
+# prefix (``anthropic/``, ``bedrock/...anthropic.``, OpenRouter, etc.).
+# Ref: https://platform.claude.com/docs/en/about-claude/models/migration-guide
+SAMPLING_UNSUPPORTED_MODEL_MARKERS: tuple[str, ...] = (
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-fable-5",
+    "claude-mythos-5",
+    "claude-mythos-preview",
+)
+
+# Error-message fragments that signal a provider rejected a param because it is *unsupported*
+# (as opposed to out-of-range). Used by the reactive backstop to catch models not yet listed
+# in SAMPLING_UNSUPPORTED_MODEL_MARKERS, while leaving genuine validation errors
+# (e.g. "temperature: must be less than or equal to 1.0") to surface normally.
+_SAMPLING_UNSUPPORTED_INDICATORS: tuple[str, ...] = (
+    "not permitted",
+    "not supported",
+    "does not support",
+    "doesn't support",
+    "unsupported",
+    "unexpected",
+    "unrecognized",
+)
+
+
 class BaseLLM(ConnectionNode):
     """Base class for all LLM nodes.
 
@@ -647,13 +679,23 @@ class BaseLLM(ConnectionNode):
 
         return response_format, tools
 
+    def _model_rejects_sampling_params(self) -> bool:
+        """Whether ``self.model`` is known to reject sampling params with a 400.
+
+        See :data:`SAMPLING_UNSUPPORTED_MODEL_MARKERS`.
+        """
+        model_lower = self.model.lower()
+        return any(marker in model_lower for marker in SAMPLING_UNSUPPORTED_MODEL_MARKERS)
+
     def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """
         Updates or modifies the parameters for the completion method.
 
         This method can be overridden by subclasses to customize the parameters
         passed to the completion method. By default, it enables usage information
-        in streaming mode if streaming is enabled and include_usage is set.
+        in streaming mode if streaming is enabled and include_usage is set, and
+        strips sampling params for models that reject them (see
+        :data:`SAMPLING_UNSUPPORTED_MODEL_MARKERS`).
         Args:
             params (dict[str, Any]): The parameters to be updated.
 
@@ -663,6 +705,9 @@ class BaseLLM(ConnectionNode):
         if self.streaming and self.streaming.enabled and self.streaming.include_usage and params.get("stream", False):
             params.setdefault("stream_options", {})
             params["stream_options"]["include_usage"] = True
+        if self._model_rejects_sampling_params():
+            for param in SAMPLING_PARAMS:
+                params.pop(param, None)
         return params
 
     # Per-request cap on strict tools. ``None`` means no cap. Providers with a
@@ -832,8 +877,34 @@ class BaseLLM(ConnectionNode):
         and return a modified `common_params` dict to retry with, or return ``None`` to
         re-raise the original error.
 
-        Default implementation: no recovery (return ``None``).
+        Default implementation: backstop for models that reject sampling params with a 400
+        but are not yet listed in :data:`SAMPLING_UNSUPPORTED_MODEL_MARKERS` (the deterministic
+        path in :meth:`update_completion_params` handles the listed ones up front). Strips the
+        sampling params and persists the removal so later calls in this run skip the failing
+        first attempt. Only fires when the error both names a present sampling param and looks
+        like an unsupported-param error, so genuine validation errors (e.g. out-of-range
+        temperature) still surface.
         """
+        msg = str(exc).lower()
+        present = [param for param in SAMPLING_PARAMS if common_params.get(param) is not None]
+        references_param = any(param in msg for param in present)
+        looks_unsupported = any(ind in msg for ind in _SAMPLING_UNSUPPORTED_INDICATORS)
+        if present and references_param and looks_unsupported:
+            logger.warning(
+                "LLM '%s': model '%s' rejected sampling params %s; retrying without them "
+                "(add the model to SAMPLING_UNSUPPORTED_MODEL_MARKERS to skip this failed attempt).",
+                self.name,
+                self.model,
+                present,
+            )
+            recovered = dict(common_params)
+            for param in SAMPLING_PARAMS:
+                recovered.pop(param, None)
+                if param in type(self).model_fields:
+                    setattr(self, param, None)
+                elif self.__pydantic_extra__ is not None:
+                    self.__pydantic_extra__.pop(param, None)
+            return recovered
         return None
 
     def execute(
