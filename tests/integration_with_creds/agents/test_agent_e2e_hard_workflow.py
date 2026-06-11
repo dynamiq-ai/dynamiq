@@ -34,13 +34,9 @@ from dynamiq.sandboxes.e2b import E2BSandbox
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from dynamiq.utils.logger import logger
 
-from .streaming_assertions import assert_streaming_events, collect_streaming_events
+from .streaming_assertions import collect_streaming_events
 
-# ---------------------------------------------------------------------------
-# Provider matrix -- one representative model each (full model sweeps live in
-# test_agent_llms.py). Each entry: required env vars + an LLM factory.
-# ---------------------------------------------------------------------------
-
+# Provider matrix -- one representative model each (full model sweeps live in test_agent_llms.py).
 COMMON_LLM_KWARGS = dict(max_tokens=20000, temperature=0)
 
 
@@ -57,8 +53,7 @@ def _gemini_llm():
 
 
 def _bedrock_llm():
-    # Claude Sonnet 4.6 via a US cross-region inference profile; adjust the region prefix
-    # (us./eu./apac.) to one enabled on the target AWS account.
+    # Cross-region inference profile; switch the us./eu./apac. prefix to one enabled on the account.
     return Bedrock(
         connection=AWSConnection(),
         model="bedrock/us.anthropic.claude-sonnet-4-6",
@@ -80,7 +75,7 @@ INFERENCE_MODES = [
 ]
 INFERENCE_MODE_IDS = ["xml", "structured_output", "function_calling"]
 
-# Tool creds required for every combo regardless of provider.
+# Required for every combo regardless of provider.
 TOOL_ENV_KEYS = ["EXA_API_KEY", "E2B_API_KEY"]
 
 HARD_TASK = (
@@ -105,8 +100,8 @@ EXPECTED_FILES = ["app.py", "index.html"]
 
 @pytest.fixture(scope="module")
 def run_config():
-    # The task is long (research + codegen + sandbox execution); bump the usual 120s.
-    return RunnableConfig(request_timeout=300)
+    # Research + codegen + sandbox execution; matches the 150s per-case timeout cap.
+    return RunnableConfig(request_timeout=150)
 
 
 def find_recovery_events(agent: Agent) -> list[tuple[str, str]]:
@@ -163,7 +158,6 @@ def test_e2e_hard_workflow_no_recovery(provider, inference_mode, run_config):
             config=run_config.model_copy(update={"callbacks": [streaming]}),
         )
 
-        # 1. Task succeeded.
         assert (
             result.status == RunnableStatus.SUCCESS
         ), f"[{provider}/{inference_mode.value}] run failed: {result.output}"
@@ -172,7 +166,7 @@ def test_e2e_hard_workflow_no_recovery(provider, inference_mode, run_config):
         content = agent_output["content"]
         assert isinstance(content, str) and content, "Agent final content should be a non-empty string"
 
-        # 2. Both deliverable files came back from the sandbox.
+        # Both deliverable files came back from the sandbox.
         returned_files = agent_output.get("files") or []
         returned_names = {f.name for f in returned_files}
         for name in EXPECTED_FILES:
@@ -181,12 +175,9 @@ def test_e2e_hard_workflow_no_recovery(provider, inference_mode, run_config):
                 f"from returned files: {returned_names}"
             )
 
-        # 3. Streaming event sequence is valid (FSM ends in ANSWER, visits REASONING).
         ordered_events = collect_streaming_events(streaming, agent.id)
-        # assert_streaming_events(ordered_events, inference_mode, agent.streaming.mode)
 
-        # 4. The agent actually researched -- the Exa tool ran at least once. Tool-result events
-        # stream as ("tool", {..., "name": "exa-search"}); reuse the events already collected.
+        # The agent actually researched -- the Exa tool ran at least once.
         exa_tool_runs = [
             content
             for step, content in ordered_events
@@ -194,12 +185,11 @@ def test_e2e_hard_workflow_no_recovery(provider, inference_mode, run_config):
         ]
         assert exa_tool_runs, f"[{provider}/{inference_mode.value}] Exa research tool was never invoked"
 
-        # 5a. Recovery signal -- streaming side: no tool-input errors were streamed.
+        # No recovery occurred -- checked on both the stream and the prompt.
         assert not any(
             step == "tool_input_error" for step, _ in ordered_events
         ), f"[{provider}/{inference_mode.value}] streamed a tool_input_error (recovery occurred)"
 
-        # 5b. Recovery signal -- prompt side: no correction messages were appended (STRICT).
         recovery_events = find_recovery_events(agent)
         assert not recovery_events, (
             f"[{provider}/{inference_mode.value}] agent triggered {len(recovery_events)} recovery "
