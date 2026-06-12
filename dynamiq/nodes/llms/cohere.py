@@ -1,8 +1,11 @@
 from typing import Any
 
+from pydantic import field_validator
+
 from dynamiq.connections import Cohere as CohereConnection
 from dynamiq.nodes.llms._strict import to_strict_subset_function
 from dynamiq.nodes.llms.base import BaseLLM
+from dynamiq.utils.logger import logger
 
 
 class Cohere(BaseLLM):
@@ -19,10 +22,31 @@ class Cohere(BaseLLM):
             (no ``strict`` key) and ``strict_tools: true`` is forwarded on the
             request. Cohere requires Command-r7b-or-newer, at least one ``required``
             parameter per tool, and a maximum of 200 fields across all tools (the
-            feature is experimental). A whitelist is treated as "enable strict":
-            Cohere's flag is request-level and applies to every tool in the call.
+            feature is experimental). Because the flag is request-level, Cohere
+            cannot do partial (per-tool) strict tool calling, so a list value is
+            coerced to ``True`` at validation (see :meth:`_normalize_strict_tools`).
     """
     connection: CohereConnection
+
+    @field_validator("strict_tools")
+    @classmethod
+    def _normalize_strict_tools(cls, value: bool | list[str]) -> bool | list[str]:
+        """Coerce a per-tool whitelist to ``True`` — Cohere can't do partial strict.
+
+        Cohere applies ``strict_tools`` at the request level (all tools or none),
+        so a list (which means "make only these tools strict" for per-tool
+        providers) has no coherent meaning here. Treat any list as "enable strict
+        for the whole request" and warn, rather than silently enforcing strict on
+        tools that were never tightened.
+        """
+        if isinstance(value, list):
+            logger.warning(
+                "Cohere applies strict_tools at the request level and cannot do "
+                "partial (per-tool) strict tool calling; coercing %r to True.",
+                value,
+            )
+            return True
+        return value
 
     def __init__(self, **kwargs):
         """Initialize the Cohere LLM node.
