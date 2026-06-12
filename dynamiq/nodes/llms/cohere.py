@@ -34,12 +34,14 @@ class Cohere(BaseLLM):
         """Coerce a per-tool whitelist to ``True`` — Cohere can't do partial strict.
 
         Cohere applies ``strict_tools`` at the request level (all tools or none),
-        so a list (which means "make only these tools strict" for per-tool
-        providers) has no coherent meaning here. Treat any list as "enable strict
-        for the whole request" and warn, rather than silently enforcing strict on
-        tools that were never tightened.
+        so a non-empty list (which means "make only these tools strict" for
+        per-tool providers) has no coherent meaning here — treat it as "enable
+        strict for the whole request" and warn. An empty list stays falsy (strict
+        off), matching :class:`BaseLLM`, which treats ``[]`` the same as ``False``.
         """
         if isinstance(value, list):
+            if not value:
+                return False
             logger.warning(
                 "Cohere applies strict_tools at the request level and cannot do "
                 "partial (per-tool) strict tool calling; coercing %r to True.",
