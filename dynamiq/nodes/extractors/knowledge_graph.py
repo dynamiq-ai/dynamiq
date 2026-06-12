@@ -30,8 +30,12 @@ def _trigram_similarity(a: str, b: str) -> float:
     return len(ta & tb) / len(ta | tb)  # Jaccard
 
 
-class KnowledgeGraph(EntityExtractor):
+class KnowledgeGraphWriter(EntityExtractor):
     """One node that extracts a knowledge graph from documents AND writes it to a graph store.
+
+    The graph analog of ``VectorStoreWriter`` (which bundles an embedder + a vector writer): this bundles
+    LLM extraction + write-time entity resolution + the graph upsert into a single node. (The thin,
+    backend-specific ``Neo4jGraphWriter`` is the graph analog of ``QdrantDocumentWriter``.)
 
     Combines, in a single node, what previously required wiring an ``EntityExtractor`` to a
     graph writer:
@@ -60,7 +64,7 @@ class KnowledgeGraph(EntityExtractor):
         similarity_threshold (float): Trigram similarity above which two names are the same entity.
     """
 
-    name: str = "knowledge-graph"
+    name: str = "knowledge-graph-writer"
     connection: Neo4j | ApacheAGE | AWSNeptune
     database: str | None = None
     graph_name: str | None = None
@@ -107,7 +111,9 @@ class KnowledgeGraph(EntityExtractor):
             )
         return Neo4jGraphStore(connection=self.connection, client=client, database=self.database)
 
-    def execute(self, input_data: EntityExtractorInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
+    def execute(
+        self, input_data: EntityExtractorInputSchema, config: RunnableConfig = None, **kwargs
+    ) -> dict[str, Any]:
         """Extract entities/relationships, resolve duplicates, and write them to the graph store."""
         if not hasattr(self._graph_store, "write_graph"):
             raise NotImplementedError(
@@ -164,9 +170,7 @@ class KnowledgeGraph(EntityExtractor):
         self._existing_cache[label] = rows
         return rows
 
-    def _resolve_against_graph(
-        self, nodes: list[dict], relationships: list[dict]
-    ) -> tuple[list[dict], list[dict]]:
+    def _resolve_against_graph(self, nodes: list[dict], relationships: list[dict]) -> tuple[list[dict], list[dict]]:
         """Remap each extracted node's id onto a trigram-matching existing node (same label)."""
         id_remap: dict[str, str] = {}
         for node in nodes:

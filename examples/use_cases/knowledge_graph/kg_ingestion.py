@@ -6,7 +6,7 @@ ingestion flow:
     input.documents ─┬─► OpenAIDocumentEmbedder ─► QdrantDocumentWriter   (vector store)
                      └─► KnowledgeGraph                                    (knowledge graph)
 
-The KnowledgeGraph node does extraction + ontology enforcement + write-time entity resolution
+The KnowledgeGraphWriter node does extraction + ontology enforcement + write-time entity resolution
 + Neo4j upsert in ONE node (replacing the old EntityExtractor -> Neo4jGraphWriter pair).
 
 Run this first, then run ``kg_question_answering.py`` to query both stores.
@@ -23,18 +23,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from qdrant_client import QdrantClient
+
 from dynamiq import Workflow
 from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
-from dynamiq.nodes.extractors import KnowledgeGraph, Ontology, Triple
+from dynamiq.nodes.extractors import KnowledgeGraphWriter, Ontology, Triple
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.node import InputTransformer, NodeDependency
 from dynamiq.nodes.writers import QdrantDocumentWriter
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.storages.vector.qdrant.qdrant import QdrantVectorStore
-from qdrant_client import QdrantClient
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -104,18 +105,16 @@ def build_workflow() -> Workflow:
         id="vector_writer",
         vector_store=vector_store,
         depends=[NodeDependency(document_embedder)],
-        input_transformer=InputTransformer(
-            selector={"documents": f"$.{document_embedder.id}.output.documents"}
-        ),
+        input_transformer=InputTransformer(selector={"documents": f"$.{document_embedder.id}.output.documents"}),
     )
 
     # ---- Graph branch: extract + resolve duplicates + write to Neo4j, all in ONE node ----
-    knowledge_graph = KnowledgeGraph(
+    knowledge_graph = KnowledgeGraphWriter(
         id="knowledge_graph",
         llm=OpenAI(connection=openai_connection, model="gpt-4o-mini", temperature=0.0, max_tokens=4000),
         connection=Neo4jConnection(),
-        ontology=ONTOLOGY,          # set to None for free-form extraction
-        resolve_duplicates=True,    # re-runs link near-duplicate entities instead of duplicating
+        ontology=ONTOLOGY,  # set to None for free-form extraction
+        resolve_duplicates=True,  # re-runs link near-duplicate entities instead of duplicating
         input_transformer=InputTransformer(selector={"documents": "$.documents"}),
     )
 

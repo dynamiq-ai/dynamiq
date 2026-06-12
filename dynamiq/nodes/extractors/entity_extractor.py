@@ -16,6 +16,11 @@ from dynamiq.utils.logger import logger
 # otherwise Neo4jGraphStore.write_graph raises (see storages/graph/neo4j/neo4j.py).
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+# An ontology-declared attribute is written as (entity)-[:HAS_ATTRIBUTE {key}]->(:AttributeValue {value})
+# rather than as a node property, so its access can be scoped independently of the (shared) entity node.
+ATTRIBUTE_VALUE_LABEL = "AttributeValue"
+HAS_ATTRIBUTE_TYPE = "HAS_ATTRIBUTE"
+
 
 class Triple(BaseModel):
     """A legal relationship pattern: (source entity type) -[relationship]-> (target entity type)."""
@@ -34,11 +39,17 @@ class Ontology(BaseModel):
         triples: Legal ``(source)-[REL]->(target)`` patterns. If empty, any relationship
             (of an allowed type) between two allowed entity types is permitted; otherwise
             only the listed patterns are kept.
+        attributes: Attributes to extract per entity type, e.g. ``{"Person": ["title", "salary"]}``.
+            Each extracted attribute becomes a separate ``(entity)-[:HAS_ATTRIBUTE {key}]->(:AttributeValue)``
+            relationship rather than a node property — so an attribute that can be sensitive (salary, email)
+            carries its own access scope on the edge and is filtered independently of the (shared) entity node.
     """
 
     entity_types: list[str]
     relationship_types: list[str]
     triples: list[Triple] = Field(default_factory=list)
+    attributes: dict[str, list[str]] = Field(default_factory=dict)
+
 
 DEFAULT_EXTRACTION_PROMPT = """You are a knowledge-graph extraction engine. Read the text below and extract \
 the entities and the relationships between them.
@@ -141,20 +152,30 @@ class EntityExtractor(Node):
         self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        entities: list[dict] = []
-        raw_relationships: list[dict] = []
+        nodes: list[dict] = []
+        relationships: list[dict] = []
+        entities_debug: list[dict] = []
+        raw_relationships_debug: list[dict] = []
 
+        # Process each document independently and stamp its metadata onto every element it produces —
+        # the graph analog of the splitter copying a parent document's metadata onto each chunk. No
+        # deduplication or cross-document merging happens here: the same entity surfaced by two documents
+        # is emitted twice (each with its own document's metadata) and collapsed later by Neo4j's MERGE
+        # in write_graph.
         for document in input_data.documents:
             check_cancellation(config)
             extracted = self._extract_from_text(document.content, config, **kwargs)
-            entities.extend(extracted.get("entities", []) or [])
-            raw_relationships.extend(extracted.get("relationships", []) or [])
+            entities = extracted.get("entities", []) or []
+            doc_relationships = extracted.get("relationships", []) or []
+            entities_debug.extend(entities)
+            raw_relationships_debug.extend(doc_relationships)
 
-        entities = self._dedupe_entities(entities)
-        nodes, relationships = self._to_write_graph_payload(entities, raw_relationships)
-
-        if self.ontology is not None:
-            nodes, relationships = self._enforce_ontology(nodes, relationships)
+            doc_nodes, doc_rels = self._to_write_graph_payload(entities, doc_relationships)
+            if self.ontology is not None:
+                doc_nodes, doc_rels = self._enforce_ontology(doc_nodes, doc_rels)
+            self._apply_document_metadata(doc_rels, document)
+            nodes.extend(doc_nodes)
+            relationships.extend(doc_rels)
 
         logger.debug(
             f"Node {self.name} - {self.id}: extracted {len(nodes)} nodes and {len(relationships)} relationships"
@@ -163,9 +184,68 @@ class EntityExtractor(Node):
         return {
             "nodes": nodes,
             "relationships": relationships,
-            "entities": entities,
-            "raw_relationships": raw_relationships,
+            "entities": entities_debug,
+            "raw_relationships": raw_relationships_debug,
         }
+
+    def _apply_document_metadata(self, relationships: list[dict], document: Document) -> None:
+        """Copy the document's metadata + provenance onto every RELATIONSHIP it produced.
+
+        Entity nodes (and ``AttributeValue`` value-nodes) deliberately carry NO access metadata — they are
+        pure identity. All ACL/provenance lives on the edges, so a node is visible exactly when the user can
+        reach it through a visible edge. This keeps entity merge a no-op on the node (just attach edges) and
+        removes the whole class of node-ACL union/leak bugs.
+
+        Generic and ACL-agnostic — whatever keys are in ``document.metadata`` (``allowed_principals``,
+        ``acl_workspace_id``, timestamps, custom fields) ride along, exactly like the splitter copies a
+        document's metadata onto each chunk. A provenance pointer ``source_doc_ids=[document.id]`` is added
+        too. Each edge's own keys (e.g. the attribute ``key``) take precedence over metadata keys.
+        """
+        doc_props = self._flatten_metadata(dict(document.metadata or {}))
+        if document.id is not None:
+            doc_props["source_doc_ids"] = [str(document.id)]
+        if not doc_props:
+            return
+        for relationship in relationships:
+            relationship["properties"] = {**doc_props, **relationship["properties"]}
+
+    @classmethod
+    def _flatten_metadata(cls, metadata: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+        """Flatten a metadata dict into Neo4j-storable top-level properties.
+
+        Neo4j properties are primitives or arrays of primitives (no nested maps), so nested dicts are
+        flattened with ``_``-joined, sanitized keys and any non-primitive value is JSON-encoded to a string.
+        """
+        out: dict[str, Any] = {}
+        for raw_key, value in metadata.items():
+            key = cls._sanitize_property_key(f"{prefix}{raw_key}")
+            if isinstance(value, dict):
+                out.update(cls._flatten_metadata(value, prefix=f"{key}_"))
+            elif cls._is_neo4j_value(value):
+                out[key] = value
+            else:
+                out[key] = json.dumps(value, default=str)
+        return out
+
+    @staticmethod
+    def _is_neo4j_value(value: Any) -> bool:
+        """True if value is a Neo4j-storable scalar or a (homogeneous) list of scalars."""
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return True
+        if isinstance(value, (list, tuple)):
+            return all(isinstance(v, (str, int, float, bool)) or v is None for v in value)
+        return False
+
+    @staticmethod
+    def _sanitize_property_key(key: str) -> str:
+        """Coerce an arbitrary metadata key into a valid Neo4j property identifier (case preserved)."""
+        cleaned = re.sub(r"[^A-Za-z0-9_]+", "_", str(key).strip())
+        cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+        if not cleaned:
+            return "field"
+        if cleaned[0].isdigit():
+            cleaned = f"_{cleaned}"
+        return cleaned
 
     def _extract_from_text(self, text: str, config: RunnableConfig, **kwargs) -> dict[str, Any]:
         """Run the LLM on a single document's text and parse its JSON output."""
@@ -205,6 +285,10 @@ class EntityExtractor(Node):
                 lines.append("- Only these relationship patterns are legal (source -[REL]-> target):")
                 for t in o.triples:
                     lines.append(f"    ({t.source}) -[{t.relationship}]-> ({t.target})")
+            if o.attributes:
+                lines.append('- For each entity, also extract these attributes when stated, inside its "properties":')
+                for etype, attrs in o.attributes.items():
+                    lines.append(f"    {etype}: {', '.join(attrs)}")
             return "\n".join(lines)
 
         lines = []
@@ -214,9 +298,7 @@ class EntityExtractor(Node):
             lines.append(f"- Only extract relationships of these types: {', '.join(self.relationship_types)}.")
         return "\n".join(lines)
 
-    def _enforce_ontology(
-        self, nodes: list[dict], relationships: list[dict]
-    ) -> tuple[list[dict], list[dict]]:
+    def _enforce_ontology(self, nodes: list[dict], relationships: list[dict]) -> tuple[list[dict], list[dict]]:
         """Drop any node/relationship that is not allowed by ``self.ontology``.
 
         Membership is checked against the same normalized (UPPER_SNAKE) identifiers that
@@ -234,24 +316,29 @@ class EntityExtractor(Node):
             for t in o.triples
         }
 
-        # 1) Keep only nodes whose label is in the ontology.
+        # 1) Keep only nodes whose label is in the ontology. AttributeValue nodes are system-generated
+        #    holders for declared attributes — always kept.
         kept_nodes: list[dict] = []
         kept_ids: set[str] = set()
         for node in nodes:
             label = node["labels"][0]
-            if label in allowed_entities:
+            if label in allowed_entities or label == ATTRIBUTE_VALUE_LABEL:
                 kept_nodes.append(node)
                 kept_ids.add(node["properties"]["id"])
             else:
                 logger.debug(f"EntityExtractor: dropping off-ontology entity label={label!r}")
 
         # 2) Keep only relationships with a legal type, surviving endpoints, and (when triples
-        #    are defined) a legal (source_label, type, target_label) pattern.
+        #    are defined) a legal (source_label, type, target_label) pattern. HAS_ATTRIBUTE edges are
+        #    system-generated (declared attributes) — kept as long as their endpoints survive.
         kept_rels: list[dict] = []
         for rel in relationships:
             rel_type, start_label, end_label = rel["type"], rel["start_label"], rel["end_label"]
             if rel["start_identity"] not in kept_ids or rel["end_identity"] not in kept_ids:
                 reason = "endpoint dropped"
+            elif rel_type == HAS_ATTRIBUTE_TYPE:
+                kept_rels.append(rel)
+                continue
             elif rel_type not in allowed_rels:
                 reason = "type not in ontology"
             elif allowed_triples and (start_label, rel_type, end_label) not in allowed_triples:
@@ -301,38 +388,64 @@ class EntityExtractor(Node):
             return {"entities": [], "relationships": []}
         return parsed
 
-    @staticmethod
-    def _dedupe_entities(entities: list[dict]) -> list[dict]:
-        """Deduplicate entities by id, keeping the first occurrence."""
-        seen: set[str] = set()
-        deduped: list[dict] = []
-        for entity in entities:
-            entity_id = entity.get("id")
-            if entity_id is None or str(entity_id) in seen:
-                continue
-            seen.add(str(entity_id))
-            deduped.append(entity)
-        return deduped
+    def _attributes_for_type(self, entity_type: str) -> list[str]:
+        """Attribute names declared for ``entity_type`` in the ontology (empty if none / no ontology)."""
+        if self.ontology is None:
+            return []
+        return self.ontology.attributes.get(entity_type, [])
 
-    @classmethod
-    def _to_write_graph_payload(cls, entities: list[dict], relationships: list[dict]) -> tuple[list[dict], list[dict]]:
-        """Convert LLM-friendly entities/relationships into the write_graph node/relationship shape."""
+    def _to_write_graph_payload(self, entities: list[dict], relationships: list[dict]) -> tuple[list[dict], list[dict]]:
+        """Convert LLM-friendly entities/relationships into the write_graph node/relationship shape.
+
+        Ontology-declared attributes (``Ontology.attributes``) are NOT written as node properties; each is
+        promoted to a separate ``(entity)-[:HAS_ATTRIBUTE {key}]->(:AttributeValue {value})`` relationship so
+        its visibility can be scoped independently of the (potentially shared) entity node.
+        """
         id_to_label: dict[str, str] = {}
         nodes: list[dict] = []
+        attribute_relationships: list[dict] = []
         for entity in entities:
             entity_id = entity.get("id")
             entity_type = entity.get("type")
             if entity_id is None or not entity_type:
                 continue
-            label = cls._sanitize_identifier(str(entity_type))
+            label = self._sanitize_identifier(str(entity_type))
             entity_id = str(entity_id)
             id_to_label[entity_id] = label
 
             properties = dict(entity.get("properties") or {})
+            # Pull ontology-declared attributes out of the node's properties — they become edges below.
+            declared = set(self._attributes_for_type(str(entity_type)))
+            attribute_values = {key: properties.pop(key) for key in list(properties) if key in declared}
+
             properties["id"] = entity_id
             if entity.get("name") is not None:
                 properties["name"] = entity["name"]
             nodes.append({"labels": [label], "identity_key": "id", "properties": properties})
+
+            for attr_key, attr_value in attribute_values.items():
+                if attr_value is None:
+                    continue
+                value_id = f"{entity_id}::{attr_key}"
+                nodes.append(
+                    {
+                        "labels": [ATTRIBUTE_VALUE_LABEL],
+                        "identity_key": "id",
+                        "properties": {"id": value_id, "value": attr_value},
+                    }
+                )
+                attribute_relationships.append(
+                    {
+                        "type": HAS_ATTRIBUTE_TYPE,
+                        "start_label": label,
+                        "end_label": ATTRIBUTE_VALUE_LABEL,
+                        "start_identity_key": "id",
+                        "end_identity_key": "id",
+                        "start_identity": entity_id,
+                        "end_identity": value_id,
+                        "properties": {"key": attr_key},
+                    }
+                )
 
         graph_relationships: list[dict] = []
         for rel in relationships:
@@ -348,7 +461,7 @@ class EntityExtractor(Node):
                 continue
             graph_relationships.append(
                 {
-                    "type": cls._sanitize_identifier(str(rel_type)),
+                    "type": self._sanitize_identifier(str(rel_type)),
                     "start_label": id_to_label[source_id],
                     "end_label": id_to_label[target_id],
                     "start_identity_key": "id",
@@ -359,7 +472,7 @@ class EntityExtractor(Node):
                 }
             )
 
-        return nodes, graph_relationships
+        return nodes, graph_relationships + attribute_relationships
 
     @staticmethod
     def _sanitize_identifier(value: str) -> str:
