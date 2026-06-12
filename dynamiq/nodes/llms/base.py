@@ -165,15 +165,8 @@ class LLMCheckpointState(BaseCheckpointState):
     is_fallback_run: bool = Field(default=False, description="Whether LLM is in fallback mode")
 
 
-# Sampling parameters that some newer models reject with an HTTP 400.
 SAMPLING_PARAMS: tuple[str, ...] = ("temperature", "top_p", "top_k")
 
-# Substrings of model names that reject the sampling parameters above with an HTTP 400.
-# These models are newer than LiteLLM's static capability map, so the ``drop_params=True``
-# we already pass to LiteLLM does not strip the params for them and the request fails. We
-# strip them ourselves. Matched by substring so the check is independent of the provider
-# prefix (``anthropic/``, ``bedrock/...anthropic.``, OpenRouter, etc.).
-# Ref: https://platform.claude.com/docs/en/about-claude/models/migration-guide
 SAMPLING_UNSUPPORTED_MODEL_MARKERS: tuple[str, ...] = (
     "claude-opus-4-7",
     "claude-opus-4-8",
@@ -182,10 +175,6 @@ SAMPLING_UNSUPPORTED_MODEL_MARKERS: tuple[str, ...] = (
     "claude-mythos-preview",
 )
 
-# Error-message fragments that signal a provider rejected a param because it is *unsupported*
-# (as opposed to out-of-range). Used by the reactive backstop to catch models not yet listed
-# in SAMPLING_UNSUPPORTED_MODEL_MARKERS, while leaving genuine validation errors
-# (e.g. "temperature: must be less than or equal to 1.0") to surface normally.
 _SAMPLING_UNSUPPORTED_INDICATORS: tuple[str, ...] = (
     "not permitted",
     "not supported",
@@ -680,10 +669,7 @@ class BaseLLM(ConnectionNode):
         return response_format, tools
 
     def _model_rejects_sampling_params(self) -> bool:
-        """Whether ``self.model`` is known to reject sampling params with a 400.
-
-        See :data:`SAMPLING_UNSUPPORTED_MODEL_MARKERS`.
-        """
+        """Whether self.model is known to reject sampling params with a 400."""
         model_lower = self.model.lower()
         return any(marker in model_lower for marker in SAMPLING_UNSUPPORTED_MODEL_MARKERS)
 
@@ -694,8 +680,7 @@ class BaseLLM(ConnectionNode):
         This method can be overridden by subclasses to customize the parameters
         passed to the completion method. By default, it enables usage information
         in streaming mode if streaming is enabled and include_usage is set, and
-        strips sampling params for models that reject them (see
-        :data:`SAMPLING_UNSUPPORTED_MODEL_MARKERS`).
+        strips sampling params for models that reject them.
         Args:
             params (dict[str, Any]): The parameters to be updated.
 
@@ -878,8 +863,7 @@ class BaseLLM(ConnectionNode):
         re-raise the original error.
 
         Default implementation: backstop for models that reject sampling params with a 400
-        but are not yet listed in :data:`SAMPLING_UNSUPPORTED_MODEL_MARKERS` (the deterministic
-        path in :meth:`update_completion_params` handles the listed ones up front). Strips the
+        but are not yet listed in SAMPLING_UNSUPPORTED_MODEL_MARKERS. Strips the
         sampling params and persists the removal so later calls in this run skip the failing
         first attempt. Only fires when the error both names a present sampling param and looks
         like an unsupported-param error, so genuine validation errors (e.g. out-of-range

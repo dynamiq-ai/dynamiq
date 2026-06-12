@@ -1,14 +1,3 @@
-"""Tests for stripping sampling params on models that reject them.
-
-Regression for: Claude Opus 4.7/4.8 (and Fable/Mythos 5) return an HTTP 400 when sent
-``temperature``/``top_p``/``top_k``. These models are newer than LiteLLM's capability map,
-so the ``drop_params=True`` we pass does not strip the params for them. ``BaseLLM`` strips
-them up front for known models (``SAMPLING_UNSUPPORTED_MODEL_MARKERS``) and, as a backstop,
-reactively retries without them when an unlisted model rejects them at runtime.
-
-The strip lives in the base class, so it applies across every provider node (Anthropic,
-Bedrock, CustomLLM) regardless of the provider prefix on the model name.
-"""
 import pytest
 
 from dynamiq.connections import AWS as AWSConnection
