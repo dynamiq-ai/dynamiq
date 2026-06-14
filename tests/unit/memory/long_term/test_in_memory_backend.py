@@ -88,6 +88,18 @@ def test_search_empty_store_returns_empty(backend, fake_embedder):
     assert hits == []
 
 
+def test_search_with_zero_limit_returns_empty(backend, fake_embedder):
+    """`limit=0` must return [] without hitting argpartition (which would be
+    called with `kth=-1` and only happen to work by accident)."""
+    for i in range(3):
+        backend.insert(_fact(f"f{i}", "u1", f"text{i}"), fake_embedder.embed(f"text{i}"))
+    hits = backend.search(
+        query_embedding=fake_embedder.embed("text0"),
+        scope={"user_id": "u1"}, limit=0,
+    )
+    assert hits == []
+
+
 # --- delete / list_by_scope / delete_scope ---
 
 def test_delete_removes_fact(backend, fake_embedder):

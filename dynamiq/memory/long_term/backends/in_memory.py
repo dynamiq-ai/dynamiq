@@ -72,6 +72,11 @@ class InMemoryLongTermMemoryBackend(LongTermMemoryBackend):
         scores = (matrix @ query) / (row_norms * query_norm)
 
         k = min(limit, len(matched_facts))
+        # argpartition would be passed `kth=-1` when k==0, which happens to
+        # return an empty slice by accident; make the zero-limit semantics
+        # explicit instead of relying on that numpy quirk.
+        if k <= 0:
+            return []
         # argpartition gives the top-k unsorted; sort just that slice.
         top_idx = np.argpartition(-scores, k - 1)[:k]
         top_idx = top_idx[np.argsort(-scores[top_idx])]
