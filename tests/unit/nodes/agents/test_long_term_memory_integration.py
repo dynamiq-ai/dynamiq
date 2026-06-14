@@ -347,3 +347,30 @@ def test_concurrent_no_user_id_call_does_not_see_other_users_ltm_tools(llm, ltm)
 
     assert snapshots.get("u1") == {"u1"}
     assert snapshots.get("none", set()) == set()
+
+
+def test_sub_agent_without_ltm_does_not_inherit_parent_overlay(llm, ltm):
+    """A sub-agent with no LTM of its own, executed inside a parent agent's
+    LTM-active context (e.g. a child thread via ContextAwareThreadPoolExecutor),
+    must NOT inherit the parent's user-scoped tools — even though ContextVars
+    propagate to child contexts by default. The fix: every execute() sets the
+    overlay unconditionally, even to an empty list."""
+    parent = _make_agent(llm, ltm=ltm)
+    sub_agent = _make_agent(llm)  # no LTM
+    sub_captured: list[set[str]] = []
+
+    def parent_run(*args, **kwargs):
+        # While the parent's overlay is active, run the sub-agent in the same
+        # context (mirrors what happens when a sub-agent is invoked from a
+        # parent's tool-loop or via ContextAwareThreadPoolExecutor).
+        with _patch_run_agent_capture_runtime_tools(sub_agent, sub_captured):
+            sub_agent.run_sync(input_data={"input": "hi", "user_id": "u1"})
+        return "ok"
+
+    with patch.object(parent, "_run_agent", side_effect=parent_run):
+        parent.run_sync(input_data={"input": "hi", "user_id": "u1"})
+
+    assert sub_captured, "sub-agent _run_agent never fired"
+    assert {"remember_fact", "recall_facts"}.isdisjoint(sub_captured[0]), (
+        "sub-agent saw parent's LTM tools via inherited ContextVar"
+    )

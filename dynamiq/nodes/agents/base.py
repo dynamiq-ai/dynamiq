@@ -656,7 +656,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         # other's user-scoped tools and don't need a lock. The set() is the last
         # statement before `try:` so nothing can raise between it and the
         # matching reset() in finally.
-        ltm_token = _run_extra_tools.set(ltm_tools) if ltm_tools else None
+        # Always set, even to an empty list. A sub-agent with no LTM of its own
+        # would otherwise inherit the parent's ContextVar value when it runs in
+        # a child thread spawned via `ContextAwareThreadPoolExecutor`, leaking
+        # the outer user's remember/recall tools into the sub-agent's prompt.
+        ltm_token = _run_extra_tools.set(ltm_tools)
         try:
             if use_memory:
                 history_messages = self._retrieve_memory(input_data)
@@ -776,8 +780,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
             return execution_result
         finally:
-            if ltm_token is not None:
-                _run_extra_tools.reset(ltm_token)
+            _run_extra_tools.reset(ltm_token)
 
     def retrieve_conversation_history(
         self,
