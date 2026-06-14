@@ -155,6 +155,50 @@ def test_fc_object_answer_streams_when_response_format_is_object():
     assert streamed_content == '{"foo": "bar"}'
 
 
+def test_xml_stream_stops_after_first_output_block():
+    """A second fabricated <output> block (reasoning models run past the stripped </output> stop)
+    must not stream: the live events and accumulated_content cover only the first block."""
+    agent = MagicMock()
+    agent.streaming.enabled = True
+    agent.streaming.mode = StreamingMode.ALL
+    agent.streaming.min_chunk_chars = 0
+    agent.streaming.stream_tool_input = None
+    agent.inference_mode.name = InferenceMode.XML.value
+    agent.name = "test-agent"
+    agent._streaming_tool_run_id = None
+    agent._streaming_tool_run_ids = []
+    agent.tool_by_names = {}
+    agent.sanitize_tool_name = lambda name: name
+    agent.llm = MagicMock()
+    agent.llm.id = "llm-1"
+    cb = AgentStreamingParserCallback(agent=agent, config=None, loop_num=1)
+    serialized = {"group": "llms", "id": "llm-1"}
+
+    block1 = (
+        "<output>\n<thought>FIRST_BLOCK thought</thought>\n"
+        "<action>StringLengthTool</action>\n"
+        '<action_input>{"text":"abc"}</action_input>\n</output>'
+    )
+    block2 = "\n<output>\n<thought>SECOND_BLOCK</thought>\n<answer>fabricated</answer>\n</output>"
+    full = block1 + block2
+
+    for start in range(0, len(full), 7):  # small chunks exercise the cross-chunk latch
+        cb.on_node_execute_stream(serialized, {"content": full[start : start + 7]})
+
+    assert cb._xml_turn_complete is True
+    assert cb.accumulated_content == block1
+    streamed = "".join(
+        (
+            str(c.kwargs.get("content", "").get("thought", ""))
+            if isinstance(c.kwargs.get("content"), dict)
+            else str(c.kwargs.get("content", ""))
+        )
+        for c in cb.agent.stream_content.call_args_list
+    )
+    assert "SECOND_BLOCK" not in streamed
+    assert "fabricated" not in streamed
+
+
 def test_parallel_tool_calls_get_unique_ids():
     """Each parallel tool call must receive a distinct tool_run_id during streaming."""
     agent = MagicMock()

@@ -23,7 +23,13 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
 )
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager, ReactPromptConfig
-from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser, extract_message_text
+from dynamiq.nodes.agents.utils import (
+    SummarizationConfig,
+    ToolCacheEntry,
+    XMLParser,
+    extract_message_text,
+    first_xml_output_block,
+)
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
@@ -584,23 +590,52 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         return self
 
+    def _acknowledge_pending_fc_tool_calls(self, content: str) -> None:
+        """Answer and clear any pending FC tool_call ids with a neutral stub.
+
+        Keeps OpenAI's function-calling protocol valid when tool calls are
+        abandoned without execution (e.g. the model returned ``provide_final_answer``
+        alongside other tool calls), so no unpaired ``tool_call`` is left to 400 a
+        subsequent request and recovery for unrelated errors is not misdirected to
+        these ids.
+        """
+        pending_ids = getattr(self, "_pending_fc_tool_call_ids", None) or []
+        for tc_id in pending_ids:
+            self._prompt.messages.append(
+                Message(role=MessageRole.TOOL, content=content, tool_call_id=tc_id, static=True)
+            )
+        self._pending_fc_tool_call_ids = []
+
     def _append_recovery_instruction(
         self,
         *,
         error_label: str,
         error_detail: str,
-        llm_generated_output: str | None,
         extra_guidance: str | None = None,
     ) -> None:
-        """Append a correction instruction to prompt for recoverable agent errors."""
+        """Append a correction instruction to prompt for recoverable agent errors.
 
-        error_context = llm_generated_output if llm_generated_output else "No response generated"
-
-        self._prompt.messages.append(
-            Message(role=MessageRole.ASSISTANT, content=f"Previous response:\n{error_context}", static=True)
-        )
+        In FUNCTION_CALLING mode with pending tool_call ids the correction is
+        delivered as ``tool`` replies, phrased in an error-result voice — what the
+        failed call "returned" — which suits the tool role better than a directive.
+        Otherwise it is appended as a ``user``-role correction instruction.
+        """
 
         guidance_suffix = f" {extra_guidance.strip()}" if extra_guidance else ""
+
+        pending_ids = getattr(self, "_pending_fc_tool_call_ids", None) or []
+        if self.inference_mode == InferenceMode.FUNCTION_CALLING and pending_ids:
+            tool_error_message = (
+                "Tool call failed: the previous call could not be processed "
+                f"('{error_label}: {error_detail}'). Retry with a valid function call whose "
+                "arguments are well-formed JSON." + guidance_suffix
+            )
+            for tc_id in pending_ids:
+                self._prompt.messages.append(
+                    Message(role=MessageRole.TOOL, content=tool_error_message, tool_call_id=tc_id, static=True)
+                )
+            self._pending_fc_tool_call_ids = []
+            return
 
         correction_message = (
             "Correction Instruction: The previous response could not be parsed due to the "
@@ -608,7 +643,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             "strictly following the required format, ensuring all tags or labeled sections are "
             "present and correctly structured, and that any JSON content is valid." + guidance_suffix
         )
-
         self._prompt.messages.append(
             Message(role=MessageRole.USER, content=correction_message, static=True)
         )
@@ -866,7 +900,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self._append_recovery_instruction(
                 error_label="EmptyResponse",
                 error_detail="The model returned an empty reply while using the Thought/Action format.",
-                llm_generated_output=llm_generated_output,
                 extra_guidance=(
                     "Re-evaluate the latest observation and respond with 'Thought:' followed by either "
                     "an 'Action:' plus JSON 'Action Input:' or a final 'Answer:' section."
@@ -924,6 +957,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         action = first_call.function.name.strip()
 
         if action == "provide_final_answer":
+            self._acknowledge_pending_fc_tool_calls("Skipped — superseded by a final-answer call.")
             final_args = first_call.function.parse_as_final_answer()
             thought = final_args.thought
             self._requested_output_files = self._parse_output_files_csv(final_args.output_files)
@@ -1038,6 +1072,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self.log_reasoning(thought, action, action_input, loop_num)
         return thought, action, action_input
 
+    @staticmethod
+    def _first_output_block(text: str) -> str:
+        """Return only the first ``<output>...</output>`` block; see ``first_xml_output_block``.
+
+        Thin wrapper kept so the parse path and the streaming callback share one boundary scan.
+        """
+        return first_xml_output_block(text)
+
     def _handle_xml_mode(
         self, llm_generated_output: str, loop_num: int, config: RunnableConfig, **kwargs
     ) -> tuple[str | None, str | None, dict | list | None]:
@@ -1049,7 +1091,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self._append_recovery_instruction(
                 error_label="EmptyResponse",
                 error_detail="The model returned an empty reply while XML format was required.",
-                llm_generated_output=llm_generated_output,
                 extra_guidance=(
                     "Respond with <thought>...</thought> and "
                     "either <action>/<action_input> or <answer> tags, "
@@ -1067,9 +1108,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             thought = parsed_data.get("thought")
             final_answer = parsed_data.get("answer")
 
-            self._requested_output_files = self._parse_output_files_csv(
-                parsed_data.get("output_files") or ""
-            )
+            self._requested_output_files = self._parse_output_files_csv(parsed_data.get("output_files") or "")
 
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
@@ -1701,6 +1740,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
             llm_generated_output = streaming_callback.accumulated_content
         else:
             llm_generated_output = llm_result.output.get("content", "")
+        if self.inference_mode == InferenceMode.XML and llm_generated_output:
+            # Drop fabricated trailing <output> blocks so history and parsing see only the real step.
+            first_block = self._first_output_block(llm_generated_output)
+            if first_block != llm_generated_output:
+                logger.warning(
+                    f"Agent {self.name} - {self.id}: model emitted more than one <output> block; "
+                    "keeping only the first block and dropping the rest."
+                )
+                llm_generated_output = first_block
         self._last_llm_output = llm_generated_output
 
         llm_reasoning = (
@@ -1844,7 +1892,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self._append_recovery_instruction(
                     error_label=type(e).__name__,
                     error_detail=str(e),
-                    llm_generated_output=self._last_llm_output,
                     extra_guidance=(
                         "The response format is correct, but some files could not be found. "
                         "Please create the missing files or correct the file paths, "
@@ -1857,7 +1904,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self._append_recovery_instruction(
                     error_label=type(e).__name__,
                     error_detail=str(e),
-                    llm_generated_output=self._last_llm_output,
                     extra_guidance=(
                         "Your final answer must be valid JSON that conforms exactly to the declared "
                         "response_format schema. Return only the JSON document — no prose, Markdown, "
@@ -1891,7 +1937,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self._append_recovery_instruction(
                     error_label=type(e).__name__,
                     error_detail=str(e),
-                    llm_generated_output=self._last_llm_output,
                     extra_guidance=extra_guidance,
                 )
                 continue

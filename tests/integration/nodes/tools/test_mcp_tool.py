@@ -1,11 +1,12 @@
 import contextlib
+import os
 import uuid
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from mcp.types import CallToolResult, ImageContent, TextContent
-from pydantic import Field, create_model
+from pydantic import Field, ValidationError, create_model
 
 from dynamiq import connections
 from dynamiq.nodes.agents import Agent
@@ -237,6 +238,220 @@ def test_extract_text_from_mcp_content():
     assert extract_text_from_mcp_content([]) == ""
 
 
+def test_get_input_schema_creates_model_from_json_schema():
+    model_cls = MCPTool.get_input_schema(
+        {
+            "title": "SearchSchema",
+            "type": "object",
+            "$defs": {
+                "Options": {
+                    "type": "object",
+                    "properties": {"case_sensitive": {"type": "boolean"}},
+                }
+            },
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "default": 10},
+                "mode": {"type": "string", "enum": ["fast", "full"]},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "ids": {"type": "array", "items": {"type": "integer"}},
+                "filters": {
+                    "type": "object",
+                    "properties": {"active": {"type": "boolean"}},
+                },
+                "options": {"$ref": "#/$defs/Options"},
+            },
+            "required": ["query"],
+        }
+    )
+
+    assert model_cls.__name__ == "MCPToolSchema"
+    input_data = model_cls(
+        query="customers",
+        mode="fast",
+        tags=["pii"],
+        ids=[1, 2],
+        filters={"active": True},
+        options={"case_sensitive": False},
+    )
+
+    assert input_data.query == "customers"
+    assert input_data.limit == 10
+    assert input_data.ids == [1, 2]
+    assert input_data.filters.active is True
+    assert input_data.options.case_sensitive is False
+    assert set(model_cls.model_json_schema()["required"]) == {"query"}
+
+    with pytest.raises(ValidationError):
+        model_cls(query="customers", mode="slow")
+
+
+def test_get_input_schema_handles_reserved_and_invalid_field_names():
+    """Property names that collide with BaseModel attrs or are not valid identifiers must round-trip."""
+    model_cls = MCPTool.get_input_schema(
+        {
+            "type": "object",
+            "properties": {
+                "model_config": {"type": "string"},
+                "schema": {"type": "integer"},
+                "weird-name": {"type": "boolean"},
+                "normal": {"type": "string"},
+            },
+            "required": ["model_config"],
+        }
+    )
+
+    instance = model_cls.model_validate({"model_config": "cfg", "schema": 5, "weird-name": True, "normal": "ok"})
+
+    assert instance.model_dump(by_alias=True) == {
+        "model_config": "cfg",
+        "schema": 5,
+        "weird-name": True,
+        "normal": "ok",
+    }
+
+
+def test_get_input_schema_builds_recursive_model_with_nested_validation():
+    """A self-referential $defs schema must build a true recursive model that validates every level."""
+    model_cls = MCPTool.get_input_schema(
+        {
+            "type": "object",
+            "title": "tree",
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "string"},
+                        "children": {"type": "array", "items": {"$ref": "#/$defs/Node"}},
+                    },
+                }
+            },
+            "properties": {"root": {"$ref": "#/$defs/Node"}},
+        }
+    )
+
+    instance = model_cls.model_validate(
+        {"root": {"value": "a", "children": [{"value": "b", "children": [{"value": "c"}]}]}}
+    )
+    # Nested levels are validated as the recursive model, not loose dicts.
+    assert instance.root.value == "a"
+    assert instance.root.children[0].value == "b"
+    assert instance.root.children[0].children[0].value == "c"
+    with pytest.raises(ValidationError):
+        model_cls.model_validate({"root": {"value": "a", "children": [{"value": {"not": "a string"}}]}})
+
+
+def test_get_input_schema_recursive_all_of_preserves_base():
+    """An allOf that extends the definition currently being built must keep both base and extension."""
+    model_cls = MCPTool.get_input_schema(
+        {
+            "type": "object",
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "string"},
+                        "next": {
+                            "allOf": [
+                                {"$ref": "#/$defs/Node"},
+                                {"type": "object", "properties": {"tag": {"type": "string"}}},
+                            ]
+                        },
+                    },
+                }
+            },
+            "properties": {"root": {"$ref": "#/$defs/Node"}},
+        }
+    )
+
+    instance = model_cls.model_validate({"root": {"value": "a", "next": {"value": "b", "tag": "t"}}})
+    assert instance.root.next.value == "b"  # base field preserved
+    assert instance.root.next.tag == "t"  # extension field present
+
+
+def test_get_input_schema_enforces_all_of():
+    """allOf must contribute its constraints instead of degrading the field to Any."""
+    model_cls = MCPTool.get_input_schema(
+        {
+            "type": "object",
+            "properties": {"count": {"allOf": [{"type": "integer"}]}},
+            "required": ["count"],
+        }
+    )
+
+    assert model_cls(count=5).count == 5
+    with pytest.raises(ValidationError):
+        model_cls(count="not-an-int")
+
+
+def test_get_input_schema_handles_empty_enum():
+    """An empty enum must not produce an invalid Literal[()] annotation."""
+    model_cls = MCPTool.get_input_schema({"type": "object", "properties": {"x": {"type": "string", "enum": []}}})
+
+    assert model_cls.model_validate({"x": "anything"}).x == "anything"
+
+
+def test_get_input_schema_handles_unresolvable_ref():
+    """An unresolvable $ref must degrade to a permissive type instead of crashing."""
+    model_cls = MCPTool.get_input_schema({"type": "object", "properties": {"x": {"$ref": "#/$defs/Missing"}}})
+
+    assert model_cls.model_validate({"x": {"anything": 1}}).x == {"anything": 1}
+
+
+def test_get_input_schema_handles_root_ref_composition():
+    """A root defined purely as a $ref to $defs must keep the referenced properties."""
+    model_cls = MCPTool.get_input_schema(
+        {
+            "$defs": {"Input": {"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}},
+            "$ref": "#/$defs/Input",
+        }
+    )
+
+    assert list(model_cls.model_fields) == ["q"]
+    assert model_cls.model_validate({"q": "x"}).q == "x"
+    with pytest.raises(ValidationError):
+        model_cls.model_validate({})
+
+
+def test_get_input_schema_handles_root_all_of_composition():
+    """A root defined purely as allOf must merge the composed properties."""
+    model_cls = MCPTool.get_input_schema(
+        {
+            "$defs": {"Base": {"type": "object", "properties": {"a": {"type": "string"}}}},
+            "allOf": [
+                {"$ref": "#/$defs/Base"},
+                {"type": "object", "properties": {"b": {"type": "integer"}}},
+            ],
+        }
+    )
+
+    instance = model_cls.model_validate({"a": "x", "b": 5})
+    assert instance.a == "x"
+    assert instance.b == 5
+
+
+def test_get_input_schema_does_not_depend_on_cwd(tmp_path):
+    """Schema building must not require a valid working directory.
+
+    Regression for an MCP init failure where the old temp-file codegen path called os.getcwd()
+    while the process working directory had been removed, raising FileNotFoundError.
+    """
+    original_cwd = os.getcwd()
+    doomed = tmp_path / "doomed"
+    doomed.mkdir()
+    os.chdir(doomed)
+    doomed.rmdir()  # the process cwd now points at a deleted directory
+    try:
+        with pytest.raises(FileNotFoundError):
+            os.getcwd()
+        model_cls = MCPTool.get_input_schema(
+            {"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}
+        )
+        assert model_cls.model_validate({"q": "x"}).q == "x"
+    finally:
+        os.chdir(original_cwd)
+
+
 def _patch_session_with_result(result: CallToolResult):
     """Patch the connection + ClientSession so call_tool yields `result`."""
 
@@ -329,3 +544,81 @@ async def test_execute_async_raises_on_is_error(mcp_server_tool):
     with conn_patch, session_patch:
         with pytest.raises(ToolExecutionException, match="API rate limit exceeded"):
             await tool.execute_async(tool.input_schema(a=20, b=22))
+
+
+@pytest.mark.asyncio
+async def test_execute_async_unwraps_task_group_exception_group(mcp_server_tool):
+    """A TaskGroup ExceptionGroup must surface its real leaf error, not the opaque wrapper."""
+    tool = mcp_server_tool._mcp_tools["add"]
+
+    @contextlib.asynccontextmanager
+    async def failing_connect(self):
+        raise ExceptionGroup(
+            "unhandled errors in a TaskGroup",
+            [ConnectionRefusedError("[Errno 61] Connection refused")],
+        )
+        yield  # pragma: no cover - makes this an async generator
+
+    with patch.object(MCPSse, "connect", new=failing_connect):
+        with pytest.raises(ToolExecutionException) as exc_info:
+            await tool.execute_async(tool.input_schema(a=20, b=22))
+
+    message = str(exc_info.value)
+    assert "ConnectionRefusedError" in message
+    assert "Connection refused" in message
+    assert "unhandled errors in a TaskGroup" not in message
+
+
+@pytest.mark.asyncio
+async def test_initialize_tools_unwraps_nested_exception_group(sse_server_connection):
+    """initialize_tools should report leaf errors from nested TaskGroup ExceptionGroups."""
+    server = MCPServer(connection=sse_server_connection)
+
+    @contextlib.asynccontextmanager
+    async def failing_connect(self):
+        raise ExceptionGroup(
+            "unhandled errors in a TaskGroup",
+            [ExceptionGroup("inner", [TimeoutError("handshake timed out")])],
+        )
+        yield  # pragma: no cover - makes this an async generator
+
+    with patch.object(MCPSse, "connect", new=failing_connect):
+        with pytest.raises(ToolExecutionException) as exc_info:
+            await server.initialize_tools()
+
+    message = str(exc_info.value)
+    assert "TimeoutError" in message
+    assert "handshake timed out" in message
+    assert "unhandled errors in a TaskGroup" not in message
+
+
+def test_map_node_resolves_mcp_server_to_single_tool(sse_server_connection, mock_mcp_tools):
+    """A Map wrapping an MCPServer that selects one tool must run that tool, not the disabled server."""
+    from dynamiq.nodes.operators import Map
+    from dynamiq.runnables import RunnableStatus
+
+    mcp_server = MCPServer(connection=sse_server_connection, include_tools=["multiply"])
+    mcp_server._mcp_tools = mock_mcp_tools
+
+    map_node = Map(node=mcp_server)
+    mocked_result = {"content": {"result": 42}}
+    with patch.object(MCPTool, "execute_async", new_callable=AsyncMock, return_value=mocked_result):
+        result = map_node.run(input_data={"input": [{"a": 2, "b": 3}, {"a": 4, "b": 5}]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output == {"output": [mocked_result, mocked_result]}
+
+
+def test_map_node_errors_when_mcp_server_resolves_to_multiple_tools(sse_server_connection, mock_mcp_tools):
+    """Map runs one node per item, so an ambiguous MCPServer (>1 tool) must fail with a clear message."""
+    from dynamiq.nodes.operators import Map
+    from dynamiq.runnables import RunnableStatus
+
+    mcp_server = MCPServer(connection=sse_server_connection)  # no include_tools -> all 3 tools
+    mcp_server._mcp_tools = mock_mcp_tools
+
+    map_node = Map(node=mcp_server)
+    result = map_node.run(input_data={"input": [{"a": 2, "b": 3}]})
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "exactly one tool" in str(result.error).lower()

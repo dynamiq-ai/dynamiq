@@ -244,6 +244,72 @@ def test_agent_xml_mode_invalid_action_input_json_is_recoverable(xml_react_agent
     assert excinfo.value.recoverable is True
 
 
+def test_agent_xml_mode_action_and_answer_in_one_response_runs_tool(xml_react_agent):
+    """A response with an <action> AND a premature <answer> must take the action, not the answer.
+
+    Reasoning models (gpt-5 / o-series) run with `stop` stripped, so the XML turn-boundary
+    stop-sequence never fires and the model can emit a valid tool call followed by a second
+    <output> block that fabricates the answer before the tool ran. The agent must keep only the
+    first <output> block: execute the tool, and source thought/action/action_input from that same
+    block so the recorded reasoning matches what ran.
+    """
+    llm_generated_output = (
+        "<output>\n"
+        "    <thought>BLOCK1: I will use the tool, as required.</thought>\n"
+        "    <action>StringLengthTool</action>\n"
+        '    <action_input>{"text":"dsfdfgdsfgfsghfghsddfg"}</action_input>\n'
+        "</output>\n"
+        "<output>\n"
+        "    <thought>BLOCK2: I will answer directly with the result.</thought>\n"
+        "    <answer>The length of the string is 21.</answer>\n"
+        "</output>"
+    )
+
+    # Mirror the run loop: trailing fabricated <output> blocks are dropped before parsing.
+    llm_generated_output = Agent._first_output_block(llm_generated_output)
+    thought, action, action_input = xml_react_agent._handle_xml_mode(
+        llm_generated_output=llm_generated_output, loop_num=1, config=RunnableConfig()
+    )
+
+    assert action == "StringLengthTool", "the tool action must win over the same-turn fabricated answer"
+    assert action != "final_answer"
+    assert action_input == {"text": "dsfdfgdsfgfsghfghsddfg"}
+    # thought must come from the SAME block as the action, not the fabricated answer block.
+    assert thought is not None and thought.startswith("BLOCK1")
+    assert "BLOCK2" not in (thought or "")
+
+
+def test_agent_xml_mode_genuine_final_answer_still_returns_answer(xml_react_agent):
+    """A single <output> block with only a final answer must still be treated as the final answer."""
+    llm_generated_output = (
+        "<output><thought>I have the result.</thought>" "<answer>The length of the string is 22.</answer></output>"
+    )
+
+    thought, action, final_answer = xml_react_agent._handle_xml_mode(
+        llm_generated_output=llm_generated_output, loop_num=1, config=RunnableConfig()
+    )
+
+    assert action == "final_answer"
+    assert "22" in final_answer
+
+
+def test_first_output_block_handles_adjacent_output_tags_in_content():
+    """Adjacent </output><output> literally inside action_input content must not be a false boundary."""
+    text = (
+        "<output><action>code-executor</action>"
+        '<action_input>{"python": "print(\'<output></output>\')"}</action_input></output>'
+        "<output><answer>fabricated</answer></output>"
+    )
+    block = Agent._first_output_block(text)
+
+    # The whole first block (incl. the adjacent tags inside the JSON) is kept; the 2nd block is dropped.
+    assert block == (
+        "<output><action>code-executor</action>"
+        '<action_input>{"python": "print(\'<output></output>\')"}</action_input></output>'
+    )
+    assert "fabricated" not in block
+
+
 def test_xmlparser_parse_missing_required_tag():
     text = "<output><thought>OK</thought></output>"
     with pytest.raises(TagNotFoundError, match="Required tag <action> not found"):

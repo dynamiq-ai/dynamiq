@@ -189,7 +189,11 @@ def expected_length(test_input_string):
 
 @pytest.fixture(scope="module")
 def agent_role():
-    return "is to help user with various tasks, goal is to provide best of possible answers to user queries"
+    return (
+        "is to help user with various tasks. You MUST use the StringLengthTool to determine the length "
+        "of any string. Never compute, estimate, or state a string's length yourself, and never answer "
+        "directly before the tool has returned its result."
+    )
 
 
 @pytest.fixture(scope="module")
