@@ -15,10 +15,3 @@ class RememberOutcome(str, Enum):
     CREATED = "created"
     UPDATED = "updated"
     UNCHANGED = "unchanged"
-
-
-class MemoryToolKind(str, Enum):
-    """Kinds of long-term-memory tools exposed to an agent."""
-
-    REMEMBER = "remember"
-    RECALL = "recall"

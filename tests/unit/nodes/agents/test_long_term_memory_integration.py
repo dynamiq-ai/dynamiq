@@ -47,12 +47,9 @@ def llm():
     )
 
 
-def _ltm_config(*, tools=None, enabled=True) -> LongTermMemoryConfig:
+def _ltm_config(*, enabled=True) -> LongTermMemoryConfig:
     backend = InMemoryLongTermMemoryBackend(embedder=_FakeEmbedder())
-    kwargs = {"backend": backend, "enabled": enabled}
-    if tools is not None:
-        kwargs["tools"] = tools
-    return LongTermMemoryConfig(**kwargs)
+    return LongTermMemoryConfig(backend=backend, enabled=enabled)
 
 
 def _make_agent(llm, *, ltm=None) -> Agent:
@@ -69,28 +66,8 @@ def _input(user_id=None, session_id=None):
 # --- LongTermMemoryConfig ---
 
 
-def test_config_default_includes_remember_and_recall():
-    assert _ltm_config().tools == ("remember", "recall")
-
-
-def test_config_can_restrict_to_read_only():
-    assert _ltm_config(tools=("recall",)).tools == ("recall",)
-
-
 def test_config_defaults_to_enabled():
     assert _ltm_config().enabled is True
-
-
-def test_config_model_dump_emits_plain_strings_not_enums():
-    """YAML round-trip relies on tool kinds being dumped as their string values,
-    not as enum members (which yaml.safe_dump cannot represent and which would
-    round-trip back as the enum *name* — 'REMEMBER' — failing validation)."""
-    import yaml
-
-    dumped = _ltm_config().model_dump(exclude={"backend"})
-    assert dumped["tools"] == ("remember", "recall")
-    assert all(isinstance(t, str) and not hasattr(t, "value") for t in dumped["tools"])
-    yaml.safe_dump(dumped)  # must not raise
 
 
 # --- Agent field declarations ---
@@ -124,12 +101,6 @@ def test_build_returns_empty_when_no_user_id(llm, ltm):
 def test_build_returns_empty_when_no_long_term_memory(llm):
     agent = _make_agent(llm)
     assert agent._build_long_term_memory_tools(_input(user_id="u1")) == []
-
-
-def test_build_respects_config_include(llm):
-    agent = _make_agent(llm, ltm=_ltm_config(tools=("recall",)))
-    tools = agent._build_long_term_memory_tools(_input(user_id="u1"))
-    assert [t.name for t in tools] == ["recall_facts"]
 
 
 def test_build_returns_empty_when_disabled(llm):

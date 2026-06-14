@@ -2,7 +2,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from dynamiq.memory.long_term import LongTermMemoryBackend, MemoryToolKind, RememberOutcome
+from dynamiq.memory.long_term import LongTermMemoryBackend, RememberOutcome
 from dynamiq.nodes.node import Node, ensure_config
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig
@@ -186,35 +186,15 @@ class RecallFactsTool(_LongTermMemoryTool):
         return {"content": [{"content": fact.content, "score": round(score, 4)} for fact, score in hits]}
 
 
-_TOOL_BUILDERS: dict[MemoryToolKind, type[_LongTermMemoryTool]] = {
-    MemoryToolKind.REMEMBER: RememberFactTool,
-    MemoryToolKind.RECALL: RecallFactsTool,
-}
+def build_long_term_memory_tools(*, backend: LongTermMemoryBackend, user_id: str) -> list[Node]:
+    """Construct the long-term-memory tools (remember + recall) with `user_id` baked in.
 
-
-def build_long_term_memory_tools(
-    *,
-    backend: LongTermMemoryBackend,
-    user_id: str,
-    include: tuple[MemoryToolKind | str, ...] = (
-        MemoryToolKind.REMEMBER,
-        MemoryToolKind.RECALL,
-    ),
-) -> list[Node]:
-    """Construct long-term-memory tools with `user_id` baked in. Unknown keys in `include` are ignored.
-
-    Skips both invalid kind strings (ValueError on enum coercion) and valid
-    enum members without a corresponding builder (e.g. an enum value added
-    here but not yet wired into `_TOOL_BUILDERS`).
+    Per-tool subsetting was intentionally removed. If you need to expose only
+    one of the two tools to a particular agent, instantiate the class directly
+    instead of going through this factory. See the LTM plan v2 "Reversible
+    cuts" appendix for the prior selector design.
     """
-    tools: list[Node] = []
-    for kind in include:
-        try:
-            tool_kind = MemoryToolKind(kind)
-        except ValueError:
-            continue
-        builder = _TOOL_BUILDERS.get(tool_kind)
-        if builder is None:
-            continue
-        tools.append(builder(backend=backend, user_id=user_id))
-    return tools
+    return [
+        RememberFactTool(backend=backend, user_id=user_id),
+        RecallFactsTool(backend=backend, user_id=user_id),
+    ]

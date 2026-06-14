@@ -853,7 +853,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         tools = build_long_term_memory_tools(
             backend=self.long_term_memory.backend,
             user_id=user_id,
-            include=self.long_term_memory.tools,
         )
         # `init_components` set this on every tool that existed at agent build
         # time; LTM tools are constructed lazily per-run and must match so the

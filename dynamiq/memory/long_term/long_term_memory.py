@@ -1,18 +1,20 @@
 from functools import cached_property
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from dynamiq.memory.long_term.base import LongTermMemoryBackend
-from dynamiq.memory.long_term.types import MemoryToolKind
 
 
 class LongTermMemoryConfig(BaseModel):
     """Agent-level configuration for long-term memory.
 
     Mirrors `SandboxConfig` / `SkillsConfig`: an on/off switch plus the backend
-    that does the work, plus which memory tools to expose to the LLM. All
-    operations (remember/recall/forget) live on `backend`.
+    that does the work. All operations (remember/recall/forget) live on
+    `backend`. The agent always exposes both the `remember_fact` and
+    `recall_facts` tools when LTM is on; per-tool subsetting was intentionally
+    removed — see plan v2 "Reversible cuts" appendix if it ever needs to come
+    back.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -21,10 +23,6 @@ class LongTermMemoryConfig(BaseModel):
     backend: LongTermMemoryBackend = Field(
         ...,
         description="Backend engine that stores facts, embeds text, and serves remember/recall/forget.",
-    )
-    tools: tuple[MemoryToolKind, ...] = Field(
-        default=(MemoryToolKind.REMEMBER, MemoryToolKind.RECALL),
-        description="Which long-term-memory tools to expose to the agent's LLM.",
     )
 
     @computed_field
@@ -46,9 +44,3 @@ class LongTermMemoryConfig(BaseModel):
             include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs
         )
         return data
-
-    @field_serializer("tools")
-    def _serialize_tools(self, tools: tuple[MemoryToolKind, ...]) -> tuple[str, ...]:
-        # Emit plain string values so YAML round-trip and tracing work; pydantic
-        # default-mode dump returns enum members which yaml.safe_dump cannot render.
-        return tuple(t.value for t in tools)
