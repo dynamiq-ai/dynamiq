@@ -863,11 +863,10 @@ class BaseLLM(ConnectionNode):
         re-raise the original error.
 
         Default implementation: backstop for models that reject sampling params with a 400
-        but are not yet listed in SAMPLING_UNSUPPORTED_MODEL_MARKERS. Strips the
-        sampling params and persists the removal so later calls in this run skip the failing
-        first attempt. Only fires when the error both names a present sampling param and looks
-        like an unsupported-param error, so genuine validation errors (e.g. out-of-range
-        temperature) still surface.
+        but are not yet listed in SAMPLING_UNSUPPORTED_MODEL_MARKERS. Returns the params
+        with the sampling params stripped. Only fires when the error both names a present
+        sampling param and looks like an unsupported-param error, so genuine validation
+        errors (e.g. out-of-range temperature) still surface.
         """
         msg = str(exc).lower()
         present = [param for param in SAMPLING_PARAMS if common_params.get(param) is not None]
@@ -884,12 +883,23 @@ class BaseLLM(ConnectionNode):
             recovered = dict(common_params)
             for param in SAMPLING_PARAMS:
                 recovered.pop(param, None)
+            return recovered
+        return None
+
+    def _persist_completion_recovery(self, common_params: dict, recovered: dict) -> None:
+        """Persist a successful param recovery on the instance.
+
+        Called only after a retry with ``recovered`` succeeds, so a failed retry never
+        leaves the reusable node mutated. Default: for every sampling param the recovery
+        dropped, clear it on the instance so later calls in this run skip the failing
+        first attempt.
+        """
+        for param in SAMPLING_PARAMS:
+            if param in common_params and param not in recovered:
                 if param in type(self).model_fields:
                     setattr(self, param, None)
                 elif self.__pydantic_extra__ is not None:
                     self.__pydantic_extra__.pop(param, None)
-            return recovered
-        return None
 
     def execute(
         self,
@@ -944,6 +954,7 @@ class BaseLLM(ConnectionNode):
             if recovered is None:
                 raise
             response = self._completion(**recovered)
+            self._persist_completion_recovery(common_params, recovered)
         handle_completion = (
             self._handle_streaming_completion_response
             if common_params.get("stream")
@@ -1007,6 +1018,7 @@ class BaseLLM(ConnectionNode):
             if recovered is None:
                 raise
             response = await self._acompletion(**recovered)
+            self._persist_completion_recovery(common_params, recovered)
 
         if common_params.get("stream"):
             return await self._handle_streaming_completion_response_async(

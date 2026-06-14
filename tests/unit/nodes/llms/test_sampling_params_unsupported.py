@@ -88,8 +88,25 @@ class TestReactiveBackstop:
         assert recovered is not None
         assert "temperature" not in recovered
         assert recovered["max_tokens"] == 100
+        # The recovery hook is pure: it must not mutate the instance, so a failed retry
+        # leaves the reusable node untouched.
+        assert anthropic_supported.temperature == 0.5
+
+    def test_persist_recovery_clears_dropped_params(self, anthropic_supported):
+        # Persistence runs only after a successful retry, mirroring execute().
+        anthropic_supported.temperature = 0.5
+        common = {"model": "anthropic/claude-opus-4-6", "temperature": 0.5, "max_tokens": 100}
+        recovered = {"model": "anthropic/claude-opus-4-6", "max_tokens": 100}
+        anthropic_supported._persist_completion_recovery(common, recovered)
         # Persisted so the next call skips the failing first attempt.
         assert anthropic_supported.temperature is None
+
+    def test_persist_recovery_noop_when_param_kept(self, anthropic_supported):
+        # A param still present in the recovered dict must not be cleared.
+        anthropic_supported.temperature = 0.5
+        common = {"model": "anthropic/claude-opus-4-6", "temperature": 0.5}
+        anthropic_supported._persist_completion_recovery(common, dict(common))
+        assert anthropic_supported.temperature == 0.5
 
     def test_no_recovery_on_out_of_range_error(self, anthropic_supported):
         # A genuine validation error must surface, not be silently stripped.
