@@ -190,6 +190,16 @@ class TestExecuteRendering:
         assert out["documents"] == []
         assert out["content"] == "No matching facts found."
 
+    def test_same_fact_via_multiple_doc_edges_deduped(self):
+        # The same fact now lives as one edge per source document; the visible ones must render once.
+        rows = [
+            {"a_name": "Jane Doe", "rel": "WORKS_AT", "rprops": {"source_doc_id": "docA"}, "b_name": "Acme"},
+            {"a_name": "Jane Doe", "rel": "WORKS_AT", "rprops": {"source_doc_id": "docB"}, "b_name": "Acme"},
+        ]
+        node = make_retriever(rows=rows)
+        out = node.execute(GraphRetrieverInputSchema(query="Jane"))
+        assert [d.content for d in out["documents"]] == ["Jane Doe -[WORKS_AT]-> Acme"]
+
     def test_attribute_value_target_rendered_by_value(self):
         # AttributeValue nodes have no name; the store coalesces to .value, surfacing the scoped attribute.
         rows = [{"a_name": "Jane Doe", "rel": "HAS_ATTRIBUTE", "rprops": {"key": "salary"}, "b_name": "$250,000"}]

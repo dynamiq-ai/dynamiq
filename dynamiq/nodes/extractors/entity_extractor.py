@@ -272,14 +272,24 @@ class EntityExtractor(Node):
         ``acl_workspace_id``, timestamps, custom fields) ride along, exactly like the splitter copies a
         document's metadata onto each chunk. A provenance pointer ``source_doc_ids=[document.id]`` is added
         too. Each edge's own keys (e.g. the attribute ``key``) take precedence over metadata keys.
+
+        The document id is also stamped as a scalar ``source_doc_id`` and declared in ``identity_keys`` so
+        the store includes it in the relationship MERGE: the SAME fact asserted by two documents stays two
+        SEPARATE edges, each keeping its own ACL/provenance, instead of merging and overwriting (which would
+        leak — a public document could overwrite a confidential document's ``allowed_principals``).
         """
         doc_props = self._flatten_metadata(dict(document.metadata or {}))
+        identity_keys: list[str] = []
         if document.id is not None:
             doc_props["source_doc_ids"] = [str(document.id)]
+            doc_props["source_doc_id"] = str(document.id)
+            identity_keys = ["source_doc_id"]
         if not doc_props:
             return
         for relationship in relationships:
             relationship["properties"] = {**doc_props, **relationship["properties"]}
+            if identity_keys:
+                relationship["identity_keys"] = identity_keys
 
     @classmethod
     def _flatten_metadata(cls, metadata: dict[str, Any], prefix: str = "") -> dict[str, Any]:

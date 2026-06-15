@@ -27,6 +27,7 @@ RUN = uuid.uuid4().hex[:8]
 ORG = f"Acme-{RUN}"
 SYS_A = f"Helios-{RUN}"  # only group:a may see this
 SYS_B = f"Borealis-{RUN}"  # only group:b may see this
+SHARED = f"Mercury-{RUN}"  # the SAME fact asserted by two docs with different ACLs (merge-bug regression)
 GROUP_A = "group:a"
 GROUP_B = "group:b"
 
@@ -52,6 +53,9 @@ def ingested(graph_connection):
     docs = [
         Document(content=f"{ORG} uses a system called {SYS_A}.", metadata={"allowed_principals": [GROUP_A]}),
         Document(content=f"{ORG} uses a system called {SYS_B}.", metadata={"allowed_principals": [GROUP_B]}),
+        # The SAME fact asserted by two documents with DIFFERENT ACLs — must stay two edges, not merge.
+        Document(content=f"{ORG} uses a system called {SHARED}.", metadata={"allowed_principals": [GROUP_A]}),
+        Document(content=f"{ORG} uses a system called {SHARED}.", metadata={"allowed_principals": [GROUP_B]}),
     ]
     result = writer.execute(KnowledgeGraphWriter.input_schema(documents=docs))
     assert result["relationships_created"] is not None
@@ -89,3 +93,12 @@ def test_principal_b_sees_only_b(ingested, graph_connection):
 def test_default_deny_hides_everything_for_unknown_principal(ingested, graph_connection):
     content = _facts_for(graph_connection, ["group:nobody"])
     assert SYS_A not in content and SYS_B not in content, f"unknown principal must see nothing: {content}"
+
+
+def test_same_fact_from_two_docs_keeps_both_acls(ingested, graph_connection):
+    # The SAME fact ("{ORG} uses {SHARED}") was asserted by a group:a doc AND a group:b doc. With the
+    # merge bug, the two collapse into one edge and the last writer's ACL wins — so one of the groups
+    # would lose access. With per-document edges, BOTH groups see it. unknown still sees nothing.
+    assert SHARED in _facts_for(graph_connection, [GROUP_A]), "group:a lost a fact it asserted (ACL overwrite)"
+    assert SHARED in _facts_for(graph_connection, [GROUP_B]), "group:b lost a fact it asserted (ACL overwrite)"
+    assert SHARED not in _facts_for(graph_connection, ["group:nobody"]), "unknown principal must not see SHARED"

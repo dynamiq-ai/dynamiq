@@ -152,6 +152,9 @@ class Neo4jGraphStore(BaseGraphStore):
             - start_identity, end_identity: Any
             - type: str
             - properties: dict (optional)
+            - identity_keys: list[str] (optional) — property names to include in the MERGE pattern, so
+              relationships that differ only on these keys are kept as distinct edges (e.g. per-document
+              edges that each retain their own ACL/provenance). Default: merge on endpoints + type only.
         """
         if not nodes and not relationships:
             raise ValueError("At least one node or relationship must be provided.")
@@ -206,18 +209,35 @@ class Neo4jGraphStore(BaseGraphStore):
                 if start_identity is None or end_identity is None:
                     raise ValueError(f"Relationship {idx} missing start or end identity value.")
 
-                rel_query = (
-                    f"MATCH (s:{start_label} {{{start_identity_key}: $start_id}})\n"
-                    f"MATCH (e:{end_label} {{{end_identity_key}: $end_id}})\n"
-                    f"MERGE (s)-[r:{rel_type}]->(e)\n"
-                    f"SET r += $props\n"
-                    "RETURN r"
-                )
                 rel_params = {
                     "start_id": start_identity,
                     "end_id": end_identity,
                     "props": properties,
                 }
+
+                # Optional relationship merge-key properties: when present, include them in the MERGE
+                # pattern so otherwise-identical relationships that differ on these keys stay DISTINCT
+                # edges (e.g. per-source-document edges that each keep their own ACL/provenance).
+                key_fragments: list[str] = []
+                for kidx, key in enumerate(rel.get("identity_keys") or []):
+                    if key not in properties:
+                        continue
+                    param_name = f"rkey_{idx}_{kidx}"
+                    key_fragments.append(f"{self._format_property_key(key)}: ${param_name}")
+                    rel_params[param_name] = properties[key]
+                merge_pattern = (
+                    f"MERGE (s)-[r:{rel_type} {{{', '.join(key_fragments)}}}]->(e)"
+                    if key_fragments
+                    else f"MERGE (s)-[r:{rel_type}]->(e)"
+                )
+
+                rel_query = (
+                    f"MATCH (s:{start_label} {{{start_identity_key}: $start_id}})\n"
+                    f"MATCH (e:{end_label} {{{end_identity_key}: $end_id}})\n"
+                    f"{merge_pattern}\n"
+                    f"SET r += $props\n"
+                    "RETURN r"
+                )
                 rel_records, rel_summary, rel_keys = self.run_cypher(rel_query, rel_params, database=database)
                 total_relationships_created += rel_summary.counters.relationships_created
                 total_properties_set += rel_summary.counters.properties_set

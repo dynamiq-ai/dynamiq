@@ -212,6 +212,26 @@ class TestExecuteEndToEndWithStubLLM:
         assert attr_edge["end_identity"] == "jane@doc-1::salary::doc-1"
         assert attr_edge["properties"]["key"] == "salary"
 
+    def test_execute_stamps_doc_discriminator_on_relationships(self):
+        # Each relationship carries a scalar source_doc_id + identity_keys so the store keeps the SAME
+        # fact from different documents as separate edges (no ACL overwrite on merge).
+        payload = {
+            "entities": [
+                {"id": "jane", "type": "Person", "name": "Jane Doe"},
+                {"id": "acme", "type": "Org", "name": "Acme"},
+            ],
+            "relationships": [{"source_id": "jane", "target_id": "acme", "type": "works at"}],
+        }
+        extractor = EntityExtractor(llm=StubLLM(response_content=json.dumps(payload)))
+        result = extractor.execute(
+            EntityExtractor.input_schema(documents=[Document(id="doc-1", content="Jane works at Acme.")])
+        )
+
+        rel = next(r for r in result["relationships"] if r["type"] == "WORKS_AT")
+        assert rel["properties"]["source_doc_id"] == "doc-1"
+        assert rel["properties"]["source_doc_ids"] == ["doc-1"]
+        assert rel["identity_keys"] == ["source_doc_id"]
+
     def test_execute_emits_doc_scoped_nodes_per_document(self):
         payload = {
             "entities": [{"id": "acme", "type": "Org", "name": "Acme"}],

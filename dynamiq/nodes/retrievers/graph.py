@@ -338,14 +338,19 @@ class GraphRetriever(ConnectionNode):
     @staticmethod
     def _render_single_hop(rows: list[dict[str, Any]]) -> list[Document]:
         documents: list[Document] = []
+        seen: set[str] = set()  # the same fact can arrive via several per-document edges -> show it once
         for rank, row in enumerate(rows):
             source, rel, target = row.get("a_name"), row.get("rel"), row.get("b_name")
             if source is None or target is None or not rel:
                 continue
+            fact = f"{source} -[{rel}]-> {target}"
+            if fact in seen:
+                continue
+            seen.add(fact)
             rprops = dict(row.get("rprops") or {})
             documents.append(
                 Document(
-                    content=f"{source} -[{rel}]-> {target}",
+                    content=fact,
                     metadata={"source": source, "target": target, "rel": rel, **rprops},
                     score=1.0 / (1.0 + rank),
                 )
@@ -355,6 +360,7 @@ class GraphRetriever(ConnectionNode):
     @staticmethod
     def _render_paths(rows: list[dict[str, Any]]) -> list[Document]:
         documents: list[Document] = []
+        seen: set[str] = set()  # dedup identical paths arriving via per-document edges
         for rank, row in enumerate(rows):
             names = row.get("node_names") or []
             rels = row.get("rel_types") or []
@@ -363,6 +369,9 @@ class GraphRetriever(ConnectionNode):
             fact = names[0]
             for rel, node in zip(rels, names[1:]):
                 fact += f" -[{rel}]-> {node}"
+            if fact in seen:
+                continue
+            seen.add(fact)
             # Merge provenance pointers across the path's edges.
             source_doc_ids: list[str] = []
             for props in row.get("rel_props") or []:
