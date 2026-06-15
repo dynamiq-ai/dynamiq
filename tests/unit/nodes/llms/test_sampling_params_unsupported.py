@@ -119,3 +119,37 @@ class TestReactiveBackstop:
     def test_no_recovery_when_no_sampling_params_present(self, anthropic_supported):
         exc = Exception("some unrelated unsupported field error")
         assert anthropic_supported._recover_completion_params(exc, {"model": "x", "max_tokens": 10}) is None
+
+
+class TestBedrockBackstop:
+    @pytest.fixture
+    def bedrock(self):
+        return Bedrock(
+            name="b",
+            model="bedrock/eu.anthropic.claude-some-future-model",
+            connection=AWSConnection(access_key_id="x", secret_access_key="y", region_name="eu-west-1"),
+        )
+
+    def test_bedrock_falls_through_to_sampling_backstop(self, bedrock):
+        # An unlisted Bedrock model must still get the base sampling recovery,
+        # not be dropped because Bedrock overrides the hook.
+        bedrock.temperature = 0.5
+        common = {"model": bedrock.model, "temperature": 0.5, "max_tokens": 100}
+        exc = Exception("litellm.BadRequestError: temperature: Extra inputs are not permitted")
+        recovered = bedrock._recover_completion_params(exc, common)
+        assert recovered is not None
+        assert "temperature" not in recovered
+        assert recovered["max_tokens"] == 100
+
+    def test_bedrock_stop_recovery_is_pure(self, bedrock):
+        # The stop recovery must not mutate the instance before the retry succeeds.
+        bedrock.stop = ["STOP"]
+        common = {"model": bedrock.model, "stop": ["STOP"], "max_tokens": 100}
+        exc = Exception("This model doesn't support the stopSequences field")
+        recovered = bedrock._recover_completion_params(exc, common)
+        assert recovered is not None
+        assert "stop" not in recovered
+        assert bedrock.stop == ["STOP"]
+        # Persisted only after a successful retry.
+        bedrock._persist_completion_recovery(common, recovered)
+        assert bedrock.stop is None
