@@ -243,6 +243,23 @@ def test_weaviate_construction_does_not_touch_collection(fake_embedder, monkeypa
     assert client.collections.get_called_with == ["UserFacts"]
 
 
+def test_weaviate_first_op_auto_ensures_collection(backend, monkeypatch):
+    """First high-level op must auto-provision the collection — consumers should
+    not have to remember to call `ensure_collection()` manually."""
+    calls: list[int] = []
+    original = WeaviateLongTermMemoryBackend.ensure_collection
+
+    def wrapped(self):
+        calls.append(1)
+        return original(self)
+
+    monkeypatch.setattr(WeaviateLongTermMemoryBackend, "ensure_collection", wrapped)
+    backend.remember(content="hello", user_id="u1")
+    backend.remember(content="world", user_id="u1")
+    backend.recall(query="hello", user_id="u1")
+    assert len(calls) == 1, f"expected exactly one ensure_collection call, got {len(calls)}"
+
+
 def test_weaviate_fact_id_maps_to_deterministic_uuid():
     """Two backends must resolve the same fact_id to the same UUID — so a fact
     inserted by one process can be deleted by another via the original id."""

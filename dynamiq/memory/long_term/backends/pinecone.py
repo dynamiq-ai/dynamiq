@@ -63,6 +63,12 @@ class PineconeLongTermMemoryBackend(LongTermMemoryBackend):
     accepts arbitrary string ids). Fact payload lives in the vector's metadata; the
     free-form `Fact.metadata` dict is JSON-encoded into a single string field to
     avoid Pinecone's no-nested-dicts restriction.
+
+    Note: unlike pgvector / Qdrant / Weaviate, the Pinecone index must exist
+    before the backend is used — Pinecone's data-plane SDK has no idempotent
+    `ensure_index` primitive, so `_ensure_storage` is not overridden. Create
+    the index (with matching `dimension` and cosine metric) via the Pinecone
+    control-plane API or console once per deployment.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

@@ -116,6 +116,9 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
         collection is dropped/recreated between operations."""
         return self._client.collections.get(self.collection_name)
 
+    def _ensure_storage(self) -> None:
+        self.ensure_collection()
+
     def ensure_collection(self) -> None:
         """Create the facts collection if absent. Safe to call repeatedly."""
         # `VectorDistances` is a top-level export in weaviate-client>=4.7 — it

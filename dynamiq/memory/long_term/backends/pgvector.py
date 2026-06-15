@@ -97,6 +97,9 @@ class PostgresLongTermMemoryBackend(LongTermMemoryBackend):
         """Return the table name wrapped as a safe SQL identifier."""
         return Identifier(self.table_name)
 
+    def _ensure_storage(self) -> None:
+        self.ensure_table()
+
     def ensure_table(self) -> None:
         """Create the facts table and indexes if absent. Safe to call repeatedly."""
         with self._conn.cursor() as cur:

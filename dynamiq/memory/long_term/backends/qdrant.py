@@ -92,6 +92,9 @@ class QdrantLongTermMemoryBackend(LongTermMemoryBackend):
     def model_post_init(self, __context) -> None:
         self._client = self.connection.connect()
 
+    def _ensure_storage(self) -> None:
+        self.ensure_collection()
+
     def ensure_collection(self) -> None:
         """Create the facts collection and payload indexes if absent. Safe to call repeatedly."""
         if not self._client.collection_exists(self.collection_name):

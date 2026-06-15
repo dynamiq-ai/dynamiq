@@ -5,7 +5,7 @@ from hashlib import md5
 from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field
 
 from dynamiq.memory.long_term.schemas import Fact
 from dynamiq.memory.long_term.types import ForgetStatus, RememberOutcome
@@ -55,6 +55,9 @@ class LongTermMemoryBackend(ABC, BaseModel):
         ),
     )
 
+    # Flag for the once-only `_guarded_ensure` gate; never serialised.
+    _storage_ensured: bool = PrivateAttr(default=False)
+
     @computed_field
     @cached_property
     def type(self) -> str:
@@ -78,6 +81,25 @@ class LongTermMemoryBackend(ABC, BaseModel):
         result = self.embedder.execute(input_data=TextEmbedderInputSchema(query=text))
         return list(result["embedding"])
 
+    # --- schema provisioning hook ---
+
+    def _ensure_storage(self) -> None:
+        """Provision tables / collections / indexes if absent. No-op by default.
+
+        Backends that need a server-side schema (pgvector, Qdrant, Weaviate)
+        override this to call their idempotent `ensure_table` / `ensure_collection`.
+        Pinecone has no SDK primitive to create an index from data-plane creds, so
+        it does not override — its index must be pre-created out of band.
+        """
+
+    def _guarded_ensure(self) -> None:
+        """Call `_ensure_storage` at most once per instance. If it raises, the
+        flag stays unset so the next op retries — failures are loud, not silent."""
+        if self._storage_ensured:
+            return
+        self._ensure_storage()
+        self._storage_ensured = True
+
     # --- high-level operations (Template Method over the storage primitives) ---
 
     def remember(
@@ -99,6 +121,7 @@ class LongTermMemoryBackend(ABC, BaseModel):
         if not content or not content.strip():
             raise LongTermMemoryError("Fact content cannot be empty")
         try:
+            self._guarded_ensure()
             normalised = content.strip()
             content_hash = _content_hash(user_id, normalised)
 
@@ -164,6 +187,7 @@ class LongTermMemoryBackend(ABC, BaseModel):
         if not stripped:
             raise LongTermMemoryError("Recall query cannot be empty")
         try:
+            self._guarded_ensure()
             embedding = self._embed(stripped)
             results = self.search(query_embedding=embedding, scope={"user_id": user_id}, limit=limit)
             logger.debug(f"LongTermMemory: recall for user={user_id} returned {len(results)} facts")
@@ -179,6 +203,7 @@ class LongTermMemoryBackend(ABC, BaseModel):
             LongTermMemoryError: If the storage delete fails for any other reason.
         """
         try:
+            self._guarded_ensure()
             fact = self.get(fact_id)
             if fact is None:
                 return ForgetStatus.NOT_FOUND
@@ -198,6 +223,7 @@ class LongTermMemoryBackend(ABC, BaseModel):
     def list_all(self, *, user_id: str, limit: int = 100) -> list[Fact]:
         """Return up to `limit` facts for `user_id` (admin/introspection)."""
         try:
+            self._guarded_ensure()
             return self.list_by_scope({"user_id": user_id}, limit=limit)
         except Exception as e:
             logger.error(f"LongTermMemory.list_all failed for user={user_id}: {e}")
@@ -206,6 +232,7 @@ class LongTermMemoryBackend(ABC, BaseModel):
     def clear_user(self, *, user_id: str) -> int:
         """Hard-delete every fact owned by `user_id` and return the count deleted."""
         try:
+            self._guarded_ensure()
             deleted = self.delete_scope({"user_id": user_id})
             logger.debug(f"LongTermMemory: cleared {deleted} facts for user={user_id}")
             return deleted
