@@ -10,16 +10,22 @@ from dynamiq.prompts import prompts
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types import Document
 from dynamiq.types.cancellation import check_cancellation
+from dynamiq.utils.json_parser import parse_llm_json_output
 from dynamiq.utils.logger import logger
 
-# Neo4j labels / relationship types / property keys must match this pattern,
-# otherwise Neo4jGraphStore.write_graph raises (see storages/graph/neo4j/neo4j.py).
+# Labels / relationship types / property keys must match this pattern — the safe identifier
+# subset shared by openCypher backends (Neo4j, Apache AGE, Neptune); stores reject anything else.
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 # An ontology-declared attribute is written as (entity)-[:HAS_ATTRIBUTE {key}]->(:AttributeValue {value})
 # rather than as a node property, so its access can be scoped independently of the (shared) entity node.
 ATTRIBUTE_VALUE_LABEL = "AttributeValue"
 HAS_ATTRIBUTE_TYPE = "HAS_ATTRIBUTE"
+
+# Shared label put on every entity node (in addition to its type label) so a single full-text index can
+# cover entity names across all types — the index-backed entry point GraphRetriever uses instead of a scan.
+ENTITY_LABEL = "Entity"
+ENTITY_NAME_FULLTEXT_INDEX = "entity_name"
 
 
 class Triple(BaseModel):
@@ -76,6 +82,71 @@ Text:
 {{document_text}}
 """
 
+JSON_RECOVERY_PROMPT = """Your previous response could not be parsed as JSON.
+
+Previous response:
+{{previous_response}}
+
+Return ONLY the corrected response as a single valid JSON object with "entities" and "relationships" \
+keys, exactly in the format originally requested. No markdown fences, no prose."""
+
+
+def _build_extraction_response_format(
+    entity_types: list[str] | None = None, relationship_types: list[str] | None = None
+) -> dict[str, Any]:
+    """Litellm ``response_format`` mirroring the JSON shape requested by DEFAULT_EXTRACTION_PROMPT.
+
+    When ``entity_types`` / ``relationship_types`` are given, the corresponding ``type`` fields are
+    emitted as enums so the model cannot produce off-ontology types in the first place. Deliberately
+    non-strict: "properties" is an open-ended map, which strict structured-output modes
+    (``additionalProperties: false`` everywhere) cannot express.
+    """
+    entity_type_schema: dict[str, Any] = {"type": "string"}
+    if entity_types:
+        entity_type_schema["enum"] = entity_types
+    relationship_type_schema: dict[str, Any] = {"type": "string"}
+    if relationship_types:
+        relationship_type_schema["enum"] = relationship_types
+
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "knowledge_graph_extraction",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "entities": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "type": entity_type_schema,
+                                "name": {"type": "string"},
+                                "properties": {"type": "object"},
+                            },
+                            "required": ["id", "type", "name"],
+                        },
+                    },
+                    "relationships": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "source_id": {"type": "string"},
+                                "target_id": {"type": "string"},
+                                "type": relationship_type_schema,
+                                "properties": {"type": "object"},
+                            },
+                            "required": ["source_id", "target_id", "type"],
+                        },
+                    },
+                },
+                "required": ["entities", "relationships"],
+            },
+        },
+    }
+
 
 class EntityExtractorInputSchema(BaseModel):
     documents: list[Document] = Field(..., description="Documents to extract entities and relationships from.")
@@ -84,9 +155,11 @@ class EntityExtractorInputSchema(BaseModel):
 class EntityExtractor(Node):
     """Extracts a knowledge graph (entities + relationships) from documents using an LLM.
 
-    The output is shaped for :meth:`Neo4jGraphStore.write_graph` so it can be passed
-    directly to a :class:`~dynamiq.nodes.writers.graph.Neo4jGraphWriter` node:
-    ``{"nodes": [...], "relationships": [...]}``.
+    The output uses the provider-neutral graph payload format consumed by
+    :meth:`BaseGraphStore.write_graph` (``{"nodes": [...], "relationships": [...]}``). Entity ids in
+    the payload are per-extraction wiring, not durable identity — persist through
+    :class:`~dynamiq.nodes.extractors.knowledge_graph.KnowledgeGraphWriter`, which assigns identity
+    via name resolution before writing.
 
     Attributes:
         group (Literal[NodeGroup.EXTRACTORS]): Node group. Defaults to NodeGroup.EXTRACTORS.
@@ -99,9 +172,8 @@ class EntityExtractor(Node):
             told the allowed types/triples AND the extracted graph is hard-filtered so only conforming
             nodes/relationships are written. When ``None`` the extractor is free-form (falling back to
             the soft ``entity_types``/``relationship_types`` hints if those are provided).
-        response_format (dict | None): Optional litellm ``response_format`` forwarded to the LLM. Leave
-            unset for providers that do not support structured-output schemas (extraction then relies on
-            the JSON-instructed prompt + robust parsing).
+        json_recovery_attempts (int): How many times to ask the LLM to repair unparseable output
+            before skipping a document. Defaults to 1; set to 0 to disable recovery.
     """
 
     group: Literal[NodeGroup.EXTRACTORS] = NodeGroup.EXTRACTORS
@@ -111,7 +183,11 @@ class EntityExtractor(Node):
     entity_types: list[str] | None = None
     relationship_types: list[str] | None = None
     ontology: Ontology | None = None
-    response_format: dict[str, Any] | None = None
+    json_recovery_attempts: int = Field(
+        default=1,
+        ge=0,
+        description="How many times to ask the LLM to repair unparseable output before skipping a document.",
+    )
     input_schema: ClassVar[type[EntityExtractorInputSchema]] = EntityExtractorInputSchema
 
     def __init__(self, **kwargs):
@@ -145,7 +221,7 @@ class EntityExtractor(Node):
 
         Returns:
             dict: ``{"nodes": [...], "relationships": [...], "entities": [...], "raw_relationships": [...]}``.
-            ``nodes``/``relationships`` are ready for ``Neo4jGraphStore.write_graph``; ``entities``/
+            ``nodes``/``relationships`` are ready for ``BaseGraphStore.write_graph``; ``entities``/
             ``raw_relationships`` are the un-transformed LLM output, kept for debugging.
         """
         config = ensure_config(config)
@@ -157,11 +233,7 @@ class EntityExtractor(Node):
         entities_debug: list[dict] = []
         raw_relationships_debug: list[dict] = []
 
-        # Process each document independently and stamp its metadata onto every element it produces —
-        # the graph analog of the splitter copying a parent document's metadata onto each chunk. No
-        # deduplication or cross-document merging happens here: the same entity surfaced by two documents
-        # is emitted twice (each with its own document's metadata) and collapsed later by Neo4j's MERGE
-        # in write_graph.
+        # Process each document independently and stamp its metadata onto every element it produces
         for document in input_data.documents:
             check_cancellation(config)
             extracted = self._extract_from_text(document.content, config, **kwargs)
@@ -170,7 +242,7 @@ class EntityExtractor(Node):
             entities_debug.extend(entities)
             raw_relationships_debug.extend(doc_relationships)
 
-            doc_nodes, doc_rels = self._to_write_graph_payload(entities, doc_relationships)
+            doc_nodes, doc_rels = self._to_write_graph_payload(entities, doc_relationships, document=document)
             if self.ontology is not None:
                 doc_nodes, doc_rels = self._enforce_ontology(doc_nodes, doc_rels)
             self._apply_document_metadata(doc_rels, document)
@@ -211,25 +283,26 @@ class EntityExtractor(Node):
 
     @classmethod
     def _flatten_metadata(cls, metadata: dict[str, Any], prefix: str = "") -> dict[str, Any]:
-        """Flatten a metadata dict into Neo4j-storable top-level properties.
+        """Flatten a metadata dict into graph-storable top-level properties.
 
-        Neo4j properties are primitives or arrays of primitives (no nested maps), so nested dicts are
-        flattened with ``_``-joined, sanitized keys and any non-primitive value is JSON-encoded to a string.
+        Property-graph backends restrict properties to primitives or arrays of primitives (no nested
+        maps), so nested dicts are flattened with ``_``-joined, sanitized keys and any non-primitive
+        value is JSON-encoded to a string.
         """
         out: dict[str, Any] = {}
         for raw_key, value in metadata.items():
             key = cls._sanitize_property_key(f"{prefix}{raw_key}")
             if isinstance(value, dict):
                 out.update(cls._flatten_metadata(value, prefix=f"{key}_"))
-            elif cls._is_neo4j_value(value):
+            elif cls._is_primitive_property_value(value):
                 out[key] = value
             else:
                 out[key] = json.dumps(value, default=str)
         return out
 
     @staticmethod
-    def _is_neo4j_value(value: Any) -> bool:
-        """True if value is a Neo4j-storable scalar or a (homogeneous) list of scalars."""
+    def _is_primitive_property_value(value: Any) -> bool:
+        """True if value is a graph-storable scalar or a (homogeneous) list of scalars."""
         if isinstance(value, (str, int, float, bool)) or value is None:
             return True
         if isinstance(value, (list, tuple)):
@@ -238,7 +311,7 @@ class EntityExtractor(Node):
 
     @staticmethod
     def _sanitize_property_key(key: str) -> str:
-        """Coerce an arbitrary metadata key into a valid Neo4j property identifier (case preserved)."""
+        """Coerce an arbitrary metadata key into a valid graph property identifier (case preserved)."""
         cleaned = re.sub(r"[^A-Za-z0-9_]+", "_", str(key).strip())
         cleaned = re.sub(r"_+", "_", cleaned).strip("_")
         if not cleaned:
@@ -248,15 +321,50 @@ class EntityExtractor(Node):
         return cleaned
 
     def _extract_from_text(self, text: str, config: RunnableConfig, **kwargs) -> dict[str, Any]:
-        """Run the LLM on a single document's text and parse its JSON output."""
-        prompt = prompts.Prompt(messages=[prompts.Message(role="user", content=self.prompt_template)])
+        """Run the LLM on a single document's text and parse its JSON output.
+
+        If the output cannot be parsed, the raw response is sent back to the LLM with a repair
+        instruction (up to ``json_recovery_attempts`` times). Only when recovery also fails is the
+        document skipped (empty extraction), so one bad response does not abort a whole batch.
+        """
+        content = self._run_llm(
+            self.prompt_template,
+            {"document_text": text, "type_guidance": self._build_type_guidance()},
+            config,
+            **kwargs,
+        )
+        parsed = self._parse_llm_json(content)
+
+        for attempt in range(self.json_recovery_attempts):
+            if parsed is not None:
+                break
+            logger.warning(
+                f"Node {self.name} - {self.id}: LLM output is not valid JSON; asking the LLM to "
+                f"repair it (attempt {attempt + 1}/{self.json_recovery_attempts})."
+            )
+            content = self._run_llm(JSON_RECOVERY_PROMPT, {"previous_response": content or ""}, config, **kwargs)
+            parsed = self._parse_llm_json(content)
+
+        if parsed is None:
+            logger.warning(
+                f"Node {self.name} - {self.id}: could not parse LLM output after recovery; "
+                "skipping this document (empty extraction)."
+            )
+            return {"entities": [], "relationships": []}
+        return parsed
+
+    def _run_llm(
+        self, prompt_template: str, input_data: dict[str, Any], config: RunnableConfig, **kwargs
+    ) -> str | None:
+        """Run the embedded LLM with a prompt template and return its raw text content."""
+        prompt = prompts.Prompt(messages=[prompts.Message(role="user", content=prompt_template)])
         run_kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         run_kwargs.pop("run_depends", None)
 
         llm_result = self.llm.run(
-            input_data={"document_text": text, "type_guidance": self._build_type_guidance()},
+            input_data=input_data,
             prompt=prompt,
-            response_format=self.response_format,
+            response_format=self._resolve_response_format(),
             config=config,
             run_depends=self._run_depends,
             **run_kwargs,
@@ -265,8 +373,17 @@ class EntityExtractor(Node):
         if llm_result.status != RunnableStatus.SUCCESS:
             logger.error(f"Node {self.name} - {self.id}: LLM execution failed: {llm_result.error.to_dict()}")
             raise ValueError("EntityExtractor LLM execution failed")
+        return llm_result.output["content"]
 
-        return self._parse_llm_json(llm_result.output["content"])
+    def _resolve_response_format(self) -> dict[str, Any]:
+        """The litellm ``response_format`` sent to the LLM.
+
+        Always the extraction-JSON schema; when an ontology is set, entity/relationship ``type``
+        is additionally constrained to an enum of its types.
+        """
+        if self.ontology is not None:
+            return _build_extraction_response_format(self.ontology.entity_types, self.ontology.relationship_types)
+        return _build_extraction_response_format()
 
     def _build_type_guidance(self) -> str:
         """Build optional prompt guidance constraining entity/relationship types.
@@ -302,7 +419,7 @@ class EntityExtractor(Node):
         """Drop any node/relationship that is not allowed by ``self.ontology``.
 
         Membership is checked against the same normalized (UPPER_SNAKE) identifiers that
-        ``_to_write_graph_payload`` produces, so comparisons match what gets written to Neo4j.
+        ``_to_write_graph_payload`` produces, so comparisons match what gets written to the graph store.
         """
         o = self.ontology
         allowed_entities = {self._sanitize_identifier(e) for e in o.entity_types}
@@ -359,10 +476,14 @@ class EntityExtractor(Node):
         return kept_nodes, kept_rels
 
     @staticmethod
-    def _parse_llm_json(content: str | None) -> dict[str, Any]:
-        """Parse the LLM response into a dict, tolerating markdown fences and surrounding prose."""
+    def _parse_llm_json(content: str | None) -> dict[str, Any] | None:
+        """Parse the LLM response into a dict, tolerating markdown fences and surrounding prose.
+
+        Returns ``None`` when no JSON object can be recovered, so the caller can trigger
+        an LLM repair round-trip.
+        """
         if not content:
-            return {"entities": [], "relationships": []}
+            return None
 
         text = content.strip()
         # Strip ```json ... ``` / ``` ... ``` fences if present.
@@ -371,22 +492,11 @@ class EntityExtractor(Node):
             text = fence.group(1).strip()
 
         try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
-            # Fall back to the first balanced-looking {...} block.
-            start, end = text.find("{"), text.rfind("}")
-            if start == -1 or end == -1 or end <= start:
-                logger.warning("EntityExtractor: could not locate JSON object in LLM output.")
-                return {"entities": [], "relationships": []}
-            try:
-                parsed = json.loads(text[start : end + 1])
-            except json.JSONDecodeError:
-                logger.warning("EntityExtractor: failed to parse JSON from LLM output.")
-                return {"entities": [], "relationships": []}
-
-        if not isinstance(parsed, dict):
-            return {"entities": [], "relationships": []}
-        return parsed
+            # Direct parse -> balanced {...}/[...] extraction -> comment/quote cleanup.
+            parsed = parse_llm_json_output(text)
+        except ValueError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
 
     def _attributes_for_type(self, entity_type: str) -> list[str]:
         """Attribute names declared for ``entity_type`` in the ontology (empty if none / no ontology)."""
@@ -394,13 +504,24 @@ class EntityExtractor(Node):
             return []
         return self.ontology.attributes.get(entity_type, [])
 
-    def _to_write_graph_payload(self, entities: list[dict], relationships: list[dict]) -> tuple[list[dict], list[dict]]:
+    def _to_write_graph_payload(
+        self, entities: list[dict], relationships: list[dict], document: Document | None = None
+    ) -> tuple[list[dict], list[dict]]:
         """Convert LLM-friendly entities/relationships into the write_graph node/relationship shape.
 
         Ontology-declared attributes (``Ontology.attributes``) are NOT written as node properties; each is
         promoted to a separate ``(entity)-[:HAS_ATTRIBUTE {key}]->(:AttributeValue {value})`` relationship so
-        its visibility can be scoped independently of the (potentially shared) entity node.
+        its visibility can be scoped independently of the (potentially shared) entity node. Value-node ids
+        are scoped per source document (``{wiring_id}::{key}::{document_id}``): the same attribute asserted
+        by two documents yields two value nodes, each on its own edge carrying its own document's
+        ACL/provenance metadata, while re-ingesting the same document updates the same value node.
+
+        Entity ids are emitted doc-scoped too (``{llm_id}@{document_id}``): LLM ids are only unique within
+        one response, so two documents using the same id for DIFFERENT concepts must not alias once the
+        per-document payloads are pooled. The wiring id carries no identity — entity identity is assigned
+        by name resolution in ``KnowledgeGraphWriter``.
         """
+        doc_suffix = f"@{document.id}" if document is not None and document.id is not None else ""
         id_to_label: dict[str, str] = {}
         nodes: list[dict] = []
         attribute_relationships: list[dict] = []
@@ -412,21 +533,27 @@ class EntityExtractor(Node):
             label = self._sanitize_identifier(str(entity_type))
             entity_id = str(entity_id)
             id_to_label[entity_id] = label
+            wiring_id = f"{entity_id}{doc_suffix}"
 
             properties = dict(entity.get("properties") or {})
             # Pull ontology-declared attributes out of the node's properties — they become edges below.
             declared = set(self._attributes_for_type(str(entity_type)))
             attribute_values = {key: properties.pop(key) for key in list(properties) if key in declared}
 
-            properties["id"] = entity_id
+            properties["id"] = wiring_id
             if entity.get("name") is not None:
                 properties["name"] = entity["name"]
-            nodes.append({"labels": [label], "identity_key": "id", "properties": properties})
+
+            # The type label stays first (ontology enforcement and resolution key on labels[0]); the shared
+            # ENTITY_LABEL is added so a single full-text index over names covers every entity type.
+            nodes.append({"labels": [label, ENTITY_LABEL], "identity_key": "id", "properties": properties})
 
             for attr_key, attr_value in attribute_values.items():
                 if attr_value is None:
                     continue
-                value_id = f"{entity_id}::{attr_key}"
+                value_id = f"{wiring_id}::{attr_key}"
+                if document is not None and document.id is not None:
+                    value_id = f"{value_id}::{document.id}"
                 nodes.append(
                     {
                         "labels": [ATTRIBUTE_VALUE_LABEL],
@@ -441,7 +568,7 @@ class EntityExtractor(Node):
                         "end_label": ATTRIBUTE_VALUE_LABEL,
                         "start_identity_key": "id",
                         "end_identity_key": "id",
-                        "start_identity": entity_id,
+                        "start_identity": wiring_id,
                         "end_identity": value_id,
                         "properties": {"key": attr_key},
                     }
@@ -466,8 +593,8 @@ class EntityExtractor(Node):
                     "end_label": id_to_label[target_id],
                     "start_identity_key": "id",
                     "end_identity_key": "id",
-                    "start_identity": source_id,
-                    "end_identity": target_id,
+                    "start_identity": f"{source_id}{doc_suffix}",
+                    "end_identity": f"{target_id}{doc_suffix}",
                     "properties": dict(rel.get("properties") or {}),
                 }
             )
@@ -476,11 +603,11 @@ class EntityExtractor(Node):
 
     @staticmethod
     def _sanitize_identifier(value: str) -> str:
-        """Coerce an arbitrary string into a valid Neo4j label/relationship-type identifier.
+        """Coerce an arbitrary string into a valid label/relationship-type identifier.
 
         Replaces invalid characters with ``_``, collapses repeats, uppercases, and ensures the
-        result starts with a letter or underscore. Guarantees the output matches Neo4j's identifier
-        rules so ``write_graph`` will not reject it.
+        result starts with a letter or underscore. Guarantees the output matches the identifier
+        rules shared by openCypher backends so ``write_graph`` will not reject it.
         """
         cleaned = re.sub(r"[^A-Za-z0-9_]+", "_", value.strip())
         cleaned = re.sub(r"_+", "_", cleaned).strip("_")

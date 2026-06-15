@@ -13,9 +13,7 @@ Requirements (same as kg_ingestion.py):
   - The local on-disk Qdrant produced by kg_ingestion.py (QDRANT_PATH below).
 """
 
-from dotenv import load_dotenv
-
-load_dotenv()
+from qdrant_client import QdrantClient
 
 from dynamiq import Workflow
 from dynamiq.connections import Neo4j as Neo4jConnection
@@ -24,13 +22,11 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.nodes.retrievers import QdrantDocumentRetriever, VectorStoreRetriever
+from dynamiq.nodes.retrievers import GraphRetriever, QdrantDocumentRetriever, VectorStoreRetriever
 from dynamiq.nodes.tools import CypherExecutor
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.storages.vector.qdrant.qdrant import QdrantVectorStore
-from qdrant_client import QdrantClient
-
 from dynamiq.utils.logger import logger
 
 # Must match kg_ingestion.py.
@@ -38,18 +34,24 @@ QDRANT_PATH = "./.qdrant_kg_demo2"
 INDEX_NAME = "kg_demo"
 EMBEDDING_MODEL = "text-embedding-3-small"
 
-AGENT_ROLE = """You answer questions about firms, people, and AI systems using two tools:
-- a vector-search tool for unstructured context retrieved from documents, and
-- a Cypher tool for querying a Neo4j knowledge graph of entities and their relationships.
+# Caller's access principals — chosen by the workflow AUTHOR (here, a constant), NOT by the agent.
+# Only graph edges whose `allowed_principals` intersect this list are visible to graph-retriever.
+# This is the trust boundary: the LLM supplies the question, the author supplies who-is-asking.
+PRINCIPALS = ["group:public"]
 
-Strategy:
-1. Use the Cypher tool's introspect mode first to learn the graph schema (labels/relationship types)
-   before writing queries.
-2. Use the knowledge graph for structured/relationship questions (who works where, what connects to what).
-3. Use the vector-search tool for descriptive or "what is / explain" questions.
-4. Combine evidence from both when helpful, and cite which tool gave you each fact."""
+AGENT_ROLE = """You answer questions about the ingested content using three tools:
+- graph-retriever: bounded, access-controlled facts from the knowledge graph for a question. PREFER this
+  for relationship/structured questions ("how is X connected to Y", "what does X use").
+- vector-search: unstructured context retrieved from documents. Use for descriptive "what is / explain".
+- knowledge-graph (Cypher): the power tool for custom graph queries when graph-retriever is not enough.
+  Introspect the schema first, then ALWAYS query actual nodes/relationships — never answer from the
+  schema alone.
 
-QUESTION = "Who is the CIO of Acme Capital, and what AI system does the firm use? How are they connected?"
+Combine evidence when helpful, and cite which tool gave you each fact."""
+
+# Default suits the kg_ingestion.py demo data; pass your own question as the first CLI argument,
+# e.g. after kg_url_ingestion.py:  python kg_question_answering.py "What are the main components?"
+DEFAULT_QUESTION = "Who is the CIO of Acme Capital, and what AI system does the firm use? How are they connected?"
 
 
 def build_workflow() -> Workflow:
@@ -73,7 +75,18 @@ def build_workflow() -> Workflow:
         top_k=4,
     )
 
-    # Tool 2: Cypher queries over the knowledge graph.
+    # Tool 2: bounded, ACL-filtered graph context. The `filters` are LOCKED node config (not on the
+    # tool's input schema), so the agent cannot drop or widen them — the controlled alternative to
+    # LLM-written Cypher. ACL is expressed via the $intersects operator on the edge ACL property.
+    graph_tool = GraphRetriever(
+        name="graph-retriever",
+        connection=Neo4jConnection(),
+        filters={"allowed_principals": {"$intersects": PRINCIPALS}},
+        max_depth=2,
+        top_k=20,
+    )
+
+    # Tool 3: Cypher power tool for queries graph-retriever can't express.
     cypher_tool = CypherExecutor(name="knowledge-graph", connection=Neo4jConnection())
 
     agent = Agent(
@@ -81,7 +94,7 @@ def build_workflow() -> Workflow:
         id="graphrag_agent",
         llm=OpenAI(connection=openai_connection, model="gpt-4o-mini", temperature=0.0, max_tokens=4000),
         role=AGENT_ROLE,
-        tools=[vector_tool, cypher_tool],
+        tools=[vector_tool, graph_tool, cypher_tool],
         inference_mode=InferenceMode.XML,
         max_loops=12,
     )
@@ -90,14 +103,31 @@ def build_workflow() -> Workflow:
 
 
 if __name__ == "__main__":
+    import sys
+
+    question = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_QUESTION
     workflow = build_workflow()
 
-    result = workflow.run(
-        input_data={"input": QUESTION},
-        config=RunnableConfig(request_timeout=180),
-    )
+    try:
+        result = workflow.run(
+            input_data={"input": question},
+            config=RunnableConfig(request_timeout=180),
+        )
 
-    assert result.status == RunnableStatus.SUCCESS, f"QA failed: {result.status} / {result.output}"
+        if result.status != RunnableStatus.SUCCESS:
+            raise RuntimeError(f"QA failed: {result.status} / {result.output}")
 
-    answer = result.output["graphrag_agent"]["output"]["content"]
-    logger.info(f"\nQuestion: {QUESTION}\n\nAnswer:\n{answer}")
+        answer = result.output["graphrag_agent"]["output"]["content"]
+        logger.info(f"\nQuestion: {question}\n\nAnswer:\n{answer}")
+    finally:
+        # Close the agent tools' clients: the Neo4j Bolt driver (avoids the unclosed-driver
+        # ResourceWarning) and the on-disk Qdrant client (releases the SQLite lock).
+        for node in workflow.flow.nodes:
+            for tool in getattr(node, "tools", []) or []:
+                client = getattr(tool, "client", None)
+                if client is not None and hasattr(client, "close"):
+                    client.close()
+                retriever = getattr(tool, "document_retriever", None)
+                vector_store = getattr(retriever, "vector_store", None)
+                if vector_store is not None and getattr(vector_store, "_client", None) is not None:
+                    vector_store._client.close()

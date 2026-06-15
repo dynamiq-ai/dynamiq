@@ -1,6 +1,5 @@
 from .chroma import ChromaDocumentWriter
 from .elasticsearch import ElasticsearchDocumentWriter
-from .graph import Neo4jGraphWriter
 from .milvus import MilvusDocumentWriter
 from .opensearch import OpenSearchDocumentWriter
 from .pgvector import PGVectorDocumentWriter

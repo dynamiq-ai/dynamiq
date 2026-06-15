@@ -22,6 +22,20 @@ class StubLLM(Node):
         return {"content": self.response_content}
 
 
+class SequenceStubLLM(Node):
+    """Stub LLM that returns one canned response per call, in order (for recovery tests)."""
+
+    group: ClassVar = NodeGroup.LLMS
+    name: str = "sequence-stub-llm"
+    responses: list[str] = []
+    calls: int = 0
+
+    def execute(self, input_data, config=None, **kwargs):
+        content = self.responses[min(self.calls, len(self.responses) - 1)]
+        self.calls += 1
+        return {"content": content}
+
+
 def _assert_valid_for_neo4j(nodes, relationships):
     """Every label/type/key produced must pass Neo4jGraphStore's validators."""
     for node in nodes:
@@ -61,19 +75,6 @@ def _IDENTIFIER_MATCHES(value: str) -> bool:
     return re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", value) is not None
 
 
-class TestDedupeEntities:
-    def test_dedupes_by_id_keeping_first(self):
-        entities = [
-            {"id": "acme", "type": "Org", "name": "Acme Capital"},
-            {"id": "acme", "type": "Org", "name": "Acme dup"},
-            {"id": "jane", "type": "Person", "name": "Jane"},
-            {"type": "Person", "name": "no-id-dropped"},
-        ]
-        deduped = EntityExtractor._dedupe_entities(entities)
-        assert [e["id"] for e in deduped] == ["acme", "jane"]
-        assert deduped[0]["name"] == "Acme Capital"
-
-
 class TestToWriteGraphPayload:
     def test_builds_write_graph_shape_and_drops_dangling(self):
         entities = [
@@ -84,15 +85,17 @@ class TestToWriteGraphPayload:
             {"source_id": "jane", "target_id": "acme", "type": "works at", "properties": {"since": 2020}},
             {"source_id": "jane", "target_id": "ghost", "type": "KNOWS"},  # dangling -> dropped
         ]
-        nodes, graph_rels = EntityExtractor._to_write_graph_payload(entities, relationships)
+        extractor = EntityExtractor(llm=StubLLM())
+        nodes, graph_rels = extractor._to_write_graph_payload(entities, relationships)
 
+        # Every entity carries its type label first plus the shared "Entity" label (the full-text index hook).
         assert nodes == [
             {
-                "labels": ["HEDGE_FUND"],
+                "labels": ["HEDGE_FUND", "Entity"],
                 "identity_key": "id",
                 "properties": {"aum": "10B", "id": "acme", "name": "Acme Capital"},
             },
-            {"labels": ["PERSON"], "identity_key": "id", "properties": {"id": "jane", "name": "Jane Doe"}},
+            {"labels": ["PERSON", "Entity"], "identity_key": "id", "properties": {"id": "jane", "name": "Jane Doe"}},
         ]
         assert graph_rels == [
             {
@@ -110,7 +113,7 @@ class TestToWriteGraphPayload:
 
     def test_entity_without_type_or_id_is_skipped(self):
         entities = [{"id": "x"}, {"type": "Person"}, {"id": "y", "type": "Person"}]
-        nodes, _ = EntityExtractor._to_write_graph_payload(entities, [])
+        nodes, _ = EntityExtractor(llm=StubLLM())._to_write_graph_payload(entities, [])
         assert [n["properties"]["id"] for n in nodes] == ["y"]
 
 
@@ -129,11 +132,14 @@ class TestParseLLMJson:
         raw = 'Here you go:\n{"entities": [], "relationships": []}\nHope that helps!'
         assert EntityExtractor._parse_llm_json(raw) == {"entities": [], "relationships": []}
 
-    def test_garbage_returns_empty(self):
-        assert EntityExtractor._parse_llm_json("not json at all") == {"entities": [], "relationships": []}
+    def test_garbage_returns_none(self):
+        assert EntityExtractor._parse_llm_json("not json at all") is None
 
-    def test_none_returns_empty(self):
-        assert EntityExtractor._parse_llm_json(None) == {"entities": [], "relationships": []}
+    def test_none_returns_none(self):
+        assert EntityExtractor._parse_llm_json(None) is None
+
+    def test_non_dict_json_returns_none(self):
+        assert EntityExtractor._parse_llm_json('[{"id": "a"}]') is None
 
 
 class TestExecuteEndToEndWithStubLLM:
@@ -157,17 +163,70 @@ class TestExecuteEndToEndWithStubLLM:
         assert result["relationships"][0]["type"] == "WORKS_AT"
         _assert_valid_for_neo4j(result["nodes"], result["relationships"])
 
-    def test_execute_merges_across_documents_and_dedupes(self):
+    def test_execute_recovers_from_unparseable_output(self):
+        payload = {
+            "entities": [{"id": "acme", "type": "Org", "name": "Acme"}],
+            "relationships": [],
+        }
+        llm = SequenceStubLLM(responses=["sorry, here is the graph you asked for", json.dumps(payload)])
+        extractor = EntityExtractor(llm=llm)
+
+        result = extractor.execute(EntityExtractor.input_schema(documents=[Document(content="Acme.")]))
+
+        assert llm.calls == 2  # initial call + one repair round-trip
+        assert [n["properties"]["name"] for n in result["nodes"]] == ["Acme"]
+
+    def test_execute_skips_document_when_recovery_fails(self):
+        llm = SequenceStubLLM(responses=["garbage", "still garbage"])
+        extractor = EntityExtractor(llm=llm)
+
+        result = extractor.execute(EntityExtractor.input_schema(documents=[Document(content="Acme.")]))
+
+        assert llm.calls == 2
+        assert result["nodes"] == []
+        assert result["relationships"] == []
+
+    def test_execute_promotes_declared_attributes_to_doc_scoped_value_nodes(self):
+        from dynamiq.nodes.extractors import Ontology
+        from dynamiq.nodes.extractors.entity_extractor import ATTRIBUTE_VALUE_LABEL, HAS_ATTRIBUTE_TYPE
+
+        payload = {
+            "entities": [{"id": "jane", "type": "Person", "name": "Jane Doe", "properties": {"salary": "$250,000"}}],
+            "relationships": [],
+        }
+        ontology = Ontology(entity_types=["Person"], relationship_types=[], attributes={"Person": ["salary"]})
+        extractor = EntityExtractor(llm=StubLLM(response_content=json.dumps(payload)), ontology=ontology)
+        document = Document(id="doc-1", content="Jane Doe's salary is $250,000.")
+
+        result = extractor.execute(EntityExtractor.input_schema(documents=[document]))
+
+        person = next(n for n in result["nodes"] if n["labels"][0] == "PERSON")
+        assert person["properties"]["id"] == "jane@doc-1"  # wiring id is doc-scoped
+        assert "salary" not in person["properties"]  # promoted to an edge, not a node property
+
+        value_node = next(n for n in result["nodes"] if n["labels"][0] == ATTRIBUTE_VALUE_LABEL)
+        assert value_node["properties"] == {"id": "jane@doc-1::salary::doc-1", "value": "$250,000"}
+
+        attr_edge = next(r for r in result["relationships"] if r["type"] == HAS_ATTRIBUTE_TYPE)
+        assert attr_edge["start_identity"] == "jane@doc-1"
+        assert attr_edge["end_identity"] == "jane@doc-1::salary::doc-1"
+        assert attr_edge["properties"]["key"] == "salary"
+
+    def test_execute_emits_doc_scoped_nodes_per_document(self):
         payload = {
             "entities": [{"id": "acme", "type": "Org", "name": "Acme"}],
             "relationships": [],
         }
         llm = StubLLM(response_content=json.dumps(payload))
         extractor = EntityExtractor(llm=llm)
+        doc_one, doc_two = Document(id="d1", content="doc one"), Document(id="d2", content="doc two")
 
-        result = extractor.execute(
-            EntityExtractor.input_schema(documents=[Document(content="doc one"), Document(content="doc two")])
-        )
-        # Same entity id surfaced by both docs -> deduped to one node.
-        assert len(result["nodes"]) == 1
-        assert result["nodes"][0]["properties"]["id"] == "acme"
+        result = extractor.execute(EntityExtractor.input_schema(documents=[doc_one, doc_two]))
+
+        # The same LLM id from two documents must NOT alias: wiring ids are doc-scoped, and identity
+        # is assigned later by KnowledgeGraphWriter name resolution (which converges them by name).
+        assert {(n["labels"][0], n["properties"]["id"]) for n in result["nodes"]} == {
+            ("ORG", "acme@d1"),
+            ("ORG", "acme@d2"),
+        }
+        assert {n["properties"]["name"] for n in result["nodes"]} == {"Acme"}

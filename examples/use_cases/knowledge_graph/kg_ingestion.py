@@ -7,7 +7,7 @@ ingestion flow:
                      └─► KnowledgeGraph                                    (knowledge graph)
 
 The KnowledgeGraphWriter node does extraction + ontology enforcement + write-time entity resolution
-+ Neo4j upsert in ONE node (replacing the old EntityExtractor -> Neo4jGraphWriter pair).
++ Neo4j upsert in ONE node — it is the single write path for extracted knowledge graphs.
 
 Run this first, then run ``kg_question_answering.py`` to query both stores.
 
@@ -18,10 +18,6 @@ Requirements:
     then set NEO4J_URI=bolt://localhost:7687, NEO4J_USERNAME=neo4j, NEO4J_PASSWORD=password.
   - Qdrant runs locally on disk (no server needed) under ``QDRANT_PATH`` below.
 """
-
-from dotenv import load_dotenv
-
-load_dotenv()
 
 from qdrant_client import QdrantClient
 
@@ -114,7 +110,6 @@ def build_workflow() -> Workflow:
         llm=OpenAI(connection=openai_connection, model="gpt-4o-mini", temperature=0.0, max_tokens=4000),
         connection=Neo4jConnection(),
         ontology=ONTOLOGY,  # set to None for free-form extraction
-        resolve_duplicates=True,  # re-runs link near-duplicate entities instead of duplicating
         input_transformer=InputTransformer(selector={"documents": "$.documents"}),
     )
 
@@ -133,7 +128,8 @@ if __name__ == "__main__":
             config=RunnableConfig(request_timeout=120),
         )
 
-        assert result.status == RunnableStatus.SUCCESS, f"Ingestion failed: {result.status} / {result.output}"
+        if result.status != RunnableStatus.SUCCESS:
+            raise RuntimeError(f"Ingestion failed: {result.status} / {result.output}")
 
         vector_out = result.output["vector_writer"]["output"]
         graph_out = result.output["knowledge_graph"]["output"]
