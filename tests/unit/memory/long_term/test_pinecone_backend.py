@@ -178,6 +178,15 @@ def test_pinecone_list_by_scope(backend, fake_embedder):
     assert {f.id for f in listed} == {"f1", "f2"}
 
 
+def test_pinecone_list_by_scope_zero_limit_returns_empty(backend, fake_embedder):
+    """Pinecone's `top_k` is required to be >= 1, so `limit=0` cannot be
+    expressed as a query — short-circuit so callers see the same empty result
+    they'd get from in-memory / other backends."""
+    backend.insert(_fact("f1", "u1", "a"), fake_embedder.embed("a"))
+    assert backend.list_by_scope({"user_id": "u1"}, limit=0) == []
+    assert backend.list_by_scope({"user_id": "u1"}, limit=-3) == []
+
+
 def test_pinecone_delete_scope_returns_accurate_count(backend, fake_embedder):
     backend.insert(_fact("f1", "u1", "a"), fake_embedder.embed("a"))
     backend.insert(_fact("f2", "u1", "b"), fake_embedder.embed("b"))

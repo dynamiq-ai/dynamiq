@@ -181,6 +181,11 @@ class PineconeLongTermMemoryBackend(LongTermMemoryBackend):
     def list_by_scope(self, scope: dict[str, str], limit: int = 100) -> list[Fact]:
         # Pinecone has no "scan" primitive — the documented pattern is a query
         # with a zero vector + filter. Capped at top_k=10000 (Pinecone's max).
+        # `top_k` must be >= 1 in Pinecone, so `limit<=0` cannot be expressed
+        # as a query at all — short-circuit to match the empty-result contract
+        # in-memory / other backends already give for `limit<=0`.
+        if limit <= 0:
+            return []
         top_k = min(max(limit, 1), self._LIST_PAGE_SIZE)
         result = self._index.query(
             vector=[0.0] * self.dimension,
