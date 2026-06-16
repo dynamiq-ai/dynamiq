@@ -285,7 +285,7 @@ def test_sync_respects_disable_env(monkeypatch):
     """With the env var disabled, nothing is registered into litellm."""
     import litellm
 
-    monkeypatch.setenv("DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM", "off")
+    monkeypatch.setenv("DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM", "false")
 
     reg = ModelRegistry()
     reg._models = {MODEL_A.lower(): dict(TEST_REGISTRY_DATA[MODEL_A])}
