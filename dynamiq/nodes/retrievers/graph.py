@@ -99,6 +99,11 @@ class GraphRetrieverInputSchema(BaseModel):
         description="Optional explicit entity names to start from. When omitted, entry entities are those "
         "whose name is mentioned in the query.",
     )
+    entity_ids: list[str] | None = Field(
+        default=None,
+        description="Optional explicit, resolved entity ids to start from (unique, variant-proof). Takes "
+        "precedence over 'entities' and the query — used by hybrid retrieval to seed traversal by id.",
+    )
     filters: dict[str, Any] | None = Field(
         default=None,
         description="Optional edge-property filters to narrow results. AND-ed on top of the node's locked "
@@ -237,6 +242,10 @@ class GraphRetriever(ConnectionNode):
         binds nothing and filters every edge by name (the fallback). Either way an entity with no
         ACL-visible edge yields no rows — so seeds without a visible edge drop out for free.
         """
+        if input_data.entity_ids:
+            params["entity_ids"] = input_data.entity_ids
+            return [f"MATCH (a:{ENTITY_LABEL})"], "a.id IN $entity_ids", True
+
         if input_data.entities:
             params["entities"] = input_data.entities
             return [f"MATCH (a:{ENTITY_LABEL})"], "a.name IN $entities", True
@@ -265,13 +274,14 @@ class GraphRetriever(ConnectionNode):
             where = " AND ".join([t for t in [entry_where, *rel_clauses] if t])
             if anchored:
                 ret = (
-                    "RETURN coalesce(startNode(r).name, startNode(r).value) AS a_name, type(r) AS rel, "
-                    "properties(r) AS rprops, coalesce(endNode(r).name, endNode(r).value) AS b_name"
+                    "RETURN coalesce(startNode(r).name, startNode(r).value) AS a_name, startNode(r).id AS a_id, "
+                    "type(r) AS rel, properties(r) AS rprops, "
+                    "coalesce(endNode(r).name, endNode(r).value) AS b_name, endNode(r).id AS b_id"
                 )
             else:
                 ret = (
-                    "RETURN coalesce(a.name, a.value) AS a_name, type(r) AS rel, "
-                    "properties(r) AS rprops, coalesce(b.name, b.value) AS b_name"
+                    "RETURN coalesce(a.name, a.value) AS a_name, a.id AS a_id, type(r) AS rel, "
+                    "properties(r) AS rprops, coalesce(b.name, b.value) AS b_name, b.id AS b_id"
                 )
             lines = [*lead, f"MATCH (a){arrow.format(rel='r')}(b)"]
             if where:
@@ -348,13 +358,14 @@ class GraphRetriever(ConnectionNode):
                 continue
             seen.add(fact)
             rprops = dict(row.get("rprops") or {})
-            documents.append(
-                Document(
-                    content=fact,
-                    metadata={"source": source, "target": target, "rel": rel, **rprops},
-                    score=1.0 / (1.0 + rank),
-                )
-            )
+            metadata = {"source": source, "target": target, "rel": rel, **rprops}
+            # Endpoint entity ids (when available) let a caller iterate: feed a fact's neighbor id back as
+            # the next hop's seed instead of doing an exploding variable-length expansion.
+            if row.get("a_id") is not None:
+                metadata["source_id"] = row["a_id"]
+            if row.get("b_id") is not None:
+                metadata["target_id"] = row["b_id"]
+            documents.append(Document(content=fact, metadata=metadata, score=1.0 / (1.0 + rank)))
         return documents
 
     @staticmethod

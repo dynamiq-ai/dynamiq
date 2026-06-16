@@ -7,8 +7,11 @@ from dynamiq.connections import ApacheAGE, AWSNeptune, Neo4j
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.extractors.entity_extractor import (
     ATTRIBUTE_VALUE_LABEL,
+    ENTITY_ID_INDEX,
     ENTITY_LABEL,
     ENTITY_NAME_FULLTEXT_INDEX,
+    HAS_ATTRIBUTE_TYPE,
+    KG_ENTITY_IDS_KEY,
     EntityExtractor,
     EntityExtractorInputSchema,
 )
@@ -35,6 +38,27 @@ def _trigram_similarity(a: str, b: str) -> float:
     if not ta or not tb:
         return 0.0
     return len(ta & tb) / len(ta | tb)  # Jaccard
+
+
+def _entity_ids_by_doc(relationships: list[dict]) -> dict[str, list[str]]:
+    """Map each source document id -> the RESOLVED entity ids it mentions, recovered from relationships.
+
+    Relationships carry ``source_doc_id`` (stamped by EntityExtractor) and, after resolution, durable
+    endpoint ids. The entity ids a chunk mentions are therefore the endpoints of the relationships sourced
+    from that chunk. ``HAS_ATTRIBUTE`` edges point at an ``AttributeValue`` holder, not an entity, so their
+    end id is excluded (the owner entity on the start side is still kept).
+    """
+    by_doc: dict[str, set[str]] = {}
+    for rel in relationships:
+        doc_id = (rel.get("properties") or {}).get("source_doc_id")
+        if not doc_id:
+            continue
+        ids = by_doc.setdefault(str(doc_id), set())
+        if rel.get("start_identity"):
+            ids.add(rel["start_identity"])
+        if rel.get("type") != HAS_ATTRIBUTE_TYPE and rel.get("end_identity"):
+            ids.add(rel["end_identity"])
+    return {doc_id: sorted(ids) for doc_id, ids in by_doc.items()}
 
 
 class KnowledgeGraphWriter(EntityExtractor):
@@ -92,21 +116,29 @@ class KnowledgeGraphWriter(EntityExtractor):
         self._ensure_entity_index()
 
     def _ensure_entity_index(self) -> None:
-        """Create the entity-name full-text index (Neo4j) so GraphRetriever can seek instead of scan.
+        """Create the entity name full-text index AND the entity id range index (Neo4j) so GraphRetriever
+        can seek instead of scan — by the question's words (full-text) or by resolved id (range index).
 
         Idempotent (``IF NOT EXISTS``) and best-effort — a failure (e.g. missing privileges) only means
         retrieval falls back to a scan, so it is logged, not raised. Neo4j-only; other backends skip it.
         """
         if not isinstance(self._graph_store, Neo4jGraphStore):
             return
-        try:
-            self._graph_store.run_cypher(
+        for statement, what in (
+            (
                 f"CREATE FULLTEXT INDEX {ENTITY_NAME_FULLTEXT_INDEX} IF NOT EXISTS "
                 f"FOR (n:{ENTITY_LABEL}) ON EACH [n.name]",
-                database=self.database,
-            )
-        except Exception as e:
-            logger.warning(f"Node {self.name} - {self.id}: could not create entity full-text index: {e}")
+                "full-text",
+            ),
+            (
+                f"CREATE INDEX {ENTITY_ID_INDEX} IF NOT EXISTS FOR (n:{ENTITY_LABEL}) ON (n.id)",
+                "id",
+            ),
+        ):
+            try:
+                self._graph_store.run_cypher(statement, database=self.database)
+            except Exception as e:
+                logger.warning(f"Node {self.name} - {self.id}: could not create entity {what} index: {e}")
 
     def _build_graph_store(self) -> BaseGraphStore:
         """Pick the concrete store from the connection type (same dispatch as CypherExecutor)."""
@@ -165,14 +197,35 @@ class KnowledgeGraphWriter(EntityExtractor):
             f"{write_result.get('relationships_created')} new relationship(s)."
         )
 
+        # Return the input chunks tagged with the RESOLVED entity ids each mentions, so they can go to a
+        # vector store and a hybrid retriever can seed graph traversal by unique id (not by ambiguous name).
+        documents = self._attach_entity_ids(input_data.documents, relationships)
+
         return {
             **extraction,
             "nodes": nodes,
             "relationships": relationships,
+            "documents": documents,
             "write_stats": write_result,
             "nodes_created": write_result.get("nodes_created"),
             "relationships_created": write_result.get("relationships_created"),
         }
+
+    @staticmethod
+    def _attach_entity_ids(documents: list, relationships: list[dict]) -> list:
+        """Return COPIES of the chunks, each with ``kg_entity_ids`` = the resolved entity ids it mentions.
+
+        Recovered from the resolved relationships by ``source_doc_id`` (see :func:`_entity_ids_by_doc`).
+        The caller's documents are not mutated. A chunk whose entities appear in no relationship gets an
+        empty list — it still flows to the vector store, just with no graph seeds.
+        """
+        by_doc = _entity_ids_by_doc(relationships)
+        enriched = []
+        for document in documents:
+            ids = by_doc.get(str(document.id), [])
+            metadata = {**(document.metadata or {}), KG_ENTITY_IDS_KEY: ids}
+            enriched.append(document.model_copy(update={"metadata": metadata}))
+        return enriched
 
     def _existing_nodes(self, label: str) -> list[tuple[str, str]]:
         """All (id, name) of existing nodes with the given label, cached per execute() call."""

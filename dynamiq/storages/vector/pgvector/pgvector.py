@@ -948,6 +948,46 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
                 documents = self._convert_query_result_to_documents(records)
                 return documents
 
+    def get_documents_by_ids(
+        self,
+        ids: list[str],
+        content_key: str | None = None,
+        embedding_key: str | None = None,
+        include_embeddings: bool = False,
+    ) -> list[Document]:
+        """Fetch documents by their exact ids (e.g. to pull a graph fact's source chunk by ``source_doc_id``).
+
+        Args:
+            ids (list[str]): The document ids to fetch. Order of the result is not guaranteed.
+            content_key (str): Field used to store content. Defaults to the store's content_key.
+            embedding_key (str): Field used to store embeddings. Defaults to the store's embedding_key.
+            include_embeddings (bool): Whether to include embeddings in the results. Defaults to False.
+
+        Returns:
+            list[Document]: The matching documents (ids with no row are simply absent).
+        """
+        if not ids:
+            return []
+
+        content_key = content_key or self.content_key
+        select_columns = [SQL("id"), Identifier(content_key), SQL("metadata")]
+        if include_embeddings:
+            select_columns.append(Identifier(embedding_key or self.embedding_key))
+
+        query = SQL("SELECT {} FROM {}.{} WHERE id = ANY(%s::text[])").format(
+            SQL(", ").join(select_columns),
+            Identifier(self.schema_name),
+            Identifier(self.table_name),
+        )
+
+        with self._get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                result = self._execute_sql_query(query, params=(list(ids),), cursor=cur)
+                records = result.fetchall()
+                return self._convert_query_result_to_documents(
+                    records, content_key=content_key, embedding_key=embedding_key
+                )
+
     def _convert_query_result_to_documents(
         self,
         query_result: dict[str, Any],

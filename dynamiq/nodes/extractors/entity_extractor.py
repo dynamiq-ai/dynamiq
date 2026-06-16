@@ -26,6 +26,14 @@ HAS_ATTRIBUTE_TYPE = "HAS_ATTRIBUTE"
 # cover entity names across all types — the index-backed entry point GraphRetriever uses instead of a scan.
 ENTITY_LABEL = "Entity"
 ENTITY_NAME_FULLTEXT_INDEX = "entity_name"
+# Range index on the entity id (Neo4j) so GraphRetriever can seek when seeding traversal by resolved id.
+ENTITY_ID_INDEX = "entity_id"
+
+# Metadata key under which the resolved, unique entity ids a chunk mentions are attached to that chunk —
+# done by KnowledgeGraphWriter (which alone has the post-resolution durable ids). Lets a hybrid retriever
+# seed graph traversal by id (unique, variant-proof), not by ambiguous entity name. ``kg_`` prefixed to
+# avoid colliding with a caller's own document metadata.
+KG_ENTITY_IDS_KEY = "kg_entity_ids"
 
 
 class Triple(BaseModel):

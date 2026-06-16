@@ -99,6 +99,24 @@ class TestQueryBuilding:
         assert params["entities"] == ["Acme"]
         assert "allowed_principals" not in query  # no locked filters -> no ACL clause
 
+    def test_explicit_entity_ids_entry_predicate(self):
+        # Resolved-id seeding (hybrid retrieval) anchors on the unique id, not the ambiguous name.
+        node = make_retriever()
+        query, params = node._build_query(
+            GraphRetrieverInputSchema(query="x", entity_ids=["uuid-acme", "uuid-jane"]), 5
+        )
+        assert "a.id IN $entity_ids" in query
+        assert params["entity_ids"] == ["uuid-acme", "uuid-jane"]
+
+    def test_entity_ids_take_precedence_over_names_and_query(self):
+        node = make_retriever()
+        query, _ = node._build_query(
+            GraphRetrieverInputSchema(query="who works at Acme?", entities=["Acme"], entity_ids=["uuid-acme"]), 5
+        )
+        assert "a.id IN $entity_ids" in query
+        assert "a.name IN $entities" not in query
+        assert "CONTAINS toLower(a.name)" not in query
+
     def test_locked_and_user_filters_both_applied_distinct_params(self):
         # Locked node filter (ACL) and user input filter are both AND-ed in, with non-colliding params.
         node = make_retriever(filters=LOCKED_ACL)
@@ -183,6 +201,23 @@ class TestExecuteRendering:
         assert out["documents"][0].metadata == {"source": "Jane Doe", "target": "Acme", "rel": "WORKS_AT", "source_url": "u"}
         assert out["content"] == "- Jane Doe -[WORKS_AT]-> Acme\n- Jane Doe -[HAS_ATTRIBUTE]-> $250,000"
         assert out["documents"][0].score > out["documents"][1].score  # rank-derived ordering
+
+    def test_single_hop_exposes_endpoint_entity_ids_for_iteration(self):
+        # Endpoint ids let a caller feed a fact's neighbor back as the next hop's seed (no *1..N).
+        rows = [
+            {
+                "a_name": "Jane Doe",
+                "a_id": "id-jane",
+                "rel": "WORKS_AT",
+                "rprops": {},
+                "b_name": "Acme",
+                "b_id": "id-acme",
+            }
+        ]
+        node = make_retriever(rows=rows)
+        out = node.execute(GraphRetrieverInputSchema(query="Jane Doe"))
+        assert out["documents"][0].metadata["source_id"] == "id-jane"
+        assert out["documents"][0].metadata["target_id"] == "id-acme"
 
     def test_empty_result_message(self):
         node = make_retriever(rows=[])
