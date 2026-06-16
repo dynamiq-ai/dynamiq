@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 from dynamiq.utils.logger import logger
 
 REGISTRY_FILE = Path(__file__).with_name("model_registry.json")
+
+_SYNC_ENV_VAR = "DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM"
+_SYNC_DISABLED_VALUES = {"0", "false", "no", "off"}
+
+
+def _sync_to_litellm_enabled() -> bool:
+    """Whether registry entries should be mirrored into litellm's ``model_cost`` (default on)."""
+    return os.getenv(_SYNC_ENV_VAR, "1").strip().lower() not in _SYNC_DISABLED_VALUES
 
 
 class ModelRegistry:
@@ -37,6 +46,42 @@ class ModelRegistry:
                 continue
             self._models[key.lower()] = value
         logger.debug("ModelRegistry: loaded %d models from %s", len(self._models), path)
+        self.sync_to_litellm()
+
+    def sync_to_litellm(self) -> None:
+        """Gap-fill loaded registry entries into litellm's in-memory ``model_cost``.
+
+        For every loaded model litellm does NOT already recognize, register it so that
+        ``litellm.supports_function_calling`` and ``drop_params`` honor our metadata. Never
+        clobbers an entry litellm already knows. Per-process, non-persistent, exception-safe:
+        a missing or misbehaving litellm can never break ``import dynamiq``.
+        """
+        if not _sync_to_litellm_enabled() or not self._models:
+            return
+        try:
+            import litellm
+        except Exception as exc:
+            logger.debug("ModelRegistry: litellm unavailable, skipping sync: %s", exc)
+            return
+
+        registered = skipped = failed = 0
+        for key, info in self._models.items():
+            try:
+                existing = litellm.get_model_info(model=key)  # case-/prefix-tolerant lookup
+            except Exception:
+                existing = None
+            if existing:
+                skipped += 1
+                continue
+            try:
+                litellm.register_model({key: info})
+                registered += 1
+            except Exception as exc:
+                failed += 1
+                logger.debug("ModelRegistry: failed to register %s into litellm: %s", key, exc)
+
+        log = logger.warning if failed else logger.debug
+        log("ModelRegistry->litellm sync: registered=%d skipped=%d failed=%d", registered, skipped, failed)
 
     def register(self, model: str, info: dict[str, Any]) -> None:
         """Add or update a model entry.

@@ -37,6 +37,17 @@ TEST_REGISTRY_DATA = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _restore_litellm_model_cost():
+    """Keep the suite hermetic: ``sync_to_litellm`` mutates the global ``litellm.model_cost``."""
+    import litellm
+
+    snapshot = dict(litellm.model_cost)
+    yield
+    litellm.model_cost.clear()
+    litellm.model_cost.update(snapshot)
+
+
 @pytest.fixture()
 def registry(tmp_path) -> ModelRegistry:
     path = tmp_path / "models.json"
@@ -224,3 +235,79 @@ def test_basellm_uses_litellm_when_model_is_known():
     ):
         assert llm.is_function_calling_supported is False
         mock_fc.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# sync_to_litellm: gap-fill registry entries into litellm.model_cost
+# ---------------------------------------------------------------------------
+
+
+def test_sync_registers_unknown_model_into_litellm(monkeypatch):
+    """After sync, a model litellm didn't know reports FC support via litellm itself."""
+    import litellm
+
+    monkeypatch.setenv("DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM", "1")
+
+    reg = ModelRegistry()
+    reg._models = {MODEL_B.lower(): dict(TEST_REGISTRY_DATA[MODEL_B])}
+
+    # Sanity: litellm must not already know this synthetic model.
+    with pytest.raises(Exception):
+        litellm.get_model_info(model=MODEL_B.lower())
+
+    reg.sync_to_litellm()
+
+    assert litellm.get_model_info(model=MODEL_B.lower())["supports_function_calling"] is True
+    # litellm's lookup is provider-prefix tolerant, so the prefixed form resolves too.
+    assert litellm.supports_function_calling(f"together_ai/{MODEL_B}") is True
+
+
+def test_sync_does_not_clobber_known_litellm_model(monkeypatch):
+    """A model litellm already knows must keep litellm's own metadata, not ours."""
+    import litellm
+
+    monkeypatch.setenv("DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM", "1")
+
+    known = "gpt-4o-mini"  # shipped in litellm's model map
+    original = dict(litellm.get_model_info(model=known))
+
+    reg = ModelRegistry()
+    # Deliberately poisoned metadata for a model litellm already knows.
+    reg._models = {known: {"max_input_tokens": 1, "supports_function_calling": False}}
+    reg.sync_to_litellm()
+
+    after = litellm.get_model_info(model=known)
+    assert after["max_input_tokens"] == original["max_input_tokens"]
+    assert after["max_input_tokens"] != 1
+
+
+def test_sync_respects_disable_env(monkeypatch):
+    """With the env var disabled, nothing is registered into litellm."""
+    import litellm
+
+    monkeypatch.setenv("DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM", "off")
+
+    reg = ModelRegistry()
+    reg._models = {MODEL_A.lower(): dict(TEST_REGISTRY_DATA[MODEL_A])}
+    reg.sync_to_litellm()
+
+    with pytest.raises(Exception):
+        litellm.get_model_info(model=MODEL_A.lower())
+
+
+def test_sync_is_exception_safe_without_litellm(monkeypatch):
+    """If importing litellm fails, sync must swallow it and not raise."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _boom(name, *args, **kwargs):
+        if name == "litellm":
+            raise ImportError("simulated")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _boom)
+
+    reg = ModelRegistry()
+    reg._models = {MODEL_A.lower(): dict(TEST_REGISTRY_DATA[MODEL_A])}
+    reg.sync_to_litellm()  # must not raise
