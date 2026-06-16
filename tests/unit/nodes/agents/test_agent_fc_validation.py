@@ -1,10 +1,3 @@
-"""Tests for Agent FUNCTION_CALLING support validation.
-
-The validator must distinguish "litellm doesn't know this model id" from
-"this model can't do function calling" — an unknown id should fall back to the
-custom registry (and ultimately warn + allow) instead of hard-failing.
-"""
-
 import uuid
 
 import pytest
@@ -15,8 +8,7 @@ from dynamiq.nodes.llms.registry import ModelRegistry
 from dynamiq.nodes.llms.togetherai import TogetherAI
 from dynamiq.nodes.types import InferenceMode
 
-# A real-world example: Together shipped this id but litellm's registry lags.
-UNKNOWN_MODEL = "moonshotai/kimi-k2.6"  # becomes together_ai/moonshotai/kimi-k2.6
+UNKNOWN_MODEL = "moonshotai/kimi-k2.6"
 PREFIXED_MODEL = f"together_ai/{UNKNOWN_MODEL}"
 
 
