@@ -239,19 +239,12 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
         return [_properties_to_fact(obj.properties) for obj in objects]
 
     def delete_scope(self, scope: dict[str, str]) -> int:
-        # Weaviate's `delete_many(where=...)` is server-capped (default ~10k per
-        # call) and doesn't report a count we can rely on across versions. Loop
-        # fetch-then-delete-by-uuid batches until the page comes back empty —
-        # this is unbounded and gives an accurate count of what we actually
-        # removed. Empty scope = match everything, same contract as Qdrant /
-        # in-memory; we drive that with `fetch_objects(limit=...)` (no filter).
+        if not scope:
+            raise ValueError("delete_scope requires a non-empty scope")
         flt = _scope_to_filter(scope)
         total = 0
         while True:
-            if flt is None:
-                result = self._collection.query.fetch_objects(limit=self._SCOPE_PAGE_SIZE)
-            else:
-                result = self._collection.query.fetch_objects(filters=flt, limit=self._SCOPE_PAGE_SIZE)
+            result = self._collection.query.fetch_objects(filters=flt, limit=self._SCOPE_PAGE_SIZE)
             objects = getattr(result, "objects", []) or []
             if not objects:
                 break

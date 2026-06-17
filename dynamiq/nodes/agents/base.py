@@ -55,7 +55,7 @@ from dynamiq.utils.utils import deep_merge
 # without mutating shared agent state, so concurrent execute() calls on the
 # same agent instance never see each other's user-scoped tools and never
 # block on a lock.
-_run_extra_tools: ContextVar[list["Node"]] = ContextVar("dynamiq_agent_run_extra_tools", default=[])
+_run_extra_tools: ContextVar[list["Node"] | None] = ContextVar("dynamiq_agent_run_extra_tools", default=None)
 
 
 class StreamChunkChoiceDelta(BaseModel):

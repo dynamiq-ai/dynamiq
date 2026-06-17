@@ -321,12 +321,12 @@ def test_weaviate_delete_scope_paginates_beyond_single_page_with_scope(backend, 
     assert backend.list_by_scope({"user_id": "u1"}) == []
 
 
-def test_weaviate_delete_scope_empty_paginates_unbounded(backend, fake_embedder, monkeypatch):
-    """Empty scope must clear the entire collection — not just the first page."""
-    monkeypatch.setattr(type(backend), "_SCOPE_PAGE_SIZE", 2)
-    for i in range(5):
-        backend.insert(_fact(f"f{i}", f"u{i % 2}", f"c{i}"), fake_embedder.embed(f"c{i}"))
-    assert backend.delete_scope({}) == 5
+def test_weaviate_delete_scope_rejects_empty_scope(backend, fake_embedder):
+    """Empty scope is rejected to prevent accidental whole-collection wipes."""
+    backend.insert(_fact("f1", "u1", "a"), fake_embedder.embed("a"))
+    with pytest.raises(ValueError, match="non-empty scope"):
+        backend.delete_scope({})
+    assert len(backend.list_by_scope({"user_id": "u1"})) == 1
 
 
 # --- search ----------------------------------------------------------------
