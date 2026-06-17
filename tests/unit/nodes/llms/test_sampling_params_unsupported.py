@@ -1,3 +1,5 @@
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from dynamiq.connections import AWS as AWSConnection
@@ -7,6 +9,24 @@ from dynamiq.nodes.llms.anthropic import Anthropic
 from dynamiq.nodes.llms.base import SAMPLING_PARAMS, SAMPLING_UNSUPPORTED_MODEL_MARKERS
 from dynamiq.nodes.llms.bedrock import Bedrock
 from dynamiq.nodes.llms.custom_llm import CustomLLM
+from dynamiq.prompts import Prompt
+from dynamiq.runnables import RunnableConfig
+
+
+def _mock_response(content="ok"):
+    """Minimal litellm ModelResponse stand-in for _handle_completion_response."""
+    choice = MagicMock()
+    choice.message.content = content
+    choice.message.tool_calls = None
+    response = MagicMock()
+    response.choices = [choice]
+    response.model_extra = {}
+    usage = MagicMock()
+    usage.prompt_tokens = usage.completion_tokens = usage.total_tokens = 0
+    usage.prompt_tokens_details = None
+    usage.cache_read_input_tokens = usage.cache_creation_input_tokens = None
+    response.usage = usage
+    return response
 
 
 @pytest.fixture
@@ -119,6 +139,22 @@ class TestReactiveBackstop:
         exc = Exception("some unrelated unsupported field error")
         assert anthropic_supported._recover_completion_params(exc, {"model": "x", "max_tokens": 10}) is None
 
+    def test_no_recovery_on_unexpected_value_validation_error(self, anthropic_supported):
+        # "unexpected value" is a validation error, not an unsupported-param signal.
+        anthropic_supported.temperature = 5.0
+        common = {"model": "anthropic/claude-opus-4-6", "temperature": 5.0}
+        exc = Exception("temperature: unexpected value; permitted range is 0..1")
+        assert anthropic_supported._recover_completion_params(exc, common) is None
+
+    def test_recovers_on_unexpected_keyword_error(self, anthropic_supported):
+        # A Python-level "unexpected keyword argument" still counts as unsupported.
+        anthropic_supported.temperature = 0.5
+        common = {"model": "anthropic/claude-opus-4-6", "temperature": 0.5}
+        exc = Exception("completion() got an unexpected keyword argument 'temperature'")
+        recovered = anthropic_supported._recover_completion_params(exc, common)
+        assert recovered is not None
+        assert "temperature" not in recovered
+
 
 class TestBedrockBackstop:
     @pytest.fixture
@@ -152,3 +188,53 @@ class TestBedrockBackstop:
         # Persisted only after a successful retry.
         bedrock._persist_completion_recovery(common, recovered)
         assert bedrock.stop is None
+
+
+class TestRecoveryLoop:
+    def test_retry_failure_triggers_next_recovery(self):
+        # Bedrock strips `stop`, the retry fails on sampling, so the loop runs the sampling
+        # backstop next and persists both drops.
+        with patch("litellm.completion"), patch("litellm.stream_chunk_builder"):
+            node = Bedrock(
+                name="b",
+                model="bedrock/eu.anthropic.claude-some-future-model",
+                connection=AWSConnection(access_key_id="x", secret_access_key="y", region_name="eu-west-1"),
+                prompt=Prompt(messages=[{"role": "user", "content": "Hello"}]),
+                stop=["DONE"],
+                temperature=0.5,
+            )
+
+            def fake_completion(**params):
+                if params.get("stop"):
+                    raise Exception("This model doesn't support the stopSequences field")
+                if params.get("temperature") is not None:
+                    raise Exception("temperature: Extra inputs are not permitted")
+                return _mock_response("ok")
+
+            node._completion = fake_completion
+            result = node.execute(MagicMock(messages=None, files=None), config=RunnableConfig(callbacks=[]))
+
+            assert result["content"] == "ok"
+            assert node.stop is None
+            assert node.temperature is None
+
+    def test_unrecoverable_retry_raises_latest_error(self):
+        # The most recent failure surfaces, not the first.
+        with patch("litellm.completion"), patch("litellm.stream_chunk_builder"):
+            node = Bedrock(
+                name="b",
+                model="bedrock/eu.anthropic.claude-some-future-model",
+                connection=AWSConnection(access_key_id="x", secret_access_key="y", region_name="eu-west-1"),
+                prompt=Prompt(messages=[{"role": "user", "content": "Hello"}]),
+                stop=["DONE"],
+                temperature=0.5,
+            )
+
+            def fake_completion(**params):
+                if params.get("stop"):
+                    raise Exception("This model doesn't support the stopSequences field")
+                raise Exception("temperature: Input should be less than or equal to 1.0")
+
+            node._completion = fake_completion
+            with pytest.raises(Exception, match="less than or equal to 1.0"):
+                node.execute(MagicMock(messages=None, files=None), config=RunnableConfig(callbacks=[]))

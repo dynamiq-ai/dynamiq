@@ -182,9 +182,12 @@ _SAMPLING_UNSUPPORTED_INDICATORS: tuple[str, ...] = (
     "does not support",
     "doesn't support",
     "unsupported",
-    "unexpected",
+    "unexpected keyword",
     "unrecognized",
 )
+
+# Upper bound on sequential completion-param recoveries (e.g. strip `stop`, then sampling params).
+_MAX_COMPLETION_RECOVERIES = 3
 
 
 class BaseLLM(ConnectionNode):
@@ -979,11 +982,20 @@ class BaseLLM(ConnectionNode):
         try:
             response = self._completion(**common_params)
         except Exception as e:
-            recovered = self._recover_completion_params(e, common_params)
-            if recovered is None:
-                raise
-            response = self._completion(**recovered)
-            self._persist_completion_recovery(common_params, recovered)
+            attempt_params = common_params
+            for _ in range(_MAX_COMPLETION_RECOVERIES):
+                recovered = self._recover_completion_params(e, attempt_params)
+                if recovered is None:
+                    raise e
+                try:
+                    response = self._completion(**recovered)
+                except Exception as retry_exc:
+                    e, attempt_params = retry_exc, recovered
+                    continue
+                self._persist_completion_recovery(common_params, recovered)
+                break
+            else:
+                raise e
         handle_completion = (
             self._handle_streaming_completion_response
             if common_params.get("stream")
@@ -1043,11 +1055,20 @@ class BaseLLM(ConnectionNode):
         try:
             response = await self._acompletion(**common_params)
         except Exception as e:
-            recovered = self._recover_completion_params(e, common_params)
-            if recovered is None:
-                raise
-            response = await self._acompletion(**recovered)
-            self._persist_completion_recovery(common_params, recovered)
+            attempt_params = common_params
+            for _ in range(_MAX_COMPLETION_RECOVERIES):
+                recovered = self._recover_completion_params(e, attempt_params)
+                if recovered is None:
+                    raise e
+                try:
+                    response = await self._acompletion(**recovered)
+                except Exception as retry_exc:
+                    e, attempt_params = retry_exc, recovered
+                    continue
+                self._persist_completion_recovery(common_params, recovered)
+                break
+            else:
+                raise e
 
         if common_params.get("stream"):
             return await self._handle_streaming_completion_response_async(
