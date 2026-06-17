@@ -1,7 +1,9 @@
+from concurrent.futures import as_completed
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.memory.long_term import LongTermMemoryBackend, RememberOutcome
 from dynamiq.nodes.node import Node, ensure_config
 from dynamiq.nodes.types import NodeGroup
@@ -170,14 +172,28 @@ class RecallFactsTool(_LongTermMemoryTool):
         # paraphrase that scores higher under one phrasing isn't penalised by
         # another phrasing's weaker hit. Ask each backend call for `limit` to
         # let the union be re-ranked at the end.
+        # Queries are independent embed+search round-trips, so fan them out in
+        # parallel — single-query callers skip the pool to avoid thread overhead.
+        queries = input_data.queries
+        limit = input_data.limit
+        if len(queries) == 1:
+            per_query_hits = [self.backend.recall(query=queries[0], user_id=self.user_id, limit=limit)]
+        else:
+            with ContextAwareThreadPoolExecutor(max_workers=len(queries)) as executor:
+                futures = [
+                    executor.submit(self.backend.recall, query=q, user_id=self.user_id, limit=limit)
+                    for q in queries
+                ]
+                per_query_hits = [f.result() for f in as_completed(futures)]
+
         best: dict[str, tuple[Any, float]] = {}
-        for query in input_data.queries:
-            for fact, score in self.backend.recall(query=query, user_id=self.user_id, limit=input_data.limit):
+        for hits in per_query_hits:
+            for fact, score in hits:
                 prev = best.get(fact.id)
                 if prev is None or score > prev[1]:
                     best[fact.id] = (fact, score)
 
-        hits = sorted(best.values(), key=lambda pair: pair[1], reverse=True)[: input_data.limit]
+        hits = sorted(best.values(), key=lambda pair: pair[1], reverse=True)[:limit]
 
         if self.is_optimized_for_agents:
             if not hits:
