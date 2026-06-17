@@ -281,6 +281,23 @@ def test_sync_does_not_clobber_known_litellm_model(monkeypatch):
     assert after["max_input_tokens"] != 1
 
 
+def test_sync_disabled_still_registers_models_into_registry(monkeypatch):
+    """The disable env only gates the litellm gap-fill -- models passed to sync_to_litellm
+    must still be added to the registry itself, and must NOT leak into litellm."""
+    import litellm
+
+    monkeypatch.setenv("DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM", "false")
+
+    reg = ModelRegistry()
+    reg.sync_to_litellm(models={MODEL_B: ModelMetadata(**TEST_REGISTRY_DATA[MODEL_B])})
+
+    # Registry registration is unconditional.
+    assert reg.get_model_info(MODEL_B) is not None
+    assert reg.supports_function_calling(MODEL_B) is True
+    # ...but the litellm sync was skipped (check model_cost directly; get_model_info caches).
+    assert MODEL_B.lower() not in litellm.model_cost
+
+
 def test_sync_respects_disable_env(monkeypatch):
     """With the env var disabled, nothing is registered into litellm."""
     import litellm

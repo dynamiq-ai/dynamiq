@@ -93,9 +93,12 @@ class ModelRegistry:
         Args:
             models: New model definitions (``{model_id: info}``) to add to the registry and
                 sync directly. Defaults to syncing all already-loaded models.
+
+        Note:
+            Registering ``models`` into the registry is unconditional; the
+            ``DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM`` toggle only gates the litellm gap-fill
+            below, so callers can still extend the registry with the sync disabled.
         """
-        if not _sync_to_litellm_enabled():
-            return
         if models is None:
             items = self._models
         else:
@@ -103,6 +106,8 @@ class ModelRegistry:
             for model, info in models.items():
                 self.register(model, info)
                 items[model.lower()] = self._models[model.lower()]
+        if not _sync_to_litellm_enabled():
+            return
         if not items:
             return
         try:
