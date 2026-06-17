@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from dynamiq.utils.logger import logger
 
@@ -26,11 +26,9 @@ def _sync_to_litellm_enabled() -> bool:
 class ModelMetadata(BaseModel):
     """Structured, litellm-compatible model metadata.
 
-    The common fields are typed for validation/discoverability; ``extra="allow"`` lets any
-    other litellm spec field (the spec is large and evolving) pass through untyped.
+    The common litellm fields are typed for validation/discoverability. Unknown fields are
+    ignored (Pydantic default), so only the fields listed here are carried into the registry.
     """
-
-    model_config = ConfigDict(extra="allow")
 
     max_tokens: int | None = None
     max_input_tokens: int | None = None

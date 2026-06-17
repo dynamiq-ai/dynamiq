@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from dynamiq.nodes.llms.base import LLM_DEFAULT_MAX_TOKENS
-from dynamiq.nodes.llms.registry import ModelRegistry
+from dynamiq.nodes.llms.registry import ModelMetadata, ModelRegistry
 
 MODEL_A = "test-org/model-a"
 MODEL_B = "test-org/model-b"
@@ -293,6 +293,46 @@ def test_sync_respects_disable_env(monkeypatch):
 
     with pytest.raises(Exception):
         litellm.get_model_info(model=MODEL_A.lower())
+
+
+def test_sync_keeps_function_calling_params_under_drop_params(monkeypatch):
+    """Core fix: under ``drop_params=True`` litellm silently strips ``tools`` for a model it
+    doesn't know to support function calling, so FUNCTION_CALLING mode breaks. Once our
+    registry entry (marking the model FC-capable) is synced, litellm keeps ``tools``."""
+    import litellm
+
+    monkeypatch.setenv("DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM", "1")
+
+    # together_ai gates `tools` on per-model FC support, so an unknown model gets them
+    # dropped under drop_params (this is the bug this branch fixes).
+    model = "together_ai/unknown-fc-model"
+    tools = [
+        {
+            "type": "function",
+            "function": {"name": "noop", "description": "noop", "parameters": {"type": "object", "properties": {}}},
+        }
+    ]
+
+    def tools_survive() -> bool:
+        params = litellm.utils.get_optional_params(
+            model=model,
+            custom_llm_provider="together_ai",
+            tools=tools,
+            tool_choice="auto",
+            drop_params=True,
+        )
+        return "tools" in params
+
+    # Before sync: litellm doesn't know the model supports FC -> tools dropped.
+    assert tools_survive() is False
+
+    reg = ModelRegistry()
+    reg.sync_to_litellm(
+        models={model: ModelMetadata(supports_function_calling=True, mode="chat", litellm_provider="together_ai")}
+    )
+
+    # After sync: litellm now knows the model is FC-capable -> tools preserved.
+    assert tools_survive() is True
 
 
 def test_sync_is_exception_safe_without_litellm(monkeypatch):
