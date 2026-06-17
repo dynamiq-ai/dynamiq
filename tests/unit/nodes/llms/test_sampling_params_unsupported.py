@@ -4,7 +4,7 @@ from dynamiq.connections import AWS as AWSConnection
 from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.connections import HttpApiKey
 from dynamiq.nodes.llms.anthropic import Anthropic
-from dynamiq.nodes.llms.base import SAMPLING_PARAMS
+from dynamiq.nodes.llms.base import SAMPLING_PARAMS, SAMPLING_UNSUPPORTED_MODEL_MARKERS
 from dynamiq.nodes.llms.bedrock import Bedrock
 from dynamiq.nodes.llms.custom_llm import CustomLLM
 
@@ -20,19 +20,18 @@ def anthropic_supported():
 
 
 class TestDetection:
-    @pytest.mark.parametrize(
-        "model",
-        [
-            "claude-opus-4-7",
-            "claude-opus-4-8",
-            "claude-fable-5",
-            "claude-mythos-5",
-            "claude-mythos-preview",
-            "bedrock/eu.anthropic.claude-opus-4-8-20251101-v1:0",
-            "openrouter/anthropic/claude-opus-4-7",
-        ],
-    )
+    @pytest.mark.parametrize("model", SAMPLING_UNSUPPORTED_MODEL_MARKERS)
     def test_unsupported_models_detected(self, model):
+        llm = Anthropic(name="a", model=model, connection=AnthropicConnection(api_key="x"))
+        assert llm._model_rejects_sampling_params() is True
+
+    @pytest.mark.parametrize(
+        "template",
+        ["bedrock/eu.anthropic.{}-20251101-v1:0", "openrouter/anthropic/{}"],
+    )
+    def test_detection_is_provider_prefix_independent(self, template):
+        # A marker must be detected regardless of the provider prefix wrapped around it.
+        model = template.format(SAMPLING_UNSUPPORTED_MODEL_MARKERS[0])
         llm = Anthropic(name="a", model=model, connection=AnthropicConnection(api_key="x"))
         assert llm._model_rejects_sampling_params() is True
 
