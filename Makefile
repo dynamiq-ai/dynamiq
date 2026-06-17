@@ -29,20 +29,26 @@ test-integration:
 	pytest tests/integration
 
 test-integration-with-creds:
-	pytest tests/integration_with_creds
+	pytest tests/integration_with_creds -m "not smoke"
+
+# Smoke tests: slow, paid end-to-end production scenarios. Excluded from every default target and
+# run ONLY here (gated behind the `run-smoke-tests` PR label in CI). -n auto parallelizes the
+# matrix; if E2B quota / provider 429s appear, dial back to `-n 4` or group same-provider cases.
+test-smoke:
+	pytest tests -m smoke -n auto --dist worksteal
 
 test-exclude-integration-with-creds:
-	pytest tests --ignore=tests/integration_with_creds
+	pytest tests --ignore=tests/integration_with_creds -m "not smoke"
 
 test-unit:
 	pytest tests/unit
 
 test:
-	pytest tests
+	pytest tests -m "not smoke"
 
 test-cov:
 	mkdir -p ./reports
-	coverage run -m pytest --junitxml=./reports/test-results.xml tests
+	coverage run -m pytest --junitxml=./reports/test-results.xml -m "not smoke" tests
 	coverage report --skip-empty --skip-covered
 	coverage html -d ./reports/htmlcov --omit="*/test_*,*/tests.py"
 	coverage xml -o ./reports/coverage.xml --omit="*/test_*,*/tests.py"
