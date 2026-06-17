@@ -79,6 +79,8 @@ class InMemoryLongTermMemoryBackend(LongTermMemoryBackend):
     def list_by_scope(
         self, scope: dict[str, str], limit: int = 100,
     ) -> list[Fact]:
+        if limit <= 0:
+            return []
         matched = [f for f in self._facts.values() if _matches_scope(f, scope)]
         return matched[:limit]
 

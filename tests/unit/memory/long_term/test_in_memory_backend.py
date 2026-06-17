@@ -104,6 +104,13 @@ def test_search_with_zero_limit_returns_empty(backend, fake_embedder):
 
 # --- delete / list_by_scope / delete_scope ---
 
+def test_list_by_scope_with_zero_or_negative_limit_returns_empty(backend, fake_embedder):
+    for i in range(3):
+        backend.insert(_fact(f"f{i}", "u1", f"c{i}"), fake_embedder.embed(f"c{i}"))
+    assert backend.list_by_scope({"user_id": "u1"}, limit=0) == []
+    assert backend.list_by_scope({"user_id": "u1"}, limit=-1) == []
+
+
 def test_delete_removes_fact(backend, fake_embedder):
     backend.insert(_fact("f1", "u1", "x"), fake_embedder.embed("x"))
     backend.delete("f1")
