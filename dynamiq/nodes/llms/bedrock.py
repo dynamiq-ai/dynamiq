@@ -35,8 +35,10 @@ class Bedrock(BaseLLM):
 
         Currently handles: hosted models (e.g. openai.gpt-oss-*, moonshotai.kimi-k2.5)
         that reject the `stopSequences` field even though LiteLLM's per-model registry
-        claims they support it. We strip `stop` and persist that recovery on the
-        instance so later calls do not repeat the same failing first attempt.
+        claims they support it. We strip `stop`; the removal is persisted on the instance
+        only after a successful retry (see :meth:`_persist_completion_recovery`) so later
+        calls do not repeat the same failing first attempt. Anything else falls through to
+        the base sampling-param backstop.
         """
         msg = str(exc)
         if any(ind in msg for ind in _BEDROCK_STOP_UNSUPPORTED_INDICATORS) and common_params.get("stop"):
@@ -46,8 +48,13 @@ class Bedrock(BaseLLM):
                 self.name,
                 self.model,
             )
-            self.stop = None
             recovered = dict(common_params)
             recovered.pop("stop", None)
             return recovered
-        return None
+        return super()._recover_completion_params(exc, common_params)
+
+    def _persist_completion_recovery(self, common_params: dict, recovered: dict) -> None:
+        """Persist Bedrock's `stop` drop, then the base sampling-param drops."""
+        if common_params.get("stop") and "stop" not in recovered:
+            self.stop = None
+        super()._persist_completion_recovery(common_params, recovered)
