@@ -219,13 +219,11 @@ class QdrantLongTermMemoryBackend(LongTermMemoryBackend):
         return [_payload_to_fact(p.payload) for p in points]
 
     def delete_scope(self, scope: dict[str, str]) -> int:
-        # Scroll for all matching point ids (paginated, no 10k cap), then delete
-        # them in one call. Compared to count-then-delete-by-filter this trades
-        # an extra round-trip for an accurate count of what we actually removed
-        # — the count+delete variant could diverge under concurrent writes.
-        # Empty scope = "match everything" — same contract as the in-memory
-        # and pgvector backends — so we use an empty Filter() rather than None.
-        scope_filter = _scope_to_filter(scope) or Filter()
+        if not scope:
+            raise ValueError("delete_scope requires a non-empty scope")
+        # Paginated scroll → bulk delete-by-id; gives an accurate count even
+        # under concurrent writes, unlike count-then-delete-by-filter.
+        scope_filter = _scope_to_filter(scope)
         ids: list = []
         offset = None
         while True:

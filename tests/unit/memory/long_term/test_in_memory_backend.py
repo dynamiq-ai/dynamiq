@@ -1,6 +1,8 @@
 """Tests for InMemoryLongTermMemoryBackend storage primitives."""
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from dynamiq.memory.long_term.schemas import Fact
 
 
@@ -181,10 +183,10 @@ def test_delete_scope_removes_all_in_scope(backend, fake_embedder):
     assert len(backend.list_by_scope({"user_id": "u2"})) == 1
 
 
-def test_delete_scope_empty_scope_deletes_everything(backend, fake_embedder):
-    """Contract: empty scope = "match every fact" — same for all backends."""
+def test_delete_scope_rejects_empty_scope(backend, fake_embedder):
+    """Empty scope is rejected to prevent accidental whole-store wipes — callers
+    must opt in via an explicit scope like `{"user_id": ...}`."""
     backend.insert(_fact("f1", "u1", "a"), fake_embedder.embed("a"))
-    backend.insert(_fact("f2", "u2", "b"), fake_embedder.embed("b"))
-    deleted = backend.delete_scope({})
-    assert deleted == 2
-    assert backend.list_by_scope({}) == []
+    with pytest.raises(ValueError, match="non-empty scope"):
+        backend.delete_scope({})
+    assert len(backend.list_by_scope({"user_id": "u1"})) == 1

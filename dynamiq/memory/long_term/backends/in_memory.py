@@ -72,9 +72,6 @@ class InMemoryLongTermMemoryBackend(LongTermMemoryBackend):
         scores = (matrix @ query) / (row_norms * query_norm)
 
         k = min(limit, len(matched_facts))
-        # argpartition would be passed `kth=-1` when k==0, which happens to
-        # return an empty slice by accident; make the zero-limit semantics
-        # explicit instead of relying on that numpy quirk.
         if k <= 0:
             return []
         # argpartition gives the top-k unsorted; sort just that slice.
@@ -89,6 +86,8 @@ class InMemoryLongTermMemoryBackend(LongTermMemoryBackend):
         return matched[:limit]
 
     def delete_scope(self, scope: dict[str, str]) -> int:
+        if not scope:
+            raise ValueError("delete_scope requires a non-empty scope")
         to_delete = [fid for fid, f in self._facts.items() if _matches_scope(f, scope)]
         for fid in to_delete:
             self.delete(fid)

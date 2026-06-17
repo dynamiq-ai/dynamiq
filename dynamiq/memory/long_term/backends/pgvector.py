@@ -229,6 +229,9 @@ class PostgresLongTermMemoryBackend(LongTermMemoryBackend):
         return [_row_to_fact(row) for row in rows]
 
     def delete_scope(self, scope: dict[str, str]) -> int:
+        # Refuse empty scope — `WHERE TRUE` would wipe the whole table.
+        if not scope:
+            raise ValueError("delete_scope requires a non-empty scope")
         where, params = _scope_where_clause(scope)
         with self._conn.cursor() as cur:
             cur.execute(

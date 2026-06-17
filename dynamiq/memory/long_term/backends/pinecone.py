@@ -200,6 +200,8 @@ class PineconeLongTermMemoryBackend(LongTermMemoryBackend):
         ]
 
     def delete_scope(self, scope: dict[str, str]) -> int:
+        if not scope:
+            raise ValueError("delete_scope requires a non-empty scope")
         # Pinecone Serverless does NOT support delete-by-filter — only delete-by-id.
         # And Pinecone's query API has no cursor, so we loop: query → delete the
         # matched ids → query again until the page comes back empty. Without the

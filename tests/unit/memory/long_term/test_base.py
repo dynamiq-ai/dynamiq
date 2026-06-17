@@ -64,3 +64,41 @@ def test_guarded_ensure_retries_after_failure(fake_embedder):
         backend.remember(content="a", user_id="u1")
     backend.remember(content="a", user_id="u1")  # second attempt succeeds
     assert _FlakyBackend.attempts == 2
+
+
+def test_recall_with_zero_or_negative_limit_short_circuits(fake_embedder):
+    """The base-class guard must return [] without embedding or searching —
+    unified across all backends so each one need not re-implement it."""
+    from dynamiq.memory.long_term.backends.in_memory import InMemoryLongTermMemoryBackend
+
+    class _TrackingBackend(InMemoryLongTermMemoryBackend):
+        search_calls: int = 0
+
+        def search(self, *, query_embedding, scope, limit):
+            type(self).search_calls += 1
+            return super().search(query_embedding=query_embedding, scope=scope, limit=limit)
+
+    _TrackingBackend.search_calls = 0
+    backend = _TrackingBackend(embedder=fake_embedder)
+    assert backend.recall(query="x", user_id="u1", limit=0) == []
+    assert backend.recall(query="x", user_id="u1", limit=-3) == []
+    assert _TrackingBackend.search_calls == 0
+
+
+def test_list_all_with_zero_or_negative_limit_short_circuits(fake_embedder):
+    from dynamiq.memory.long_term.backends.in_memory import InMemoryLongTermMemoryBackend
+
+    backend = InMemoryLongTermMemoryBackend(embedder=fake_embedder)
+    backend.remember(content="a", user_id="u1")
+    assert backend.list_all(user_id="u1", limit=0) == []
+    assert backend.list_all(user_id="u1", limit=-1) == []
+
+
+def test_clear_user_rejects_empty_user_id(fake_embedder):
+    """`clear_user("")` would resolve to `delete_scope({"user_id": ""})` and only
+    spare facts with empty-string user_ids — block it at the public API."""
+    from dynamiq.memory.long_term.backends.in_memory import InMemoryLongTermMemoryBackend
+
+    backend = InMemoryLongTermMemoryBackend(embedder=fake_embedder)
+    with pytest.raises(Exception, match="non-empty user_id"):
+        backend.clear_user(user_id="")

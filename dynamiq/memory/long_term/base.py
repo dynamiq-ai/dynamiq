@@ -186,6 +186,11 @@ class LongTermMemoryBackend(ABC, BaseModel):
         stripped = query.strip() if query else ""
         if not stripped:
             raise LongTermMemoryError("Recall query cannot be empty")
+        # Unified `limit<=0` short-circuit so every backend sees the same empty-result
+        # contract (Pinecone's top_k must be >=1; numpy.argpartition with k=0 only
+        # works by accident on the in-memory backend).
+        if limit <= 0:
+            return []
         try:
             self._guarded_ensure()
             embedding = self._embed(stripped)
@@ -222,6 +227,8 @@ class LongTermMemoryBackend(ABC, BaseModel):
 
     def list_all(self, *, user_id: str, limit: int = 100) -> list[Fact]:
         """Return up to `limit` facts for `user_id` (admin/introspection)."""
+        if limit <= 0:
+            return []
         try:
             self._guarded_ensure()
             return self.list_by_scope({"user_id": user_id}, limit=limit)
@@ -231,6 +238,8 @@ class LongTermMemoryBackend(ABC, BaseModel):
 
     def clear_user(self, *, user_id: str) -> int:
         """Hard-delete every fact owned by `user_id` and return the count deleted."""
+        if not user_id:
+            raise LongTermMemoryError("clear_user requires a non-empty user_id")
         try:
             self._guarded_ensure()
             deleted = self.delete_scope({"user_id": user_id})
