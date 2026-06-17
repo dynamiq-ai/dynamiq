@@ -11,18 +11,11 @@ from dynamiq.memory.long_term.schemas import Fact
 if TYPE_CHECKING:
     from pinecone import Pinecone as PineconeClient
 
-# Pinecone metadata doesn't accept nested dicts; we JSON-encode the Fact's
-# `metadata` into this single string field and decode on read.
 _METADATA_JSON_KEY = "metadata_json"
 
 
 def _scope_to_filter(scope: dict[str, str]) -> dict | None:
-    """Translate `{key: value, ...}` into a Pinecone metadata filter.
-
-    Single-key scopes become a flat `{key: {"$eq": value}}`; multi-key scopes
-    are wrapped in `$and` since Pinecone treats sibling keys as implicit-AND
-    only when each is a leaf.
-    """
+    """Translate a scope dict into a Pinecone metadata filter."""
     if not scope:
         return None
     if len(scope) == 1:
@@ -59,16 +52,8 @@ def _metadata_to_fact(meta: dict[str, Any]) -> Fact:
 class PineconeLongTermMemoryBackend(LongTermMemoryBackend):
     """Long-term memory backend backed by Pinecone.
 
-    Facts are stored as Pinecone vectors keyed by the original `fact_id` (Pinecone
-    accepts arbitrary string ids). Fact payload lives in the vector's metadata; the
-    free-form `Fact.metadata` dict is JSON-encoded into a single string field to
-    avoid Pinecone's no-nested-dicts restriction.
-
-    Note: unlike pgvector / Qdrant / Weaviate, the Pinecone index must exist
-    before the backend is used — Pinecone's data-plane SDK has no idempotent
-    `ensure_index` primitive, so `_ensure_storage` is not overridden. Create
-    the index (with matching `dimension` and cosine metric) via the Pinecone
-    control-plane API or console once per deployment.
+    The Pinecone index must be pre-created out of band — the data-plane SDK
+    has no idempotent ensure_index primitive.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -78,7 +63,6 @@ class PineconeLongTermMemoryBackend(LongTermMemoryBackend):
     index_name: str = "user_facts"
     namespace: str = "default"
     dimension: int = 1536
-    # Scroll/list pagination cap. Pinecone's max top_k is 10000 per query.
     _LIST_PAGE_SIZE: int = 10_000
 
     _client: "PineconeClient | None" = PrivateAttr(default=None)
@@ -115,8 +99,6 @@ class PineconeLongTermMemoryBackend(LongTermMemoryBackend):
         return _metadata_to_fact(meta)
 
     def get_by_hash(self, *, user_id: str, content_hash: str) -> Fact | None:
-        # Pinecone's metadata-only filter goes through `query`; we send a zero
-        # vector since the score is irrelevant for a hash lookup.
         result = self._index.query(
             vector=[0.0] * self.dimension,
             top_k=1,
@@ -150,7 +132,6 @@ class PineconeLongTermMemoryBackend(LongTermMemoryBackend):
         new_fact = existing.model_copy(
             update={"content": content, "hash": content_hash, "metadata": metadata, "updated_at": updated_at}
         )
-        # `upsert` overwrites both the vector and the metadata payload in one call.
         self._index.upsert(
             vectors=[{"id": fact_id, "values": list(embedding), "metadata": _fact_to_metadata(new_fact)}],
             namespace=self.namespace,
@@ -179,11 +160,7 @@ class PineconeLongTermMemoryBackend(LongTermMemoryBackend):
         return out
 
     def list_by_scope(self, scope: dict[str, str], limit: int = 100) -> list[Fact]:
-        # Pinecone has no "scan" primitive — the documented pattern is a query
-        # with a zero vector + filter. Capped at top_k=10000 (Pinecone's max).
-        # `top_k` must be >= 1 in Pinecone, so `limit<=0` cannot be expressed
-        # as a query at all — short-circuit to match the empty-result contract
-        # in-memory / other backends already give for `limit<=0`.
+        # Pinecone's top_k must be >= 1.
         if limit <= 0:
             return []
         top_k = min(max(limit, 1), self._LIST_PAGE_SIZE)
@@ -202,10 +179,8 @@ class PineconeLongTermMemoryBackend(LongTermMemoryBackend):
     def delete_scope(self, scope: dict[str, str]) -> int:
         if not scope:
             raise ValueError("delete_scope requires a non-empty scope")
-        # Pinecone Serverless does NOT support delete-by-filter — only delete-by-id.
-        # And Pinecone's query API has no cursor, so we loop: query → delete the
-        # matched ids → query again until the page comes back empty. Without the
-        # loop, scopes with >`_LIST_PAGE_SIZE` facts (10k) would silently leak.
+        # Pinecone Serverless supports only delete-by-id, with no cursor — loop
+        # query → delete-by-id until the page is empty.
         total = 0
         flt = _scope_to_filter(scope)
         while True:

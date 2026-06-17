@@ -64,8 +64,6 @@ class InMemoryLongTermMemoryBackend(LongTermMemoryBackend):
         matrix = np.asarray([self._vectors[f.id] for f in matched_facts], dtype=np.float64)
         query = np.asarray(query_embedding, dtype=np.float64)
 
-        # Cosine = (M @ q) / (||rows|| * ||q||); zero-norm rows fall back to 1
-        # to avoid div-by-zero (the dot product is 0 anyway, so the score is 0).
         row_norms = np.linalg.norm(matrix, axis=1)
         row_norms[row_norms == 0] = 1.0
         query_norm = np.linalg.norm(query) or 1.0
@@ -74,7 +72,6 @@ class InMemoryLongTermMemoryBackend(LongTermMemoryBackend):
         k = min(limit, len(matched_facts))
         if k <= 0:
             return []
-        # argpartition gives the top-k unsorted; sort just that slice.
         top_idx = np.argpartition(-scores, k - 1)[:k]
         top_idx = top_idx[np.argsort(-scores[top_idx])]
         return [(matched_facts[i], float(scores[i])) for i in top_idx]

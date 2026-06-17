@@ -1170,9 +1170,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             input_message: The user's input message
             history_messages: Optional conversation history
         """
-        # Pass overlay-aware tool variables so per-call LTM tools appear in the
-        # system prompt (relevant for XML/ReAct mode, where the model learns
-        # about tools from the prompt rather than function-calling schemas).
         system_message = Message(
             role=MessageRole.SYSTEM,
             content=self.generate_prompt(
@@ -2157,10 +2154,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         return fc_tools, response_format
 
     def _effective_inference_schemas(self) -> tuple:
-        """Inference schemas for the current call, including any per-call LTM
-        overlay. When no overlay is set this is the init-time cache; when LTM
-        tools are attached they're regenerated so remember/recall are visible
-        to the LLM in FUNCTION_CALLING and STRUCTURED_OUTPUT modes."""
+        """Inference schemas including any per-call LTM tool overlay."""
         if not _run_extra_tools.get():
             return self._tools, self._response_format
         return self._build_inference_schemas(self._runtime_tools)
@@ -2191,10 +2185,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             response_format_schema=response_format_schema,
         )
 
-        # `has_tools` decides whether the XML/ReAct template emits tool-related
-        # blocks. Long-term memory injects per-call tools that aren't visible at
-        # init time, so we must opt in here too — otherwise the template has no
-        # placeholder for them and they stay invisible to the LLM.
         ltm_enabled = self.long_term_memory is not None and self.long_term_memory.enabled
         self.system_prompt_manager.build_react_prompt(
             ReactPromptConfig(

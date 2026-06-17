@@ -49,12 +49,8 @@ from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
 
-# Per-call overlay of tools visible to a single `Agent.execute` invocation —
-# currently used for long-term-memory tools that bind a request's `user_id`
-# at construction. ContextVar gives per-thread and per-asyncio-task isolation
-# without mutating shared agent state, so concurrent execute() calls on the
-# same agent instance never see each other's user-scoped tools and never
-# block on a lock.
+# Per-call tool overlay (e.g. LTM tools bound to a request's user_id); isolated
+# per thread / per asyncio task via ContextVar.
 _run_extra_tools: ContextVar[list["Node"] | None] = ContextVar("dynamiq_agent_run_extra_tools", default=None)
 
 
@@ -449,9 +445,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 tool.init_components(connection_manager)
             tool.is_optimized_for_agents = True
 
-        # The LTM embedder is a ConnectionNode that needs its text_embedder
-        # client built before the first recall/remember call, otherwise it
-        # AttributeErrors on a `None` client during `execute`.
         if self.long_term_memory and self.long_term_memory.backend.embedder.is_postponed_component_init:
             self.long_term_memory.backend.embedder.init_components(connection_manager)
 
@@ -648,18 +641,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 len(ltm_tools),
                 ", ".join(t.name for t in ltm_tools),
             )
-        # Publish the per-call LTM tools via the module-level ContextVar; the
-        # tool-resolution properties (`tool_description`, `tool_names`,
-        # `tool_by_names`) and inference-schema generation read it. Setting a
-        # ContextVar is cheap, isolated per thread / per asyncio task, and never
-        # mutates shared state — so concurrent execute() calls don't see each
-        # other's user-scoped tools and don't need a lock. The set() is the last
-        # statement before `try:` so nothing can raise between it and the
-        # matching reset() in finally.
-        # Always set, even to an empty list. A sub-agent with no LTM of its own
-        # would otherwise inherit the parent's ContextVar value when it runs in
-        # a child thread spawned via `ContextAwareThreadPoolExecutor`, leaking
-        # the outer user's remember/recall tools into the sub-agent's prompt.
+        # Always set — a sub-agent without LTM would otherwise inherit the
+        # parent's overlay via `ContextAwareThreadPoolExecutor`.
         ltm_token = _run_extra_tools.set(ltm_tools)
         try:
             if use_memory:
@@ -857,9 +840,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             backend=self.long_term_memory.backend,
             user_id=user_id,
         )
-        # `init_components` set this on every tool that existed at agent build
-        # time; LTM tools are constructed lazily per-run and must match so the
-        # remember/recall outputs render as friendly strings rather than raw dicts.
         for tool in tools:
             tool.is_optimized_for_agents = True
         return tools
@@ -1863,11 +1843,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
     @property
     def _runtime_tools(self) -> list[Node]:
-        """Tools the LLM should see for the current call: instance tools + any
-        per-call overlay (e.g. long-term-memory tools bound to a request's
-        user_id). The overlay is read from a `ContextVar` and is isolated per
-        thread / per asyncio task — concurrent execute() calls never see each
-        other's user-scoped tools."""
+        """Instance tools plus any per-call overlay (LTM tools bound to user_id)."""
         extra = _run_extra_tools.get()
         return self.tools + extra if extra else self.tools
 

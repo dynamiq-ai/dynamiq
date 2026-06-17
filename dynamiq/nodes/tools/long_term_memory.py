@@ -94,8 +94,6 @@ class RecallFactsInputSchema(BaseModel):
     @field_validator("queries", mode="after")
     @classmethod
     def _strip_and_require_nonblank(cls, queries: list[str]) -> list[str]:
-        """Reject whitespace-only entries here so the model sees a clean
-        validation error, instead of the backend raising at recall time."""
         cleaned = [q.strip() for q in queries]
         if any(not q for q in cleaned):
             raise ValueError("`queries` must not contain empty or whitespace-only strings")
@@ -168,12 +166,7 @@ class RecallFactsTool(_LongTermMemoryTool):
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        # Recall once per query; merge by fact id keeping the best score so a
-        # paraphrase that scores higher under one phrasing isn't penalised by
-        # another phrasing's weaker hit. Ask each backend call for `limit` to
-        # let the union be re-ranked at the end.
-        # Queries are independent embed+search round-trips, so fan them out in
-        # parallel — single-query callers skip the pool to avoid thread overhead.
+        # Fan recalls out in parallel; merge by fact_id keeping the best score.
         queries = input_data.queries
         limit = input_data.limit
         if len(queries) == 1:
@@ -203,13 +196,7 @@ class RecallFactsTool(_LongTermMemoryTool):
 
 
 def build_long_term_memory_tools(*, backend: LongTermMemoryBackend, user_id: str) -> list[Node]:
-    """Construct the long-term-memory tools (remember + recall) with `user_id` baked in.
-
-    Per-tool subsetting was intentionally removed. If you need to expose only
-    one of the two tools to a particular agent, instantiate the class directly
-    instead of going through this factory. See the LTM plan v2 "Reversible
-    cuts" appendix for the prior selector design.
-    """
+    """Construct the long-term-memory tools (remember + recall) with `user_id` baked in."""
     return [
         RememberFactTool(backend=backend, user_id=user_id),
         RecallFactsTool(backend=backend, user_id=user_id),

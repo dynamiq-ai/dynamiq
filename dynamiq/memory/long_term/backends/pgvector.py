@@ -35,11 +35,7 @@ _CREATE_USER_HASH_INDEX_TEMPLATE = SQL("CREATE UNIQUE INDEX IF NOT EXISTS {idx} 
 
 
 def _scope_where_clause(scope: dict[str, str]) -> tuple[Composed, list]:
-    """Build a parameterised WHERE clause from a scope dict.
-
-    Keys are interpolated as `Identifier` (safe); values stay as `%s` placeholders
-    for the driver — never an f-string substitution.
-    """
+    """Build a parameterised WHERE clause from a scope dict."""
     if not scope:
         return SQL("TRUE"), []
     clauses = [SQL("{key} = %s").format(key=Identifier(key)) for key in scope.keys()]
@@ -78,7 +74,6 @@ class PostgresLongTermMemoryBackend(LongTermMemoryBackend):
         return super().to_dict_exclude_params | {"_conn": True, "connection": True}
 
     def to_dict(self, include_secure_params: bool = False, for_tracing: bool = False, **kwargs) -> dict[str, Any]:
-        # super() re-adds the embedder; we add the connection on top.
         data = super().to_dict(include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs)
         data["connection"] = self.connection.to_dict(
             for_tracing=for_tracing, include_secure_params=include_secure_params, **kwargs
@@ -229,7 +224,6 @@ class PostgresLongTermMemoryBackend(LongTermMemoryBackend):
         return [_row_to_fact(row) for row in rows]
 
     def delete_scope(self, scope: dict[str, str]) -> int:
-        # Refuse empty scope — `WHERE TRUE` would wipe the whole table.
         if not scope:
             raise ValueError("delete_scope requires a non-empty scope")
         where, params = _scope_where_clause(scope)

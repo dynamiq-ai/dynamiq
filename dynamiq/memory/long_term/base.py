@@ -27,14 +27,7 @@ def _content_hash(user_id: str, content: str) -> str:
 
 
 class LongTermMemoryBackend(ABC, BaseModel):
-    """Fact-shaped, user-scoped storage + embedding engine for long-term memory.
-
-    Subclasses implement the abstract storage primitives (`insert`, `get`,
-    `search`, `update`, ...). The high-level operations the agent tools call —
-    `remember`, `recall`, `forget`, `list_all`, `clear_user` — are concrete here
-    (Template Method): they orchestrate embedding, dedup, and semantic upsert in
-    terms of those primitives, so every backend gets them for free.
-    """
+    """Fact-shaped, user-scoped storage + embedding engine for long-term memory."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -48,29 +41,21 @@ class LongTermMemoryBackend(ABC, BaseModel):
         default=0.85,
         ge=0.0,
         le=1.0,
-        description=(
-            "Cosine similarity above which a new `remember()` call replaces the "
-            "nearest existing fact in place instead of inserting a new row. "
-            "Set to 1.0 to disable upsert (insert-only)."
-        ),
+        description="Cosine-similarity threshold above which `remember()` upserts the nearest fact in place.",
     )
 
-    # Flag for the once-only `_guarded_ensure` gate; never serialised.
     _storage_ensured: bool = PrivateAttr(default=False)
 
     @computed_field
     @cached_property
     def type(self) -> str:
-        """Fully-qualified class id used by the YAML loader for polymorphic reconstruction."""
         return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
     @property
     def to_dict_exclude_params(self) -> dict[str, bool]:
-        """Field names to exclude from serialization (overridden by subclasses)."""
         return {"embedder": True}
 
     def to_dict(self, include_secure_params: bool = False, for_tracing: bool = False, **kwargs) -> dict[str, Any]:
-        """Serialize the backend to a dict for workflow YAML round-trip."""
         data = self.model_dump(exclude=kwargs.pop("exclude", self.to_dict_exclude_params), **kwargs)
         data["embedder"] = self.embedder.to_dict(
             include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs
@@ -81,43 +66,20 @@ class LongTermMemoryBackend(ABC, BaseModel):
         result = self.embedder.execute(input_data=TextEmbedderInputSchema(query=text))
         return list(result["embedding"])
 
-    # --- schema provisioning hook ---
-
     def _ensure_storage(self) -> None:
-        """Provision tables / collections / indexes if absent. No-op by default.
-
-        Backends that need a server-side schema (pgvector, Qdrant, Weaviate)
-        override this to call their idempotent `ensure_table` / `ensure_collection`.
-        Pinecone has no SDK primitive to create an index from data-plane creds, so
-        it does not override — its index must be pre-created out of band.
-        """
+        """Provision tables / collections / indexes if absent. No-op by default."""
 
     def _guarded_ensure(self) -> None:
-        """Call `_ensure_storage` at most once per instance. If it raises, the
-        flag stays unset so the next op retries — failures are loud, not silent."""
+        """Call `_ensure_storage` at most once per instance; retry on failure."""
         if self._storage_ensured:
             return
         self._ensure_storage()
         self._storage_ensured = True
 
-    # --- high-level operations (Template Method over the storage primitives) ---
-
     def remember(
         self, *, content: str, user_id: str, metadata: dict[str, Any] | None = None
     ) -> tuple[Fact, RememberOutcome]:
-        """Add or upsert a fact for `user_id`. Returns the fact and a `RememberOutcome`.
-
-        1. Exact-duplicate guard: if `(user_id, normalised content)` already exists,
-           return it with `UNCHANGED` (no embed cost).
-        2. Otherwise embed once and search the user's facts for the nearest neighbour.
-           If the top match's cosine score exceeds `upsert_threshold`, replace that
-           fact's content/hash/embedding/metadata in place (preserving id, created_at)
-           and return `UPDATED`. This is how an agent "corrects" a fact: re-state it.
-        3. Otherwise insert a brand-new fact and return `CREATED`.
-
-        Raises:
-            LongTermMemoryError: If content is empty or storage fails.
-        """
+        """Add or upsert a fact for `user_id`. Returns the fact and a `RememberOutcome`."""
         if not content or not content.strip():
             raise LongTermMemoryError("Fact content cannot be empty")
         try:
@@ -136,8 +98,6 @@ class LongTermMemoryBackend(ABC, BaseModel):
             if nearest and nearest[0][1] >= self.upsert_threshold:
                 old_fact, score = nearest[0]
                 now = datetime.now(UTC)
-                # New metadata replaces the old when the caller supplies it;
-                # otherwise the existing metadata is preserved.
                 new_metadata = metadata if metadata is not None else old_fact.metadata
                 self.update(
                     old_fact.id,
@@ -178,17 +138,10 @@ class LongTermMemoryBackend(ABC, BaseModel):
             raise LongTermMemoryError(f"Failed to remember fact: {e}") from e
 
     def recall(self, *, query: str, user_id: str, limit: int = 5) -> list[tuple[Fact, float]]:
-        """Semantic search for facts relevant to `query`, scoped to `user_id`.
-
-        Raises:
-            LongTermMemoryError: If the query is empty or search fails.
-        """
+        """Semantic search for facts relevant to `query`, scoped to `user_id`."""
         stripped = query.strip() if query else ""
         if not stripped:
             raise LongTermMemoryError("Recall query cannot be empty")
-        # Unified `limit<=0` short-circuit so every backend sees the same empty-result
-        # contract (Pinecone's top_k must be >=1; numpy.argpartition with k=0 only
-        # works by accident on the in-memory backend).
         if limit <= 0:
             return []
         try:
@@ -202,11 +155,7 @@ class LongTermMemoryBackend(ABC, BaseModel):
             raise LongTermMemoryError(f"Failed to recall facts: {e}") from e
 
     def forget(self, *, fact_id: str, user_id: str) -> ForgetStatus:
-        """Delete a fact by id, returning a `ForgetStatus`. Never raises on user mismatch.
-
-        Raises:
-            LongTermMemoryError: If the storage delete fails for any other reason.
-        """
+        """Delete a fact by id, returning a `ForgetStatus`. Never raises on user mismatch."""
         try:
             self._guarded_ensure()
             fact = self.get(fact_id)
@@ -249,11 +198,9 @@ class LongTermMemoryBackend(ABC, BaseModel):
             logger.error(f"LongTermMemory.clear_user failed for user={user_id}: {e}")
             raise LongTermMemoryError(f"Failed to clear user facts: {e}") from e
 
-    # --- storage primitives (implemented per backend) ---
-
     @abstractmethod
     def insert(self, fact: Fact, embedding: list[float]) -> None:
-        """Insert a new fact and its embedding. Caller has already deduped via `get_by_hash`."""
+        """Insert a new fact and its embedding."""
 
     @abstractmethod
     def get(self, fact_id: str) -> Fact | None:
@@ -295,8 +242,4 @@ class LongTermMemoryBackend(ABC, BaseModel):
         metadata: dict[str, Any],
         updated_at: datetime,
     ) -> None:
-        """Replace content/hash/embedding/metadata/updated_at for a fact in place.
-
-        Preserves `id`, `user_id`, and `created_at`. Used by the semantic-upsert
-        path in `remember`.
-        """
+        """Replace mutable fields of a fact in place; preserves id, user_id, created_at."""

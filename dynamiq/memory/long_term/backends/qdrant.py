@@ -22,11 +22,7 @@ _UUID_NAMESPACE = uuid.UUID("00000000-0000-0000-0000-000000000000")
 
 
 def _to_point_id(fact_id: str) -> str:
-    """Map an arbitrary `fact_id` string to a deterministic Qdrant UUID.
-
-    Qdrant requires UUID or unsigned-int point IDs; the original `fact_id`
-    is kept in the payload so lookups round-trip.
-    """
+    """Map a fact_id to a deterministic Qdrant UUID (Qdrant requires UUID/uint ids)."""
     return uuid.uuid5(_UUID_NAMESPACE, fact_id).hex
 
 
@@ -82,7 +78,6 @@ class QdrantLongTermMemoryBackend(LongTermMemoryBackend):
         return super().to_dict_exclude_params | {"_client": True, "connection": True}
 
     def to_dict(self, include_secure_params: bool = False, for_tracing: bool = False, **kwargs) -> dict[str, Any]:
-        # super() re-adds the embedder; we add the connection on top.
         data = super().to_dict(include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs)
         data["connection"] = self.connection.to_dict(
             for_tracing=for_tracing, include_secure_params=include_secure_params, **kwargs
@@ -221,8 +216,6 @@ class QdrantLongTermMemoryBackend(LongTermMemoryBackend):
     def delete_scope(self, scope: dict[str, str]) -> int:
         if not scope:
             raise ValueError("delete_scope requires a non-empty scope")
-        # Paginated scroll → bulk delete-by-id; gives an accurate count even
-        # under concurrent writes, unlike count-then-delete-by-filter.
         scope_filter = _scope_to_filter(scope)
         ids: list = []
         offset = None

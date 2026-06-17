@@ -69,8 +69,6 @@ class BaseConnection(BaseModel, ABC):
         Returns:
             dict: A dictionary representation of the connection instance.
         """
-        # Drop forwarded `include_secure_params` — has no effect here and
-        # `model_dump` would reject it as an unknown kwarg.
         kwargs.pop("include_secure_params", None)
         if for_tracing:
             return {"id": self.id, "type": self.type}

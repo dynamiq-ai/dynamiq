@@ -12,12 +12,7 @@ from dynamiq.memory.long_term.schemas import Fact
 if TYPE_CHECKING:
     from weaviate import WeaviateClient
 
-# Weaviate properties are strictly typed and rejects nested objects, so we
-# JSON-encode the Fact's `metadata` dict into a single TEXT property.
 _METADATA_JSON_KEY = "metadata_json"
-# Deterministic namespace so two backends pointing at the same collection
-# resolve a given `fact_id` to the same UUID — required for delete/update
-# round-trips when the original fact_id is not itself a UUID.
 _UUID_NAMESPACE = uuid.UUID("00000000-0000-0000-0000-000000000000")
 
 
@@ -51,8 +46,7 @@ def _properties_to_fact(props: dict[str, Any]) -> Fact:
 
 
 def _scope_to_filter(scope: dict[str, str]):
-    """Translate `{key: value, ...}` to a weaviate v4 `Filter` expression, AND-ing
-    multiple keys. Imported lazily so the module load doesn't require weaviate."""
+    """Translate a scope dict into a weaviate v4 `Filter` expression."""
     if not scope:
         return None
     from weaviate.classes.query import Filter
@@ -72,13 +66,7 @@ def _id_in_filter(uuids: list[str]):
 
 
 class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
-    """Long-term memory backend backed by Weaviate (client v4).
-
-    Each fact is one Weaviate object whose UUID is derived deterministically
-    from the original `fact_id` (UUID5 over a fixed namespace) so id-based
-    operations round-trip cleanly. Free-form `Fact.metadata` is JSON-encoded
-    into a single TEXT property to dodge Weaviate's strict-schema constraint.
-    """
+    """Long-term memory backend backed by Weaviate (client v4)."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -86,8 +74,6 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
     connection: WeaviateConnection = Field(default_factory=WeaviateConnection)
     collection_name: str = "UserFacts"
     dimension: int = 1536
-    # Page size for scoped scans (list/delete). Capped at Weaviate's default
-    # `QUERY_MAXIMUM_RESULTS` so a single fetch never exceeds server limits.
     _SCOPE_PAGE_SIZE: int = 10_000
 
     _client: "WeaviateClient | None" = PrivateAttr(default=None)
@@ -104,16 +90,11 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
         return data
 
     def model_post_init(self, __context) -> None:
-        # Only resolve the client here; the collection proxy is fetched lazily
-        # so backend construction does not depend on the collection already
-        # existing — callers can construct, call ensure_collection(), then use.
         self._client = self.connection.connect()
 
     @property
     def _collection(self):
-        """Lazy collection proxy. Re-fetched per access — the call is local to
-        the weaviate client (no network) and avoids stale state if the
-        collection is dropped/recreated between operations."""
+        """Lazy collection proxy; fetched per access (local, no network)."""
         return self._client.collections.get(self.collection_name)
 
     def _ensure_storage(self) -> None:
@@ -121,9 +102,6 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
 
     def ensure_collection(self) -> None:
         """Create the facts collection if absent. Safe to call repeatedly."""
-        # `VectorDistances` is a top-level export in weaviate-client>=4.7 — it
-        # is NOT nested under `Configure` in current releases, despite some
-        # older docs still showing `Configure.VectorDistances.COSINE`.
         from weaviate.classes.config import Configure, DataType, Property, VectorDistances
 
         if self._client.collections.exists(self.collection_name):
@@ -198,7 +176,6 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
         new_fact = existing.model_copy(
             update={"content": content, "hash": content_hash, "metadata": metadata, "updated_at": updated_at}
         )
-        # `replace` overwrites properties + vector while preserving the uuid.
         self._collection.data.replace(
             uuid=_to_weaviate_uuid(fact_id),
             properties=_fact_to_properties(new_fact),
@@ -224,8 +201,7 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
         out: list[tuple[Fact, float]] = []
         for obj in objects:
             distance = getattr(obj.metadata, "distance", None) if obj.metadata is not None else None
-            # Weaviate returns cosine *distance* in [0, 2]; convert to similarity
-            # so callers see the same shape as Qdrant/Pinecone (`1.0 = best`).
+            # Convert cosine distance to similarity to match Qdrant/Pinecone (`1.0 = best`).
             score = 1.0 - float(distance) if distance is not None else 0.0
             out.append((_properties_to_fact(obj.properties), score))
         return out

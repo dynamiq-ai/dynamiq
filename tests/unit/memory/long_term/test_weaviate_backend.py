@@ -147,8 +147,6 @@ def _fake_id_in_filter(uuids):
 def fake_weaviate_client(monkeypatch):
     client = _FakeClient()
     monkeypatch.setattr(WeaviateConnection, "connect", lambda self: client)
-    # Swap in a fake scope_to_filter so the backend uses our predicate fakes
-    # instead of real weaviate Filter objects (which the fake store can't evaluate).
     import dynamiq.memory.long_term.backends.weaviate as weaviate_backend
 
     monkeypatch.setattr(weaviate_backend, "_scope_to_filter", _fake_scope_to_filter)
@@ -164,8 +162,6 @@ def backend(fake_embedder, fake_weaviate_client):
         collection_name="UserFacts",
         dimension=fake_embedder.DIM,
     )
-    # The real backend's `model_post_init` already called `collections.get`,
-    # which our fake auto-creates on access — so the collection is ready.
     return backend
 
 

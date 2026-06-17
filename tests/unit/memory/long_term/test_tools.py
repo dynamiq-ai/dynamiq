@@ -132,8 +132,7 @@ def test_recall_tool_merges_multiple_queries_and_dedupes(backend, user_id):
 
 
 def test_recall_tool_fans_queries_out_in_parallel(backend, user_id, monkeypatch):
-    """Multi-query recall should dispatch `backend.recall` calls concurrently
-    so total wall-time is bounded by the slowest single query, not the sum."""
+    """Multi-query recall must run `backend.recall` concurrently."""
     import time
 
     backend.remember(content="User likes pizza", user_id=user_id)
@@ -153,9 +152,7 @@ def test_recall_tool_fans_queries_out_in_parallel(backend, user_id, monkeypatch)
     tool.execute(tool.input_schema(queries=["pizza", "Python", "favourite food", "language"], limit=5))
     elapsed = time.monotonic() - start
 
-    # Sequential would be ~4 * delay = 0.4s; parallel should be near `delay` plus
-    # scheduling overhead. Generous bound at 2.5 * delay catches a regression
-    # to sequential without being flaky on slow CI.
+    # Sequential would be 4*delay; allow up to 2.5x for parallel + scheduling slack.
     assert elapsed < 2.5 * delay, f"recall fanout regressed to sequential ({elapsed:.3f}s)"
 
 

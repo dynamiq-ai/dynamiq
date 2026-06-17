@@ -189,8 +189,6 @@ def test_init_components_initializes_ltm_embedder(llm):
 
     ltm_with_postponed = LongTermMemoryConfig(backend=InMemoryLongTermMemoryBackend(embedder=_RecordingEmbedder()))
     agent = _make_agent(llm, ltm=ltm_with_postponed)
-    # Node.__init__ already invokes init_components on construction; clear and
-    # assert the explicit call also propagates to the embedder.
     init_calls.clear()
     agent.init_components()
     assert len(init_calls) == 1
@@ -265,9 +263,7 @@ def test_execute_does_not_serialize_concurrent_calls_when_ltm_configured(llm, lt
     barrier = threading.Barrier(2, timeout=5)
 
     def fake_run(*args, **kwargs):
-        # If a lock was serialising us, the second thread would never reach
-        # the barrier and we'd time out — barrier verifies true concurrency.
-        barrier.wait()
+        barrier.wait()  # times out under a lock; verifies real concurrency
         return "ok"
 
     with patch.object(agent, "_run_agent", side_effect=fake_run):
@@ -292,7 +288,6 @@ def test_concurrent_calls_isolate_per_user_ltm_tools(llm, ltm):
     barrier = threading.Barrier(2, timeout=5)
 
     def fake_run(*args, **kwargs):
-        # Wait so both threads are inside _run_agent simultaneously.
         barrier.wait()
         resolved = agent.tool_by_names
         bound_user_ids = {t.user_id for t in resolved.values() if hasattr(t, "user_id")}
@@ -360,9 +355,6 @@ def test_sub_agent_without_ltm_does_not_inherit_parent_overlay(llm, ltm):
     sub_captured: list[set[str]] = []
 
     def parent_run(*args, **kwargs):
-        # While the parent's overlay is active, run the sub-agent in the same
-        # context (mirrors what happens when a sub-agent is invoked from a
-        # parent's tool-loop or via ContextAwareThreadPoolExecutor).
         with _patch_run_agent_capture_runtime_tools(sub_agent, sub_captured):
             sub_agent.run_sync(input_data={"input": "hi", "user_id": "u1"})
         return "ok"
