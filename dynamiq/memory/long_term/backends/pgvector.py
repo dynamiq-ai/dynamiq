@@ -198,6 +198,10 @@ class PostgresLongTermMemoryBackend(LongTermMemoryBackend):
         scope: dict[str, str],
         limit: int,
     ) -> list[tuple[Fact, float]]:
+        if not scope:
+            raise ValueError("search requires a non-empty scope")
+        if limit <= 0:
+            return []
         where, params = _scope_where_clause(scope)
         with self._conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
@@ -212,6 +216,10 @@ class PostgresLongTermMemoryBackend(LongTermMemoryBackend):
         return [(_row_to_fact(row), float(row["score"])) for row in rows]
 
     def list_by_scope(self, scope: dict[str, str], limit: int = 100) -> list[Fact]:
+        if not scope:
+            raise ValueError("list_by_scope requires a non-empty scope")
+        if limit <= 0:
+            return []
         where, params = _scope_where_clause(scope)
         with self._conn.cursor(row_factory=dict_row) as cur:
             cur.execute(

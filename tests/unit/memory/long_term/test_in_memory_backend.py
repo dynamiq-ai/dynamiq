@@ -197,3 +197,36 @@ def test_delete_scope_rejects_empty_scope(backend, fake_embedder):
     with pytest.raises(ValueError, match="non-empty scope"):
         backend.delete_scope({})
     assert len(backend.list_by_scope({"user_id": "u1"})) == 1
+
+
+def test_search_and_list_by_scope_reject_empty_scope(backend, fake_embedder):
+    """Empty scope is rejected on read paths too — match-all would leak across users."""
+    backend.insert(_fact("f1", "u1", "a"), fake_embedder.embed("a"))
+    with pytest.raises(ValueError, match="non-empty scope"):
+        backend.search(query_embedding=fake_embedder.embed("a"), scope={}, limit=5)
+    with pytest.raises(ValueError, match="non-empty scope"):
+        backend.list_by_scope({})
+
+
+def test_concurrent_inserts_do_not_lose_facts(backend, fake_embedder):
+    """Two threads remembering distinct facts must both land; the lock serialises
+    the dict mutations so neither overwrites the other."""
+    import threading
+
+    errors: list[Exception] = []
+
+    def worker(uid: str, n: int):
+        try:
+            for i in range(n):
+                backend.remember(content=f"{uid}-fact-{i}", user_id=uid)
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    t1 = threading.Thread(target=worker, args=("u1", 25))
+    t2 = threading.Thread(target=worker, args=("u2", 25))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    assert errors == []
+    assert len(backend.list_by_scope({"user_id": "u1"})) == 25
+    assert len(backend.list_by_scope({"user_id": "u2"})) == 25

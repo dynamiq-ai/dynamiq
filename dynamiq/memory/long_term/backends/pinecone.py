@@ -144,6 +144,10 @@ class PineconeLongTermMemoryBackend(LongTermMemoryBackend):
         scope: dict[str, str],
         limit: int,
     ) -> list[tuple[Fact, float]]:
+        if not scope:
+            raise ValueError("search requires a non-empty scope")
+        if limit <= 0:
+            return []
         result = self._index.query(
             vector=list(query_embedding),
             top_k=limit,
@@ -160,7 +164,8 @@ class PineconeLongTermMemoryBackend(LongTermMemoryBackend):
         return out
 
     def list_by_scope(self, scope: dict[str, str], limit: int = 100) -> list[Fact]:
-        # Pinecone's top_k must be >= 1.
+        if not scope:
+            raise ValueError("list_by_scope requires a non-empty scope")
         if limit <= 0:
             return []
         top_k = min(max(limit, 1), self._LIST_PAGE_SIZE)

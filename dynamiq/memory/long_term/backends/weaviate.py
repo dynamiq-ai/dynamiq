@@ -189,6 +189,10 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
         scope: dict[str, str],
         limit: int,
     ) -> list[tuple[Fact, float]]:
+        if not scope:
+            raise ValueError("search requires a non-empty scope")
+        if limit <= 0:
+            return []
         from weaviate.classes.query import MetadataQuery
 
         result = self._collection.query.near_vector(
@@ -207,6 +211,10 @@ class WeaviateLongTermMemoryBackend(LongTermMemoryBackend):
         return out
 
     def list_by_scope(self, scope: dict[str, str], limit: int = 100) -> list[Fact]:
+        if not scope:
+            raise ValueError("list_by_scope requires a non-empty scope")
+        if limit <= 0:
+            return []
         result = self._collection.query.fetch_objects(
             filters=_scope_to_filter(scope),
             limit=limit,
