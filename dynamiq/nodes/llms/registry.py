@@ -82,6 +82,13 @@ class ModelRegistry:
             return None
         return info.get("supports_vision")
 
+    def supports_function_calling(self, model: str) -> bool | None:
+        """Return function-calling support flag or ``None`` if unknown."""
+        info = self._resolve(model)
+        if info is None:
+            return None
+        return info.get("supports_function_calling")
+
     def supports_pdf_input(self, model: str) -> bool | None:
         """Return PDF input support flag or ``None`` if unknown."""
         info = self._resolve(model)
