@@ -3,7 +3,7 @@ import types
 from concurrent.futures import as_completed
 from typing import Any, Callable, Literal, Mapping, Union, get_args, get_origin
 
-from litellm import get_supported_openai_params, supports_function_calling, supports_response_schema
+from litellm import get_supported_openai_params, supports_response_schema
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from pydantic_core import from_json
 
@@ -555,7 +555,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         model = self.llm.model
         match self.inference_mode:
             case InferenceMode.FUNCTION_CALLING:
-                if not supports_function_calling(model=model):
+                if not self.llm.is_function_calling_supported:
                     raise ValueError(
                         f"Model {model} does not support function calling. "
                         f"Try inference_mode=InferenceMode.XML or InferenceMode.DEFAULT."
