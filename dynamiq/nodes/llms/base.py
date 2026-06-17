@@ -4,7 +4,7 @@ import warnings
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
 
-from litellm import get_max_tokens, get_model_info, supports_vision
+from litellm import get_max_tokens, get_model_info, supports_function_calling, supports_vision
 from litellm.exceptions import (
     APIConnectionError,
     BudgetExceededError,
@@ -77,6 +77,7 @@ class ModelInfo(BaseModel):
     max_input_tokens: int | None = None
     supports_vision: bool | None = None
     supports_pdf_input: bool | None = None
+    supports_function_calling: bool | None = None
 
 
 class FallbackTrigger(str, Enum):
@@ -400,6 +401,34 @@ class BaseLLM(ConnectionNode):
                 return False
         custom = model_registry.supports_vision(self.model)
         return custom if custom is not None else False
+
+    @property
+    def is_function_calling_supported(self) -> bool:
+        """Check if the LLM supports native function/tool calling."""
+        if self.model_info and self.model_info.supports_function_calling is not None:
+            return self.model_info.supports_function_calling
+        if self._get_litellm_model_info() is not None:
+            try:
+                return supports_function_calling(self.model)
+            except Exception:
+                return False
+        custom = model_registry.supports_function_calling(self.model)
+        if custom is not None:
+            return custom
+        if model_registry.get_model_info(self.model) is not None:
+            logger.warning(
+                "Model %s has a registry entry with no 'supports_function_calling' flag; "
+                "assuming it supports function calling. Set the flag to silence this.",
+                self.model,
+            )
+        else:
+            logger.warning(
+                "Model %s is unknown to litellm and the custom registry; assuming it supports "
+                "function calling. Add a registry entry or set model_info.supports_function_calling "
+                "to silence this.",
+                self.model,
+            )
+        return True
 
     @property
     def is_pdf_input_supported(self) -> bool:
