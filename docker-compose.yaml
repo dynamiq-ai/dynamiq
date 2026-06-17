@@ -48,3 +48,13 @@ services:
       - .env
     volumes:
       - ./:/app
+
+  dynamiq-app-test-smoke:
+    image: dynamiq-app:${IMAGE_TAG:-local}
+    build:
+      target: develop
+    entrypoint: ["make", "test-smoke"]
+    env_file:
+      - .env
+    volumes:
+      - ./:/app
