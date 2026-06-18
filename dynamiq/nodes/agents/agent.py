@@ -10,6 +10,7 @@ from pydantic_core import from_json
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.agents.base import Agent as BaseAgent
+from dynamiq.nodes.agents.base import _run_extra_tools
 from dynamiq.nodes.agents.components import parser, schema_generator
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
@@ -1173,7 +1174,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             role=MessageRole.SYSTEM,
             content=self.generate_prompt(
                 tools_name=self.tool_names,
-                input_formats=schema_generator.generate_input_formats(self.tools, self.sanitize_tool_name),
+                tool_description=self.tool_description,
+                input_formats=schema_generator.generate_input_formats(self._runtime_tools, self.sanitize_tool_name),
             ),
             static=True,
         )
@@ -1701,21 +1703,22 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         try:
             native_parallel = self.parallel_tool_calls_enabled and self.inference_mode == InferenceMode.FUNCTION_CALLING
+            fc_tools, response_format = self._effective_inference_schemas()
             # In FUNCTION_CALLING mode with tools present, force a tool call so
             # the model cannot bail out with a text-only response. Honour any
             # explicit caller override (kwargs / self.llm.tool_choice).
             forced_tool_choice = None
             if (
                 self.inference_mode == InferenceMode.FUNCTION_CALLING
-                and self._tools
+                and fc_tools
                 and "tool_choice" not in kwargs
                 and getattr(self.llm, "tool_choice", None) is None
             ):
                 forced_tool_choice = "required"
             llm_result = self._run_llm(
                 messages=messages,
-                tools=self._tools,
-                response_format=self._response_format,
+                tools=fc_tools,
+                response_format=response_format,
                 config=llm_config,
                 parallel_tool_calls=True if native_parallel else None,
                 **({"tool_choice": forced_tool_choice} if forced_tool_choice else {}),
@@ -2129,6 +2132,33 @@ class Agent(HistoryManagerMixin, BaseAgent):
             except Exception as e:
                 logger.debug("Failed to load todo state (none or invalid): %s", e)
 
+    def _build_inference_schemas(self, tools: list) -> tuple:
+        """Build (function_calling_tools, response_format) for the given tool list.
+
+        Returns the init-time defaults for modes that don't apply, so callers
+        can substitute whichever value the current inference mode produces.
+        """
+        fc_tools = self._tools
+        response_format = self._response_format
+        if self.inference_mode == InferenceMode.FUNCTION_CALLING:
+            fc_tools = schema_generator.generate_function_calling_schemas(
+                tools,
+                self.delegation_allowed,
+                self.sanitize_tool_name,
+                response_format=self.response_format,
+            )
+        elif self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
+            response_format = schema_generator.generate_structured_output_schemas(
+                tools, self.sanitize_tool_name, self.delegation_allowed
+            )
+        return fc_tools, response_format
+
+    def _effective_inference_schemas(self) -> tuple:
+        """Inference schemas including any per-call LTM tool overlay."""
+        if not _run_extra_tools.get():
+            return self._tools, self._response_format
+        return self._build_inference_schemas(self._runtime_tools)
+
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""
         # Generate inference-mode schemas
@@ -2155,10 +2185,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
             response_format_schema=response_format_schema,
         )
 
+        ltm_enabled = self.long_term_memory is not None and self.long_term_memory.enabled
         self.system_prompt_manager.build_react_prompt(
             ReactPromptConfig(
                 inference_mode=self.inference_mode,
-                has_tools=bool(self.tools) or (self.skills.enabled and self.skills.source is not None),
+                has_tools=bool(self.tools)
+                or (self.skills.enabled and self.skills.source is not None)
+                or ltm_enabled,
                 parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
                 delegation_allowed=self.delegation_allowed,
                 context_compaction_enabled=self.summarization_config.enabled,

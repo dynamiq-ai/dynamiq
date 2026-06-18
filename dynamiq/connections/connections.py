@@ -69,6 +69,7 @@ class BaseConnection(BaseModel, ABC):
         Returns:
             dict: A dictionary representation of the connection instance.
         """
+        kwargs.pop("include_secure_params", None)
         if for_tracing:
             return {"id": self.id, "type": self.type}
         return self.model_dump(**kwargs)

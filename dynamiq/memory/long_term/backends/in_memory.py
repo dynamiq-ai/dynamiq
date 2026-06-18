@@ -1,0 +1,124 @@
+import threading
+from contextlib import AbstractContextManager
+from datetime import datetime
+
+import numpy as np
+from pydantic import PrivateAttr
+
+from dynamiq.memory.long_term.base import LongTermMemoryBackend
+from dynamiq.memory.long_term.schemas import Fact
+
+
+class InMemoryLongTermMemoryBackend(LongTermMemoryBackend):
+    """Dict + numpy-cosine backend. Loses data on restart."""
+
+    name: str = "in-memory-long-term-memory-backend"
+
+    _facts: dict[str, Fact] = PrivateAttr(default_factory=dict)
+    _vectors: dict[str, list[float]] = PrivateAttr(default_factory=dict)
+    _lock: threading.RLock = PrivateAttr(default_factory=threading.RLock)
+
+    def _dedup_lock(self) -> AbstractContextManager:
+        # Re-entrant: base.remember holds the lock while calling get_by_hash + insert,
+        # both of which re-acquire it.
+        return self._lock
+
+    def insert(self, fact: Fact, embedding: list[float]) -> None:
+        with self._lock:
+            self._facts[fact.id] = fact
+            self._vectors[fact.id] = list(embedding)
+
+    def get(self, fact_id: str) -> Fact | None:
+        with self._lock:
+            return self._facts.get(fact_id)
+
+    def get_by_hash(self, *, user_id: str, content_hash: str) -> Fact | None:
+        with self._lock:
+            for fact in self._facts.values():
+                if fact.user_id == user_id and fact.hash == content_hash:
+                    return fact
+            return None
+
+    def delete(self, fact_id: str) -> None:
+        with self._lock:
+            self._facts.pop(fact_id, None)
+            self._vectors.pop(fact_id, None)
+
+    def update(
+        self,
+        fact_id: str,
+        *,
+        content: str,
+        content_hash: str,
+        embedding: list[float],
+        metadata: dict,
+        updated_at: datetime,
+    ) -> None:
+        with self._lock:
+            existing = self._facts.get(fact_id)
+            if existing is None:
+                return
+            self._facts[fact_id] = existing.model_copy(
+                update={"content": content, "hash": content_hash, "metadata": metadata, "updated_at": updated_at}
+            )
+            self._vectors[fact_id] = list(embedding)
+
+    def search(
+        self, *, query_embedding: list[float],
+        scope: dict[str, str], limit: int,
+    ) -> list[tuple[Fact, float]]:
+        if not scope:
+            raise ValueError("search requires a non-empty scope")
+        if limit <= 0:
+            return []
+        # Hold the lock through scoring so concurrent delete/update can't make
+        # the returned facts diverge from what's actually stored.
+        with self._lock:
+            if not self._facts:
+                return []
+
+            matched_facts = [f for f in self._facts.values() if _matches_scope(f, scope)]
+            if not matched_facts:
+                return []
+
+            matrix = np.asarray([self._vectors[f.id] for f in matched_facts], dtype=np.float64)
+            query = np.asarray(query_embedding, dtype=np.float64)
+            row_norms = np.linalg.norm(matrix, axis=1)
+            row_norms[row_norms == 0] = 1.0
+            query_norm = np.linalg.norm(query) or 1.0
+            scores = (matrix @ query) / (row_norms * query_norm)
+
+            k = min(limit, len(matched_facts))
+            if k <= 0:
+                return []
+            top_idx = np.argpartition(-scores, k - 1)[:k]
+            top_idx = top_idx[np.argsort(-scores[top_idx])]
+            return [(matched_facts[i], float(scores[i])) for i in top_idx]
+
+    def list_by_scope(
+        self, scope: dict[str, str], limit: int = 100,
+    ) -> list[Fact]:
+        if not scope:
+            raise ValueError("list_by_scope requires a non-empty scope")
+        if limit <= 0:
+            return []
+        with self._lock:
+            matched = [f for f in self._facts.values() if _matches_scope(f, scope)]
+        return matched[:limit]
+
+    def delete_scope(self, scope: dict[str, str]) -> int:
+        if not scope:
+            raise ValueError("delete_scope requires a non-empty scope")
+        with self._lock:
+            to_delete = [fid for fid, f in self._facts.items() if _matches_scope(f, scope)]
+            for fid in to_delete:
+                self._facts.pop(fid, None)
+                self._vectors.pop(fid, None)
+            return len(to_delete)
+
+
+def _matches_scope(fact: Fact, scope: dict[str, str]) -> bool:
+    for key, value in scope.items():
+        if getattr(fact, key, None) != value:
+            return False
+    return True
