@@ -98,8 +98,10 @@ def test_concurrent_remember_same_content_yields_one_fact(backend, user_id):
             outcomes.append(outcome)
 
     threads = [threading.Thread(target=worker) for _ in range(2)]
-    for t in threads: t.start()
-    for t in threads: t.join()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
 
     assert sorted(o.value for o in outcomes) == ["created", "unchanged"]
     assert len(backend.list_by_scope({"user_id": user_id})) == 1
