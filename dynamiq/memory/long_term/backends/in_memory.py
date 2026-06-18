@@ -65,6 +65,8 @@ class InMemoryLongTermMemoryBackend(LongTermMemoryBackend):
             raise ValueError("search requires a non-empty scope")
         if limit <= 0:
             return []
+        # Hold the lock through scoring so concurrent delete/update can't make
+        # the returned facts diverge from what's actually stored.
         with self._lock:
             if not self._facts:
                 return []
@@ -74,19 +76,18 @@ class InMemoryLongTermMemoryBackend(LongTermMemoryBackend):
                 return []
 
             matrix = np.asarray([self._vectors[f.id] for f in matched_facts], dtype=np.float64)
+            query = np.asarray(query_embedding, dtype=np.float64)
+            row_norms = np.linalg.norm(matrix, axis=1)
+            row_norms[row_norms == 0] = 1.0
+            query_norm = np.linalg.norm(query) or 1.0
+            scores = (matrix @ query) / (row_norms * query_norm)
 
-        query = np.asarray(query_embedding, dtype=np.float64)
-        row_norms = np.linalg.norm(matrix, axis=1)
-        row_norms[row_norms == 0] = 1.0
-        query_norm = np.linalg.norm(query) or 1.0
-        scores = (matrix @ query) / (row_norms * query_norm)
-
-        k = min(limit, len(matched_facts))
-        if k <= 0:
-            return []
-        top_idx = np.argpartition(-scores, k - 1)[:k]
-        top_idx = top_idx[np.argsort(-scores[top_idx])]
-        return [(matched_facts[i], float(scores[i])) for i in top_idx]
+            k = min(limit, len(matched_facts))
+            if k <= 0:
+                return []
+            top_idx = np.argpartition(-scores, k - 1)[:k]
+            top_idx = top_idx[np.argsort(-scores[top_idx])]
+            return [(matched_facts[i], float(scores[i])) for i in top_idx]
 
     def list_by_scope(
         self, scope: dict[str, str], limit: int = 100,

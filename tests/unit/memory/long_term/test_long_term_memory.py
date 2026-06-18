@@ -24,6 +24,27 @@ def test_remember_exact_duplicate_returns_unchanged(backend, user_id):
     assert first.id == second.id
 
 
+def test_remember_duplicate_applies_new_metadata(backend, user_id):
+    """Re-stating the same content with changed metadata must persist the new
+    metadata and return UPDATED, not silently drop it as UNCHANGED."""
+    first, _ = backend.remember(content="User likes pizza", user_id=user_id, metadata={"source": "chat"})
+    second, outcome = backend.remember(
+        content="User likes pizza", user_id=user_id, metadata={"source": "profile"}
+    )
+    assert outcome == RememberOutcome.UPDATED
+    assert second.id == first.id
+    assert second.metadata == {"source": "profile"}
+    assert backend.get(first.id).metadata == {"source": "profile"}
+
+
+def test_remember_duplicate_without_metadata_stays_unchanged(backend, user_id):
+    """No metadata supplied → don't churn an UPDATED outcome on an exact duplicate."""
+    first, _ = backend.remember(content="User likes pizza", user_id=user_id, metadata={"source": "chat"})
+    second, outcome = backend.remember(content="User likes pizza", user_id=user_id)
+    assert outcome == RememberOutcome.UNCHANGED
+    assert second.metadata == {"source": "chat"}
+
+
 def test_remember_does_not_dedup_across_users(backend, user_id, other_user_id):
     a, _ = backend.remember(content="User likes pizza", user_id=user_id)
     b, b_outcome = backend.remember(content="User likes pizza", user_id=other_user_id)

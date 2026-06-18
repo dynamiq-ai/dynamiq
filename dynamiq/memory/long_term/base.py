@@ -89,6 +89,19 @@ class LongTermMemoryBackend(ABC, BaseModel):
 
             existing = self.get_by_hash(user_id=user_id, content_hash=content_hash)
             if existing is not None:
+                if metadata is not None and metadata != existing.metadata:
+                    now = datetime.now(UTC)
+                    embedding = self._embed(normalised)
+                    self.update(
+                        existing.id,
+                        content=existing.content,
+                        content_hash=existing.hash,
+                        embedding=embedding,
+                        metadata=metadata,
+                        updated_at=now,
+                    )
+                    logger.debug(f"LongTermMemory: exact-dedup hit with new metadata for user={user_id}, fact {existing.id}")
+                    return existing.model_copy(update={"metadata": metadata, "updated_at": now}), RememberOutcome.UPDATED
                 logger.debug(f"LongTermMemory: exact-dedup hit for user={user_id}, fact {existing.id}")
                 return existing, RememberOutcome.UNCHANGED
 

@@ -93,9 +93,14 @@ def test_build_returns_default_tools_when_ltm_and_user_id_present(llm, ltm):
     assert {t.name for t in tools} == {"remember_fact", "recall_facts"}
 
 
-def test_build_returns_empty_when_no_user_id(llm, ltm):
+def test_build_raises_when_ltm_enabled_but_no_user_id(llm, ltm):
+    """Mismatch between the prompt's tool-block expectations and the empty
+    runtime overlay is treated as a configuration error, not silently swallowed."""
+    import pytest
+
     agent = _make_agent(llm, ltm=ltm)
-    assert agent._build_long_term_memory_tools(_input(session_id="s1")) == []
+    with pytest.raises(ValueError, match="user_id"):
+        agent._build_long_term_memory_tools(_input(session_id="s1"))
 
 
 def test_build_returns_empty_when_no_long_term_memory(llm):
@@ -233,14 +238,12 @@ def test_execute_clears_ltm_overlay_even_when_run_raises(llm, ltm):
     assert {"remember_fact", "recall_facts"}.isdisjoint(agent.tool_by_names.keys())
 
 
-def test_execute_no_ltm_overlay_when_no_user_id(llm, ltm):
+def test_execute_surfaces_failure_when_ltm_enabled_but_no_user_id(llm, ltm):
+    """LTM-enabled agent run without user_id fails fast — the prompt would
+    otherwise advertise tool blocks the LLM can't see."""
     agent = _make_agent(llm, ltm=ltm)
-    captured: list[set[str]] = []
-
-    with _patch_run_agent_capture_runtime_tools(agent, captured):
-        agent.run_sync(input_data={"input": "hi"})
-
-    assert {"remember_fact", "recall_facts"}.isdisjoint(captured[0])
+    result = agent.run_sync(input_data={"input": "hi"})
+    assert result.status.value == "failure"
 
 
 def test_execute_no_ltm_overlay_when_no_long_term_memory(llm):
@@ -309,39 +312,6 @@ def test_concurrent_calls_isolate_per_user_ltm_tools(llm, ltm):
     assert set(snapshots.keys()) == {"u1", "u2"}
     for tool_names in snapshots.values():
         assert tool_names == {"remember_fact", "recall_facts"}
-
-
-def test_concurrent_no_user_id_call_does_not_see_other_users_ltm_tools(llm, ltm):
-    """A concurrent no-user_id execute must not observe another call's
-    user-scoped tools — ContextVar isolation guarantees this without a lock."""
-    import threading
-    from concurrent.futures import ThreadPoolExecutor
-
-    agent = _make_agent(llm, ltm=ltm)
-    snapshots: dict[str, set] = {}
-    snapshots_lock = threading.Lock()
-    barrier = threading.Barrier(2, timeout=5)
-
-    def fake_run(*args, **kwargs):
-        barrier.wait()
-        resolved = agent.tool_by_names
-        bound = {getattr(t, "user_id", None) for t in resolved.values() if hasattr(t, "user_id")}
-        with snapshots_lock:
-            key = next(iter(bound), "none")
-            snapshots[key] = bound
-        return "ok"
-
-    with patch.object(agent, "_run_agent", side_effect=fake_run):
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = [
-                pool.submit(agent.run_sync, input_data={"input": "hi", "user_id": "u1"}),
-                pool.submit(agent.run_sync, input_data={"input": "hi"}),
-            ]
-            for f in futures:
-                f.result(timeout=10)
-
-    assert snapshots.get("u1") == {"u1"}
-    assert snapshots.get("none", set()) == set()
 
 
 def test_sub_agent_without_ltm_does_not_inherit_parent_overlay(llm, ltm):

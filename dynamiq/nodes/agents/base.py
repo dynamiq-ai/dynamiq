@@ -828,12 +828,20 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         return history_messages
 
     def _build_long_term_memory_tools(self, input_data: "AgentInputSchema") -> list[Node]:
-        """Construct per-run long-term-memory tools, or [] when LTM is off/absent or user_id is missing."""
+        """Construct per-run long-term-memory tools, or [] when LTM is off/absent.
+
+        Raises if LTM is enabled but `input_data.user_id` is missing — the prompt
+        already advertises tool blocks at that point, so silently dropping the
+        tools would leave the LLM with an empty `tool_description`.
+        """
         if self.long_term_memory is None or not self.long_term_memory.enabled:
             return []
         user_id = getattr(input_data, "user_id", None)
         if not user_id:
-            return []
+            raise ValueError(
+                "long_term_memory is enabled but input_data.user_id is missing; "
+                "pass user_id or disable long_term_memory for this call"
+            )
         from dynamiq.nodes.tools.long_term_memory import build_long_term_memory_tools
 
         tools = build_long_term_memory_tools(
