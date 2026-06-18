@@ -13,11 +13,11 @@ from .harness import assert_strict_call_is_clean, run_route_agent
 REQUIRED_ENV = ["COHERE_API_KEY"]
 PROVIDER = "cohere"
 
-pytestmark = [pytest.mark.smoke, pytest.mark.integration, pytest.mark.flaky(reruns=3)]
+pytestmark = [pytest.mark.smoke, pytest.mark.integration]
 
 
 def _llm():
-    return Cohere(connection=CohereConnection(), model="cohere/command-a-03-2025", max_tokens=2048, temperature=1)
+    return Cohere(connection=CohereConnection(), model="cohere/command-a-03-2025", max_tokens=4096, temperature=1)
 
 
 def _skip_if_no_creds():

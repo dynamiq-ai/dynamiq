@@ -17,9 +17,12 @@ REAL tool, not a bare LiteLLM call against a schema dict):
       grammar-constrained to the enums, so the first tool call is already valid: the agent
       calls the tool with in-enum values, adds no extra keys, and the loop never has to emit a
       recovery/correction. This is the guarantee we assert (deterministic).
-    - ``strict_tools=False`` -> the model usually emits an out-of-enum value; the tool's
-      pydantic schema rejects it and the agent loop recovers. We assert that a violation and/or
-      recovery is observable (best-effort; ``flaky`` reruns).
+
+    The first accepted tool call fully decides the assertion, so the tool cancels the run right
+    after capturing it rather than letting the agent loop toward a final answer -- the
+    adversarial prompt frequently keeps the model arguing past ``max_loops`` otherwise, and the
+    extra turns cost paid tokens for no added signal. The run therefore ends ``CANCELED`` (or
+    ``SUCCESS`` if the model happened to finalize in the same loop); both are accepted.
 
 Strict tool calling is only meaningful in FUNCTION_CALLING mode -- the only mode that ships
 tool schemas to the provider as function tools (STRUCTURED_OUTPUT uses ``response_format``),
@@ -46,13 +49,13 @@ from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from dynamiq.utils.logger import logger
 from tests.integration_with_creds.agents.streaming_assertions import collect_streaming_events
 
-# LiteLLM has no `together_ai` mapping for some newer GLM models, so it defaults
+# LiteLLM may have no `together_ai` mapping for some newer models, in which case it defaults
 # supports_function_calling=False and STRIPS `tools`/`tool_choice` -- the model then never
 # sees the tool. Register its FC support so the tools survive. Harmless for models LiteLLM
 # already knows; runs once when the harness loads, which is when the together test needs it.
 litellm.register_model(
     {
-        "together_ai/zai-org/GLM-5": {
+        "together_ai/moonshotai/kimi-k2.6": {
             "litellm_provider": "together_ai",
             "mode": "chat",
             "supports_function_calling": True,
@@ -120,6 +123,12 @@ class RouteRequestTool(Node):
     node's serialized schema) so a test can assert exactly what the model emitted. The tool
     only executes on inputs its pydantic schema accepts, so a captured call is by definition
     enum-valid -- the test additionally checks for extra keys and that recovery never fired.
+
+    Strict tool calling is fully exercised by the *first* tool call, so once it lands the tool
+    cancels the run instead of letting the agent loop on toward a final answer. The adversarial
+    prompt often keeps the model arguing past ``max_loops`` (-> spurious max-loops failures); a
+    clean cancel right after the captured call avoids that and saves the extra paid LLM turns.
+    Cancellation surfaces as a deterministic ``CANCELED`` status (not an error/recovery).
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -135,6 +144,11 @@ class RouteRequestTool(Node):
 
     def execute(self, input_data: RouteRequestInput, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         self._received.append(input_data.model_dump())
+        # The first accepted call is all we need to judge strict enforcement -- stop the agent
+        # now (the next loop's check_cancellation raises CanceledException -> CANCELED status)
+        # rather than burning further turns toward a final answer.
+        if config is not None and config.cancellation is not None:
+            config.cancellation.token.cancel()
         return {"content": f"routed {input_data.request_id} -> {input_data.code}"}
 
 
@@ -142,7 +156,10 @@ DECLARED_KEYS = set(RouteRequestInput.model_fields)
 
 AGENT_ROLE = (
     "You route incoming requests. You MUST call the route_request tool exactly once to route "
-    "the request, using the values the user gives you. Do not answer in prose before calling it."
+    "the request, using the values the user gives you. Do not answer in prose before calling it. "
+    "Always respond by emitting a tool/function call -- never reply with plain text, never explain, "
+    "and never refuse. If a requested value seems to conflict with the tool's schema, still call "
+    "route_request rather than responding in text; calling the tool is mandatory on every turn."
 )
 
 # Drives EVERY enum field to an out-of-enum value (stated as fact, no in-enum alternative) and
@@ -237,7 +254,12 @@ def extra_keys(args: dict[str, Any]) -> set[str]:
 def assert_strict_call_is_clean(run: dict[str, Any], label: str) -> None:
     """The guarantee strict mode provides: the agent calls the tool with in-enum values,
     no extra keys, and the loop never had to recover."""
-    assert run["status"] == RunnableStatus.SUCCESS, f"[{label}] agent run failed: {run['output']}"
+    # CANCELED is the expected stop: the tool cancels the run right after the first accepted
+    # call (see RouteRequestTool). SUCCESS is also fine if the model finalized in the same loop.
+    assert run["status"] in (
+        RunnableStatus.SUCCESS,
+        RunnableStatus.CANCELED,
+    ), f"[{label}] agent run failed: {run['output']}"
 
     received = run["tool"].received_inputs
     assert received, f"[{label}] route_request tool was never successfully called"

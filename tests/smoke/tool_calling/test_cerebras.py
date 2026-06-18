@@ -13,11 +13,11 @@ from .harness import assert_strict_call_is_clean, run_route_agent
 REQUIRED_ENV = ["CEREBRAS_API_KEY"]
 PROVIDER = "cerebras"
 
-pytestmark = [pytest.mark.smoke, pytest.mark.integration, pytest.mark.flaky(reruns=3)]
+pytestmark = [pytest.mark.smoke, pytest.mark.integration]
 
 
 def _llm():
-    return Cerebras(connection=CerebrasConnection(), model="cerebras/zai-glm-4.7", max_tokens=2048, temperature=1)
+    return Cerebras(connection=CerebrasConnection(), model="cerebras/zai-glm-4.7", max_tokens=4096, temperature=1)
 
 
 def _skip_if_no_creds():

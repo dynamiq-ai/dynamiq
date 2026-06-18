@@ -28,8 +28,7 @@ from dynamiq.sandboxes import SandboxConfig
 from dynamiq.sandboxes.e2b import E2BSandbox
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from dynamiq.utils.logger import logger
-
-from .streaming_assertions import collect_streaming_events
+from tests.integration_with_creds.agents.streaming_assertions import collect_streaming_events
 
 # Provider matrix -- one representative model each (full model sweeps live in test_agent_llms.py).
 COMMON_LLM_KWARGS = dict(max_tokens=20000, temperature=0)
@@ -136,11 +135,7 @@ PROVIDERS = {
     "xai": (["XAI_API_KEY"], _llm_factory(llms.xAI, conn.xAI, "grok-3")),
 }
 
-INFERENCE_MODES = [
-    InferenceMode.XML,
-    InferenceMode.STRUCTURED_OUTPUT,
-    InferenceMode.FUNCTION_CALLING
-]
+INFERENCE_MODES = [InferenceMode.XML, InferenceMode.STRUCTURED_OUTPUT, InferenceMode.FUNCTION_CALLING]
 INFERENCE_MODE_IDS = ["xml", "structured_output", "function_calling"]
 
 # Required for every combo regardless of provider.
@@ -150,9 +145,9 @@ HARD_TASK = (
     "First, research the current stable major version of the Flask Python web framework and one "
     "recommended way to structure a minimal Flask app. Then build a minimal website: create an "
     "`index.html` page and a Flask backend `app.py` that serves that page on `/` and exposes a "
-    "`/api/health` endpoint returning JSON `{\"status\": \"ok\"}`. Save BOTH files to "
+    '`/api/health` endpoint returning JSON `{"status": "ok"}`. Save BOTH files to '
     "`/home/user/output` so they are returned. Finally, verify the backend imports cleanly by "
-    "running `python -c \"import app\"` from `/home/user/output` in the sandbox; if it fails, fix "
+    'running `python -c "import app"` from `/home/user/output` in the sandbox; if it fails, fix '
     "the code and re-verify. Report the Flask version you used in your final answer."
 )
 

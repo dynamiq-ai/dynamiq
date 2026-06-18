@@ -13,11 +13,11 @@ from .harness import assert_strict_call_is_clean, run_route_agent
 REQUIRED_ENV = ["OPENAI_API_KEY"]
 PROVIDER = "openai"
 
-pytestmark = [pytest.mark.smoke, pytest.mark.integration, pytest.mark.flaky(reruns=3)]
+pytestmark = [pytest.mark.smoke, pytest.mark.integration]
 
 
 def _llm():
-    return OpenAI(connection=OpenAIConnection(), model="gpt-4.1", max_tokens=2048, temperature=1)
+    return OpenAI(connection=OpenAIConnection(), model="gpt-4.1", max_tokens=4096, temperature=1)
 
 
 def _skip_if_no_creds():
