@@ -175,6 +175,10 @@ class TestBuildCompletionParams:
 
             assert recovered is not None
             assert recovered.get("stop") is None
+            # Recovery is pure: the instance is not mutated until the retry succeeds.
+            assert node.stop == ["DONE"]
+
+            node._persist_completion_recovery(initial_params, recovered)
             assert node.stop is None
 
             next_params = node._build_completion_params(

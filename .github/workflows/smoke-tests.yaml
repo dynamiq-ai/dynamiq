@@ -1,4 +1,4 @@
-name: Integration Tests With Creds
+name: Smoke Tests
 
 on:
   workflow_dispatch:
@@ -6,11 +6,11 @@ on:
     types: [labeled]
 
 jobs:
-  integration-tests-with-creds:
-    name: Integration Tests With Creds
+  smoke-tests:
+    name: Smoke Tests
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.label.name == 'run-integration-tests-with-creds' &&
+      (github.event.label.name == 'run-smoke-tests' &&
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
@@ -24,14 +24,8 @@ jobs:
         uses: SpicyPizza/create-envfile@v2.0
         with:
           envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          envkey_UNSTRUCTURED_API_KEY: ${{ secrets.UNSTRUCTURED_API_KEY }}
-          envkey_PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
-          envkey_PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD }}
-          envkey_PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
           envkey_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           envkey_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          envkey_QDRANT_URL: ${{ secrets.QDRANT_URL }}
-          envkey_QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
           envkey_EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
           envkey_E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
           envkey_AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -47,5 +41,5 @@ jobs:
             *.cache-to=type=gha,mode=max
           targets: dynamiq-app-test
 
-      - name: Run integration tests with creds
-        run: docker compose up dynamiq-app-test-integration-with-creds --exit-code-from dynamiq-app-test-integration-with-creds
+      - name: Run smoke tests
+        run: docker compose up dynamiq-app-test-smoke --exit-code-from dynamiq-app-test-smoke

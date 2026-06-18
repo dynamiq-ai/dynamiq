@@ -107,6 +107,8 @@ mkdocs-autorefs = "<1.4.0"
 griffe = "<2.0.0"
 requests-mock = "~1.12.1"
 pytest-rerunfailures = "^16.1"
+pytest-xdist = "^3.8.0"
+pytest-timeout = "^2.4.0"
 
 [tool.poetry.group.examples]
 optional = true
@@ -139,6 +141,13 @@ exclude_dirs = ["tests"]
 
 [tool.isort]
 line_length = 120
+
+[tool.pytest.ini_options]
+markers = [
+    "smoke: slow, paid end-to-end production-scenario tests; run only via the `run-smoke-tests` label / `make test-smoke`",
+    "integration: tests that exercise real integrations (may require credentials)",
+    "unit: fast, isolated unit tests",
+]
 
 [tool.poetry.scripts]
 dynamiq = "dynamiq.cli:main"
