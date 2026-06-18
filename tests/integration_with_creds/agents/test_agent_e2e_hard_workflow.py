@@ -124,9 +124,9 @@ PROVIDERS = {
         ["SAMBANOVA_API_KEY"],
         _llm_factory(llms.SambaNova, conn.SambaNova, "Meta-Llama-3.3-70B-Instruct"),
     ),
-    "togetherai": (
+    "togetherai_kimi": (
         ["TOGETHER_API_KEY"],
-        _llm_factory(llms.TogetherAI, conn.TogetherAI, "meta-llama/Llama-3.3-70B-Instruct-Turbo"),
+        _llm_factory(llms.TogetherAI, conn.TogetherAI, "moonshotai/kimi-k2.6"),
     ),
     "vertexai": (VERTEXAI_ENV_KEYS, _llm_factory(llms.VertexAI, conn.VertexAI, "gemini-2.5-pro")),
     "watsonx": (
@@ -210,7 +210,7 @@ def test_e2e_hard_workflow_no_recovery(provider, inference_mode, run_config):
             id=f"e2e_hard_workflow_{provider}_{inference_mode.value}",
             llm=llm,
             role=AGENT_ROLE,
-            tools=[ExaTool(connection=conn.Exa())],
+            tools=[ExaTool(connection=conn.Exa(), include_full_content=True)],
             sandbox=SandboxConfig(enabled=True, backend=sandbox_backend),
             inference_mode=inference_mode,
             max_loops=25,
