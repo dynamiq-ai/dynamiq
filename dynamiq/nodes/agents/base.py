@@ -1,6 +1,7 @@
 import io
 import json
 import re
+from contextvars import ContextVar
 from copy import deepcopy
 from enum import Enum
 from typing import Any, Callable, ClassVar, Union
@@ -10,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy, MemorySaveMode
+from dynamiq.memory.long_term import LongTermMemoryConfig
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentIterativeCheckpointMixin
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
@@ -46,6 +48,10 @@ from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
+
+# Per-call tool overlay (e.g. LTM tools bound to a request's user_id); isolated
+# per thread / per asyncio task via ContextVar.
+_run_extra_tools: ContextVar[list["Node"] | None] = ContextVar("dynamiq_agent_run_extra_tools", default=None)
 
 
 class StreamChunkChoiceDelta(BaseModel):
@@ -222,6 +228,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
+    long_term_memory: LongTermMemoryConfig | None = Field(
+        default=None,
+        description=(
+            "Long-term, fact-shaped, user-scoped memory config (enabled + backend + tools). "
+            "Accessed via remember/recall tools. Independent of `memory` (short-term messages)."
+        ),
+    )
     verbose: bool = Field(False, description="Whether to print verbose logs.")
     file_store: FileStoreConfig = Field(
         default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
@@ -384,6 +397,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             "llm": True,
             "tools": True,
             "memory": True,
+            "long_term_memory": True,
             "files": True,
             "images": True,
             "file_store": True,
@@ -402,6 +416,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         data["tools"] = data["tools"] + [mcp_server.to_dict(**kwargs) for mcp_server in self._mcp_servers]
 
         data["memory"] = self.memory.to_dict(**kwargs) if self.memory else None
+        data["long_term_memory"] = self.long_term_memory.to_dict(**kwargs) if self.long_term_memory else None
         if self.files:
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         if self.images:
@@ -429,6 +444,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if tool.is_postponed_component_init:
                 tool.init_components(connection_manager)
             tool.is_optimized_for_agents = True
+
+        if self.long_term_memory and self.long_term_memory.backend.embedder.is_postponed_component_init:
+            self.long_term_memory.backend.embedder.init_components(connection_manager)
 
         self._ensure_skills_ingested_for_sandbox()
 
@@ -614,123 +632,138 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         use_memory = self.memory and (input_data.user_id or input_data.session_id)
 
-        if use_memory:
-            history_messages = self._retrieve_memory(input_data)
-            if len(history_messages) > 0:
-                history_messages.insert(
-                    0,
-                    Message(
-                        role=MessageRole.SYSTEM,
-                        content="Below is the previous conversation history. "
-                        "Use this context to inform your response.",
-                        static=True,
-                    ),
-                )
-        else:
-            history_messages = None
-
-        files = input_data.files
-        if files:
-            normalized_files = self._ensure_named_files(files)
-            file_paths = []
-            if self.sandbox_backend:
-                file_paths = self._upload_files_to_sandbox(normalized_files)
-            else:
-                if not self.file_store_backend:
-                    self._setup_in_memory_file_store_and_tools()
-                if self.file_store_backend:
-                    file_paths = self._upload_files_to_file_store(normalized_files)
-            input_message = self._inject_attached_files_into_message(
-                input_message, normalized_files, file_paths=file_paths
+        ltm_tools = self._build_long_term_memory_tools(input_data)
+        if ltm_tools:
+            logger.info(
+                "Agent %s - %s: attached %d long-term memory tools (%s)",
+                self.name,
+                self.id,
+                len(ltm_tools),
+                ", ".join(t.name for t in ltm_tools),
             )
-
-        if input_data.tool_params:
-            kwargs["tool_params"] = input_data.tool_params
-
-        self.system_prompt_manager.update_variables(dict(input_data))
-        kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
-        kwargs.pop("run_depends", None)
-
+        # Always set — a sub-agent without LTM would otherwise inherit the
+        # parent's overlay via `ContextAwareThreadPoolExecutor`.
+        ltm_token = _run_extra_tools.set(ltm_tools)
         try:
-            result = self._run_agent(input_message, history_messages, config=config, **kwargs)
-        except CanceledException:
             if use_memory:
-                try:
-                    self._save_history_to_memory(custom_metadata)
-                except Exception as save_error:
-                    logger.error(
-                        f"Agent {self.name} - {self.id}: failed to save history to memory "
-                        f"after cancel: {save_error}",
+                history_messages = self._retrieve_memory(input_data)
+                if len(history_messages) > 0:
+                    history_messages.insert(
+                        0,
+                        Message(
+                            role=MessageRole.SYSTEM,
+                            content="Below is the previous conversation history. "
+                            "Use this context to inform your response.",
+                            static=True,
+                        ),
                     )
+            else:
+                history_messages = None
+
+            files = input_data.files
+            if files:
+                normalized_files = self._ensure_named_files(files)
+                file_paths = []
+                if self.sandbox_backend:
+                    file_paths = self._upload_files_to_sandbox(normalized_files)
+                else:
+                    if not self.file_store_backend:
+                        self._setup_in_memory_file_store_and_tools()
+                    if self.file_store_backend:
+                        file_paths = self._upload_files_to_file_store(normalized_files)
+                input_message = self._inject_attached_files_into_message(
+                    input_message, normalized_files, file_paths=file_paths
+                )
+
+            if input_data.tool_params:
+                kwargs["tool_params"] = input_data.tool_params
+
+            self.system_prompt_manager.update_variables(dict(input_data))
+            kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
+            kwargs.pop("run_depends", None)
+
+            try:
+                result = self._run_agent(input_message, history_messages, config=config, **kwargs)
+            except CanceledException:
+                if use_memory:
+                    try:
+                        self._save_history_to_memory(custom_metadata)
+                    except Exception as save_error:
+                        logger.error(
+                            f"Agent {self.name} - {self.id}: failed to save history to memory "
+                            f"after cancel: {save_error}",
+                        )
+                        try:
+                            self._append_user_input_to_memory(custom_metadata)
+                        except Exception as save_error2:
+                            logger.error(
+                                f"Agent {self.name} - {self.id}: also failed to save user input "
+                                f"after cancel: {save_error2}",
+                            )
+                raise
+            except Exception:
+                if use_memory:
                     try:
                         self._append_user_input_to_memory(custom_metadata)
-                    except Exception as save_error2:
+                    except Exception as save_error:
                         logger.error(
-                            f"Agent {self.name} - {self.id}: also failed to save user input "
-                            f"after cancel: {save_error2}",
+                            f"Agent {self.name} - {self.id}: failed to save user input to memory "
+                            f"after agent error: {save_error}",
                         )
-            raise
-        except Exception:
+                raise
+            finally:
+                self._current_call_context = None
+                self._clear_todos_file()
+
             if use_memory:
                 try:
-                    self._append_user_input_to_memory(custom_metadata)
+                    self._save_history_to_memory(custom_metadata, final_output=result)
                 except Exception as save_error:
                     logger.error(
-                        f"Agent {self.name} - {self.id}: failed to save user input to memory "
-                        f"after agent error: {save_error}",
+                        "Agent %s - %s: failed to save history to memory: %s",
+                        self.name,
+                        self.id,
+                        save_error,
                     )
-            raise
+
+            execution_result = {
+                "content": result,
+            }
+
+            requested_paths = getattr(self, "_requested_output_files", None)
+
+            if self.file_store_backend and requested_paths:
+                try:
+                    stored_files = self.file_store_backend.list_files_bytes(requested_paths)
+                except Exception as e:
+                    logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from file store: {e}")
+                    stored_files = []
+                if stored_files:
+                    execution_result["files"] = stored_files
+                    logger.info(
+                        f"Agent {self.name} - {self.id}: "
+                        f"returning {len(stored_files)} requested file(s) from file store"
+                    )
+
+            if self.sandbox_backend and requested_paths:
+                try:
+                    sandbox_files = self.sandbox_backend.collect_files(file_paths=requested_paths)
+                except Exception as e:
+                    logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from sandbox: {e}")
+                    sandbox_files = []
+                if sandbox_files:
+                    existing_files = execution_result.get("files", [])
+                    execution_result["files"] = existing_files + sandbox_files
+                    logger.info(
+                        f"Agent {self.name} - {self.id}: "
+                        f"returning {len(sandbox_files)} requested file(s) from sandbox"
+                    )
+
+            logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
+
+            return execution_result
         finally:
-            self._current_call_context = None
-            self._clear_todos_file()
-
-        if use_memory:
-            try:
-                self._save_history_to_memory(custom_metadata, final_output=result)
-            except Exception as save_error:
-                logger.error(
-                    "Agent %s - %s: failed to save history to memory: %s",
-                    self.name,
-                    self.id,
-                    save_error,
-                )
-
-        execution_result = {
-            "content": result,
-        }
-
-        requested_paths = getattr(self, "_requested_output_files", None)
-
-        if self.file_store_backend and requested_paths:
-            try:
-                stored_files = self.file_store_backend.list_files_bytes(requested_paths)
-            except Exception as e:
-                logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from file store: {e}")
-                stored_files = []
-            if stored_files:
-                execution_result["files"] = stored_files
-                logger.info(
-                    f"Agent {self.name} - {self.id}: "
-                    f"returning {len(stored_files)} requested file(s) from file store"
-                )
-
-        if self.sandbox_backend and requested_paths:
-            try:
-                sandbox_files = self.sandbox_backend.collect_files(file_paths=requested_paths)
-            except Exception as e:
-                logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from sandbox: {e}")
-                sandbox_files = []
-            if sandbox_files:
-                existing_files = execution_result.get("files", [])
-                execution_result["files"] = existing_files + sandbox_files
-                logger.info(
-                    f"Agent {self.name} - {self.id}: "
-                    f"returning {len(sandbox_files)} requested file(s) from sandbox"
-                )
-
-        logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
-
-        return execution_result
+            _run_extra_tools.reset(ltm_token)
 
     def retrieve_conversation_history(
         self,
@@ -793,6 +826,31 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         )
         logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
         return history_messages
+
+    def _build_long_term_memory_tools(self, input_data: "AgentInputSchema") -> list[Node]:
+        """Construct per-run long-term-memory tools, or [] when LTM is off/absent.
+
+        Raises if LTM is enabled but `input_data.user_id` is missing — the prompt
+        already advertises tool blocks at that point, so silently dropping the
+        tools would leave the LLM with an empty `tool_description`.
+        """
+        if self.long_term_memory is None or not self.long_term_memory.enabled:
+            return []
+        user_id = getattr(input_data, "user_id", None)
+        if not user_id:
+            raise ValueError(
+                "long_term_memory is enabled but input_data.user_id is missing; "
+                "pass user_id or disable long_term_memory for this call"
+            )
+        from dynamiq.nodes.tools.long_term_memory import build_long_term_memory_tools
+
+        tools = build_long_term_memory_tools(
+            backend=self.long_term_memory.backend,
+            user_id=user_id,
+        )
+        for tool in tools:
+            tool.is_optimized_for_agents = True
+        return tools
 
     def _is_input_output_trace_message(self, message: Message) -> bool:
         """Return True when a message is an internal ReAct/tool-trace entry."""
@@ -1792,23 +1850,30 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         return self.sandbox.backend if self.sandbox and self.sandbox.enabled else None
 
     @property
+    def _runtime_tools(self) -> list[Node]:
+        """Instance tools plus any per-call overlay (LTM tools bound to user_id)."""
+        extra = _run_extra_tools.get()
+        return self.tools + extra if extra else self.tools
+
+    @property
     def tool_description(self) -> str:
         """Returns a description of the tools available to the agent."""
+        tools = self._runtime_tools
         return (
-            "\n".join([f"- {tool.name}: {(tool.description or '').strip()}" for tool in self.tools])
-            if self.tools
+            "\n".join([f"- {tool.name}: {(tool.description or '').strip()}" for tool in tools])
+            if tools
             else ""
         )
 
     @property
     def tool_names(self) -> str:
         """Returns a comma-separated list of tool names available to the agent."""
-        return ",".join([self.sanitize_tool_name(tool.name) for tool in self.tools])
+        return ",".join([self.sanitize_tool_name(tool.name) for tool in self._runtime_tools])
 
     @property
     def tool_by_names(self) -> dict[str, Node]:
         """Returns a dictionary mapping tool names to their corresponding Node objects."""
-        return {self.sanitize_tool_name(tool.name): tool for tool in self.tools}
+        return {self.sanitize_tool_name(tool.name): tool for tool in self._runtime_tools}
 
     def reset_run_state(self):
         """Resets the agent's run state.
