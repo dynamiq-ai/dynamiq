@@ -1,8 +1,9 @@
 from dynamiq.connections import Cerebras as CerebrasConnection
+from dynamiq.nodes.llms._strict import OpenAIStrictToolsMixin
 from dynamiq.nodes.llms.base import BaseLLM
 
 
-class Cerebras(BaseLLM):
+class Cerebras(OpenAIStrictToolsMixin, BaseLLM):
     """Cerebras LLM node.
 
     This class provides an implementation for the Cerebras Language Model node.

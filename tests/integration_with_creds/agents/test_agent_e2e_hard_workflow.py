@@ -6,8 +6,8 @@ verifies it in an E2B sandbox. We assert the task finishes WITHOUT triggering re
 ``agent._prompt.messages`` for recovery markers, and checking the ALL-mode stream for a
 ``tool_input_error`` event.
 
-Per-provider creds (OPENAI/ANTHROPIC/GEMINI/AWS) plus EXA_API_KEY and E2B_API_KEY are
-required; combos with missing creds are skipped.
+The matrix spans every LLM provider exposed by ``dynamiq.nodes.llms``. Per-provider creds
+plus EXA_API_KEY and E2B_API_KEY are required; combos with missing creds are skipped.
 """
 
 import os
@@ -15,16 +15,11 @@ import os
 import pytest
 
 from dynamiq import Workflow
+from dynamiq import connections as conn
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
-from dynamiq.connections import AWS as AWSConnection
-from dynamiq.connections import E2B as E2BConnection
-from dynamiq.connections import Anthropic as AnthropicConnection
-from dynamiq.connections import Exa as ExaConnection
-from dynamiq.connections import Gemini as GeminiConnection
-from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
+from dynamiq.nodes import llms
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.llms import Anthropic, Bedrock, Gemini, OpenAI
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import MessageRole
@@ -40,32 +35,105 @@ from .streaming_assertions import collect_streaming_events
 COMMON_LLM_KWARGS = dict(max_tokens=20000, temperature=0)
 
 
-def _openai_llm():
-    return OpenAI(connection=OpenAIConnection(), model="gpt-4.1", **COMMON_LLM_KWARGS)
+def _llm_factory(node_cls, connection_cls, model, **connection_kwargs):
+    """Build a zero-arg LLM factory; connection construction is deferred so combos with
+    missing creds skip before any env var is read (connections raise on absent env keys)."""
+
+    def factory():
+        return node_cls(connection=connection_cls(**connection_kwargs), model=model, **COMMON_LLM_KWARGS)
+
+    return factory
 
 
-def _anthropic_llm():
-    return Anthropic(connection=AnthropicConnection(), model="claude-sonnet-4-5", **COMMON_LLM_KWARGS)
+def _ollama_llm():
+    # Opt-in: only runs when OLLAMA_URL points at a reachable server (no API key concept).
+    return llms.Ollama(connection=conn.Ollama(url=os.environ["OLLAMA_URL"]), model="llama3.1:8b", **COMMON_LLM_KWARGS)
 
 
-def _gemini_llm():
-    return Gemini(connection=GeminiConnection(), model="gemini-2.5-pro", **COMMON_LLM_KWARGS)
+# GCP service-account fields are all required by the VertexAI connection, so every env var
+# must be present for the combo to run.
+VERTEXAI_ENV_KEYS = [
+    "VERTEXAI_PROJECT_ID",
+    "VERTEXAI_PROJECT_LOCATION",
+    "GOOGLE_CLOUD_PROJECT_ID",
+    "GOOGLE_CLOUD_PRIVATE_KEY_ID",
+    "GOOGLE_CLOUD_PRIVATE_KEY",
+    "GOOGLE_CLOUD_CLIENT_EMAIL",
+    "GOOGLE_CLOUD_CLIENT_ID",
+    "GOOGLE_CLOUD_AUTH_URI",
+    "GOOGLE_CLOUD_TOKEN_URI",
+    "GOOGLE_CLOUD_AUTH_PROVIDER_X509_CERT_URL",
+    "GOOGLE_CLOUD_CLIENT_X509_CERT_URL",
+    "GOOGLE_CLOUD_UNIVERSE_DOMAIN",
+]
 
-
-def _bedrock_llm():
-    # Cross-region inference profile; switch the us./eu./apac. prefix to one enabled on the account.
-    return Bedrock(
-        connection=AWSConnection(),
-        model="bedrock/us.anthropic.claude-sonnet-4-6",
-        **COMMON_LLM_KWARGS,
-    )
-
-
+# provider id -> (required env keys, LLM factory). Model choices favor each provider's
+# strongest tool-calling model; MODEL_PREFIX is auto-prepended by each node class.
 PROVIDERS = {
-    "openai": (["OPENAI_API_KEY"], _openai_llm),
-    "anthropic": (["ANTHROPIC_API_KEY"], _anthropic_llm),
-    "gemini": (["GEMINI_API_KEY"], _gemini_llm),
-    "bedrock": (["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"], _bedrock_llm),
+    "openai": (["OPENAI_API_KEY"], _llm_factory(llms.OpenAI, conn.OpenAI, "gpt-4.1")),
+    "anthropic": (["ANTHROPIC_API_KEY"], _llm_factory(llms.Anthropic, conn.Anthropic, "claude-sonnet-4-5")),
+    "gemini": (["GEMINI_API_KEY"], _llm_factory(llms.Gemini, conn.Gemini, "gemini-2.5-pro")),
+    "bedrock": (
+        ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"],
+        # Cross-region inference profile; switch the us./eu./apac. prefix to one enabled on the account.
+        _llm_factory(llms.Bedrock, conn.AWS, "bedrock/us.anthropic.claude-sonnet-4-6"),
+    ),
+    "ai21": (["AI21_API_KEY"], _llm_factory(llms.AI21, conn.AI21, "jamba-large")),
+    "anyscale": (
+        ["ANYSCALE_API_KEY"],
+        _llm_factory(llms.Anyscale, conn.Anyscale, "meta-llama/Meta-Llama-3-70B-Instruct"),
+    ),
+    "azureai": (
+        # Model is the Azure deployment name -- adjust to one provisioned on the resource.
+        ["AZURE_API_KEY", "AZURE_URL", "AZURE_API_VERSION"],
+        _llm_factory(llms.AzureAI, conn.AzureAI, "gpt-4.1"),
+    ),
+    "cerebras": (["CEREBRAS_API_KEY"], _llm_factory(llms.Cerebras, conn.Cerebras, "llama-3.3-70b")),
+    "cohere": (["COHERE_API_KEY"], _llm_factory(llms.Cohere, conn.Cohere, "command-a-03-2025")),
+    "databricks": (
+        ["DATABRICKS_API_KEY", "DATABRICKS_API_BASE"],
+        _llm_factory(llms.Databricks, conn.Databricks, "databricks-meta-llama-3-3-70b-instruct"),
+    ),
+    "deepinfra": (
+        ["DEEPINFRA_API_KEY"],
+        _llm_factory(llms.DeepInfra, conn.DeepInfra, "meta-llama/Llama-3.3-70B-Instruct"),
+    ),
+    "deepseek": (["DEEPSEEK_API_KEY"], _llm_factory(llms.DeepSeek, conn.DeepSeek, "deepseek-chat")),
+    "fireworksai": (
+        ["FIREWORKS_AI_API_KEY"],
+        _llm_factory(llms.FireworksAI, conn.FireworksAI, "accounts/fireworks/models/llama-v3p3-70b-instruct"),
+    ),
+    "groq": (["GROQ_API_KEY"], _llm_factory(llms.Groq, conn.Groq, "llama-3.3-70b-versatile")),
+    "huggingface": (
+        ["HUGGINGFACE_API_KEY"],
+        _llm_factory(llms.HuggingFace, conn.HuggingFace, "meta-llama/Meta-Llama-3.1-70B-Instruct"),
+    ),
+    "mistral": (["MISTRAL_API_KEY"], _llm_factory(llms.Mistral, conn.Mistral, "mistral-large-latest")),
+    "nvidia_nim": (
+        ["NVIDIA_NIM_API_KEY", "NVIDIA_NIM_URL"],
+        _llm_factory(llms.NvidiaNIM, conn.NvidiaNIM, "meta/llama-3.3-70b-instruct"),
+    ),
+    "ollama": (["OLLAMA_URL"], _ollama_llm),
+    "openrouter": (["OPENROUTER_API_KEY"], _llm_factory(llms.OpenRouter, conn.OpenRouter, "openai/gpt-4.1")),
+    "perplexity": (["PERPLEXITYAI_API_KEY"], _llm_factory(llms.Perplexity, conn.Perplexity, "sonar-pro")),
+    "replicate": (
+        ["REPLICATE_API_KEY"],
+        _llm_factory(llms.Replicate, conn.Replicate, "meta/meta-llama-3-70b-instruct"),
+    ),
+    "sambanova": (
+        ["SAMBANOVA_API_KEY"],
+        _llm_factory(llms.SambaNova, conn.SambaNova, "Meta-Llama-3.3-70B-Instruct"),
+    ),
+    "togetherai_kimi": (
+        ["TOGETHER_API_KEY"],
+        _llm_factory(llms.TogetherAI, conn.TogetherAI, "moonshotai/kimi-k2.6"),
+    ),
+    "vertexai": (VERTEXAI_ENV_KEYS, _llm_factory(llms.VertexAI, conn.VertexAI, "gemini-2.5-pro")),
+    "watsonx": (
+        ["WATSONX_API_KEY", "WATSONX_PROJECT_ID", "WATSONX_URL"],
+        _llm_factory(llms.WatsonX, conn.WatsonX, "meta-llama/llama-3-3-70b-instruct"),
+    ),
+    "xai": (["XAI_API_KEY"], _llm_factory(llms.xAI, conn.xAI, "grok-3")),
 }
 
 INFERENCE_MODES = [
@@ -135,14 +203,14 @@ def test_e2e_hard_workflow_no_recovery(provider, inference_mode, run_config):
         pytest.skip(f"Missing credentials for {provider}/{inference_mode.value}: {missing}")
 
     llm = llm_factory()
-    sandbox_backend = E2BSandbox(connection=E2BConnection())
+    sandbox_backend = E2BSandbox(connection=conn.E2B())
     try:
         agent = Agent(
             name=f"E2EHardWorkflowAgent_{provider}_{inference_mode.value}",
             id=f"e2e_hard_workflow_{provider}_{inference_mode.value}",
             llm=llm,
             role=AGENT_ROLE,
-            tools=[ExaTool(connection=ExaConnection())],
+            tools=[ExaTool(connection=conn.Exa(), include_full_content=True)],
             sandbox=SandboxConfig(enabled=True, backend=sandbox_backend),
             inference_mode=inference_mode,
             max_loops=25,
@@ -186,14 +254,20 @@ def test_e2e_hard_workflow_no_recovery(provider, inference_mode, run_config):
         assert exa_tool_runs, f"[{provider}/{inference_mode.value}] Exa research tool was never invoked"
 
         # No recovery occurred -- checked on both the stream and the prompt.
-        assert not any(
-            step == "tool_input_error" for step, _ in ordered_events
-        ), f"[{provider}/{inference_mode.value}] streamed a tool_input_error (recovery occurred)"
+        tool_input_errors = [content for step, content in ordered_events if step == "tool_input_error"]
+        assert not tool_input_errors, (
+            f"[{provider}/{inference_mode.value}] streamed {len(tool_input_errors)} tool_input_error "
+            f"event(s) (recovery occurred):\n"
+            + "\n".join(
+                f"- loop {e.get('loop_num')}: {e.get('error')}" if isinstance(e, dict) else f"- {e}"
+                for e in tool_input_errors
+            )
+        )
 
         recovery_events = find_recovery_events(agent)
         assert not recovery_events, (
             f"[{provider}/{inference_mode.value}] agent triggered {len(recovery_events)} recovery "
-            f"event(s): {[kind for kind, _ in recovery_events]}"
+            f"event(s):\n" + "\n".join(f"- [{kind}] {content}" for kind, content in recovery_events)
         )
 
         logger.info(f"--- E2E hard workflow passed clean (no recovery) for {provider}/{inference_mode.value} ---")

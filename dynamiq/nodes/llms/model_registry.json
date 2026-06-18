@@ -79,6 +79,7 @@
         "max_output_tokens": 262144,
         "max_tokens": 262144,
         "mode": "chat",
+        "litellm_provider": "together_ai",
         "supports_vision": true,
         "supports_pdf_input": false,
         "supports_function_calling": true,
