@@ -1,4 +1,5 @@
 import threading
+from contextlib import AbstractContextManager
 from datetime import datetime
 
 import numpy as np
@@ -16,6 +17,11 @@ class InMemoryLongTermMemoryBackend(LongTermMemoryBackend):
     _facts: dict[str, Fact] = PrivateAttr(default_factory=dict)
     _vectors: dict[str, list[float]] = PrivateAttr(default_factory=dict)
     _lock: threading.RLock = PrivateAttr(default_factory=threading.RLock)
+
+    def _dedup_lock(self) -> AbstractContextManager:
+        # Re-entrant: base.remember holds the lock while calling get_by_hash + insert,
+        # both of which re-acquire it.
+        return self._lock
 
     def insert(self, fact: Fact, embedding: list[float]) -> None:
         with self._lock:

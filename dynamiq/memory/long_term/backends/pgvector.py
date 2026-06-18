@@ -9,7 +9,7 @@ from psycopg.types.json import Jsonb
 from pydantic import ConfigDict, Field, PrivateAttr
 
 from dynamiq.connections import PostgreSQL as PostgreSQLConnection
-from dynamiq.memory.long_term.base import LongTermMemoryBackend
+from dynamiq.memory.long_term.base import LongTermMemoryBackend, LongTermMemoryDuplicateError
 from dynamiq.memory.long_term.schemas import Fact
 
 _CREATE_EXTENSION_SQL = SQL("CREATE EXTENSION IF NOT EXISTS vector")
@@ -125,22 +125,27 @@ class PostgresLongTermMemoryBackend(LongTermMemoryBackend):
             cur.execute(SQL("DROP TABLE IF EXISTS {table}").format(table=self._table))
 
     def insert(self, fact: Fact, embedding: list[float]) -> None:
-        with self._conn.cursor() as cur:
-            cur.execute(
-                SQL("INSERT INTO {table} ({cols}, embedding) " "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)").format(
-                    table=self._table, cols=_FACT_COLUMNS
-                ),
-                (
-                    fact.id,
-                    fact.content,
-                    fact.hash,
-                    fact.user_id,
-                    Jsonb(fact.metadata),
-                    fact.created_at,
-                    fact.updated_at,
-                    embedding,
-                ),
-            )
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    SQL("INSERT INTO {table} ({cols}, embedding) " "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)").format(
+                        table=self._table, cols=_FACT_COLUMNS
+                    ),
+                    (
+                        fact.id,
+                        fact.content,
+                        fact.hash,
+                        fact.user_id,
+                        Jsonb(fact.metadata),
+                        fact.created_at,
+                        fact.updated_at,
+                        embedding,
+                    ),
+                )
+        except psycopg.errors.UniqueViolation as e:
+            raise LongTermMemoryDuplicateError(
+                f"fact with (user_id={fact.user_id}, hash={fact.hash}) already exists"
+            ) from e
 
     def get(self, fact_id: str) -> Fact | None:
         with self._conn.cursor(row_factory=dict_row) as cur:

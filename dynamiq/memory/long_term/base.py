@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime
 from functools import cached_property
 from hashlib import md5
@@ -16,6 +17,12 @@ from dynamiq.utils.logger import logger
 
 class LongTermMemoryError(Exception):
     """Base exception for long-term memory operations."""
+
+    pass
+
+
+class LongTermMemoryDuplicateError(LongTermMemoryError):
+    """Backend rejected `insert` because the (user_id, hash) already exists."""
 
     pass
 
@@ -75,6 +82,15 @@ class LongTermMemoryBackend(ABC, BaseModel):
             return
         self._ensure_storage()
         self._storage_ensured = True
+
+    def _dedup_lock(self) -> AbstractContextManager:
+        """Critical section around the recheck-then-insert in `remember`.
+
+        Default `nullcontext` is correct for stores with a server-side unique
+        constraint (e.g. pgvector); in-process backends override to return a
+        re-entrant lock so two threads can't both miss `get_by_hash` and insert.
+        """
+        return nullcontext()
 
     def remember(
         self, *, content: str, user_id: str, metadata: dict[str, Any] | None = None
@@ -148,7 +164,27 @@ class LongTermMemoryBackend(ABC, BaseModel):
                 created_at=now,
                 updated_at=now,
             )
-            self.insert(fact, embedding)
+            with self._dedup_lock():
+                # Recheck under the lock: another thread may have inserted the
+                # same (user_id, hash) while we were embedding/searching.
+                racer = self.get_by_hash(user_id=user_id, content_hash=content_hash)
+                if racer is not None:
+                    logger.debug(
+                        f"LongTermMemory: concurrent insert race lost for user={user_id}, fact {racer.id}"
+                    )
+                    return racer, RememberOutcome.UNCHANGED
+                try:
+                    self.insert(fact, embedding)
+                except LongTermMemoryDuplicateError:
+                    # Cross-process race: another writer hit the server's unique
+                    # constraint between our recheck and insert.
+                    racer = self.get_by_hash(user_id=user_id, content_hash=content_hash)
+                    if racer is None:
+                        raise
+                    logger.debug(
+                        f"LongTermMemory: cross-process insert race lost for user={user_id}, fact {racer.id}"
+                    )
+                    return racer, RememberOutcome.UNCHANGED
             logger.debug(f"LongTermMemory: stored fact {fact.id} for user={user_id}")
             return fact, RememberOutcome.CREATED
         except Exception as e:

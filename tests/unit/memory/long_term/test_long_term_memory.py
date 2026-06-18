@@ -45,6 +45,66 @@ def test_remember_duplicate_without_metadata_stays_unchanged(backend, user_id):
     assert second.metadata == {"source": "chat"}
 
 
+def test_remember_recovers_when_backend_raises_duplicate_error(backend, user_id, monkeypatch):
+    """Simulates a cross-process race: another writer wins between our recheck
+    and our insert. Backend raises LongTermMemoryDuplicateError; base.remember
+    must re-fetch the winner and return UNCHANGED instead of propagating."""
+    from datetime import UTC, datetime
+
+    from dynamiq.memory.long_term.base import LongTermMemoryDuplicateError
+    from dynamiq.memory.long_term.schemas import Fact
+
+    cls = type(backend)
+    winner = Fact(
+        id="winner-id", content="User likes pizza", hash="dummy", user_id=user_id,
+        metadata={}, created_at=datetime.now(UTC), updated_at=datetime.now(UTC),
+    )
+    call_count = {"get_by_hash": 0}
+
+    def flaky_get_by_hash(self, *, user_id, content_hash):
+        call_count["get_by_hash"] += 1
+        # Initial check returns None (we don't see the race yet); subsequent
+        # calls (recheck under lock + post-error refetch) return the winner.
+        return None if call_count["get_by_hash"] == 1 else winner
+
+    def empty_search(self, *, query_embedding, scope, limit):
+        return []  # so we skip the upsert path and reach the CREATE-with-insert path
+
+    def boom_insert(self, fact, embedding):
+        raise LongTermMemoryDuplicateError("simulated unique violation")
+
+    monkeypatch.setattr(cls, "get_by_hash", flaky_get_by_hash)
+    monkeypatch.setattr(cls, "search", empty_search)
+    monkeypatch.setattr(cls, "insert", boom_insert)
+
+    fact, outcome = backend.remember(content="User likes pizza", user_id=user_id)
+    assert outcome == RememberOutcome.UNCHANGED
+    assert fact.id == winner.id
+
+
+def test_concurrent_remember_same_content_yields_one_fact(backend, user_id):
+    """Two threads racing on the same content must produce exactly one stored
+    fact: one CREATED, the other UNCHANGED (no duplicate row, no exception)."""
+    import threading
+
+    outcomes: list[RememberOutcome] = []
+    outcomes_lock = threading.Lock()
+    barrier = threading.Barrier(2, timeout=5)
+
+    def worker():
+        barrier.wait()
+        _, outcome = backend.remember(content="User likes pizza", user_id=user_id)
+        with outcomes_lock:
+            outcomes.append(outcome)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads: t.start()
+    for t in threads: t.join()
+
+    assert sorted(o.value for o in outcomes) == ["created", "unchanged"]
+    assert len(backend.list_by_scope({"user_id": user_id})) == 1
+
+
 def test_remember_does_not_dedup_across_users(backend, user_id, other_user_id):
     a, _ = backend.remember(content="User likes pizza", user_id=user_id)
     b, b_outcome = backend.remember(content="User likes pizza", user_id=other_user_id)
