@@ -224,8 +224,10 @@ def test_concurrent_inserts_do_not_lose_facts(backend, fake_embedder):
 
     t1 = threading.Thread(target=worker, args=("u1", 25))
     t2 = threading.Thread(target=worker, args=("u2", 25))
-    t1.start(); t2.start()
-    t1.join(); t2.join()
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
 
     assert errors == []
     assert len(backend.list_by_scope({"user_id": "u1"})) == 25

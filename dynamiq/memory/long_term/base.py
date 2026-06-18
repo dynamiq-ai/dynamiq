@@ -100,8 +100,13 @@ class LongTermMemoryBackend(ABC, BaseModel):
                         metadata=metadata,
                         updated_at=now,
                     )
-                    logger.debug(f"LongTermMemory: exact-dedup hit with new metadata for user={user_id}, fact {existing.id}")
-                    return existing.model_copy(update={"metadata": metadata, "updated_at": now}), RememberOutcome.UPDATED
+                    logger.debug(
+                        "LongTermMemory: exact-dedup hit with new metadata " f"for user={user_id}, fact {existing.id}"
+                    )
+                    return (
+                        existing.model_copy(update={"metadata": metadata, "updated_at": now}),
+                        RememberOutcome.UPDATED,
+                    )
                 logger.debug(f"LongTermMemory: exact-dedup hit for user={user_id}, fact {existing.id}")
                 return existing, RememberOutcome.UNCHANGED
 
