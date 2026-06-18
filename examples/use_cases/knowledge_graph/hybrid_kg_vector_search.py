@@ -42,8 +42,6 @@ Run:  python examples/use_cases/knowledge_graph/hybrid_kg_vector_search.py
 
 import os
 
-from dotenv import load_dotenv
-
 from dynamiq import Workflow
 from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
@@ -62,8 +60,6 @@ from dynamiq.nodes.utils.utils import Input, Output
 from dynamiq.nodes.writers.pgvector import PGVectorDocumentWriter
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types import Document
-
-load_dotenv()
 
 TABLE = "demo_kg_hybrid"
 DIM = 1536  # text-embedding-3-small

@@ -30,10 +30,6 @@ import sys
 from io import BytesIO
 
 import requests
-from dotenv import load_dotenv
-
-load_dotenv()
-
 from qdrant_client import QdrantClient
 from tqdm import tqdm
 

@@ -50,7 +50,9 @@ _FILTER_OPERATORS: dict[str, Any] = {
 def _validate_identifier(name: str) -> str:
     """Guard a property key that will be interpolated into Cypher text."""
     if not _IDENTIFIER_PATTERN.match(name):
-        raise ValueError(f"GraphRetriever: unsafe property identifier {name!r} (must match {_IDENTIFIER_PATTERN.pattern}).")
+        raise ValueError(
+            f"GraphRetriever: unsafe property identifier {name!r} " f"(must match {_IDENTIFIER_PATTERN.pattern})."
+        )
     return name
 
 
@@ -231,7 +233,9 @@ class GraphRetriever(ConnectionNode):
     def _effective_depth(self) -> int:
         return max(1, min(self.max_depth, _MAX_TRAVERSAL_DEPTH))
 
-    def _entry(self, input_data: GraphRetrieverInputSchema, params: dict[str, Any]) -> tuple[list[str], str | None, bool]:
+    def _entry(
+        self, input_data: GraphRetrieverInputSchema, params: dict[str, Any]
+    ) -> tuple[list[str], str | None, bool]:
         """Pick the entry-point strategy. Returns (lead_lines, entry_where, anchored).
 
         - explicit ``entities``  -> anchor on ``:Entity`` nodes by exact name.
@@ -254,7 +258,11 @@ class GraphRetriever(ConnectionNode):
             lucene = _lucene_query(input_data.query)
             if lucene:
                 params["q"] = lucene
-                return [f"CALL db.index.fulltext.queryNodes('{ENTITY_NAME_FULLTEXT_INDEX}', $q) YIELD node AS a"], None, True
+                return (
+                    [f"CALL db.index.fulltext.queryNodes('{ENTITY_NAME_FULLTEXT_INDEX}', $q) YIELD node AS a"],
+                    None,
+                    True,
+                )
 
         params["q"] = input_data.query
         return [], "(toLower($q) CONTAINS toLower(a.name) OR toLower($q) CONTAINS toLower(b.name))", False

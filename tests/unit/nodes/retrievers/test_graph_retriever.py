@@ -132,7 +132,10 @@ class TestQueryBuilding:
         # Even if the caller supplies their own filters, the locked ACL clause is still present.
         node = make_retriever(filters=LOCKED_ACL)
         query, _ = node._build_query(
-            GraphRetrieverInputSchema(query="x", entities=["Acme"], filters={"allowed_principals": {"$intersects": ["group:b"]}}), 5
+            GraphRetrieverInputSchema(
+                query="x", entities=["Acme"], filters={"allowed_principals": {"$intersects": ["group:b"]}}
+            ),
+            5,
         )
         assert query.count("coalesce(r.allowed_principals, [])") == 2  # locked + the user's own, both apply
 
@@ -198,7 +201,12 @@ class TestExecuteRendering:
 
         contents = [d.content for d in out["documents"]]
         assert contents == ["Jane Doe -[WORKS_AT]-> Acme", "Jane Doe -[HAS_ATTRIBUTE]-> $250,000"]
-        assert out["documents"][0].metadata == {"source": "Jane Doe", "target": "Acme", "rel": "WORKS_AT", "source_url": "u"}
+        assert out["documents"][0].metadata == {
+            "source": "Jane Doe",
+            "target": "Acme",
+            "rel": "WORKS_AT",
+            "source_url": "u",
+        }
         assert out["content"] == "- Jane Doe -[WORKS_AT]-> Acme\n- Jane Doe -[HAS_ATTRIBUTE]-> $250,000"
         assert out["documents"][0].score > out["documents"][1].score  # rank-derived ordering
 
