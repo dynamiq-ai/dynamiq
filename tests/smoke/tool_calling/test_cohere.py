@@ -17,7 +17,7 @@ pytestmark = [pytest.mark.smoke, pytest.mark.integration, pytest.mark.flaky(reru
 
 
 def _llm():
-    return Cohere(connection=CohereConnection(), model="cohere/command-a-03-2025", max_tokens=2048, temperature=1)
+    return Cohere(connection=CohereConnection(), model="cohere/command-a-plus-05-2026", max_tokens=4096, temperature=1)
 
 
 def _skip_if_no_creds():
@@ -30,5 +30,8 @@ def _skip_if_no_creds():
 def test_strict_tool_call_is_clean():
     """strict_tools=True: the agent's first tool call is enum-valid with no extra keys and no recovery."""
     _skip_if_no_creds()
-    run = run_route_agent(_llm(), strict_tools=True, inference_mode=InferenceMode.FUNCTION_CALLING)
+    # stream=False: Cohere's v2 streamed tool-call events aren't reassembled by LiteLLM's
+    # stream_chunk_builder, so a streamed run returns {'content': ''} with no tool_calls ("No
+    # function called"). The non-streaming path reads tool_calls directly. See harness.
+    run = run_route_agent(_llm(), strict_tools=True, inference_mode=InferenceMode.FUNCTION_CALLING, stream=False)
     assert_strict_call_is_clean(run, label=f"{PROVIDER}-fc-strict")

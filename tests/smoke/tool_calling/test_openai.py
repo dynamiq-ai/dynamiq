@@ -17,7 +17,7 @@ pytestmark = [pytest.mark.smoke, pytest.mark.integration, pytest.mark.flaky(reru
 
 
 def _llm():
-    return OpenAI(connection=OpenAIConnection(), model="gpt-4.1", max_tokens=2048, temperature=1)
+    return OpenAI(connection=OpenAIConnection(), model="gpt-4.1", max_tokens=4096, temperature=1)
 
 
 def _skip_if_no_creds():

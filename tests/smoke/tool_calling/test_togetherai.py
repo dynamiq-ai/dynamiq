@@ -1,6 +1,7 @@
 """Strict-tools smoke test for Together AI (per-tool ``strict`` via OpenAIStrictToolsMixin).
 
-The harness registers ``together_ai/zai-org/GLM-5`` with LiteLLM so its function-calling
+Uses ``moonshotai/kimi-k2.6`` -- a model that reliably emits function calls (the repo's e2e
+suite uses it for Together too). The harness registers it with LiteLLM so its function-calling
 support isn't stripped from the request.
 """
 
@@ -22,7 +23,7 @@ pytestmark = [pytest.mark.smoke, pytest.mark.integration, pytest.mark.flaky(reru
 
 def _llm():
     return TogetherAI(
-        connection=TogetherAIConnection(), model="together_ai/zai-org/GLM-5", max_tokens=2048, temperature=1
+        connection=TogetherAIConnection(), model="together_ai/moonshotai/kimi-k2.6", max_tokens=4096, temperature=1
     )
 
 
