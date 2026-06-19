@@ -40,8 +40,8 @@ QDRANT_PATH = "./.qdrant_kg_demo2"
 INDEX_NAME = "kg_demo"
 EMBEDDING_MODEL = "text-embedding-3-small"  # 1536 dims, matches Qdrant store default
 
-# Schema the knowledge graph must conform to. The LLM is told these types/triples and the
-# extracted graph is hard-filtered to them. Set ontology=None on the node for free-form extraction.
+# Schema the knowledge graph must conform to (required). The LLM is told these types/triples and the
+# extracted graph is hard-filtered to them.
 ONTOLOGY = Ontology(
     entity_types=["Person", "Organization", "System", "Event", "Location"],
     relationship_types=["WORKS_AT", "USES", "PRESENTED", "PRESENTED_AT", "LOCATED_IN"],
@@ -109,7 +109,7 @@ def build_workflow() -> Workflow:
         id="knowledge_graph",
         llm=OpenAI(connection=openai_connection, model="gpt-4o-mini", temperature=0.0, max_tokens=4000),
         connection=Neo4jConnection(),
-        ontology=ONTOLOGY,  # set to None for free-form extraction
+        ontology=ONTOLOGY,
         input_transformer=InputTransformer(selector={"documents": "$.documents"}),
     )
 

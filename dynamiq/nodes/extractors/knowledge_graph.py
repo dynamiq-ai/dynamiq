@@ -72,7 +72,7 @@ class KnowledgeGraphWriter(EntityExtractor):
     Combines, in a single node, what previously required wiring an ``EntityExtractor`` to a
     graph writer:
 
-      1. LLM extraction (+ optional ``ontology`` enforcement, inherited from EntityExtractor).
+      1. LLM extraction (+ ``ontology`` enforcement, inherited from EntityExtractor).
       2. Write-time entity resolution: node identity is decided by NAME similarity only — the
          LLM-produced ids are just wiring that links edges to entities within one extraction and
          never participate in identity. An entity whose name is trigram-similar

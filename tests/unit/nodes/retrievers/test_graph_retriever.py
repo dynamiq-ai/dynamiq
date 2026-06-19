@@ -250,6 +250,13 @@ class TestExecuteRendering:
         out = node.execute(GraphRetrieverInputSchema(query="Jane"))
         assert out["documents"][0].content == "Jane Doe -[HAS_ATTRIBUTE]-> $250,000"
 
+    def test_edge_description_is_appended_to_the_fact(self):
+        # A description captured on the edge enriches the bare type in the rendered fact (not just metadata).
+        rows = [{"a_name": "Jane Doe", "rel": "WORKS_AT", "rprops": {"description": "CFO since 2020"}, "b_name": "Acme"}]
+        node = make_retriever(rows=rows)
+        out = node.execute(GraphRetrieverInputSchema(query="Jane"))
+        assert out["documents"][0].content == "Jane Doe -[WORKS_AT]-> Acme: CFO since 2020"
+
     def test_multi_hop_renders_path(self):
         rows = [
             {

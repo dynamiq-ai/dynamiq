@@ -58,7 +58,7 @@ EMBEDDING_MODEL = "text-embedding-3-small"  # 1536 dims, matches Qdrant store de
 
 # Ontology tuned for technical documentation. No triples: any relationship (of an allowed type)
 # between allowed entity types is permitted — docs are too varied for a strict pattern list.
-# Adjust the types to the documentation you ingest, or set ontology=None for free-form extraction.
+# Adjust the types to the documentation you ingest. An ontology is required (no free-form mode).
 ONTOLOGY = Ontology(
     entity_types=["Product", "Component", "Feature", "Concept", "Technology", "Person", "Organization"],
     relationship_types=["HAS_FEATURE", "PART_OF", "USES", "INTEGRATES_WITH", "DEVELOPED_BY", "RELATED_TO"],

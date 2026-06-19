@@ -362,10 +362,14 @@ class GraphRetriever(ConnectionNode):
             if source is None or target is None or not rel:
                 continue
             fact = f"{source} -[{rel}]-> {target}"
+            rprops = dict(row.get("rprops") or {})
+            # An edge description (when the extractor captured one) enriches the bare type with detail it
+            # cannot convey -- append it so it reaches the answer, not just the metadata.
+            if rprops.get("description"):
+                fact = f"{fact}: {rprops['description']}"
             if fact in seen:
                 continue
             seen.add(fact)
-            rprops = dict(row.get("rprops") or {})
             metadata = {"source": source, "target": target, "rel": rel, **rprops}
             # Endpoint entity ids (when available) let a caller iterate: feed a fact's neighbor id back as
             # the next hop's seed instead of doing an exploding variable-length expansion.
@@ -383,17 +387,22 @@ class GraphRetriever(ConnectionNode):
         for rank, row in enumerate(rows):
             names = row.get("node_names") or []
             rels = row.get("rel_types") or []
+            rel_props = row.get("rel_props") or []
             if len(names) < 2 or len(rels) != len(names) - 1:
                 continue
             fact = names[0]
-            for rel, node in zip(rels, names[1:]):
+            for i, (rel, node) in enumerate(zip(rels, names[1:])):
                 fact += f" -[{rel}]-> {node}"
+                # Inline each hop's edge description (when present) so multi-hop facts keep their detail.
+                desc = (rel_props[i] or {}).get("description") if i < len(rel_props) else None
+                if desc:
+                    fact += f" ({desc})"
             if fact in seen:
                 continue
             seen.add(fact)
             # Merge provenance pointers across the path's edges.
             source_doc_ids: list[str] = []
-            for props in row.get("rel_props") or []:
+            for props in rel_props:
                 source_doc_ids.extend((props or {}).get("source_doc_ids") or [])
             documents.append(
                 Document(

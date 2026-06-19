@@ -5,10 +5,14 @@ from typing import ClassVar
 
 import pytest
 
-from dynamiq.nodes.extractors import EntityExtractor
+from dynamiq.nodes.extractors import EntityExtractor, Ontology
 from dynamiq.nodes.node import Node, NodeGroup
 from dynamiq.storages.graph.neo4j.neo4j import Neo4jGraphStore
 from dynamiq.types import Document
+
+# ``ontology`` is required on EntityExtractor; this permissive schema covers the types the tests emit so
+# enforcement keeps them. Tests that exercise attribute reification or guidance pass their own ontology.
+_ONTOLOGY = Ontology(entity_types=["Hedge Fund", "Person", "Org"], relationship_types=["works at"])
 
 
 class StubLLM(Node):
@@ -78,6 +82,7 @@ def _IDENTIFIER_MATCHES(value: str) -> bool:
 class TestToWriteGraphPayload:
     def test_builds_write_graph_shape_and_drops_dangling(self):
         entities = [
+            # ``aum`` is an undeclared inline property: nodes are identity-only, so it must be dropped.
             {"id": "acme", "type": "Hedge Fund", "name": "Acme Capital", "properties": {"aum": "10B"}},
             {"id": "jane", "type": "person", "name": "Jane Doe"},
         ]
@@ -85,15 +90,16 @@ class TestToWriteGraphPayload:
             {"source_id": "jane", "target_id": "acme", "type": "works at", "properties": {"since": 2020}},
             {"source_id": "jane", "target_id": "ghost", "type": "KNOWS"},  # dangling -> dropped
         ]
-        extractor = EntityExtractor(llm=StubLLM())
+        extractor = EntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)
         nodes, graph_rels = extractor._to_write_graph_payload(entities, relationships)
 
-        # Every entity carries its type label first plus the shared "Entity" label (the full-text index hook).
+        # Every entity carries its type label first plus the shared "Entity" label (the full-text index hook),
+        # and ONLY identity properties (id + name) -- the emitted ``aum`` is dropped, never inlined on the node.
         assert nodes == [
             {
                 "labels": ["HEDGE_FUND", "Entity"],
                 "identity_key": "id",
-                "properties": {"aum": "10B", "id": "acme", "name": "Acme Capital"},
+                "properties": {"id": "acme", "name": "Acme Capital"},
             },
             {"labels": ["PERSON", "Entity"], "identity_key": "id", "properties": {"id": "jane", "name": "Jane Doe"}},
         ]
@@ -113,8 +119,37 @@ class TestToWriteGraphPayload:
 
     def test_entity_without_type_or_id_is_skipped(self):
         entities = [{"id": "x"}, {"type": "Person"}, {"id": "y", "type": "Person"}]
-        nodes, _ = EntityExtractor(llm=StubLLM())._to_write_graph_payload(entities, [])
+        nodes, _ = EntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)._to_write_graph_payload(entities, [])
         assert [n["properties"]["id"] for n in nodes] == ["y"]
+
+    def test_relationship_description_rides_on_edge_properties(self):
+        entities = [{"id": "jane", "type": "Person", "name": "Jane"}, {"id": "acme", "type": "Org", "name": "Acme"}]
+        relationships = [
+            {"source_id": "jane", "target_id": "acme", "type": "WORKS_AT", "description": "CFO since 2020"}
+        ]
+        _, graph_rels = EntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)._to_write_graph_payload(entities, relationships)
+        assert graph_rels[0]["properties"]["description"] == "CFO since 2020"
+
+    def test_entity_description_is_not_written_to_the_node(self):
+        # Descriptions are edge-only: an entity-level description must never land on the (shared) node.
+        entities = [{"id": "jane", "type": "Person", "name": "Jane", "description": "the CFO"}]
+        nodes, _ = EntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)._to_write_graph_payload(entities, [])
+        assert nodes[0]["properties"] == {"id": "jane", "name": "Jane"}
+
+
+class TestTypeGuidance:
+    def test_ontology_type_descriptions_annotate_the_guidance(self):
+        ontology = Ontology(
+            entity_types=["Person", "Org"],
+            relationship_types=["WORKS_AT"],
+            entity_descriptions={"Person": "an individual human"},  # Org intentionally undescribed
+            relationship_descriptions={"WORKS_AT": "employment of a person by an organization"},
+        )
+        guidance = EntityExtractor(llm=StubLLM(), ontology=ontology)._build_type_guidance()
+
+        assert "Person (an individual human)" in guidance
+        assert "Org" in guidance and "Org (" not in guidance  # bare when no description
+        assert "WORKS_AT (employment of a person by an organization)" in guidance
 
 
 class TestParseLLMJson:
@@ -152,7 +187,7 @@ class TestExecuteEndToEndWithStubLLM:
             "relationships": [{"source_id": "jane", "target_id": "acme", "type": "works at"}],
         }
         llm = StubLLM(response_content=json.dumps(payload))
-        extractor = EntityExtractor(llm=llm)
+        extractor = EntityExtractor(llm=llm, ontology=_ONTOLOGY)
 
         result = extractor.execute(
             EntityExtractor.input_schema(documents=[Document(content="Jane Doe works at Acme Capital.")])
@@ -169,7 +204,7 @@ class TestExecuteEndToEndWithStubLLM:
             "relationships": [],
         }
         llm = SequenceStubLLM(responses=["sorry, here is the graph you asked for", json.dumps(payload)])
-        extractor = EntityExtractor(llm=llm)
+        extractor = EntityExtractor(llm=llm, ontology=_ONTOLOGY)
 
         result = extractor.execute(EntityExtractor.input_schema(documents=[Document(content="Acme.")]))
 
@@ -178,7 +213,7 @@ class TestExecuteEndToEndWithStubLLM:
 
     def test_execute_skips_document_when_recovery_fails(self):
         llm = SequenceStubLLM(responses=["garbage", "still garbage"])
-        extractor = EntityExtractor(llm=llm)
+        extractor = EntityExtractor(llm=llm, ontology=_ONTOLOGY)
 
         result = extractor.execute(EntityExtractor.input_schema(documents=[Document(content="Acme.")]))
 
@@ -222,7 +257,7 @@ class TestExecuteEndToEndWithStubLLM:
             ],
             "relationships": [{"source_id": "jane", "target_id": "acme", "type": "works at"}],
         }
-        extractor = EntityExtractor(llm=StubLLM(response_content=json.dumps(payload)))
+        extractor = EntityExtractor(llm=StubLLM(response_content=json.dumps(payload)), ontology=_ONTOLOGY)
         result = extractor.execute(
             EntityExtractor.input_schema(documents=[Document(id="doc-1", content="Jane works at Acme.")])
         )
@@ -238,15 +273,16 @@ class TestExecuteEndToEndWithStubLLM:
             "relationships": [],
         }
         llm = StubLLM(response_content=json.dumps(payload))
-        extractor = EntityExtractor(llm=llm)
+        extractor = EntityExtractor(llm=llm, ontology=_ONTOLOGY)
         doc_one, doc_two = Document(id="d1", content="doc one"), Document(id="d2", content="doc two")
 
         result = extractor.execute(EntityExtractor.input_schema(documents=[doc_one, doc_two]))
 
         # The same LLM id from two documents must NOT alias: wiring ids are doc-scoped, and identity
         # is assigned later by KnowledgeGraphWriter name resolution (which converges them by name).
-        assert {(n["labels"][0], n["properties"]["id"]) for n in result["nodes"]} == {
+        "]["id"]) for n in result["nodes"]} == {
             ("ORG", "acme@d1"),
             ("ORG", "acme@d2"),
         }
         assert {n["properties"]["name"] for n in result["nodes"]} == {"Acme"}
+assert {(n["labels"][0], n["properties

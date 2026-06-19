@@ -57,12 +57,50 @@ class Ontology(BaseModel):
             Each extracted attribute becomes a separate ``(entity)-[:HAS_ATTRIBUTE {key}]->(:AttributeValue)``
             relationship rather than a node property — so an attribute that can be sensitive (salary, email)
             carries its own access scope on the edge and is filtered independently of the (shared) entity node.
+        entity_descriptions: Optional ``{type: description}`` explaining what each entity type means, e.g.
+            ``{"Person": "an individual human"}``. Injected into the extraction prompt so the model applies
+            the type as intended; types without a description are listed bare.
+        relationship_descriptions: Optional ``{type: description}`` explaining what each relationship type
+            means, e.g. ``{"WORKS_AT": "employment of a person by an organization"}``. Prompt-only, same as
+            ``entity_descriptions``.
     """
 
     entity_types: list[str]
     relationship_types: list[str]
     triples: list[Triple] = Field(default_factory=list)
     attributes: dict[str, list[str]] = Field(default_factory=dict)
+    entity_descriptions: dict[str, str] = Field(default_factory=dict)
+    relationship_descriptions: dict[str, str] = Field(default_factory=dict)
+
+
+class GraphNode(BaseModel):
+    """A provider-neutral ``BaseGraphStore.write_graph`` node payload.
+
+    ``identity_key`` names the property used to MERGE the node (always ``id`` here); ``properties`` must
+    contain that key. ``labels[0]`` is the entity type, ``labels[1]`` the shared ``Entity`` label.
+    """
+
+    labels: list[str]
+    properties: dict[str, Any]
+    identity_key: str = "id"
+
+
+class GraphRelationship(BaseModel):
+    """A provider-neutral ``BaseGraphStore.write_graph`` relationship payload.
+
+    Both endpoints are matched on their ``id`` property (``start_identity_key`` / ``end_identity_key``);
+    ``start_identity`` / ``end_identity`` are the id values to match. ``properties`` carries the edge's own
+    data plus per-document ACL/provenance attached later by ``_apply_document_metadata``.
+    """
+
+    type: str
+    start_label: str
+    end_label: str
+    start_identity: str
+    end_identity: str
+    properties: dict[str, Any] = Field(default_factory=dict)
+    start_identity_key: str = "id"
+    end_identity_key: str = "id"
 
 
 DEFAULT_EXTRACTION_PROMPT = """You are a knowledge-graph extraction engine. Read the text below and extract \
@@ -76,7 +114,7 @@ Return ONLY a single JSON object (no markdown, no prose) with exactly this shape
   ],
   "relationships": [
     {"source_id": "<id of source entity>", "target_id": "<id of target entity>", "type": "<RELATION_TYPE>", \
-"properties": {"<optional extra key>": "<value>"}}
+"description": "<optional one-line description>", "properties": {"<optional extra key>": "<value>"}}
   ]
 }
 
@@ -84,6 +122,8 @@ Rules:
 - Every relationship's source_id and target_id MUST reference an id present in "entities".
 - Keep ids stable and unique (reuse the same id when the same entity appears again).
 - "type" should be a short identifier (letters, digits, underscores). Relationship types are usually UPPER_SNAKE_CASE.
+- A relationship's "description" is optional: one line adding detail the type alone does not convey (role, \
+date, magnitude). Omit it when it would only restate the type.
 - Use "properties" only for genuinely useful attributes; otherwise return an empty object.
 {{type_guidance}}
 Text:
@@ -144,6 +184,7 @@ def _build_extraction_response_format(
                                 "source_id": {"type": "string"},
                                 "target_id": {"type": "string"},
                                 "type": relationship_type_schema,
+                                "description": {"type": "string"},
                                 "properties": {"type": "object"},
                             },
                             "required": ["source_id", "target_id", "type"],
@@ -174,12 +215,9 @@ class EntityExtractor(Node):
         name (str): Node name. Defaults to "entity-extractor".
         llm (Node): The LLM node used to perform the extraction.
         prompt_template (str): Jinja prompt template. Supports ``document_text`` and ``type_guidance``.
-        entity_types (list[str] | None): Optional whitelist hint of entity types to extract.
-        relationship_types (list[str] | None): Optional whitelist hint of relationship types to extract.
-        ontology (Ontology | None): Optional schema. When set, it is the source of truth: the LLM is
-            told the allowed types/triples AND the extracted graph is hard-filtered so only conforming
-            nodes/relationships are written. When ``None`` the extractor is free-form (falling back to
-            the soft ``entity_types``/``relationship_types`` hints if those are provided).
+        ontology (Ontology): Required schema, the source of truth for extraction. The LLM is told the
+            allowed types/triples/attributes AND the extracted graph is hard-filtered so only conforming
+            nodes/relationships are written. (There is no free-form mode: declare what you want extracted.)
         json_recovery_attempts (int): How many times to ask the LLM to repair unparseable output
             before skipping a document. Defaults to 1; set to 0 to disable recovery.
     """
@@ -188,9 +226,7 @@ class EntityExtractor(Node):
     name: str = "entity-extractor"
     llm: Node
     prompt_template: str = DEFAULT_EXTRACTION_PROMPT
-    entity_types: list[str] | None = None
-    relationship_types: list[str] | None = None
-    ontology: Ontology | None = None
+    ontology: Ontology
     json_recovery_attempts: int = Field(
         default=1,
         ge=0,
@@ -251,8 +287,7 @@ class EntityExtractor(Node):
             raw_relationships_debug.extend(doc_relationships)
 
             doc_nodes, doc_rels = self._to_write_graph_payload(entities, doc_relationships, document=document)
-            if self.ontology is not None:
-                doc_nodes, doc_rels = self._enforce_ontology(doc_nodes, doc_rels)
+            doc_nodes, doc_rels = self._enforce_ontology(doc_nodes, doc_rels)
             self._apply_document_metadata(doc_rels, document)
             nodes.extend(doc_nodes)
             relationships.extend(doc_rels)
@@ -394,44 +429,32 @@ class EntityExtractor(Node):
         return llm_result.output["content"]
 
     def _resolve_response_format(self) -> dict[str, Any]:
-        """The litellm ``response_format`` sent to the LLM.
-
-        Always the extraction-JSON schema; when an ontology is set, entity/relationship ``type``
-        is additionally constrained to an enum of its types.
-        """
-        if self.ontology is not None:
-            return _build_extraction_response_format(self.ontology.entity_types, self.ontology.relationship_types)
-        return _build_extraction_response_format()
+        """The litellm ``response_format`` sent to the LLM: the extraction-JSON schema with
+        entity/relationship ``type`` constrained to an enum of the ontology's types."""
+        return _build_extraction_response_format(self.ontology.entity_types, self.ontology.relationship_types)
 
     def _build_type_guidance(self) -> str:
-        """Build optional prompt guidance constraining entity/relationship types.
-
-        With an ``ontology`` set, the model is told the full schema (types + legal triples);
-        otherwise it falls back to the soft ``entity_types``/``relationship_types`` hints.
-        """
-        if self.ontology is not None:
-            o = self.ontology
-            lines = [
-                "You MUST conform to this ontology. Anything outside it will be discarded:",
-                f"- Allowed entity types: {', '.join(o.entity_types)}.",
-                f"- Allowed relationship types: {', '.join(o.relationship_types)}.",
-            ]
-            if o.triples:
-                lines.append("- Only these relationship patterns are legal (source -[REL]-> target):")
-                for t in o.triples:
-                    lines.append(f"    ({t.source}) -[{t.relationship}]-> ({t.target})")
-            if o.attributes:
-                lines.append('- For each entity, also extract these attributes when stated, inside its "properties":')
-                for etype, attrs in o.attributes.items():
-                    lines.append(f"    {etype}: {', '.join(attrs)}")
-            return "\n".join(lines)
-
-        lines = []
-        if self.entity_types:
-            lines.append(f"- Only extract entities of these types: {', '.join(self.entity_types)}.")
-        if self.relationship_types:
-            lines.append(f"- Only extract relationships of these types: {', '.join(self.relationship_types)}.")
+        """Build prompt guidance: the model is told the full ontology (types + legal triples + attributes)."""
+        o = self.ontology
+        lines = [
+            "You MUST conform to this ontology. Anything outside it will be discarded:",
+            f"- Allowed entity types: {self._format_typed(o.entity_types, o.entity_descriptions)}.",
+            f"- Allowed relationship types: {self._format_typed(o.relationship_types, o.relationship_descriptions)}.",
+        ]
+        if o.triples:
+            lines.append("- Only these relationship patterns are legal (source -[REL]-> target):")
+            for t in o.triples:
+                lines.append(f"    ({t.source}) -[{t.relationship}]-> ({t.target})")
+        if o.attributes:
+            lines.append('- For each entity, also extract these attributes when stated, inside its "properties":')
+            for etype, attrs in o.attributes.items():
+                lines.append(f"    {etype}: {', '.join(attrs)}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _format_typed(types: list[str], descriptions: dict[str, str]) -> str:
+        """Render ``types`` as a comma list, annotating any that have a description: ``Person (a human)``."""
+        return ", ".join(f"{t} ({descriptions[t]})" if descriptions.get(t) else t for t in types)
 
     def _enforce_ontology(self, nodes: list[dict], relationships: list[dict]) -> tuple[list[dict], list[dict]]:
         """Drop any node/relationship that is not allowed by ``self.ontology``.
@@ -517,9 +540,7 @@ class EntityExtractor(Node):
         return parsed if isinstance(parsed, dict) else None
 
     def _attributes_for_type(self, entity_type: str) -> list[str]:
-        """Attribute names declared for ``entity_type`` in the ontology (empty if none / no ontology)."""
-        if self.ontology is None:
-            return []
+        """Attribute names declared for ``entity_type`` in the ontology (empty if none declared)."""
         return self.ontology.attributes.get(entity_type, [])
 
     def _to_write_graph_payload(
@@ -527,10 +548,13 @@ class EntityExtractor(Node):
     ) -> tuple[list[dict], list[dict]]:
         """Convert LLM-friendly entities/relationships into the write_graph node/relationship shape.
 
-        Ontology-declared attributes (``Ontology.attributes``) are NOT written as node properties; each is
-        promoted to a separate ``(entity)-[:HAS_ATTRIBUTE {key}]->(:AttributeValue {value})`` relationship so
-        its visibility can be scoped independently of the (potentially shared) entity node. Value-node ids
-        are scoped per source document (``{wiring_id}::{key}::{document_id}``): the same attribute asserted
+        Entity nodes carry ONLY identity (``id`` + ``name``) — never the LLM's free-form ``properties``.
+        Nodes are merged by name and hold no ACL, so any inline property would be readable by anyone who can
+        reach the shared node; keeping nodes identity-only removes that leak. Ontology-declared attributes
+        (``Ontology.attributes``) are instead promoted to a separate
+        ``(entity)-[:HAS_ATTRIBUTE {key}]->(:AttributeValue {value})`` relationship so their visibility is
+        scoped independently of the (shared) entity node; any other emitted property is dropped. Value-node
+        ids are scoped per source document (``{wiring_id}::{key}::{document_id}``): the same attribute asserted
         by two documents yields two value nodes, each on its own edge carrying its own document's
         ACL/provenance metadata, while re-ingesting the same document updates the same value node.
 
@@ -553,18 +577,20 @@ class EntityExtractor(Node):
             id_to_label[entity_id] = label
             wiring_id = f"{entity_id}{doc_suffix}"
 
-            properties = dict(entity.get("properties") or {})
-            # Pull ontology-declared attributes out of the node's properties — they become edges below.
+            emitted = dict(entity.get("properties") or {})
+            # Declared ontology attributes are reified to ACL-scoped HAS_ATTRIBUTE edges below.
             declared = set(self._attributes_for_type(str(entity_type)))
-            attribute_values = {key: properties.pop(key) for key in list(properties) if key in declared}
+            attribute_values = {key: emitted[key] for key in emitted if key in declared}
 
-            properties["id"] = wiring_id
+            # Node = identity only (id + name). Other emitted props are dropped: nodes are merged by name and
+            # carry no ACL, so an inline prop would leak to anyone who can reach the shared node.
+            properties: dict[str, Any] = {"id": wiring_id}
             if entity.get("name") is not None:
                 properties["name"] = entity["name"]
 
-            # The type label stays first (ontology enforcement and resolution key on labels[0]); the shared
-            # ENTITY_LABEL is added so a single full-text index over names covers every entity type.
-            nodes.append({"labels": [label, ENTITY_LABEL], "identity_key": "id", "properties": properties})
+            # Type label first (ontology enforcement + resolution key on labels[0]); shared ENTITY_LABEL second
+            # so one full-text index over names spans every type.
+            nodes.append(GraphNode(labels=[label, ENTITY_LABEL], properties=properties).model_dump())
 
             for attr_key, attr_value in attribute_values.items():
                 if attr_value is None:
@@ -572,24 +598,16 @@ class EntityExtractor(Node):
                 value_id = f"{wiring_id}::{attr_key}"
                 if document is not None and document.id is not None:
                     value_id = f"{value_id}::{document.id}"
-                nodes.append(
-                    {
-                        "labels": [ATTRIBUTE_VALUE_LABEL],
-                        "identity_key": "id",
-                        "properties": {"id": value_id, "value": attr_value},
-                    }
-                )
+                nodes.append(GraphNode(labels=[ATTRIBUTE_VALUE_LABEL], properties={"id": value_id, "value": attr_value}).model_dump())
                 attribute_relationships.append(
-                    {
-                        "type": HAS_ATTRIBUTE_TYPE,
-                        "start_label": label,
-                        "end_label": ATTRIBUTE_VALUE_LABEL,
-                        "start_identity_key": "id",
-                        "end_identity_key": "id",
-                        "start_identity": wiring_id,
-                        "end_identity": value_id,
-                        "properties": {"key": attr_key},
-                    }
+                    GraphRelationship(
+                        type=HAS_ATTRIBUTE_TYPE,
+                        start_label=label,
+                        end_label=ATTRIBUTE_VALUE_LABEL,
+                        start_identity=wiring_id,
+                        end_identity=value_id,
+                        properties={"key": attr_key},
+                    ).model_dump()
                 )
 
         graph_relationships: list[dict] = []
@@ -604,17 +622,19 @@ class EntityExtractor(Node):
             if source_id not in id_to_label or target_id not in id_to_label:
                 logger.debug(f"EntityExtractor: skipping relationship with unresolved endpoint: {rel}")
                 continue
+            # Edges carry per-document ACL, so the optional description rides safely on the edge.
+            rel_props = dict(rel.get("properties") or {})
+            if rel.get("description") is not None:
+                rel_props["description"] = rel["description"]
             graph_relationships.append(
-                {
-                    "type": self._sanitize_identifier(str(rel_type)),
-                    "start_label": id_to_label[source_id],
-                    "end_label": id_to_label[target_id],
-                    "start_identity_key": "id",
-                    "end_identity_key": "id",
-                    "start_identity": f"{source_id}{doc_suffix}",
-                    "end_identity": f"{target_id}{doc_suffix}",
-                    "properties": dict(rel.get("properties") or {}),
-                }
+                GraphRelationship(
+                    type=self._sanitize_identifier(str(rel_type)),
+                    start_label=id_to_label[source_id],
+                    end_label=id_to_label[target_id],
+                    start_identity=f"{source_id}{doc_suffix}",
+                    end_identity=f"{target_id}{doc_suffix}",
+                    properties=rel_props,
+                ).model_dump()
             )
 
         return nodes, graph_relationships + attribute_relationships

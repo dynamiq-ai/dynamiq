@@ -8,7 +8,7 @@ existing node's id; no match -> fresh UUID.
 import uuid
 
 from dynamiq.connections import Neo4j
-from dynamiq.nodes.extractors import KnowledgeGraphWriter
+from dynamiq.nodes.extractors import KnowledgeGraphWriter, Ontology
 from dynamiq.nodes.extractors.entity_extractor import ATTRIBUTE_VALUE_LABEL, HAS_ATTRIBUTE_TYPE
 
 from .test_entity_extractor import StubLLM
@@ -19,6 +19,7 @@ def make_writer(existing: dict[str, list[tuple[str, str]]]) -> KnowledgeGraphWri
     writer = KnowledgeGraphWriter(
         llm=StubLLM(),
         connection=Neo4j(uri="bolt://localhost:7687", username="neo4j", password="password"),
+        ontology=Ontology(entity_types=[], relationship_types=[]),  # required; unused by resolution tests
         is_postponed_component_init=True,
     )
     writer._existing_cache = existing
