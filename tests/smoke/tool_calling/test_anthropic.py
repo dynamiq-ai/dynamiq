@@ -19,7 +19,7 @@ pytestmark = [pytest.mark.smoke, pytest.mark.integration, pytest.mark.flaky(reru
 
 def _llm():
     # Small model is fine: strict is grammar-constrained, so capability doesn't change the result.
-    return Anthropic(connection=AnthropicConnection(), model="claude-haiku-4-5", max_tokens=2048, temperature=1)
+    return Anthropic(connection=AnthropicConnection(), model="claude-haiku-4-5", max_tokens=4096, temperature=1)
 
 
 def _skip_if_no_creds():

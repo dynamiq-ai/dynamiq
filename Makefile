@@ -55,7 +55,7 @@ test-cov:
 
 test-cov-exclude-integration-with-creds:
 	mkdir -p ./reports
-	coverage run -m pytest --junitxml=./reports/test-results.xml tests --ignore=tests/integration_with_creds
+	coverage run -m pytest --junitxml=./reports/test-results.xml -m "not smoke" tests --ignore=tests/integration_with_creds
 	coverage report --skip-empty --skip-covered
 	coverage html -d ./reports/htmlcov --omit="*/test_*,*/tests.py"
 	coverage xml -o ./reports/coverage.xml --omit="*/test_*,*/tests.py"

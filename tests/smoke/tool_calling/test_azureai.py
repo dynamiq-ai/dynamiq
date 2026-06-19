@@ -17,7 +17,7 @@ pytestmark = [pytest.mark.smoke, pytest.mark.integration, pytest.mark.flaky(reru
 
 
 def _llm():
-    return AzureAI(connection=AzureAIConnection(), model="azure/gpt-4.1", max_tokens=2048, temperature=1)
+    return AzureAI(connection=AzureAIConnection(), model="azure/gpt-4.1", max_tokens=4096, temperature=1)
 
 
 def _skip_if_no_creds():
