@@ -70,23 +70,14 @@ class Cohere(BaseLLM):
         return to_strict_subset_function(fn, attach_flag=False)
 
     def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Forward Cohere-specific tool params that LiteLLM otherwise drops.
+        """Forward Cohere's request-level ``strict_tools`` flag when strict is on.
 
-        - ``strict_tools``: LiteLLM doesn't expose it as a supported Cohere param, so we
-          inject it via ``extra_body`` to reach Cohere's Chat API V2. Sent only when strict
-          is requested and tools are present.
-        - ``tool_choice="required"``: LiteLLM's Cohere v2 ``map_openai_params`` never maps
-          ``tool_choice`` (it silently drops it), so a forced tool call — e.g. an Agent in
-          FUNCTION_CALLING mode — never reaches Cohere and the model is free to answer in
-          prose. We translate it to Cohere's native ``"REQUIRED"`` and whitelist it via
-          ``allowed_openai_params`` so ``drop_params`` keeps it on the request body.
+        LiteLLM doesn't expose ``strict_tools`` as a supported Cohere param, so we
+        inject it via ``extra_body`` — LiteLLM's HTTP handler merges ``extra_body``
+        into the request body, reaching Cohere's Chat API V2. Only sent when strict
+        is requested and tools are present.
         """
         params = super().update_completion_params(params)
         if self.strict_tools and params.get("tools"):
             params.setdefault("extra_body", {})["strict_tools"] = True
-        if params.get("tool_choice") == "required" and params.get("tools"):
-            params["tool_choice"] = "REQUIRED"
-            allowed = params.setdefault("allowed_openai_params", [])
-            if "tool_choice" not in allowed:
-                allowed.append("tool_choice")
         return params

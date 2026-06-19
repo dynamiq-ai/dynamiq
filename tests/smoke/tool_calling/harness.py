@@ -204,6 +204,7 @@ def run_route_agent(
     strict_tools: bool,
     inference_mode: InferenceMode = InferenceMode.FUNCTION_CALLING,
     request_timeout: int = 120,
+    stream: bool = True,
 ) -> dict[str, Any]:
     """Run a single agent over the route_request scenario and return everything to assert on.
 
@@ -221,7 +222,7 @@ def run_route_agent(
         inference_mode=inference_mode,
         max_loops=3,
         verbose=True,
-        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL),
+        streaming=StreamingConfig(enabled=stream, mode=StreamingMode.ALL),
     )
 
     streaming = StreamingIteratorCallbackHandler()

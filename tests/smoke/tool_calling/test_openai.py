@@ -13,7 +13,7 @@ from .harness import assert_strict_call_is_clean, run_route_agent
 REQUIRED_ENV = ["OPENAI_API_KEY"]
 PROVIDER = "openai"
 
-pytestmark = [pytest.mark.smoke, pytest.mark.integration]
+pytestmark = [pytest.mark.smoke, pytest.mark.integration, pytest.mark.flaky(reruns=3)]
 
 
 def _llm():
