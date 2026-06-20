@@ -5,13 +5,36 @@ and the fact that filter VALUES are always bound parameters. A ``StubGraphStore`
 so ``execute`` is exercised end-to-end without Neo4j.
 """
 
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
 from dynamiq.connections import Neo4j
+from dynamiq.nodes.extractors import Ontology
+from dynamiq.nodes.node import Node, NodeGroup
 from dynamiq.nodes.retrievers import GraphRetriever
 from dynamiq.nodes.retrievers.graph import GraphRetrieverInputSchema, _compile_edge_filters
+
+
+class StubLLM(Node):
+    """LLM stub: returns a canned ``content`` (the query-entity JSON) instead of calling a real model."""
+
+    group: ClassVar = NodeGroup.LLMS
+    name: str = "stub-llm"
+    response_content: str = '{"names": []}'
+
+    def execute(self, input_data, config=None, **kwargs):
+        return {"content": self.response_content}
+
+
+class FailingStubLLM(StubLLM):
+    """LLM stub whose run never succeeds — exercises the graceful fallback to the raw query."""
+
+    def execute(self, input_data, config=None, **kwargs):
+        raise RuntimeError("llm boom")
+
+
+_ONTOLOGY = Ontology(entity_types=["Org", "Person"], relationship_types=["WORKS_AT"])
 
 
 class StubGraphStore:
@@ -33,6 +56,10 @@ class StubGraphStore:
 
 
 def make_retriever(rows=None, **kwargs) -> GraphRetriever:
+    # llm + ontology are required; default to an empty-names stub so query-seeding tests that don't care
+    # about extraction fall back to the raw query (unchanged behavior).
+    kwargs.setdefault("llm", StubLLM())
+    kwargs.setdefault("ontology", _ONTOLOGY)
     node = GraphRetriever(
         connection=Neo4j(uri="bolt://localhost:7687", username="neo4j", password="password"),
         is_postponed_component_init=True,
@@ -138,16 +165,6 @@ class TestQueryBuilding:
             5,
         )
         assert query.count("coalesce(r.allowed_principals, [])") == 2  # locked + the user's own, both apply
-
-    def test_multi_hop_inlines_validated_depth_and_guards_every_edge(self):
-        node = make_retriever(filters=LOCKED_ACL, max_depth=3)
-        query, _ = node._build_query(GraphRetrieverInputSchema(query="x", entities=["Acme"]), 5)
-        assert "[rels*1..3]" in query
-        assert "all(rel IN rels WHERE" in query
-
-    def test_depth_capped(self):
-        node = make_retriever(max_depth=99)
-        assert node._effective_depth() == 5
 
 
 class TestEntryModes:
@@ -257,18 +274,51 @@ class TestExecuteRendering:
         out = node.execute(GraphRetrieverInputSchema(query="Jane"))
         assert out["documents"][0].content == "Jane Doe -[WORKS_AT]-> Acme: CFO since 2020"
 
-    def test_multi_hop_renders_path(self):
-        rows = [
-            {
-                "node_names": ["Jane Doe", "Acme", "TradingX"],
-                "rel_types": ["WORKS_AT", "USES"],
-                "rel_props": [{"source_doc_ids": ["d1"]}, {"source_doc_ids": ["d2"]}],
-            }
-        ]
-        node = make_retriever(rows=rows, filters={"allowed_principals": {"$intersects": ["u:jane"]}}, max_depth=2)
-        out = node.execute(GraphRetrieverInputSchema(query="x", entities=["Jane Doe"]))
-        doc = out["documents"][0]
-        assert doc.content == "Jane Doe -[WORKS_AT]-> Acme -[USES]-> TradingX"
-        assert doc.metadata["source"] == "Jane Doe"
-        assert doc.metadata["target"] == "TradingX"
-        assert doc.metadata["source_doc_ids"] == ["d1", "d2"]
+    def test_query_entity_extraction_seeds_fulltext_anding_tokens_within_a_name(self):
+        # The LLM extracts ["Acme Capital"] -> the seek ANDs the name's tokens, so it won't match a node
+        # that merely shares "Acme" or "Capital" (precision over the noisy whole-question OR).
+        node = make_retriever(llm=StubLLM(response_content='{"names": ["Acme Capital"]}'))
+        node._use_fulltext = True
+        node.execute(GraphRetrieverInputSchema(query="Who works at Acme Capital and where?"))
+        assert node._graph_store.last_params["q"] == "(Acme~ AND Capital~)"
+
+    def test_multiple_entities_or_across_names(self):
+        # AND within each name, OR across the two entities the question is about.
+        node = make_retriever(llm=StubLLM(response_content='{"names": ["Alice Smith", "Helios"]}'))
+        node._use_fulltext = True
+        node.execute(GraphRetrieverInputSchema(query="Does Alice Smith use Helios?"))
+        assert node._graph_store.last_params["q"] == "(Alice~ AND Smith~) OR (Helios~)"
+
+    def test_query_entity_extraction_seeds_contains_scan(self):
+        node = make_retriever(llm=StubLLM(response_content='{"names": ["Acme Capital"]}'))
+        node._use_fulltext = False
+        node.execute(GraphRetrieverInputSchema(query="Who works at Acme Capital and where?"))
+        assert node._graph_store.last_params["q"] == "Acme Capital"
+
+    def test_empty_extraction_falls_back_to_whole_query(self):
+        node = make_retriever(llm=StubLLM(response_content='{"names": []}'))
+        node._use_fulltext = False
+        node.execute(GraphRetrieverInputSchema(query="how are things connected?"))
+        assert node._graph_store.last_params["q"] == "how are things connected?"
+
+    def test_llm_failure_falls_back_to_whole_query(self):
+        node = make_retriever(llm=FailingStubLLM())
+        node._use_fulltext = False
+        out = node.execute(GraphRetrieverInputSchema(query="who is Jane?"))  # must not raise
+        assert node._graph_store.last_params["q"] == "who is Jane?"
+        assert out["documents"] == []
+
+    def test_explicit_entities_skip_extraction(self):
+        # Explicit entities take precedence -> the LLM is never consulted, and we anchor by exact name.
+        names_seen = []
+
+        class RecordingLLM(StubLLM):
+            def execute(self, input_data, config=None, **kwargs):
+                names_seen.append(input_data)
+                return {"content": '{"names": ["SHOULD_NOT_BE_USED"]}'}
+
+        node = make_retriever(llm=RecordingLLM())
+        node.execute(GraphRetrieverInputSchema(query="anything", entities=["Acme"]))
+        assert names_seen == []  # extraction skipped
+        assert node._graph_store.last_params.get("entities") == ["Acme"]
+        assert "a.name IN $entities" in node._graph_store.last_query

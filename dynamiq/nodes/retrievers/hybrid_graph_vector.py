@@ -47,7 +47,7 @@ class HybridGraphVectorRetriever(Node):
 
     Composes (does not subclass) a :class:`VectorStoreRetriever` and a :class:`GraphRetriever`, so each can
     point at a different backend and keep its own config (the vector retriever's hybrid ``alpha`` /
-    reranker, the graph retriever's LOCKED ACL ``filters`` and traversal ``max_depth``). Flow:
+    reranker, the graph retriever's LOCKED ACL ``filters``). Flow:
 
       1. Vector-retrieve passages for the query.
       2. Collect the resolved entity ids those passages mention (their ``kg_entity_ids`` metadata) as graph
@@ -87,8 +87,8 @@ class HybridGraphVectorRetriever(Node):
     seed_graph_from_passages: bool = True
     max_seed_entities: int = 10
     # Graph expansion depth. 1 = single hop. >1 iterates hop-by-hop (a beam search), pruning the frontier
-    # each hop — NOT one exploding *1..N traversal. Configure the inner graph_retriever with max_depth=1;
-    # depth is controlled here so each hop stays a cheap, bounded 1-hop call.
+    # each hop — NOT one exploding *1..N traversal. The inner GraphRetriever is single-hop by design; this
+    # node drives the multi-hop expansion by re-seeding it with each hop's neighbor ids.
     max_hops: int = 1
     beam_width: int = 10  # frontier cap per hop — bounds the iterative expansion
     fact_limit: int = 50  # max facts kept after ranking (guards against hub-entity edge floods)

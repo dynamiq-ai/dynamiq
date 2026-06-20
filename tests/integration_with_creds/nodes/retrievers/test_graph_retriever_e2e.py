@@ -75,6 +75,8 @@ def _facts_for(graph_connection, principals, **kwargs):
     # ACL is expressed as a LOCKED filter via the $intersects operator (node config, not input).
     retriever = GraphRetriever(
         connection=graph_connection,
+        llm=OpenAI(connection=OpenAIConnection(), model="gpt-4o-mini", temperature=0),
+        ontology=ONTOLOGY,
         filters={"allowed_principals": {"$intersects": principals}},
         **kwargs,
     )

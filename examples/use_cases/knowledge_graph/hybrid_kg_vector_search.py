@@ -145,7 +145,15 @@ def build_workflow() -> Workflow:
         document_retriever=PGVectorDocumentRetriever(connection=pg, table_name=TABLE, dimension=DIM, top_k=3),
         alpha=0.5,  # dense + BM25 keyword (entity names live in the content)
     )
-    graph_retriever = GraphRetriever(id="graph_retriever", connection=neo4j, max_depth=1, top_k=10)
+    # Seeded per-hop by the vector side's kg_entity_ids, so its llm is never actually called here; it is
+    # required all the same (single-hop, query-entity-extraction is the GraphRetriever contract).
+    graph_retriever = GraphRetriever(
+        id="graph_retriever",
+        connection=neo4j,
+        llm=OpenAI(connection=openai, model="gpt-4o-mini"),
+        ontology=ONTOLOGY,
+        top_k=10,
+    )
 
     hybrid_retriever = HybridGraphVectorRetriever(
         id="hybrid_retriever",

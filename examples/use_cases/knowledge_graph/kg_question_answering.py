@@ -21,6 +21,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAITextEmbedder
+from dynamiq.nodes.extractors import Ontology
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.retrievers import GraphRetriever, QdrantDocumentRetriever, VectorStoreRetriever
 from dynamiq.nodes.tools import CypherExecutor
@@ -50,7 +51,7 @@ AGENT_ROLE = """You answer questions about the ingested content using three tool
 Combine evidence when helpful, and cite which tool gave you each fact."""
 
 # Default suits the kg_ingestion.py demo data; pass your own question as the first CLI argument,
-# e.g. after kg_url_ingestion.py:  python kg_question_answering.py "What are the main components?"
+# e.g.:  python kg_question_answering.py "What are the main components?"
 DEFAULT_QUESTION = "Who is the CIO of Acme Capital, and what AI system does the firm use? How are they connected?"
 
 
@@ -81,8 +82,13 @@ def build_workflow() -> Workflow:
     graph_tool = GraphRetriever(
         name="graph-retriever",
         connection=Neo4jConnection(),
+        # Same entity types the graph was ingested with, so the question is parsed for those kinds.
+        llm=OpenAI(connection=openai_connection, model="gpt-4o-mini", temperature=0),
+        ontology=Ontology(
+            entity_types=["Person", "Organization", "System", "Event", "Location"],
+            relationship_types=["WORKS_AT", "USES", "PRESENTED", "PRESENTED_AT", "LOCATED_IN"],
+        ),
         filters={"allowed_principals": {"$intersects": PRINCIPALS}},
-        max_depth=2,
         top_k=20,
     )
 

@@ -7,16 +7,18 @@ from dynamiq.connections import ApacheAGE, AWSNeptune, Neo4j
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
-from dynamiq.nodes.extractors.entity_extractor import ENTITY_LABEL, ENTITY_NAME_FULLTEXT_INDEX
-from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
+from dynamiq.nodes.extractors.entity_extractor import ENTITY_LABEL, ENTITY_NAME_FULLTEXT_INDEX, Ontology
+from dynamiq.nodes.node import ConnectionNode, Node, NodeDependency, NodeGroup, ensure_config
 from dynamiq.nodes.types import ActionType
-from dynamiq.runnables import RunnableConfig
+from dynamiq.prompts import Message, Prompt
+from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.storages.graph.age import ApacheAgeGraphStore
 from dynamiq.storages.graph.base import BaseGraphStore
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
 from dynamiq.storages.graph.neptune import NeptuneGraphStore
 from dynamiq.types import Document
 from dynamiq.types.cancellation import check_cancellation
+from dynamiq.utils.json_parser import parse_llm_json_output
 from dynamiq.utils.logger import logger
 
 # Property keys interpolated into Cypher text (label/property identifiers) must match this — the safe
@@ -24,8 +26,27 @@ from dynamiq.utils.logger import logger
 # only KEYS are validated here, so a malicious filter key cannot smuggle Cypher.
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-# Hard ceiling on traversal depth — keeps the variable-length expansion (and the result size) bounded.
-_MAX_TRAVERSAL_DEPTH = 5
+# LLM pre-step (LangChain-style): pull the entities a QUESTION is about, constrained to the same ontology
+# entity types used at ingestion, so the graph search seeds on those names (precise) rather than every
+# word in the question (noisy). The structured output is just a list of names.
+_QUERY_ENTITY_PROMPT = (
+    "You identify which named entities a QUESTION is about, so they can be looked up in a knowledge graph. "
+    "Return ONLY a JSON object of the form {\"names\": [\"...\"]} -- the entity names exactly as they appear "
+    "in the question. Only include entities whose type is one of: {{entity_types}}. Omit question words, "
+    "verbs and generic nouns. Return an empty list if the question names no such entity.\n\nQuestion:\n{{query}}"
+)
+
+_QUERY_ENTITY_RESPONSE_FORMAT: dict[str, Any] = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "query_entities",
+        "schema": {
+            "type": "object",
+            "properties": {"names": {"type": "array", "items": {"type": "string"}}},
+            "required": ["names"],
+        },
+    },
+}
 
 # Supported edge-filter operators -> Cypher predicate builders. `c` is the qualified property
 # (e.g. ``r.source_url``); `p` is the bound-parameter name.
@@ -57,13 +78,30 @@ def _validate_identifier(name: str) -> str:
 
 
 def _lucene_query(text: str) -> str:
-    """Turn a free-text question into a fuzzy Lucene OR-query over entity names.
+    """Turn free text into a fuzzy Lucene OR-query (the no-extraction fallback over the raw question).
 
     Keeps only word tokens (so Lucene special characters can't break the parser) and appends ``~`` to
-    each for edit-distance fuzzy matching. Returns "" when there are no usable tokens.
+    each for edit-distance fuzzy matching. OR across tokens maximizes recall. Returns "" when there are
+    no usable tokens.
     """
     terms = re.findall(r"[A-Za-z0-9]+", text or "")
     return " OR ".join(f"{t}~" for t in terms)
+
+
+def _grouped_lucene_query(names: list[str]) -> str:
+    """Fuzzy Lucene query for a list of entity names: AND the tokens WITHIN a name, OR ACROSS names.
+
+    A multi-word name like ``"Alice Smith"`` becomes ``(Alice~ AND Smith~)`` — so it matches "Alice Smith"
+    (and typos) but NOT "Alice Tem", which only shares one token. Multiple extracted entities are OR-ed
+    (``(Alice~ AND Smith~) OR (Helios~)``) so a question about several entities still finds them all.
+    Returns "" when no name yields a usable token.
+    """
+    groups: list[str] = []
+    for name in names:
+        tokens = re.findall(r"[A-Za-z0-9]+", name or "")
+        if tokens:
+            groups.append("(" + " AND ".join(f"{t}~" for t in tokens) + ")")
+    return " OR ".join(groups)
 
 
 def _compile_edge_filters(
@@ -117,9 +155,11 @@ class GraphRetriever(ConnectionNode):
     """Retrieves bounded, ACL-filtered context from a knowledge graph for a natural-language query.
 
     The graph sibling of :class:`~dynamiq.nodes.retrievers.retriever.VectorStoreRetriever`, and the
-    controlled alternative to ``CypherExecutor`` for read access: it finds entry-point entities by name,
-    expands one or more hops through **visible** edges, and renders the resulting facts as ``Document``
-    objects an agent can consume directly.
+    controlled alternative to ``CypherExecutor`` for read access. An LLM first extracts the entities the
+    question is about (constrained to the ontology's types), the retriever finds those entry-point entities
+    by name, expands ONE hop through **visible** edges, and renders the resulting facts as ``Document``
+    objects an agent can consume directly. Deeper exploration is by iteration: each fact carries its
+    neighbor's ``source_id``/``target_id``, which an agent feeds back as the next call's ``entity_ids``.
 
     Entry-point selection is backend-agnostic: on Neo4j with the entity-name full-text index present
     (created by ``KnowledgeGraphWriter``) it uses an index seek and expands only the seed's neighborhood;
@@ -145,11 +185,13 @@ class GraphRetriever(ConnectionNode):
 
     Attributes:
         connection (Neo4j | ApacheAGE | AWSNeptune): The graph backend connection.
+        llm (Node): LLM used to extract the query's entities before seeding the search (required).
+        ontology (Ontology): Schema whose entity types constrain query-entity extraction — pass the SAME
+            ontology used at ingestion so the question is parsed for the entity kinds the graph contains.
         database (str | None): Optional target database (Neo4j).
         graph_name (str | None): Graph name (Apache AGE).
         filters (dict | None): LOCKED edge-property filters, always applied (operator grammar). ACL lives
             here via the ``$intersects`` operator.
-        max_depth (int): Traversal depth from entry entities (1 = direct facts). Capped at 5.
         top_k (int): Maximum number of facts to return.
     """
 
@@ -158,27 +200,43 @@ class GraphRetriever(ConnectionNode):
     name: str = "graph-retriever"
     description: str = (
         "Retrieves facts from a knowledge graph for a natural-language question. Input: a 'query' string "
-        "(and optionally 'entities' to start from, or 'top_k'). Returns related entities and relationships "
-        "as bullet-point facts. Use for questions about how things are connected."
+        "(and optionally 'entities'/'entity_ids' to start from, or 'top_k'). Returns one hop of related "
+        "facts as bullet points; call again with a fact's neighbor id to go deeper."
     )
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     connection: Neo4j | ApacheAGE | AWSNeptune
+    llm: Node
+    ontology: Ontology
     database: str | None = None
     graph_name: str | None = None
     create_graph_if_not_exists: bool = False
     filters: dict[str, Any] | None = None  # LOCKED: always applied; not overridable from the input schema
-    max_depth: int = 1
-    top_k: int = 10
+    top_k: int = 50
 
     input_schema: ClassVar[type[GraphRetrieverInputSchema]] = GraphRetrieverInputSchema
 
     _graph_store: BaseGraphStore | None = PrivateAttr(default=None)
     _use_fulltext: bool = PrivateAttr(default=False)
+    _run_depends: list = PrivateAttr(default_factory=list)
+
+    def reset_run_state(self) -> None:
+        self._run_depends = []
+
+    @property
+    def to_dict_exclude_params(self) -> dict:
+        return super().to_dict_exclude_params | {"llm": True}
+
+    def to_dict(self, **kwargs) -> dict:
+        data = super().to_dict(**kwargs)
+        data["llm"] = self.llm.to_dict(**kwargs)
+        return data
 
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """Select the concrete graph store from the connection type (same dispatch as CypherExecutor)."""
         connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
+        if self.llm.is_postponed_component_init:
+            self.llm.init_components(connection_manager)
         if self._graph_store is None:
             self._graph_store = self._build_graph_store()
         self._use_fulltext = self._probe_fulltext()
@@ -230,16 +288,57 @@ class GraphRetriever(ConnectionNode):
         if getattr(self._graph_store, "client", None) is not self.client:
             self._graph_store.update_client(self.client)
 
-    def _effective_depth(self) -> int:
-        return max(1, min(self.max_depth, _MAX_TRAVERSAL_DEPTH))
+    def _extract_entity_names(self, query: str, config: RunnableConfig, **kwargs) -> list[str]:
+        """Extract the entity names a question is about via the LLM, constrained to the ontology's types.
+
+        Returns ``[]`` on any failure (non-SUCCESS status, unparseable output, exception) so the search
+        degrades to seeding on the raw query rather than erroring.
+        """
+        try:
+            prompt = Prompt(messages=[Message(role="user", content=_QUERY_ENTITY_PROMPT)])
+            run_kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
+            run_kwargs.pop("run_depends", None)
+            result = self.llm.run(
+                input_data={"query": query, "entity_types": ", ".join(self.ontology.entity_types)},
+                prompt=prompt,
+                response_format=_QUERY_ENTITY_RESPONSE_FORMAT,
+                config=config,
+                run_depends=self._run_depends,
+                **run_kwargs,
+            )
+            self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
+            if result.status != RunnableStatus.SUCCESS:
+                logger.warning(f"Node {self.name} - {self.id}: query entity extraction failed; using raw query.")
+                return []
+            parsed = parse_llm_json_output(result.output.get("content") or "")
+            names = parsed.get("names") if isinstance(parsed, dict) else None
+            return [n.strip() for n in (names or []) if isinstance(n, str) and n.strip()]
+        except Exception as e:
+            logger.warning(f"Node {self.name} - {self.id}: query entity extraction error: {e}; using raw query.")
+            return []
+
+    def _seed_entity_names(
+        self, input_data: GraphRetrieverInputSchema, config: RunnableConfig, **kwargs
+    ) -> list[str]:
+        """The entity names the search seeds on (extracted from the question), or ``[]``.
+
+        Skips extraction entirely when the caller passes explicit ``entity_ids``/``entities`` — those
+        anchor the search directly (``_entry`` ignores the seed), so the LLM is never consulted. An empty
+        list means "no entities extracted" -> ``_entry`` falls back to the raw query.
+        """
+        if input_data.entity_ids or input_data.entities:
+            return []
+        return self._extract_entity_names(input_data.query, config, **kwargs)
 
     def _entry(
-        self, input_data: GraphRetrieverInputSchema, params: dict[str, Any]
+        self, input_data: GraphRetrieverInputSchema, params: dict[str, Any], seed_names: list[str] | None
     ) -> tuple[list[str], str | None, bool]:
         """Pick the entry-point strategy. Returns (lead_lines, entry_where, anchored).
 
-        - explicit ``entities``  -> anchor on ``:Entity`` nodes by exact name.
-        - full-text index (Neo4j, index present) -> seek seed entities by the question's words.
+        - explicit ``entity_ids`` / ``entities`` -> anchor on ``:Entity`` nodes by id / exact name (these
+          take precedence and skip extraction — used by hybrid/iterative retrieval).
+        - full-text index (Neo4j, index present) -> seek seeds by a fuzzy query over the extracted entity
+          names (AND within a name, OR across names); falls back to an OR over the raw query when no names.
         - otherwise (non-Neo4j, or index missing) -> portable ``CONTAINS`` scan.
 
         Anchored modes bind ``a`` to a seed and expand from it (cheap, neighborhood-bounded); the scan
@@ -255,7 +354,9 @@ class GraphRetriever(ConnectionNode):
             return [f"MATCH (a:{ENTITY_LABEL})"], "a.name IN $entities", True
 
         if self._use_fulltext:
-            lucene = _lucene_query(input_data.query)
+            # Precise: AND tokens within each extracted name, OR across names. No names -> recall-y OR
+            # over the raw question.
+            lucene = _grouped_lucene_query(seed_names) if seed_names else _lucene_query(input_data.query)
             if lucene:
                 params["q"] = lucene
                 return (
@@ -264,54 +365,41 @@ class GraphRetriever(ConnectionNode):
                     True,
                 )
 
-        params["q"] = input_data.query
+        params["q"] = " ".join(seed_names) if seed_names else input_data.query
         return [], "(toLower($q) CONTAINS toLower(a.name) OR toLower($q) CONTAINS toLower(b.name))", False
 
-    def _build_query(self, input_data: GraphRetrieverInputSchema, limit: int) -> tuple[str, dict[str, Any]]:
-        """Build the single parameterized Cypher query and its parameters."""
+    def _build_query(
+        self, input_data: GraphRetrieverInputSchema, limit: int, seed_names: list[str] | None = None
+    ) -> tuple[str, dict[str, Any]]:
+        """Build the single parameterized one-hop Cypher query and its parameters.
+
+        ``seed_names`` are the extracted entity names computed in ``execute``; ``None`` (the default when
+        called directly) means seed on the raw query (the pre-extraction behavior).
+        """
         params: dict[str, Any] = {"limit": limit}
-        depth = self._effective_depth()
-        lead, entry_where, anchored = self._entry(input_data, params)
+        lead, entry_where, anchored = self._entry(input_data, params, seed_names)
         # Anchored expansion is undirected (catch edges into and out of the seed); direction is recovered
         # in RETURN via startNode/endNode. The scan keeps the directed pattern with a=source, b=target.
         arrow = "-[{rel}]-" if anchored else "-[{rel}]->"
 
-        if depth == 1:
-            rel_clauses, filter_params = self._edge_predicates("r", input_data.filters)
-            params.update(filter_params)
-            where = " AND ".join([t for t in [entry_where, *rel_clauses] if t])
-            if anchored:
-                ret = (
-                    "RETURN coalesce(startNode(r).name, startNode(r).value) AS a_name, startNode(r).id AS a_id, "
-                    "type(r) AS rel, properties(r) AS rprops, "
-                    "coalesce(endNode(r).name, endNode(r).value) AS b_name, endNode(r).id AS b_id"
-                )
-            else:
-                ret = (
-                    "RETURN coalesce(a.name, a.value) AS a_name, a.id AS a_id, type(r) AS rel, "
-                    "properties(r) AS rprops, coalesce(b.name, b.value) AS b_name, b.id AS b_id"
-                )
-            lines = [*lead, f"MATCH (a){arrow.format(rel='r')}(b)"]
-            if where:
-                lines.append(f"WHERE {where}")
-            lines += [ret, "LIMIT $limit"]
-            return "\n".join(lines), params
-
-        # Multi-hop: every edge on the path must be visible (all(...)). Depth is a validated int, so it is
-        # safe to inline — Cypher does not allow a parameter in variable-length bounds.
-        rel_clauses, filter_params = self._edge_predicates("rel", input_data.filters)
+        rel_clauses, filter_params = self._edge_predicates("r", input_data.filters)
         params.update(filter_params)
-        all_clause = f"all(rel IN rels WHERE {' AND '.join(rel_clauses)})" if rel_clauses else None
-        where = " AND ".join([t for t in [entry_where, all_clause] if t])
-        lines = [*lead, f"MATCH path = (a){arrow.format(rel=f'rels*1..{depth}')}(b)"]
+        where = " AND ".join([t for t in [entry_where, *rel_clauses] if t])
+        if anchored:
+            ret = (
+                "RETURN coalesce(startNode(r).name, startNode(r).value) AS a_name, startNode(r).id AS a_id, "
+                "type(r) AS rel, properties(r) AS rprops, "
+                "coalesce(endNode(r).name, endNode(r).value) AS b_name, endNode(r).id AS b_id"
+            )
+        else:
+            ret = (
+                "RETURN coalesce(a.name, a.value) AS a_name, a.id AS a_id, type(r) AS rel, "
+                "properties(r) AS rprops, coalesce(b.name, b.value) AS b_name, b.id AS b_id"
+            )
+        lines = [*lead, f"MATCH (a){arrow.format(rel='r')}(b)"]
         if where:
             lines.append(f"WHERE {where}")
-        lines += [
-            "RETURN [n IN nodes(path) | coalesce(n.name, n.value)] AS node_names, "
-            "[r IN relationships(path) | type(r)] AS rel_types, "
-            "[r IN relationships(path) | properties(r)] AS rel_props",
-            "LIMIT $limit",
-        ]
+        lines += [ret, "LIMIT $limit"]
         return "\n".join(lines), params
 
     def _edge_predicates(self, rel_var: str, user_filters: dict[str, Any] | None) -> tuple[list[str], dict[str, Any]]:
@@ -330,6 +418,7 @@ class GraphRetriever(ConnectionNode):
         """Retrieve filtered graph context for the query and render it as Documents."""
         logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
         config = ensure_config(config)
+        self.reset_run_state()
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
@@ -338,12 +427,11 @@ class GraphRetriever(ConnectionNode):
 
         limit = input_data.top_k or self.top_k
         try:
-            query, params = self._build_query(input_data, limit)
+            seed_names = self._seed_entity_names(input_data, config, **kwargs)
+            query, params = self._build_query(input_data, limit, seed_names)
             records, _, _ = self._graph_store.run_cypher(query, parameters=params, database=self.database)
             rows = self._graph_store.format_records(records)
-            documents = (
-                self._render_single_hop(rows) if self._effective_depth() == 1 else self._render_paths(rows)
-            )
+            documents = self._render_single_hop(rows)
             content = "\n".join(f"- {d.content}" for d in documents) or "No matching facts found."
             logger.info(f"Tool {self.name} - {self.id}: retrieved {len(documents)} fact(s).")
             return {"content": content, "documents": documents}
@@ -378,42 +466,4 @@ class GraphRetriever(ConnectionNode):
             if row.get("b_id") is not None:
                 metadata["target_id"] = row["b_id"]
             documents.append(Document(content=fact, metadata=metadata, score=1.0 / (1.0 + rank)))
-        return documents
-
-    @staticmethod
-    def _render_paths(rows: list[dict[str, Any]]) -> list[Document]:
-        documents: list[Document] = []
-        seen: set[str] = set()  # dedup identical paths arriving via per-document edges
-        for rank, row in enumerate(rows):
-            names = row.get("node_names") or []
-            rels = row.get("rel_types") or []
-            rel_props = row.get("rel_props") or []
-            if len(names) < 2 or len(rels) != len(names) - 1:
-                continue
-            fact = names[0]
-            for i, (rel, node) in enumerate(zip(rels, names[1:])):
-                fact += f" -[{rel}]-> {node}"
-                # Inline each hop's edge description (when present) so multi-hop facts keep their detail.
-                desc = (rel_props[i] or {}).get("description") if i < len(rel_props) else None
-                if desc:
-                    fact += f" ({desc})"
-            if fact in seen:
-                continue
-            seen.add(fact)
-            # Merge provenance pointers across the path's edges.
-            source_doc_ids: list[str] = []
-            for props in rel_props:
-                source_doc_ids.extend((props or {}).get("source_doc_ids") or [])
-            documents.append(
-                Document(
-                    content=fact,
-                    metadata={
-                        "source": names[0],
-                        "target": names[-1],
-                        "rels": rels,
-                        "source_doc_ids": source_doc_ids,
-                    },
-                    score=1.0 / (1.0 + rank),
-                )
-            )
         return documents
