@@ -280,9 +280,8 @@ class TestExecuteEndToEndWithStubLLM:
 
         # The same LLM id from two documents must NOT alias: wiring ids are doc-scoped, and identity
         # is assigned later by KnowledgeGraphWriter name resolution (which converges them by name).
-        "]["id"]) for n in result["nodes"]} == {
+        assert {(n["labels"][0], n["properties"]["id"]) for n in result["nodes"]} == {
             ("ORG", "acme@d1"),
             ("ORG", "acme@d2"),
         }
         assert {n["properties"]["name"] for n in result["nodes"]} == {"Acme"}
-assert {(n["labels"][0], n["properties
