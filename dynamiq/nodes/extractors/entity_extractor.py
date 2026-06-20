@@ -601,7 +601,11 @@ class EntityExtractor(Node):
                 value_id = f"{wiring_id}::{attr_key}"
                 if document is not None and document.id is not None:
                     value_id = f"{value_id}::{document.id}"
-                nodes.append(GraphNode(labels=[ATTRIBUTE_VALUE_LABEL], properties={"id": value_id, "value": attr_value}).model_dump())
+                nodes.append(
+                    GraphNode(
+                        labels=[ATTRIBUTE_VALUE_LABEL], properties={"id": value_id, "value": attr_value}
+                    ).model_dump()
+                )
                 attribute_relationships.append(
                     GraphRelationship(
                         type=HAS_ATTRIBUTE_TYPE,

@@ -127,7 +127,8 @@ class TestToWriteGraphPayload:
         relationships = [
             {"source_id": "jane", "target_id": "acme", "type": "WORKS_AT", "description": "CFO since 2020"}
         ]
-        _, graph_rels = EntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)._to_write_graph_payload(entities, relationships)
+        extractor = EntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)
+        _, graph_rels = extractor._to_write_graph_payload(entities, relationships)
         assert graph_rels[0]["properties"]["description"] == "CFO since 2020"
 
     def test_entity_description_is_not_written_to_the_node(self):
