@@ -40,7 +40,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.converters import HTMLConverter
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
-from dynamiq.nodes.extractors import KnowledgeGraphWriter, Ontology
+from dynamiq.nodes.extractors import EntityExtractor, KnowledgeGraphWriter, Ontology
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.node import InputTransformer, NodeDependency
 from dynamiq.nodes.splitters.document import DocumentSplitter
@@ -145,20 +145,39 @@ def build_workflow() -> Workflow:
         depends=[NodeDependency(html_converter)],
         input_transformer=InputTransformer(selector={"documents": f"$.{html_converter.id}.output.documents"}),
     )
-    knowledge_graph = KnowledgeGraphWriter(
-        id="knowledge_graph",
+    entity_extractor = EntityExtractor(
+        id="entity_extractor",
         llm=OpenAI(
             id=KG_LLM_ID, connection=openai_connection, model="gpt-4o-mini", temperature=0.0, max_tokens=4000
         ),
-        connection=Neo4jConnection(),
         ontology=ONTOLOGY,
         depends=[NodeDependency(kg_splitter)],
         input_transformer=InputTransformer(selector={"documents": f"$.{kg_splitter.id}.output.documents"}),
     )
+    knowledge_graph = KnowledgeGraphWriter(
+        id="knowledge_graph",
+        connection=Neo4jConnection(),
+        depends=[NodeDependency(entity_extractor)],
+        input_transformer=InputTransformer(
+            selector={
+                "nodes": f"$.{entity_extractor.id}.output.nodes",
+                "relationships": f"$.{entity_extractor.id}.output.relationships",
+                "documents": f"$.{entity_extractor.id}.output.documents",
+            }
+        ),
+    )
 
     return Workflow(
         flow=Flow(
-            nodes=[html_converter, vector_splitter, document_embedder, vector_writer, kg_splitter, knowledge_graph]
+            nodes=[
+                html_converter,
+                vector_splitter,
+                document_embedder,
+                vector_writer,
+                kg_splitter,
+                entity_extractor,
+                knowledge_graph,
+            ]
         )
     )
 

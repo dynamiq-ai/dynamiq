@@ -1,7 +1,7 @@
 import re
-from typing import Any
+from typing import Any, ClassVar, Literal
 
-from pydantic import PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr
 
 from dynamiq.connections import ApacheAGE, AWSNeptune, Neo4j
 from dynamiq.connections.managers import ConnectionManager
@@ -12,14 +12,15 @@ from dynamiq.nodes.extractors.entity_extractor import (
     ENTITY_NAME_FULLTEXT_INDEX,
     HAS_ATTRIBUTE_TYPE,
     KG_ENTITY_IDS_KEY,
-    EntityExtractor,
-    EntityExtractorInputSchema,
 )
+from dynamiq.nodes.node import Node, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.graph.age import ApacheAgeGraphStore
 from dynamiq.storages.graph.base import BaseGraphStore
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
 from dynamiq.storages.graph.neptune import NeptuneGraphStore
+from dynamiq.types import Document
+from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
 
@@ -61,33 +62,48 @@ def _entity_ids_by_doc(relationships: list[dict]) -> dict[str, list[str]]:
     return {doc_id: sorted(ids) for doc_id, ids in by_doc.items()}
 
 
-class KnowledgeGraphWriter(EntityExtractor):
-    """One node that extracts a knowledge graph from documents AND writes it to a graph store.
+class KnowledgeGraphWriterInputSchema(BaseModel):
+    """Input for the writer: an ``EntityExtractor``'s output payload.
 
-    The graph analog of ``VectorStoreWriter`` (which bundles an embedder + a vector writer): this bundles
-    LLM extraction + write-time entity resolution + the graph upsert into a single node. It is the only
-    write path for extracted graphs — extraction payload ids are per-extraction wiring, and this node is
-    where they are replaced with durable identity (name resolution) before hitting the store.
+    ``nodes`` / ``relationships`` are the provider-neutral graph payload; ``documents`` are the source
+    chunks the payload was extracted from, tagged on output with the resolved entity ids they mention.
+    """
 
-    Combines, in a single node, what previously required wiring an ``EntityExtractor`` to a
-    graph writer:
+    nodes: list[dict] = Field(default_factory=list, description="Extracted graph nodes (EntityExtractor output).")
+    relationships: list[dict] = Field(default_factory=list, description="Extracted graph relationships.")
+    documents: list[Document] = Field(
+        default_factory=list, description="Source chunks to tag with the resolved entity ids each mentions."
+    )
 
-      1. LLM extraction (+ ``ontology`` enforcement, inherited from EntityExtractor).
-      2. Write-time entity resolution: node identity is decided by NAME similarity only — the
+
+class KnowledgeGraphWriter(Node):
+    """Writes an extracted knowledge graph to a graph store, assigning durable entity identity first.
+
+    Consumes an :class:`~dynamiq.nodes.extractors.entity_extractor.EntityExtractor`'s output
+    (``{nodes, relationships, documents}``) and:
+
+      1. Write-time entity resolution: node identity is decided by NAME similarity only — the
          LLM-produced ids are just wiring that links edges to entities within one extraction and
          never participate in identity. An entity whose name is trigram-similar
          (>= ``similarity_threshold``) to an existing same-label node adopts that node's id;
          otherwise it is written as a new node under a fresh UUID. Re-running ingestion therefore
          converges onto existing entities instead of duplicating them.
-      3. Upsert into the graph backend via ``BaseGraphStore.write_graph``.
+      2. Upsert into the graph backend via ``BaseGraphStore.write_graph``.
+      3. Tag each source chunk with the resolved entity ids it mentions (``kg_entity_ids``) so the
+         chunk can go to a vector store and a hybrid retriever can seed graph traversal by unique id.
+
+    Split from extraction so extraction can be parallelized in a flow: many ``EntityExtractor`` nodes
+    (each on a shard of documents) can fan into a SINGLE ``KnowledgeGraphWriter``. The writer must stay
+    one node — resolution reads the current graph plus a per-call candidate cache, so two writers running
+    concurrently against the same graph would race and create duplicate entities.
 
     Provider-agnostic: the concrete store is selected from the connection type
     (``Neo4j`` / ``ApacheAGE`` / ``AWSNeptune``), exactly like ``CypherExecutor``. The write path
     requires a store that implements ``write_graph`` — currently Neo4j; other backends raise a
     clear error until their stores add it.
 
-    Input: ``{"documents": [Document, ...]}`` (same as EntityExtractor).
-    Output: the extraction payload plus ``write_stats`` and ``nodes_created`` / ``relationships_created``.
+    Input: ``{"nodes": [...], "relationships": [...], "documents": [Document, ...]}``.
+    Output: the resolved payload plus ``write_stats`` and ``nodes_created`` / ``relationships_created``.
 
     Attributes:
         connection (Neo4j | ApacheAGE | AWSNeptune): The graph backend connection.
@@ -97,6 +113,7 @@ class KnowledgeGraphWriter(EntityExtractor):
         similarity_threshold (float): Trigram similarity above which two names are the same entity.
     """
 
+    group: Literal[NodeGroup.EXTRACTORS] = NodeGroup.EXTRACTORS
     name: str = "knowledge-graph-writer"
     connection: Neo4j | ApacheAGE | AWSNeptune
     database: str | None = None
@@ -104,11 +121,12 @@ class KnowledgeGraphWriter(EntityExtractor):
     create_graph_if_not_exists: bool = False
     similarity_threshold: float = 0.6
 
+    input_schema: ClassVar[type[KnowledgeGraphWriterInputSchema]] = KnowledgeGraphWriterInputSchema
     _graph_store: BaseGraphStore | None = PrivateAttr(default=None)
     _existing_cache: dict[str, list[tuple[str, str]]] = PrivateAttr(default_factory=dict)
 
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
-        """Initialize the embedded LLM (parent) and select the graph store for the connection."""
+        """Select the graph store for the connection and ensure the entity indexes exist."""
         connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self._graph_store is None:
@@ -161,9 +179,13 @@ class KnowledgeGraphWriter(EntityExtractor):
         return Neo4jGraphStore(connection=self.connection, client=client, database=self.database)
 
     def execute(
-        self, input_data: EntityExtractorInputSchema, config: RunnableConfig = None, **kwargs
+        self, input_data: KnowledgeGraphWriterInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
-        """Extract entities/relationships, resolve duplicates, and write them to the graph store."""
+        """Resolve extracted entities to durable identity and write them to the graph store."""
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+        check_cancellation(config)
+
         if not self._graph_store.supports_write_graph():
             raise NotImplementedError(
                 f"{type(self).__name__}: write is not supported for backend "
@@ -171,10 +193,7 @@ class KnowledgeGraphWriter(EntityExtractor):
             )
 
         self._existing_cache = {}
-
-        # Reuse the full EntityExtractor pipeline (extraction + ontology enforcement).
-        extraction = super().execute(input_data, config=config, **kwargs)
-        nodes, relationships = extraction["nodes"], extraction["relationships"]
+        nodes, relationships = input_data.nodes, input_data.relationships
 
         if nodes:
             nodes, relationships = self._resolve_against_graph(nodes, relationships)
@@ -202,7 +221,6 @@ class KnowledgeGraphWriter(EntityExtractor):
         documents = self._attach_entity_ids(input_data.documents, relationships)
 
         return {
-            **extraction,
             "nodes": nodes,
             "relationships": relationships,
             "documents": documents,

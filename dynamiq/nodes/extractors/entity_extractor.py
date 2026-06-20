@@ -264,9 +264,11 @@ class EntityExtractor(Node):
         """Extract entities/relationships from the input documents.
 
         Returns:
-            dict: ``{"nodes": [...], "relationships": [...], "entities": [...], "raw_relationships": [...]}``.
-            ``nodes``/``relationships`` are ready for ``BaseGraphStore.write_graph``; ``entities``/
-            ``raw_relationships`` are the un-transformed LLM output, kept for debugging.
+            dict: ``{"nodes": [...], "relationships": [...], "documents": [...], "entities": [...],
+            "raw_relationships": [...]}``. ``nodes``/``relationships`` are ready for
+            ``BaseGraphStore.write_graph`` and ``documents`` passes the source chunks through, so the whole
+            output feeds straight into ``KnowledgeGraphWriter``; ``entities``/``raw_relationships`` are the
+            un-transformed LLM output, kept for debugging.
         """
         config = ensure_config(config)
         self.reset_run_state()
@@ -299,6 +301,7 @@ class EntityExtractor(Node):
         return {
             "nodes": nodes,
             "relationships": relationships,
+            "documents": input_data.documents,
             "entities": entities_debug,
             "raw_relationships": raw_relationships_debug,
         }

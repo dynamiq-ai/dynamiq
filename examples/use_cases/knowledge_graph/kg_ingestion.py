@@ -6,8 +6,9 @@ ingestion flow:
     input.documents ─┬─► OpenAIDocumentEmbedder ─► QdrantDocumentWriter   (vector store)
                      └─► KnowledgeGraph                                    (knowledge graph)
 
-The KnowledgeGraphWriter node does extraction + ontology enforcement + write-time entity resolution
-+ Neo4j upsert in ONE node — it is the single write path for extracted knowledge graphs.
+An EntityExtractor node does LLM extraction + ontology enforcement; a KnowledgeGraphWriter node then does
+write-time entity resolution + Neo4j upsert. They are split so extraction can be parallelized (see
+parallel_kg_extraction.py); the writer is the single, serial write path for extracted knowledge graphs.
 
 Run this first, then run ``kg_question_answering.py`` to query both stores.
 
@@ -26,7 +27,7 @@ from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
-from dynamiq.nodes.extractors import KnowledgeGraphWriter, Ontology, Triple
+from dynamiq.nodes.extractors import EntityExtractor, KnowledgeGraphWriter, Ontology, Triple
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.node import InputTransformer, NodeDependency
 from dynamiq.nodes.writers import QdrantDocumentWriter
@@ -104,19 +105,32 @@ def build_workflow() -> Workflow:
         input_transformer=InputTransformer(selector={"documents": f"$.{document_embedder.id}.output.documents"}),
     )
 
-    # ---- Graph branch: extract + resolve duplicates + write to Neo4j, all in ONE node ----
-    knowledge_graph = KnowledgeGraphWriter(
-        id="knowledge_graph",
+    # ---- Graph branch: extract (LLM), then resolve duplicates + write to Neo4j ----
+    # Extraction and writing are separate nodes: extraction is parallelizable, the writer must stay single
+    # (resolution races otherwise). See parallel_kg_extraction.py for fanning out multiple extractors.
+    entity_extractor = EntityExtractor(
+        id="entity_extractor",
         llm=OpenAI(connection=openai_connection, model="gpt-4o-mini", temperature=0.0, max_tokens=4000),
-        connection=Neo4jConnection(),
         ontology=ONTOLOGY,
         input_transformer=InputTransformer(selector={"documents": "$.documents"}),
+    )
+    knowledge_graph = KnowledgeGraphWriter(
+        id="knowledge_graph",
+        connection=Neo4jConnection(),
+        depends=[NodeDependency(entity_extractor)],
+        input_transformer=InputTransformer(
+            selector={
+                "nodes": f"$.{entity_extractor.id}.output.nodes",
+                "relationships": f"$.{entity_extractor.id}.output.relationships",
+                "documents": f"$.{entity_extractor.id}.output.documents",
+            }
+        ),
     )
 
     # The embedder branch also reads the same workflow input ("documents").
     document_embedder.input_transformer = InputTransformer(selector={"documents": "$.documents"})
 
-    return Workflow(flow=Flow(nodes=[document_embedder, vector_writer, knowledge_graph]))
+    return Workflow(flow=Flow(nodes=[document_embedder, vector_writer, entity_extractor, knowledge_graph]))
 
 
 if __name__ == "__main__":

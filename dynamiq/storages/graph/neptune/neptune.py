@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 from dynamiq.connections import AWSNeptune as AWSNeptuneConnection
 from dynamiq.storages.graph.base import BaseGraphStore
@@ -10,7 +10,15 @@ LABEL_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class NeptuneGraphStore(BaseGraphStore):
-    """Wrapper for Amazon Neptune openCypher execution over HTTP."""
+    """Wrapper for Amazon Neptune openCypher execution over HTTP.
+
+    Uses the shared :meth:`BaseGraphStore.write_graph` (standard openCypher MERGE/SET). Neptune's HTTP
+    ``/openCypher`` response does not surface write counters, so ``nodes_created`` / ``relationships_created``
+    come back as 0 (best-effort) even though the upsert succeeds.
+    """
+
+    # Inherits the shared openCypher write path; counters are best-effort 0 (default _tally_counts).
+    _writes_graph: ClassVar[bool] = True
 
     def __init__(
         self,

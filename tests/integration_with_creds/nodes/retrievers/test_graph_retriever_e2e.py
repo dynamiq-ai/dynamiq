@@ -16,7 +16,7 @@ import pytest
 
 from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.extractors import KnowledgeGraphWriter, Ontology
+from dynamiq.nodes.extractors import EntityExtractor, KnowledgeGraphWriter, Ontology
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.retrievers import GraphRetriever
 from dynamiq.nodes.retrievers.graph import GraphRetrieverInputSchema
@@ -44,11 +44,12 @@ def graph_connection():
 @pytest.fixture(scope="module")
 def ingested(graph_connection):
     """Ingest the two ACL-scoped documents once for the module."""
-    writer = KnowledgeGraphWriter(
+    extractor = EntityExtractor(
         llm=OpenAI(connection=OpenAIConnection(), model="gpt-4o-mini", temperature=0),
-        connection=graph_connection,
         ontology=ONTOLOGY,
     )
+    extractor.init_components()
+    writer = KnowledgeGraphWriter(connection=graph_connection)
     writer.init_components()
     docs = [
         Document(content=f"{ORG} uses a system called {SYS_A}.", metadata={"allowed_principals": [GROUP_A]}),
@@ -57,7 +58,14 @@ def ingested(graph_connection):
         Document(content=f"{ORG} uses a system called {SHARED}.", metadata={"allowed_principals": [GROUP_A]}),
         Document(content=f"{ORG} uses a system called {SHARED}.", metadata={"allowed_principals": [GROUP_B]}),
     ]
-    result = writer.execute(KnowledgeGraphWriter.input_schema(documents=docs))
+    extraction = extractor.execute(EntityExtractor.input_schema(documents=docs))
+    result = writer.execute(
+        KnowledgeGraphWriter.input_schema(
+            nodes=extraction["nodes"],
+            relationships=extraction["relationships"],
+            documents=extraction["documents"],
+        )
+    )
     assert result["relationships_created"] is not None
     yield
     writer._graph_store.close()

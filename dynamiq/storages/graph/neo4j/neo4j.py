@@ -1,5 +1,4 @@
-import re
-from typing import Any, Iterable
+from typing import Any, ClassVar, Iterable
 
 from neo4j import RoutingControl
 from neo4j.exceptions import Neo4jError
@@ -8,16 +7,17 @@ from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.storages.graph.base import BaseGraphStore
 from dynamiq.utils.logger import logger
 
-LABEL_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-PROPERTY_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
 
 class Neo4jGraphStore(BaseGraphStore):
     """
     Lightweight wrapper around the Neo4j Python driver.
 
-    Provides helpers to run Cypher and to upsert simple node/relationship payloads.
+    Provides helpers to run Cypher and to upsert simple node/relationship payloads. The graph-upsert
+    path itself lives in :class:`BaseGraphStore`; this store only flips on writes and reads back native
+    Neo4j counters.
     """
+
+    _writes_graph: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -131,152 +131,17 @@ class Neo4jGraphStore(BaseGraphStore):
     def supports_graph_result(self) -> bool:
         return True
 
-    def write_graph(
-        self,
-        *,
-        nodes: list[dict[str, Any]],
-        relationships: list[dict[str, Any]],
-        database: str | None = None,
-    ) -> dict[str, Any]:
+    def _tally_counts(self, totals: dict[str, int], summary: Any) -> None:
+        """Read Neo4j's native write counters off each statement's summary into ``totals``.
+
+        Adding all three on every statement equals the per-phase tally: the node statement reports
+        ``relationships_created = 0`` (no edge pattern), and the edge statement reports
+        ``nodes_created = 0`` (endpoints are MATCHed, only the edge is MERGEd).
         """
-        Upsert nodes and relationships using MERGE + SET.
-
-        Nodes must include:
-            - labels: list[str]
-            - properties: dict (must contain the identity_key)
-            - identity_key: str (defaults to 'id' if missing)
-
-        Relationships must include:
-            - start_label, end_label: str
-            - start_identity_key, end_identity_key: str
-            - start_identity, end_identity: Any
-            - type: str
-            - properties: dict (optional)
-            - identity_keys: list[str] (optional) — property names to include in the MERGE pattern, so
-              relationships that differ only on these keys are kept as distinct edges (e.g. per-document
-              edges that each retain their own ACL/provenance). Default: merge on endpoints + type only.
-        """
-        if not nodes and not relationships:
-            raise ValueError("At least one node or relationship must be provided.")
-
-        total_nodes_created = 0
-        total_properties_set = 0
-        total_relationships_created = 0
-        all_records: list[dict[str, Any]] = []
-        last_keys: list[str] = []
-
-        if nodes:
-            node_lines: list[str] = []
-            node_params: dict[str, Any] = {}
-            return_nodes: list[str] = []
-            for idx, node in enumerate(nodes):
-                labels = node.get("labels") or []
-                identity_key = self._format_property_key(node.get("identity_key") or "id")
-                properties = node.get("properties") or {}
-                if identity_key not in properties:
-                    raise ValueError(f"Node {idx} is missing identity key '{identity_key}' in properties.")
-
-                label_string = self._format_labels(labels)
-                param_props = f"node_{idx}_props"
-                param_id = f"node_{idx}_id"
-                node_params[param_props] = properties
-                node_params[param_id] = properties[identity_key]
-
-                node_lines.append(
-                    f"MERGE (n{idx}{label_string} {{{identity_key}: ${param_id}}})\n" f"SET n{idx} += ${param_props}"
-                )
-                return_nodes.append(f"n{idx}")
-
-            node_query = "\n".join(node_lines) + "\nRETURN " + ", ".join(return_nodes)
-            node_records, node_summary, node_keys = self.run_cypher(node_query, node_params, database=database)
-            total_nodes_created += node_summary.counters.nodes_created
-            total_properties_set += node_summary.counters.properties_set
-            all_records.extend(self.format_records(node_records))
-            if node_keys:
-                last_keys = node_keys
-
-        if relationships:
-            for idx, rel in enumerate(relationships):
-                rel_type = self._format_relationship_type(rel.get("type") or "")
-                start_label = self._format_single_label(rel.get("start_label") or "")
-                end_label = self._format_single_label(rel.get("end_label") or "")
-                start_identity_key = self._format_property_key(rel.get("start_identity_key") or "id")
-                end_identity_key = self._format_property_key(rel.get("end_identity_key") or "id")
-                start_identity = rel.get("start_identity")
-                end_identity = rel.get("end_identity")
-                properties = rel.get("properties") or {}
-
-                if start_identity is None or end_identity is None:
-                    raise ValueError(f"Relationship {idx} missing start or end identity value.")
-
-                rel_params = {
-                    "start_id": start_identity,
-                    "end_id": end_identity,
-                    "props": properties,
-                }
-
-                # Optional relationship merge-key properties: when present, include them in the MERGE
-                # pattern so otherwise-identical relationships that differ on these keys stay DISTINCT
-                # edges (e.g. per-source-document edges that each keep their own ACL/provenance).
-                key_fragments: list[str] = []
-                for kidx, key in enumerate(rel.get("identity_keys") or []):
-                    if key not in properties:
-                        continue
-                    param_name = f"rkey_{idx}_{kidx}"
-                    key_fragments.append(f"{self._format_property_key(key)}: ${param_name}")
-                    rel_params[param_name] = properties[key]
-                merge_pattern = (
-                    f"MERGE (s)-[r:{rel_type} {{{', '.join(key_fragments)}}}]->(e)"
-                    if key_fragments
-                    else f"MERGE (s)-[r:{rel_type}]->(e)"
-                )
-
-                rel_query = (
-                    f"MATCH (s:{start_label} {{{start_identity_key}: $start_id}})\n"
-                    f"MATCH (e:{end_label} {{{end_identity_key}: $end_id}})\n"
-                    f"{merge_pattern}\n"
-                    f"SET r += $props\n"
-                    "RETURN r"
-                )
-                rel_records, rel_summary, rel_keys = self.run_cypher(rel_query, rel_params, database=database)
-                total_relationships_created += rel_summary.counters.relationships_created
-                total_properties_set += rel_summary.counters.properties_set
-                all_records.extend(self.format_records(rel_records))
-                if rel_keys:
-                    last_keys = rel_keys
-
-        return {
-            "nodes_created": total_nodes_created,
-            "properties_set": total_properties_set,
-            "relationships_created": total_relationships_created,
-            "records": all_records,
-            "keys": last_keys,
-        }
-
-    @staticmethod
-    def _format_labels(labels: list[str]) -> str:
-        if not labels:
-            raise ValueError("At least one label is required for a node.")
-        cleaned = [Neo4jGraphStore._format_single_label(label) for label in labels]
-        return ":" + ":".join(cleaned)
-
-    @staticmethod
-    def _format_single_label(label: str) -> str:
-        if not LABEL_PATTERN.match(label):
-            raise ValueError(f"Invalid Neo4j label: '{label}'")
-        return label
-
-    @staticmethod
-    def _format_relationship_type(rel_type: str) -> str:
-        if not LABEL_PATTERN.match(rel_type):
-            raise ValueError(f"Invalid Neo4j relationship type: '{rel_type}'")
-        return rel_type
-
-    @staticmethod
-    def _format_property_key(key: str) -> str:
-        if not PROPERTY_KEY_PATTERN.match(key):
-            raise ValueError(f"Invalid Neo4j property key: '{key}'")
-        return key
+        counters = summary.counters
+        totals["nodes_created"] += counters.nodes_created
+        totals["relationships_created"] += counters.relationships_created
+        totals["properties_set"] += counters.properties_set
 
     def close(self: "Neo4jGraphStore") -> None:
         if self.client:

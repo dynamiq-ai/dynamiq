@@ -48,7 +48,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import PostgreSQL as PostgreSQLConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.embedders.openai import OpenAIDocumentEmbedder, OpenAITextEmbedder
-from dynamiq.nodes.extractors import KnowledgeGraphWriter, Ontology
+from dynamiq.nodes.extractors import EntityExtractor, KnowledgeGraphWriter, Ontology
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.node import InputTransformer, NodeDependency
 from dynamiq.nodes.retrievers.graph import GraphRetriever
@@ -91,15 +91,29 @@ def build_workflow() -> Workflow:
         input_transformer=InputTransformer(selector={"documents": "$.entry.output.documents"}),
     )
 
-    # 2. Per-chunk KG extraction + WRITE to Neo4j. Also returns the SAME chunks, tagged with
-    #    kg_entity_ids (the resolved, unique ids each chunk mentions) for the vector store.
-    kg_writer = KnowledgeGraphWriter(
-        id="kg_writer",
+    # 2a. Per-chunk KG extraction (LLM). Separate node so it can be parallelized; emits {nodes,
+    #     relationships, documents}.
+    entity_extractor = EntityExtractor(
+        id="entity_extractor",
         llm=OpenAI(connection=openai, model="gpt-4o-mini"),
-        connection=neo4j,
         ontology=ONTOLOGY,
         depends=[NodeDependency(node=splitter)],
         input_transformer=InputTransformer(selector={"documents": "$.splitter.output.documents"}),
+    )
+
+    # 2b. Resolve duplicates + WRITE to Neo4j. Also returns the SAME chunks, tagged with kg_entity_ids
+    #     (the resolved, unique ids each chunk mentions) for the vector store.
+    kg_writer = KnowledgeGraphWriter(
+        id="kg_writer",
+        connection=neo4j,
+        depends=[NodeDependency(node=entity_extractor)],
+        input_transformer=InputTransformer(
+            selector={
+                "nodes": "$.entity_extractor.output.nodes",
+                "relationships": "$.entity_extractor.output.relationships",
+                "documents": "$.entity_extractor.output.documents",
+            }
+        ),
     )
 
     # 3. Embed CLEAN chunk content (no graph text folded in — entity names already live in the content).
@@ -153,7 +167,9 @@ def build_workflow() -> Workflow:
     )
 
     return Workflow(
-        flow=Flow(nodes=[entry, splitter, kg_writer, doc_embedder, writer, hybrid_retriever, exit_node])
+        flow=Flow(
+            nodes=[entry, splitter, entity_extractor, kg_writer, doc_embedder, writer, hybrid_retriever, exit_node]
+        )
     )
 
 
