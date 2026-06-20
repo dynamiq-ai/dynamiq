@@ -8,18 +8,41 @@ existing node's id; no match -> fresh UUID.
 import uuid
 
 from dynamiq.connections import Neo4j
-from dynamiq.nodes.extractors import KnowledgeGraphWriter, Ontology
+from dynamiq.nodes.extractors import KnowledgeGraphWriter
 from dynamiq.nodes.extractors.entity_extractor import ATTRIBUTE_VALUE_LABEL, HAS_ATTRIBUTE_TYPE
+from dynamiq.types import Document
 
-from .test_entity_extractor import StubLLM
+
+class FakeGraphStore:
+    """Minimal write-graph store: records the resolved payload, no real DB."""
+
+    def __init__(self):
+        self.written = None
+
+    def supports_write_graph(self) -> bool:
+        return True
+
+    def write_graph(self, nodes, relationships, database=None):
+        self.written = (nodes, relationships)
+        return {
+            "nodes_created": len(nodes),
+            "relationships_created": len(relationships),
+            "properties_set": 0,
+            "records": [],
+            "keys": [],
+        }
+
+    def run_cypher(self, *args, **kwargs):  # _existing_nodes path (none pre-seeded -> empty)
+        return ([], None, [])
+
+    def format_records(self, records):
+        return []
 
 
 def make_writer(existing: dict[str, list[tuple[str, str]]]) -> KnowledgeGraphWriter:
     """Writer with a pre-populated per-call candidate cache, so no store is ever queried."""
     writer = KnowledgeGraphWriter(
-        llm=StubLLM(),
         connection=Neo4j(uri="bolt://localhost:7687", username="neo4j", password="password"),
-        ontology=Ontology(entity_types=[], relationship_types=[]),  # required; unused by resolution tests
         is_postponed_component_init=True,
     )
     writer._existing_cache = existing
@@ -150,3 +173,38 @@ class TestResolveAgainstGraph:
         resolved_nodes, _ = writer._resolve_against_graph(nodes, [])
 
         assert len({n["properties"]["id"] for n in resolved_nodes}) == 2
+
+
+class TestExecute:
+    def test_execute_resolves_writes_and_tags_documents(self):
+        # Full write path on a fake store: nodes get resolved ids, the store receives the resolved payload,
+        # and the source chunk is tagged with the resolved entity ids it mentions.
+        writer = make_writer({})
+        store = FakeGraphStore()
+        writer._graph_store = store
+
+        nodes = [entity("PERSON", "jane@d1", "Jane"), entity("ORGANIZATION", "acme@d1", "Acme")]
+        rels = [edge("WORKS_AT", "PERSON", "ORGANIZATION", "jane@d1", "acme@d1", {"source_doc_id": "d1"})]
+        document = Document(id="d1", content="Jane works at Acme.")
+
+        result = writer.execute(
+            KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=rels, documents=[document])
+        )
+
+        # The store was handed the RESOLVED payload (wiring ids replaced by UUIDs).
+        assert result["nodes_created"] == 2 and result["relationships_created"] == 1
+        written_ids = {n["properties"]["id"] for n in store.written[0]}
+        assert "jane@d1" not in written_ids and all(is_uuid(i) for i in written_ids)
+
+        # The chunk is tagged with both resolved endpoint ids it mentions.
+        tagged = result["documents"][0].metadata["kg_entity_ids"]
+        assert set(tagged) == written_ids
+
+    def test_execute_empty_payload_writes_nothing(self):
+        writer = make_writer({})
+        writer._graph_store = FakeGraphStore()
+
+        result = writer.execute(KnowledgeGraphWriter.input_schema(nodes=[], relationships=[], documents=[]))
+
+        assert result["nodes_created"] == 0 and result["relationships_created"] == 0
+        assert writer._graph_store.written is None  # write_graph never called
