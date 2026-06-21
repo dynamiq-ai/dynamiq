@@ -252,7 +252,8 @@ class KnowledgeGraphWriter(Node):
         rows: list[tuple[str, str]] = []
         if _LABEL_PATTERN.match(label):
             records, _, _ = self._graph_store.run_cypher(
-                f"MATCH (n:`{label}`) WHERE n.name IS NOT NULL RETURN n.id AS id, n.name AS name"
+                f"MATCH (n:`{label}`) WHERE n.name IS NOT NULL RETURN n.id AS id, n.name AS name",
+                database=self.database,
             )
             rows = [(r.get("id"), r.get("name")) for r in self._graph_store.format_records(records)]
         self._existing_cache[label] = rows

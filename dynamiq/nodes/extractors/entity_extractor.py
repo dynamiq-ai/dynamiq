@@ -1,5 +1,6 @@
 import json
 import re
+import uuid
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
@@ -279,10 +280,25 @@ class EntityExtractor(Node):
         entities_debug: list[dict] = []
         raw_relationships_debug: list[dict] = []
 
-        # Process each document independently and stamp its metadata onto every element it produces
+        # Process each document independently and stamp its metadata onto every element it produces. A
+        # per-document LLM failure skips only that chunk (like an unparseable response) so one transient
+        # error can't discard the whole batch -- but if EVERY document fails, that's systemic (e.g. bad
+        # credentials), so we raise rather than silently report an empty graph as success.
+        failed = 0
         for document in input_data.documents:
             check_cancellation(config)
-            extracted = self._extract_from_text(document.content, config, **kwargs)
+            # A document id scopes EVERYTHING per-document: node wiring ids, attribute ids, and the
+            # source_doc_id ACL merge discriminator. A missing id silently collapses all three -- id-less
+            # docs alias each other's nodes and their edges merge, overwriting allowed_principals. Assign a
+            # stable id up front so the whole pipeline (and the returned documents) keys off a real value.
+            if document.id is None:
+                document.id = uuid.uuid4().hex
+            try:
+                extracted = self._extract_from_text(document.content, config, **kwargs)
+            except ValueError as exc:
+                logger.error(f"Node {self.name} - {self.id}: extraction failed for a document, skipping it: {exc}")
+                failed += 1
+                continue
             entities = extracted.get("entities", []) or []
             doc_relationships = extracted.get("relationships", []) or []
             entities_debug.extend(entities)
@@ -293,6 +309,12 @@ class EntityExtractor(Node):
             self._apply_document_metadata(doc_rels, document)
             nodes.extend(doc_nodes)
             relationships.extend(doc_rels)
+
+        if failed and failed == len(input_data.documents):
+            raise ValueError(
+                f"EntityExtractor: all {failed} document(s) failed extraction; this is likely systemic "
+                "(e.g. invalid credentials or model access), not a per-document issue."
+            )
 
         logger.debug(
             f"Node {self.name} - {self.id}: extracted {len(nodes)} nodes and {len(relationships)} relationships"
@@ -477,17 +499,26 @@ class EntityExtractor(Node):
             for t in o.triples
         }
 
-        # 1) Keep only nodes whose label is in the ontology. AttributeValue nodes are system-generated
-        #    holders for declared attributes — always kept.
+        # 1) Keep entity nodes whose label is in the ontology. AttributeValue nodes are held aside, NOT
+        #    committed yet: an attribute value carries its access scope on its HAS_ATTRIBUTE edge, so it
+        #    may only survive if that edge survives (step 3). Committing it here would orphan it -- a
+        #    sensitive value left as a disconnected node with no edge ACL -- when its owner is dropped.
         kept_nodes: list[dict] = []
         kept_ids: set[str] = set()
+        attribute_nodes: dict[str, dict] = {}
         for node in nodes:
             label = node["labels"][0]
-            if label in allowed_entities or label == ATTRIBUTE_VALUE_LABEL:
+            if label == ATTRIBUTE_VALUE_LABEL:
+                attribute_nodes[node["properties"]["id"]] = node
+            elif label in allowed_entities:
                 kept_nodes.append(node)
                 kept_ids.add(node["properties"]["id"])
             else:
                 logger.debug(f"EntityExtractor: dropping off-ontology entity label={label!r}")
+
+        # An AttributeValue endpoint is a valid target only while its node exists; pair it with the surviving
+        # entity ids so the endpoint check below can vet HAS_ATTRIBUTE edges without committing the values.
+        valid_endpoint_ids = kept_ids | attribute_nodes.keys()
 
         # 2) Keep only relationships with a legal type, surviving endpoints, and (when triples
         #    are defined) a legal (source_label, type, target_label) pattern. HAS_ATTRIBUTE edges are
@@ -495,7 +526,7 @@ class EntityExtractor(Node):
         kept_rels: list[dict] = []
         for rel in relationships:
             rel_type, start_label, end_label = rel["type"], rel["start_label"], rel["end_label"]
-            if rel["start_identity"] not in kept_ids or rel["end_identity"] not in kept_ids:
+            if rel["start_identity"] not in valid_endpoint_ids or rel["end_identity"] not in valid_endpoint_ids:
                 reason = "endpoint dropped"
             elif rel_type == HAS_ATTRIBUTE_TYPE:
                 kept_rels.append(rel)
@@ -510,6 +541,14 @@ class EntityExtractor(Node):
             logger.debug(
                 f"EntityExtractor: dropping relationship ({start_label})-[{rel_type}]->({end_label}): {reason}"
             )
+
+        # 3) Commit only the AttributeValue nodes still reached by a surviving HAS_ATTRIBUTE edge. Any value
+        #    whose owning entity was dropped lost its edge in step 2, so it is dropped here too -- never left
+        #    as an orphan node holding a value with no ACL.
+        referenced_attr_ids = {r["end_identity"] for r in kept_rels if r["type"] == HAS_ATTRIBUTE_TYPE}
+        for attr_id in attribute_nodes.keys() - referenced_attr_ids:
+            logger.debug(f"EntityExtractor: dropping orphaned AttributeValue id={attr_id!r} (owner removed)")
+        kept_nodes.extend(attribute_nodes[attr_id] for attr_id in referenced_attr_ids)
 
         dropped_n, dropped_r = len(nodes) - len(kept_nodes), len(relationships) - len(kept_rels)
         if dropped_n or dropped_r:

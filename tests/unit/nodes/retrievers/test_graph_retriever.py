@@ -119,11 +119,14 @@ class TestQueryBuilding:
         assert params["lf0_intersects"] == ["group:a"]  # locked ACL filter applied
         assert "coalesce(r.allowed_principals, [])" in query
 
-    def test_explicit_entities_entry_predicate(self):
+    def test_explicit_entities_seed_by_name_fuzzily(self):
+        # Explicit entities are seed NAMES, matched the same (fuzzy) way as extracted ones -- here via the
+        # CONTAINS scan (no index), seeded by the entity name, NOT the raw query "x".
         node = make_retriever()
         query, params = node._build_query(GraphRetrieverInputSchema(query="x", entities=["Acme"]), 5)
-        assert "a.name IN $entities" in query
-        assert params["entities"] == ["Acme"]
+        assert "toLower($q) CONTAINS toLower(a.name)" in query
+        assert params["q"] == "Acme"
+        assert "a.name IN $entities" not in query  # no longer an exact anchor
         assert "allowed_principals" not in query  # no locked filters -> no ACL clause
 
     def test_explicit_entity_ids_entry_predicate(self):
@@ -189,14 +192,15 @@ class TestEntryModes:
         assert "toLower($q) CONTAINS toLower(a.name)" in query  # portable scan
         assert "MATCH (a)-[r]->(b)" in query  # directed
 
-    def test_explicit_entities_anchor_on_entity_label(self):
+    def test_explicit_entities_use_fulltext_fuzzily_like_extracted(self):
+        # With the index present, explicit entities go through the SAME fuzzy full-text seek as extracted
+        # names (AND within a name) -- just skipping the LLM extraction step.
         node = make_retriever(filters=LOCKED_ACL)
-        node._use_fulltext = True  # ignored — explicit entities take precedence over the index
-        query, params = node._build_query(GraphRetrieverInputSchema(query="x", entities=["Acme"]), 5)
-        assert "MATCH (a:Entity)" in query
-        assert "a.name IN $entities" in query
-        assert "queryNodes" not in query and "CONTAINS" not in query
-        assert params["entities"] == ["Acme"]
+        node._use_fulltext = True
+        query, params = node._build_query(GraphRetrieverInputSchema(query="x", entities=["Acme Capital"]), 5)
+        assert "queryNodes" in query
+        assert params["q"] == "(Acme~ AND Capital~)"
+        assert "CONTAINS" not in query and "a.name IN $entities" not in query
 
     def test_anchored_query_uses_match_not_optional(self):
         # The "only entities with >=1 ACL-visible edge" property: a plain MATCH drops seeds whose edges
@@ -217,14 +221,14 @@ class TestExecuteRendering:
         out = node.execute(GraphRetrieverInputSchema(query="Jane Doe"))
 
         contents = [d.content for d in out["documents"]]
-        assert contents == ["Jane Doe -[WORKS_AT]-> Acme", "Jane Doe -[HAS_ATTRIBUTE]-> $250,000"]
+        assert contents == ["Jane Doe -[WORKS_AT]-> Acme", "Jane Doe -[salary]-> $250,000"]
         assert out["documents"][0].metadata == {
             "source": "Jane Doe",
             "target": "Acme",
             "rel": "WORKS_AT",
             "source_url": "u",
         }
-        assert out["content"] == "- Jane Doe -[WORKS_AT]-> Acme\n- Jane Doe -[HAS_ATTRIBUTE]-> $250,000"
+        assert out["content"] == "- Jane Doe -[WORKS_AT]-> Acme\n- Jane Doe -[salary]-> $250,000"
         assert out["documents"][0].score > out["documents"][1].score  # rank-derived ordering
 
     def test_single_hop_exposes_endpoint_entity_ids_for_iteration(self):
@@ -262,7 +266,18 @@ class TestExecuteRendering:
 
     def test_attribute_value_target_rendered_by_value(self):
         # AttributeValue nodes have no name; the store coalesces to .value, surfacing the scoped attribute.
+        # The attribute KEY ("salary") labels the relation -- HAS_ATTRIBUTE is bookkeeping; a bare value
+        # ("$250,000") would not say WHICH attribute it is. The raw type stays in metadata.
         rows = [{"a_name": "Jane Doe", "rel": "HAS_ATTRIBUTE", "rprops": {"key": "salary"}, "b_name": "$250,000"}]
+        node = make_retriever(rows=rows)
+        out = node.execute(GraphRetrieverInputSchema(query="Jane"))
+        assert out["documents"][0].content == "Jane Doe -[salary]-> $250,000"
+        assert out["documents"][0].metadata["rel"] == "HAS_ATTRIBUTE"
+        assert out["documents"][0].metadata["key"] == "salary"
+
+    def test_attribute_edge_without_key_falls_back_to_type(self):
+        # Defensive: an attribute edge missing its key still renders (the bookkeeping type), never crashes.
+        rows = [{"a_name": "Jane Doe", "rel": "HAS_ATTRIBUTE", "rprops": {}, "b_name": "$250,000"}]
         node = make_retriever(rows=rows)
         out = node.execute(GraphRetrieverInputSchema(query="Jane"))
         assert out["documents"][0].content == "Jane Doe -[HAS_ATTRIBUTE]-> $250,000"
@@ -311,7 +326,8 @@ class TestExecuteRendering:
         assert out["documents"] == []
 
     def test_explicit_entities_skip_extraction(self):
-        # Explicit entities take precedence -> the LLM is never consulted, and we anchor by exact name.
+        # Explicit entities are used as seed names directly -> the LLM is never consulted, and they seed
+        # the fuzzy search the same way extracted names would.
         names_seen = []
 
         class RecordingLLM(StubLLM):
@@ -322,5 +338,4 @@ class TestExecuteRendering:
         node = make_retriever(llm=RecordingLLM())
         node.execute(GraphRetrieverInputSchema(query="anything", entities=["Acme"]))
         assert names_seen == []  # extraction skipped
-        assert node._graph_store.last_params.get("entities") == ["Acme"]
-        assert "a.name IN $entities" in node._graph_store.last_query
+        assert node._graph_store.last_params["q"] == "Acme"  # seeded by the entity name, not the query

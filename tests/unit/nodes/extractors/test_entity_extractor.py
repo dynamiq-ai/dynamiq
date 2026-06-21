@@ -6,6 +6,7 @@ from typing import ClassVar
 import pytest
 
 from dynamiq.nodes.extractors import EntityExtractor, Ontology
+from dynamiq.nodes.extractors.entity_extractor import ATTRIBUTE_VALUE_LABEL, ENTITY_LABEL, HAS_ATTRIBUTE_TYPE
 from dynamiq.nodes.node import Node, NodeGroup
 from dynamiq.storages.graph.neo4j.neo4j import Neo4jGraphStore
 from dynamiq.types import Document
@@ -38,6 +39,33 @@ class SequenceStubLLM(Node):
         content = self.responses[min(self.calls, len(self.responses) - 1)]
         self.calls += 1
         return {"content": content}
+
+
+class FailingStubLLM(Node):
+    """Stub LLM whose every run fails (non-SUCCESS) — simulates a systemic error like bad credentials."""
+
+    group: ClassVar = NodeGroup.LLMS
+    name: str = "failing-stub-llm"
+
+    def execute(self, input_data, config=None, **kwargs):
+        raise RuntimeError("llm boom")
+
+
+class FlakyStubLLM(Node):
+    """Stub LLM that fails on the given 0-based call indices and returns ``response_content`` otherwise."""
+
+    group: ClassVar = NodeGroup.LLMS
+    name: str = "flaky-stub-llm"
+    response_content: str = "{}"
+    fail_calls: list[int] = []
+    calls: int = 0
+
+    def execute(self, input_data, config=None, **kwargs):
+        index = self.calls
+        self.calls += 1
+        if index in self.fail_calls:
+            raise RuntimeError("transient llm boom")
+        return {"content": self.response_content}
 
 
 def _assert_valid_for_neo4j(nodes, relationships):
@@ -286,3 +314,96 @@ class TestExecuteEndToEndWithStubLLM:
             ("ORG", "acme@d2"),
         }
         assert {n["properties"]["name"] for n in result["nodes"]} == {"Acme"}
+
+    def test_single_llm_failure_skips_only_that_document(self):
+        # A transient LLM failure on one document must NOT abort the batch; remaining documents still process.
+        payload = {"entities": [{"id": "acme", "type": "Org", "name": "Acme"}], "relationships": []}
+        llm = FlakyStubLLM(fail_calls=[0], response_content=json.dumps(payload))  # doc 1 fails, doc 2 succeeds
+        extractor = EntityExtractor(llm=llm, ontology=_ONTOLOGY)
+        docs = [Document(id="d1", content="doc one"), Document(id="d2", content="doc two")]
+
+        result = extractor.execute(EntityExtractor.input_schema(documents=docs))
+
+        # Only doc 2's entity survives; doc 1 was skipped, not fatal.
+        assert [n["properties"]["name"] for n in result["nodes"]] == ["Acme"]
+
+    def test_all_documents_failing_raises_systemic_error(self):
+        # When EVERY document fails, that's systemic (e.g. bad credentials) — raise instead of an empty graph.
+        extractor = EntityExtractor(llm=FailingStubLLM(), ontology=_ONTOLOGY)
+        docs = [Document(id="d1", content="a"), Document(id="d2", content="b")]
+
+        with pytest.raises(ValueError, match="all 2 document"):
+            extractor.execute(EntityExtractor.input_schema(documents=docs))
+
+    def test_documents_without_id_get_one_so_acl_edges_stay_separate(self):
+        # An explicit id=None used to drop the source_doc_id discriminator: identical facts from two docs
+        # would MERGE into one edge and the last allowed_principals would overwrite the other (ACL leak).
+        # Now every id-less document is assigned a real id, so each fact keeps its own edge + ACL.
+        payload = {
+            "entities": [
+                {"id": "jane", "type": "Person", "name": "Jane Doe"},
+                {"id": "acme", "type": "Org", "name": "Acme"},
+            ],
+            "relationships": [{"source_id": "jane", "target_id": "acme", "type": "works at"}],
+        }
+        llm = StubLLM(response_content=json.dumps(payload))
+        extractor = EntityExtractor(llm=llm, ontology=_ONTOLOGY)
+        doc_a = Document(id=None, content="Jane works at Acme.", metadata={"allowed_principals": ["group:a"]})
+        doc_b = Document(id=None, content="Jane works at Acme.", metadata={"allowed_principals": ["group:b"]})
+
+        result = extractor.execute(EntityExtractor.input_schema(documents=[doc_a, doc_b]))
+
+        # Each id-less document was assigned a distinct, non-null id.
+        assert doc_a.id is not None and doc_b.id is not None and doc_a.id != doc_b.id
+
+        rels = [r for r in result["relationships"] if r["type"] == "WORKS_AT"]
+        assert len(rels) == 2  # two separate edges, not one merged edge
+        assert all(r["identity_keys"] == ["source_doc_id"] for r in rels)
+        # Each edge carries its OWN document discriminator and its OWN ACL -- neither overwrites the other.
+        assert {r["properties"]["source_doc_id"] for r in rels} == {doc_a.id, doc_b.id}
+        assert {tuple(r["properties"]["allowed_principals"]) for r in rels} == {("group:a",), ("group:b",)}
+
+
+class TestEnforceOntology:
+    """Ontology enforcement must never strand an AttributeValue node without its ACL-bearing edge.
+
+    A value (e.g. a salary) lives in a separate node, but its access scope rides on the HAS_ATTRIBUTE
+    edge -- so if the owning entity is dropped (and the edge with it), the value node must be dropped too,
+    never left as an orphan: a sensitive value with no edge means no ACL can gate it.
+    """
+
+    def _extractor(self):
+        ontology = Ontology(entity_types=["Person"], relationship_types=[], attributes={"Person": ["salary"]})
+        return EntityExtractor(llm=StubLLM(), ontology=ontology)
+
+    def _attribute_graph(self, owner_label):
+        # (owner)-[:HAS_ATTRIBUTE {key}]->(:AttributeValue {value}); owner_label decides if the owner survives.
+        nodes = [
+            {"labels": [owner_label, ENTITY_LABEL], "properties": {"id": "p1", "name": "Jane"}},
+            {"labels": [ATTRIBUTE_VALUE_LABEL], "properties": {"id": "p1::salary", "value": "$250,000"}},
+        ]
+        rels = [
+            {
+                "type": HAS_ATTRIBUTE_TYPE,
+                "start_label": owner_label,
+                "end_label": ATTRIBUTE_VALUE_LABEL,
+                "start_identity": "p1",
+                "end_identity": "p1::salary",
+                "properties": {"key": "salary"},
+            }
+        ]
+        return nodes, rels
+
+    def test_orphaned_attribute_value_dropped_when_owner_removed(self):
+        # Off-ontology owner label -> owner dropped, its HAS_ATTRIBUTE edge dropped, value must NOT survive.
+        nodes, rels = self._attribute_graph("EMPLOYEE")
+        kept_nodes, kept_rels = self._extractor()._enforce_ontology(nodes, rels)
+        assert kept_nodes == []  # no orphaned AttributeValue left behind
+        assert kept_rels == []
+
+    def test_attribute_value_kept_when_owner_survives(self):
+        # In-ontology owner label -> owner + edge + value all survive together.
+        nodes, rels = self._attribute_graph("PERSON")
+        kept_nodes, kept_rels = self._extractor()._enforce_ontology(nodes, rels)
+        assert sorted(n["labels"][0] for n in kept_nodes) == [ATTRIBUTE_VALUE_LABEL, "PERSON"]
+        assert [r["type"] for r in kept_rels] == [HAS_ATTRIBUTE_TYPE]

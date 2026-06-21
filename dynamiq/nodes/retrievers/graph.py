@@ -7,7 +7,12 @@ from dynamiq.connections import ApacheAGE, AWSNeptune, Neo4j
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
-from dynamiq.nodes.extractors.entity_extractor import ENTITY_LABEL, ENTITY_NAME_FULLTEXT_INDEX, Ontology
+from dynamiq.nodes.extractors.entity_extractor import (
+    ENTITY_LABEL,
+    ENTITY_NAME_FULLTEXT_INDEX,
+    HAS_ATTRIBUTE_TYPE,
+    Ontology,
+)
 from dynamiq.nodes.node import ConnectionNode, Node, NodeDependency, NodeGroup, ensure_config
 from dynamiq.nodes.types import ActionType
 from dynamiq.prompts import Message, Prompt
@@ -320,14 +325,18 @@ class GraphRetriever(ConnectionNode):
     def _seed_entity_names(
         self, input_data: GraphRetrieverInputSchema, config: RunnableConfig, **kwargs
     ) -> list[str]:
-        """The entity names the search seeds on (extracted from the question), or ``[]``.
+        """The entity names the search seeds on, matched fuzzily (same path as extracted names).
 
-        Skips extraction entirely when the caller passes explicit ``entity_ids``/``entities`` — those
-        anchor the search directly (``_entry`` ignores the seed), so the LLM is never consulted. An empty
-        list means "no entities extracted" -> ``_entry`` falls back to the raw query.
+        - explicit ``entities`` -> used as the seed names directly, **skipping LLM extraction**.
+        - explicit ``entity_ids`` -> ``[]`` (anchored exactly by id in ``_entry``, not by name).
+        - otherwise -> extracted from the question by the LLM.
+
+        An empty list means "no seed names" -> ``_entry`` falls back to the raw query.
         """
-        if input_data.entity_ids or input_data.entities:
+        if input_data.entity_ids:
             return []
+        if input_data.entities:
+            return input_data.entities
         return self._extract_entity_names(input_data.query, config, **kwargs)
 
     def _entry(
@@ -335,11 +344,11 @@ class GraphRetriever(ConnectionNode):
     ) -> tuple[list[str], str | None, bool]:
         """Pick the entry-point strategy. Returns (lead_lines, entry_where, anchored).
 
-        - explicit ``entity_ids`` / ``entities`` -> anchor on ``:Entity`` nodes by id / exact name (these
-          take precedence and skip extraction — used by hybrid/iterative retrieval).
-        - full-text index (Neo4j, index present) -> seek seeds by a fuzzy query over the extracted entity
-          names (AND within a name, OR across names); falls back to an OR over the raw query when no names.
-        - otherwise (non-Neo4j, or index missing) -> portable ``CONTAINS`` scan.
+        - explicit ``entity_ids`` -> anchor on ``:Entity`` nodes by exact id (the precise hybrid/iterative
+          seed; takes precedence and skips name matching entirely).
+        - else, seed by NAME (``seed_names`` = explicit ``entities`` or LLM-extracted names), matched
+          fuzzily: on Neo4j with the index, a full-text seek over ``(tok AND tok) OR (...)``; otherwise a
+          portable ``CONTAINS`` scan. With no names, falls back to a recall-y OR over the raw query.
 
         Anchored modes bind ``a`` to a seed and expand from it (cheap, neighborhood-bounded); the scan
         binds nothing and filters every edge by name (the fallback). Either way an entity with no
@@ -349,14 +358,12 @@ class GraphRetriever(ConnectionNode):
             params["entity_ids"] = input_data.entity_ids
             return [f"MATCH (a:{ENTITY_LABEL})"], "a.id IN $entity_ids", True
 
-        if input_data.entities:
-            params["entities"] = input_data.entities
-            return [f"MATCH (a:{ENTITY_LABEL})"], "a.name IN $entities", True
-
+        # Explicit entities and extracted names are matched the same way; `seed_names` carries either.
+        # (`seed_names is None` only on direct _build_query calls -> derive from the input's entities.)
+        names = seed_names if seed_names is not None else input_data.entities
         if self._use_fulltext:
-            # Precise: AND tokens within each extracted name, OR across names. No names -> recall-y OR
-            # over the raw question.
-            lucene = _grouped_lucene_query(seed_names) if seed_names else _lucene_query(input_data.query)
+            # Precise: AND tokens within each name, OR across names. No names -> recall-y OR over the query.
+            lucene = _grouped_lucene_query(names) if names else _lucene_query(input_data.query)
             if lucene:
                 params["q"] = lucene
                 return (
@@ -365,7 +372,7 @@ class GraphRetriever(ConnectionNode):
                     True,
                 )
 
-        params["q"] = " ".join(seed_names) if seed_names else input_data.query
+        params["q"] = " ".join(names) if names else input_data.query
         return [], "(toLower($q) CONTAINS toLower(a.name) OR toLower($q) CONTAINS toLower(b.name))", False
 
     def _build_query(
@@ -449,8 +456,12 @@ class GraphRetriever(ConnectionNode):
             source, rel, target = row.get("a_name"), row.get("rel"), row.get("b_name")
             if source is None or target is None or not rel:
                 continue
-            fact = f"{source} -[{rel}]-> {target}"
             rprops = dict(row.get("rprops") or {})
+            # Attribute edges reify a "key -> value" pair; HAS_ATTRIBUTE is just the bookkeeping type, so
+            # render the attribute KEY as the relation -- otherwise the fact is a bare value ("$250,000")
+            # with no hint of WHICH attribute it is.
+            rel_label = rprops["key"] if rel == HAS_ATTRIBUTE_TYPE and rprops.get("key") else rel
+            fact = f"{source} -[{rel_label}]-> {target}"
             # An edge description (when the extractor captured one) enriches the bare type with detail it
             # cannot convey -- append it so it reaches the answer, not just the metadata.
             if rprops.get("description"):

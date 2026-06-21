@@ -4,13 +4,15 @@ Ingests two documents about the same organisation but with DIFFERENT ``allowed_p
 asserts that retrieving as one principal returns that principal's facts and NEVER leaks the other's —
 the core promise of edge-level ACL enforcement compiled server-side (not LLM-written Cypher).
 
-Requires NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD and OPENAI_API_KEY. Skipped otherwise. The test
-is robust to pre-existing graph data: it ingests two distinctively-named systems and only asserts on
-the visibility of those two names, so it does not clear the database.
+Requires NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD and OPENAI_API_KEY. Skipped otherwise. The fixture
+wipes the database before ingesting so each run starts from a clean, isolated graph. (We do NOT namespace
+entity names with a random suffix: the extraction LLM normalizes random-looking suffixes off names, so
+"Helios-ab12cd34" gets stored as bare "Helios" -- making the suffix useless for isolation and the
+assertions flaky. On Neo4j Community a per-run named database isn't available, so a wipe is the isolation
+mechanism. Run serially against a dedicated test instance, not a shared one.)
 """
 
 import os
-import uuid
 
 import pytest
 
@@ -22,12 +24,11 @@ from dynamiq.nodes.retrievers import GraphRetriever
 from dynamiq.nodes.retrievers.graph import GraphRetrieverInputSchema
 from dynamiq.types import Document
 
-# Unique per run so concurrent/leftover data cannot interfere with the assertions.
-RUN = uuid.uuid4().hex[:8]
-ORG = f"Acme-{RUN}"
-SYS_A = f"Helios-{RUN}"  # only group:a may see this
-SYS_B = f"Borealis-{RUN}"  # only group:b may see this
-SHARED = f"Mercury-{RUN}"  # the SAME fact asserted by two docs with different ACLs (merge-bug regression)
+# Plain proper nouns the extraction LLM won't mangle; isolation comes from wiping the DB, not the names.
+ORG = "Acme"
+SYS_A = "Helios"  # only group:a may see this
+SYS_B = "Borealis"  # only group:b may see this
+SHARED = "Mercury"  # the SAME fact asserted by two docs with different ACLs (merge-bug regression)
 GROUP_A = "group:a"
 GROUP_B = "group:b"
 
@@ -43,7 +44,12 @@ def graph_connection():
 
 @pytest.fixture(scope="module")
 def ingested(graph_connection):
-    """Ingest the two ACL-scoped documents once for the module."""
+    """Wipe the graph, then ingest the ACL-scoped documents once for the module."""
+    driver = graph_connection.connect()
+    with driver.session() as session:
+        session.run("MATCH (n) DETACH DELETE n").consume()  # clean slate -> isolation without name suffixes
+    driver.close()
+
     extractor = EntityExtractor(
         llm=OpenAI(connection=OpenAIConnection(), model="gpt-4o-mini", temperature=0),
         ontology=ONTOLOGY,
