@@ -10,6 +10,7 @@ existing node's id; no match -> fresh UUID.
 import uuid
 from typing import Any, ClassVar
 
+import pytest
 from pydantic import BaseModel, Field
 
 from dynamiq import Workflow
@@ -219,6 +220,27 @@ class TestExecute:
 
         assert result["nodes_created"] == 0 and result["relationships_created"] == 0
         assert writer._graph_store.written is None  # write_graph never called
+
+    def test_execute_rejects_relationship_endpoints_absent_from_nodes(self):
+        # A relationship endpoint not present in `nodes` can never be resolved: it would write with an
+        # ephemeral wiring id that MATCHes no graph node (no edge created) and mis-tag chunks with that id.
+        # The writer rejects such payloads -- both the no-nodes case and a partially-dangling endpoint --
+        # rather than silently writing nothing useful.
+        writer = make_writer({})
+        store = FakeGraphStore()
+        writer._graph_store = store
+        rels = [edge("WORKS_AT", "PERSON", "ORGANIZATION", "jane@d1", "acme@d1", {"source_doc_id": "d1"})]
+
+        # Only "jane@d1" is provided as a node -> "acme@d1" is dangling.
+        nodes = [entity("PERSON", "jane@d1", "Jane")]
+        with pytest.raises(ValueError, match="endpoints absent from"):
+            writer.execute(KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=rels, documents=[]))
+
+        # And the no-nodes case (the reported scenario) is rejected too.
+        with pytest.raises(ValueError, match="endpoints absent from"):
+            writer.execute(KnowledgeGraphWriter.input_schema(nodes=[], relationships=rels, documents=[]))
+
+        assert store.written is None  # nothing written in either case
 
 
 # --- Full workflow: the writer tags chunks with kg_entity_ids; the ids must reach the retriever ---

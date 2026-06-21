@@ -195,6 +195,22 @@ class KnowledgeGraphWriter(Node):
         self._existing_cache = {}
         nodes, relationships = input_data.nodes, input_data.relationships
 
+        # Relationship endpoints reference node wiring ids; resolution (below) only rewrites endpoints found
+        # among `nodes`. An endpoint absent from `nodes` can never be resolved -- it would be written with an
+        # ephemeral id that MATCHes no graph node (creating no edge) and would mis-tag chunks with that id.
+        # Reject such payloads instead of silently writing nothing useful.
+        if relationships:
+            node_ids = {n["properties"]["id"] for n in nodes}
+            dangling = [
+                r for r in relationships if r["start_identity"] not in node_ids or r["end_identity"] not in node_ids
+            ]
+            if dangling:
+                raise ValueError(
+                    f"KnowledgeGraphWriter: {len(dangling)} relationship(s) reference endpoints absent from "
+                    f"`nodes` ({len(nodes)} node(s) given); relationships must be written together with their "
+                    "endpoint nodes."
+                )
+
         if nodes:
             nodes, relationships = self._resolve_against_graph(nodes, relationships)
 
