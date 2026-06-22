@@ -115,7 +115,7 @@ class HttpApiCallInputSchema(BaseModel):
         default={},
         description="Parameter to provide files to the request. Maps parameter names to file paths for file uploads. "
         "Provide strings for file IDs from files.",
-        map_from_storage=True,
+        json_schema_extra={"map_from_storage": True},
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
