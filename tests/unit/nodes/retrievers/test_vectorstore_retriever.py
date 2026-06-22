@@ -138,8 +138,6 @@ def test_format_content_strips_outer_content_whitespace_only():
     assert "Content:\nFirst paragraph.\n\nSecond paragraph.\n--- End Source 1 ---" in content
 
 
-# --- locked_filters: a server-side ACL filter the runtime/LLM cannot drop ---
-
 _LOCKED_ACL = {
     "operator": "AND",
     "conditions": [
@@ -150,9 +148,8 @@ _LOCKED_ACL = {
 
 
 def test_runtime_filters_cannot_drop_locked_filters():
-    # Security contract (RFC README §9, 06 §10.2): a runtime filter supplied by the
-    # prompt-injectable LLM must be AND-merged with the locked ACL filter, never
-    # substituted for it. If this assertion can be made to fail, the ACL is bypassable.
+    # A runtime filter supplied by the prompt-injectable LLM  must be
+    # AND-merged with the locked ACL filter, never substituted for it.
     retriever = _retriever(filters={}, locked_filters=_LOCKED_ACL)
     llm_supplied = {"field": "metadata.source", "operator": "==", "value": "confluence"}
 
@@ -189,8 +186,8 @@ def test_no_filters_at_all_returns_empty():
 
 
 def test_execute_passes_anded_filters_to_document_retriever(mocker):
-    # The contract proven at the real execute() boundary: the filters that reach the
-    # document retriever are AND(locked, llm_supplied) — the LLM cannot drop the ACL.
+    # The filters that reach the document retriever are
+    # AND(locked, llm_supplied) — the LLM cannot drop the ACL.
     retriever = _retriever(filters={}, locked_filters=_LOCKED_ACL, top_k=None, alpha=0.5)
 
     # Neutralize tracing/callbacks/cancellation that need real Node wiring; they're not under test.

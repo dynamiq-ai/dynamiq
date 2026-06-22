@@ -191,7 +191,7 @@ def test_to_data_object_with_invalid_properties(mock_weaviate):
 
 
 def test_acl_properties_have_defensive_weaviate_types():
-    # RFC 01 §2: ACL properties must get explicit Weaviate types instead of the auto-schema
+    # ACL properties must get explicit Weaviate types instead of the auto-schema
     # default of TEXT. `allowed_principals` in particular MUST be text[] or `contains_any`
     # (the whole ACL filter) silently degrades.
     store = WeaviateVectorStore.__new__(WeaviateVectorStore)
@@ -212,6 +212,4 @@ def test_create_collection_declares_allowed_principals_as_text_array():
 
     created = {p.name: p for p in store.client.collections.create.call_args.kwargs["properties"]}
     assert isinstance(created["allowed_principals"], Property)
-    # NB: the Property stores the type under `dataType` (camelCase); `data_type` is only the
-    # constructor alias, so reading `data_type` off the instance returns None.
     assert created["allowed_principals"].dataType == DataType.TEXT_ARRAY

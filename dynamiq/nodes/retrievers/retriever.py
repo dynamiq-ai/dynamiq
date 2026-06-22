@@ -64,8 +64,8 @@ class VectorStoreRetriever(Node):
     filters: dict[str, Any] = Field(default_factory=dict)
     locked_filters: dict[str, Any] | None = Field(
         default=None,
-        description="A server-side filter that is AND-merged with (never replaced by) runtime "
-        "filters. Used to enforce non-bypassable constraints such as ACL/permission filtering.",
+        description="A server-side filter that is AND-merged with runtime filters. "
+        "Used to enforce non-bypassable constraints such as ACL/permission filtering.",
     )
     top_k: int | None = None
     alpha: float = Field(
