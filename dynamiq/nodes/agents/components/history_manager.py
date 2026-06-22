@@ -60,7 +60,7 @@ class HistoryManagerMixin:
 
         if preserve_count > 0:
             to_summarize = conversation_history[:-preserve_count]
-            to_preserve = [m.copy() for m in conversation_history[-preserve_count:]]
+            to_preserve = [m.model_copy() for m in conversation_history[-preserve_count:]]
         else:
             to_summarize = conversation_history
             to_preserve = []
