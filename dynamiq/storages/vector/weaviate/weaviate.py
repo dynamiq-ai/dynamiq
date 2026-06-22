@@ -56,6 +56,11 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
         "message_id": DataType.TEXT,
         "user_id": DataType.TEXT,
         "session_id": DataType.TEXT,
+        # Permission-aware RAG (ACL) properties. Declared explicitly so they are never left to
+        # auto-schema: allowed_principals MUST be text[] for `contains_any` filtering to work.
+        "allowed_principals": DataType.TEXT_ARRAY,
+        "acl_workspace_id": DataType.TEXT,
+        "acl_is_public": DataType.BOOL,
     }
     _DEFAULT_QUERY_METADATA_PROPERTIES: tuple[str, ...] = DEFAULT_SEARCHABLE_TEXT_METADATA_FIELDS
 

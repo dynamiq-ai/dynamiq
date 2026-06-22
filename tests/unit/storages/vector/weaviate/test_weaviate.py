@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from weaviate.classes.config import DataType, Property
 
 from dynamiq.storages.vector.weaviate.weaviate import WeaviateVectorStore
 from dynamiq.types import Document
@@ -187,3 +188,30 @@ def test_to_data_object_with_invalid_properties(mock_weaviate):
     # Verify the error message mentions the invalid property name
     assert "Invalid property name" in str(excinfo.value)
     assert "1invalid_property" in str(excinfo.value)
+
+
+def test_acl_properties_have_defensive_weaviate_types():
+    # RFC 01 §2: ACL properties must get explicit Weaviate types instead of the auto-schema
+    # default of TEXT. `allowed_principals` in particular MUST be text[] or `contains_any`
+    # (the whole ACL filter) silently degrades.
+    store = WeaviateVectorStore.__new__(WeaviateVectorStore)
+    store.content_key = "content"
+
+    assert store._get_property_type("allowed_principals") == DataType.TEXT_ARRAY
+    assert store._get_property_type("acl_workspace_id") == DataType.TEXT
+    assert store._get_property_type("acl_is_public") == DataType.BOOL
+
+
+def test_create_collection_declares_allowed_principals_as_text_array():
+    # The defensive type must reach the actual schema sent to Weaviate at create time.
+    store = WeaviateVectorStore.__new__(WeaviateVectorStore)
+    store.content_key = "content"
+    store.client = MagicMock()
+
+    store._create_collection("Test_collection", None, properties_to_define=["allowed_principals"])
+
+    created = {p.name: p for p in store.client.collections.create.call_args.kwargs["properties"]}
+    assert isinstance(created["allowed_principals"], Property)
+    # NB: the Property stores the type under `dataType` (camelCase); `data_type` is only the
+    # constructor alias, so reading `data_type` off the instance returns None.
+    assert created["allowed_principals"].dataType == DataType.TEXT_ARRAY
