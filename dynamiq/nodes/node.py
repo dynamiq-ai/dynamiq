@@ -686,7 +686,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             elif isinstance(value, BaseModel):
                 try:
                     bm_copy = value.model_copy(deep=False)
-                    for fname in getattr(value, "model_fields", {}):
+                    for fname in type(value).model_fields:
                         try:
                             setattr(bm_copy, fname, _clone_nested(getattr(value, fname)))
                         except Exception as e:
@@ -706,7 +706,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 logger.warning(f"Clone: failed to clone field '{value}': {e}")
                 return value
 
-        for _field_name in getattr(cloned_node, "model_fields", {}):
+        for _field_name in type(cloned_node).model_fields:
             _val = getattr(cloned_node, _field_name)
             _new_val = _clone_nested(_val)
             if _new_val is not _val:

@@ -266,7 +266,7 @@ class ContextRecallEvaluator(BaseEvaluator):
             logger.debug(f"Answer: {answer}")
             logger.debug(f"Context: {context}")
             logger.debug("Classifications:")
-            logger.debug(json.dumps([item.dict() for item in classifications], indent=2))
+            logger.debug(json.dumps([item.model_dump() for item in classifications], indent=2))
             logger.debug(f"Context Recall Score: {score}")
             logger.debug("-" * 50)
 

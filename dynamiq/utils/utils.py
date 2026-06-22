@@ -149,7 +149,7 @@ def serialize_files_in_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(serialize_files_in_value(v) for v in value)
     if isinstance(value, BaseModel):
-        return {k: serialize_files_in_value(getattr(value, k)) for k in value.model_fields}
+        return {k: serialize_files_in_value(getattr(value, k)) for k in type(value).model_fields}
     return value
 
 

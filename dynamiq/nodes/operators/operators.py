@@ -203,7 +203,7 @@ class Map(Node):
             if hasattr(obj, "id"):
                 setattr(obj, "id", str(uuid.uuid4()))
 
-            for field_name in obj.model_fields:
+            for field_name in type(obj).model_fields:
                 value = getattr(obj, field_name)
                 if isinstance(value, list):
                     new_list = [self.regenerate_ids(item) for item in value]

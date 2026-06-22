@@ -50,11 +50,11 @@ class CSVConverterInputSchema(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @model_validator(mode="after")
-    def validate_source(cls, values):
-        file_paths, files = values.file_paths, values.files
+    def validate_source(self) -> "CSVConverterInputSchema":
+        file_paths, files = self.file_paths, self.files
         if not file_paths and not files:
             raise ValueError("Either `file_paths` or `files` must be provided.")
-        return values
+        return self
 
 
 class CSVConverter(Node):

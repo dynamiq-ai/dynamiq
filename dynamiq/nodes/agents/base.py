@@ -1246,7 +1246,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if hasattr(obj, "id"):
                 setattr(obj, "id", str(uuid4()))
 
-            for field_name in getattr(obj, "model_fields", {}):
+            for field_name in type(obj).model_fields:
                 value = getattr(obj, field_name)
                 if isinstance(value, list):
                     setattr(obj, field_name, [self._regenerate_node_ids(item) for item in value])

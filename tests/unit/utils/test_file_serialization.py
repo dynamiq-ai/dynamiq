@@ -180,3 +180,31 @@ class TestAgentToolResultToDict:
         assert data["result"] == "plain text"
         assert data["output"] == {"key": "value"}
         assert data["files"] == []
+
+
+class TestNoPydanticModelFieldsDeprecation:
+    """Regression guard: instance-level ``model_fields`` access is deprecated in
+    Pydantic 2.11 and removed in v3. Exercising the touched code paths must not
+    emit the deprecation warning (we use ``type(instance).model_fields`` instead).
+    """
+
+    def test_serialize_files_in_value_no_instance_model_fields_deprecation(self):
+        import warnings
+
+        class Inner(BaseModel):
+            attachment: Any = None
+            name: str = "x"
+
+        bio = BytesIO(b"model-file")
+        bio.name = "doc.pdf"
+
+        with warnings.catch_warnings():
+            # Turn the specific Pydantic instance ``model_fields`` deprecation into an error.
+            warnings.filterwarnings(
+                "error",
+                message=r".*Accessing the 'model_fields' attribute on the instance is deprecated.*",
+                category=DeprecationWarning,
+            )
+            result = serialize_files_in_value(Inner(attachment=bio))
+
+        assert result["attachment"]["name"] == "doc.pdf"
