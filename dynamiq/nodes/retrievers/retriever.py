@@ -62,6 +62,11 @@ class VectorStoreRetriever(Node):
     document_retriever: Retriever
     document_reranker: Node | None = None
     filters: dict[str, Any] = Field(default_factory=dict)
+    locked_filters: dict[str, Any] | None = Field(
+        default=None,
+        description="A server-side filter that is AND-merged with (never replaced by) runtime "
+        "filters. Used to enforce non-bypassable constraints such as ACL/permission filtering.",
+    )
     top_k: int | None = None
     alpha: float = Field(
         default=0.5,
@@ -399,6 +404,17 @@ class VectorStoreRetriever(Node):
         normalized = re.sub(r"[^0-9a-zA-Z]+", "_", normalized)
         return [token for token in normalized.lower().split("_") if token]
 
+    def _resolve_filters(self, runtime_filters: dict[str, Any] | None) -> dict[str, Any] | None:
+        # `runtime_filters` (the LLM/tool-call channel) falls back to node-level `self.filters`,
+        # preserving the legacy precedence. `locked_filters` is AND-merged with that result so it
+        # can never be dropped by a prompt-injected runtime filter — only narrowed further.
+        overridable = runtime_filters or self.filters
+        if self.locked_filters and overridable:
+            return {"operator": "AND", "conditions": [self.locked_filters, overridable]}
+        if self.locked_filters:
+            return self.locked_filters
+        return overridable
+
     def execute(
         self,
         input_data: VectorStoreRetrieverInputSchema,
@@ -421,7 +437,7 @@ class VectorStoreRetriever(Node):
         self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        filters = input_data.filters or self.filters
+        filters = self._resolve_filters(input_data.filters)
         top_k = input_data.top_k or self.top_k
         similarity_threshold = (
             input_data.similarity_threshold

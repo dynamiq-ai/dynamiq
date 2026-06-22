@@ -1,4 +1,5 @@
-from dynamiq.nodes.retrievers.retriever import VectorStoreRetriever
+from dynamiq.nodes.retrievers.retriever import VectorStoreRetriever, VectorStoreRetrieverInputSchema
+from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types import Document
 
 
@@ -135,3 +136,82 @@ def test_format_content_strips_outer_content_whitespace_only():
     )
 
     assert "Content:\nFirst paragraph.\n\nSecond paragraph.\n--- End Source 1 ---" in content
+
+
+# --- locked_filters: a server-side ACL filter the runtime/LLM cannot drop ---
+
+_LOCKED_ACL = {
+    "operator": "AND",
+    "conditions": [
+        {"field": "metadata.acl_workspace_id", "operator": "==", "value": "ws:abc"},
+        {"field": "metadata.allowed_principals", "operator": "in", "value": ["ws:abc:public"]},
+    ],
+}
+
+
+def test_runtime_filters_cannot_drop_locked_filters():
+    # Security contract (RFC README §9, 06 §10.2): a runtime filter supplied by the
+    # prompt-injectable LLM must be AND-merged with the locked ACL filter, never
+    # substituted for it. If this assertion can be made to fail, the ACL is bypassable.
+    retriever = _retriever(filters={}, locked_filters=_LOCKED_ACL)
+    llm_supplied = {"field": "metadata.source", "operator": "==", "value": "confluence"}
+
+    effective = retriever._resolve_filters(llm_supplied)
+
+    assert effective["operator"] == "AND"
+    assert _LOCKED_ACL in effective["conditions"]
+    assert llm_supplied in effective["conditions"]
+
+
+def test_without_locked_filters_runtime_behaviour_is_unchanged():
+    # Backward compatibility: with no locked_filters (the default for every existing KB),
+    # the node must behave exactly as before — runtime filters win, self.filters is the fallback.
+    retriever = _retriever(filters={"field": "metadata.lang", "operator": "==", "value": "en"})
+    runtime = {"field": "metadata.source", "operator": "==", "value": "drive"}
+
+    assert retriever._resolve_filters(runtime) == runtime
+    assert retriever._resolve_filters({}) == retriever.filters
+
+
+def test_locked_filters_apply_when_no_runtime_filters():
+    # With a lock but no runtime/node filters, the lock alone is the effective filter.
+    retriever = _retriever(filters={}, locked_filters=_LOCKED_ACL)
+
+    assert retriever._resolve_filters({}) == _LOCKED_ACL
+    assert retriever._resolve_filters(None) == _LOCKED_ACL
+
+
+def test_no_filters_at_all_returns_empty():
+    # No lock, no runtime, no node filters → empty (legacy: `{} or {}` == `{}`).
+    retriever = _retriever(filters={})
+
+    assert retriever._resolve_filters({}) == {}
+
+
+def test_execute_passes_anded_filters_to_document_retriever(mocker):
+    # The contract proven at the real execute() boundary: the filters that reach the
+    # document retriever are AND(locked, llm_supplied) — the LLM cannot drop the ACL.
+    retriever = _retriever(filters={}, locked_filters=_LOCKED_ACL, top_k=None, alpha=0.5)
+
+    # Neutralize tracing/callbacks/cancellation that need real Node wiring; they're not under test.
+    mocker.patch.object(VectorStoreRetriever, "run_on_node_execute_run")
+    mocker.patch("dynamiq.nodes.retrievers.retriever.NodeDependency")
+    mocker.patch("dynamiq.nodes.retrievers.retriever.check_cancellation")
+
+    embedder = mocker.MagicMock()
+    embedder.run.return_value = mocker.MagicMock(status=RunnableStatus.SUCCESS, output={"embedding": [0.1, 0.2]})
+    retriever.text_embedder = embedder
+
+    doc_retriever = mocker.MagicMock()
+    doc_retriever.run.return_value = mocker.MagicMock(status=RunnableStatus.SUCCESS, output={"documents": []})
+    retriever.document_retriever = doc_retriever
+    retriever.document_reranker = None
+
+    llm_supplied = {"field": "metadata.source", "operator": "==", "value": "confluence"}
+    retriever.execute(
+        VectorStoreRetrieverInputSchema(query="q", filters=llm_supplied),
+        RunnableConfig(callbacks=[]),
+    )
+
+    passed_filters = doc_retriever.run.call_args.kwargs["input_data"]["filters"]
+    assert passed_filters == {"operator": "AND", "conditions": [_LOCKED_ACL, llm_supplied]}
