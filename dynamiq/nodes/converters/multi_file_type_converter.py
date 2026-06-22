@@ -7,6 +7,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dynamiq.connections.managers import ConnectionManager
+from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.converters.docx import DOCXFileConverter
 from dynamiq.nodes.converters.html import HTMLConverter
 from dynamiq.nodes.converters.llm_text_extractor import LLMImageConverter, LLMPDFConverter
@@ -18,7 +19,7 @@ from dynamiq.nodes.node import ErrorHandling, Node, NodeDependency, ensure_confi
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types import Document
-from dynamiq.types.cancellation import check_cancellation
+from dynamiq.types.cancellation import CanceledException, check_cancellation
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,6 @@ FILE_TYPE_TO_SUPPORTED_CONVERTER_CLASS_MAP = {
 DEFAULT_TIMEOUT_SECONDS = 600.0
 
 
-# TODO: Add parallel processing for multiple files.
 class MultiFileTypeConverterInputSchema(BaseModel):
     """Schema for MultiFileConverter input data."""
 
@@ -92,6 +92,12 @@ class MultiFileTypeConverter(Node):
         default_factory=lambda: ErrorHandling(timeout_seconds=DEFAULT_TIMEOUT_SECONDS),
         description="Overall execution timeout for the whole batch. Sub-converters carry their own "
         "per-file timeouts. Set timeout_seconds to None to disable.",
+    )
+    max_workers: int | None = Field(
+        default=None,
+        description="Maximum number of files to convert concurrently. Defaults to None, which sizes the "
+        "thread pool to the number of input files. When the surrounding RunnableConfig sets "
+        "max_node_workers, that value is used as an upper bound.",
     )
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[MultiFileTypeConverterInputSchema]] = MultiFileTypeConverterInputSchema
@@ -276,56 +282,34 @@ class MultiFileTypeConverter(Node):
         **kwargs,
     ) -> list[Document]:
         """
-        Process the files.
+        Process the files, converting each one concurrently while preserving input order.
+
+        Files originating from ``file_paths`` are processed first (in their resolved order),
+        followed by files supplied directly via ``files``. Conversions run on a
+        ``ContextAwareThreadPoolExecutor`` so contextvars (tracing, request ids) propagate to
+        worker threads. Output ordering and error semantics match sequential processing: the
+        documents are concatenated in input order, and the first failure is re-raised.
         """
 
-        all_documents = []
+        work_items = self._build_work_items(file_paths=file_paths, files=files, metadata=metadata)
 
-        if file_paths is not None:
-            paths_obj = [Path(path) for path in file_paths]
-            filepaths = [path for path in paths_obj if path.is_file()]
-            filepaths_in_directories = [
-                filepath for path in paths_obj if path.is_dir() for filepath in path.glob("*.*") if filepath.is_file()
-            ]
-            if filepaths_in_directories and isinstance(metadata, list):
-                raise ValueError(
-                    "If providing directories in the `file_paths` parameter, "
-                    "`metadata` can only be a dictionary (metadata applied to every file), "
-                    "and not a list. To specify different metadata for each file, "
-                    "provide an explicit list of direct paths instead."
-                )
+        # Snapshot the inbound dependency chain so every per-file conversion starts from the
+        # same base (the FileTypeExtractor / upstream node). Workers never mutate the shared
+        # self._run_depends; they each return the dependency chain they produced.
+        base_run_depends = list(self._run_depends)
 
-            all_filepaths = list(set(filepaths + filepaths_in_directories))
+        results = self._convert_work_items_parallel(work_items, base_run_depends, config, **kwargs)
 
-            if not all_filepaths:
-                raise FileNotFoundError(f"No files found in the provided paths: {file_paths}")
+        all_documents: list[Document] = []
+        collected_run_depends: list[dict] = []
+        for documents, run_depends in results:
+            all_documents.extend(documents)
+            collected_run_depends.extend(run_depends)
 
-            meta_list = self._normalize_metadata(metadata, len(all_filepaths))
-
-            for filepath, meta in zip(all_filepaths, meta_list):
-                check_cancellation(config)
-                try:
-                    with open(filepath, "rb") as f:
-                        file_content = BytesIO(f.read())
-
-                    filename = filepath.name
-                    documents = self._process_single_file(file_content, filename, meta, config, **kwargs)
-                    all_documents.extend(documents)
-                except Exception as e:
-                    logger.error(f"Failed to process file {filepath}: {str(e)}")
-                    raise
-
-        if files is not None:
-            meta_list = self._normalize_metadata(metadata, len(files))
-            for i, (file, meta) in enumerate(zip(files, meta_list)):
-                check_cancellation(config)
-                try:
-                    filename = meta.get("filename", f"file_{i}")
-                    documents = self._process_single_file(file, filename, meta, config, **kwargs)
-                    all_documents.extend(documents)
-                except Exception as e:
-                    logger.error(f"Failed to process file {i}: {str(e)}")
-                    raise
+        # Surface the union of every per-file converter as this node's dependency chain so
+        # downstream tracing reflects all sub-converters that ran, not just the last one.
+        if collected_run_depends:
+            self._run_depends = collected_run_depends
 
         if len(all_documents) == 0:
             raise ValueError(
@@ -342,16 +326,142 @@ class MultiFileTypeConverter(Node):
 
         return all_documents
 
+    def _build_work_items(
+        self,
+        file_paths: list[str] | None,
+        files: list[BytesIO] | None,
+        metadata: dict[str, Any] | list[dict[str, Any]] | None,
+    ) -> list[tuple[BytesIO, str, dict]]:
+        """Resolve all inputs into an ordered list of ``(file, filename, metadata)`` work items.
+
+        File reading and path/directory resolution happen here (single-threaded) so that the
+        parallel stage only performs the actual, independent per-file conversion work.
+        """
+        work_items: list[tuple[BytesIO, str, dict]] = []
+
+        if file_paths is not None:
+            paths_obj = [Path(path) for path in file_paths]
+            filepaths = [path for path in paths_obj if path.is_file()]
+            filepaths_in_directories = [
+                filepath for path in paths_obj if path.is_dir() for filepath in path.glob("*.*") if filepath.is_file()
+            ]
+            if filepaths_in_directories and isinstance(metadata, list):
+                raise ValueError(
+                    "If providing directories in the `file_paths` parameter, "
+                    "`metadata` can only be a dictionary (metadata applied to every file), "
+                    "and not a list. To specify different metadata for each file, "
+                    "provide an explicit list of direct paths instead."
+                )
+
+            # Order-preserving de-duplication: keep the first occurrence of each path so that
+            # documents map back to the input order and stay aligned with list-valued metadata.
+            # (A plain set() would scramble both the output order and the metadata pairing.)
+            all_filepaths = list(dict.fromkeys(filepaths + filepaths_in_directories))
+
+            if not all_filepaths:
+                raise FileNotFoundError(f"No files found in the provided paths: {file_paths}")
+
+            meta_list = self._normalize_metadata(metadata, len(all_filepaths))
+
+            for filepath, meta in zip(all_filepaths, meta_list):
+                with open(filepath, "rb") as f:
+                    file_content = BytesIO(f.read())
+                work_items.append((file_content, filepath.name, meta))
+
+        if files is not None:
+            meta_list = self._normalize_metadata(metadata, len(files))
+            for i, (file, meta) in enumerate(zip(files, meta_list)):
+                filename = meta.get("filename", f"file_{i}")
+                work_items.append((file, filename, meta))
+
+        return work_items
+
+    def _convert_work_items_parallel(
+        self,
+        work_items: list[tuple[BytesIO, str, dict]],
+        base_run_depends: list[dict],
+        config: RunnableConfig,
+        **kwargs,
+    ) -> list[tuple[list, list[dict]]]:
+        """Convert work items concurrently, preserving input order and first-failure semantics.
+
+        Returns a list aligned with ``work_items`` of ``(documents, run_depends)`` tuples.
+        ``executor.map`` preserves ordering and re-raises the first worker exception (the same
+        "fail on first error" behavior as sequential processing).
+        """
+        if not work_items:
+            return []
+
+        check_cancellation(config)
+
+        # Single file: no need to spin up a thread pool.
+        if len(work_items) == 1:
+            file, filename, meta = work_items[0]
+            return [self._convert_one(file, filename, meta, base_run_depends, config, **kwargs)]
+
+        max_workers = self._resolve_max_workers(len(work_items), config)
+
+        try:
+            with ContextAwareThreadPoolExecutor(max_workers=max_workers) as executor:
+                results = list(
+                    executor.map(
+                        lambda item: self._convert_one(item[0], item[1], item[2], base_run_depends, config, **kwargs),
+                        work_items,
+                    )
+                )
+        except CanceledException:
+            if config and getattr(config, "cancellation", None) and config.cancellation.token:
+                config.cancellation.token.cancel()
+            raise
+
+        return results
+
+    def _resolve_max_workers(self, item_count: int, config: RunnableConfig | None) -> int:
+        """Determine the thread-pool size, honoring the node's and RunnableConfig's limits."""
+        max_workers = self.max_workers or item_count
+        config_limit = config.max_node_workers if config else None
+        if config_limit:
+            max_workers = min(max_workers, config_limit)
+        return max(1, min(max_workers, item_count))
+
+    def _convert_one(
+        self,
+        file: BytesIO,
+        filename: str,
+        meta: dict,
+        base_run_depends: list[dict],
+        config: RunnableConfig,
+        **kwargs,
+    ) -> tuple[list, list[dict]]:
+        """Convert a single work item on a worker thread.
+
+        Each call uses a private copy of ``base_run_depends`` so concurrent workers never race
+        on shared state. Returns the produced documents alongside the dependency chain the
+        sub-converters generated, which the caller folds back into ``self._run_depends``.
+        """
+        check_cancellation(config)
+        run_depends = list(base_run_depends)
+        try:
+            documents, run_depends = self._process_single_file(file, filename, meta, run_depends, config, **kwargs)
+        except Exception as e:
+            logger.error(f"Failed to process file {filename}: {str(e)}")
+            raise
+        return documents, run_depends
+
     def call_file_type_extractor(
-        self, input_data: FileTypeExtractorInputSchema, config: RunnableConfig, **run_kwargs
-    ) -> dict:
+        self, input_data: FileTypeExtractorInputSchema, run_depends: list[dict], config: RunnableConfig, **run_kwargs
+    ) -> tuple[dict, list[dict]]:
         """
         Call the file type extractor.
+
+        Uses the supplied ``run_depends`` chain (local to the file being processed) instead of
+        the shared ``self._run_depends`` so it is safe to call from concurrent worker threads.
+        Returns the extractor output along with the updated dependency chain.
         """
         file_type_extractor_result = self.file_type_extractor.run(
-            input_data=input_data, config=config, run_depends=self._run_depends, **run_kwargs
+            input_data=input_data, config=config, run_depends=run_depends, **run_kwargs
         )
-        self._run_depends = [NodeDependency(node=self.file_type_extractor).to_dict(for_tracing=True)]
+        run_depends = [NodeDependency(node=self.file_type_extractor).to_dict(for_tracing=True)]
 
         if file_type_extractor_result.status != RunnableStatus.SUCCESS:
             logger.error(
@@ -359,16 +469,21 @@ class MultiFileTypeConverter(Node):
                 f"{file_type_extractor_result.error.to_dict()}"
             )
             raise ValueError("FileTypeExtractor execution failed")
-        return file_type_extractor_result.output
+        return file_type_extractor_result.output, run_depends
 
-    def call_converter(self, input_data: dict, detected_type: FileType, config: RunnableConfig, **run_kwargs) -> dict:
+    def call_converter(
+        self, input_data: dict, detected_type: FileType, run_depends: list[dict], config: RunnableConfig, **run_kwargs
+    ) -> tuple[dict, list[dict]]:
         """
         Call the converter.
+
+        Uses the supplied ``run_depends`` chain so it is safe to call concurrently. Returns the
+        converter output along with the updated dependency chain.
         """
         converter_result = self.converter_mapping[detected_type].run(
-            input_data=input_data, config=config, run_depends=self._run_depends, **run_kwargs
+            input_data=input_data, config=config, run_depends=run_depends, **run_kwargs
         )
-        self._run_depends = [NodeDependency(node=self.converter_mapping[detected_type]).to_dict(for_tracing=True)]
+        run_depends = [NodeDependency(node=self.converter_mapping[detected_type]).to_dict(for_tracing=True)]
 
         converter_name = self.converter_mapping[detected_type].name
 
@@ -378,16 +493,21 @@ class MultiFileTypeConverter(Node):
                 f"{converter_result.error.to_dict()}"
             )
             raise ValueError(f"{converter_name} execution failed")
-        return converter_result.output
+        return converter_result.output, run_depends
 
-    def call_fallback_converter(self, input_data: dict, config: RunnableConfig, **run_kwargs) -> dict:
+    def call_fallback_converter(
+        self, input_data: dict, run_depends: list[dict], config: RunnableConfig, **run_kwargs
+    ) -> tuple[dict, list[dict]]:
         """
         Call the fallback converter.
+
+        Uses the supplied ``run_depends`` chain so it is safe to call concurrently. Returns the
+        fallback converter output along with the updated dependency chain.
         """
         fallback_converter_result = self.fallback_converter.run(
-            input_data=input_data, config=config, run_depends=self._run_depends, **run_kwargs
+            input_data=input_data, config=config, run_depends=run_depends, **run_kwargs
         )
-        self._run_depends = [NodeDependency(node=self.fallback_converter).to_dict(for_tracing=True)]
+        run_depends = [NodeDependency(node=self.fallback_converter).to_dict(for_tracing=True)]
 
         fallback_converter_name = self.fallback_converter.name
 
@@ -397,11 +517,11 @@ class MultiFileTypeConverter(Node):
                 f"{fallback_converter_result.error.to_dict()}"
             )
             raise ValueError(f"{fallback_converter_name} execution failed")
-        return fallback_converter_result.output
+        return fallback_converter_result.output, run_depends
 
     def _process_single_file(
-        self, file: BytesIO, filename: str, metadata: dict, config: RunnableConfig, **kwargs
-    ) -> list:
+        self, file: BytesIO, filename: str, metadata: dict, run_depends: list[dict], config: RunnableConfig, **kwargs
+    ) -> tuple[list, list[dict]]:
         """
         Process a single file by routing to appropriate converter based on file type.
 
@@ -409,15 +529,18 @@ class MultiFileTypeConverter(Node):
             file: The file to convert
             filename: The filename for file type detection
             metadata: Metadata for the file
+            run_depends: The dependency chain local to this file (never the shared
+                ``self._run_depends``), so this method is safe to run concurrently.
             config: Runtime configuration
             **kwargs: Additional arguments
 
         Returns:
-            list: List of documents from the conversion
+            tuple: ``(documents, run_depends)`` where documents is the list of documents from
+                the conversion and run_depends is the dependency chain the sub-converters produced.
         """
         try:
-            file_type_extractor_result = self.call_file_type_extractor(
-                input_data={"file": file, "filename": filename}, config=config, **kwargs
+            file_type_extractor_result, run_depends = self.call_file_type_extractor(
+                input_data={"file": file, "filename": filename}, run_depends=run_depends, config=config, **kwargs
             )
 
             detected_type = file_type_extractor_result.get("type")
@@ -434,21 +557,27 @@ class MultiFileTypeConverter(Node):
                     if metadata:
                         converter_input["metadata"] = [metadata]
 
-                    result = self.call_converter(
-                        input_data=converter_input, detected_type=detected_type, config=config, **kwargs
+                    result, run_depends = self.call_converter(
+                        input_data=converter_input,
+                        detected_type=detected_type,
+                        run_depends=run_depends,
+                        config=config,
+                        **kwargs,
                     )
                     logger.info(f"Successfully converted using {converter_name}")
-                    return result.get("documents", [])
+                    return result.get("documents", []), run_depends
 
                 except Exception as e:
                     logger.warning(f"Failed to convert with {converter_name}: {str(e)}")
                     if self.fallback_converter:
-                        return self._convert_with_fallback_converter(file, filename, metadata, config, **kwargs)
+                        return self._convert_with_fallback_converter(
+                            file, filename, metadata, run_depends, config, **kwargs
+                        )
                     else:
                         raise
 
             elif self.fallback_converter:
-                return self._convert_with_fallback_converter(file, filename, metadata, config, **kwargs)
+                return self._convert_with_fallback_converter(file, filename, metadata, run_depends, config, **kwargs)
 
             else:
                 raise ValueError(f"Unsupported file type: {detected_type}")
@@ -459,8 +588,8 @@ class MultiFileTypeConverter(Node):
             raise ValueError(error_msg)
 
     def _convert_with_fallback_converter(
-        self, file: BytesIO, filename: str, metadata: dict, config: RunnableConfig, **kwargs
-    ) -> list:
+        self, file: BytesIO, filename: str, metadata: dict, run_depends: list[dict], config: RunnableConfig, **kwargs
+    ) -> tuple[list, list[dict]]:
         """
         Try to convert using the fallback converter.
 
@@ -468,11 +597,12 @@ class MultiFileTypeConverter(Node):
             file: The file to convert
             filename: The filename
             metadata: Metadata for the file
+            run_depends: The dependency chain local to this file.
             config: Runtime configuration
             **kwargs: Additional arguments
 
         Returns:
-            list: List of documents from the conversion
+            tuple: ``(documents, run_depends)`` from the conversion.
         """
         try:
             logger.info(f"Attempting conversion with fallback converter for {filename}")
@@ -481,12 +611,14 @@ class MultiFileTypeConverter(Node):
             if metadata:
                 converter_input["metadata"] = [metadata]
 
-            result = self.call_fallback_converter(input_data=converter_input, config=config, **kwargs)
+            result, run_depends = self.call_fallback_converter(
+                input_data=converter_input, run_depends=run_depends, config=config, **kwargs
+            )
 
             logger.info(
                 f"Successfully converted using fallback converter: {self.fallback_converter.__class__.__name__}"
             )
-            return result.get("documents", [])
+            return result.get("documents", []), run_depends
 
         except Exception as e:
             logger.error(f"Fallback converter also failed: {str(e)}")
