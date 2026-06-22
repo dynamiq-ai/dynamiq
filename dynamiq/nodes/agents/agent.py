@@ -2012,11 +2012,17 @@ class Agent(HistoryManagerMixin, BaseAgent):
     def _parse_output_files_csv(raw: str) -> list[str]:
         """Parse a comma-separated string of file paths into a list.
 
-        Strips whitespace from each entry and drops empty entries.
+        Strips whitespace from each entry and drops empty entries. Entries
+        containing angle brackets are dropped: the model occasionally bleeds a
+        control-token fragment (e.g. ``</antml：parameter>``, a fullwidth-colon
+        variant of the tool-call XML closing tag) into the ``output_files`` field,
+        and a real file path never contains ``<`` or ``>``. Letting such junk
+        through made it a phantom file request that failed resolution and forced a
+        wasted retry.
         """
         if not raw or not raw.strip():
             return []
-        return [p.strip() for p in raw.split(",") if p.strip()]
+        return [p.strip() for p in raw.split(",") if p.strip() and "<" not in p and ">" not in p]
 
     def _resolve_requested_output_files(self, *, strict: bool = True) -> None:
         """Resolve ``_requested_output_files`` against the file backend.
