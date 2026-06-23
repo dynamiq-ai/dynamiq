@@ -213,6 +213,60 @@ def test_config_max_node_workers_caps_concurrency(converter):
     assert state["peak"] <= 3
 
 
+def test_max_workers_zero_is_honored_not_widened(converter):
+    """An explicit ``max_workers=0`` must not be mistaken for "unset" and widened to the
+    file count; it floors to a single worker, so conversions never overlap."""
+    n = 5
+    converter.max_workers = 0
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(n)]
+
+    lock = threading.Lock()
+    state = {"active": 0, "peak": 0}
+    original_run = TextFileConverter.run
+
+    def tracking_run(self, *args, **kwargs):
+        with lock:
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        try:
+            time.sleep(0.02)
+            return original_run(self, *args, **kwargs)
+        finally:
+            with lock:
+                state["active"] -= 1
+
+    TextFileConverter.run = tracking_run
+    try:
+        result = converter.run(input_data={"files": files})
+    finally:
+        TextFileConverter.run = original_run
+
+    assert result.status == RunnableStatus.SUCCESS
+    # Before the fix, ``self.max_workers or item_count`` turned 0 into 5 and peak would exceed 1.
+    assert state["peak"] == 1
+
+
+def test_reused_bytesio_instance_is_isolated_per_file(converter):
+    """The same BytesIO passed multiple times must not be shared across workers.
+
+    Each work item gets a private copy, so every occurrence converts correctly and the
+    caller's original buffer is never mutated (a worker sets ``file.name`` during
+    conversion — that must land on the copy, not the shared input).
+    """
+    buf = _txt("shared body", "dup.txt")
+    files = [buf, buf, buf]
+
+    result = converter.run(input_data={"files": files})
+
+    assert result.status == RunnableStatus.SUCCESS
+    documents = result.output["documents"]
+    assert len(documents) == 3
+    assert all("shared body" in doc.content for doc in documents)
+    # The original input buffer is untouched: name preserved, contents still readable.
+    assert buf.name == "dup.txt"
+    assert buf.getvalue() == b"shared body"
+
+
 # ---------------------------------------------------------------------------
 # (c) Error propagation matches prior behavior
 # ---------------------------------------------------------------------------

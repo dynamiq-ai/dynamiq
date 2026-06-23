@@ -377,7 +377,17 @@ class MultiFileTypeConverter(Node):
             for i, (file, meta) in enumerate(zip(files, meta_list)):
                 check_cancellation(config)
                 filename = meta.get("filename", f"file_{i}")
-                work_items.append((file, filename, meta))
+                # Copy into a private buffer per work item so concurrent workers never race on
+                # seek/read/``.name`` of a shared or repeated BytesIO (a worker sets ``file.name``
+                # during conversion). ``getvalue()`` reads the full contents without disturbing the
+                # original's position. Mirrors the per-file copy made for path-based inputs above.
+                file_copy = BytesIO(file.getvalue())
+                # Preserve the original ``.name`` so the FileTypeExtractor can still detect the
+                # type from its extension (the path-based branch carries this via ``filepath.name``).
+                original_name = getattr(file, "name", None)
+                if original_name is not None:
+                    file_copy.name = original_name
+                work_items.append((file_copy, filename, meta))
 
         return work_items
 
@@ -423,7 +433,10 @@ class MultiFileTypeConverter(Node):
 
     def _resolve_max_workers(self, item_count: int, config: RunnableConfig | None) -> int:
         """Determine the thread-pool size, honoring the node's and RunnableConfig's limits."""
-        max_workers = self.max_workers or item_count
+        # Use ``is None`` (not ``or``) so an explicit max_workers=0 isn't mistaken for "unset"
+        # and silently widened to the full file count; the final max(1, ...) floor keeps any
+        # non-positive configured value a valid (minimal, single-worker) pool size.
+        max_workers = item_count if self.max_workers is None else self.max_workers
         config_limit = config.max_node_workers if config else None
         if config_limit:
             max_workers = min(max_workers, config_limit)
