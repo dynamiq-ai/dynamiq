@@ -15,6 +15,7 @@ import pytest
 
 from dynamiq.nodes.converters.multi_file_type_converter import MultiFileTypeConverter
 from dynamiq.nodes.converters.text import TextFileConverter
+from dynamiq.nodes.extractors.extractors import FileTypeExtractor
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 
 
@@ -257,6 +258,64 @@ def test_reused_bytesio_instance_is_isolated_per_file(converter):
     assert all("shared body" in doc.content for doc in documents)
     assert buf.name == "dup.txt"
     assert buf.getvalue() == b"shared body"
+
+
+def test_cancellation_stops_pending_files(converter):
+    """A cancel signal mid-batch stops files that have not started converting."""
+    n = 6
+    converter.max_workers = 1  # serialize so cancellation lands deterministically between files
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(n)]
+    config = RunnableConfig()
+    token = config.cancellation.token
+
+    converted = []
+    original_run = TextFileConverter.run
+
+    def tracking_run(self, *args, **kwargs):
+        result = original_run(self, *args, **kwargs)
+        converted.append(1)
+        if len(converted) == 2:
+            token.cancel()
+        return result
+
+    TextFileConverter.run = tracking_run
+    try:
+        result = converter.run(input_data={"files": files}, config=config)
+    finally:
+        TextFileConverter.run = original_run
+
+    assert result.status == RunnableStatus.CANCELED
+    assert len(converted) < n
+
+
+def test_cancellation_during_extraction_is_not_masked(converter):
+    """Cancellation signaled mid-file propagates as CANCELED and skips the converter."""
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(3)]
+    config = RunnableConfig()
+    token = config.cancellation.token
+
+    converter_calls = []
+    original_extractor_run = FileTypeExtractor.run
+    original_text_run = TextFileConverter.run
+
+    def cancel_during_extraction(self, *args, **kwargs):
+        token.cancel()
+        return original_extractor_run(self, *args, **kwargs)
+
+    def tracking_text_run(self, *args, **kwargs):
+        converter_calls.append(1)
+        return original_text_run(self, *args, **kwargs)
+
+    FileTypeExtractor.run = cancel_during_extraction
+    TextFileConverter.run = tracking_text_run
+    try:
+        result = converter.run(input_data={"files": files}, config=config)
+    finally:
+        FileTypeExtractor.run = original_extractor_run
+        TextFileConverter.run = original_text_run
+
+    assert result.status == RunnableStatus.CANCELED
+    assert converter_calls == []
 
 
 # ---------------------------------------------------------------------------

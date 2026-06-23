@@ -1,5 +1,6 @@
 import copy
 import logging
+from concurrent.futures import FIRST_COMPLETED, wait
 from io import BytesIO
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -44,6 +45,9 @@ FILE_TYPE_TO_SUPPORTED_CONVERTER_CLASS_MAP = {
 }
 
 DEFAULT_TIMEOUT_SECONDS = 600.0
+
+# How often the main thread polls for cancellation while parallel conversions run.
+_CANCELLATION_POLL_INTERVAL = 0.05
 
 
 class MultiFileTypeConverterInputSchema(BaseModel):
@@ -395,8 +399,9 @@ class MultiFileTypeConverter(Node):
         """Convert work items concurrently, preserving input order and first-failure semantics.
 
         Returns a list aligned with ``work_items`` of ``(documents, run_depends)`` tuples.
-        ``executor.map`` preserves ordering and re-raises the first worker exception (the same
-        "fail on first error" behavior as sequential processing).
+        Results are collected in submission order and the first worker exception is re-raised,
+        matching the sequential "fail on first error" behavior. The main thread polls for
+        cancellation so a cancel signal stops pending files without waiting for the whole batch.
         """
         if not work_items:
             return []
@@ -410,18 +415,25 @@ class MultiFileTypeConverter(Node):
 
         max_workers = self._resolve_max_workers(len(work_items), config)
 
+        executor = ContextAwareThreadPoolExecutor(max_workers=max_workers)
         try:
-            with ContextAwareThreadPoolExecutor(max_workers=max_workers) as executor:
-                results = list(
-                    executor.map(
-                        lambda item: self._convert_one(item[0], item[1], item[2], base_run_depends, config, **kwargs),
-                        work_items,
-                    )
-                )
+            futures = [
+                executor.submit(self._convert_one, file, filename, meta, base_run_depends, config, **kwargs)
+                for file, filename, meta in work_items
+            ]
+            # Poll instead of blocking on the whole batch, so cancellation is honored promptly.
+            pending = set(futures)
+            while pending:
+                check_cancellation(config)
+                _, pending = wait(pending, timeout=_CANCELLATION_POLL_INTERVAL, return_when=FIRST_COMPLETED)
+            results = [future.result() for future in futures]
         except CanceledException:
             if config and getattr(config, "cancellation", None) and config.cancellation.token:
                 config.cancellation.token.cancel()
             raise
+        finally:
+            # cancel_futures drops files that have not started; in-flight ones cannot be interrupted.
+            executor.shutdown(wait=False, cancel_futures=True)
 
         return results
 
@@ -578,6 +590,7 @@ class MultiFileTypeConverter(Node):
                     if metadata:
                         converter_input["metadata"] = [metadata]
 
+                    check_cancellation(config)
                     result, run_depends = self.call_converter(
                         converter=converter,
                         input_data=converter_input,
@@ -588,6 +601,8 @@ class MultiFileTypeConverter(Node):
                     logger.info(f"Successfully converted using {converter_name}")
                     return result.get("documents", []), run_depends
 
+                except CanceledException:
+                    raise
                 except Exception as e:
                     logger.warning(f"Failed to convert with {converter_name}: {str(e)}")
                     if self.fallback_converter:
@@ -603,6 +618,8 @@ class MultiFileTypeConverter(Node):
             else:
                 raise ValueError(f"Unsupported file type: {detected_type}")
 
+        except CanceledException:
+            raise
         except Exception as e:
             error_msg = f"Failed to convert document {filename}: {str(e)}"
             logger.error(error_msg)
@@ -633,6 +650,7 @@ class MultiFileTypeConverter(Node):
                 converter_input["metadata"] = [metadata]
 
             fallback_converter = self.fallback_converter.clone()
+            check_cancellation(config)
             result, run_depends = self.call_fallback_converter(
                 fallback_converter=fallback_converter,
                 input_data=converter_input,
@@ -646,6 +664,8 @@ class MultiFileTypeConverter(Node):
             )
             return result.get("documents", []), run_depends
 
+        except CanceledException:
+            raise
         except Exception as e:
             logger.error(f"Fallback converter also failed: {str(e)}")
             raise ValueError(f"All conversion attempts failed. Last error: {str(e)}")
