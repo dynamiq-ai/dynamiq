@@ -18,7 +18,7 @@ DESCRIPTION = (
 )
 
 
-class KnowledgeBaseAPIRetrieverInputSchema(BaseModel):
+class DynamiqKnowledgebaseVectorStoreRetrieverInputSchema(BaseModel):
     query: str = Field(..., description="Parameter to provide a query to retrieve documents.")
     filters: dict[str, Any] = Field(
         default_factory=dict,
@@ -31,18 +31,18 @@ class KnowledgeBaseAPIRetrieverInputSchema(BaseModel):
     )
 
 
-class KnowledgeBaseAPIRetriever(ConnectionNode):
+class DynamiqKnowledgebaseVectorStoreRetriever(ConnectionNode):
     """Retriever tool that delegates retrieval to the ACL-enforced Dynamiq knowledge base API.
 
     Unlike the local vector-store retrievers, this node does not query a vector store directly.
-    It calls ``POST {connection.url}/v1/knowledgebases/{knowledge_base_id}/search`` and forwards
+    It calls ``POST {connection.url}/v1/knowledgebases/{knowledge_base_id}/vector-search`` and forwards
     the response (the API performs embedding + ACL-filtered retrieval and formatting), so it is a
     drop-in replacement for ``VectorStoreRetriever`` at the tool level.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     action_type: ActionType = ActionType.SEMANTIC_SEARCH
-    name: str = "knowledge-base-api-retriever"
+    name: str = "dynamiq-knowledgebase-vector-store-retriever"
     description: str = DESCRIPTION
     connection: DynamiqConnection = Field(default_factory=DynamiqConnection)
     knowledge_base_id: str
@@ -51,12 +51,14 @@ class KnowledgeBaseAPIRetriever(ConnectionNode):
     similarity_threshold: float | None = None
     timeout: float = 30
     success_codes: list[int] = [200]
-    input_schema: ClassVar[type[KnowledgeBaseAPIRetrieverInputSchema]] = KnowledgeBaseAPIRetrieverInputSchema
+    input_schema: ClassVar[type[DynamiqKnowledgebaseVectorStoreRetrieverInputSchema]] = (
+        DynamiqKnowledgebaseVectorStoreRetrieverInputSchema
+    )
 
     def _build_url(self) -> str:
-        return f"{self.connection.url.rstrip('/')}/v1/knowledgebases/{self.knowledge_base_id}/search"
+        return f"{self.connection.url.rstrip('/')}/v1/knowledgebases/{self.knowledge_base_id}/vector-search"
 
-    def _build_request_kwargs(self, input_data: KnowledgeBaseAPIRetrieverInputSchema) -> dict[str, Any]:
+    def _build_request_kwargs(self, input_data: DynamiqKnowledgebaseVectorStoreRetrieverInputSchema) -> dict[str, Any]:
         """Build the kwargs for the search request. Input overrides node-level defaults."""
         filters = input_data.filters or self.filters
         top_k = input_data.top_k if input_data.top_k is not None else self.top_k
@@ -94,7 +96,7 @@ class KnowledgeBaseAPIRetriever(ConnectionNode):
 
         data = response.json()
         # Tolerate either {"documents": [...], "content": ...} or a bare list of documents.
-        raw_documents = data.get("documents", []) if isinstance(data, dict) else (data or [])
+        raw_documents = (data.get("documents") or []) if isinstance(data, dict) else (data or [])
         documents = [self._to_document(item) for item in raw_documents]
 
         content = data.get("content") if isinstance(data, dict) else None
@@ -116,7 +118,7 @@ class KnowledgeBaseAPIRetriever(ConnectionNode):
         )
 
     def execute(
-        self, input_data: KnowledgeBaseAPIRetrieverInputSchema, config: RunnableConfig = None, **kwargs
+        self, input_data: DynamiqKnowledgebaseVectorStoreRetrieverInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
         config = ensure_config(config)
         check_cancellation(config)
@@ -137,7 +139,7 @@ class KnowledgeBaseAPIRetriever(ConnectionNode):
         return self._parse_response(response)
 
     async def execute_async(
-        self, input_data: KnowledgeBaseAPIRetrieverInputSchema, config: RunnableConfig = None, **kwargs
+        self, input_data: DynamiqKnowledgebaseVectorStoreRetrieverInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
         config = ensure_config(config)
         check_cancellation(config)
