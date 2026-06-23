@@ -377,13 +377,7 @@ class MultiFileTypeConverter(Node):
             for i, (file, meta) in enumerate(zip(files, meta_list)):
                 check_cancellation(config)
                 filename = meta.get("filename", f"file_{i}")
-                # Copy into a private buffer per work item so concurrent workers never race on
-                # seek/read/``.name`` of a shared or repeated BytesIO (a worker sets ``file.name``
-                # during conversion). ``getvalue()`` reads the full contents without disturbing the
-                # original's position. Mirrors the per-file copy made for path-based inputs above.
                 file_copy = BytesIO(file.getvalue())
-                # Preserve the original ``.name`` so the FileTypeExtractor can still detect the
-                # type from its extension (the path-based branch carries this via ``filepath.name``).
                 original_name = getattr(file, "name", None)
                 if original_name is not None:
                     file_copy.name = original_name
@@ -433,9 +427,6 @@ class MultiFileTypeConverter(Node):
 
     def _resolve_max_workers(self, item_count: int, config: RunnableConfig | None) -> int:
         """Determine the thread-pool size, honoring the node's and RunnableConfig's limits."""
-        # Use ``is None`` (not ``or``) so an explicit max_workers=0 isn't mistaken for "unset"
-        # and silently widened to the full file count; the final max(1, ...) floor keeps any
-        # non-positive configured value a valid (minimal, single-worker) pool size.
         max_workers = item_count if self.max_workers is None else self.max_workers
         config_limit = config.max_node_workers if config else None
         if config_limit:
@@ -563,9 +554,6 @@ class MultiFileTypeConverter(Node):
                 the conversion and run_depends is the dependency chain the sub-converters produced.
         """
         try:
-            # Clone the shared FileTypeExtractor so this worker never races other threads on the
-            # child node's per-run mutable state, callbacks, or cache keys (mirrors how the Map
-            # operator clones its inner node per task).
             file_type_extractor = self.file_type_extractor.clone()
             file_type_extractor_result, run_depends = self.call_file_type_extractor(
                 file_type_extractor=file_type_extractor,
@@ -579,7 +567,6 @@ class MultiFileTypeConverter(Node):
             logger.info(f"Detected file type: {detected_type} for file: {filename}")
 
             if detected_type and detected_type in self.converter_mapping:
-                # Clone the mapped converter so concurrent workers each run their own instance.
                 converter = self.converter_mapping[detected_type].clone()
                 converter_name = converter.name
 
@@ -645,7 +632,6 @@ class MultiFileTypeConverter(Node):
             if metadata:
                 converter_input["metadata"] = [metadata]
 
-            # Clone the shared fallback converter so concurrent workers each run their own instance.
             fallback_converter = self.fallback_converter.clone()
             result, run_depends = self.call_fallback_converter(
                 fallback_converter=fallback_converter,

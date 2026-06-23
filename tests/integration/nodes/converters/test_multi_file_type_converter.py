@@ -214,8 +214,7 @@ def test_config_max_node_workers_caps_concurrency(converter):
 
 
 def test_max_workers_zero_is_honored_not_widened(converter):
-    """An explicit ``max_workers=0`` must not be mistaken for "unset" and widened to the
-    file count; it floors to a single worker, so conversions never overlap."""
+    """An explicit max_workers=0 floors to a single worker, not the full file count."""
     n = 5
     converter.max_workers = 0
     files = [_txt(f"body {i}", f"f{i}.txt") for i in range(n)]
@@ -242,17 +241,11 @@ def test_max_workers_zero_is_honored_not_widened(converter):
         TextFileConverter.run = original_run
 
     assert result.status == RunnableStatus.SUCCESS
-    # Before the fix, ``self.max_workers or item_count`` turned 0 into 5 and peak would exceed 1.
     assert state["peak"] == 1
 
 
 def test_reused_bytesio_instance_is_isolated_per_file(converter):
-    """The same BytesIO passed multiple times must not be shared across workers.
-
-    Each work item gets a private copy, so every occurrence converts correctly and the
-    caller's original buffer is never mutated (a worker sets ``file.name`` during
-    conversion — that must land on the copy, not the shared input).
-    """
+    """The same BytesIO passed multiple times is copied per work item, not shared."""
     buf = _txt("shared body", "dup.txt")
     files = [buf, buf, buf]
 
@@ -262,7 +255,6 @@ def test_reused_bytesio_instance_is_isolated_per_file(converter):
     documents = result.output["documents"]
     assert len(documents) == 3
     assert all("shared body" in doc.content for doc in documents)
-    # The original input buffer is untouched: name preserved, contents still readable.
     assert buf.name == "dup.txt"
     assert buf.getvalue() == b"shared body"
 
