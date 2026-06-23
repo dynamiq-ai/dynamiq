@@ -94,14 +94,22 @@ class DynamiqKnowledgebaseVectorStoreRetriever(ConnectionNode):
                 recoverable=True,
             )
 
-        data = response.json()
-        # Tolerate either {"documents": [...], "content": ...} or a bare list of documents.
-        raw_documents = (data.get("documents") or []) if isinstance(data, dict) else (data or [])
-        documents = [self._to_document(item) for item in raw_documents]
+        try:
+            data = response.json()
+            # Tolerate either {"documents": [...], "content": ...} or a bare list of documents.
+            raw_documents = (data.get("documents") or []) if isinstance(data, dict) else (data or [])
+            documents = [self._to_document(item) for item in raw_documents]
 
-        content = data.get("content") if isinstance(data, dict) else None
-        if content is None:
-            content = "\n\n".join((doc.content or "") for doc in documents)
+            content = data.get("content") if isinstance(data, dict) else None
+            if content is None:
+                content = "\n\n".join((doc.content or "") for doc in documents)
+        except Exception as e:
+            logger.error(f"Tool {self.name} - {self.id}: failed to parse response. Error: {str(e)}")
+            raise ToolExecutionException(
+                f"Failed to parse response with error: {str(e)}. "
+                f"Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
 
         logger.info(f"Tool {self.name} - {self.id}: retrieved {len(documents)} documents")
         return {"content": content, "documents": documents}

@@ -118,6 +118,16 @@ def test_execute_raises_on_error_status(retriever):
         retriever.execute(DynamiqKnowledgebaseVectorStoreRetrieverInputSchema(query="q"), RunnableConfig(callbacks=[]))
 
 
+def test_execute_raises_recoverable_on_invalid_json(retriever):
+    response = MagicMock()
+    response.status_code = 200
+    response.json.side_effect = ValueError("invalid json")
+    retriever.client.request.return_value = response
+
+    with pytest.raises(ToolExecutionException):
+        retriever.execute(DynamiqKnowledgebaseVectorStoreRetrieverInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+
 @pytest.mark.asyncio
 async def test_execute_async_builds_request_and_parses_documents(retriever):
     payload = {"content": "ASYNC CONTENT", "documents": [{"id": "1", "content": "Doc"}]}
