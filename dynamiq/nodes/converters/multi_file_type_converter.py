@@ -291,7 +291,7 @@ class MultiFileTypeConverter(Node):
         documents are concatenated in input order, and the first failure is re-raised.
         """
 
-        work_items = self._build_work_items(file_paths=file_paths, files=files, metadata=metadata)
+        work_items = self._build_work_items(file_paths=file_paths, files=files, metadata=metadata, config=config)
 
         # Snapshot the inbound dependency chain so every per-file conversion starts from the
         # same base (the FileTypeExtractor / upstream node). Workers never mutate the shared
@@ -331,11 +331,14 @@ class MultiFileTypeConverter(Node):
         file_paths: list[str] | None,
         files: list[BytesIO] | None,
         metadata: dict[str, Any] | list[dict[str, Any]] | None,
+        config: RunnableConfig = None,
     ) -> list[tuple[BytesIO, str, dict]]:
         """Resolve all inputs into an ordered list of ``(file, filename, metadata)`` work items.
 
         File reading and path/directory resolution happen here (single-threaded) so that the
-        parallel stage only performs the actual, independent per-file conversion work.
+        parallel stage only performs the actual, independent per-file conversion work. Reading
+        every input can be slow, so ``check_cancellation`` is polled per item to honor a cancel
+        signal promptly during this prep phase.
         """
         work_items: list[tuple[BytesIO, str, dict]] = []
 
@@ -364,6 +367,7 @@ class MultiFileTypeConverter(Node):
             meta_list = self._normalize_metadata(metadata, len(all_filepaths))
 
             for filepath, meta in zip(all_filepaths, meta_list):
+                check_cancellation(config)
                 with open(filepath, "rb") as f:
                     file_content = BytesIO(f.read())
                 work_items.append((file_content, filepath.name, meta))
@@ -371,6 +375,7 @@ class MultiFileTypeConverter(Node):
         if files is not None:
             meta_list = self._normalize_metadata(metadata, len(files))
             for i, (file, meta) in enumerate(zip(files, meta_list)):
+                check_cancellation(config)
                 filename = meta.get("filename", f"file_{i}")
                 work_items.append((file, filename, meta))
 
@@ -449,19 +454,25 @@ class MultiFileTypeConverter(Node):
         return documents, run_depends
 
     def call_file_type_extractor(
-        self, input_data: FileTypeExtractorInputSchema, run_depends: list[dict], config: RunnableConfig, **run_kwargs
+        self,
+        file_type_extractor: FileTypeExtractor,
+        input_data: FileTypeExtractorInputSchema,
+        run_depends: list[dict],
+        config: RunnableConfig,
+        **run_kwargs,
     ) -> tuple[dict, list[dict]]:
         """
         Call the file type extractor.
 
-        Uses the supplied ``run_depends`` chain (local to the file being processed) instead of
-        the shared ``self._run_depends`` so it is safe to call from concurrent worker threads.
-        Returns the extractor output along with the updated dependency chain.
+        Runs the per-worker ``file_type_extractor`` clone (never the shared
+        ``self.file_type_extractor``) with the supplied ``run_depends`` chain (local to the file
+        being processed) so it is safe to call from concurrent worker threads. Returns the
+        extractor output along with the updated dependency chain.
         """
-        file_type_extractor_result = self.file_type_extractor.run(
+        file_type_extractor_result = file_type_extractor.run(
             input_data=input_data, config=config, run_depends=run_depends, **run_kwargs
         )
-        run_depends = [NodeDependency(node=self.file_type_extractor).to_dict(for_tracing=True)]
+        run_depends = [NodeDependency(node=file_type_extractor).to_dict(for_tracing=True)]
 
         if file_type_extractor_result.status != RunnableStatus.SUCCESS:
             logger.error(
@@ -472,20 +483,19 @@ class MultiFileTypeConverter(Node):
         return file_type_extractor_result.output, run_depends
 
     def call_converter(
-        self, input_data: dict, detected_type: FileType, run_depends: list[dict], config: RunnableConfig, **run_kwargs
+        self, converter: Node, input_data: dict, run_depends: list[dict], config: RunnableConfig, **run_kwargs
     ) -> tuple[dict, list[dict]]:
         """
         Call the converter.
 
-        Uses the supplied ``run_depends`` chain so it is safe to call concurrently. Returns the
-        converter output along with the updated dependency chain.
+        Runs the per-worker ``converter`` clone (never the shared mapped instance) with the
+        supplied ``run_depends`` chain so it is safe to call concurrently. Returns the converter
+        output along with the updated dependency chain.
         """
-        converter_result = self.converter_mapping[detected_type].run(
-            input_data=input_data, config=config, run_depends=run_depends, **run_kwargs
-        )
-        run_depends = [NodeDependency(node=self.converter_mapping[detected_type]).to_dict(for_tracing=True)]
+        converter_result = converter.run(input_data=input_data, config=config, run_depends=run_depends, **run_kwargs)
+        run_depends = [NodeDependency(node=converter).to_dict(for_tracing=True)]
 
-        converter_name = self.converter_mapping[detected_type].name
+        converter_name = converter.name
 
         if converter_result.status != RunnableStatus.SUCCESS:
             logger.error(
@@ -496,20 +506,21 @@ class MultiFileTypeConverter(Node):
         return converter_result.output, run_depends
 
     def call_fallback_converter(
-        self, input_data: dict, run_depends: list[dict], config: RunnableConfig, **run_kwargs
+        self, fallback_converter: Node, input_data: dict, run_depends: list[dict], config: RunnableConfig, **run_kwargs
     ) -> tuple[dict, list[dict]]:
         """
         Call the fallback converter.
 
-        Uses the supplied ``run_depends`` chain so it is safe to call concurrently. Returns the
-        fallback converter output along with the updated dependency chain.
+        Runs the per-worker ``fallback_converter`` clone (never the shared
+        ``self.fallback_converter``) with the supplied ``run_depends`` chain so it is safe to call
+        concurrently. Returns the fallback converter output along with the updated dependency chain.
         """
-        fallback_converter_result = self.fallback_converter.run(
+        fallback_converter_result = fallback_converter.run(
             input_data=input_data, config=config, run_depends=run_depends, **run_kwargs
         )
-        run_depends = [NodeDependency(node=self.fallback_converter).to_dict(for_tracing=True)]
+        run_depends = [NodeDependency(node=fallback_converter).to_dict(for_tracing=True)]
 
-        fallback_converter_name = self.fallback_converter.name
+        fallback_converter_name = fallback_converter.name
 
         if fallback_converter_result.status != RunnableStatus.SUCCESS:
             logger.error(
@@ -539,15 +550,25 @@ class MultiFileTypeConverter(Node):
                 the conversion and run_depends is the dependency chain the sub-converters produced.
         """
         try:
+            # Clone the shared FileTypeExtractor so this worker never races other threads on the
+            # child node's per-run mutable state, callbacks, or cache keys (mirrors how the Map
+            # operator clones its inner node per task).
+            file_type_extractor = self.file_type_extractor.clone()
             file_type_extractor_result, run_depends = self.call_file_type_extractor(
-                input_data={"file": file, "filename": filename}, run_depends=run_depends, config=config, **kwargs
+                file_type_extractor=file_type_extractor,
+                input_data={"file": file, "filename": filename},
+                run_depends=run_depends,
+                config=config,
+                **kwargs,
             )
 
             detected_type = file_type_extractor_result.get("type")
             logger.info(f"Detected file type: {detected_type} for file: {filename}")
 
             if detected_type and detected_type in self.converter_mapping:
-                converter_name = self.converter_mapping[detected_type].name
+                # Clone the mapped converter so concurrent workers each run their own instance.
+                converter = self.converter_mapping[detected_type].clone()
+                converter_name = converter.name
 
                 try:
                     if not hasattr(file, "name"):
@@ -558,8 +579,8 @@ class MultiFileTypeConverter(Node):
                         converter_input["metadata"] = [metadata]
 
                     result, run_depends = self.call_converter(
+                        converter=converter,
                         input_data=converter_input,
-                        detected_type=detected_type,
                         run_depends=run_depends,
                         config=config,
                         **kwargs,
@@ -611,12 +632,18 @@ class MultiFileTypeConverter(Node):
             if metadata:
                 converter_input["metadata"] = [metadata]
 
+            # Clone the shared fallback converter so concurrent workers each run their own instance.
+            fallback_converter = self.fallback_converter.clone()
             result, run_depends = self.call_fallback_converter(
-                input_data=converter_input, run_depends=run_depends, config=config, **kwargs
+                fallback_converter=fallback_converter,
+                input_data=converter_input,
+                run_depends=run_depends,
+                config=config,
+                **kwargs,
             )
 
             logger.info(
-                f"Successfully converted using fallback converter: {self.fallback_converter.__class__.__name__}"
+                f"Successfully converted using fallback converter: {fallback_converter.__class__.__name__}"
             )
             return result.get("documents", []), run_depends
 
