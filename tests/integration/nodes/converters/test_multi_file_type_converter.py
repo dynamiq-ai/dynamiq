@@ -346,6 +346,34 @@ def test_single_file_failure_fails_the_node(converter):
     assert result.status == RunnableStatus.FAILURE
 
 
+def test_failure_stops_pending_files(converter):
+    """An early failure stops files that have not started, mirroring sequential fail-fast."""
+    n = 6
+    converter.max_workers = 1  # serialize so the failure lands before later files start
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(n)]
+
+    started = []
+    original_run = TextFileConverter.run
+
+    def failing_run(self, *args, **kwargs):
+        input_data = kwargs.get("input_data") or (args[0] if args else None)
+        files_arg = input_data.get("files") if isinstance(input_data, dict) else None
+        name = getattr(files_arg[0], "name", "") if files_arg else ""
+        started.append(name)
+        if name == "f1.txt":
+            raise RuntimeError("boom on f1")
+        return original_run(self, *args, **kwargs)
+
+    TextFileConverter.run = failing_run
+    try:
+        result = converter.run(input_data={"files": files})
+    finally:
+        TextFileConverter.run = original_run
+
+    assert result.status == RunnableStatus.FAILURE
+    assert len(started) < n  # files after the failure never started converting
+
+
 def test_no_documents_raises(converter):
     """An empty resolved file set fails just as before."""
     result = converter.run(input_data={"file_paths": ["/path/that/does/not/exist.txt"]})

@@ -1,6 +1,6 @@
 import copy
 import logging
-from concurrent.futures import FIRST_COMPLETED, wait
+from concurrent.futures import FIRST_EXCEPTION, wait
 from io import BytesIO
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -421,11 +421,19 @@ class MultiFileTypeConverter(Node):
                 executor.submit(self._convert_one, file, filename, meta, base_run_depends, config, **kwargs)
                 for file, filename, meta in work_items
             ]
-            # Poll instead of blocking on the whole batch, so cancellation is honored promptly.
+            # Poll so cancellation is honored promptly, and stop at the first worker failure so
+            # later/unstarted files are not run — matching the sequential loop's fail-fast behavior.
             pending = set(futures)
-            while pending:
+            failed = False
+            while pending and not failed:
                 check_cancellation(config)
-                _, pending = wait(pending, timeout=_CANCELLATION_POLL_INTERVAL, return_when=FIRST_COMPLETED)
+                done, pending = wait(pending, timeout=_CANCELLATION_POLL_INTERVAL, return_when=FIRST_EXCEPTION)
+                failed = any(future.exception() is not None for future in done)
+            if failed:
+                # Re-raise the earliest-index failure; ``finally`` cancels the rest.
+                for future in futures:
+                    if future.done() and not future.cancelled() and future.exception() is not None:
+                        raise future.exception()
             results = [future.result() for future in futures]
         except CanceledException:
             if config and getattr(config, "cancellation", None) and config.cancellation.token:
