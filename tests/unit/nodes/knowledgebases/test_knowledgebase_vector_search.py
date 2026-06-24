@@ -3,7 +3,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
+from dynamiq import Workflow
 from dynamiq.connections import Dynamiq
+from dynamiq.flows import Flow
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.knowledgebases.knowledgebase import (
     DynamiqKnowledgebaseVectorSearch,
@@ -146,3 +148,46 @@ async def test_execute_async_builds_request_and_parses_documents(retriever):
     _, kwargs = async_client.request.call_args
     assert kwargs["url"] == "https://api.example.ai/v1/knowledgebases/kb-123/vector-search"
     assert result["documents"][0].content == "Doc"
+
+
+def test_yaml_roundtrip(tmp_path):
+    connection = Dynamiq(id="dynamiq-conn", url="https://api.example.ai/", api_key="secret-token")
+    node = DynamiqKnowledgebaseVectorSearch(
+        id="kb-node",
+        connection=connection,
+        knowledgebase_id="kb-123",
+        limit=7,
+        metadata_fields=["title", "url"],
+    )
+    workflow = Workflow(id="kb-workflow", flow=Flow(id="kb-flow", nodes=[node]))
+
+    yaml_path = tmp_path / "kb_workflow.yaml"
+    workflow.to_yaml_file(yaml_path)
+
+    loaded = Workflow.from_yaml_file(str(yaml_path), init_components=True)
+    loaded_node = loaded.flow.nodes[0]
+    assert isinstance(loaded_node, DynamiqKnowledgebaseVectorSearch)
+    assert loaded_node.client is not None  # init_components built the HTTP client
+
+    roundtrip_path = tmp_path / "kb_workflow_roundtrip.yaml"
+    loaded.to_yaml_file(roundtrip_path)
+    roundtrip_node = Workflow.from_yaml_file(str(roundtrip_path), init_components=True).flow.nodes[0]
+
+    assert roundtrip_node.knowledgebase_id == "kb-123"
+    assert roundtrip_node.limit == 7
+    assert roundtrip_node.metadata_fields == ["title", "url"]
+    assert roundtrip_node.connection.id == "dynamiq-conn"
+    assert roundtrip_node.connection.url == "https://api.example.ai/"
+
+    # The deserialized node still executes end-to-end with the config it was loaded with.
+    roundtrip_node.client = MagicMock()
+    roundtrip_node.client.request.return_value = _mock_response({"data": [{"content": "hit", "metadata": {"title": "T"}}]})
+
+    result = roundtrip_node.execute(
+        DynamiqKnowledgebaseVectorSearchInputSchema(query="q"), RunnableConfig(callbacks=[])
+    )
+
+    _, kwargs = roundtrip_node.client.request.call_args
+    assert kwargs["url"] == "https://api.example.ai/v1/knowledgebases/kb-123/vector-search"
+    assert kwargs["json"] == {"query": "q", "limit": 7}  # node-level limit survived the roundtrip
+    assert [doc.content for doc in result["documents"]] == ["hit"]
