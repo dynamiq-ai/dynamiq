@@ -181,7 +181,9 @@ def test_yaml_roundtrip(tmp_path):
 
     # The deserialized node still executes end-to-end with the config it was loaded with.
     roundtrip_node.client = MagicMock()
-    roundtrip_node.client.request.return_value = _mock_response({"data": [{"content": "hit", "metadata": {"title": "T"}}]})
+    roundtrip_node.client.request.return_value = _mock_response(
+        {"data": [{"content": "hit", "metadata": {"title": "T"}}]}
+    )
 
     result = roundtrip_node.execute(
         DynamiqKnowledgebaseVectorSearchInputSchema(query="q"), RunnableConfig(callbacks=[])
