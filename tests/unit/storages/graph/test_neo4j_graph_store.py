@@ -1,7 +1,8 @@
 """Unit tests for the shared write_graph path as exercised by Neo4jGraphStore (no live DB).
 
-Characterization test: locks the exact Cypher the shared ``BaseGraphStore.write_graph`` builders emit and
-the counter totals Neo4j reads back, so the base-class refactor cannot silently change Neo4j behavior.
+Characterization test: locks the exact Cypher Neo4j's ``UNWIND`` bulk builders emit (node upserts grouped
+by label-set, edge upserts grouped by structure) and the counter totals Neo4j reads back, so a refactor
+cannot silently change Neo4j write behavior.
 """
 
 from types import SimpleNamespace
@@ -47,52 +48,63 @@ def test_write_graph_batches_nodes_and_writes_edges():
             "identity_keys": ["source_doc_id"],
         }
     ]
-    # Node statement reports relationships_created=0; edge statement reports nodes_created=0 -- the
-    # invariant that makes "add all three counters every statement" equal the old split tally.
-    node_result = ([], _summary(nodes_created=2, relationships_created=0, properties_set=4), ["n0", "n1"])
+    # Neo4j writes each label-group with one UNWIND statement (PERSON:Entity, ORG:Entity) and the edge
+    # with one UNWIND statement -> three statements. Each reports its own counters; summing all three on
+    # every statement still equals the totals (node statements report relationships_created=0, the edge
+    # statement reports nodes_created=0).
+    person_result = ([], _summary(nodes_created=1, relationships_created=0, properties_set=2), ["n"])
+    org_result = ([], _summary(nodes_created=1, relationships_created=0, properties_set=2), ["n"])
     edge_result = ([], _summary(nodes_created=0, relationships_created=1, properties_set=2), ["r"])
-    store, client = _store([node_result, edge_result])
+    store, client = _store([person_result, org_result, edge_result])
 
     result = store.write_graph(nodes=nodes, relationships=relationships)
 
-    # --- one batched node query, one per-edge query ---
-    assert client.execute_query.call_count == 2
-    node_call, edge_call = client.execute_query.call_args_list
+    # --- one UNWIND node query per label-group, one UNWIND edge query per structural group ---
+    assert client.execute_query.call_count == 3
+    person_call, org_call, edge_call = client.execute_query.call_args_list
 
-    node_query = node_call.args[0]
-    assert node_query == (
-        "MERGE (n0:PERSON:Entity {id: $node_0_id})\n"
-        "ON CREATE SET n0 += $node_0_props\n"
-        "MERGE (n1:ORG:Entity {id: $node_1_id})\n"
-        "ON CREATE SET n1 += $node_1_props\n"
-        "RETURN n0, n1"
+    assert person_call.args[0] == (
+        "UNWIND $rows AS row\n"
+        "MERGE (n:PERSON:Entity {id: row.id})\n"
+        "ON CREATE SET n += row.props\n"
+        "RETURN n"
     )
-    assert node_call.kwargs["parameters_"] == {
-        "node_0_props": {"id": "jane", "name": "Jane"},
-        "node_0_id": "jane",
-        "node_1_props": {"id": "acme", "name": "Acme"},
-        "node_1_id": "acme",
+    assert person_call.kwargs["parameters_"] == {
+        "rows": [{"id": "jane", "props": {"id": "jane", "name": "Jane"}}]
+    }
+    assert org_call.args[0] == (
+        "UNWIND $rows AS row\n"
+        "MERGE (n:ORG:Entity {id: row.id})\n"
+        "ON CREATE SET n += row.props\n"
+        "RETURN n"
+    )
+    assert org_call.kwargs["parameters_"] == {
+        "rows": [{"id": "acme", "props": {"id": "acme", "name": "Acme"}}]
     }
 
-    edge_query = edge_call.args[0]
-    assert edge_query == (
-        "MATCH (s:PERSON {id: $start_id})\n"
-        "MATCH (e:ORG {id: $end_id})\n"
-        "MERGE (s)-[r:WORKS_AT {source_doc_id: $rkey_0_0}]->(e)\n"
-        "SET r += $props\n"
+    assert edge_call.args[0] == (
+        "UNWIND $rows AS row\n"
+        "MATCH (s:PERSON {id: row.start_id})\n"
+        "MATCH (e:ORG {id: row.end_id})\n"
+        "MERGE (s)-[r:WORKS_AT {source_doc_id: row.source_doc_id}]->(e)\n"
+        "SET r += row.props\n"
         "RETURN r"
     )
     assert edge_call.kwargs["parameters_"] == {
-        "start_id": "jane",
-        "end_id": "acme",
-        "props": {"source_doc_id": "doc-1", "role": "CFO"},
-        "rkey_0_0": "doc-1",
+        "rows": [
+            {
+                "start_id": "jane",
+                "end_id": "acme",
+                "props": {"source_doc_id": "doc-1", "role": "CFO"},
+                "source_doc_id": "doc-1",
+            }
+        ]
     }
 
-    # --- aggregated stats: node + edge summaries summed ---
+    # --- aggregated stats: all statement summaries summed ---
     assert result["nodes_created"] == 2
     assert result["relationships_created"] == 1
-    assert result["properties_set"] == 6  # 4 (nodes) + 2 (edge)
+    assert result["properties_set"] == 6  # 2 + 2 (nodes) + 2 (edge)
     assert result["keys"] == ["r"]  # last statement's keys
 
 

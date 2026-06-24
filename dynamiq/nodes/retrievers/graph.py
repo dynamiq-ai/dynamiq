@@ -197,7 +197,13 @@ class GraphRetriever(ConnectionNode):
         graph_name (str | None): Graph name (Apache AGE).
         filters (dict | None): LOCKED edge-property filters, always applied (operator grammar). ACL lives
             here via the ``$intersects`` operator.
-        top_k (int): Maximum number of facts to return.
+        top_k (int): Maximum number of facts to fetch from the graph. With a ``document_reranker`` this is
+            the CANDIDATE pool that gets reranked; the reranker's own ``top_k`` decides the final count.
+        document_reranker (Node | None): Optional reranker (e.g. a cross-encoder ``CohereReranker``) applied
+            to the rendered facts. A high-degree (hub) entity can expand to many edges that all match the
+            seed equally; the reranker scores each fact against the query and keeps the most relevant, so
+            precision on hubs comes from relevance, not the position-only fallback score. Off by default.
+            Over-fetch by setting this node's ``top_k`` above the reranker's ``top_k``.
     """
 
     group: Literal[NodeGroup.RETRIEVERS] = NodeGroup.RETRIEVERS
@@ -217,6 +223,7 @@ class GraphRetriever(ConnectionNode):
     create_graph_if_not_exists: bool = False
     filters: dict[str, Any] | None = None  # LOCKED: always applied; not overridable from the input schema
     top_k: int = 50
+    document_reranker: Node | None = None  # optional rerank of rendered facts; top_k here = candidate pool
 
     input_schema: ClassVar[type[GraphRetrieverInputSchema]] = GraphRetrieverInputSchema
 
@@ -229,11 +236,13 @@ class GraphRetriever(ConnectionNode):
 
     @property
     def to_dict_exclude_params(self) -> dict:
-        return super().to_dict_exclude_params | {"llm": True}
+        return super().to_dict_exclude_params | {"llm": True, "document_reranker": True}
 
     def to_dict(self, **kwargs) -> dict:
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
+        if self.document_reranker:
+            data["document_reranker"] = self.document_reranker.to_dict(**kwargs)
         return data
 
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
@@ -242,6 +251,8 @@ class GraphRetriever(ConnectionNode):
         super().init_components(connection_manager)
         if self.llm.is_postponed_component_init:
             self.llm.init_components(connection_manager)
+        if self.document_reranker and self.document_reranker.is_postponed_component_init:
+            self.document_reranker.init_components(connection_manager)
         if self._graph_store is None:
             self._graph_store = self._build_graph_store()
         self._use_fulltext = self._probe_fulltext()
@@ -439,14 +450,41 @@ class GraphRetriever(ConnectionNode):
             records, _, _ = self._graph_store.run_cypher(query, parameters=params, database=self.database)
             rows = self._graph_store.format_records(records)
             documents = self._render_single_hop(rows)
-            content = "\n".join(f"- {d.content}" for d in documents) or "No matching facts found."
             logger.info(f"Tool {self.name} - {self.id}: retrieved {len(documents)} fact(s).")
+            documents = self._maybe_rerank(documents, input_data.query, config, **kwargs)
+            content = "\n".join(f"- {d.content}" for d in documents) or "No matching facts found."
             return {"content": content, "documents": documents}
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: execution error: {e}", exc_info=True)
             raise ToolExecutionException(
                 f"Tool '{self.name}' failed to retrieve graph context. Error: {e}.", recoverable=True
             )
+
+    def _maybe_rerank(self, documents: list[Document], query: str, config: RunnableConfig, **kwargs) -> list[Document]:
+        """Refine the rendered facts with the optional reranker; the candidate facts ARE the documents.
+
+        The reranker scores each fact against the query and returns its own ``top_k`` -- so a hub's many
+        equally-seed-matching edges get ordered by relevance instead of the position-only fallback score.
+        Reranking is a refinement, not a hard dependency: a reranker failure degrades to the unranked facts
+        (mirrors how query-entity extraction degrades), so an optional precision step never fails the read.
+        """
+        if not self.document_reranker or not documents:
+            return documents
+        check_cancellation(config)
+        before = len(documents)
+        result = self.document_reranker.run(
+            input_data={"query": query, "documents": documents},
+            run_depends=self._run_depends,
+            config=config,
+            **kwargs,
+        )
+        self._run_depends = [NodeDependency(node=self.document_reranker).to_dict(for_tracing=True)]
+        if result.status != RunnableStatus.SUCCESS:
+            logger.warning(f"Tool {self.name} - {self.id}: reranker failed; returning unranked facts.")
+            return documents
+        reranked = result.output.get("documents", documents)
+        logger.info(f"Tool {self.name} - {self.id}: reranked {before} -> {len(reranked)} fact(s).")
+        return reranked
 
     @staticmethod
     def _render_single_hop(rows: list[dict[str, Any]]) -> list[Document]:

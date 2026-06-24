@@ -1,43 +1,22 @@
-import json
 from unittest.mock import MagicMock
+
+import pytest
 
 from dynamiq.storages.graph.neptune import NeptuneGraphStore
 
 
-def test_neptune_supports_and_writes_graph_via_shared_path():
-    # Neptune inherits BaseGraphStore.write_graph: a batched node POST + one per-edge POST, openCypher.
+def test_neptune_write_graph_not_implemented():
+    # write_graph now lives only on the Neo4j store; BaseGraphStore provides no default, so the Neptune
+    # openCypher backend (which previously inherited the shared path) raises NotImplementedError until it
+    # gains its own implementation. Only Neo4j (and the relational Postgres store) implement write_graph.
     client = MagicMock()
-    response = MagicMock()
-    response.json.return_value = {"results": []}
-    client.post.return_value = response
     store = NeptuneGraphStore(client=client, endpoint="https://localhost:8182/openCypher", verify_ssl=False)
 
-    assert store.supports_write_graph() is True
-
-    result = store.write_graph(
-        nodes=[{"labels": ["PERSON", "Entity"], "identity_key": "id", "properties": {"id": "jane", "name": "Jane"}}],
-        relationships=[
-            {
-                "type": "WORKS_AT",
-                "start_label": "PERSON",
-                "end_label": "ORG",
-                "start_identity": "jane",
-                "end_identity": "acme",
-                "properties": {},
-            }
-        ],
-    )
-
-    assert client.post.call_count == 2
-    node_body = json.loads(client.post.call_args_list[0].kwargs["data"])
-    edge_body = json.loads(client.post.call_args_list[1].kwargs["data"])
-    assert node_body["query"] == (
-        "MERGE (n0:PERSON:Entity {id: $node_0_id})\nON CREATE SET n0 += $node_0_props\nRETURN n0"
-    )
-    assert "MERGE (s)-[r:WORKS_AT]->(e)" in edge_body["query"]
-    # Neptune's HTTP response carries no write counters -> best-effort 0 (upsert still happens).
-    assert result["nodes_created"] == 0
-    assert result["relationships_created"] == 0
+    with pytest.raises(NotImplementedError):
+        store.write_graph(
+            nodes=[{"labels": ["PERSON", "Entity"], "identity_key": "id", "properties": {"id": "jane"}}],
+            relationships=[],
+        )
 
 
 def test_neptune_run_cypher_with_params():

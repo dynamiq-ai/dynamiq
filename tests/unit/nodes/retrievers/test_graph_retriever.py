@@ -34,6 +34,31 @@ class FailingStubLLM(StubLLM):
         raise RuntimeError("llm boom")
 
 
+class StubReranker(Node):
+    """Reranker stub: reverses the candidate facts and caps to ``top_k`` so tests can see rerank ran.
+
+    Records how many candidates it received, to assert the retriever over-fetches (passes the whole
+    rendered set) and that the final output is the reranker's, not the raw retrieval order.
+    """
+
+    group: ClassVar = NodeGroup.RANKERS
+    name: str = "stub-reranker"
+    top_k: int = 2
+    received: int = 0
+
+    def execute(self, input_data, config=None, **kwargs):
+        documents = input_data["documents"] if isinstance(input_data, dict) else input_data.documents
+        self.received = len(documents)
+        return {"documents": list(reversed(documents))[: self.top_k]}
+
+
+class FailingStubReranker(StubReranker):
+    """Reranker stub whose run never succeeds — exercises graceful degradation to unranked facts."""
+
+    def execute(self, input_data, config=None, **kwargs):
+        raise RuntimeError("rerank boom")
+
+
 _ONTOLOGY = Ontology(entity_types=["Org", "Person"], relationship_types=["WORKS_AT"])
 
 
@@ -339,3 +364,51 @@ class TestExecuteRendering:
         node.execute(GraphRetrieverInputSchema(query="anything", entities=["Acme"]))
         assert names_seen == []  # extraction skipped
         assert node._graph_store.last_params["q"] == "Acme"  # seeded by the entity name, not the query
+
+
+# Three distinct facts so rendering produces 3 documents (no dedup collisions).
+_RERANK_ROWS = [
+    {"a_name": "Jane", "rel": "WORKS_AT", "rprops": {}, "b_name": "Acme"},
+    {"a_name": "Bob", "rel": "WORKS_AT", "rprops": {}, "b_name": "Globex"},
+    {"a_name": "Eve", "rel": "WORKS_AT", "rprops": {}, "b_name": "Initech"},
+]
+
+
+class TestReranking:
+    def test_reranker_reorders_caps_and_receives_all_candidates(self):
+        # The reranker gets ALL rendered facts (top_k = candidate pool) and its output -- reversed, capped
+        # to its own top_k=2 -- becomes the result, so precision comes from rerank, not retrieval order.
+        reranker = StubReranker(top_k=2)
+        node = make_retriever(rows=_RERANK_ROWS, document_reranker=reranker)
+
+        out = node.execute(GraphRetrieverInputSchema(query="who works where?"))
+
+        assert reranker.received == 3  # over-fetch: the whole rendered set was reranked
+        assert [d.content for d in out["documents"]] == [
+            "Eve -[WORKS_AT]-> Initech",
+            "Bob -[WORKS_AT]-> Globex",
+        ]
+        # The bullet content reflects the reranked, capped set -- not the original 3.
+        assert out["content"] == "- Eve -[WORKS_AT]-> Initech\n- Bob -[WORKS_AT]-> Globex"
+
+    def test_reranker_failure_degrades_to_unranked_facts(self):
+        # A reranker failure must not fail the read -- it degrades to the unranked facts (like the LLM path).
+        node = make_retriever(rows=_RERANK_ROWS, document_reranker=FailingStubReranker())
+
+        out = node.execute(GraphRetrieverInputSchema(query="who works where?"))  # must not raise
+
+        assert [d.content for d in out["documents"]] == [
+            "Jane -[WORKS_AT]-> Acme",
+            "Bob -[WORKS_AT]-> Globex",
+            "Eve -[WORKS_AT]-> Initech",
+        ]
+
+    def test_no_reranker_returns_facts_unchanged(self):
+        node = make_retriever(rows=_RERANK_ROWS)  # no document_reranker
+        out = node.execute(GraphRetrieverInputSchema(query="who works where?"))
+        assert len(out["documents"]) == 3
+
+    def test_to_dict_serializes_the_reranker(self):
+        node = make_retriever(rows=[], document_reranker=StubReranker())
+        data = node.to_dict()
+        assert data["document_reranker"]["name"] == "stub-reranker"

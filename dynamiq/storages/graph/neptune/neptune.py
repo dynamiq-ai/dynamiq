@@ -10,15 +10,13 @@ LABEL_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class NeptuneGraphStore(BaseGraphStore):
-    """Wrapper for Amazon Neptune openCypher execution over HTTP.
+    """Wrapper for Amazon Neptune openCypher execution over HTTP (read / introspection).
 
-    Uses the shared :meth:`BaseGraphStore.write_graph` (standard openCypher MERGE/SET). Neptune's HTTP
-    ``/openCypher`` response does not surface write counters, so ``nodes_created`` / ``relationships_created``
-    come back as 0 (best-effort) even though the upsert succeeds.
+    Graph writes are not implemented for Neptune: ``write_graph`` is defined only on the Neo4j store, so
+    ``supports_write_graph()`` is False here and ``write_graph`` raises ``NotImplementedError``.
     """
 
-    # Inherits the shared openCypher write path; counters are best-effort 0 (default _tally_counts).
-    _writes_graph: ClassVar[bool] = True
+    _writes_graph: ClassVar[bool] = False
 
     def __init__(
         self,

@@ -64,29 +64,6 @@ class ApacheAgeGraphStore(BaseGraphStore):
         summary = {"query": query, "counters": {}, "result_available_after": None}
         return records, summary, []
 
-    def _build_node_statements(self, nodes: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
-        """AGE override: one MERGE per query with a SINGLE-column ``RETURN ... AS result``.
-
-        AGE wraps Cypher in ``cypher(graph, query, params) AS (result agtype)``, which forces the query to
-        RETURN exactly one column — so the batched multi-``RETURN n0, n1, ...`` form the base uses for
-        Neo4j/Neptune is invalid here. The edge builder is inherited (its ``RETURN r`` is single-column).
-        """
-        statements: list[tuple[str, dict[str, Any]]] = []
-        for idx, node in enumerate(nodes):
-            labels = node.get("labels") or []
-            identity_key = self._format_property_key(node.get("identity_key") or "id")
-            properties = node.get("properties") or {}
-            if identity_key not in properties:
-                raise ValueError(f"Node {idx} is missing identity key '{identity_key}' in properties.")
-            label_string = self._format_labels(labels)
-            query = (
-                f"MERGE (n{label_string} {{{identity_key}: $node_id}})\n"
-                f"ON CREATE SET n += $node_props\n"
-                "RETURN n AS result"
-            )
-            statements.append((query, {"node_id": properties[identity_key], "node_props": properties}))
-        return statements
-
     def update_client(self, client: Any) -> None:
         self.client = client
         self._age_loaded = False
