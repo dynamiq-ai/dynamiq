@@ -183,6 +183,37 @@ class TestResolveAgainstGraph:
         # The transient ref never leaks to the store.
         assert "attr_ref" not in value_node
 
+    def test_resolution_does_not_mutate_input_payload(self):
+        # Resolution must not touch the caller's dicts: the same payload may be written again (e.g. to a
+        # second backend). A second resolve must rebuild attribute ids identically -- which is impossible
+        # if the first run popped attr_ref or rewrote properties["id"] in place.
+        writer = make_writer({"PERSON": [("uuid-jane", "Jane Doe")]})
+        nodes = [
+            entity("PERSON", "jane@d1", "Jane Doe"),
+            attr_value_node("jane@d1", "salary", "d1", "$250,000"),
+        ]
+        rels = [
+            edge(
+                HAS_ATTRIBUTE_TYPE, "PERSON", ATTRIBUTE_VALUE_LABEL, "jane@d1", "jane@d1::salary::d1",
+                {"key": "salary"},
+            )
+        ]
+
+        first_nodes, first_rels = writer._resolve_against_graph(nodes, rels)
+
+        # Input is untouched: wiring ids and the transient attr_ref survive on the caller's objects.
+        assert nodes[0]["properties"]["id"] == "jane@d1"
+        assert nodes[1]["properties"]["id"] == "jane@d1::salary::d1"
+        assert nodes[1]["attr_ref"] == {"owner": "jane@d1", "key": "salary", "doc": "d1"}
+        assert rels[0]["end_identity"] == "jane@d1::salary::d1"
+
+        # Re-resolving the same payload yields the same resolved ids (repeatable, not corrupted).
+        second_nodes, second_rels = writer._resolve_against_graph(nodes, rels)
+        for resolved in (first_nodes, second_nodes):
+            value_node = next(n for n in resolved if n["labels"][0] == ATTRIBUTE_VALUE_LABEL)
+            assert value_node["properties"]["id"] == "uuid-jane::salary::d1"
+        assert first_rels[0]["end_identity"] == second_rels[0]["end_identity"] == "uuid-jane::salary::d1"
+
     def test_attribute_value_id_rederived_when_llm_id_contains_delimiter(self):
         # An LLM id can itself contain "::"; the value id is rebuilt from the carried (owner, key, doc)
         # parts, not by splitting the string, so the owner still resolves onto its UUID.

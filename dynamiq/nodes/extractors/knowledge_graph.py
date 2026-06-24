@@ -285,7 +285,14 @@ class KnowledgeGraphWriter(Node):
         fresh UUID. Newly assigned entities are added to the per-call candidate cache so later
         entities in the same batch converge onto them too. ``AttributeValue`` node ids are
         re-derived from their owner's resolved id (``{owner_id}::{attr_key}::{doc_id}``).
+
+        Works on copies of the caller's dicts: this rewrites ``properties["id"]`` and strips the
+        transient ``attr_ref`` below, so mutating the input in place would leave the same payload
+        unwritable a second time (attribute ids could no longer be rebuilt).
         """
+        nodes = [{**node, "properties": {**node["properties"]}} for node in nodes]
+        relationships = [{**rel} for rel in relationships]
+
         id_remap: dict[str, str] = {}
         for node in nodes:
             label = node["labels"][0]
