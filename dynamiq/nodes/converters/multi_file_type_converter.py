@@ -494,6 +494,8 @@ class MultiFileTypeConverter(Node):
         run_depends = [NodeDependency(node=file_type_extractor).to_dict(for_tracing=True)]
 
         if file_type_extractor_result.status != RunnableStatus.SUCCESS:
+            # A canceled sub-run surfaces as CanceledException (CANCELED), not a generic failure.
+            check_cancellation(config)
             logger.error(
                 f"Node {self.name} - {self.id}: FileTypeExtractor execution failed: "
                 f"{file_type_extractor_result.error.to_dict()}"
@@ -517,6 +519,7 @@ class MultiFileTypeConverter(Node):
         converter_name = converter.name
 
         if converter_result.status != RunnableStatus.SUCCESS:
+            check_cancellation(config)
             logger.error(
                 f"Node {self.name} - {self.id}: {converter_name} execution failed: "
                 f"{converter_result.error.to_dict()}"
@@ -542,6 +545,7 @@ class MultiFileTypeConverter(Node):
         fallback_converter_name = fallback_converter.name
 
         if fallback_converter_result.status != RunnableStatus.SUCCESS:
+            check_cancellation(config)
             logger.error(
                 f"Node {self.name} - {self.id}: {fallback_converter_name} execution failed: "
                 f"{fallback_converter_result.error.to_dict()}"
