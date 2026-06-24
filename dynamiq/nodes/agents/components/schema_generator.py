@@ -33,10 +33,10 @@ FINAL_ANSWER_FUNCTION_SCHEMA = {
                 "answer": {"type": "string", "description": "Answer on initial request."},
                 "output_files": {
                     "type": "string",
-                    "description": "Optional comma-separated file paths to return. Empty string if none.",
+                    "description": "Optional comma-separated file paths to return.",
                 },
             },
-            "required": ["thought", "answer", "output_files"],
+            "required": ["thought", "answer"],
             "additionalProperties": False,
         },
     },
@@ -86,10 +86,10 @@ def build_final_answer_function_schema(response_format: dict | type[BaseModel] |
             "answer": answer_schema,
             "output_files": {
                 "type": "string",
-                "description": "Optional comma-separated file paths to return. Empty string if none.",
+                "description": "Optional comma-separated file paths to return.",
             },
         },
-        "required": ["thought", "answer", "output_files"],
+        "required": ["thought", "answer"],
         "additionalProperties": False,
     }
 
