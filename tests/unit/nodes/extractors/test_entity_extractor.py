@@ -353,14 +353,17 @@ class TestExecuteEndToEndWithStubLLM:
 
         result = extractor.execute(EntityExtractor.input_schema(documents=[doc_a, doc_b]))
 
-        # Each id-less document was assigned a distinct, non-null id.
-        assert doc_a.id is not None and doc_b.id is not None and doc_a.id != doc_b.id
+        # Ids are assigned on copies, so the caller's input objects are left untouched.
+        assert doc_a.id is None and doc_b.id is None
+        # Each id-less document was assigned a distinct, non-null id on the returned copies.
+        out_a, out_b = result["documents"]
+        assert out_a.id is not None and out_b.id is not None and out_a.id != out_b.id
 
         rels = [r for r in result["relationships"] if r["type"] == "WORKS_AT"]
         assert len(rels) == 2  # two separate edges, not one merged edge
         assert all(r["identity_keys"] == ["source_doc_id"] for r in rels)
         # Each edge carries its OWN document discriminator and its OWN ACL -- neither overwrites the other.
-        assert {r["properties"]["source_doc_id"] for r in rels} == {doc_a.id, doc_b.id}
+        assert {r["properties"]["source_doc_id"] for r in rels} == {out_a.id, out_b.id}
         assert {tuple(r["properties"]["allowed_principals"]) for r in rels} == {("group:a",), ("group:b",)}
 
 

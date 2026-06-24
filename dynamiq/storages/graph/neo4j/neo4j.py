@@ -194,6 +194,47 @@ class Neo4jGraphStore(BaseGraphStore):
 
         return {**totals, "records": all_records, "keys": last_keys}
 
+    def delete_documents(
+        self,
+        document_ids: list[str],
+        *,
+        doc_scoped_labels: list[str] | None = None,
+        database: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, int]:
+        """Delete the given documents' edges (and their document-scoped nodes), leaving entities intact.
+
+        For each label in ``doc_scoped_labels`` (e.g. ``AttributeValue``), the node is the end of an edge
+        stamped with one of these documents' ``source_doc_id`` and belongs to exactly that document, so a
+        ``DETACH DELETE`` removes the node and that edge together. Any remaining per-document edges
+        (entity-to-entity) are then deleted; identity (entity) nodes are deliberately never matched.
+        """
+        if not document_ids:
+            return {"nodes_deleted": 0, "relationships_deleted": 0}
+
+        totals = {"nodes_deleted": 0, "relationships_deleted": 0}
+        params = {"doc_ids": list(document_ids)}
+
+        for label in doc_scoped_labels or []:
+            if not LABEL_PATTERN.match(label):
+                raise ValueError(f"Invalid document-scoped label for delete: {label!r}")
+            query = (
+                "MATCH ()-[r]->(v:`" + label + "`)\n"
+                "WHERE r.source_doc_id IN $doc_ids\n"
+                "DETACH DELETE v"
+            )
+            _, summary, _ = self.run_cypher(query, params, database=database)
+            totals["nodes_deleted"] += summary.counters.nodes_deleted
+            totals["relationships_deleted"] += summary.counters.relationships_deleted
+
+        _, summary, _ = self.run_cypher(
+            "MATCH ()-[r]->() WHERE r.source_doc_id IN $doc_ids DELETE r",
+            params,
+            database=database,
+        )
+        totals["relationships_deleted"] += summary.counters.relationships_deleted
+        return totals
+
     def _build_node_statements(self, nodes: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
         """Neo4j override: BULK node upsert via ``UNWIND``, grouped by label-set.
 

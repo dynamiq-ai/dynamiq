@@ -64,6 +64,34 @@ class BaseGraphStore(ABC):
             f"{type(self).__name__}: write_graph is not implemented for this backend."
         )
 
+    def delete_documents(
+        self,
+        document_ids: list[str],
+        *,
+        doc_scoped_labels: list[str] | None = None,
+        database: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, int]:
+        """Remove all graph data belonging to the given source documents.
+
+        The explicit, caller-driven counterpart to ``write_graph`` — analogous to
+        :meth:`BaseVectorStore.delete_documents_by_file_ids` on the vector side: writing never deletes
+        on its own, so to replace a document's facts the caller deletes them here, then re-writes.
+
+        Deletes every relationship stamped with one of these ``source_doc_id`` values, and the
+        document-scoped nodes whose label is in ``doc_scoped_labels`` (e.g. ``AttributeValue`` — value
+        nodes that belong to exactly one document). Identity nodes (entities) are SHARED across
+        documents and are NEVER deleted here: a subsequent ``write_graph`` re-MERGEs them unchanged,
+        keeping their write-once ``name``. The caller passes the labels so this layer stays neutral of
+        KG semantics. Returns ``{"nodes_deleted", "relationships_deleted"}``.
+
+        No default implementation — each writing backend defines its own delete path. Backends that do
+        not support writing inherit this and raise.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__}: delete_documents is not implemented for this backend."
+        )
+
     def update_client(self, client: Any) -> None:
         """Update the underlying client reference if the connection is reinitialized."""
         if hasattr(self, "client"):

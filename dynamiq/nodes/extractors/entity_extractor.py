@@ -37,6 +37,16 @@ ENTITY_ID_INDEX = "entity_id"
 KG_ENTITY_IDS_KEY = "kg_entity_ids"
 
 
+def build_attribute_value_id(owner_id: str, attr_key: str, document_id: str | None) -> str:
+    """Stable AttributeValue node id: "{owner}::{key}::{doc}" (doc omitted when absent).
+
+    Single source of truth for the format so KnowledgeGraphWriter can rebuild it from the resolved
+    owner id without parsing the composite string back apart.
+    """
+    value_id = f"{owner_id}::{attr_key}"
+    return f"{value_id}::{document_id}" if document_id is not None else value_id
+
+
 class Triple(BaseModel):
     """A legal relationship pattern: (source entity type) -[relationship]-> (target entity type)."""
 
@@ -285,14 +295,17 @@ class EntityExtractor(Node):
         # error can't discard the whole batch -- but if EVERY document fails, that's systemic (e.g. bad
         # credentials), so we raise rather than silently report an empty graph as success.
         failed = 0
+        documents: list[Document] = []
         for document in input_data.documents:
             check_cancellation(config)
             # A document id scopes EVERYTHING per-document: node wiring ids, attribute ids, and the
             # source_doc_id ACL merge discriminator. A missing id silently collapses all three -- id-less
             # docs alias each other's nodes and their edges merge, overwriting allowed_principals. Assign a
             # stable id up front so the whole pipeline (and the returned documents) keys off a real value.
+            # Copy rather than mutate in place so callers holding the input list don't see ids change.
             if document.id is None:
-                document.id = uuid.uuid4().hex
+                document = document.model_copy(update={"id": uuid.uuid4().hex})
+            documents.append(document)
             try:
                 extracted = self._extract_from_text(document.content, config, **kwargs)
             except ValueError as exc:
@@ -323,7 +336,7 @@ class EntityExtractor(Node):
         return {
             "nodes": nodes,
             "relationships": relationships,
-            "documents": input_data.documents,
+            "documents": documents,
             "entities": entities_debug,
             "raw_relationships": raw_relationships_debug,
         }
@@ -637,14 +650,15 @@ class EntityExtractor(Node):
             for attr_key, attr_value in attribute_values.items():
                 if attr_value is None:
                     continue
-                value_id = f"{wiring_id}::{attr_key}"
-                if document is not None and document.id is not None:
-                    value_id = f"{value_id}::{document.id}"
-                nodes.append(
-                    GraphNode(
-                        labels=[ATTRIBUTE_VALUE_LABEL], properties={"id": value_id, "value": attr_value}
-                    ).model_dump()
-                )
+                doc_id = document.id if document is not None and document.id is not None else None
+                value_id = build_attribute_value_id(wiring_id, attr_key, doc_id)
+                value_node = GraphNode(
+                    labels=[ATTRIBUTE_VALUE_LABEL], properties={"id": value_id, "value": attr_value}
+                ).model_dump()
+                # Structured parts for the writer to rebuild the resolved id without parsing the
+                # composite string. Sibling key (not in `properties`) so the store never persists it.
+                value_node["attr_ref"] = {"owner": wiring_id, "key": attr_key, "doc": doc_id}
+                nodes.append(value_node)
                 attribute_relationships.append(
                     GraphRelationship(
                         type=HAS_ATTRIBUTE_TYPE,

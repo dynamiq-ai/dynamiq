@@ -13,13 +13,15 @@ import pytest
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
 
 
-def _summary(*, nodes_created=0, relationships_created=0, properties_set=0):
-    """A fake Neo4j ResultSummary with the counters write_graph reads."""
+def _summary(*, nodes_created=0, relationships_created=0, properties_set=0, nodes_deleted=0, relationships_deleted=0):
+    """A fake Neo4j ResultSummary with the counters write_graph / delete_documents read."""
     return SimpleNamespace(
         counters=SimpleNamespace(
             nodes_created=nodes_created,
             relationships_created=relationships_created,
             properties_set=properties_set,
+            nodes_deleted=nodes_deleted,
+            relationships_deleted=relationships_deleted,
         )
     )
 
@@ -145,3 +147,51 @@ def test_write_graph_node_missing_identity_key_raises():
 def test_supports_write_graph_flag():
     store, _ = _store([])
     assert store.supports_write_graph() is True
+
+
+def test_delete_documents_removes_doc_scoped_nodes_and_edges_keeps_entities():
+    # Two statements: DETACH DELETE the doc-scoped AttributeValue nodes (with their edges), then DELETE
+    # the remaining per-document edges. Entity nodes are never matched by either query.
+    value_del = ([], _summary(nodes_deleted=2, relationships_deleted=2), [])
+    edge_del = ([], _summary(relationships_deleted=1), [])
+    store, client = _store([value_del, edge_del])
+
+    result = store.delete_documents(["d1", "d2"], doc_scoped_labels=["AttributeValue"])
+
+    assert client.execute_query.call_count == 2
+    value_call, edge_call = client.execute_query.call_args_list
+    assert value_call.args[0] == (
+        "MATCH ()-[r]->(v:`AttributeValue`)\n"
+        "WHERE r.source_doc_id IN $doc_ids\n"
+        "DETACH DELETE v"
+    )
+    assert value_call.kwargs["parameters_"] == {"doc_ids": ["d1", "d2"]}
+    assert edge_call.args[0] == "MATCH ()-[r]->() WHERE r.source_doc_id IN $doc_ids DELETE r"
+    assert edge_call.kwargs["parameters_"] == {"doc_ids": ["d1", "d2"]}
+    # nodes: 2 from the value statement; relationships: 2 (value edges) + 1 (entity-entity edge).
+    assert result == {"nodes_deleted": 2, "relationships_deleted": 3}
+
+
+def test_delete_documents_empty_ids_is_noop():
+    store, client = _store([])
+    result = store.delete_documents([], doc_scoped_labels=["AttributeValue"])
+    assert client.execute_query.call_count == 0
+    assert result == {"nodes_deleted": 0, "relationships_deleted": 0}
+
+
+def test_delete_documents_with_no_doc_scoped_labels_only_deletes_edges():
+    store, client = _store([([], _summary(relationships_deleted=4), [])])
+
+    result = store.delete_documents(["d1"])
+
+    assert client.execute_query.call_count == 1  # just the edge-delete statement
+    assert client.execute_query.call_args_list[0].args[0] == (
+        "MATCH ()-[r]->() WHERE r.source_doc_id IN $doc_ids DELETE r"
+    )
+    assert result == {"nodes_deleted": 0, "relationships_deleted": 4}
+
+
+def test_delete_documents_rejects_invalid_label():
+    store, _ = _store([])
+    with pytest.raises(ValueError, match="Invalid document-scoped label"):
+        store.delete_documents(["d1"], doc_scoped_labels=["bad-label!"])

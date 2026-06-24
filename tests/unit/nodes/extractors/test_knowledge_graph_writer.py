@@ -78,6 +78,18 @@ def edge(rel_type: str, start_label: str, end_label: str, start_id: str, end_id:
     }
 
 
+def attr_value_node(owner_id: str, attr_key: str, doc_id: str | None, value: str) -> dict:
+    """An AttributeValue node as the extractor emits it: composite id + transient `attr_ref` carrying
+    the structured (owner, key, doc) parts the writer rebuilds the resolved id from."""
+    value_id = f"{owner_id}::{attr_key}" + (f"::{doc_id}" if doc_id is not None else "")
+    return {
+        "labels": [ATTRIBUTE_VALUE_LABEL],
+        "identity_key": "id",
+        "properties": {"id": value_id, "value": value},
+        "attr_ref": {"owner": owner_id, "key": attr_key, "doc": doc_id},
+    }
+
+
 def is_uuid(value: str) -> bool:
     try:
         uuid.UUID(value)
@@ -153,11 +165,7 @@ class TestResolveAgainstGraph:
         writer = make_writer({"PERSON": [("uuid-jane", "Jane Doe")]})
         nodes = [
             entity("PERSON", "jane@d1", "Jane Doe"),
-            {
-                "labels": [ATTRIBUTE_VALUE_LABEL],
-                "identity_key": "id",
-                "properties": {"id": "jane@d1::salary::d1", "value": "$250,000"},
-            },
+            attr_value_node("jane@d1", "salary", "d1", "$250,000"),
         ]
         rels = [
             edge(
@@ -171,6 +179,30 @@ class TestResolveAgainstGraph:
         value_node = next(n for n in resolved_nodes if n["labels"][0] == ATTRIBUTE_VALUE_LABEL)
         assert value_node["properties"]["id"] == "uuid-jane::salary::d1"
         assert resolved_rels[0]["start_identity"] == "uuid-jane"
+        assert resolved_rels[0]["end_identity"] == "uuid-jane::salary::d1"
+        # The transient ref never leaks to the store.
+        assert "attr_ref" not in value_node
+
+    def test_attribute_value_id_rederived_when_llm_id_contains_delimiter(self):
+        # An LLM id can itself contain "::"; the value id is rebuilt from the carried (owner, key, doc)
+        # parts, not by splitting the string, so the owner still resolves onto its UUID.
+        writer = make_writer({"PERSON": [("uuid-jane", "Jane Doe")]})
+        owner = "Person::42@d1"  # llm_id "Person::42" -> wiring id with embedded "::"
+        nodes = [
+            entity("PERSON", owner, "Jane Doe"),
+            attr_value_node(owner, "salary", "d1", "$250,000"),
+        ]
+        rels = [
+            edge(
+                HAS_ATTRIBUTE_TYPE, "PERSON", ATTRIBUTE_VALUE_LABEL, owner, f"{owner}::salary::d1",
+                {"key": "salary"},
+            )
+        ]
+
+        resolved_nodes, resolved_rels = writer._resolve_against_graph(nodes, rels)
+
+        value_node = next(n for n in resolved_nodes if n["labels"][0] == ATTRIBUTE_VALUE_LABEL)
+        assert value_node["properties"]["id"] == "uuid-jane::salary::d1"
         assert resolved_rels[0]["end_identity"] == "uuid-jane::salary::d1"
 
     def test_same_llm_id_from_different_documents_does_not_alias(self):

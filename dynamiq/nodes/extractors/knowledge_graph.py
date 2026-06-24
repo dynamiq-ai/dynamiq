@@ -12,6 +12,7 @@ from dynamiq.nodes.extractors.entity_extractor import (
     ENTITY_NAME_FULLTEXT_INDEX,
     HAS_ATTRIBUTE_TYPE,
     KG_ENTITY_IDS_KEY,
+    build_attribute_value_id,
 )
 from dynamiq.nodes.node import Node, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
@@ -313,16 +314,17 @@ class KnowledgeGraphWriter(Node):
                     # Make the new node a match candidate for the rest of this batch.
                     self._existing_cache.setdefault(label, []).append((id_remap[old_id], name))
 
-        # AttributeValue ids derive from their owner entity ("{owner}::{key}::{doc}") — re-derive
-        # them from the owner's resolved id so re-ingestion updates the same value node. partition()
-        # splits at the FIRST "::", so the "{key}::{doc}" tail is preserved as-is.
+        # AttributeValue ids derive from their owner entity so re-ingestion updates the same value
+        # node. The structured (owner, key, doc) parts ride on the node, so we rebuild the resolved
+        # id directly via build_attribute_value_id — no string parsing, so an LLM id containing "::"
+        # can't corrupt the split. Pop the transient ref so it never reaches the store.
         for node in nodes:
             if node["labels"][0] != ATTRIBUTE_VALUE_LABEL:
                 continue
+            ref = node.pop("attr_ref", None)
             old_id = node["properties"]["id"]
-            owner_id, sep, attr_key = old_id.partition("::")
-            if sep and owner_id in id_remap:
-                id_remap[old_id] = f"{id_remap[owner_id]}::{attr_key}"
+            if ref and ref["owner"] in id_remap:
+                id_remap[old_id] = build_attribute_value_id(id_remap[ref["owner"]], ref["key"], ref["doc"])
 
         for node in nodes:
             nid = node["properties"]["id"]
