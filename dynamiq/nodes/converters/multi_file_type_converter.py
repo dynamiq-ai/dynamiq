@@ -1,6 +1,6 @@
 import copy
 import logging
-from concurrent.futures import FIRST_EXCEPTION, wait
+from concurrent.futures import wait
 from io import BytesIO
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -421,20 +421,15 @@ class MultiFileTypeConverter(Node):
                 executor.submit(self._convert_one, file, filename, meta, base_run_depends, config, **kwargs)
                 for file, filename, meta in work_items
             ]
-            # Poll so cancellation is honored promptly, and stop at the first worker failure so
-            # later/unstarted files are not run — matching the sequential loop's fail-fast behavior.
-            pending = set(futures)
-            failed = False
-            while pending and not failed:
-                check_cancellation(config)
-                done, pending = wait(pending, timeout=_CANCELLATION_POLL_INTERVAL, return_when=FIRST_EXCEPTION)
-                failed = any(future.exception() is not None for future in done)
-            if failed:
-                # Re-raise the earliest-index failure; ``finally`` cancels the rest.
-                for future in futures:
-                    if future.done() and not future.cancelled() and future.exception() is not None:
-                        raise future.exception()
-            results = [future.result() for future in futures]
+            # Resolve futures in input order so the first surfaced error matches sequential
+            # processing, while still polling for cancellation; ``finally`` cancels the unstarted
+            # rest, so no later file is awaited or started once an earlier one fails.
+            results = []
+            for future in futures:
+                while not future.done():
+                    check_cancellation(config)
+                    wait([future], timeout=_CANCELLATION_POLL_INTERVAL)
+                results.append(future.result())
         except CanceledException:
             if config and getattr(config, "cancellation", None) and config.cancellation.token:
                 config.cancellation.token.cancel()

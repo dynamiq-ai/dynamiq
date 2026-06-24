@@ -374,6 +374,34 @@ def test_failure_stops_pending_files(converter):
     assert len(started) < n  # files after the failure never started converting
 
 
+def test_failure_reports_first_error_in_input_order(converter):
+    """The surfaced error is the earliest-index failure, not whichever fails first in time."""
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(4)]
+
+    original_run = TextFileConverter.run
+
+    def failing_run(self, *args, **kwargs):
+        input_data = kwargs.get("input_data") or (args[0] if args else None)
+        files_arg = input_data.get("files") if isinstance(input_data, dict) else None
+        name = getattr(files_arg[0], "name", "") if files_arg else ""
+        if name == "f0.txt":
+            time.sleep(0.1)  # earliest index fails, but slowly
+            raise RuntimeError("boom on f0")
+        if name == "f2.txt":
+            raise RuntimeError("boom on f2")  # later index fails first in time
+        return original_run(self, *args, **kwargs)
+
+    TextFileConverter.run = failing_run
+    try:
+        result = converter.run(input_data={"files": files})
+    finally:
+        TextFileConverter.run = original_run
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "boom on f0" in result.error.message
+    assert "boom on f2" not in result.error.message
+
+
 def test_no_documents_raises(converter):
     """An empty resolved file set fails just as before."""
     result = converter.run(input_data={"file_paths": ["/path/that/does/not/exist.txt"]})
