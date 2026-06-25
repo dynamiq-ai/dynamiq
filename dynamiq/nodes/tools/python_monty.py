@@ -111,7 +111,8 @@ class PythonMonty(Node):
             import pydantic_monty
         except ImportError as e:
             raise ToolExecutionException(
-                "PythonMonty requires the 'pydantic-monty' package. " "Install with: poetry install --extras monty",
+                "PythonMonty requires the 'pydantic-monty' package. "
+                "Install with: uv sync --extra monty (or pip install pydantic-monty)",
                 recoverable=False,
             ) from e
 

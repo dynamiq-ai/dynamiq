@@ -150,11 +150,10 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
         with:
-          version: 1.8.3
-          virtualenvs-create: false
+          version: "0.11.24"
 
       - name: Install dependencies
         run: make install-dependencies-dev
@@ -177,11 +176,10 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
         with:
-          version: 1.8.3
-          virtualenvs-create: false
+          version: "0.11.24"
 
       - name: Install dependencies
         run: make install-dependencies-dev
