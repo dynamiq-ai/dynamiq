@@ -1,7 +1,26 @@
 import json
 from unittest.mock import MagicMock
 
+import pytest
+
 from dynamiq.storages.graph.age import ApacheAgeGraphStore
+
+
+def _age_store():
+    client = MagicMock()
+    client.cursor.return_value.__enter__.return_value = MagicMock()
+    return ApacheAgeGraphStore(client=client, graph_name="graph")
+
+
+def test_age_write_graph_is_gated_off():
+    # write_graph is implemented only on the Neo4j store; AGE does not support writing and raises.
+    store = _age_store()
+    assert store.supports_write_graph() is False
+    with pytest.raises(NotImplementedError):
+        store.write_graph(
+            nodes=[{"labels": ["PERSON"], "identity_key": "id", "properties": {"id": "jane"}}],
+            relationships=[],
+        )
 
 
 def test_age_run_cypher_executes_query():

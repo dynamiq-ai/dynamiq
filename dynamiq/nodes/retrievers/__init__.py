@@ -1,5 +1,6 @@
 from .chroma import ChromaDocumentRetriever
 from .elasticsearch import ElasticsearchDocumentRetriever
+from .graph import GraphRetriever
 from .milvus import MilvusDocumentRetriever
 from .opensearch import OpenSearchDocumentRetriever
 from .pgvector import PGVectorDocumentRetriever
