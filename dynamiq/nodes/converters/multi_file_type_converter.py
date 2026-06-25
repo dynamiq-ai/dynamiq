@@ -4,6 +4,7 @@ from concurrent.futures import wait
 from io import BytesIO
 from pathlib import Path
 from typing import Any, ClassVar, Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -448,6 +449,19 @@ class MultiFileTypeConverter(Node):
             max_workers = min(max_workers, config_limit)
         return max(1, min(max_workers, item_count))
 
+    @staticmethod
+    def _clone_for_worker(node: Node) -> Node:
+        """Clone a child node with a fresh id for per-file isolation.
+
+        Beyond isolating mutable state, the fresh id keeps each file's sub-run distinct in
+        tracing: reusing the original id makes every file's extractor/converter span share one
+        node id, which collapses the run tree (a file's converter attaches to the wrong
+        extractor, leaving some extractors with several converters and others with none).
+        """
+        clone = node.clone()
+        clone.id = str(uuid4())
+        return clone
+
     def _convert_one(
         self,
         file: BytesIO,
@@ -573,7 +587,7 @@ class MultiFileTypeConverter(Node):
                 the conversion and run_depends is the dependency chain the sub-converters produced.
         """
         try:
-            file_type_extractor = self.file_type_extractor.clone()
+            file_type_extractor = self._clone_for_worker(self.file_type_extractor)
             file_type_extractor_result, run_depends = self.call_file_type_extractor(
                 file_type_extractor=file_type_extractor,
                 input_data={"file": file, "filename": filename},
@@ -586,7 +600,7 @@ class MultiFileTypeConverter(Node):
             logger.info(f"Detected file type: {detected_type} for file: {filename}")
 
             if detected_type and detected_type in self.converter_mapping:
-                converter = self.converter_mapping[detected_type].clone()
+                converter = self._clone_for_worker(self.converter_mapping[detected_type])
                 converter_name = converter.name
 
                 try:
@@ -656,7 +670,7 @@ class MultiFileTypeConverter(Node):
             if metadata:
                 converter_input["metadata"] = [metadata]
 
-            fallback_converter = self.fallback_converter.clone()
+            fallback_converter = self._clone_for_worker(self.fallback_converter)
             check_cancellation(config)
             result, run_depends = self.call_fallback_converter(
                 fallback_converter=fallback_converter,

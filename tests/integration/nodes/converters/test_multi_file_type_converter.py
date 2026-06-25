@@ -13,6 +13,7 @@ from io import BytesIO
 
 import pytest
 
+from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.nodes.converters.multi_file_type_converter import MultiFileTypeConverter
 from dynamiq.nodes.converters.text import TextFileConverter
 from dynamiq.nodes.extractors.extractors import FileTypeExtractor
@@ -258,6 +259,41 @@ def test_reused_bytesio_instance_is_isolated_per_file(converter):
     assert all("shared body" in doc.content for doc in documents)
     assert buf.name == "dup.txt"
     assert buf.getvalue() == b"shared body"
+
+
+def test_parallel_subruns_have_unique_trace_ids(converter):
+    """Each file's extractor/converter clone gets a unique node id so the trace tree stays 1:1.
+
+    A shared id collapses every file's spans onto one node id, leaving the run tree ambiguous
+    (some extractors collecting several converters, others none).
+    """
+    n = 5
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(n)]
+    tracing = TracingCallbackHandler()
+    result = converter.run(input_data={"files": files}, config=RunnableConfig(callbacks=[tracing]))
+    assert result.status == RunnableStatus.SUCCESS
+
+    runs = list(tracing.runs.values())
+    extractor_ids = [r.metadata["node"]["id"] for r in runs if (r.name or "") == "file-type-extractor"]
+    converter_runs = [r for r in runs if (r.name or "") == "text-file-converter"]
+
+    # Every per-file extractor and converter clone has a distinct id.
+    assert len(extractor_ids) == n
+    assert len(set(extractor_ids)) == n
+    assert len({r.metadata["node"]["id"] for r in converter_runs}) == n
+
+    # Each converter depends on exactly one extractor, mapping 1:1 onto the extractor set.
+    extractor_id_set = set(extractor_ids)
+    dep_targets = []
+    for r in converter_runs:
+        deps = [
+            d["node"]["id"]
+            for d in (r.metadata.get("run_depends") or [])
+            if d.get("node", {}).get("id") in extractor_id_set
+        ]
+        assert len(deps) == 1
+        dep_targets.append(deps[0])
+    assert sorted(dep_targets) == sorted(extractor_ids)
 
 
 def test_cancellation_stops_pending_files(converter):
