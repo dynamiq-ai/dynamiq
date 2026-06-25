@@ -1,0 +1,444 @@
+"""Tests for the parallelized MultiFileTypeConverter.
+
+These exercise three guarantees of the concurrency change:
+    1. Correctness and output ordering with multiple files of different types.
+    2. That per-file conversions actually run concurrently (proved with a barrier and
+       a sleep-based timing assertion).
+    3. That error semantics match the prior sequential behavior (first failure raises).
+"""
+
+import threading
+import time
+from io import BytesIO
+
+import pytest
+
+from dynamiq.callbacks import TracingCallbackHandler
+from dynamiq.nodes.converters.multi_file_type_converter import MultiFileTypeConverter
+from dynamiq.nodes.converters.text import TextFileConverter
+from dynamiq.nodes.extractors.extractors import FileTypeExtractor
+from dynamiq.runnables import RunnableConfig, RunnableStatus
+
+
+def _txt(content: str, name: str) -> BytesIO:
+    buf = BytesIO(content.encode("utf-8"))
+    buf.name = name
+    return buf
+
+
+@pytest.fixture
+def converter():
+    node = MultiFileTypeConverter()
+    node.init_components()
+    return node
+
+
+def _contents(documents):
+    return [doc.content for doc in documents]
+
+
+# ---------------------------------------------------------------------------
+# (a) Correctness + output ordering with multiple files of different types
+# ---------------------------------------------------------------------------
+
+
+def test_preserves_output_order_with_files(converter):
+    """Documents map back to the input files in their original order."""
+    files = [_txt(f"content number {i}", f"file_{i}.txt") for i in range(8)]
+
+    result = converter.run(input_data={"files": files})
+
+    assert result.status == RunnableStatus.SUCCESS
+    documents = result.output["documents"]
+    assert len(documents) == 8
+    # Each TextFileConverter yields exactly one document; order must match the inputs.
+    for i, content in enumerate(_contents(documents)):
+        assert f"content number {i}" in content
+
+
+def test_mixed_file_types_convert_correctly(converter):
+    """Different file types route to the right converters and keep their order."""
+    files = [
+        _txt("plain text body", "a.txt"),
+        _txt("# Markdown heading\nbody", "b.md"),
+        _txt("another text body", "c.txt"),
+    ]
+
+    result = converter.run(input_data={"files": files})
+
+    assert result.status == RunnableStatus.SUCCESS
+    contents = _contents(result.output["documents"])
+    assert len(contents) == 3
+    assert "plain text body" in contents[0]
+    assert "Markdown heading" in contents[1]
+    assert "another text body" in contents[2]
+
+
+def test_file_paths_preserve_per_file_metadata(tmp_path, converter):
+    """Explicit file paths keep their per-file metadata aligned after parallel processing."""
+    paths = []
+    for i in range(4):
+        p = tmp_path / f"f{i}.txt"
+        p.write_text(f"body {i}")
+        paths.append(str(p))
+
+    metadata = [{"idx": i} for i in range(4)]
+    result = converter.run(input_data={"file_paths": paths, "metadata": metadata})
+
+    assert result.status == RunnableStatus.SUCCESS
+    documents = result.output["documents"]
+    assert len(documents) == 4
+    # Each document's content and its idx metadata must stay consistent with each other.
+    for doc in documents:
+        idx = doc.metadata["idx"]
+        assert f"body {idx}" in doc.content
+
+
+# ---------------------------------------------------------------------------
+# (b) Conversions actually run concurrently
+# ---------------------------------------------------------------------------
+
+
+def test_conversions_run_concurrently_via_barrier(converter):
+    """All N converters must be inside run() simultaneously, proving real parallelism.
+
+    A barrier of size N only releases once N threads reach it. If conversion were
+    sequential, the second thread would never arrive and the barrier would time out.
+    """
+    n = 6
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(n)]
+
+    barrier = threading.Barrier(n, timeout=5)
+    original_run = TextFileConverter.run
+
+    def barriered_run(self, *args, **kwargs):
+        # Block until all N file conversions have entered concurrently.
+        barrier.wait()
+        return original_run(self, *args, **kwargs)
+
+    TextFileConverter.run = barriered_run
+    try:
+        result = converter.run(input_data={"files": files})
+    finally:
+        TextFileConverter.run = original_run
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert len(result.output["documents"]) == n
+
+
+def test_parallel_is_faster_than_sequential(converter):
+    """Wall-clock for N sleep-mocked files is ~one sleep, not N sleeps."""
+    n = 8
+    sleep_s = 0.05
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(n)]
+
+    original_run = TextFileConverter.run
+
+    def slow_run(self, *args, **kwargs):
+        time.sleep(sleep_s)
+        return original_run(self, *args, **kwargs)
+
+    TextFileConverter.run = slow_run
+    try:
+        start = time.perf_counter()
+        result = converter.run(input_data={"files": files})
+        elapsed = time.perf_counter() - start
+    finally:
+        TextFileConverter.run = original_run
+
+    assert result.status == RunnableStatus.SUCCESS
+    sequential_estimate = n * sleep_s
+    # Parallel execution should be well under half the sequential time.
+    assert (
+        elapsed < sequential_estimate / 2
+    ), f"Expected parallel run << {sequential_estimate:.3f}s sequential, got {elapsed:.3f}s"
+
+
+def test_max_workers_caps_concurrency(converter):
+    """max_workers limits how many conversions run at once."""
+    n = 6
+    converter.max_workers = 2
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(n)]
+
+    lock = threading.Lock()
+    state = {"active": 0, "peak": 0}
+    original_run = TextFileConverter.run
+
+    def tracking_run(self, *args, **kwargs):
+        with lock:
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        try:
+            time.sleep(0.02)
+            return original_run(self, *args, **kwargs)
+        finally:
+            with lock:
+                state["active"] -= 1
+
+    TextFileConverter.run = tracking_run
+    try:
+        result = converter.run(input_data={"files": files})
+    finally:
+        TextFileConverter.run = original_run
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert state["peak"] <= 2
+
+
+def test_config_max_node_workers_caps_concurrency(converter):
+    """RunnableConfig.max_node_workers is honored as an upper bound on concurrency."""
+    n = 6
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(n)]
+
+    lock = threading.Lock()
+    state = {"active": 0, "peak": 0}
+    original_run = TextFileConverter.run
+
+    def tracking_run(self, *args, **kwargs):
+        with lock:
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        try:
+            time.sleep(0.02)
+            return original_run(self, *args, **kwargs)
+        finally:
+            with lock:
+                state["active"] -= 1
+
+    TextFileConverter.run = tracking_run
+    try:
+        result = converter.run(input_data={"files": files}, config=RunnableConfig(max_node_workers=3))
+    finally:
+        TextFileConverter.run = original_run
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert state["peak"] <= 3
+
+
+def test_max_workers_zero_is_honored_not_widened(converter):
+    """An explicit max_workers=0 floors to a single worker, not the full file count."""
+    n = 5
+    converter.max_workers = 0
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(n)]
+
+    lock = threading.Lock()
+    state = {"active": 0, "peak": 0}
+    original_run = TextFileConverter.run
+
+    def tracking_run(self, *args, **kwargs):
+        with lock:
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        try:
+            time.sleep(0.02)
+            return original_run(self, *args, **kwargs)
+        finally:
+            with lock:
+                state["active"] -= 1
+
+    TextFileConverter.run = tracking_run
+    try:
+        result = converter.run(input_data={"files": files})
+    finally:
+        TextFileConverter.run = original_run
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert state["peak"] == 1
+
+
+def test_reused_bytesio_instance_is_isolated_per_file(converter):
+    """The same BytesIO passed multiple times is copied per work item, not shared."""
+    buf = _txt("shared body", "dup.txt")
+    files = [buf, buf, buf]
+
+    result = converter.run(input_data={"files": files})
+
+    assert result.status == RunnableStatus.SUCCESS
+    documents = result.output["documents"]
+    assert len(documents) == 3
+    assert all("shared body" in doc.content for doc in documents)
+    assert buf.name == "dup.txt"
+    assert buf.getvalue() == b"shared body"
+
+
+def test_parallel_subruns_have_unique_trace_ids(converter):
+    """Each file's extractor/converter clone gets a unique node id so the trace tree stays 1:1.
+
+    A shared id collapses every file's spans onto one node id, leaving the run tree ambiguous
+    (some extractors collecting several converters, others none).
+    """
+    n = 5
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(n)]
+    tracing = TracingCallbackHandler()
+    result = converter.run(input_data={"files": files}, config=RunnableConfig(callbacks=[tracing]))
+    assert result.status == RunnableStatus.SUCCESS
+
+    runs = list(tracing.runs.values())
+    extractor_ids = [r.metadata["node"]["id"] for r in runs if (r.name or "") == "file-type-extractor"]
+    converter_runs = [r for r in runs if (r.name or "") == "text-file-converter"]
+
+    # Every per-file extractor and converter clone has a distinct id.
+    assert len(extractor_ids) == n
+    assert len(set(extractor_ids)) == n
+    assert len({r.metadata["node"]["id"] for r in converter_runs}) == n
+
+    # Each converter depends on exactly one extractor, mapping 1:1 onto the extractor set.
+    extractor_id_set = set(extractor_ids)
+    dep_targets = []
+    for r in converter_runs:
+        deps = [
+            d["node"]["id"]
+            for d in (r.metadata.get("run_depends") or [])
+            if d.get("node", {}).get("id") in extractor_id_set
+        ]
+        assert len(deps) == 1
+        dep_targets.append(deps[0])
+    assert sorted(dep_targets) == sorted(extractor_ids)
+
+
+def test_cancellation_stops_pending_files(converter):
+    """A cancel signal mid-batch stops files that have not started converting."""
+    n = 6
+    converter.max_workers = 1  # serialize so cancellation lands deterministically between files
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(n)]
+    config = RunnableConfig()
+    token = config.cancellation.token
+
+    converted = []
+    original_run = TextFileConverter.run
+
+    def tracking_run(self, *args, **kwargs):
+        result = original_run(self, *args, **kwargs)
+        converted.append(1)
+        if len(converted) == 2:
+            token.cancel()
+        return result
+
+    TextFileConverter.run = tracking_run
+    try:
+        result = converter.run(input_data={"files": files}, config=config)
+    finally:
+        TextFileConverter.run = original_run
+
+    assert result.status == RunnableStatus.CANCELED
+    assert len(converted) < n
+
+
+def test_cancellation_during_extraction_is_not_masked(converter):
+    """Cancellation signaled mid-file propagates as CANCELED and skips the converter."""
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(3)]
+    config = RunnableConfig()
+    token = config.cancellation.token
+
+    converter_calls = []
+    original_extractor_run = FileTypeExtractor.run
+    original_text_run = TextFileConverter.run
+
+    def cancel_during_extraction(self, *args, **kwargs):
+        token.cancel()
+        return original_extractor_run(self, *args, **kwargs)
+
+    def tracking_text_run(self, *args, **kwargs):
+        converter_calls.append(1)
+        return original_text_run(self, *args, **kwargs)
+
+    FileTypeExtractor.run = cancel_during_extraction
+    TextFileConverter.run = tracking_text_run
+    try:
+        result = converter.run(input_data={"files": files}, config=config)
+    finally:
+        FileTypeExtractor.run = original_extractor_run
+        TextFileConverter.run = original_text_run
+
+    assert result.status == RunnableStatus.CANCELED
+    assert converter_calls == []
+
+
+# ---------------------------------------------------------------------------
+# (c) Error propagation matches prior behavior
+# ---------------------------------------------------------------------------
+
+
+def test_single_file_failure_fails_the_node(converter):
+    """A failure converting one file fails the whole node (no silent swallowing)."""
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(4)]
+
+    original_run = TextFileConverter.run
+
+    def failing_run(self, *args, **kwargs):
+        input_data = kwargs.get("input_data") or (args[0] if args else None)
+        files_arg = input_data.get("files") if isinstance(input_data, dict) else None
+        if files_arg and getattr(files_arg[0], "name", "") == "f2.txt":
+            raise RuntimeError("boom on f2")
+        return original_run(self, *args, **kwargs)
+
+    TextFileConverter.run = failing_run
+    try:
+        result = converter.run(input_data={"files": files})
+    finally:
+        TextFileConverter.run = original_run
+
+    # Same as sequential: the node surfaces a failure rather than returning partial output.
+    assert result.status == RunnableStatus.FAILURE
+
+
+def test_failure_stops_pending_files(converter):
+    """An early failure stops files that have not started, mirroring sequential fail-fast."""
+    n = 6
+    converter.max_workers = 1  # serialize so the failure lands before later files start
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(n)]
+
+    started = []
+    original_run = TextFileConverter.run
+
+    def failing_run(self, *args, **kwargs):
+        input_data = kwargs.get("input_data") or (args[0] if args else None)
+        files_arg = input_data.get("files") if isinstance(input_data, dict) else None
+        name = getattr(files_arg[0], "name", "") if files_arg else ""
+        started.append(name)
+        if name == "f1.txt":
+            raise RuntimeError("boom on f1")
+        return original_run(self, *args, **kwargs)
+
+    TextFileConverter.run = failing_run
+    try:
+        result = converter.run(input_data={"files": files})
+    finally:
+        TextFileConverter.run = original_run
+
+    assert result.status == RunnableStatus.FAILURE
+    assert len(started) < n  # files after the failure never started converting
+
+
+def test_failure_reports_first_error_in_input_order(converter):
+    """The surfaced error is the earliest-index failure, not whichever fails first in time."""
+    files = [_txt(f"body {i}", f"f{i}.txt") for i in range(4)]
+
+    original_run = TextFileConverter.run
+
+    def failing_run(self, *args, **kwargs):
+        input_data = kwargs.get("input_data") or (args[0] if args else None)
+        files_arg = input_data.get("files") if isinstance(input_data, dict) else None
+        name = getattr(files_arg[0], "name", "") if files_arg else ""
+        if name == "f0.txt":
+            time.sleep(0.1)  # earliest index fails, but slowly
+            raise RuntimeError("boom on f0")
+        if name == "f2.txt":
+            raise RuntimeError("boom on f2")  # later index fails first in time
+        return original_run(self, *args, **kwargs)
+
+    TextFileConverter.run = failing_run
+    try:
+        result = converter.run(input_data={"files": files})
+    finally:
+        TextFileConverter.run = original_run
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "boom on f0" in result.error.message
+    assert "boom on f2" not in result.error.message
+
+
+def test_no_documents_raises(converter):
+    """An empty resolved file set fails just as before."""
+    result = converter.run(input_data={"file_paths": ["/path/that/does/not/exist.txt"]})
+    assert result.status == RunnableStatus.FAILURE
