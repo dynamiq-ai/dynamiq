@@ -17,7 +17,7 @@ Or build the Python package from the source code:
 ```sh
 git clone https://github.com/dynamiq-ai/dynamiq.git
 cd dynamiq
-poetry install
+uv sync
 ```
 
 ## Examples

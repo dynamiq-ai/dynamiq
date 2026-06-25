@@ -7,7 +7,7 @@ from dynamiq.types import Document
 def main() -> None:
     if find_spec("bs4") is None:
         print(
-            "HTMLHeaderSplitter requires beautifulsoup4. Install with: poetry install (or pip install beautifulsoup4)"
+            "HTMLHeaderSplitter requires beautifulsoup4. Install with: uv sync (or pip install beautifulsoup4)"
         )
         return
 
