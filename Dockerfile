@@ -3,8 +3,11 @@ FROM python:3.13.10-slim AS runtime
 ENV PYTHONPATH=/app/
 ENV UV_PROJECT_ENVIRONMENT=/usr/local
 ENV UV_COMPILE_BYTECODE=1
+ENV PATH="/opt/uv/bin:$PATH"
 
-COPY --from=ghcr.io/astral-sh/uv:0.11.24 /uv /bin/uv
+# Install uv from PyPI into an isolated venv (so `uv sync` into /usr/local can't
+# remove it), avoiding a build-time dependency on ghcr.io.
+RUN python -m venv /opt/uv && /opt/uv/bin/pip install --no-cache-dir uv==0.11.24
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git curl make build-essential \
