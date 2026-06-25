@@ -22,7 +22,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: "0.8.13"
+          version: "0.11.24"
           python-version: "3.13"
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
