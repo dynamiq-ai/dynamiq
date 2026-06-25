@@ -8,6 +8,7 @@ from dynamiq.nodes.retrievers.base import Retriever, RetrieverInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import PGVectorStore
 from dynamiq.storages.vector.pgvector.pgvector import PGVectorStoreParams, PGVectorStoreRetrieverParams
+from dynamiq.types import Document
 from dynamiq.types.cancellation import check_cancellation
 
 
@@ -130,3 +131,12 @@ class PGVectorDocumentRetriever(Retriever, PGVectorStoreRetrieverParams):
         return {
             "documents": output["documents"],
         }
+
+    def get_documents_by_ids(self, ids: list[str]) -> list[Document]:
+        """Fetch documents by exact id — e.g. to pull a graph fact's source chunk (``source_doc_id``) for
+        grounding. A pgvector-only capability (no similarity search); other retrievers don't define it."""
+        if not ids:
+            return []
+        if self.vector_store is None:
+            self.init_components()
+        return self.vector_store.get_documents_by_ids(list(ids))

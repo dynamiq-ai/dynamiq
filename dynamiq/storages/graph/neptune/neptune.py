@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 from dynamiq.connections import AWSNeptune as AWSNeptuneConnection
 from dynamiq.storages.graph.base import BaseGraphStore
@@ -10,7 +10,13 @@ LABEL_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class NeptuneGraphStore(BaseGraphStore):
-    """Wrapper for Amazon Neptune openCypher execution over HTTP."""
+    """Wrapper for Amazon Neptune openCypher execution over HTTP (read / introspection).
+
+    Graph writes are not implemented for Neptune: ``write_graph`` is defined only on the Neo4j store, so
+    ``supports_write_graph()`` is False here and ``write_graph`` raises ``NotImplementedError``.
+    """
+
+    _writes_graph: ClassVar[bool] = False
 
     def __init__(
         self,

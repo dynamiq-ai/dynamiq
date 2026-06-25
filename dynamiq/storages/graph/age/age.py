@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 from psycopg import sql
 
@@ -13,6 +13,11 @@ LABEL_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 class ApacheAgeGraphStore(BaseGraphStore):
     """Wrapper for Apache AGE openCypher execution via PostgreSQL."""
+
+    # write_graph is built (single-column node builder below) but GATED OFF: AGE's openCypher subset
+    # support for ``ON CREATE SET`` + parameterized ``SET n += $map`` is version-sensitive and cannot be
+    # verified without a live AGE instance. Flip to True only alongside a passing live integration test.
+    _writes_graph: ClassVar[bool] = False
 
     def __init__(
         self,
