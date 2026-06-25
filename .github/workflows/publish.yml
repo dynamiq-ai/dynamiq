@@ -19,29 +19,22 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
         with:
-          python-version: '3.13'
-          check-latest: true
-      - name: Install Poetry
-        uses: snok/install-poetry@v1.4.1
-        with:
-          version: 1.8.3
-          virtualenvs-create: false
+          version: "0.8.13"
+          python-version: "3.13"
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ secrets.AWS_REGION }}
           role-to-assume: ${{ secrets.AWS_ROLE }}
       - name: Build Package
-        run: |
-          poetry build
+        run: uv build
       - name: Publish to AWS CodeArtifact
         run: |
-          export POETRY_HTTP_BASIC_CODEARTIFACT_USERNAME=aws
-          export POETRY_HTTP_BASIC_CODEARTIFACT_PASSWORD=`aws codeartifact get-authorization-token --domain dynamiq --domain-owner ${{ secrets.AWS_ACCOUNT_ID }} --region ${{ secrets.AWS_REGION }} --query authorizationToken --output text`
-          export POETRY_REPOSITORIES_CODEARTIFACT_URL=`aws codeartifact get-repository-endpoint --domain dynamiq --domain-owner ${{ secrets.AWS_ACCOUNT_ID }} --repository dynamiq --region ${{ secrets.AWS_REGION }} --format pypi --query repositoryEndpoint --output text`
-          poetry publish --repository codeartifact
+          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain dynamiq --domain-owner ${{ secrets.AWS_ACCOUNT_ID }} --region ${{ secrets.AWS_REGION }} --query authorizationToken --output text)
+          CODEARTIFACT_URL=$(aws codeartifact get-repository-endpoint --domain dynamiq --domain-owner ${{ secrets.AWS_ACCOUNT_ID }} --repository dynamiq --region ${{ secrets.AWS_REGION }} --format pypi --query repositoryEndpoint --output text)
+          uv publish --publish-url "${CODEARTIFACT_URL}" --username aws --password "${CODEARTIFACT_AUTH_TOKEN}"
       - name: Publish to PyPI
-        run: poetry publish -u __token__ -p ${{ secrets.PYPI_PASSWORD }}
+        run: uv publish --token ${{ secrets.PYPI_PASSWORD }}
