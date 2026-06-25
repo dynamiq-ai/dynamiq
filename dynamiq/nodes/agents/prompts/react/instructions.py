@@ -175,6 +175,8 @@ IMPORTANT RULES:
 - ALWAYS populate the "thought" field FIRST before any other field (particularly "action_input") in your response.
 - Each tool has a specific input format you must strictly follow
 - In action_input field, provide properly formatted JSON with double quotes
+- action_input MUST always be a JSON object mapping the tool's argument names to values, even for a
+  single argument — never a bare value. Example: action_input: "{\\"query\\": \\"latest sales\\", \\"limit\\": 5}".
 - When action_input contains multi-line content (e.g. shell commands, code), you MUST escape newlines as \\n within the JSON string — do NOT use literal line breaks inside JSON string values.
 - Json has to be parsable with json.loads() in Python.
 - Do not use markdown code blocks around your JSON
