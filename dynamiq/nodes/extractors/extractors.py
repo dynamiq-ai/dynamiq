@@ -3,6 +3,7 @@ import re
 from io import BytesIO
 from typing import Any, ClassVar, Literal
 
+import magic
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.nodes import Node, NodeGroup
@@ -116,67 +117,217 @@ class FileType(str, enum.Enum):
     MARKDOWN = "markdown"
 
 
-EXTENSION_MAP = {
+FILE_TYPE_DEFINITIONS: dict[FileType, dict[str, set[str]]] = {
     FileType.IMAGE: {
-        "png",
-        "jpg",
-        "jpeg",
-        "gif",
-        "bmp",
-        "webp",
-        "tiff",
-        "svg",
-        "dwg",
-        "xcf",
-        "jpx",
-        "apng",
-        "cr2",
-        "jxr",
-        "psd",
-        "ico",
-        "heic",
-        "avif",
+        "extensions": {
+            "png",
+            "jpg",
+            "jpeg",
+            "gif",
+            "bmp",
+            "webp",
+            "tiff",
+            "tif",
+            "svg",
+            "dwg",
+            "xcf",
+            "jpx",
+            "apng",
+            "cr2",
+            "jxr",
+            "psd",
+            "ico",
+            "heic",
+            "avif",
+        },
+        "mimes": {
+            "image/png",
+            "image/jpeg",
+            "image/gif",
+            "image/bmp",
+            "image/webp",
+            "image/tiff",
+            "image/svg+xml",
+            "image/x-icon",
+            "image/vnd.microsoft.icon",
+            "image/heic",
+            "image/heif",
+            "image/avif",
+            "image/vnd.adobe.photoshop",
+            "image/x-canon-cr2",
+            "image/vnd.dwg",
+            "image/x-xcf",
+        },
     },
-    FileType.DOCUMENT: {"doc", "docx", "odt", "rtf"},
-    FileType.PDF: {"pdf"},
-    FileType.SPREADSHEET: {"xls", "xlsx", "csv", "ods"},
-    FileType.PRESENTATION: {"ppt", "pptx", "odp"},
+    FileType.DOCUMENT: {
+        "extensions": {"doc", "docx", "odt", "rtf"},
+        "mimes": {
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.oasis.opendocument.text",
+            "application/rtf",
+            "text/rtf",
+        },
+    },
+    FileType.PDF: {
+        "extensions": {"pdf"},
+        "mimes": {"application/pdf"},
+    },
+    FileType.SPREADSHEET: {
+        "extensions": {"xls", "xlsx", "csv", "ods"},
+        "mimes": {
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.oasis.opendocument.spreadsheet",
+            "text/csv",
+            "application/csv",
+        },
+    },
+    FileType.PRESENTATION: {
+        "extensions": {"ppt", "pptx", "odp"},
+        "mimes": {
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/vnd.oasis.opendocument.presentation",
+        },
+    },
     FileType.ARCHIVE: {
-        "zip",
-        "rar",
-        "tar",
-        "7z",
-        "gz",
-        "bz2",
-        "xz",
-        "lz",
-        "lz4",
-        "lzo",
-        "zstd",
-        "Z",
-        "cab",
-        "deb",
-        "ar",
-        "rpm",
-        "br",
-        "dcm",
-        "ps",
-        "crx",
+        "extensions": {
+            "zip",
+            "rar",
+            "tar",
+            "7z",
+            "gz",
+            "bz2",
+            "xz",
+            "lz",
+            "lz4",
+            "lzo",
+            "zstd",
+            "zst",
+            "Z",
+            "cab",
+            "deb",
+            "ar",
+            "rpm",
+            "br",
+            "dcm",
+            "ps",
+            "crx",
+        },
+        "mimes": {
+            "application/zip",
+            "application/x-rar",
+            "application/vnd.rar",
+            "application/x-tar",
+            "application/x-7z-compressed",
+            "application/gzip",
+            "application/x-bzip2",
+            "application/x-xz",
+            "application/x-lzip",
+            "application/x-lz4",
+            "application/zstd",
+            "application/x-compress",
+            "application/vnd.ms-cab-compressed",
+            "application/x-deb",
+            "application/x-archive",
+            "application/x-rpm",
+            "application/x-redhat-package-manager",
+            "application/dicom",
+        },
     },
-    FileType.AUDIO: {"mp3", "wav", "flac", "m4a", "aac", "ogg", "mid", "amr", "aiff"},
-    FileType.VIDEO: {"mp4", "mkv", "avi", "mov", "wmv", "webm", "3gp", "m4v", "mpg", "flv"},
-    FileType.FONT: {"woff", "woff2", "ttf", "otf"},
-    FileType.EXECUTABLE: {"exe"},
-    FileType.DATABASE: {"sqlite"},
-    FileType.EBOOK: {"epub"},
-    FileType.HTML: {"html"},
-    FileType.TEXT: {"txt"},
-    FileType.MARKDOWN: {"md"},
+    FileType.AUDIO: {
+        "extensions": {"mp3", "wav", "flac", "m4a", "aac", "ogg", "mid", "amr", "aiff"},
+        "mimes": {
+            "audio/mpeg",
+            "audio/wav",
+            "audio/x-wav",
+            "audio/flac",
+            "audio/x-flac",
+            "audio/mp4",
+            "audio/aac",
+            "audio/ogg",
+            "audio/midi",
+            "audio/x-midi",
+            "audio/amr",
+            "audio/aiff",
+            "audio/x-aiff",
+        },
+    },
+    FileType.VIDEO: {
+        "extensions": {"mp4", "mkv", "avi", "mov", "wmv", "webm", "3gp", "m4v", "mpg", "flv"},
+        "mimes": {
+            "video/mp4",
+            "video/x-matroska",
+            "video/x-msvideo",
+            "video/quicktime",
+            "video/x-ms-wmv",
+            "video/webm",
+            "video/3gpp",
+            "video/mpeg",
+            "video/x-flv",
+        },
+    },
+    FileType.FONT: {
+        "extensions": {"woff", "woff2", "ttf", "otf"},
+        "mimes": {
+            "font/woff",
+            "font/woff2",
+            "font/ttf",
+            "font/otf",
+            "application/font-woff",
+            "application/font-sfnt",
+            "application/x-font-ttf",
+            "application/vnd.ms-opentype",
+        },
+    },
+    FileType.EXECUTABLE: {
+        "extensions": {"exe"},
+        "mimes": {
+            "application/x-dosexec",
+            "application/x-msdownload",
+            "application/vnd.microsoft.portable-executable",
+        },
+    },
+    FileType.DATABASE: {
+        "extensions": {"sqlite"},
+        "mimes": {"application/x-sqlite3", "application/vnd.sqlite3"},
+    },
+    FileType.EBOOK: {
+        "extensions": {"epub"},
+        "mimes": {"application/epub+zip"},
+    },
+    FileType.HTML: {
+        "extensions": {"html"},
+        "mimes": {"text/html"},
+    },
+    FileType.TEXT: {
+        "extensions": {"txt"},
+        "mimes": {"text/plain"},
+    },
+    FileType.MARKDOWN: {
+        "extensions": {"md"},
+        "mimes": {"text/markdown", "text/x-markdown"},
+    },
 }
+
+EXTENSION_MAP = {file_type: definition["extensions"] for file_type, definition in FILE_TYPE_DEFINITIONS.items()}
+
+EXTENSION_TO_FILE_TYPE = {
+    extension.lower(): file_type
+    for file_type, definition in FILE_TYPE_DEFINITIONS.items()
+    for extension in definition["extensions"]
+}
+MIME_TO_FILE_TYPE = {
+    mime.lower(): file_type for file_type, definition in FILE_TYPE_DEFINITIONS.items() for mime in definition["mimes"]
+}
+
+# Leading bytes handed to libmagic.
+_CONTENT_SAMPLE_SIZE = 8192
 
 
 class FileTypeExtractorInputSchema(BaseModel):
-    file: BytesIO | None = Field(None, description="Parameter to provide file")
+    file: BytesIO | bytes | None = Field(None, description="Parameter to provide file content as bytes or BytesIO.")
     filename: str | None = Field("", description="Parameter to provide filename")
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -184,20 +335,71 @@ class FileTypeExtractorInputSchema(BaseModel):
 class FileTypeExtractor(Node):
     group: Literal[NodeGroup.EXTRACTORS] = NodeGroup.EXTRACTORS
     name: str = "file-type-extractor"
-    description: str = "Node that extract file category based on file extension"
+    description: str = "Node that extract file category based on file extension or content"
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     input_schema: ClassVar[type[FileTypeExtractorInputSchema]] = FileTypeExtractorInputSchema
 
+    @staticmethod
+    def _read_header(file: BytesIO | bytes | None, size: int) -> bytes:
+        """
+        Read up to ``size`` leading bytes without consuming a ``BytesIO`` stream.
+        Args:
+            file (BytesIO | bytes | None): The file content to read.
+            size (int): Maximum number of leading bytes to return.
+
+        Returns:
+            bytes: The leading bytes, or an empty ``bytes`` if nothing readable was provided.
+        """
+        if file is None:
+            return b""
+
+        if isinstance(file, bytes):
+            return file[:size]
+
+        if isinstance(file, BytesIO):
+            position = file.tell()
+            file.seek(0)
+            try:
+                return file.read(size)
+            finally:
+                file.seek(position)
+
+        return b""
+
+    @classmethod
+    def _guess_type_from_content(cls, file: BytesIO | bytes | None) -> "FileType | None":
+        """
+        Detect the file category from raw content using libmagic, mapped through ``MIME_TO_FILE_TYPE``.
+
+        Args:
+            file (BytesIO | bytes | None): The file content to inspect.
+
+        Returns:
+            FileType | None: The detected category, or ``None`` when the content is empty or its MIME
+                type is not mapped to a known category.
+        """
+        header = cls._read_header(file, _CONTENT_SAMPLE_SIZE)
+        if not header:
+            return None
+
+        mime_type = magic.from_buffer(header, mime=True)
+        if not mime_type:
+            return None
+
+        mime_type = mime_type.split(";")[0].strip().lower()
+        return MIME_TO_FILE_TYPE.get(mime_type)
+
     def execute(
         self, input_data: FileTypeExtractorInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
         """
-        Determines the category of a file based on its extension.
+        Determines the category of a file from its filename extension when available, otherwise from
+        its content via MIME detection.
         Args:
-            input_data (FileTypeExtractorInputSchema): input data for the tool, which includes either a filename or a
-                BytesIO file object.
+            input_data (FileTypeExtractorInputSchema): input data for the tool, which includes a filename
+                and/or the file content as ``bytes`` or a ``BytesIO`` object.
             config (RunnableConfig, optional): Configuration for the runnable, including callbacks.
             **kwargs: Additional arguments passed to the execution context.
         Returns:
@@ -209,17 +411,16 @@ class FileTypeExtractor(Node):
         file = input_data.file
         filename = input_data.filename
         try:
-            filename = (getattr(file, "name", None) or filename) if file else filename
-            if not filename:
-                return {"type": None}
-            file_ext = filename.split(".")[-1] if "." in filename else ""
-            file_ext = file_ext.lower()
+            filename = (getattr(file, "name", None) or filename) if file is not None else filename
 
             result = None
-            for category, extensions in EXTENSION_MAP.items():
-                if file_ext in extensions:
-                    result = category
-                    break
+
+            if filename and "." in filename:
+                file_ext = filename.rsplit(".", 1)[-1].lower()
+                result = EXTENSION_TO_FILE_TYPE.get(file_ext)
+
+            if result is None:
+                result = self._guess_type_from_content(file)
 
             return {"type": result}
         except Exception as e:
