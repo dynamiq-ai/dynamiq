@@ -1,9 +1,11 @@
+import codecs
 import enum
 import re
+import zipfile
 from io import BytesIO
 from typing import Any, ClassVar, Literal
 
-import magic
+import filetype
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.nodes import Node, NodeGroup
@@ -117,212 +119,85 @@ class FileType(str, enum.Enum):
     MARKDOWN = "markdown"
 
 
-FILE_TYPE_DEFINITIONS: dict[FileType, dict[str, set[str]]] = {
+# Single source of truth: every category and the filename extensions that map to it. The reverse
+# lookup below is derived from this, so a new format is added in exactly one place.
+EXTENSION_MAP = {
     FileType.IMAGE: {
-        "extensions": {
-            "png",
-            "jpg",
-            "jpeg",
-            "gif",
-            "bmp",
-            "webp",
-            "tiff",
-            "tif",
-            "svg",
-            "dwg",
-            "xcf",
-            "jpx",
-            "apng",
-            "cr2",
-            "jxr",
-            "psd",
-            "ico",
-            "heic",
-            "avif",
-        },
-        "mimes": {
-            "image/png",
-            "image/jpeg",
-            "image/gif",
-            "image/bmp",
-            "image/webp",
-            "image/tiff",
-            "image/svg+xml",
-            "image/x-icon",
-            "image/vnd.microsoft.icon",
-            "image/heic",
-            "image/heif",
-            "image/avif",
-            "image/vnd.adobe.photoshop",
-            "image/x-canon-cr2",
-            "image/vnd.dwg",
-            "image/x-xcf",
-        },
+        "png",
+        "jpg",
+        "jpeg",
+        "gif",
+        "bmp",
+        "webp",
+        "tiff",
+        "tif",
+        "svg",
+        "dwg",
+        "xcf",
+        "jpx",
+        "apng",
+        "cr2",
+        "jxr",
+        "psd",
+        "ico",
+        "heic",
+        "avif",
     },
-    FileType.DOCUMENT: {
-        "extensions": {"doc", "docx", "odt", "rtf"},
-        "mimes": {
-            "application/msword",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "application/vnd.oasis.opendocument.text",
-            "application/rtf",
-            "text/rtf",
-        },
-    },
-    FileType.PDF: {
-        "extensions": {"pdf"},
-        "mimes": {"application/pdf"},
-    },
-    FileType.SPREADSHEET: {
-        "extensions": {"xls", "xlsx", "csv", "ods"},
-        "mimes": {
-            "application/vnd.ms-excel",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "application/vnd.oasis.opendocument.spreadsheet",
-            "text/csv",
-            "application/csv",
-        },
-    },
-    FileType.PRESENTATION: {
-        "extensions": {"ppt", "pptx", "odp"},
-        "mimes": {
-            "application/vnd.ms-powerpoint",
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "application/vnd.oasis.opendocument.presentation",
-        },
-    },
+    FileType.DOCUMENT: {"doc", "docx", "odt", "rtf"},
+    FileType.PDF: {"pdf"},
+    FileType.SPREADSHEET: {"xls", "xlsx", "csv", "ods"},
+    FileType.PRESENTATION: {"ppt", "pptx", "odp"},
     FileType.ARCHIVE: {
-        "extensions": {
-            "zip",
-            "rar",
-            "tar",
-            "7z",
-            "gz",
-            "bz2",
-            "xz",
-            "lz",
-            "lz4",
-            "lzo",
-            "zstd",
-            "zst",
-            "Z",
-            "cab",
-            "deb",
-            "ar",
-            "rpm",
-            "br",
-            "dcm",
-            "ps",
-            "crx",
-        },
-        "mimes": {
-            "application/zip",
-            "application/x-rar",
-            "application/vnd.rar",
-            "application/x-tar",
-            "application/x-7z-compressed",
-            "application/gzip",
-            "application/x-bzip2",
-            "application/x-xz",
-            "application/x-lzip",
-            "application/x-lz4",
-            "application/zstd",
-            "application/x-compress",
-            "application/vnd.ms-cab-compressed",
-            "application/x-deb",
-            "application/x-archive",
-            "application/x-rpm",
-            "application/x-redhat-package-manager",
-            "application/dicom",
-        },
+        "zip",
+        "rar",
+        "tar",
+        "7z",
+        "gz",
+        "bz2",
+        "xz",
+        "lz",
+        "lz4",
+        "lzo",
+        "zstd",
+        "zst",
+        "Z",
+        "cab",
+        "deb",
+        "ar",
+        "rpm",
+        "br",
+        "dcm",
+        "ps",
+        "crx",
     },
-    FileType.AUDIO: {
-        "extensions": {"mp3", "wav", "flac", "m4a", "aac", "ogg", "mid", "amr", "aiff"},
-        "mimes": {
-            "audio/mpeg",
-            "audio/wav",
-            "audio/x-wav",
-            "audio/flac",
-            "audio/x-flac",
-            "audio/mp4",
-            "audio/aac",
-            "audio/ogg",
-            "audio/midi",
-            "audio/x-midi",
-            "audio/amr",
-            "audio/aiff",
-            "audio/x-aiff",
-        },
-    },
-    FileType.VIDEO: {
-        "extensions": {"mp4", "mkv", "avi", "mov", "wmv", "webm", "3gp", "m4v", "mpg", "flv"},
-        "mimes": {
-            "video/mp4",
-            "video/x-matroska",
-            "video/x-msvideo",
-            "video/quicktime",
-            "video/x-ms-wmv",
-            "video/webm",
-            "video/3gpp",
-            "video/mpeg",
-            "video/x-flv",
-        },
-    },
-    FileType.FONT: {
-        "extensions": {"woff", "woff2", "ttf", "otf"},
-        "mimes": {
-            "font/woff",
-            "font/woff2",
-            "font/ttf",
-            "font/otf",
-            "application/font-woff",
-            "application/font-sfnt",
-            "application/x-font-ttf",
-            "application/vnd.ms-opentype",
-        },
-    },
-    FileType.EXECUTABLE: {
-        "extensions": {"exe"},
-        "mimes": {
-            "application/x-dosexec",
-            "application/x-msdownload",
-            "application/vnd.microsoft.portable-executable",
-        },
-    },
-    FileType.DATABASE: {
-        "extensions": {"sqlite"},
-        "mimes": {"application/x-sqlite3", "application/vnd.sqlite3"},
-    },
-    FileType.EBOOK: {
-        "extensions": {"epub"},
-        "mimes": {"application/epub+zip"},
-    },
-    FileType.HTML: {
-        "extensions": {"html"},
-        "mimes": {"text/html"},
-    },
-    FileType.TEXT: {
-        "extensions": {"txt"},
-        "mimes": {"text/plain"},
-    },
-    FileType.MARKDOWN: {
-        "extensions": {"md"},
-        "mimes": {"text/markdown", "text/x-markdown"},
-    },
+    FileType.AUDIO: {"mp3", "wav", "flac", "m4a", "aac", "ogg", "mid", "amr", "aiff"},
+    FileType.VIDEO: {"mp4", "mkv", "avi", "mov", "wmv", "webm", "3gp", "m4v", "mpg", "flv"},
+    FileType.FONT: {"woff", "woff2", "ttf", "otf"},
+    FileType.EXECUTABLE: {"exe"},
+    FileType.DATABASE: {"sqlite"},
+    FileType.EBOOK: {"epub"},
+    FileType.HTML: {"html"},
+    FileType.TEXT: {"txt"},
+    FileType.MARKDOWN: {"md"},
 }
-
-EXTENSION_MAP = {file_type: definition["extensions"] for file_type, definition in FILE_TYPE_DEFINITIONS.items()}
 
 EXTENSION_TO_FILE_TYPE = {
-    extension.lower(): file_type
-    for file_type, definition in FILE_TYPE_DEFINITIONS.items()
-    for extension in definition["extensions"]
-}
-MIME_TO_FILE_TYPE = {
-    mime.lower(): file_type for file_type, definition in FILE_TYPE_DEFINITIONS.items() for mime in definition["mimes"]
+    extension.lower(): file_type for file_type, extensions in EXTENSION_MAP.items() for extension in extensions
 }
 
-# Leading bytes handed to libmagic.
+ZIP_DIRECTORY_MAP = {
+    "word/": FileType.DOCUMENT,
+    "ppt/": FileType.PRESENTATION,
+    "xl/": FileType.SPREADSHEET,
+}
+ZIP_MIMETYPE_MAP = {
+    "application/epub+zip": FileType.EBOOK,
+    "application/vnd.oasis.opendocument.text": FileType.DOCUMENT,
+    "application/vnd.oasis.opendocument.spreadsheet": FileType.SPREADSHEET,
+    "application/vnd.oasis.opendocument.presentation": FileType.PRESENTATION,
+}
+
+# Leading bytes read for content detection.
 _CONTENT_SAMPLE_SIZE = 8192
 
 
@@ -368,35 +243,101 @@ class FileTypeExtractor(Node):
 
         return b""
 
+    @staticmethod
+    def _guess_type_from_zip(file: BytesIO | bytes) -> "FileType | None":
+        """
+        Resolve a ZIP-container format (OOXML/ODF/epub) by inspecting the archive's internal layout.
+
+        Args:
+            file (BytesIO | bytes): The file content, known to start with the ZIP signature.
+
+        Returns:
+            FileType | None: The resolved document category, ``FileType.ARCHIVE`` for a plain ZIP, or
+                ``None`` if the bytes are not a readable ZIP archive.
+        """
+        if isinstance(file, BytesIO):
+            source, position = file, file.tell()
+        else:
+            source, position = BytesIO(file), None
+
+        try:
+            source.seek(0)
+            with zipfile.ZipFile(source) as archive:
+                names = archive.namelist()
+                if "mimetype" in names:
+                    mimetype = archive.read("mimetype").decode("utf-8", errors="ignore").strip().lower()
+                    file_type = ZIP_MIMETYPE_MAP.get(mimetype)
+                    if file_type is not None:
+                        return file_type
+                for directory, file_type in ZIP_DIRECTORY_MAP.items():
+                    if any(name.startswith(directory) for name in names):
+                        return file_type
+            return FileType.ARCHIVE
+        except (zipfile.BadZipFile, OSError):
+            return None
+        finally:
+            if position is not None:
+                source.seek(position)
+
+    @staticmethod
+    def _guess_type_from_text(sample: bytes) -> "FileType | None":
+        """
+        Classify text-based content that carries no magic-byte signature.
+
+        Args:
+            sample (bytes): The leading bytes of the file.
+
+        Returns:
+            FileType | None: ``FileType.HTML`` or ``FileType.TEXT``, or ``None`` if the sample is not
+                decodable as UTF-8 text.
+        """
+        try:
+            text = codecs.getincrementaldecoder("utf-8")().decode(sample, final=False)
+        except UnicodeDecodeError:
+            return None
+
+        head = text.lstrip().lower()
+        if head.startswith(("<!doctype html", "<html")) or "<html" in head[:4096]:
+            return FileType.HTML
+        return FileType.TEXT
+
     @classmethod
     def _guess_type_from_content(cls, file: BytesIO | bytes | None) -> "FileType | None":
         """
-        Detect the file category from raw content using libmagic, mapped through ``MIME_TO_FILE_TYPE``.
+        Detect the file category from raw content, covering ZIP-container, binary and text formats.
 
         Args:
             file (BytesIO | bytes | None): The file content to inspect.
 
         Returns:
-            FileType | None: The detected category, or ``None`` when the content is empty or its MIME
-                type is not mapped to a known category.
+            FileType | None: The detected category, or ``None`` when it cannot be determined.
         """
         header = cls._read_header(file, _CONTENT_SAMPLE_SIZE)
         if not header:
             return None
 
-        mime_type = magic.from_buffer(header, mime=True)
-        if not mime_type:
-            return None
+        # ZIP container: covers OOXML, ODF, epub and plain archives.
+        if header.startswith(b"PK"):
+            zip_type = cls._guess_type_from_zip(file)
+            if zip_type is not None:
+                return zip_type
 
-        mime_type = mime_type.split(";")[0].strip().lower()
-        return MIME_TO_FILE_TYPE.get(mime_type)
+        # Other binary formats with a stable magic-byte signature.
+        extension = filetype.guess_extension(header)
+        if extension:
+            file_type = EXTENSION_TO_FILE_TYPE.get(extension.lower())
+            if file_type is not None:
+                return file_type
+
+        # Text-based formats have no signature; fall back to content inspection.
+        return cls._guess_type_from_text(header)
 
     def execute(
         self, input_data: FileTypeExtractorInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
         """
         Determines the category of a file from its filename extension when available, otherwise from
-        its content via MIME detection.
+        its content.
         Args:
             input_data (FileTypeExtractorInputSchema): input data for the tool, which includes a filename
                 and/or the file content as ``bytes`` or a ``BytesIO`` object.
