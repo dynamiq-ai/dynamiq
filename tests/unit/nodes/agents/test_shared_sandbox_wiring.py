@@ -112,3 +112,34 @@ def test_owner_without_active_session_uses_own_backend(test_llm):
     shell = next(t for t in agent.tools if isinstance(t, SandboxShellTool))
     assert agent._sandbox_is_shared is False
     assert shell.sandbox is agent.sandbox_backend
+
+
+def test_two_subagents_share_one_sandbox_distinct_workdirs(test_llm):
+    from dynamiq.nodes.agents.shared_session import _shared_session
+    from dynamiq.nodes.tools.agent_tool import SubAgentTool
+    from dynamiq.sandboxes.tools.shell import SandboxShellTool
+
+    owner = _sandboxed_agent(test_llm, name="Owner", share_sandbox_with_subagents=True)
+    token = owner._maybe_enter_shared_session({"run_id": "run-1"})
+    try:
+        sub1 = Agent(name="Researcher", llm=test_llm, role="r", tools=[])
+        sub2 = Agent(name="Researcher", llm=test_llm, role="r", tools=[])
+
+        shell1 = next(t for t in sub1.tools if isinstance(t, SandboxShellTool))
+        shell2 = next(t for t in sub2.tools if isinstance(t, SandboxShellTool))
+
+        # same underlying sandbox
+        assert shell1.sandbox.sandbox_id == "sbx-shared"
+        assert shell2.sandbox.sandbox_id == "sbx-shared"
+        # isolated working directories
+        assert shell1.sandbox.base_path != shell2.sandbox.base_path
+        assert shell1.sandbox.base_path.startswith("/home/user/work/researcher-")
+        assert shell2.sandbox.base_path.startswith("/home/user/work/researcher-")
+        assert sub1._sandbox_is_shared and sub2._sandbox_is_shared
+
+        # cleanup must not kill the shared sandbox
+        SubAgentTool.cleanup_factory_agent(sub1)
+        assert owner.sandbox_backend.current_sandbox_id == "sbx-shared"
+    finally:
+        owner._exit_shared_session(token)
+    assert _shared_session.get() is None
