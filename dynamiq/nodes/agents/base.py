@@ -241,6 +241,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         description="Configuration for file storage used by the agent.",
     )
     sandbox: SandboxConfig | None = Field(default=None, description="Configuration for sandbox used by the agent.")
+    share_sandbox_with_subagents: bool = Field(
+        default=False,
+        description="When enabled, subagents (SubAgentTool) share this agent's sandbox "
+        "instead of each provisioning their own. Each subagent gets an isolated working directory.",
+    )
     skills: SkillsConfig = Field(
         default_factory=SkillsConfig,
         description="Skills config. When enabled and source registry is set, skills are on (Dynamiq or FileSystem).",
@@ -644,6 +649,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         # Always set — a sub-agent without LTM would otherwise inherit the
         # parent's overlay via `ContextAwareThreadPoolExecutor`.
         ltm_token = _run_extra_tools.set(ltm_tools)
+        shared_session_token = self._maybe_enter_shared_session(kwargs)
         try:
             if use_memory:
                 history_messages = self._retrieve_memory(input_data)
@@ -764,6 +770,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             return execution_result
         finally:
             _run_extra_tools.reset(ltm_token)
+            self._exit_shared_session(shared_session_token)
 
     def retrieve_conversation_history(
         self,
@@ -1848,6 +1855,33 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     def sandbox_backend(self) -> Sandbox | None:
         """Get the sandbox backend from the configuration if enabled."""
         return self.sandbox.backend if self.sandbox and self.sandbox.enabled else None
+
+    def _maybe_enter_shared_session(self, kwargs: dict):
+        """Establish a shared execution session for this subtree if this agent owns one.
+
+        Returns a ContextVar token to reset later, or None when nothing was set
+        (flag off, no sandbox, or a session already exists and is inherited).
+        """
+        from dynamiq.nodes.agents.shared_session import SharedSession, _shared_session
+
+        if _shared_session.get() is not None:
+            return None  # inherit the ancestor's session
+        if not self.share_sandbox_with_subagents or self.sandbox_backend is None:
+            return None
+
+        session = SharedSession(
+            sandbox=self.sandbox_backend,
+            share_sandbox=True,
+            owner_run_id=str(kwargs.get("run_id") or self.id),
+        )
+        return _shared_session.set(session)
+
+    def _exit_shared_session(self, token) -> None:
+        """Reset the ContextVar set by `_maybe_enter_shared_session`."""
+        from dynamiq.nodes.agents.shared_session import _shared_session
+
+        if token is not None:
+            _shared_session.reset(token)
 
     @property
     def _runtime_tools(self) -> list[Node]:
