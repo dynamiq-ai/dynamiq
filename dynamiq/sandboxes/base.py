@@ -378,6 +378,18 @@ class Sandbox(abc.ABC, BaseModel):
         """Close the sandbox."""
         raise NotImplementedError(f"Implementation of close() is not implemented for {self.__class__.__name__}")
 
+    def ensure_started(self) -> str | None:
+        """Materialize the underlying sandbox (assign an id) and return its id."""
+        raise NotImplementedError(f"ensure_started() is not implemented for {self.__class__.__name__}")
+
+    def create_view(self, base_path: str, sandbox_id: str | None = None) -> "Sandbox":
+        """Return a lightweight view of this sandbox bound to a different base_path.
+
+        The view reconnects to the same underlying sandbox (via sandbox_id) but
+        isolates file paths and shell working directory to `base_path`.
+        """
+        raise NotImplementedError(f"create_view() is not implemented for {self.__class__.__name__}")
+
 
 class SandboxConfig(BaseModel):
     """Configuration for sandbox and related features.

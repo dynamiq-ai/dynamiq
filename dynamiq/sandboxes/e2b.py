@@ -91,6 +91,24 @@ class E2BSandbox(Sandbox):
         """Get the current sandbox ID (for saving/reconnecting later)."""
         return self.sandbox_id
 
+    def ensure_started(self) -> str | None:
+        """Ensure the sandbox exists (create/reconnect) and return its id."""
+        self._ensure_sandbox()
+        return self.current_sandbox_id
+
+    def create_view(self, base_path: str, sandbox_id: str | None = None) -> "E2BSandbox":
+        """Create a sibling E2BSandbox that reconnects to the same sandbox_id."""
+        return E2BSandbox(
+            connection=self.connection,
+            sandbox_id=sandbox_id or self.current_sandbox_id,
+            base_path=base_path,
+            timeout=self.timeout,
+            template=self.template,
+            envs=self.envs,
+            metadata=self.metadata,
+            creation_error_handling=self.creation_error_handling,
+        )
+
     def get_public_host(self, port: int) -> str:
         """Return the public host for a given port so the sandbox can be reached at https://{host}.
 
@@ -294,10 +312,10 @@ class E2BSandbox(Sandbox):
 
         try:
             if run_in_background_enabled:
-                sandbox.commands.run(command, background=True)
+                sandbox.commands.run(command, background=True, cwd=self.base_path)
                 return ShellCommandResult(background=True)
 
-            result = sandbox.commands.run(command, timeout=timeout)
+            result = sandbox.commands.run(command, timeout=timeout, cwd=self.base_path)
             return ShellCommandResult(
                 stdout=result.stdout,
                 stderr=result.stderr,
