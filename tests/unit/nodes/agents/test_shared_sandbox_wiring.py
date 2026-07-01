@@ -86,3 +86,29 @@ def test_cleanup_kills_owned_sandbox():
     agent._sandbox_is_shared = False
     SubAgentTool.cleanup_factory_agent(agent)
     agent.sandbox_backend.close.assert_called_once_with(kill=True)
+
+
+def test_subagent_under_session_uses_view_backed_tools(test_llm):
+    from dynamiq.nodes.agents.shared_session import SharedSession
+    from dynamiq.sandboxes.tools.shell import SandboxShellTool
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(sandbox=shared, share_sandbox=True, owner_run_id="owner")
+    token = _shared_session.set(session)
+    try:
+        sub = Agent(name="Researcher", llm=test_llm, role="r", tools=[])  # no own sandbox
+        shell = next(t for t in sub.tools if isinstance(t, SandboxShellTool))
+        assert sub._sandbox_is_shared is True
+        assert shell.sandbox.sandbox_id == "sbx-shared"
+        assert shell.sandbox.base_path.startswith("/home/user/work/researcher-")
+    finally:
+        _shared_session.reset(token)
+
+
+def test_owner_without_active_session_uses_own_backend(test_llm):
+    from dynamiq.sandboxes.tools.shell import SandboxShellTool
+
+    agent = _sandboxed_agent(test_llm, share_sandbox_with_subagents=True)  # no session set yet
+    shell = next(t for t in agent.tools if isinstance(t, SandboxShellTool))
+    assert agent._sandbox_is_shared is False
+    assert shell.sandbox is agent.sandbox_backend

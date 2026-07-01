@@ -273,6 +273,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     _pinned_input: Message | VisionMessage | None = PrivateAttr(default=None)
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
+    _sandbox_is_shared: bool = PrivateAttr(default=False)
     # Loop progress and pending-tool-call state are declared on AgentIterativeCheckpointMixin.
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -346,12 +347,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 expanded_tools.append(tool)
 
         self.tools = expanded_tools
-        if self.file_store_backend and self.sandbox_backend:
+        tools_sandbox = self._resolve_tools_sandbox()
+        if self.file_store_backend and tools_sandbox:
             raise ValueError("file_store and sandbox cannot both be enabled for an Agent at the same time")
 
-        if self.sandbox_backend:
+        if tools_sandbox:
             # Add sandbox tools when sandbox is enabled (not serialized; recreated from sandbox config on load)
-            sandbox_tools = self.sandbox_backend.get_tools(llm=self.llm)
+            sandbox_tools = tools_sandbox.get_tools(llm=self.llm)
             self._excluded_tool_ids.update(t.id for t in sandbox_tools)
             self.tools.extend(sandbox_tools)
 
@@ -1882,6 +1884,24 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         if token is not None:
             _shared_session.reset(token)
+
+    def _resolve_tools_sandbox(self):
+        """Choose the sandbox to build this agent's sandbox tools from.
+
+        Under an active shared session (i.e. this agent is a subagent of a sharing
+        owner), return a per-agent view of the shared sandbox and mark it borrowed.
+        Otherwise return this agent's own sandbox_backend (unchanged behavior).
+        """
+        from dynamiq.nodes.agents.shared_session import _shared_session
+
+        session = _shared_session.get()
+        if session is not None and session.share_sandbox and self.file_store_backend is None:
+            key = f"{(self.sanitize_tool_name(self.name) or 'subagent').lower()}-{uuid4().hex[:8]}"
+            view = session.sandbox_view_for(key)
+            if view is not None:
+                self._sandbox_is_shared = True
+                return view
+        return self.sandbox_backend
 
     @property
     def _runtime_tools(self) -> list[Node]:
