@@ -290,19 +290,16 @@ class EntityExtractor(Node):
         entities_debug: list[dict] = []
         raw_relationships_debug: list[dict] = []
 
-        # Process each document independently and stamp its metadata onto every element it produces. A
-        # per-document LLM failure skips only that chunk (like an unparseable response) so one transient
-        # error can't discard the whole batch -- but if EVERY document fails, that's systemic (e.g. bad
-        # credentials), so we raise rather than silently report an empty graph as success.
+        # Process each document independently, stamping its metadata onto everything it produces. One
+        # document's LLM failure skips only that chunk; if EVERY document fails it's systemic (bad creds),
+        # so we raise rather than report an empty graph as success.
         failed = 0
         documents: list[Document] = []
         for document in input_data.documents:
             check_cancellation(config)
-            # A document id scopes EVERYTHING per-document: node wiring ids, attribute ids, and the
-            # source_doc_id ACL merge discriminator. A missing id silently collapses all three -- id-less
-            # docs alias each other's nodes and their edges merge, overwriting allowed_principals. Assign a
-            # stable id up front so the whole pipeline (and the returned documents) keys off a real value.
-            # Copy rather than mutate in place so callers holding the input list don't see ids change.
+            # The document id scopes everything per-document: node wiring ids, attribute ids, and the
+            # source_doc_id ACL discriminator. Without it, id-less docs alias each other and merge edges
+            # (overwriting allowed_principals). Assign a stable id up front (copy, don't mutate the input).
             if document.id is None:
                 document = document.model_copy(update={"id": uuid.uuid4().hex})
             documents.append(document)
@@ -344,20 +341,15 @@ class EntityExtractor(Node):
     def _apply_document_metadata(self, relationships: list[dict], document: Document) -> None:
         """Copy the document's metadata + provenance onto every RELATIONSHIP it produced.
 
-        Entity nodes (and ``AttributeValue`` value-nodes) deliberately carry NO access metadata — they are
-        pure identity. All ACL/provenance lives on the edges, so a node is visible exactly when the user can
-        reach it through a visible edge. This keeps entity merge a no-op on the node (just attach edges) and
-        removes the whole class of node-ACL union/leak bugs.
+        Nodes carry NO access metadata (pure identity); all ACL/provenance lives on edges, so a node is
+        visible exactly when reachable through a visible edge. This makes entity merge a no-op on the node
+        and avoids node-ACL leak bugs.
 
-        Generic and ACL-agnostic — whatever keys are in ``document.metadata`` (``allowed_principals``,
-        ``acl_workspace_id``, timestamps, custom fields) ride along, exactly like the splitter copies a
-        document's metadata onto each chunk. A provenance pointer ``source_doc_ids=[document.id]`` is added
-        too. Each edge's own keys (e.g. the attribute ``key``) take precedence over metadata keys.
-
-        The document id is also stamped as a scalar ``source_doc_id`` and declared in ``identity_keys`` so
-        the store includes it in the relationship MERGE: the SAME fact asserted by two documents stays two
-        SEPARATE edges, each keeping its own ACL/provenance, instead of merging and overwriting (which would
-        leak — a public document could overwrite a confidential document's ``allowed_principals``).
+        Any keys in ``document.metadata`` (``allowed_principals``, timestamps, custom fields) ride along;
+        each edge's own keys (e.g. attribute ``key``) win over metadata keys. The document id is also
+        stamped as ``source_doc_id`` and declared in ``identity_keys`` so it enters the relationship MERGE:
+        the same fact from two documents stays two edges with their own ACLs, rather than merging and
+        overwriting (a public doc overwriting a confidential doc's ``allowed_principals``).
         """
         doc_props = self._flatten_metadata(dict(document.metadata or {}))
         identity_keys: list[str] = []
@@ -512,10 +504,9 @@ class EntityExtractor(Node):
             for t in o.triples
         }
 
-        # 1) Keep entity nodes whose label is in the ontology. AttributeValue nodes are held aside, NOT
-        #    committed yet: an attribute value carries its access scope on its HAS_ATTRIBUTE edge, so it
-        #    may only survive if that edge survives (step 3). Committing it here would orphan it -- a
-        #    sensitive value left as a disconnected node with no edge ACL -- when its owner is dropped.
+        # 1) Keep entity nodes whose label is in the ontology. AttributeValue nodes are held aside (not
+        #    committed yet): a value's ACL lives on its HAS_ATTRIBUTE edge, so it survives only if that edge
+        #    does (step 3) -- committing here would orphan a sensitive value with no ACL if its owner drops.
         kept_nodes: list[dict] = []
         kept_ids: set[str] = set()
         attribute_nodes: dict[str, dict] = {}
@@ -533,9 +524,9 @@ class EntityExtractor(Node):
         # entity ids so the endpoint check below can vet HAS_ATTRIBUTE edges without committing the values.
         valid_endpoint_ids = kept_ids | attribute_nodes.keys()
 
-        # 2) Keep only relationships with a legal type, surviving endpoints, and (when triples
-        #    are defined) a legal (source_label, type, target_label) pattern. HAS_ATTRIBUTE edges are
-        #    system-generated (declared attributes) — kept as long as their endpoints survive.
+        # 2) Keep relationships with a legal type, surviving endpoints, and (when triples are defined) a
+        #    legal (source, type, target) pattern. HAS_ATTRIBUTE edges are system-generated -> kept if
+        #    their endpoints survive.
         kept_rels: list[dict] = []
         for rel in relationships:
             rel_type, start_label, end_label = rel["type"], rel["start_label"], rel["end_label"]
@@ -555,9 +546,8 @@ class EntityExtractor(Node):
                 f"EntityExtractor: dropping relationship ({start_label})-[{rel_type}]->({end_label}): {reason}"
             )
 
-        # 3) Commit only the AttributeValue nodes still reached by a surviving HAS_ATTRIBUTE edge. Any value
-        #    whose owning entity was dropped lost its edge in step 2, so it is dropped here too -- never left
-        #    as an orphan node holding a value with no ACL.
+        # 3) Commit only AttributeValue nodes still reached by a surviving HAS_ATTRIBUTE edge -- one whose
+        #    owner was dropped lost its edge in step 2, so it is dropped here too, never orphaned with no ACL.
         referenced_attr_ids = {r["end_identity"] for r in kept_rels if r["type"] == HAS_ATTRIBUTE_TYPE}
         for attr_id in attribute_nodes.keys() - referenced_attr_ids:
             logger.debug(f"EntityExtractor: dropping orphaned AttributeValue id={attr_id!r} (owner removed)")
@@ -603,20 +593,17 @@ class EntityExtractor(Node):
     ) -> tuple[list[dict], list[dict]]:
         """Convert LLM-friendly entities/relationships into the write_graph node/relationship shape.
 
-        Entity nodes carry ONLY identity (``id`` + ``name``) — never the LLM's free-form ``properties``.
-        Nodes are merged by name and hold no ACL, so any inline property would be readable by anyone who can
-        reach the shared node; keeping nodes identity-only removes that leak. Ontology-declared attributes
-        (``Ontology.attributes``) are instead promoted to a separate
-        ``(entity)-[:HAS_ATTRIBUTE {key}]->(:AttributeValue {value})`` relationship so their visibility is
-        scoped independently of the (shared) entity node; any other emitted property is dropped. Value-node
-        ids are scoped per source document (``{wiring_id}::{key}::{document_id}``): the same attribute asserted
-        by two documents yields two value nodes, each on its own edge carrying its own document's
-        ACL/provenance metadata, while re-ingesting the same document updates the same value node.
+        Entity nodes carry ONLY identity (``id`` + ``name``), never the LLM's free-form properties: nodes
+        are merged by name and hold no ACL, so an inline property would leak to anyone who can reach the
+        shared node. Ontology-declared attributes (``Ontology.attributes``) are instead promoted to a
+        ``(entity)-[:HAS_ATTRIBUTE {key}]->(:AttributeValue {value})`` edge so their visibility is scoped
+        independently; any other emitted property is dropped. Value-node ids are doc-scoped
+        (``{wiring_id}::{key}::{document_id}``) so the same attribute from two documents yields two value
+        nodes, each on its own ACL-bearing edge, while re-ingesting a document updates the same node.
 
-        Entity ids are emitted doc-scoped too (``{llm_id}@{document_id}``): LLM ids are only unique within
-        one response, so two documents using the same id for DIFFERENT concepts must not alias once the
-        per-document payloads are pooled. The wiring id carries no identity — entity identity is assigned
-        by name resolution in ``KnowledgeGraphWriter``.
+        Entity ids are doc-scoped too (``{llm_id}@{document_id}``): LLM ids are unique only within one
+        response, so identical ids from different documents must not alias when pooled. The wiring id
+        carries no identity -- that is assigned by name resolution in ``KnowledgeGraphWriter``.
         """
         doc_suffix = f"@{document.id}" if document is not None and document.id is not None else ""
         id_to_label: dict[str, str] = {}

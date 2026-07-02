@@ -196,9 +196,8 @@ class KnowledgeGraphWriter(Node):
         self._existing_cache = {}
         nodes, relationships = input_data.nodes, input_data.relationships
 
-        # Relationship endpoints reference node wiring ids; resolution (below) only rewrites endpoints found
-        # among `nodes`. An endpoint absent from `nodes` can never be resolved -- it would be written with an
-        # ephemeral id that MATCHes no graph node (creating no edge) and would mis-tag chunks with that id.
+        # Resolution only rewrites endpoints found among `nodes`. An endpoint absent from `nodes` can't be
+        # resolved -- it would get an ephemeral id that matches no graph node (no edge) and mis-tags chunks.
         # Reject such payloads instead of silently writing nothing useful.
         if relationships:
             node_ids = {n["properties"]["id"] for n in nodes}
@@ -321,10 +320,9 @@ class KnowledgeGraphWriter(Node):
                     # Make the new node a match candidate for the rest of this batch.
                     self._existing_cache.setdefault(label, []).append((id_remap[old_id], name))
 
-        # AttributeValue ids derive from their owner entity so re-ingestion updates the same value
-        # node. The structured (owner, key, doc) parts ride on the node, so we rebuild the resolved
-        # id directly via build_attribute_value_id — no string parsing, so an LLM id containing "::"
-        # can't corrupt the split. Pop the transient ref so it never reaches the store.
+        # AttributeValue ids derive from their owner so re-ingestion updates the same node. Rebuild the id
+        # from the (owner, key, doc) parts on the node via build_attribute_value_id (no string parsing, so
+        # an LLM id containing "::" can't corrupt it). Pop the transient ref so it never reaches the store.
         for node in nodes:
             if node["labels"][0] != ATTRIBUTE_VALUE_LABEL:
                 continue

@@ -26,14 +26,11 @@ from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.json_parser import parse_llm_json_output
 from dynamiq.utils.logger import logger
 
-# Property keys interpolated into Cypher text (label/property identifiers) must match this — the safe
-# identifier subset shared by openCypher backends. Filter VALUES are always passed as bound parameters;
-# only KEYS are validated here, so a malicious filter key cannot smuggle Cypher.
+# Only filter KEYS are validated against this (VALUES are always bound params), so a key can't inject Cypher.
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-# LLM pre-step (LangChain-style): pull the entities a QUESTION is about, constrained to the same ontology
-# entity types used at ingestion, so the graph search seeds on those names (precise) rather than every
-# word in the question (noisy). The structured output is just a list of names.
+# LLM pre-step: extract the entities a QUESTION is about (constrained to ontology types) so the graph
+# seeds on those names rather than every word. Structured output is just a list of names.
 _QUERY_ENTITY_PROMPT = (
     "You identify which named entities a QUESTION is about, so they can be looked up in a knowledge graph. "
     "Return ONLY a JSON object of the form {\"names\": [\"...\"]} -- the entity names exactly as they appear "
@@ -73,9 +70,8 @@ _FILTER_OPERATORS: dict[str, Any] = {
     "$lte": lambda c, p: f"{c} <= ${p}",
     "$contains": lambda c, p: f"{c} CONTAINS ${p}",  # substring (string properties)
     "$any": lambda c, p: f"${p} IN {c}",  # membership (scalar value in a list property)
-    # list-list intersection (default-deny): keep the edge only if its list property shares >=1 element
-    # with the parameter list. This is how ACL is expressed — `{"allowed_principals": {"$intersects": [...]}}`
-    # — a missing/null property coalesces to [] and is therefore excluded.
+    # list-list intersection (default-deny): keep the edge only if its list shares >=1 element with the
+    # param list. How ACL is expressed: {"allowed_principals": {"$intersects": [...]}}. Null -> [] -> excluded.
     "$intersects": lambda c, p: f"size([x IN coalesce({c}, []) WHERE x IN ${p}]) > 0",
 }
 
@@ -101,12 +97,10 @@ def _lucene_query(text: str) -> str:
 
 
 def _grouped_lucene_query(names: list[str]) -> str:
-    """Fuzzy Lucene query for a list of entity names: AND the tokens WITHIN a name, OR ACROSS names.
+    """Fuzzy Lucene query: AND tokens WITHIN a name, OR ACROSS names.
 
-    A multi-word name like ``"Alice Smith"`` becomes ``(Alice~ AND Smith~)`` — so it matches "Alice Smith"
-    (and typos) but NOT "Alice Tem", which only shares one token. Multiple extracted entities are OR-ed
-    (``(Alice~ AND Smith~) OR (Helios~)``) so a question about several entities still finds them all.
-    Returns "" when no name yields a usable token.
+    ``"Alice Smith"`` -> ``(Alice~ AND Smith~)`` (matches the full name and typos, not a one-token overlap);
+    multiple names are OR-ed. Returns "" when no name yields a usable token.
     """
     groups: list[str] = []
     for name in names:
@@ -420,9 +414,9 @@ class GraphRetriever(ConnectionNode):
         rel_clauses, filter_params = self._edge_predicates("r", input_data.filters)
         params.update(filter_params)
         where = " AND ".join([t for t in [entry_where, *rel_clauses] if t])
-        # Endpoint names are read from the edge's own ACL-bearing snapshot (r.src_name/r.dst_name), never
-        # from the shared, merged entity node -- so a node name written by a differently-scoped document
-        # cannot leak. Node ids (opaque UUIDs) are still taken from the nodes for next-hop iteration.
+        # Names come from the edge's own ACL-bearing snapshot (r.src_name/r.dst_name), never the shared
+        # merged node, so a differently-scoped name can't leak. Node ids still come from the nodes (for
+        # next-hop iteration).
         if anchored:
             ret = (
                 "RETURN r.src_name AS a_name, startNode(r).id AS a_id, "
@@ -571,8 +565,7 @@ class GraphRetriever(ConnectionNode):
             if source is None or target is None or not rel:
                 continue
             rprops = dict(row.get("rprops") or {})
-            # src_name/dst_name are the edge's endpoint-name snapshot, already surfaced as source/target
-            # below -- drop them from the raw props so they are not duplicated in the document metadata.
+            # already surfaced as source/target below -> drop from raw props to avoid metadata duplication.
             rprops.pop("src_name", None)
             rprops.pop("dst_name", None)
             # Attribute edges reify a "key -> value" pair; HAS_ATTRIBUTE is just the bookkeeping type, so

@@ -61,6 +61,7 @@ def shared_node_graph(graph_connection):
          "properties": {"id": "sys-sec", "name": SYS_SECRET}},
     ]
     # Both edges start at the SAME shared org node; each carries its own per-document name snapshot + ACL.
+
     def _edge(dst, src_name, dst_name, principal, doc_id):
         return {
             "type": "USES", "start_label": "Organization", "end_label": "System",
