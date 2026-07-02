@@ -18,8 +18,8 @@ def slugify(value: str) -> str:
 
 class SharedSession:
     """Holds resources shared by an agent and its subagents for one run.
-    
-    The owning agent registers its own `sandbox_backend`; 
+
+    The owning agent registers its own `sandbox_backend`;
     subagents obtain a per-agent *view* (same sandbox_id,
     isolated base_path) via `sandbox_view_for`.
     """
