@@ -10,10 +10,13 @@ from typing import Any, ClassVar
 import pytest
 
 from dynamiq.connections import Neo4j
+from dynamiq.nodes.embedders.base import TextEmbedder
 from dynamiq.nodes.extractors import Ontology
+from dynamiq.nodes.extractors.entity_extractor import ENTITY_EMBEDDING_VECTOR_INDEX
 from dynamiq.nodes.node import Node, NodeGroup
 from dynamiq.nodes.retrievers import GraphRetriever
 from dynamiq.nodes.retrievers.graph import GraphRetrieverInputSchema, _compile_edge_filters
+from dynamiq.storages.graph.neo4j import Neo4jGraphStore
 
 
 class StubLLM(Node):
@@ -57,6 +60,25 @@ class FailingStubReranker(StubReranker):
 
     def execute(self, input_data, config=None, **kwargs):
         raise RuntimeError("rerank boom")
+
+
+class StubTextEmbedder(TextEmbedder):
+    """Embeds a query to a fixed-dim vector from its length (no real model); counts calls."""
+
+    name: str = "stub-text-embedder"
+    fail: bool = False
+    calls: int = 0
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("client", object())  # satisfy ConnectionNode's connection/client requirement
+        super().__init__(**kwargs)
+
+    def execute(self, input_data, config=None, **kwargs):
+        if self.fail:
+            raise RuntimeError("embed boom")
+        query = input_data.query if hasattr(input_data, "query") else input_data["query"]
+        self.calls += 1
+        return {"embedding": [float(len(query)), 1.0, 2.0], "query": query}
 
 
 _ONTOLOGY = Ontology(entity_types=["Org", "Person"], relationship_types=["WORKS_AT"])
@@ -208,14 +230,20 @@ class TestEntryModes:
         assert "MATCH (a)-[r]-(b)" in query
         assert "startNode(r)" in query and "endNode(r)" in query
         assert "coalesce(r.allowed_principals, [])" in query  # ACL still enforced on the edge
+        # names render from the edge's own ACL-bearing snapshot, never the shared merged node
+        assert "r.src_name AS a_name" in query and "r.dst_name AS b_name" in query
+        assert "startNode(r).name" not in query and "endNode(r).name" not in query
 
     def test_scan_fallback_when_index_absent(self):
         node = make_retriever(filters=LOCKED_ACL)
         node._use_fulltext = False
         query, _ = node._build_query(GraphRetrieverInputSchema(query="What does Jane use?"), 10)
         assert "queryNodes" not in query
-        assert "toLower($q) CONTAINS toLower(a.name)" in query  # portable scan
+        assert "toLower($q) CONTAINS toLower(a.name)" in query  # portable scan (seed match still by node name)
         assert "MATCH (a)-[r]->(b)" in query  # directed
+        # but rendered names come from the edge snapshot, not the shared node
+        assert "r.src_name AS a_name" in query and "r.dst_name AS b_name" in query
+        assert "coalesce(a.name" not in query and "coalesce(b.name" not in query
 
     def test_explicit_entities_use_fulltext_fuzzily_like_extracted(self):
         # With the index present, explicit entities go through the SAME fuzzy full-text seek as extracted
@@ -412,3 +440,138 @@ class TestReranking:
         node = make_retriever(rows=[], document_reranker=StubReranker())
         data = node.to_dict()
         assert data["document_reranker"]["name"] == "stub-reranker"
+
+
+class TestVectorSeeding:
+    def test_vector_branch_binds_seeds_from_index(self):
+        # seed_vectors present -> a per-vector index lookup binds the seed entity `a`; expansion is anchored.
+        node = make_retriever(filters=LOCKED_ACL)
+        query, params = node._build_query(
+            GraphRetrieverInputSchema(query="who drives an automobile?"),
+            10,
+            seed_names=["car"],
+            seed_vectors=[[0.1, 0.2, 0.3]],
+        )
+        assert "UNWIND $qvecs AS qv" in query
+        assert f"db.index.vector.queryNodes('{ENTITY_EMBEDDING_VECTOR_INDEX}', $vk, qv) YIELD node AS a" in query
+        assert params["qvecs"] == [[0.1, 0.2, 0.3]]
+        assert params["vk"] == node.vector_top_k
+        assert "CONTAINS" not in query  # not the scan fallback
+        # anchored (undirected) one-hop, ACL still enforced on the edge
+        assert "MATCH (a)-[r]-(b)" in query
+        assert "coalesce(r.allowed_principals, [])" in query
+
+    def test_entity_ids_take_precedence_over_vectors(self):
+        node = make_retriever()
+        query, params = node._build_query(
+            GraphRetrieverInputSchema(query="x", entity_ids=["uuid-acme"]),
+            5,
+            seed_vectors=[[0.1, 0.2, 0.3]],
+        )
+        assert "a.id IN $entity_ids" in query
+        assert "vector.queryNodes" not in query
+
+    def test_falls_back_to_scan_without_seed_vectors(self):
+        # No seed_vectors -> unchanged behavior (CONTAINS scan when no full-text index).
+        node = make_retriever()
+        query, _ = node._build_query(GraphRetrieverInputSchema(query="who works at Acme?"), 10)
+        assert "vector.queryNodes" not in query
+        assert "toLower($q) CONTAINS toLower(a.name)" in query
+
+    def test_seed_vectors_embeds_each_name_when_vector_active(self):
+        embedder = StubTextEmbedder(is_postponed_component_init=True)
+        node = make_retriever(text_embedder=embedder)
+        node._use_vector = True
+
+        vectors = node._seed_vectors(GraphRetrieverInputSchema(query="q"), ["car", "bike"], None, config=None)
+
+        assert vectors == [[3.0, 1.0, 2.0], [4.0, 1.0, 2.0]]  # len("car")=3, len("bike")=4
+        assert embedder.calls == 2  # one embed per seed name
+
+    def test_seed_vectors_reuses_query_vector_when_no_names(self):
+        # No seed names (extraction found none, or seed_by_query) -> the precomputed whole-query vector is
+        # reused as the single seed, with NO extra embed call.
+        embedder = StubTextEmbedder(is_postponed_component_init=True)
+        node = make_retriever(text_embedder=embedder)
+        node._use_vector = True
+
+        vectors = node._seed_vectors(GraphRetrieverInputSchema(query="q"), [], [7.0, 7.0, 7.0], config=None)
+
+        assert vectors == [[7.0, 7.0, 7.0]]
+        assert embedder.calls == 0  # reused, not re-embedded
+
+    def test_seed_vectors_none_when_vector_inactive(self):
+        embedder = StubTextEmbedder(is_postponed_component_init=True)
+        node = make_retriever(text_embedder=embedder)
+        node._use_vector = False  # no vector index -> fall back, embedder untouched
+
+        assert node._seed_vectors(GraphRetrieverInputSchema(query="q"), ["car"], None, config=None) is None
+        assert embedder.calls == 0
+
+    def test_seed_vectors_none_for_entity_id_anchored(self):
+        node = make_retriever(text_embedder=StubTextEmbedder(is_postponed_component_init=True))
+        node._use_vector = True
+        q = GraphRetrieverInputSchema(query="q", entity_ids=["uuid-x"])
+        assert node._seed_vectors(q, [], [1.0], config=None) is None
+
+    def test_seed_vectors_degrades_on_embedder_failure(self):
+        node = make_retriever(text_embedder=StubTextEmbedder(is_postponed_component_init=True, fail=True))
+        node._use_vector = True
+        assert node._seed_vectors(GraphRetrieverInputSchema(query="q"), ["car"], None, config=None) is None
+
+    def test_probe_vector_false_without_embedder(self):
+        node = make_retriever()  # no text_embedder
+        assert node._probe_vector() is False
+
+    def test_probe_vector_true_when_index_present(self):
+        node = make_retriever(text_embedder=StubTextEmbedder(is_postponed_component_init=True))
+        store = Neo4jGraphStore.__new__(Neo4jGraphStore)
+        store.database = None
+        store.run_cypher = lambda *a, **k: ([{"c": 1}], None, [])
+        store.format_records = lambda records: list(records)
+        node._graph_store = store
+        assert node._probe_vector() is True
+
+    def test_to_dict_serializes_the_text_embedder(self):
+        node = make_retriever(rows=[], text_embedder=StubTextEmbedder(is_postponed_component_init=True))
+        data = node.to_dict()
+        assert data["text_embedder"]["name"] == "stub-text-embedder"
+
+
+class TestFactRerank:
+    def test_query_vector_ranks_facts_server_side(self):
+        # A query vector -> the neighbourhood is ordered by edge-embedding cosine, so top_k are MOST relevant.
+        node = make_retriever(filters=LOCKED_ACL)
+        query, params = node._build_query(
+            GraphRetrieverInputSchema(query="what does Acme use?"), 10, seed_names=["Acme"], query_vector=[0.1, 0.2]
+        )
+        assert "vector.similarity.cosine(r.embedding, $qvec)" in query
+        assert "ORDER BY CASE WHEN r.embedding IS NULL THEN -1.0" in query
+        assert params["qvec"] == [0.1, 0.2]
+        assert query.index("ORDER BY") < query.index("LIMIT $limit")  # rank the neighbourhood, THEN limit
+
+    def test_no_query_vector_no_ranking(self):
+        node = make_retriever()
+        query, params = node._build_query(GraphRetrieverInputSchema(query="who works at Acme?"), 10)
+        assert "vector.similarity.cosine" not in query
+        assert "qvec" not in params
+
+    def test_render_strips_edge_embedding_from_output(self):
+        rows = [
+            {
+                "a_name": "Acme",
+                "a_id": "1",
+                "rel": "USES",
+                "b_name": "Helios",
+                "b_id": "2",
+                "rprops": {"embedding": [0.1, 0.2, 0.3], "description": "for trading"},
+            }
+        ]
+        docs = GraphRetriever._render_single_hop(rows)
+        assert "embedding" not in docs[0].metadata  # edge vector never surfaces to the caller
+        assert docs[0].content == "Acme -[USES]-> Helios: for trading"
+
+    def test_seed_by_query_skips_extraction(self):
+        # seed_by_query -> no LLM extraction; seeding falls to the whole-query vector.
+        node = make_retriever(seed_by_query=True, llm=StubLLM(response_content='{"names": ["Acme"]}'))
+        assert node._seed_entity_names(GraphRetrieverInputSchema(query="who at Acme?"), config=None) == []
