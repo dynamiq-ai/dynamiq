@@ -7,7 +7,9 @@ from dynamiq.connections import ApacheAGE, AWSNeptune, Neo4j
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
+from dynamiq.nodes.embedders.base import TextEmbedder
 from dynamiq.nodes.extractors.entity_extractor import (
+    ENTITY_EMBEDDING_VECTOR_INDEX,
     ENTITY_LABEL,
     ENTITY_NAME_FULLTEXT_INDEX,
     HAS_ATTRIBUTE_TYPE,
@@ -225,6 +227,15 @@ class GraphRetriever(ConnectionNode):
     filters: dict[str, Any] | None = None  # LOCKED: always applied; not overridable from the input schema
     top_k: int = 50
     document_reranker: Node | None = None  # optional rerank of rendered facts; top_k here = candidate pool
+    # Optional semantic seeding: when set AND the entity vector index exists, entry entities are found by
+    # embedding the query's entity names and vector-searching, instead of the full-text/CONTAINS name match.
+    # Use the SAME embedding model as the writer's `entity_embedder` so vector dimensions match.
+    text_embedder: TextEmbedder | None = None
+    vector_top_k: int = 5  # candidate entities pulled from the vector index per seed name
+    # When True (and vector seeding is available), skip LLM entity extraction and seed the top-k entities by
+    # the WHOLE question embedding — simpler, no LLM, context-preserving. Facts are then reranked by the same
+    # vector. Off by default (keeps entity-anchored extraction). Requires a text_embedder + entity index.
+    seed_by_query: bool = False
     # optional grounding source: any object with get_documents_by_ids(ids) -> list[Document]
     document_retriever: Any = None
     # when True, LLM-compose an answer from the retrieved context; when False (default) return raw facts/source
@@ -234,6 +245,7 @@ class GraphRetriever(ConnectionNode):
 
     _graph_store: BaseGraphStore | None = PrivateAttr(default=None)
     _use_fulltext: bool = PrivateAttr(default=False)
+    _use_vector: bool = PrivateAttr(default=False)
     _run_depends: list = PrivateAttr(default_factory=list)
 
     def reset_run_state(self) -> None:
@@ -241,13 +253,20 @@ class GraphRetriever(ConnectionNode):
 
     @property
     def to_dict_exclude_params(self) -> dict:
-        return super().to_dict_exclude_params | {"llm": True, "document_reranker": True, "document_retriever": True}
+        return super().to_dict_exclude_params | {
+            "llm": True,
+            "document_reranker": True,
+            "document_retriever": True,
+            "text_embedder": True,
+        }
 
     def to_dict(self, **kwargs) -> dict:
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
         if self.document_reranker:
             data["document_reranker"] = self.document_reranker.to_dict(**kwargs)
+        if self.text_embedder:
+            data["text_embedder"] = self.text_embedder.to_dict(**kwargs)
         if self.document_retriever is not None and hasattr(self.document_retriever, "to_dict"):
             data["document_retriever"] = self.document_retriever.to_dict(**kwargs)
         return data
@@ -264,9 +283,12 @@ class GraphRetriever(ConnectionNode):
             self.document_retriever, "is_postponed_component_init", False
         ):
             self.document_retriever.init_components(connection_manager)
+        if self.text_embedder and self.text_embedder.is_postponed_component_init:
+            self.text_embedder.init_components(connection_manager)
         if self._graph_store is None:
             self._graph_store = self._build_graph_store()
         self._use_fulltext = self._probe_fulltext()
+        self._use_vector = self._probe_vector()
 
     def _probe_fulltext(self) -> bool:
         """Whether the entity-name full-text index exists (Neo4j only). Read-only; failure -> scan fallback.
@@ -286,6 +308,27 @@ class GraphRetriever(ConnectionNode):
             return bool(rows and (rows[0].get("c") or 0) > 0)
         except Exception as e:
             logger.warning(f"Node {self.name} - {self.id}: full-text index probe failed, using scan: {e}")
+            return False
+
+    def _probe_vector(self) -> bool:
+        """Whether semantic seeding is available: a ``text_embedder`` is set AND the entity vector index
+        exists (Neo4j only). Read-only; any failure -> ``False`` so the retriever falls back to full-text/scan.
+
+        Backend-agnostic: without an embedder, or on a non-Neo4j store, or before the writer has embedded any
+        entity (so no vector index), this returns ``False`` and the existing name-match path is used.
+        """
+        if not self.text_embedder or not isinstance(self._graph_store, Neo4jGraphStore):
+            return False
+        try:
+            records, _, _ = self._graph_store.run_cypher(
+                "SHOW INDEXES YIELD name, type WHERE name = $n AND type = 'VECTOR' RETURN count(*) AS c",
+                parameters={"n": ENTITY_EMBEDDING_VECTOR_INDEX},
+                database=self.database,
+            )
+            rows = self._graph_store.format_records(records)
+            return bool(rows and (rows[0].get("c") or 0) > 0)
+        except Exception as e:
+            logger.warning(f"Node {self.name} - {self.id}: vector index probe failed, using name match: {e}")
             return False
 
     def _build_graph_store(self) -> BaseGraphStore:
@@ -351,23 +394,88 @@ class GraphRetriever(ConnectionNode):
 
         - explicit ``entities`` -> used as the seed names directly, **skipping LLM extraction**.
         - explicit ``entity_ids`` -> ``[]`` (anchored exactly by id in ``_entry``, not by name).
+        - ``seed_by_query`` -> ``[]`` (no names; seed on the WHOLE question vector, no LLM extraction).
         - otherwise -> extracted from the question by the LLM.
 
-        An empty list means "no seed names" -> ``_entry`` falls back to the raw query.
+        An empty list means "no seed names" -> ``_entry`` seeds on the whole-query vector (or the raw query).
         """
-        if input_data.entity_ids:
+        if input_data.entity_ids or self.seed_by_query:
             return []
         if input_data.entities:
             return input_data.entities
         return self._extract_entity_names(input_data.query, config, **kwargs)
 
+    def _embed_query(self, text: str, config: RunnableConfig, **kwargs) -> list[float] | None:
+        """Embed one text via ``text_embedder``; ``None`` on any failure. One call, reused for the whole-query
+        rank vector and per-name seed vectors."""
+        try:
+            embed_kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
+            embed_kwargs.pop("run_depends", None)
+            result = self.text_embedder.run(
+                input_data={"query": text}, run_depends=self._run_depends, config=config, **embed_kwargs
+            )
+            if result.status != RunnableStatus.SUCCESS:
+                return None
+            self._run_depends = [NodeDependency(node=self.text_embedder).to_dict(for_tracing=True)]
+            return result.output.get("embedding") or None
+        except Exception as e:
+            logger.warning(f"Node {self.name} - {self.id}: query embed failed: {e}")
+            return None
+
+    def _query_vector(self, query: str, config: RunnableConfig, **kwargs) -> list[float] | None:
+        """Embed the WHOLE query ONCE (when ``_use_vector``) → reused for BOTH server-side fact reranking
+        (``$qvec``) and the no-entity-names seed vector (incl. ``seed_by_query``). ``None`` disables both.
+
+        ``_use_vector`` is true only when the entity vector index exists, which — created with the 5.15+
+        ``CREATE VECTOR INDEX`` syntax — also guarantees the ``vector.similarity.cosine`` function the rank
+        uses. Best-effort: any failure returns ``None``."""
+        if not self._use_vector or not query:
+            return None
+        return self._embed_query(query, config, **kwargs)
+
+    def _seed_vectors(
+        self,
+        input_data: GraphRetrieverInputSchema,
+        seed_names: list[str],
+        query_vector: list[float] | None,
+        config: RunnableConfig,
+        **kwargs,
+    ) -> list[list[float]] | None:
+        """Vectors to seed entity search on, or ``None`` to fall back to the full-text/scan path.
+
+        ``None`` when semantic seeding is off (``_use_vector`` False) or the search is anchored by explicit
+        ``entity_ids``. With entity names, each is embedded separately (a multi-entity question seeds on each
+        independently); with NO names (extraction found none, or ``seed_by_query``), the already-computed
+        ``query_vector`` is reused — the whole query is embedded once and serves both seeding and reranking.
+        Any embedder failure → ``None`` (name match).
+        """
+        if not self._use_vector or input_data.entity_ids:
+            return None
+        if not seed_names:
+            return [query_vector] if query_vector else None
+        vectors: list[list[float]] = []
+        for name in seed_names:
+            vector = self._embed_query(name, config, **kwargs)
+            if vector is None:
+                logger.warning(f"Node {self.name} - {self.id}: seed-name embed failed; using name match.")
+                return None
+            vectors.append(vector)
+        return vectors or None
+
     def _entry(
-        self, input_data: GraphRetrieverInputSchema, params: dict[str, Any], seed_names: list[str] | None
+        self,
+        input_data: GraphRetrieverInputSchema,
+        params: dict[str, Any],
+        seed_names: list[str] | None,
+        seed_vectors: list[list[float]] | None = None,
     ) -> tuple[list[str], str | None, bool]:
         """Pick the entry-point strategy. Returns (lead_lines, entry_where, anchored).
 
         - explicit ``entity_ids`` -> anchor on ``:Entity`` nodes by exact id (the precise hybrid/iterative
           seed; takes precedence and skips name matching entirely).
+        - else, ``seed_vectors`` present (a ``text_embedder`` is set and the entity vector index exists)
+          -> anchor on the nearest entities by embedding similarity (``db.index.vector.queryNodes``), one
+          lookup per seed vector. Semantic seeding: matches "car" to an entity named "automobile".
         - else, seed by NAME (``seed_names`` = explicit ``entities`` or LLM-extracted names), matched
           fuzzily: on Neo4j with the index, a full-text seek over ``(tok AND tok) OR (...)``; otherwise a
           portable ``CONTAINS`` scan. With no names, falls back to a recall-y OR over the raw query.
@@ -379,6 +487,18 @@ class GraphRetriever(ConnectionNode):
         if input_data.entity_ids:
             params["entity_ids"] = input_data.entity_ids
             return [f"MATCH (a:{ENTITY_LABEL})"], "a.id IN $entity_ids", True
+
+        if seed_vectors:
+            params["qvecs"] = seed_vectors
+            params["vk"] = self.vector_top_k
+            return (
+                [
+                    "UNWIND $qvecs AS qv",
+                    f"CALL db.index.vector.queryNodes('{ENTITY_EMBEDDING_VECTOR_INDEX}', $vk, qv) YIELD node AS a",
+                ],
+                None,
+                True,
+            )
 
         # Explicit entities and extracted names are matched the same way; `seed_names` carries either.
         # (`seed_names is None` only on direct _build_query calls -> derive from the input's entities.)
@@ -398,15 +518,24 @@ class GraphRetriever(ConnectionNode):
         return [], "(toLower($q) CONTAINS toLower(a.name) OR toLower($q) CONTAINS toLower(b.name))", False
 
     def _build_query(
-        self, input_data: GraphRetrieverInputSchema, limit: int, seed_names: list[str] | None = None
+        self,
+        input_data: GraphRetrieverInputSchema,
+        limit: int,
+        seed_names: list[str] | None = None,
+        seed_vectors: list[list[float]] | None = None,
+        query_vector: list[float] | None = None,
     ) -> tuple[str, dict[str, Any]]:
         """Build the single parameterized one-hop Cypher query and its parameters.
 
         ``seed_names`` are the extracted entity names computed in ``execute``; ``None`` (the default when
-        called directly) means seed on the raw query (the pre-extraction behavior).
+        called directly) means seed on the raw query (the pre-extraction behavior). ``seed_vectors`` are the
+        embedded seed names (when semantic seeding is active) — when present they take precedence over names.
+        ``query_vector`` is the embedded query — when present the neighbourhood is ranked server-side by the
+        cosine of each edge's ``r.embedding`` so only the top ``limit`` MOST RELEVANT facts come back (a hub
+        no longer returns an arbitrary slice), and the embeddings never cross the wire.
         """
         params: dict[str, Any] = {"limit": limit}
-        lead, entry_where, anchored = self._entry(input_data, params, seed_names)
+        lead, entry_where, anchored = self._entry(input_data, params, seed_names, seed_vectors)
         # Anchored expansion is undirected (catch edges into and out of the seed); direction is recovered
         # in RETURN via startNode/endNode. The scan keeps the directed pattern with a=source, b=target.
         arrow = "-[{rel}]-" if anchored else "-[{rel}]->"
@@ -431,7 +560,16 @@ class GraphRetriever(ConnectionNode):
         lines = [*lead, f"MATCH (a){arrow.format(rel='r')}(b)"]
         if where:
             lines.append(f"WHERE {where}")
-        lines += [ret, "LIMIT $limit"]
+        lines.append(ret)
+        if query_vector:
+            # Rank the whole matched neighbourhood by fact relevance, then LIMIT — so the top_k returned are
+            # the MOST relevant, not an arbitrary slice. Edges without an embedding sort last (score -1).
+            params["qvec"] = query_vector
+            lines.append(
+                "ORDER BY CASE WHEN r.embedding IS NULL THEN -1.0 "
+                "ELSE vector.similarity.cosine(r.embedding, $qvec) END DESC"
+            )
+        lines.append("LIMIT $limit")
         return "\n".join(lines), params
 
     def _edge_predicates(self, rel_var: str, user_filters: dict[str, Any] | None) -> tuple[list[str], dict[str, Any]]:
@@ -460,7 +598,11 @@ class GraphRetriever(ConnectionNode):
         limit = input_data.top_k or self.top_k
         try:
             seed_names = self._seed_entity_names(input_data, config, **kwargs)
-            query, params = self._build_query(input_data, limit, seed_names)
+            # Embed the whole question once (when vectors are on): reused as the fact-rank vector AND, when
+            # there are no seed names, the seed vector — so seeding and reranking share one embedding.
+            query_vector = self._query_vector(input_data.query, config, **kwargs)
+            seed_vectors = self._seed_vectors(input_data, seed_names, query_vector, config, **kwargs)
+            query, params = self._build_query(input_data, limit, seed_names, seed_vectors, query_vector)
             records, _, _ = self._graph_store.run_cypher(query, parameters=params, database=self.database)
             rows = self._graph_store.format_records(records)
             documents = self._render_single_hop(rows)
@@ -568,6 +710,7 @@ class GraphRetriever(ConnectionNode):
             # already surfaced as source/target below -> drop from raw props to avoid metadata duplication.
             rprops.pop("src_name", None)
             rprops.pop("dst_name", None)
+            rprops.pop("embedding", None)  # edge embedding is used server-side for ranking, never surfaced
             # Attribute edges reify a "key -> value" pair; HAS_ATTRIBUTE is just the bookkeeping type, so
             # render the attribute KEY as the relation -- otherwise the fact is a bare value ("$250,000")
             # with no hint of WHICH attribute it is.

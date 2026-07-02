@@ -22,7 +22,9 @@ import pytest
 
 from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.extractors import Ontology
+from dynamiq.nodes.embedders import OpenAIDocumentEmbedder, OpenAITextEmbedder
+from dynamiq.nodes.extractors import KnowledgeGraphWriter, Ontology
+from dynamiq.nodes.extractors.entity_extractor import ENTITY_EMBEDDING_VECTOR_INDEX
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.retrievers import GraphRetriever
 from dynamiq.nodes.retrievers.graph import GraphRetrieverInputSchema
@@ -117,3 +119,96 @@ def test_secret_caller_sees_its_own_edge(shared_node_graph, graph_connection):
 def test_unknown_principal_sees_nothing(shared_node_graph, graph_connection):
     content = _facts_for(graph_connection, ["group:nobody"])
     assert SYS_PUBLIC not in content and SYS_SECRET not in content, f"unknown principal must see nothing: {content}"
+
+
+# --- Semantic (embedding) seeding -------------------------------------------------------------------
+# When the writer is given an `entity_embedder`, each entity's NAME is embedded and a Neo4j vector index
+# is created; a retriever with a matching `text_embedder` then seeds entry entities by embedding
+# similarity. This proves a PARAPHRASED seed ("automaker") reaches an entity named "Car Manufacturer" —
+# a match the full-text/CONTAINS name path cannot make.
+
+VEC_ORG_NAME = "Car Manufacturer"
+VEC_SYS_NAME = "Assembly Robotics"
+VEC_DOC = "docV"
+
+
+@pytest.fixture(scope="module")
+def embedded_graph(graph_connection):
+    """Wipe, then ingest ONE org->system fact through the writer WITH an entity embedder (real OpenAI).
+
+    Exercises the real write path: ``_embed_nodes`` (name embedding) + ``_ensure_entity_vector_index``.
+    """
+    store = Neo4jGraphStore(connection=graph_connection, client=graph_connection.connect())
+    store.run_cypher("MATCH (n) DETACH DELETE n")  # clean slate
+
+    nodes = [
+        {
+            "labels": ["Organization", "Entity"],
+            "identity_key": "id",
+            "properties": {"id": "vec-org", "name": VEC_ORG_NAME},
+        },
+        {"labels": ["System", "Entity"], "identity_key": "id", "properties": {"id": "vec-sys", "name": VEC_SYS_NAME}},
+    ]
+    relationships = [
+        {
+            "type": "USES",
+            "start_label": "Organization",
+            "end_label": "System",
+            "start_identity": "vec-org",
+            "end_identity": "vec-sys",
+            "start_identity_key": "id",
+            "end_identity_key": "id",
+            "identity_keys": ["source_doc_id"],
+            "properties": {
+                "src_name": VEC_ORG_NAME,
+                "dst_name": VEC_SYS_NAME,
+                "allowed_principals": [GROUP_PUBLIC],
+                "source_doc_id": VEC_DOC,
+            },
+        }
+    ]
+
+    writer = KnowledgeGraphWriter(
+        connection=graph_connection,
+        entity_embedder=OpenAIDocumentEmbedder(connection=OpenAIConnection()),
+    )
+    writer.init_components()
+    try:
+        writer.execute(KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=relationships))
+    finally:
+        writer._graph_store.close()
+    yield
+    store.close()
+
+
+def test_vector_index_created_and_entities_embedded(embedded_graph, graph_connection):
+    store = Neo4jGraphStore(connection=graph_connection, client=graph_connection.connect())
+    try:
+        rows, _, _ = store.run_cypher(
+            "SHOW INDEXES YIELD name, type WHERE name = $n AND type = 'VECTOR' RETURN count(*) AS c",
+            parameters={"n": ENTITY_EMBEDDING_VECTOR_INDEX},
+        )
+        assert store.format_records(rows)[0]["c"] == 1, "entity vector index should have been created"
+        embedded, _, _ = store.run_cypher("MATCH (n:Entity) WHERE n.embedding IS NOT NULL RETURN count(n) AS c")
+        assert store.format_records(embedded)[0]["c"] >= 2, "entity nodes should carry an embedding"
+    finally:
+        store.close()
+
+
+def test_paraphrased_query_seeds_via_vector_similarity(embedded_graph, graph_connection):
+    # "automaker" never appears as a stored name; only a semantic (vector) seed can reach "Car Manufacturer".
+    retriever = GraphRetriever(
+        connection=graph_connection,
+        llm=OpenAI(connection=OpenAIConnection(), model="gpt-4o-mini", temperature=0),
+        text_embedder=OpenAITextEmbedder(connection=OpenAIConnection()),
+        ontology=ONTOLOGY,
+        filters={"allowed_principals": {"$intersects": [GROUP_PUBLIC]}},
+    )
+    retriever.init_components()
+    assert retriever._use_vector, "vector seeding should be active (embedder set + vector index present)"
+    try:
+        # `entities` skips LLM extraction so the seed term is fixed; it is embedded and vector-matched.
+        out = retriever.execute(GraphRetrieverInputSchema(query="What does the automaker use?", entities=["automaker"]))
+        assert VEC_SYS_NAME in out["content"], f"paraphrased vector seed should reach the fact: {out['content']}"
+    finally:
+        retriever._graph_store.close()

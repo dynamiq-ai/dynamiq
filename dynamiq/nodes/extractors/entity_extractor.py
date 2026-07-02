@@ -29,12 +29,33 @@ ENTITY_LABEL = "Entity"
 ENTITY_NAME_FULLTEXT_INDEX = "entity_name"
 # Range index on the entity id (Neo4j) so GraphRetriever can seek when seeding traversal by resolved id.
 ENTITY_ID_INDEX = "entity_id"
+# Vector index on the entity name embedding (Neo4j >= 5.11) so GraphRetriever can seed traversal by
+# semantic similarity instead of surface-form overlap. Only present when a writer embeds entities.
+ENTITY_EMBEDDING_VECTOR_INDEX = "entity_embedding"
 
 # Metadata key under which the resolved, unique entity ids a chunk mentions are attached to that chunk —
 # done by KnowledgeGraphWriter (which alone has the post-resolution durable ids). Lets a hybrid retriever
 # seed graph traversal by id (unique, variant-proof), not by ambiguous entity name. ``kg_`` prefixed to
 # avoid colliding with a caller's own document metadata.
 KG_ENTITY_IDS_KEY = "kg_entity_ids"
+
+
+def normalize_name(name: str) -> str:
+    """Canonical form of an entity name for identity & matching: lowercased, non-alphanumerics stripped,
+    whitespace collapsed. Single source of truth so "Acme", "acme", and "ACME  Corp" converge — used both
+    for the deterministic node id (``uuid5(label:normalize_name(name))``) and the trigram similarity input.
+    """
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", "", (name or "").lower())).strip()
+
+
+def build_fact_text(src_name: str, rel_label: str, dst_name: str, description: str | None = None) -> str:
+    """The natural-language triplet embedded onto an edge for semantic rerank: ``"{src} {rel} {dst}[: {desc}]"``.
+
+    ``rel_label`` is the attribute key for ``HAS_ATTRIBUTE`` edges, else the relationship type (mirrors how
+    ``GraphRetriever`` renders a one-hop fact), so the embedded text matches the rendered fact.
+    """
+    text = f"{src_name} {rel_label} {dst_name}"
+    return f"{text}: {description}" if description else text
 
 
 def build_attribute_value_id(owner_id: str, attr_key: str, document_id: str | None) -> str:

@@ -1,21 +1,26 @@
 import re
 from typing import Any, ClassVar, Literal
+from uuid import NAMESPACE_DNS, uuid5
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from dynamiq.connections import ApacheAGE, AWSNeptune, Neo4j
 from dynamiq.connections.managers import ConnectionManager
+from dynamiq.nodes.embedders.base import DocumentEmbedder
 from dynamiq.nodes.extractors.entity_extractor import (
     ATTRIBUTE_VALUE_LABEL,
+    ENTITY_EMBEDDING_VECTOR_INDEX,
     ENTITY_ID_INDEX,
     ENTITY_LABEL,
     ENTITY_NAME_FULLTEXT_INDEX,
     HAS_ATTRIBUTE_TYPE,
     KG_ENTITY_IDS_KEY,
     build_attribute_value_id,
+    build_fact_text,
+    normalize_name,
 )
 from dynamiq.nodes.node import Node, NodeGroup, ensure_config
-from dynamiq.runnables import RunnableConfig
+from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.storages.graph.age import ApacheAgeGraphStore
 from dynamiq.storages.graph.base import BaseGraphStore
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
@@ -25,14 +30,25 @@ from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
 
-# Cypher identifier guard (Neo4j/openCypher label syntax used by the resolution read query).
-_LABEL_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# Fixed namespace for deterministic entity ids: uuid5(_KG_NAMESPACE, f"{label}:{normalize_name(name)}").
+# A stable constant so the same (type, name) always hashes to the same id, across machines and runs.
+_KG_NAMESPACE = uuid5(NAMESPACE_DNS, "dynamiq.knowledge-graph.entity")
 
 
 def _trigrams(text: str) -> set[str]:
     """Padded character trigrams of a normalized name (pg_trgm-style)."""
-    norm = " " + re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", "", text.lower())).strip() + " "
+    norm = " " + normalize_name(text) + " "
     return {norm[i : i + 3] for i in range(len(norm) - 2)} if len(norm) >= 3 else set()
+
+
+def _lucene_or_query(text: str) -> str:
+    """Fuzzy Lucene OR-query over a name's word tokens (``tok~ OR tok~``) for full-text blocking.
+
+    Keeps only word tokens so Lucene special characters can't break the parser; ``~`` adds edit-distance
+    fuzziness. Returns "" when there are no usable tokens.
+    """
+    terms = re.findall(r"[A-Za-z0-9]+", text or "")
+    return " OR ".join(f"{t}~" for t in terms)
 
 
 def _trigram_similarity(a: str, b: str) -> float:
@@ -112,6 +128,20 @@ class KnowledgeGraphWriter(Node):
         graph_name (str | None): Graph name (Apache AGE).
         create_graph_if_not_exists (bool): Create the AGE graph if missing.
         similarity_threshold (float): Trigram similarity above which two names are the same entity.
+        fuzzy_matching (bool): Identity always uses the deterministic id ``uuid5(label:normalize_name(name))``
+            so identical (normalized) names collapse for free with no graph read (idempotent). This flag
+            only toggles the OPTIONAL fuzzy tier on top: when ``True`` (default), spelling variants
+            ("Acme" ≈ "Acme LLC") are additionally merged by pulling a bounded set of near candidates from
+            an index (entity vector index if embeddings are on, else the entity-name full-text index) and
+            confirming with trigram — embeddings only *find* candidates, trigram *decides*, so distinct
+            same-category names ("John Smith" vs "John Doe") are never fused. ``False`` = deterministic only.
+        resolution_top_k (int): Max candidates pulled from the index per name during fuzzy matching.
+        entity_embedder (DocumentEmbedder | None): Optional embedder (Neo4j only). When set: (1) each
+            entity's name is embedded onto the node with a vector index, so ``GraphRetriever`` can seed
+            traversal by semantic similarity; and (2) each relationship's triplet ("src rel dst: desc") is
+            embedded onto the EDGE as ``embedding`` (no new node, ACL stays on the edge), so the retriever
+            can rerank retrieved facts by relevance. Off by default. Use the SAME embedding model on the
+            retriever so vector dimensions match.
     """
 
     group: Literal[NodeGroup.EXTRACTORS] = NodeGroup.EXTRACTORS
@@ -121,15 +151,32 @@ class KnowledgeGraphWriter(Node):
     graph_name: str | None = None
     create_graph_if_not_exists: bool = False
     similarity_threshold: float = 0.6
+    fuzzy_matching: bool = True  # deterministic id is always the base; this toggles the optional fuzzy tier
+    resolution_top_k: int = 10
+    entity_embedder: DocumentEmbedder | None = None
 
     input_schema: ClassVar[type[KnowledgeGraphWriterInputSchema]] = KnowledgeGraphWriterInputSchema
     _graph_store: BaseGraphStore | None = PrivateAttr(default=None)
-    _existing_cache: dict[str, list[tuple[str, str]]] = PrivateAttr(default_factory=dict)
+    # Vector indexes ensured this process (by name) — created lazily on first embed from the real embedding
+    # length so a dimension can never mismatch the embedder's model.
+    _vector_indexes_ready: set[str] = PrivateAttr(default_factory=set)
+
+    @property
+    def to_dict_exclude_params(self) -> dict:
+        return super().to_dict_exclude_params | {"entity_embedder": True}
+
+    def to_dict(self, **kwargs) -> dict:
+        data = super().to_dict(**kwargs)
+        if self.entity_embedder:
+            data["entity_embedder"] = self.entity_embedder.to_dict(**kwargs)
+        return data
 
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """Select the graph store for the connection and ensure the entity indexes exist."""
         connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
+        if self.entity_embedder and self.entity_embedder.is_postponed_component_init:
+            self.entity_embedder.init_components(connection_manager)
         if self._graph_store is None:
             self._graph_store = self._build_graph_store()
         self._ensure_entity_index()
@@ -158,6 +205,123 @@ class KnowledgeGraphWriter(Node):
                 self._graph_store.run_cypher(statement, database=self.database)
             except Exception as e:
                 logger.warning(f"Node {self.name} - {self.id}: could not create entity {what} index: {e}")
+
+    def _embed_texts(self, texts: list[str], config: RunnableConfig, **kwargs) -> dict[str, list[float]]:
+        """Embed a list of texts in ONE embedder call → ``{text: vector}``; ``{}`` when disabled or on failure.
+
+        Neo4j + ``entity_embedder`` gated (embeddings back a Neo4j vector index, so a raw vector on any other
+        backend is unqueryable dead weight). Best-effort: any embedder failure is logged and returns ``{}`` so
+        the write proceeds without embeddings.
+        """
+        if not self.entity_embedder or not isinstance(self._graph_store, Neo4jGraphStore):
+            return {}
+        texts = [t for t in dict.fromkeys(texts) if (t or "").strip()]
+        if not texts:
+            return {}
+        try:
+            run_kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
+            run_kwargs.pop("run_depends", None)
+            result = self.entity_embedder.run(
+                input_data={"documents": [Document(content=t) for t in texts]}, config=config, **run_kwargs
+            )
+            if result.status != RunnableStatus.SUCCESS:
+                logger.warning(f"Node {self.name} - {self.id}: embedder failed ({result.error}); skipping embeddings.")
+                return {}
+            return {
+                doc.content: doc.embedding
+                for doc in (result.output.get("documents") or [])
+                if doc.embedding is not None
+            }
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Node {self.name} - {self.id}: embedding error: {e}; skipping embeddings.")
+            return {}
+
+    def _embed_entity_names(self, nodes: list[dict], config: RunnableConfig, **kwargs) -> dict[str, list[float]]:
+        """Embed every entity node's NAME (one call) → ``{name: vector}``. Reused for the fuzzy candidate
+        lookup (Tier 2 of resolution) and node storage. ``AttributeValue`` holders are doc-scoped values, not
+        entities that get seeded/matched on, so they're skipped."""
+        names = [
+            n["properties"]["name"]
+            for n in nodes
+            if n["labels"][0] != ATTRIBUTE_VALUE_LABEL and (n["properties"].get("name") or "").strip()
+        ]
+        return self._embed_texts(names, config, **kwargs)
+
+    @staticmethod
+    def _attach_embeddings(nodes: list[dict], name_vectors: dict[str, list[float]]) -> list[dict]:
+        """Attach each entity node's precomputed name embedding (from ``_embed_entity_names``) as a property.
+
+        Runs after resolution on the deduped node set. No-op when there are no embeddings.
+        """
+        if not name_vectors:
+            return nodes
+        for node in nodes:
+            if node["labels"][0] == ATTRIBUTE_VALUE_LABEL:
+                continue
+            embedding = name_vectors.get(node["properties"].get("name"))
+            if embedding is not None:
+                node["properties"]["embedding"] = embedding
+        return nodes
+
+    @staticmethod
+    def _edge_triplet_text(rel: dict) -> str | None:
+        """The triplet text to embed for an edge, or ``None`` when it can't be rendered (missing names).
+
+        Mirrors ``GraphRetriever``'s render: the attribute KEY is the relation for ``HAS_ATTRIBUTE`` edges,
+        else the relationship type; the edge's own ``src_name``/``dst_name`` snapshots are the endpoints.
+        """
+        props = rel.get("properties") or {}
+        rel_type = rel.get("type") or ""
+        src_name, dst_name = props.get("src_name"), props.get("dst_name")
+        if not (rel_type and src_name and dst_name):
+            return None
+        rel_label = props["key"] if rel_type == HAS_ATTRIBUTE_TYPE and props.get("key") else rel_type
+        return build_fact_text(src_name, rel_label, dst_name, props.get("description"))
+
+    def _maybe_embed_edges(self, relationships: list[dict], config: RunnableConfig, **kwargs) -> None:
+        """Embed each relationship's triplet and store it on the EDGE (``properties['embedding']``), in place.
+
+        No-op without an embedder / non-Neo4j store (``_embed_texts`` returns ``{}``). The embedding rides
+        through the existing edge write path (``SET r += props``); the retriever uses it to rerank facts and
+        strips it from output. ACL stays on the edge — no new node, no new access-control surface.
+        """
+        if not relationships:
+            return
+        texts = {id(rel): self._edge_triplet_text(rel) for rel in relationships}
+        vectors = self._embed_texts([t for t in texts.values() if t], config, **kwargs)
+        if not vectors:
+            return
+        for rel in relationships:
+            text = texts[id(rel)]
+            vector = vectors.get(text) if text else None
+            if vector is not None:
+                # New props dict (not in-place): `_resolve_against_graph` shallow-copies rels, so the
+                # properties dict is shared with the caller's input — replacing the ref keeps input pristine.
+                rel["properties"] = {**(rel.get("properties") or {}), "embedding": vector}
+
+    def _ensure_vector_index(self, index_name: str, label: str, dimension: int) -> None:
+        """Create a Neo4j (>= 5.11) vector index ``index_name`` on ``(:label).embedding``, once per process.
+
+        Lazy from the REAL embedding length so the dimension can never mismatch the model. Idempotent
+        (``IF NOT EXISTS``), best-effort (logged not raised), Neo4j-only.
+        """
+        if index_name in self._vector_indexes_ready or not isinstance(self._graph_store, Neo4jGraphStore):
+            return
+        statement = (
+            f"CREATE VECTOR INDEX {index_name} IF NOT EXISTS "
+            f"FOR (n:{label}) ON n.embedding "
+            f"OPTIONS {{indexConfig: {{`vector.dimensions`: {int(dimension)}, "
+            "`vector.similarity_function`: 'cosine'}}"
+        )
+        try:
+            self._graph_store.run_cypher(statement, database=self.database)
+            self._vector_indexes_ready.add(index_name)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Node {self.name} - {self.id}: could not create vector index {index_name!r}: {e}")
+
+    def _ensure_entity_vector_index(self, dimension: int) -> None:
+        """Create the entity-name vector index so ``GraphRetriever`` can seed by similarity."""
+        self._ensure_vector_index(ENTITY_EMBEDDING_VECTOR_INDEX, ENTITY_LABEL, dimension)
 
     def _build_graph_store(self) -> BaseGraphStore:
         """Pick the concrete store from the connection type (same dispatch as CypherExecutor)."""
@@ -193,7 +357,6 @@ class KnowledgeGraphWriter(Node):
                 f"{type(self._graph_store).__name__}. Only Neo4j currently implements write_graph."
             )
 
-        self._existing_cache = {}
         nodes, relationships = input_data.nodes, input_data.relationships
 
         # Resolution only rewrites endpoints found among `nodes`. An endpoint absent from `nodes` can't be
@@ -212,7 +375,15 @@ class KnowledgeGraphWriter(Node):
                 )
 
         if nodes:
-            nodes, relationships = self._resolve_against_graph(nodes, relationships)
+            # Embed BEFORE resolving so one embed call serves both: the fuzzy candidate lookup (Tier 2)
+            # and node storage. Ensure the vector index up front so resolution can query it this write.
+            name_vectors = self._embed_entity_names(nodes, config, **kwargs)
+            if name_vectors:
+                self._ensure_entity_vector_index(len(next(iter(name_vectors.values()))))
+            nodes, relationships = self._resolve_against_graph(nodes, relationships, name_vectors)
+            nodes = self._attach_embeddings(nodes, name_vectors)
+            # Embed each relationship's triplet onto the edge (for fact reranking at retrieval time).
+            self._maybe_embed_edges(relationships, config, **kwargs)
 
         if nodes or relationships:
             write_result = self._graph_store.write_graph(
@@ -261,36 +432,157 @@ class KnowledgeGraphWriter(Node):
             enriched.append(document.model_copy(update={"metadata": metadata}))
         return enriched
 
-    def _existing_nodes(self, label: str) -> list[tuple[str, str]]:
-        """All (id, name) of existing nodes with the given label, cached per execute() call."""
-        if label in self._existing_cache:
-            return self._existing_cache[label]
-        rows: list[tuple[str, str]] = []
-        if _LABEL_PATTERN.match(label):
+    @staticmethod
+    def _deterministic_id(label: str, name: str) -> str:
+        """Content-addressed node id: ``uuid5(_KG_NAMESPACE, f"{label}:{normalize_name(name)}")``.
+
+        Same (type, normalized name) → same id, on every machine and run — so identical names collapse
+        under ``MERGE`` with no read (Tier 1), and re-ingestion is idempotent. The label is in the hashed
+        string, so an "Apple" Organization and an "Apple" Product never collide.
+        """
+        return str(uuid5(_KG_NAMESPACE, f"{label}:{normalize_name(name)}"))
+
+    def _existing_ids(self, ids: list[str]) -> set[str]:
+        """Which of ``ids`` are already saved as ``:Entity`` nodes — one batched, index-backed lookup.
+
+        Uses the entity-id range index (``entity_id``), so it's a b-tree seek per id, not a scan. Lets
+        resolution skip the fuzzy tier for entities that already exist exactly. Best-effort and Neo4j-only:
+        on any other backend or any failure it returns an empty set, so fuzzy simply runs (never blocks
+        the write).
+        """
+        if not ids or not isinstance(self._graph_store, Neo4jGraphStore):
+            return set()
+        try:
             records, _, _ = self._graph_store.run_cypher(
-                f"MATCH (n:`{label}`) WHERE n.name IS NOT NULL RETURN n.id AS id, n.name AS name",
+                f"UNWIND $ids AS id MATCH (n:{ENTITY_LABEL} {{id: id}}) RETURN n.id AS id",
+                parameters={"ids": list(dict.fromkeys(ids))},
                 database=self.database,
             )
-            rows = [(r.get("id"), r.get("name")) for r in self._graph_store.format_records(records)]
-        self._existing_cache[label] = rows
-        return rows
+            return {r.get("id") for r in self._graph_store.format_records(records)}
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Node {self.name} - {self.id}: existing-id lookup failed ({e}); running fuzzy.")
+            return set()
 
-    def _resolve_against_graph(self, nodes: list[dict], relationships: list[dict]) -> tuple[list[dict], list[dict]]:
-        """Assign graph identity to every extracted entity by name similarity ONLY.
+    def _blocking_candidates(self, label: str, name: str, vector: list[float] | None) -> list[tuple[str, str]]:
+        """Bounded set of existing same-label entities near ``name`` for fuzzy resolution (Neo4j only).
 
-        LLM-produced ids are ephemeral wiring: they link edges to entities within one extraction
-        and never participate in identity. Every entity either adopts the id of the best
-        trigram-matching existing node (same label, score >= ``similarity_threshold``) or gets a
-        fresh UUID. Newly assigned entities are added to the per-call candidate cache so later
-        entities in the same batch converge onto them too. ``AttributeValue`` node ids are
-        re-derived from their owner's resolved id (``{owner_id}::{attr_key}::{doc_id}``).
-
-        Works on copies of the caller's dicts: this rewrites ``properties["id"]`` and strips the
-        transient ``attr_ref`` below, so mutating the input in place would leave the same payload
-        unwritable a second time (attribute ids could no longer be rebuilt).
+        Replaces the old full-label scan with an index seek: the entity vector index when a name embedding
+        is available (catches synonyms), else the entity-name full-text index. Best-effort — any failure
+        (e.g. the index doesn't exist yet on the first write) yields no candidates, so resolution simply
+        keeps the deterministic id. Returns ``(id, name)`` pairs.
         """
+        try:
+            if vector is not None:
+                # Over-fetch (queryNodes returns nearest across ALL types) then keep this label's.
+                records, _, _ = self._graph_store.run_cypher(
+                    "CALL db.index.vector.queryNodes($index, $k, $vec) YIELD node "
+                    "WHERE $label IN labels(node) AND node.name IS NOT NULL "
+                    "RETURN node.id AS id, node.name AS name",
+                    parameters={
+                        "index": ENTITY_EMBEDDING_VECTOR_INDEX,
+                        "k": max(self.resolution_top_k * 5, self.resolution_top_k),
+                        "vec": vector,
+                        "label": label,
+                    },
+                    database=self.database,
+                )
+            else:
+                lucene = _lucene_or_query(name)
+                if not lucene:
+                    return []
+                records, _, _ = self._graph_store.run_cypher(
+                    "CALL db.index.fulltext.queryNodes($index, $q) YIELD node "
+                    "WHERE $label IN labels(node) AND node.name IS NOT NULL "
+                    "RETURN node.id AS id, node.name AS name LIMIT $k",
+                    parameters={
+                        "index": ENTITY_NAME_FULLTEXT_INDEX,
+                        "q": lucene,
+                        "label": label,
+                        "k": self.resolution_top_k,
+                    },
+                    database=self.database,
+                )
+            return [(r.get("id"), r.get("name")) for r in self._graph_store.format_records(records)]
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                f"Node {self.name} - {self.id}: fuzzy candidate lookup failed ({e}); using deterministic id."
+            )
+            return []
+
+    def _find_canonical(
+        self,
+        label: str,
+        name: str,
+        det_id: str,
+        vector: list[float] | None,
+        batch_candidates: list[tuple[str, str]],
+        use_db: bool,
+    ) -> str | None:
+        """Tier 2: return the id of an existing/earlier entity that is a trigram near-dup of ``name``.
+
+        Candidates come from the index (``_blocking_candidates``, Neo4j) plus this-write entities already
+        resolved (``batch_candidates``). The merge decision is ALWAYS trigram ≥ ``similarity_threshold`` —
+        embeddings/full-text only propose candidates, so distinct same-category names ("John Smith" vs
+        "John Doe") are never fused. Returns ``None`` when nothing clears the threshold (keep ``det_id``).
+        """
+        candidates = list(batch_candidates)
+        if use_db:
+            candidates += self._blocking_candidates(label, name, vector)
+
+        best_id, best_score = None, 0.0
+        for cand_id, cand_name in candidates:
+            if not cand_id or not cand_name or cand_id == det_id:
+                continue  # skip self: an exact-normalized dup already shares det_id
+            score = _trigram_similarity(name, cand_name)
+            if score >= self.similarity_threshold and score > best_score:
+                best_id, best_score = cand_id, score
+        if best_id:
+            logger.info(
+                f"Node {self.name} - {self.id}: linking {name!r} -> existing node {best_id!r} "
+                f"(trigram={best_score:.2f})"
+            )
+        return best_id
+
+    def _resolve_against_graph(
+        self, nodes: list[dict], relationships: list[dict], name_vectors: dict[str, list[float]] | None = None
+    ) -> tuple[list[dict], list[dict]]:
+        """Assign durable identity to every extracted entity — deterministic base + optional fuzzy tier.
+
+        LLM-produced ids are ephemeral wiring. Each entity ALWAYS gets a **deterministic** id
+        ``uuid5(label:normalize_name(name))`` (Tier 1) — identical names collapse under ``MERGE`` with no
+        graph read, and re-ingestion is idempotent. When ``fuzzy_matching`` is on (default), spelling
+        variants are additionally merged (Tier 2, optional): for entities whose deterministic id is not
+        already saved, a bounded index-backed candidate lookup + trigram confirm may adopt an existing
+        entity's id instead. ``AttributeValue`` ids are re-derived from their owner's resolved id.
+
+        Works on copies of the caller's dicts (rewrites ``properties["id"]``, strips the transient
+        ``attr_ref``), so the input stays writable a second time.
+        """
+        name_vectors = name_vectors or {}
         nodes = [{**node, "properties": {**node["properties"]}} for node in nodes]
         relationships = [{**rel} for rel in relationships]
+
+        fuzzy = self.fuzzy_matching
+        use_db = fuzzy and isinstance(self._graph_store, Neo4jGraphStore)
+
+        # Tier 1: deterministic id per named entity (nameless ones get a fresh uuid). One pass, so the
+        # existence check below can be batched over the whole set.
+        det_by_old: dict[str, str] = {}
+        for node in nodes:
+            if node["labels"][0] == ATTRIBUTE_VALUE_LABEL:
+                continue
+            old_id = node["properties"]["id"]
+            if old_id in det_by_old:
+                continue  # wiring ids are doc-scoped, so a repeat means the same in-document entity
+            name = node["properties"].get("name")
+            det_by_old[old_id] = self._deterministic_id(node["labels"][0], name) if name else generate_uuid()
+
+        # Tier 2 GATE: an entity whose deterministic id is ALREADY in the graph is an established exact
+        # node — keep it and skip fuzzy, so re-ingestion is a no-op and fuzzy can never re-merge it into a
+        # similar-but-different node. One batched, index-backed existence lookup answers this for all ids.
+        already_saved = self._existing_ids(list(det_by_old.values())) if fuzzy else set()
+        # This-write candidates so variants within one batch converge (brand-new ids aren't indexed yet).
+        batch_candidates: dict[str, list[tuple[str, str]]] = {}
 
         id_remap: dict[str, str] = {}
         for node in nodes:
@@ -299,26 +591,19 @@ class KnowledgeGraphWriter(Node):
                 continue
             old_id = node["properties"]["id"]
             if old_id in id_remap:
-                continue  # wiring ids are doc-scoped, so a repeat means the same in-document entity
+                continue
             name = node["properties"].get("name")
-
-            best_id, best_score = None, 0.0
-            for ex_id, ex_name in self._existing_nodes(label) if name else []:
-                score = _trigram_similarity(name, ex_name)
-                if score >= self.similarity_threshold and score > best_score:
-                    best_id, best_score = ex_id, score
-
-            if best_id:
-                id_remap[old_id] = best_id
-                logger.info(
-                    f"Node {self.name} - {self.id}: linking {name!r} -> existing node "
-                    f"{best_id!r} (trigram={best_score:.2f})"
+            det_id = det_by_old[old_id]
+            resolved = det_id
+            if fuzzy and name and det_id not in already_saved:
+                match = self._find_canonical(
+                    label, name, det_id, name_vectors.get(name), batch_candidates.get(label, []), use_db
                 )
-            else:
-                id_remap[old_id] = generate_uuid()
-                if name:
-                    # Make the new node a match candidate for the rest of this batch.
-                    self._existing_cache.setdefault(label, []).append((id_remap[old_id], name))
+                if match:
+                    resolved = match
+            id_remap[old_id] = resolved
+            if name:
+                batch_candidates.setdefault(label, []).append((resolved, name))
 
         # AttributeValue ids derive from their owner so re-ingestion updates the same node. Rebuild the id
         # from the (owner, key, doc) parts on the node via build_attribute_value_id (no string parsing, so
