@@ -32,6 +32,7 @@ class HFStreamingInputEventMessage(StreamingEventMessage):
 class HFStreamingOutputEventMessageData(BaseModel):
     prompt: str
     action: HumanFeedbackAction = HumanFeedbackAction.ASK
+    is_browser_takeover: bool = False
 
 
 class HFStreamingOutputEventMessage(StreamingEventMessage):
@@ -136,6 +137,12 @@ Important:
     )
     input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
     msg_template: str = "{{input}}"
+    is_browser_takeover: bool = Field(
+        default=False,
+        description="If True, streamed feedback events are marked as a browser-takeover request so a chat UI can "
+        "render an interactive browser session instead of a plain text prompt. Requires a browser tool "
+        "(e.g. Stagehand with live view enabled) in the same run to provide the live session.",
+    )
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @model_validator(mode="after")
@@ -195,7 +202,9 @@ Important:
         event = HFStreamingOutputEventMessage(
             wf_run_id=config.run_id,
             entity_id=self.id,
-            data=HFStreamingOutputEventMessageData(prompt=prompt, action=HumanFeedbackAction.ASK),
+            data=HFStreamingOutputEventMessageData(
+                prompt=prompt, action=HumanFeedbackAction.ASK, is_browser_takeover=self.is_browser_takeover
+            ),
             event=streaming.event,
             source=StreamingEntitySource(
                 id=self.id,
@@ -237,7 +246,9 @@ Important:
         event = HFStreamingOutputEventMessage(
             wf_run_id=config.run_id,
             entity_id=self.id,
-            data=HFStreamingOutputEventMessageData(prompt=message, action=HumanFeedbackAction.INFO),
+            data=HFStreamingOutputEventMessageData(
+                prompt=message, action=HumanFeedbackAction.INFO, is_browser_takeover=self.is_browser_takeover
+            ),
             event=streaming.event,
             source=StreamingEntitySource(
                 id=self.id,
