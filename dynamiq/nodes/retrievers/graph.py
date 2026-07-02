@@ -420,16 +420,19 @@ class GraphRetriever(ConnectionNode):
         rel_clauses, filter_params = self._edge_predicates("r", input_data.filters)
         params.update(filter_params)
         where = " AND ".join([t for t in [entry_where, *rel_clauses] if t])
+        # Endpoint names are read from the edge's own ACL-bearing snapshot (r.src_name/r.dst_name), never
+        # from the shared, merged entity node -- so a node name written by a differently-scoped document
+        # cannot leak. Node ids (opaque UUIDs) are still taken from the nodes for next-hop iteration.
         if anchored:
             ret = (
-                "RETURN coalesce(startNode(r).name, startNode(r).value) AS a_name, startNode(r).id AS a_id, "
+                "RETURN r.src_name AS a_name, startNode(r).id AS a_id, "
                 "type(r) AS rel, properties(r) AS rprops, "
-                "coalesce(endNode(r).name, endNode(r).value) AS b_name, endNode(r).id AS b_id"
+                "r.dst_name AS b_name, endNode(r).id AS b_id"
             )
         else:
             ret = (
-                "RETURN coalesce(a.name, a.value) AS a_name, a.id AS a_id, type(r) AS rel, "
-                "properties(r) AS rprops, coalesce(b.name, b.value) AS b_name, b.id AS b_id"
+                "RETURN r.src_name AS a_name, a.id AS a_id, type(r) AS rel, "
+                "properties(r) AS rprops, r.dst_name AS b_name, b.id AS b_id"
             )
         lines = [*lead, f"MATCH (a){arrow.format(rel='r')}(b)"]
         if where:
@@ -568,6 +571,10 @@ class GraphRetriever(ConnectionNode):
             if source is None or target is None or not rel:
                 continue
             rprops = dict(row.get("rprops") or {})
+            # src_name/dst_name are the edge's endpoint-name snapshot, already surfaced as source/target
+            # below -- drop them from the raw props so they are not duplicated in the document metadata.
+            rprops.pop("src_name", None)
+            rprops.pop("dst_name", None)
             # Attribute edges reify a "key -> value" pair; HAS_ATTRIBUTE is just the bookkeeping type, so
             # render the attribute KEY as the relation -- otherwise the fact is a bare value ("$250,000")
             # with no hint of WHICH attribute it is.

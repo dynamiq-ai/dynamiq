@@ -208,14 +208,20 @@ class TestEntryModes:
         assert "MATCH (a)-[r]-(b)" in query
         assert "startNode(r)" in query and "endNode(r)" in query
         assert "coalesce(r.allowed_principals, [])" in query  # ACL still enforced on the edge
+        # names render from the edge's own ACL-bearing snapshot, never the shared merged node
+        assert "r.src_name AS a_name" in query and "r.dst_name AS b_name" in query
+        assert "startNode(r).name" not in query and "endNode(r).name" not in query
 
     def test_scan_fallback_when_index_absent(self):
         node = make_retriever(filters=LOCKED_ACL)
         node._use_fulltext = False
         query, _ = node._build_query(GraphRetrieverInputSchema(query="What does Jane use?"), 10)
         assert "queryNodes" not in query
-        assert "toLower($q) CONTAINS toLower(a.name)" in query  # portable scan
+        assert "toLower($q) CONTAINS toLower(a.name)" in query  # portable scan (seed match still by node name)
         assert "MATCH (a)-[r]->(b)" in query  # directed
+        # but rendered names come from the edge snapshot, not the shared node
+        assert "r.src_name AS a_name" in query and "r.dst_name AS b_name" in query
+        assert "coalesce(a.name" not in query and "coalesce(b.name" not in query
 
     def test_explicit_entities_use_fulltext_fuzzily_like_extracted(self):
         # With the index present, explicit entities go through the SAME fuzzy full-text seek as extracted

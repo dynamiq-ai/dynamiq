@@ -620,6 +620,10 @@ class EntityExtractor(Node):
         """
         doc_suffix = f"@{document.id}" if document is not None and document.id is not None else ""
         id_to_label: dict[str, str] = {}
+        # Endpoint names snapshotted onto each edge below (src_name/dst_name). Rendering reads these
+        # ACL-bearing edge props instead of the shared, merged entity node, so a node name written by a
+        # differently-scoped document can never leak to a caller entitled only to THIS document's edge.
+        id_to_name: dict[str, str] = {}
         nodes: list[dict] = []
         attribute_relationships: list[dict] = []
         for entity in entities:
@@ -630,6 +634,8 @@ class EntityExtractor(Node):
             label = self._sanitize_identifier(str(entity_type))
             entity_id = str(entity_id)
             id_to_label[entity_id] = label
+            if entity.get("name") is not None:
+                id_to_name[entity_id] = entity["name"]
             wiring_id = f"{entity_id}{doc_suffix}"
 
             emitted = dict(entity.get("properties") or {})
@@ -659,6 +665,9 @@ class EntityExtractor(Node):
                 # composite string. Sibling key (not in `properties`) so the store never persists it.
                 value_node["attr_ref"] = {"owner": wiring_id, "key": attr_key, "doc": doc_id}
                 nodes.append(value_node)
+                # src_name/dst_name snapshot the rendered endpoints onto the edge: the owner entity's name
+                # and the value itself (the AttributeValue node carries the value, but rendering reads it
+                # from the ACL-bearing edge so it is never dereferenced from a shared node).
                 attribute_relationships.append(
                     GraphRelationship(
                         type=HAS_ATTRIBUTE_TYPE,
@@ -666,7 +675,7 @@ class EntityExtractor(Node):
                         end_label=ATTRIBUTE_VALUE_LABEL,
                         start_identity=wiring_id,
                         end_identity=value_id,
-                        properties={"key": attr_key},
+                        properties={"key": attr_key, "src_name": entity.get("name"), "dst_name": attr_value},
                     ).model_dump()
                 )
 
@@ -686,6 +695,11 @@ class EntityExtractor(Node):
             rel_props = dict(rel.get("properties") or {})
             if rel.get("description") is not None:
                 rel_props["description"] = rel["description"]
+            # Snapshot endpoint names onto the edge so rendering never reads them from the shared node.
+            if source_id in id_to_name:
+                rel_props["src_name"] = id_to_name[source_id]
+            if target_id in id_to_name:
+                rel_props["dst_name"] = id_to_name[target_id]
             graph_relationships.append(
                 GraphRelationship(
                     type=self._sanitize_identifier(str(rel_type)),
