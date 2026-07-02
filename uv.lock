@@ -1340,7 +1340,7 @@ wheels = [
 
 [[package]]
 name = "dynamiq"
-version = "0.56.0"
+version = "0.55.0"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
