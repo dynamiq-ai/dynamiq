@@ -3,6 +3,7 @@ import re
 from io import BytesIO
 from typing import Any, ClassVar, Literal
 
+import filetype
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.nodes import Node, NodeGroup
@@ -139,7 +140,7 @@ EXTENSION_MAP = {
     },
     FileType.DOCUMENT: {"doc", "docx", "odt", "rtf"},
     FileType.PDF: {"pdf"},
-    FileType.SPREADSHEET: {"xls", "xlsx", "csv", "ods"},
+    FileType.SPREADSHEET: {"xls", "xlsx", "csv", "tsv", "ods"},
     FileType.PRESENTATION: {"ppt", "pptx", "odp"},
     FileType.ARCHIVE: {
         "zip",
@@ -169,10 +170,12 @@ EXTENSION_MAP = {
     FileType.EXECUTABLE: {"exe"},
     FileType.DATABASE: {"sqlite"},
     FileType.EBOOK: {"epub"},
-    FileType.HTML: {"html"},
-    FileType.TEXT: {"txt"},
-    FileType.MARKDOWN: {"md"},
+    FileType.HTML: {"html", "htm", "xhtml"},
+    FileType.TEXT: {"txt", "json", "xml", "yaml", "yml", "log", "rst"},
+    FileType.MARKDOWN: {"md", "markdown"},
 }
+
+CONTENT_PROBE_SIZE = 8192
 
 
 class FileTypeExtractorInputSchema(BaseModel):
@@ -184,7 +187,7 @@ class FileTypeExtractorInputSchema(BaseModel):
 class FileTypeExtractor(Node):
     group: Literal[NodeGroup.EXTRACTORS] = NodeGroup.EXTRACTORS
     name: str = "file-type-extractor"
-    description: str = "Node that extract file category based on file extension"
+    description: str = "Node that extracts file category based on file extension, falling back to file content"
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -210,17 +213,53 @@ class FileTypeExtractor(Node):
         filename = input_data.filename
         try:
             filename = (getattr(file, "name", None) or filename) if file else filename
-            if not filename:
-                return {"type": None}
-            file_ext = filename.split(".")[-1] if "." in filename else ""
-            file_ext = file_ext.lower()
+            file_ext = filename.split(".")[-1].lower() if filename and "." in filename else ""
 
             result = None
-            for category, extensions in EXTENSION_MAP.items():
-                if file_ext in extensions:
-                    result = category
-                    break
+            if file_ext:
+                for category, extensions in EXTENSION_MAP.items():
+                    if file_ext in extensions:
+                        result = category
+                        break
+
+            if result is None and file is not None:
+                result = self._detect_type_from_content(file)
 
             return {"type": result}
         except Exception as e:
             raise ValueError(f"Encountered an error while performing extension extraction. \nError details: {e}")
+
+    @staticmethod
+    def _detect_type_from_content(file: BytesIO) -> FileType | None:
+        """Detect the file category from content when the extension is missing or unknown.
+
+        Binary formats (pdf, docx, xlsx, pptx, images, archives, ...) are detected via magic
+        bytes; the remainder is classified as HTML or plain text if it decodes as UTF-8.
+        """
+        file.seek(0)
+        head = file.read(CONTENT_PROBE_SIZE)
+        file.seek(0)
+        if not head:
+            return None
+
+        kind = filetype.guess(head)
+        if kind:
+            for category, extensions in EXTENSION_MAP.items():
+                if kind.extension in extensions:
+                    return category
+            return None
+
+        if b"\x00" in head:
+            return None
+        try:
+            text = head.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                text = head[:-3].decode("utf-8")
+            except UnicodeDecodeError:
+                return None
+
+        lowered = text.lstrip().lower()
+        if lowered.startswith(("<!doctype html", "<html")) or "<html" in lowered:
+            return FileType.HTML
+        return FileType.TEXT if text.strip() else None

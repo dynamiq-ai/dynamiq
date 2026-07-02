@@ -135,7 +135,7 @@ def complex_html_bytesio(complex_html_content):
 
 @pytest.fixture
 def invalid_html_content():
-    return b"\x00\x01\x02\x03\x04This is not valid HTML content\xFF\xFE"
+    return b"\x00\x01\x02\x03\x04This is not valid HTML content\xff\xfe"
 
 
 @pytest.fixture
@@ -242,6 +242,34 @@ def test_html_converter_with_complex_content(request, input_type, input_fixture)
 
     expected_source = html_input if input_type == "file_paths" else html_input.name
     assert document["metadata"]["file_path"] == expected_source
+
+
+def test_html_converter_with_xml_declaration():
+    content = b'<?xml version="1.0" encoding="UTF-8"?><html><body><p>Declared page</p></body></html>'
+    html_buffer = BytesIO(content)
+    html_buffer.name = "declared.html"
+
+    wf_html = Workflow(flow=Flow(nodes=[HTMLConverter()]))
+    response = wf_html.run(input_data={"files": [html_buffer]})
+
+    assert response.status == RunnableStatus.SUCCESS
+    node_id = wf_html.flow.nodes[0].id
+    document = response.output[node_id]["output"]["documents"][0]
+    assert "Declared page" in document["content"]
+
+
+def test_html_converter_with_non_utf8_charset():
+    content = '<html><head><meta charset="iso-8859-1"></head><body><p>café</p></body></html>'.encode("iso-8859-1")
+    html_buffer = BytesIO(content)
+    html_buffer.name = "latin1.html"
+
+    wf_html = Workflow(flow=Flow(nodes=[HTMLConverter()]))
+    response = wf_html.run(input_data={"files": [html_buffer]})
+
+    assert response.status == RunnableStatus.SUCCESS
+    node_id = wf_html.flow.nodes[0].id
+    document = response.output[node_id]["output"]["documents"][0]
+    assert "café" in document["content"]
 
 
 @pytest.mark.parametrize(

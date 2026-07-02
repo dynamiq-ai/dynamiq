@@ -80,7 +80,8 @@ def create_bytesio_with_name(content, name):
         ("video.mp4", None, "video"),
         ("image.gif", None, "image"),
         ("unknownfile.xyz", None, None),
-        (None, create_bytesio_with_name(b"file content with name", "unknownfile.xyz"), None),
+        # Unknown extension, but readable text content: detected from content.
+        (None, create_bytesio_with_name(b"file content with name", "unknownfile.xyz"), "text"),
         (None, create_bytesio_with_name(b"image content", "file_with_name.jpg"), "image"),
         (None, create_bytesio_with_name(b"spreadsheet content", "test.xlsx"), "spreadsheet"),
         (None, create_bytesio_with_name(b"presentation content", "test.pptx"), "presentation"),
@@ -96,9 +97,14 @@ def create_bytesio_with_name(content, name):
         (None, create_bytesio_with_name(b"font content", "test.otf"), "font"),
         (None, create_bytesio_with_name(b"executable content", "test.exe"), "executable"),
         (None, create_bytesio_with_name(b"ebook content", "test.epub"), "ebook"),
-        (None, create_bytesio_with_name(b"unknown content", "unknownfile.xyz"), None),
-        ("file_0", create_bytesio_with_name(b"content", ""), None),
-        (None, create_bytesio_with_name(b"content", ""), None),
+        # Missing or unknown extension: type is detected from content.
+        (None, create_bytesio_with_name(b"unknown content", "unknownfile.xyz"), "text"),
+        ("file_0", create_bytesio_with_name(b"content", ""), "text"),
+        (None, create_bytesio_with_name(b"content", ""), "text"),
+        (None, create_bytesio_with_name(b"%PDF-1.4 fake pdf body", ""), "pdf"),
+        (None, create_bytesio_with_name(b"<!DOCTYPE html><html><body>hi</body></html>", ""), "html"),
+        (None, create_bytesio_with_name(b"\x00\x01\x02 binary garbage \xff\xfe", ""), None),
+        (None, create_bytesio_with_name(b"", ""), None),
         ("", None, None),
     ],
 )
