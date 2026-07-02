@@ -999,6 +999,13 @@ class SambaNova(BaseApiKeyConnection):
         pass
 
 
+class Novita(BaseApiKeyConnection):
+    api_key: str = Field(default_factory=partial(get_env_var, "NOVITA_API_KEY"))
+
+    def connect(self):
+        pass
+
+
 class MilvusDeploymentType(str, enum.Enum):
     """
     Defines general deployment types for Milvus deployments.
