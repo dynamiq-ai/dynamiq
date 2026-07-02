@@ -35,6 +35,10 @@ def test_ensure_started_materializes_and_returns_id():
     assert sb.current_sandbox_id == "sbx-created"
 
 
+def test_e2b_supports_views():
+    assert _sandbox(sandbox_id="s").supports_views is True
+
+
 def test_run_command_shell_runs_in_base_path_cwd():
     sb = _sandbox(base_path="/home/user/work/x")
     fake = MagicMock()

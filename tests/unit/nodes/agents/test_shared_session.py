@@ -2,6 +2,8 @@ from dynamiq.nodes.agents.shared_session import SharedSession, _shared_session, 
 
 
 class FakeSandbox:
+    supports_views = True
+
     def __init__(self, sandbox_id=None, base_path="/home/user"):
         self.sandbox_id = sandbox_id
         self.base_path = base_path
@@ -51,6 +53,26 @@ def test_view_materializes_when_no_sandbox_id():
     assert sb.ensure_started_calls == 1
     assert view.sandbox_id == "sbx-new"
     assert view.base_path == "/home/user/work/writer-cd34"
+
+
+class NoViewSandbox:
+    """A sandbox backend that does not support views (e.g. Daytona / base)."""
+
+    supports_views = False
+    base_path = "/home/user"
+    sandbox_id = "sbx-x"
+
+    @property
+    def current_sandbox_id(self):
+        return self.sandbox_id
+
+
+def test_share_disabled_when_backend_lacks_view_support():
+    sb = NoViewSandbox()
+    ss = SharedSession(sandbox=sb, share_sandbox=True, owner_run_id="o")
+    # A backend that cannot produce views must degrade to no-sharing, not crash.
+    assert ss.share_sandbox is False
+    assert ss.sandbox_view_for("k") is None
 
 
 def test_contextvar_defaults_to_none():

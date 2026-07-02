@@ -275,6 +275,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
     _sandbox_is_shared: bool = PrivateAttr(default=False)
+    # A borrowed per-agent view of an owner's shared sandbox; when set it is this
+    # agent's effective sandbox_backend for the whole run (tools, uploads, output).
+    _shared_sandbox_view: Sandbox | None = PrivateAttr(default=None)
     # Loop progress and pending-tool-call state are declared on AgentIterativeCheckpointMixin.
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -1856,7 +1859,15 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
     @property
     def sandbox_backend(self) -> Sandbox | None:
-        """Get the sandbox backend from the configuration if enabled."""
+        """Get the effective sandbox backend for this agent.
+
+        When this agent borrows an owner's shared sandbox, the per-agent view is the
+        effective backend so uploads, output collection, skills ingestion and cleanup
+        all target the same sandbox as the sandbox tools. Otherwise falls back to the
+        agent's own configured backend (if enabled).
+        """
+        if self._shared_sandbox_view is not None:
+            return self._shared_sandbox_view
         return self.sandbox.backend if self.sandbox and self.sandbox.enabled else None
 
     def _maybe_enter_shared_session(self, kwargs: dict):
@@ -1890,11 +1901,17 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         Otherwise return this agent's own sandbox_backend (unchanged behavior).
         """
         session = _shared_session.get()
-        if session is not None and session.share_sandbox and self.file_store_backend is None:
+        if (
+            session is not None
+            and session.share_sandbox
+            and self.file_store_backend is None
+            and self.sandbox_backend is None  # only borrow when this agent brings no sandbox of its own
+        ):
             key = f"{(self.sanitize_tool_name(self.name) or 'subagent').lower()}-{uuid4().hex[:8]}"
             view = session.sandbox_view_for(key)
             if view is not None:
                 self._sandbox_is_shared = True
+                self._shared_sandbox_view = view
                 return view
         return self.sandbox_backend
 

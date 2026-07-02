@@ -105,6 +105,55 @@ def test_subagent_under_session_uses_view_backed_tools(test_llm):
         _shared_session.reset(token)
 
 
+def test_borrowed_subagent_sandbox_backend_is_the_shared_view(test_llm):
+    """A subagent that borrows the shared sandbox must expose it as sandbox_backend,
+    so execute()'s file upload / output collection / skills paths use the shared
+    sandbox instead of falling back to an in-memory file store."""
+    from dynamiq.nodes.agents.shared_session import SharedSession
+    from dynamiq.sandboxes.tools.shell import SandboxShellTool
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(sandbox=shared, share_sandbox=True, owner_run_id="owner")
+    token = _shared_session.set(session)
+    try:
+        sub = Agent(name="Researcher", llm=test_llm, role="r", tools=[])  # brings no sandbox
+        assert sub._sandbox_is_shared is True
+        assert sub.sandbox_backend is not None
+        assert sub.sandbox_backend.sandbox_id == "sbx-shared"
+        assert sub.sandbox_backend.base_path.startswith("/home/user/work/researcher-")
+        # exactly the view feeding the shell tool — no split brain
+        shell = next(t for t in sub.tools if isinstance(t, SandboxShellTool))
+        assert sub.sandbox_backend is shell.sandbox
+    finally:
+        _shared_session.reset(token)
+
+
+def test_subagent_with_own_sandbox_is_not_overridden(test_llm):
+    """A subagent configured with its own sandbox keeps it — the shared session
+    must not silently swap its tools onto the parent's view while other paths
+    (cleanup, skills) still point at its own backend."""
+    from dynamiq.nodes.agents.shared_session import SharedSession
+    from dynamiq.sandboxes.tools.shell import SandboxShellTool
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(sandbox=shared, share_sandbox=True, owner_run_id="owner")
+    token = _shared_session.set(session)
+    try:
+        sub = Agent(
+            name="Sub",
+            llm=test_llm,
+            role="r",
+            tools=[],
+            sandbox=SandboxConfig(enabled=True, backend=E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-own")),
+        )
+        assert sub._sandbox_is_shared is False
+        assert sub.sandbox_backend.sandbox_id == "sbx-own"
+        shell = next(t for t in sub.tools if isinstance(t, SandboxShellTool))
+        assert shell.sandbox.sandbox_id == "sbx-own"
+    finally:
+        _shared_session.reset(token)
+
+
 def test_owner_without_active_session_uses_own_backend(test_llm):
     from dynamiq.sandboxes.tools.shell import SandboxShellTool
 

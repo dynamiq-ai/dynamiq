@@ -91,6 +91,11 @@ class E2BSandbox(Sandbox):
         """Get the current sandbox ID (for saving/reconnecting later)."""
         return self.sandbox_id
 
+    @property
+    def supports_views(self) -> bool:
+        """E2B supports reconnecting multiple views to one sandbox id."""
+        return True
+
     def ensure_started(self) -> str | None:
         """Ensure the sandbox exists (create/reconnect) and return its id."""
         self._ensure_sandbox()
