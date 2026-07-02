@@ -75,6 +75,8 @@ def create_bytesio_with_name(content, name):
         ("presentation.pptx", None, "presentation"),
         ("file.pdf", None, "pdf"),
         ("spreadsheet.xlsx", None, "spreadsheet"),
+        ("legacy.xls", None, None),
+        ("open_document.ods", None, None),
         ("archive.zip", None, "archive"),
         ("audio.mp3", None, "audio"),
         ("video.mp4", None, "video"),

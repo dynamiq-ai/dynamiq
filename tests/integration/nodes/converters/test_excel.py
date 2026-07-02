@@ -1,5 +1,6 @@
 from io import BytesIO
 
+import pytest
 from openpyxl import Workbook as ExcelWorkbook
 
 from dynamiq import Workflow
@@ -56,6 +57,19 @@ def test_excel_converter_with_csv():
     assert "| Alice | 30 |" in content
 
 
+@pytest.mark.parametrize("filename", ["legacy.xls", "open_document.ods"])
+def test_excel_converter_rejects_unsupported_spreadsheet_extensions(filename):
+    buffer = BytesIO(b"legacy spreadsheet bytes")
+    buffer.name = filename
+
+    workflow = Workflow(flow=Flow(nodes=[ExcelFileConverter()]))
+    response = workflow.run(input_data={"files": [buffer]})
+
+    assert response.status == RunnableStatus.FAILURE
+    node_id = workflow.flow.nodes[0].id
+    assert "Unsupported spreadsheet extension" in response.output[node_id]["error"]["message"]
+
+
 def test_multi_file_converter_routes_spreadsheets_locally():
     documents = run_and_get_documents(
         MultiFileTypeConverter(),
@@ -65,6 +79,18 @@ def test_multi_file_converter_routes_spreadsheets_locally():
     assert len(documents) == 2
     for document in documents:
         assert "| Alice | 30 |" in document["content"]
+
+
+def test_multi_file_converter_does_not_route_legacy_spreadsheet_to_excel():
+    buffer = BytesIO(b"\x00\x01legacy spreadsheet bytes")
+    buffer.name = "legacy.xls"
+
+    workflow = Workflow(flow=Flow(nodes=[MultiFileTypeConverter()]))
+    response = workflow.run(input_data={"files": [buffer]})
+
+    assert response.status == RunnableStatus.FAILURE
+    node_id = workflow.flow.nodes[0].id
+    assert "Unsupported file type: None" in response.output[node_id]["error"]["message"]
 
 
 def test_multi_file_converter_detects_type_without_extension():

@@ -272,6 +272,20 @@ def test_html_converter_with_non_utf8_charset():
     assert "café" in document["content"]
 
 
+def test_html_converter_with_utf16_charset():
+    content = "<html><body><p>UTF-16 page</p></body></html>".encode("utf-16")
+    html_buffer = BytesIO(content)
+    html_buffer.name = "utf16.html"
+
+    wf_html = Workflow(flow=Flow(nodes=[HTMLConverter()]))
+    response = wf_html.run(input_data={"files": [html_buffer]})
+
+    assert response.status == RunnableStatus.SUCCESS
+    node_id = wf_html.flow.nodes[0].id
+    document = response.output[node_id]["output"]["documents"][0]
+    assert "UTF-16 page" in document["content"]
+
+
 @pytest.mark.parametrize(
     "input_type,input_fixture",
     [

@@ -140,7 +140,7 @@ EXTENSION_MAP = {
     },
     FileType.DOCUMENT: {"doc", "docx", "odt", "rtf"},
     FileType.PDF: {"pdf"},
-    FileType.SPREADSHEET: {"xls", "xlsx", "csv", "tsv", "ods"},
+    FileType.SPREADSHEET: {"xlsx", "csv", "tsv"},
     FileType.PRESENTATION: {"ppt", "pptx", "odp"},
     FileType.ARCHIVE: {
         "zip",

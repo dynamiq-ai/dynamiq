@@ -14,6 +14,14 @@ from dynamiq.components.converters.utils import get_filename_for_bytesio
 from dynamiq.types import Document, DocumentCreationMode
 
 
+UNICODE_BOMS_WITH_NULL_BYTES = (
+    b"\xff\xfe",
+    b"\xfe\xff",
+    b"\xff\xfe\x00\x00",
+    b"\x00\x00\xfe\xff",
+)
+
+
 class HTMLConverter(BaseConverter):
     """
     A component for converting HTML files to Documents using lxml.
@@ -85,8 +93,9 @@ class HTMLConverter(BaseConverter):
         Returns:
             lxml HTML element
         """
-        if b"\x00" in html_content:
+        if b"\x00" in html_content and not html_content.startswith(UNICODE_BOMS_WITH_NULL_BYTES):
             raise ValueError("File content is binary, not HTML")
+
         try:
             # Bytes input lets lxml resolve the charset and encoding declaration itself;
             # a str input makes it reject pages starting with <?xml ... encoding=...?>.

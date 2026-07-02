@@ -11,6 +11,9 @@ from dynamiq.components.converters.utils import get_filename_for_bytesio
 from dynamiq.types import Document, DocumentCreationMode
 
 
+SUPPORTED_EXCEL_EXTENSIONS = {".csv", ".tsv", ".xlsx"}
+
+
 class ExcelFileConverter(BaseConverter):
     """
     A component for converting spreadsheet files (xlsx, csv, tsv) to Documents.
@@ -59,6 +62,13 @@ class ExcelFileConverter(BaseConverter):
                 data = f.read()
 
         extension = Path(filepath).suffix.lower()
+        if extension and extension not in SUPPORTED_EXCEL_EXTENSIONS:
+            supported_extensions = ", ".join(sorted(SUPPORTED_EXCEL_EXTENSIONS))
+            raise ValueError(
+                f"Unsupported spreadsheet extension '{extension}'. "
+                f"ExcelFileConverter supports: {supported_extensions}."
+            )
+
         if extension in {".csv", ".tsv"}:
             content = self._convert_delimited(data, delimiter="\t" if extension == ".tsv" else ",")
         else:
