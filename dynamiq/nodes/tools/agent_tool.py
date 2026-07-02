@@ -259,7 +259,10 @@ class SubAgentTool(Node):
 
     @staticmethod
     def cleanup_factory_agent(agent: Agent) -> None:
-        """Kill sandbox resources on a factory-created agent."""
+        """Kill sandbox resources on a factory-created agent (unless it borrowed a shared one)."""
+        if getattr(agent, "_sandbox_is_shared", False):
+            logger.info(f"SubAgentTool '{agent.id}': using a shared sandbox — skipping teardown")
+            return
         if getattr(agent, "sandbox_backend", None):
             try:
                 agent.sandbox_backend.close(kill=True)

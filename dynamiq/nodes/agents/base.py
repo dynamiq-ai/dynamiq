@@ -17,6 +17,7 @@ from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentIterati
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
+from dynamiq.nodes.agents.shared_session import SharedSession, _shared_session
 from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     ToolCacheEntry,
@@ -241,6 +242,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         description="Configuration for file storage used by the agent.",
     )
     sandbox: SandboxConfig | None = Field(default=None, description="Configuration for sandbox used by the agent.")
+    share_sandbox_with_subagents: bool = Field(
+        default=False,
+        description="When enabled, subagents (SubAgentTool) share this agent's sandbox "
+        "instead of each provisioning their own. Each subagent gets an isolated working directory.",
+    )
     skills: SkillsConfig = Field(
         default_factory=SkillsConfig,
         description="Skills config. When enabled and source registry is set, skills are on (Dynamiq or FileSystem).",
@@ -268,6 +274,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     _pinned_input: Message | VisionMessage | None = PrivateAttr(default=None)
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
+    _sandbox_is_shared: bool = PrivateAttr(default=False)
     # Loop progress and pending-tool-call state are declared on AgentIterativeCheckpointMixin.
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -341,12 +348,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 expanded_tools.append(tool)
 
         self.tools = expanded_tools
-        if self.file_store_backend and self.sandbox_backend:
+        tools_sandbox = self._resolve_tools_sandbox()
+        if self.file_store_backend and tools_sandbox:
             raise ValueError("file_store and sandbox cannot both be enabled for an Agent at the same time")
 
-        if self.sandbox_backend:
+        if tools_sandbox:
             # Add sandbox tools when sandbox is enabled (not serialized; recreated from sandbox config on load)
-            sandbox_tools = self.sandbox_backend.get_tools(llm=self.llm)
+            sandbox_tools = tools_sandbox.get_tools(llm=self.llm)
             self._excluded_tool_ids.update(t.id for t in sandbox_tools)
             self.tools.extend(sandbox_tools)
 
@@ -644,6 +652,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         # Always set — a sub-agent without LTM would otherwise inherit the
         # parent's overlay via `ContextAwareThreadPoolExecutor`.
         ltm_token = _run_extra_tools.set(ltm_tools)
+        shared_session_token = self._maybe_enter_shared_session(kwargs)
         try:
             if use_memory:
                 history_messages = self._retrieve_memory(input_data)
@@ -764,6 +773,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             return execution_result
         finally:
             _run_extra_tools.reset(ltm_token)
+            self._exit_shared_session(shared_session_token)
 
     def retrieve_conversation_history(
         self,
@@ -1848,6 +1858,45 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     def sandbox_backend(self) -> Sandbox | None:
         """Get the sandbox backend from the configuration if enabled."""
         return self.sandbox.backend if self.sandbox and self.sandbox.enabled else None
+
+    def _maybe_enter_shared_session(self, kwargs: dict):
+        """Establish a shared execution session for this subtree if this agent owns one.
+
+        Returns a ContextVar token to reset later, or None when nothing was set
+        (flag off, no sandbox, or a session already exists and is inherited).
+        """
+        if _shared_session.get() is not None:
+            return None  # inherit the ancestor's session
+        if not self.share_sandbox_with_subagents or self.sandbox_backend is None:
+            return None
+
+        session = SharedSession(
+            sandbox=self.sandbox_backend,
+            share_sandbox=True,
+            owner_run_id=str(kwargs.get("run_id") or self.id),
+        )
+        return _shared_session.set(session)
+
+    def _exit_shared_session(self, token) -> None:
+        """Reset the ContextVar set by `_maybe_enter_shared_session`."""
+        if token is not None:
+            _shared_session.reset(token)
+
+    def _resolve_tools_sandbox(self):
+        """Choose the sandbox to build this agent's sandbox tools from.
+
+        Under an active shared session (i.e. this agent is a subagent of a sharing
+        owner), return a per-agent view of the shared sandbox and mark it borrowed.
+        Otherwise return this agent's own sandbox_backend (unchanged behavior).
+        """
+        session = _shared_session.get()
+        if session is not None and session.share_sandbox and self.file_store_backend is None:
+            key = f"{(self.sanitize_tool_name(self.name) or 'subagent').lower()}-{uuid4().hex[:8]}"
+            view = session.sandbox_view_for(key)
+            if view is not None:
+                self._sandbox_is_shared = True
+                return view
+        return self.sandbox_backend
 
     @property
     def _runtime_tools(self) -> list[Node]:
