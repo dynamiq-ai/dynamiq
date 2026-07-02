@@ -1,4 +1,3 @@
-import codecs
 import enum
 import re
 import zipfile
@@ -6,6 +5,7 @@ from io import BytesIO
 from typing import Any, ClassVar, Literal
 
 import filetype
+from charset_normalizer import from_bytes
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.nodes import Node, NodeGroup
@@ -197,6 +197,28 @@ ZIP_MIMETYPE_MAP = {
     "application/vnd.oasis.opendocument.presentation": FileType.PRESENTATION,
 }
 
+_MARKDOWN_RE = re.compile(
+    r"""
+    ^\#{1,6}\s+.+$                |  # headings
+    ^\s*```[\w-]*\s*$             |  # fenced code block
+    ^\s*~~~[\w-]*\s*$             |  # tilde fenced code block
+    ^\s*>+\s+.+$                  |  # blockquote
+    ^\s*[-*+]\s+.+$               |  # unordered list
+    ^\s*\d+\.\s+.+$               |  # ordered list
+    ^\s*[-*+]\s+\[[ xX]\]\s+.+$   |  # task list
+    ^(?:-{3,}|\*{3,}|_{3,})\s*$   |  # horizontal rule
+    \*\*[^*\n]+\*\*               |  # bold
+    __[^_\n]+__                   |
+    (?<!\*)\*[^*\n]+\*(?!\*)      |  # italic
+    (?<!_)_[^_\n]+_(?!_)          |
+    `[^`\n]+`                     |  # inline code
+    \[[^\]]+\]\([^)]+\)           |  # links
+    !\[[^\]]*\]\([^)]+\)          |  # images
+    ~~[^~\n]+~~                      # strikethrough
+    """,
+    re.MULTILINE | re.VERBOSE,
+)
+
 # Leading bytes read for content detection.
 _CONTENT_SAMPLE_SIZE = 8192
 
@@ -282,23 +304,24 @@ class FileTypeExtractor(Node):
     @staticmethod
     def _guess_type_from_text(sample: bytes) -> "FileType | None":
         """
-        Classify text-based content that carries no magic-byte signature.
+        Classify content only when it is confirmed to be readable text.
 
         Args:
             sample (bytes): The leading bytes of the file.
 
         Returns:
-            FileType | None: ``FileType.HTML`` or ``FileType.TEXT``, or ``None`` if the sample is not
-                decodable as UTF-8 text.
+            FileType | None: ``FileType.HTML`` or ``FileType.TEXT`` for confirmed text, otherwise ``None``.
         """
-        try:
-            text = codecs.getincrementaldecoder("utf-8")().decode(sample, final=False)
-        except UnicodeDecodeError:
+        match = from_bytes(sample).best()
+        if match is None:
             return None
 
+        text = str(match)
         head = text.lstrip().lower()
         if head.startswith(("<!doctype html", "<html")) or "<html" in head[:4096]:
             return FileType.HTML
+        if _MARKDOWN_RE.search(text):
+            return FileType.MARKDOWN
         return FileType.TEXT
 
     @classmethod

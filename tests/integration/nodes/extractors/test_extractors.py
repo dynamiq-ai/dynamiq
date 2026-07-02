@@ -144,6 +144,8 @@ def create_pptx_content():
 PDF_CONTENT = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"
 TEXT_CONTENT = b"This is a plain text document.\nIt has a couple of lines.\n"
 MARKDOWN_CONTENT = b"# Heading\n\nParagraph with **bold** and a [link](https://example.com).\n"
+HTML_CONTENT = b"<!DOCTYPE html>\n<html><head><title>Page</title></head><body><p>Hi</p></body></html>\n"
+BINARY_CONTENT = b"\x00\x01\x02\x03\xff\xfe\xfd\xfc" * 128
 
 
 @pytest.mark.parametrize(
@@ -151,12 +153,16 @@ MARKDOWN_CONTENT = b"# Heading\n\nParagraph with **bold** and a [link](https://e
     [
         (None, create_bytesio_without_extension(PDF_CONTENT), "pdf"),
         (None, create_bytesio_without_extension(TEXT_CONTENT), "text"),
-        (None, create_bytesio_without_extension(MARKDOWN_CONTENT), "text"),
+        (None, create_bytesio_without_extension(MARKDOWN_CONTENT), "markdown"),
+        (None, create_bytesio_without_extension(HTML_CONTENT), "html"),
         (None, create_bytesio_without_extension(create_pptx_content()), "presentation"),
+        (None, create_bytesio_without_extension(BINARY_CONTENT), None),  # binary -> unidentified
         ("document", create_bytesio_without_extension(PDF_CONTENT), "pdf"),
         ("notes", create_bytesio_without_extension(TEXT_CONTENT), "text"),
-        ("readme", create_bytesio_without_extension(MARKDOWN_CONTENT), "text"),
+        ("readme", create_bytesio_without_extension(MARKDOWN_CONTENT), "markdown"),
+        ("page", create_bytesio_without_extension(HTML_CONTENT), "html"),
         ("slides", create_bytesio_without_extension(create_pptx_content()), "presentation"),
+        ("blob", create_bytesio_without_extension(BINARY_CONTENT), None),  # binary -> unidentified
         (None, create_bytesio_without_extension(PDF_CONTENT, "document"), "pdf"),
         (None, create_bytesio_without_extension(create_pptx_content(), "slides"), "presentation"),
     ],
