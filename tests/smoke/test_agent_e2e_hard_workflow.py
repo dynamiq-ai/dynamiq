@@ -108,6 +108,7 @@ PROVIDERS = {
         _llm_factory(llms.HuggingFace, conn.HuggingFace, "meta-llama/Meta-Llama-3.1-70B-Instruct"),
     ),
     "mistral": (["MISTRAL_API_KEY"], _llm_factory(llms.Mistral, conn.Mistral, "mistral-large-latest")),
+    "novita": (["NOVITA_API_KEY"], _llm_factory(llms.Novita, conn.Novita, "deepseek/deepseek-v3.2")),
     "nvidia_nim": (
         ["NVIDIA_NIM_API_KEY", "NVIDIA_NIM_URL"],
         _llm_factory(llms.NvidiaNIM, conn.NvidiaNIM, "meta/llama-3.3-70b-instruct"),
