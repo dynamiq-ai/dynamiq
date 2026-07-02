@@ -17,6 +17,7 @@ from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentIterati
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
+from dynamiq.nodes.agents.shared_session import SharedSession, _shared_session
 from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     ToolCacheEntry,
@@ -1864,8 +1865,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         Returns a ContextVar token to reset later, or None when nothing was set
         (flag off, no sandbox, or a session already exists and is inherited).
         """
-        from dynamiq.nodes.agents.shared_session import SharedSession, _shared_session
-
         if _shared_session.get() is not None:
             return None  # inherit the ancestor's session
         if not self.share_sandbox_with_subagents or self.sandbox_backend is None:
@@ -1880,8 +1879,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
     def _exit_shared_session(self, token) -> None:
         """Reset the ContextVar set by `_maybe_enter_shared_session`."""
-        from dynamiq.nodes.agents.shared_session import _shared_session
-
         if token is not None:
             _shared_session.reset(token)
 
@@ -1892,8 +1889,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         owner), return a per-agent view of the shared sandbox and mark it borrowed.
         Otherwise return this agent's own sandbox_backend (unchanged behavior).
         """
-        from dynamiq.nodes.agents.shared_session import _shared_session
-
         session = _shared_session.get()
         if session is not None and session.share_sandbox and self.file_store_backend is None:
             key = f"{(self.sanitize_tool_name(self.name) or 'subagent').lower()}-{uuid4().hex[:8]}"

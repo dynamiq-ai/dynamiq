@@ -1,10 +1,3 @@
-"""Run-scoped shared execution session shared by an agent and its subagents.
-
-P1 covers sandbox sharing only. The session is carried in a ContextVar so it
-propagates to subagent worker threads via ContextAwareThreadPoolExecutor,
-mirroring the existing `_run_extra_tools` pattern in agents/base.py.
-"""
-
 import re
 import threading
 from contextvars import ContextVar
@@ -25,9 +18,9 @@ def slugify(value: str) -> str:
 
 class SharedSession:
     """Holds resources shared by an agent and its subagents for one run.
-
-    In P1 this is the shared sandbox. The owning agent registers its own
-    `sandbox_backend`; subagents obtain a per-agent *view* (same sandbox_id,
+    
+    The owning agent registers its own `sandbox_backend`; 
+    subagents obtain a per-agent *view* (same sandbox_id,
     isolated base_path) via `sandbox_view_for`.
     """
 
