@@ -1,6 +1,7 @@
+import csv
 import enum
 import re
-from io import BytesIO
+from io import BytesIO, StringIO
 from typing import Any, ClassVar, Literal
 
 import filetype
@@ -176,6 +177,11 @@ EXTENSION_MAP = {
 }
 
 CONTENT_PROBE_SIZE = 8192
+UNSUPPORTED_SPREADSHEET_EXTENSIONS = {"xls", "ods"}
+HTML_START_RE = re.compile(
+    r"^\s*(?:<!doctype\s+html\b|<html(?:\s|>|/)|<\?xml[^>]*\?>\s*(?:<!doctype\s+html\b|<html(?:\s|>|/)))",
+    re.IGNORECASE,
+)
 
 
 class FileTypeExtractorInputSchema(BaseModel):
@@ -221,6 +227,8 @@ class FileTypeExtractor(Node):
                     if file_ext in extensions:
                         result = category
                         break
+                if result is None and file_ext in UNSUPPORTED_SPREADSHEET_EXTENSIONS:
+                    return {"type": None}
 
             if result is None and file is not None:
                 result = self._detect_type_from_content(file)
@@ -259,7 +267,32 @@ class FileTypeExtractor(Node):
             except UnicodeDecodeError:
                 return None
 
-        lowered = text.lstrip().lower()
-        if lowered.startswith(("<!doctype html", "<html")) or "<html" in lowered:
+        if HTML_START_RE.match(text):
             return FileType.HTML
+        if FileTypeExtractor._looks_like_delimited_table(text):
+            return FileType.SPREADSHEET
         return FileType.TEXT if text.strip() else None
+
+    @staticmethod
+    def _looks_like_delimited_table(text: str) -> bool:
+        """Return True for simple CSV/TSV-style text with multiple consistent rows."""
+        lines = [line for line in text.strip("\ufeff").splitlines() if line.strip()]
+        if len(lines) < 2:
+            return False
+
+        sample = "\n".join(lines[:10])
+        for delimiter in (",", "\t"):
+            rows = list(csv.reader(StringIO(sample), delimiter=delimiter))
+            rows = [row for row in rows if any(cell.strip() for cell in row)]
+            if len(rows) < 2:
+                continue
+
+            widths = [len(row) for row in rows]
+            if max(widths) < 2:
+                continue
+
+            most_common_width = max(set(widths), key=widths.count)
+            if most_common_width >= 2 and widths.count(most_common_width) / len(widths) >= 0.8:
+                return True
+
+        return False

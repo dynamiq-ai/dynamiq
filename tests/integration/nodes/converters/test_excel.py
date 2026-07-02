@@ -57,6 +57,15 @@ def test_excel_converter_with_csv():
     assert "| Alice | 30 |" in content
 
 
+def test_excel_converter_with_extensionless_csv():
+    documents = run_and_get_documents(ExcelFileConverter(), [build_csv_bytesio("extensionless-item-id")])
+
+    assert len(documents) == 1
+    content = documents[0]["content"]
+    assert "| name | age |" in content
+    assert "| Alice | 30 |" in content
+
+
 @pytest.mark.parametrize("filename", ["legacy.xls", "open_document.ods"])
 def test_excel_converter_rejects_unsupported_spreadsheet_extensions(filename):
     buffer = BytesIO(b"legacy spreadsheet bytes")
@@ -82,7 +91,7 @@ def test_multi_file_converter_routes_spreadsheets_locally():
 
 
 def test_multi_file_converter_does_not_route_legacy_spreadsheet_to_excel():
-    buffer = BytesIO(b"\x00\x01legacy spreadsheet bytes")
+    buffer = BytesIO(b"name,age\nAlice,30\n")
     buffer.name = "legacy.xls"
 
     workflow = Workflow(flow=Flow(nodes=[MultiFileTypeConverter()]))
@@ -91,6 +100,15 @@ def test_multi_file_converter_does_not_route_legacy_spreadsheet_to_excel():
     assert response.status == RunnableStatus.FAILURE
     node_id = workflow.flow.nodes[0].id
     assert "Unsupported file type: None" in response.output[node_id]["error"]["message"]
+
+
+def test_multi_file_converter_routes_extensionless_csv_to_excel():
+    documents = run_and_get_documents(MultiFileTypeConverter(), [build_csv_bytesio("extensionless-item-id")])
+
+    assert len(documents) == 1
+    content = documents[0]["content"]
+    assert "| name | age |" in content
+    assert "| Alice | 30 |" in content
 
 
 def test_multi_file_converter_detects_type_without_extension():

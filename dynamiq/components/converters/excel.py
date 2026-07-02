@@ -72,7 +72,8 @@ class ExcelFileConverter(BaseConverter):
         if extension in {".csv", ".tsv"}:
             content = self._convert_delimited(data, delimiter="\t" if extension == ".tsv" else ",")
         else:
-            content = self._convert_workbook(data)
+            delimiter = None if extension else self._detect_delimiter(data)
+            content = self._convert_delimited(data, delimiter=delimiter) if delimiter else self._convert_workbook(data)
 
         return self._create_documents(
             filepath=filepath,
@@ -102,6 +103,37 @@ class ExcelFileConverter(BaseConverter):
         text = data.decode("utf-8-sig", errors="replace")
         rows = list(csv.reader(StringIO(text), delimiter=delimiter))
         return self._to_markdown_table(rows)
+
+    @staticmethod
+    def _detect_delimiter(data: bytes) -> str | None:
+        """Detect extensionless CSV/TSV content without treating binary workbooks as text."""
+        if b"\x00" in data[:8192]:
+            return None
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            return None
+
+        lines = [line for line in text.splitlines() if line.strip()]
+        if len(lines) < 2:
+            return None
+
+        sample = "\n".join(lines[:10])
+        for delimiter in (",", "\t"):
+            rows = list(csv.reader(StringIO(sample), delimiter=delimiter))
+            rows = [row for row in rows if any(cell.strip() for cell in row)]
+            if len(rows) < 2:
+                continue
+
+            widths = [len(row) for row in rows]
+            if max(widths) < 2:
+                continue
+
+            most_common_width = max(set(widths), key=widths.count)
+            if most_common_width >= 2 and widths.count(most_common_width) / len(widths) >= 0.8:
+                return delimiter
+
+        return None
 
     @staticmethod
     def _to_markdown_table(rows: list[list[str]]) -> str:

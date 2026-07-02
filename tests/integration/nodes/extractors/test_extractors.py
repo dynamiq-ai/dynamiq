@@ -101,6 +101,10 @@ def create_bytesio_with_name(content, name):
         (None, create_bytesio_with_name(b"ebook content", "test.epub"), "ebook"),
         # Missing or unknown extension: type is detected from content.
         (None, create_bytesio_with_name(b"unknown content", "unknownfile.xyz"), "text"),
+        (None, create_bytesio_with_name(b"name,age\nAlice,30\nBob,25\n", ""), "spreadsheet"),
+        (None, create_bytesio_with_name(b"name\tage\nAlice\t30\nBob\t25\n", ""), "spreadsheet"),
+        (None, create_bytesio_with_name(b"name,age\nAlice,30\n", "legacy.xls"), None),
+        (None, create_bytesio_with_name(b'Text log mentioning <html but not starting with it', ""), "text"),
         ("file_0", create_bytesio_with_name(b"content", ""), "text"),
         (None, create_bytesio_with_name(b"content", ""), "text"),
         (None, create_bytesio_with_name(b"%PDF-1.4 fake pdf body", ""), "pdf"),
