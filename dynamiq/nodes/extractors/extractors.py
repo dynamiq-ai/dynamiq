@@ -200,9 +200,9 @@ ZIP_DIRECTORY_MAP = {
 ZIP_MIMETYPE_MAP = {
     "application/epub+zip": FileType.EBOOK,
     "application/vnd.oasis.opendocument.text": FileType.DOCUMENT,
-    "application/vnd.oasis.opendocument.spreadsheet": FileType.SPREADSHEET,
     "application/vnd.oasis.opendocument.presentation": FileType.PRESENTATION,
 }
+UNSUPPORTED_ZIP_MIMETYPES = {"application/vnd.oasis.opendocument.spreadsheet"}
 
 _MARKDOWN_RE = re.compile(
     r"""
@@ -295,6 +295,8 @@ class FileTypeExtractor(Node):
                 names = archive.namelist()
                 if "mimetype" in names:
                     mimetype = archive.read("mimetype").decode("utf-8", errors="ignore").strip().lower()
+                    if mimetype in UNSUPPORTED_ZIP_MIMETYPES:
+                        return None
                     file_type = ZIP_MIMETYPE_MAP.get(mimetype)
                     if file_type is not None:
                         return file_type

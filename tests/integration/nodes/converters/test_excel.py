@@ -1,3 +1,4 @@
+import zipfile
 from io import BytesIO
 
 import pytest
@@ -26,6 +27,16 @@ def build_xlsx_bytesio(filename: str = "test.xlsx") -> BytesIO:
 
 def build_csv_bytesio(filename: str = "test.csv") -> BytesIO:
     buffer = BytesIO(b"name,age\nAlice,30\nBob,25\n")
+    buffer.name = filename
+    return buffer
+
+
+def build_ods_bytesio(filename: str = "extensionless-ods") -> BytesIO:
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("mimetype", "application/vnd.oasis.opendocument.spreadsheet")
+        archive.writestr("content.xml", "<office:document-content/>")
+    buffer.seek(0)
     buffer.name = filename
     return buffer
 
@@ -100,6 +111,17 @@ def test_multi_file_converter_does_not_route_legacy_spreadsheet_to_excel():
     assert response.status == RunnableStatus.FAILURE
     node_id = workflow.flow.nodes[0].id
     assert "Unsupported file type: None" in response.output[node_id]["error"]["message"]
+    assert "ExcelFileConverter" not in response.output[node_id]["error"]["message"]
+
+
+def test_multi_file_converter_does_not_route_extensionless_ods_to_excel():
+    workflow = Workflow(flow=Flow(nodes=[MultiFileTypeConverter()]))
+    response = workflow.run(input_data={"files": [build_ods_bytesio()]})
+
+    assert response.status == RunnableStatus.FAILURE
+    node_id = workflow.flow.nodes[0].id
+    assert "Unsupported file type: None" in response.output[node_id]["error"]["message"]
+    assert "ExcelFileConverter" not in response.output[node_id]["error"]["message"]
 
 
 def test_multi_file_converter_routes_extensionless_csv_to_excel():
