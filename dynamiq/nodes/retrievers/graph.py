@@ -658,13 +658,17 @@ class GraphRetriever(ConnectionNode):
         """Fetch the verbatim source documents behind the retrieved facts (optional grounding).
 
         Each fact came from an ACL-visible edge whose ACL equals its source document's, so the caller is
-        already entitled to those documents; the distinct ``source_doc_id`` values are pulled via the
-        ``document_retriever``'s ``get_documents_by_ids`` with no extra ACL check. Returns ``[]`` when no
-        retriever is set, no fact carries a ``source_doc_id``, or the fetch fails.
+        already entitled to those documents; the distinct ``source_doc_ids`` (every per-document edge behind
+        a deduped fact) are pulled via the ``document_retriever``'s ``get_documents_by_ids`` with no extra
+        ACL check. Returns ``[]`` when no retriever is set, no fact carries provenance, or the fetch fails.
         """
         if not self.document_retriever or not hasattr(self.document_retriever, "get_documents_by_ids"):
             return []
-        ids = list(dict.fromkeys(d.metadata.get("source_doc_id") for d in documents if d.metadata.get("source_doc_id")))
+        ids: list[str] = []
+        for d in documents:
+            md = d.metadata
+            ids.extend(md.get("source_doc_ids") or ([md["source_doc_id"]] if md.get("source_doc_id") else []))
+        ids = list(dict.fromkeys(ids))  # dedupe across facts, preserve order
         if not ids:
             return []
         try:
@@ -701,7 +705,9 @@ class GraphRetriever(ConnectionNode):
     @staticmethod
     def _render_single_hop(rows: list[dict[str, Any]]) -> list[Document]:
         documents: list[Document] = []
-        seen: set[str] = set()  # the same fact can arrive via several per-document edges -> show it once
+        # The same fact can arrive via several per-document edges -> show it once, but MERGE every edge's
+        # source_doc_id onto the kept fact so grounding fetches all the source chunks, not just the first.
+        seen: dict[str, Document] = {}
         for rank, row in enumerate(rows):
             source, rel, target = row.get("a_name"), row.get("rel"), row.get("b_name")
             if source is None or target is None or not rel:
@@ -720,15 +726,25 @@ class GraphRetriever(ConnectionNode):
             # cannot convey -- append it so it reaches the answer, not just the metadata.
             if rprops.get("description"):
                 fact = f"{fact}: {rprops['description']}"
+            source_doc_id = rprops.get("source_doc_id")
             if fact in seen:
+                # duplicate fact from another per-document edge: keep its source doc for grounding
+                if source_doc_id:
+                    doc_ids = seen[fact].metadata.setdefault("source_doc_ids", [])
+                    if source_doc_id not in doc_ids:
+                        doc_ids.append(source_doc_id)
                 continue
-            seen.add(fact)
             metadata = {"source": source, "target": target, "rel": rel, **rprops}
+            # Normalize provenance to a list so later duplicate facts can accumulate every source doc.
+            if source_doc_id:
+                metadata["source_doc_ids"] = [source_doc_id]
             # Endpoint entity ids (when available) let a caller iterate: feed a fact's neighbor id back as
             # the next hop's seed instead of doing an exploding variable-length expansion.
             if row.get("a_id") is not None:
                 metadata["source_id"] = row["a_id"]
             if row.get("b_id") is not None:
                 metadata["target_id"] = row["b_id"]
-            documents.append(Document(content=fact, metadata=metadata, score=1.0 / (1.0 + rank)))
+            document = Document(content=fact, metadata=metadata, score=1.0 / (1.0 + rank))
+            seen[fact] = document
+            documents.append(document)
         return documents
