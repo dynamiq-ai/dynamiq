@@ -358,8 +358,7 @@ class FileTypeExtractor(Node):
         # ZIP container: covers OOXML, ODF, epub and plain archives.
         if header.startswith(b"PK"):
             zip_type = cls._guess_type_from_zip(file)
-            if zip_type is not None:
-                return zip_type
+            return zip_type
 
         # Other binary formats with a stable magic-byte signature.
         extension = filetype.guess_extension(header)

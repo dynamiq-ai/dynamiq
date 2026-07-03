@@ -212,6 +212,15 @@ def test_file_type_extraction_from_content(filename, file, result):
     )
 
 
+def test_unsupported_zip_mimetype_does_not_fall_back_to_archive(monkeypatch):
+    monkeypatch.setattr(
+        "dynamiq.nodes.extractors.extractors.filetype.guess_extension",
+        lambda _: "zip",
+    )
+
+    assert FileTypeExtractor._guess_type_from_content(ODS_CONTENT) is None
+
+
 @pytest.mark.parametrize(
     "value, pattern, result",
     [
