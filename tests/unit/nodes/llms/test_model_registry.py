@@ -155,6 +155,55 @@ def test_model_info_override_takes_priority():
     assert llm.is_pdf_input_supported is True
 
 
+def test_registry_supports_video_input():
+    """Video-input support has no litellm signal at all -- it only ever comes from an
+    explicit registry entry or a model_info override."""
+    import json as _json
+
+    data = {
+        "video-model": {"supports_video_input": True},
+        "no-video-model": {"supports_video_input": False},
+        "unflagged-model": {"max_input_tokens": 1000},
+    }
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "models.json"
+        path.write_text(_json.dumps(data))
+        reg = ModelRegistry(path=path)
+
+    assert reg.supports_video_input("video-model") is True
+    assert reg.supports_video_input("no-video-model") is False
+    assert reg.supports_video_input("unflagged-model") is None
+    assert reg.supports_video_input("unknown-model") is None
+
+
+@pytest.mark.usefixtures("_litellm_unknown", "_patch_registry")
+def test_basellm_video_input_not_in_registry_defaults_false():
+    """A model with no supports_video_input entry (litellm has no such signal either)
+    defaults to unsupported."""
+    from dynamiq.connections import TogetherAI as TogetherAIConnection
+    from dynamiq.nodes.llms.togetherai import TogetherAI
+
+    llm = TogetherAI(model=MODEL_B, connection=TogetherAIConnection(api_key="test-key"))
+    assert llm.is_video_input_supported is False
+
+
+def test_basellm_video_input_model_info_override_takes_priority():
+    """model_info.supports_video_input overrides the registry regardless of what litellm
+    itself knows about the model."""
+    from dynamiq.connections import TogetherAI as TogetherAIConnection
+    from dynamiq.nodes.llms.togetherai import TogetherAI
+
+    llm = TogetherAI(
+        model=MODEL_A,
+        connection=TogetherAIConnection(api_key="test-key"),
+        model_info={"supports_video_input": True},
+    )
+    assert llm.is_video_input_supported is True
+
+
 @pytest.mark.usefixtures("_litellm_unknown", "_patch_registry")
 def test_model_info_none_falls_through():
     """When model_info is None, the existing lookup chain is used."""
