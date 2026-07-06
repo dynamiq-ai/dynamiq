@@ -6,7 +6,7 @@ from dynamiq.connections import AWS as AWSConnection
 from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.connections import HttpApiKey
 from dynamiq.nodes.llms.anthropic import Anthropic
-from dynamiq.nodes.llms.base import SAMPLING_PARAMS, SAMPLING_UNSUPPORTED_MODEL_MARKERS
+from dynamiq.nodes.llms.base import SAMPLING_PARAMS
 from dynamiq.nodes.llms.bedrock import Bedrock
 from dynamiq.nodes.llms.custom_llm import CustomLLM
 from dynamiq.prompts import Prompt
@@ -40,7 +40,24 @@ def anthropic_supported():
 
 
 class TestDetection:
-    @pytest.mark.parametrize("model", SAMPLING_UNSUPPORTED_MODEL_MARKERS)
+    @pytest.mark.parametrize(
+        "model",
+        [
+            # Known rejecting generations.
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-sonnet-5",
+            "claude-fable-5",
+            "claude-mythos-5",
+            "claude-mythos-preview",
+            # Future versioned releases.
+            "claude-opus-4-9",
+            "claude-opus-4-10",
+            "claude-opus-5",
+            "claude-sonnet-5-1",
+            "claude-sonnet-6",
+        ],
+    )
     def test_unsupported_models_detected(self, model):
         llm = Anthropic(name="a", model=model, connection=AnthropicConnection(api_key="x"))
         assert llm._model_rejects_sampling_params() is True
@@ -50,12 +67,29 @@ class TestDetection:
         ["bedrock/eu.anthropic.{}-20251101-v1:0", "openrouter/anthropic/{}"],
     )
     def test_detection_is_provider_prefix_independent(self, template):
-        # A marker must be detected regardless of the provider prefix wrapped around it.
-        model = template.format(SAMPLING_UNSUPPORTED_MODEL_MARKERS[0])
+        # A rejecting model must be detected regardless of the provider prefix wrapped around it,
+        # including a trailing date suffix that must not be parsed as the minor version.
+        model = template.format("claude-sonnet-5")
         llm = Anthropic(name="a", model=model, connection=AnthropicConnection(api_key="x"))
         assert llm._model_rejects_sampling_params() is True
 
-    @pytest.mark.parametrize("model", ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5", "gpt-4o"])
+    @pytest.mark.parametrize(
+        "model",
+        [
+            # Older Anthropic generations that still accept sampling params.
+            "claude-opus-4-5",
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5",
+            # Dated full id for Opus 4.0 — the date must not be read as a minor version above the cutoff.
+            "claude-opus-4-20250514",
+            # No released Haiku rejects yet; a future one is left to the runtime backstop.
+            "claude-haiku-5",
+            # Retired pre-4 naming and non-Anthropic models must not false-positive.
+            "claude-3-5-sonnet-20241022",
+            "gpt-4o",
+        ],
+    )
     def test_supported_models_not_detected(self, model):
         llm = Anthropic(name="a", model=model, connection=AnthropicConnection(api_key="x"))
         assert llm._model_rejects_sampling_params() is False
