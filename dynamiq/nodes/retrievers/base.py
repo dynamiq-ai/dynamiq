@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode
 from dynamiq.nodes.types import ActionType
+from dynamiq.types import Document
 
 
 class RetrieverInputSchema(BaseModel):
@@ -41,3 +42,14 @@ class Retriever(VectorStoreNode, ABC):
     @property
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"document_retriever": True}
+
+    def get_documents_by_id(self, ids: list[str]) -> list[Document]:
+        """Fetch documents by their exact ids, forwarding to the underlying vector store.
+
+        Shared by every retriever node; backends whose store can't fetch by id raise NotImplementedError.
+        """
+        if not ids:
+            return []
+        if self.vector_store is None:
+            self.init_components()
+        return self.vector_store.get_documents_by_id(list(ids))
