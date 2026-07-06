@@ -21,8 +21,11 @@ from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     ToolCacheEntry,
     ToolOutputSandboxPersistenceConfig,
+    bytes_to_data_url,
     convert_bytesio_to_file_info,
     extract_message_text,
+    is_image_file,
+    is_video_file,
     process_tool_output_with_sandbox_persistence,
 )
 from dynamiq.nodes.llms import BaseLLM
@@ -36,7 +39,17 @@ from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.nodes.tools.skills_tool import SkillsTool
 from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import InferenceMode
-from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage
+from dynamiq.prompts import (
+    Message,
+    MessageRole,
+    Prompt,
+    VisionMessage,
+    VisionMessageFileContent,
+    VisionMessageFileData,
+    VisionMessageImageContent,
+    VisionMessageImageURL,
+    VisionMessageTextContent,
+)
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox, SandboxConfig
 from dynamiq.skills.config import SkillsConfig
@@ -138,6 +151,11 @@ class AgentInputSchema(BaseModel):
     images: list[str | bytes | io.BytesIO] | None = Field(
         default=None, description="Image inputs (URLs, bytes, or file objects)."
     )
+    videos: list[str | bytes | io.BytesIO] | None = Field(
+        default=None,
+        description="Video inputs (URLs, bytes, or file objects). Only usable with an LLM "
+        "that supports native video input (see BaseLLM.is_video_input_supported).",
+    )
     files: list[io.BytesIO | bytes] | None = Field(
         default=None,
         description="List of file paths to pass to the agent.",
@@ -208,6 +226,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     files: list[io.BytesIO | bytes] | None = None
     is_files_allowed: bool = True
     images: list[str | bytes | io.BytesIO] = None
+    videos: list[str | bytes | io.BytesIO] = None
     name: str = "Agent"
     max_loops: int = 1
     tool_output_max_length: int = TOOL_MAX_TOKENS
@@ -400,6 +419,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             "long_term_memory": True,
             "files": True,
             "images": True,
+            "videos": True,
             "file_store": True,
             "skills": True,
             "sandbox": True,
@@ -421,6 +441,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         if self.images:
             data["images"] = [{"name": getattr(f, "name", f"image_{i}")} for i, f in enumerate(self.images)]
+        if self.videos:
+            data["videos"] = [{"name": getattr(f, "name", f"video_{i}")} for i, f in enumerate(self.videos)]
 
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
         data["sandbox"] = self.sandbox.to_dict(**kwargs) if self.sandbox else None
@@ -564,6 +586,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             del custom_metadata["files"]
         if "images" in custom_metadata:
             del custom_metadata["images"]
+        if "videos" in custom_metadata:
+            del custom_metadata["videos"]
         if "tool_params" in custom_metadata:
             del custom_metadata["tool_params"]
 
@@ -603,6 +627,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         log_data = input_data.model_dump()
         if log_data.get("images"):
             log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
+        if log_data.get("videos"):
+            log_data["videos"] = [f"video_{i}" for i in range(len(log_data["videos"]))]
         if log_data.get("files"):
             log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]
 
@@ -660,9 +686,37 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             else:
                 history_messages = None
 
-            files = input_data.files
-            if files:
-                normalized_files = self._ensure_named_files(files)
+            images = list(input_data.images or [])
+            videos = list(input_data.videos or [])
+            other_files = []
+            for file in input_data.files or []:
+                if is_image_file(file):
+                    images.append(file)
+                elif is_video_file(file):
+                    videos.append(file)
+                else:
+                    other_files.append(file)
+
+            if videos and not self.llm.is_video_input_supported:
+                logger.warning(
+                    "Agent %s - %s: LLM '%s' does not support video input; treating %d video "
+                    "attachment(s) as generic files instead.",
+                    self.name, self.id, self.llm.model, len(videos),
+                )
+                other_files.extend(videos)
+                videos = []
+
+            if images and not self.llm.is_vision_supported:
+                logger.warning(
+                    "Agent %s - %s: LLM '%s' does not support vision input; treating %d image "
+                    "attachment(s) as generic files instead.",
+                    self.name, self.id, self.llm.model, len(images),
+                )
+                other_files.extend(images)
+                images = []
+
+            if other_files:
+                normalized_files = self._ensure_named_files(other_files)
                 file_paths = []
                 if self.sandbox_backend:
                     file_paths = self._upload_files_to_sandbox(normalized_files)
@@ -674,6 +728,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 input_message = self._inject_attached_files_into_message(
                     input_message, normalized_files, file_paths=file_paths
                 )
+
+            if images or videos:
+                input_message = self._inject_attached_media_into_message(input_message, images=images, videos=videos)
 
             if input_data.tool_params:
                 kwargs["tool_params"] = input_data.tool_params
@@ -1839,6 +1896,52 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         return input_message
 
+    def _inject_attached_media_into_message(
+        self,
+        input_message: Message | VisionMessage,
+        images: list[io.BytesIO | bytes],
+        videos: list[io.BytesIO | bytes],
+    ) -> Message | VisionMessage:
+        """Convert image/video attachments into vision content blocks the LLM can actually
+        see, instead of leaving them as opaque text references.
+
+        Only applies when input_message is still a plain Message -- a caller-provided
+        VisionMessage (e.g. one built with its own Jinja placeholders, like `input_message=`
+        on Agent construction) is left untouched, matching `_inject_attached_files_into_message`.
+        Callers are expected to have already dropped any images/videos the configured LLM
+        doesn't support (see `is_vision_supported`/`is_video_input_supported`).
+        """
+        if not images and not videos:
+            return input_message
+
+        if not isinstance(input_message, Message):
+            return input_message
+
+        content = []
+        if input_message.content:
+            content.append(VisionMessageTextContent(text=input_message.content))
+
+        for image in images:
+            try:
+                image_bytes = image.getvalue() if isinstance(image, io.BytesIO) else image
+                image_url = bytes_to_data_url(image_bytes)
+                content.append(VisionMessageImageContent(image_url=VisionMessageImageURL(url=image_url)))
+            except Exception as e:
+                logger.error(f"Agent {self.name} - {self.id}: error processing image attachment: {str(e)}")
+
+        for video in videos:
+            try:
+                video_bytes = video.getvalue() if isinstance(video, io.BytesIO) else video
+                video_url = bytes_to_data_url(video_bytes)
+                content.append(VisionMessageFileContent(file=VisionMessageFileData(file_data=video_url)))
+            except Exception as e:
+                logger.error(f"Agent {self.name} - {self.id}: error processing video attachment: {str(e)}")
+
+        if not content:
+            return input_message
+
+        return VisionMessage(content=content, role=input_message.role, static=input_message.static)
+
     @property
     def file_store_backend(self) -> FileStore | None:
         """Get the file store backend from the configuration if enabled."""
@@ -1991,6 +2094,9 @@ class AgentManager(Agent):
 
         if log_data.get("images"):
             log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
+
+        if log_data.get("videos"):
+            log_data["videos"] = [f"video_{i}" for i in range(len(log_data["videos"]))]
 
         if log_data.get("files"):
             log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]

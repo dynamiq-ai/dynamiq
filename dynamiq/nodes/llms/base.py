@@ -77,6 +77,7 @@ class ModelInfo(BaseModel):
     max_input_tokens: int | None = None
     supports_vision: bool | None = None
     supports_pdf_input: bool | None = None
+    supports_video_input: bool | None = None
     supports_function_calling: bool | None = None
 
 
@@ -465,6 +466,21 @@ class BaseLLM(ConnectionNode):
             except Exception:
                 return False
         custom = model_registry.supports_pdf_input(self.model)
+        return custom if custom is not None else False
+
+    @property
+    def is_video_input_supported(self) -> bool:
+        """Check if the LLM supports native video input.
+
+        Unlike vision/PDF, litellm exposes no video-input capability signal (its `video_*`
+        APIs are for generation, not describing input support), so this skips the litellm
+        tier entirely: it checks the model_info override, then the custom registry. A model
+        needs an explicit `supports_video_input` entry in model_registry.json to resolve here,
+        even if litellm already recognizes the model for other purposes.
+        """
+        if self.model_info and self.model_info.supports_video_input is not None:
+            return self.model_info.supports_video_input
+        custom = model_registry.supports_video_input(self.model)
         return custom if custom is not None else False
 
     def get_messages(
