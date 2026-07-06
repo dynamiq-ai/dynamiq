@@ -14,6 +14,14 @@ from dynamiq.components.converters.utils import get_filename_for_bytesio
 from dynamiq.types import Document, DocumentCreationMode
 
 
+UNICODE_BOMS_WITH_NULL_BYTES = (
+    b"\xff\xfe",
+    b"\xfe\xff",
+    b"\xff\xfe\x00\x00",
+    b"\x00\x00\xfe\xff",
+)
+
+
 class HTMLConverter(BaseConverter):
     """
     A component for converting HTML files to Documents using lxml.
@@ -56,12 +64,12 @@ class HTMLConverter(BaseConverter):
         else:
             filepath = str(file)
 
-        # Read the file content
+        # Read the file content as bytes; decoding is delegated to lxml (see _parse_html_content)
         if isinstance(file, BytesIO):
             file.seek(0)
-            html_content = file.read().decode("utf-8")
+            html_content = file.read()
         else:
-            with open(file, encoding="utf-8") as f:
+            with open(file, "rb") as f:
                 html_content = f.read()
 
         # Parse the HTML content
@@ -75,7 +83,7 @@ class HTMLConverter(BaseConverter):
             metadata=metadata,
         )
 
-    def _parse_html_content(self, html_content: str) -> lxml_html.HtmlElement:
+    def _parse_html_content(self, html_content: bytes) -> lxml_html.HtmlElement:
         """
         Parse HTML content using lxml.
 
@@ -85,12 +93,17 @@ class HTMLConverter(BaseConverter):
         Returns:
             lxml HTML element
         """
+        if b"\x00" in html_content and not html_content.startswith(UNICODE_BOMS_WITH_NULL_BYTES):
+            raise ValueError("File content is binary, not HTML")
+
         try:
+            # Bytes input lets lxml resolve the charset and encoding declaration itself;
+            # a str input makes it reject pages starting with <?xml ... encoding=...?>.
             return lxml_html.fromstring(html_content)
         except etree.ParserError:
             # Handle malformed HTML by cleaning it first
-            html_content = self._clean_html(html_content)
-            return lxml_html.fromstring(html_content)
+            cleaned = self._clean_html(html_content.decode("utf-8", errors="replace"))
+            return lxml_html.fromstring(cleaned)
 
     @staticmethod
     def _clean_html(html_content: str) -> str:

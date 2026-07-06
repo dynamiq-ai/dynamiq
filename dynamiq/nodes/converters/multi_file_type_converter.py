@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.converters.docx import DOCXFileConverter
+from dynamiq.nodes.converters.excel import ExcelFileConverter
 from dynamiq.nodes.converters.html import HTMLConverter
 from dynamiq.nodes.converters.llm_text_extractor import LLMImageConverter, LLMPDFConverter
 from dynamiq.nodes.converters.pptx import PPTXFileConverter
@@ -30,6 +31,7 @@ DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP = {
     FileType.PDF: PyPDFConverter,
     FileType.DOCUMENT: DOCXFileConverter,
     FileType.PRESENTATION: PPTXFileConverter,
+    FileType.SPREADSHEET: ExcelFileConverter,
     FileType.HTML: HTMLConverter,
     FileType.TEXT: TextFileConverter,
     FileType.MARKDOWN: TextFileConverter,
@@ -40,6 +42,7 @@ FILE_TYPE_TO_SUPPORTED_CONVERTER_CLASS_MAP = {
     FileType.IMAGE: (LLMImageConverter,),
     FileType.DOCUMENT: (DOCXFileConverter,),
     FileType.PRESENTATION: (PPTXFileConverter,),
+    FileType.SPREADSHEET: (ExcelFileConverter,),
     FileType.HTML: (HTMLConverter,),
     FileType.TEXT: (TextFileConverter,),
     FileType.MARKDOWN: (TextFileConverter,),
@@ -79,6 +82,7 @@ class MultiFileTypeConverter(Node):
         - LLMPDFConverter
         - DOCXFileConverter
         - PPTXFileConverter
+        - ExcelFileConverter
         - HTMLConverter
         - UnstructuredFileConverter (fallback)
     """
