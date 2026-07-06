@@ -156,6 +156,13 @@ def _parse_comparison_condition(condition: dict[str, Any]) -> tuple[str, list[An
 
     value: Any = condition["value"]
 
+    if operator == "contains_any":
+        # `contains_any` operates on the raw JSONB array, so it must bypass the
+        # scalar `->>` casting applied to the other comparison operators. It also
+        # returns its own params list (the JSONB key + the value array), so unlike the
+        # other operators it is returned as-is instead of being wrapped in a list.
+        return _contains_any(field, value)
+
     if field.startswith("metadata."):
         field = _parse_metadata_fields_in_metadata(field, value)
 
@@ -417,6 +424,32 @@ def _in(field: str, value: Any) -> tuple[str, list]:
     return f"{field} = ANY(%s::text[])", value
 
 
+def _contains_any(field: str, value: Any) -> tuple[str, list]:
+    """
+    Creates a `contains_any` (union) comparison filter.
+
+    Args:
+        field (str): The field to compare (already qualified, e.g. ``metadata.tags``).
+        value (Any): The list of values to compare against.
+
+    Returns:
+        tuple[str, list]: A `contains_any` comparison SQL query and params to use in the query.
+
+    Raises:
+        VectorStoreFilterException: If the value is not a list or contains unsupported types.
+    """
+    _validate_list_value(field, value, "contains_any")
+
+    text_values = [str(v) for v in value]
+
+    if field.startswith("metadata."):
+        field_name = field.split(".", 1)[1]
+        return "metadata->%s ?| %s::text[]", [field_name, text_values]
+
+    # Fallback for a top-level JSONB column (the default schema has no such array column).
+    return f"{field} ?| %s::text[]", [text_values]
+
+
 LOGICAL_OPERATORS = ["AND", "OR"]
 
 COMPARISON_OPERATORS = {
@@ -428,4 +461,5 @@ COMPARISON_OPERATORS = {
     "<=": _less_than_equal,
     "in": _in,
     "not in": _not_in,
+    "contains_any": _contains_any,
 }

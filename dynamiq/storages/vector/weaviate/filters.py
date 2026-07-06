@@ -321,6 +321,54 @@ def _not_in(field: str, value: Any) -> FilterReturn:
     return Filter.all_of(operands)
 
 
+def _contains_any(field: str, value: Any) -> FilterReturn:
+    """
+    Create a 'contains any' (union) filter.
+
+    Matches documents whose ``field`` contains at least one of the given values.
+    See https://docs.weaviate.io/weaviate/search/filters#containsany-filter
+
+    Args:
+        field (str): The field to filter on.
+        value (Any): The list of values to compare against.
+
+    Returns:
+        FilterReturn: The 'contains any' filter.
+
+    Raises:
+        VectorStoreFilterException: If the value is not a list.
+    """
+    if not isinstance(value, list):
+        msg = f"{field}'s value must be a list when using 'contains_any' or 'contains_all' comparators"
+        raise VectorStoreFilterException(msg)
+
+    return Filter.by_property(field).contains_any(value)
+
+
+def _contains_all(field: str, value: Any) -> FilterReturn:
+    """
+    Create a 'contains all' (intersection) filter.
+
+    Matches documents whose ``field`` contains every one of the given values.
+    See https://docs.weaviate.io/weaviate/search/filters#containsall-filter
+
+    Args:
+        field (str): The field to filter on.
+        value (Any): The list of values to compare against.
+
+    Returns:
+        FilterReturn: The 'contains all' filter.
+
+    Raises:
+        VectorStoreFilterException: If the value is not a list.
+    """
+    if not isinstance(value, list):
+        msg = f"{field}'s value must be a list when using 'contains_any' or 'contains_all' comparators"
+        raise VectorStoreFilterException(msg)
+
+    return Filter.by_property(field).contains_all(value)
+
+
 COMPARISON_OPERATORS = {
     "==": _equal,
     "!=": _not_equal,
@@ -330,6 +378,8 @@ COMPARISON_OPERATORS = {
     "<=": _less_than_equal,
     "in": _in,
     "not in": _not_in,
+    "contains_any": _contains_any,
+    "contains_all": _contains_all,
 }
 
 
