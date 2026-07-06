@@ -88,3 +88,19 @@ def test_ask_stream_event_browser_takeover_defaults_to_false():
 
     assert capture.events, "expected the ASK prompt to be streamed to the UI"
     assert capture.events[0].data.is_browser_takeover is False
+
+
+def test_description_reflects_browser_takeover_when_enabled():
+    """In takeover mode the agent-facing description must not claim the user can only reply with text."""
+    tool = HumanFeedbackTool(is_browser_takeover=True)
+    description = tool.description.lower()
+
+    assert "can not perform actions" not in description, "text-only caveat contradicts browser takeover"
+    assert "browser" in description, "description should tell the agent the user acts in a live browser"
+
+
+def test_description_keeps_text_only_caveat_by_default():
+    """Without takeover the existing text-only guidance for the agent is preserved."""
+    tool = HumanFeedbackTool()
+
+    assert "can not perform actions" in tool.description.lower()

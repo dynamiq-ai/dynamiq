@@ -126,7 +126,6 @@ Examples:
 
 Important:
 - Use 'ask' for approval, confirmation, clarification, or information.
-- The user can only provide text responses - they can not perform actions.
 - This tool should be used to gather information from user and send status updates during agent execution.
 """
     input_method: FeedbackMethod | InputMethodCallable = FeedbackMethod.CONSOLE
@@ -148,6 +147,14 @@ Important:
     @model_validator(mode="after")
     def update_description(self):
         msg_template = self.msg_template
+        if self.is_browser_takeover:
+            self.description += (
+                "\n- Browser takeover is ENABLED: the user interacts directly with a live browser session "
+                "(navigating, clicking, typing), not only text responses. Coordinate with the browser tool "
+                "and hand off control to the user when manual action is required."
+            )
+        else:
+            self.description += "\n- The user can only provide text responses - they can not perform actions."
         self.description += (
             f"\nMessage template: '{msg_template}'." " Parameters will be substituted based on the provided input data."
         )
