@@ -1,10 +1,13 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
 from dynamiq.storages.vector.utils import create_file_id_filter, create_file_ids_filter
 from dynamiq.utils.logger import logger
+
+if TYPE_CHECKING:
+    from dynamiq.types import Document
 
 
 class BaseVectorStoreParams(BaseModel):
@@ -34,6 +37,14 @@ class BaseVectorStore(ABC):
     This abstract class provides a consistent interface for all vector store implementations,
     including common methods for document deletion by file ID(s).
     """
+
+    def get_documents_by_id(self, ids: list[str]) -> list["Document"]:
+        """Fetch documents by their exact ids (not a similarity search).
+
+        Backends that can address points by id override this; the rest inherit this default so callers
+        can rely on a single contract.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support fetch-by-id.")
 
     @abstractmethod
     def delete_documents_by_filters(self, filters: dict[str, Any]) -> None:

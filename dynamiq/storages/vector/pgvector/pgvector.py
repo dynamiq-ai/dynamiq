@@ -948,7 +948,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
                 documents = self._convert_query_result_to_documents(records)
                 return documents
 
-    def get_documents_by_ids(
+    def get_documents_by_id(
         self,
         ids: list[str],
         content_key: str | None = None,
