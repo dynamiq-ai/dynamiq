@@ -37,6 +37,7 @@ class ModelMetadata(BaseModel):
     litellm_provider: str | None = None
     supports_vision: bool | None = None
     supports_pdf_input: bool | None = None
+    supports_video_input: bool | None = None
     supports_function_calling: bool | None = None
     supports_parallel_function_calling: bool | None = None
     supports_response_schema: bool | None = None
@@ -193,6 +194,13 @@ class ModelRegistry:
         if info is None:
             return None
         return info.get("supports_pdf_input")
+
+    def supports_video_input(self, model: str) -> bool | None:
+        """Return video input support flag or ``None`` if unknown."""
+        info = self._resolve(model)
+        if info is None:
+            return None
+        return info.get("supports_video_input")
 
     def list_models(self) -> list[str]:
         """Return all registered model identifiers."""

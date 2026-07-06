@@ -1,3 +1,4 @@
+import base64
 import uuid
 from io import BytesIO
 from unittest.mock import PropertyMock, patch
@@ -19,7 +20,7 @@ from dynamiq.nodes.agents.exceptions import (
     XMLParsingError,
 )
 from dynamiq.nodes.agents.utils import SummarizationConfig, XMLParser
-from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.llms import Gemini, OpenAI
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import InferenceMode
@@ -873,6 +874,163 @@ def test_inject_attached_files_skips_vision_message(openai_node, mock_llm_execut
 
     assert result is input_message
     assert result.content == [prompts.VisionMessageTextContent(text="Analyze the uploads.")]
+
+
+# 1x1 px transparent PNG.
+_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00"
+    b"\x1f\x15\xc4\x89\x00\x00\x00\x0bIDATx\x9cc\x60\x00\x02\x00\x00\x05\x00\x01\x0d\n-\xb4"
+    b"\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+# Minimal bytes `filetype` recognizes as video/mp4 (bare ftyp box, no real media).
+_MP4_BYTES = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + b"\x00" * 20
+
+
+def test_execute_auto_detects_image_file_as_vision_content(openai_node, mocker):
+    """An image passed via `files` is content-sniffed and turned into a real vision content
+    block, not just a text filename reference -- gpt-4o-mini supports vision."""
+    agent = Agent(name="Vision Files Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+
+    answer_result = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        output={"content": "Thought: saw the image.\nAnswer: It's a tiny image."},
+    )
+    mock_run_llm = mocker.patch.object(agent, "_run_llm", return_value=answer_result)
+
+    image_file = BytesIO(_PNG_BYTES)
+    image_file.name = "pixel.png"
+
+    result = agent.run(input_data={"input": "What's in this image?", "files": [image_file]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    messages = mock_run_llm.call_args.kwargs["messages"]
+    user_message = next(m for m in messages if m.role == "user")
+
+    assert isinstance(user_message, prompts.VisionMessage)
+    image_blocks = [c for c in user_message.content if isinstance(c, prompts.VisionMessageImageContent)]
+    assert len(image_blocks) == 1
+    assert image_blocks[0].image_url.url.startswith("data:image/png;base64,")
+
+
+def test_execute_video_file_falls_back_when_llm_unsupported(openai_node, mocker):
+    """A video passed via `files` degrades to the old text-listing behavior when the
+    configured LLM doesn't support video input (gpt-4o-mini has no such registry entry)."""
+    agent = Agent(name="No Video Support Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    assert agent.llm.is_video_input_supported is False
+
+    answer_result = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        output={"content": "Thought: no video support.\nAnswer: Can't watch it."},
+    )
+    mock_run_llm = mocker.patch.object(agent, "_run_llm", return_value=answer_result)
+
+    video_file = BytesIO(_MP4_BYTES)
+    video_file.name = "clip.mp4"
+
+    result = agent.run(input_data={"input": "What's happening in this video?", "files": [video_file]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    messages = mock_run_llm.call_args.kwargs["messages"]
+    user_message = next(m for m in messages if m.role == "user")
+
+    assert isinstance(user_message, Message)
+    assert "Attached files available to you:" in user_message.content
+    assert "clip.mp4" in user_message.content
+
+
+def test_execute_video_data_url_falls_back_as_uploaded_file(openai_node, mocker):
+    """A data URL should not be pasted into the prompt when the LLM lacks video support."""
+    agent = Agent(name="No Video Support Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    assert agent.llm.is_video_input_supported is False
+
+    answer_result = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        output={"content": "Thought: no video support.\nAnswer: Can't watch it."},
+    )
+    mock_run_llm = mocker.patch.object(agent, "_run_llm", return_value=answer_result)
+
+    encoded_video = base64.b64encode(_MP4_BYTES).decode("ascii")
+    video_data_url = f"data:video/mp4;base64,{encoded_video}"
+
+    result = agent.run(input_data={"input": "What's happening in this video?", "videos": [video_data_url]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    messages = mock_run_llm.call_args.kwargs["messages"]
+    user_message = next(m for m in messages if m.role == "user")
+
+    assert isinstance(user_message, Message)
+    assert video_data_url not in user_message.content
+    assert encoded_video not in user_message.content
+    assert "Attached files available to you:" in user_message.content
+    assert "video_0.mp4" in user_message.content
+    assert agent.file_store_backend.retrieve("video_0.mp4") == _MP4_BYTES
+    stored_file = agent.file_store_backend.list_files()[0]
+    assert stored_file.content_type == "video/mp4"
+
+
+def test_execute_video_local_path_falls_back_as_uploaded_file(openai_node, mocker, tmp_path):
+    """A local path should be read and uploaded when the LLM lacks video support."""
+    agent = Agent(name="No Video Support Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    assert agent.llm.is_video_input_supported is False
+
+    answer_result = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        output={"content": "Thought: no video support.\nAnswer: Can't watch it."},
+    )
+    mock_run_llm = mocker.patch.object(agent, "_run_llm", return_value=answer_result)
+
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(_MP4_BYTES)
+
+    result = agent.run(input_data={"input": "What's happening in this video?", "videos": [str(video_path)]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    messages = mock_run_llm.call_args.kwargs["messages"]
+    user_message = next(m for m in messages if m.role == "user")
+
+    assert isinstance(user_message, Message)
+    assert str(video_path) not in user_message.content
+    assert "Media attachments not supported by this model" not in user_message.content
+    assert "Attached files available to you:" in user_message.content
+    assert "clip.mp4" in user_message.content
+    assert agent.file_store_backend.retrieve("clip.mp4") == _MP4_BYTES
+    stored_file = agent.file_store_backend.list_files()[0]
+    assert stored_file.content_type == "video/mp4"
+
+
+def test_execute_auto_detects_video_file_as_vision_content(mocker):
+    """A video passed via `files` becomes a real video content block when the configured
+    LLM is registered as supporting video input (Gemini)."""
+    gemini_connection = connections.Gemini(id=str(uuid.uuid4()), api_key="api-key")
+    gemini_node = Gemini(
+        name="Gemini",
+        model="gemini/gemini-3.5-flash",
+        connection=gemini_connection,
+        prompt=Prompt(messages=[Message(role="user", content="{{input}}")]),
+    )
+    assert gemini_node.is_video_input_supported is True
+
+    agent = Agent(name="Video Files Agent", llm=gemini_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+
+    answer_result = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        output={"content": "Thought: watched it.\nAnswer: A short clip."},
+    )
+    mock_run_llm = mocker.patch.object(agent, "_run_llm", return_value=answer_result)
+
+    video_file = BytesIO(_MP4_BYTES)
+    video_file.name = "clip.mp4"
+
+    result = agent.run(input_data={"input": "What's happening in this video?", "files": [video_file]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    messages = mock_run_llm.call_args.kwargs["messages"]
+    user_message = next(m for m in messages if m.role == "user")
+
+    assert isinstance(user_message, prompts.VisionMessage)
+    video_blocks = [c for c in user_message.content if isinstance(c, prompts.VisionMessageFileContent)]
+    assert len(video_blocks) == 1
+    assert video_blocks[0].file.file_data.startswith("data:video/mp4;base64,")
 
 
 class TestParallelToolCloning:

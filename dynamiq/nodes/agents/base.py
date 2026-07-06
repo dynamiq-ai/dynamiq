@@ -1,10 +1,15 @@
+import base64
+import binascii
 import io
 import json
+import mimetypes
 import re
 from contextvars import ContextVar
 from copy import deepcopy
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, ClassVar, Union
+from urllib.parse import unquote_to_bytes
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer, model_validator
@@ -21,8 +26,11 @@ from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     ToolCacheEntry,
     ToolOutputSandboxPersistenceConfig,
+    bytes_to_data_url,
     convert_bytesio_to_file_info,
     extract_message_text,
+    is_image_file,
+    is_video_file,
     process_tool_output_with_sandbox_persistence,
 )
 from dynamiq.nodes.llms import BaseLLM
@@ -36,7 +44,17 @@ from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.nodes.tools.skills_tool import SkillsTool
 from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import InferenceMode
-from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage
+from dynamiq.prompts import (
+    Message,
+    MessageRole,
+    Prompt,
+    VisionMessage,
+    VisionMessageFileContent,
+    VisionMessageFileData,
+    VisionMessageImageContent,
+    VisionMessageImageURL,
+    VisionMessageTextContent,
+)
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox, SandboxConfig
 from dynamiq.skills.config import SkillsConfig
@@ -138,6 +156,11 @@ class AgentInputSchema(BaseModel):
     images: list[str | bytes | io.BytesIO] | None = Field(
         default=None, description="Image inputs (URLs, bytes, or file objects)."
     )
+    videos: list[str | bytes | io.BytesIO] | None = Field(
+        default=None,
+        description="Video inputs (URLs, bytes, or file objects). Only usable with an LLM "
+        "that supports native video input (see BaseLLM.is_video_input_supported).",
+    )
     files: list[io.BytesIO | bytes] | None = Field(
         default=None,
         description="List of file paths to pass to the agent.",
@@ -208,6 +231,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     files: list[io.BytesIO | bytes] | None = None
     is_files_allowed: bool = True
     images: list[str | bytes | io.BytesIO] = None
+    videos: list[str | bytes | io.BytesIO] = None
     name: str = "Agent"
     max_loops: int = 1
     tool_output_max_length: int = TOOL_MAX_TOKENS
@@ -400,6 +424,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             "long_term_memory": True,
             "files": True,
             "images": True,
+            "videos": True,
             "file_store": True,
             "skills": True,
             "sandbox": True,
@@ -421,6 +446,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         if self.images:
             data["images"] = [{"name": getattr(f, "name", f"image_{i}")} for i, f in enumerate(self.images)]
+        if self.videos:
+            data["videos"] = [{"name": getattr(f, "name", f"video_{i}")} for i, f in enumerate(self.videos)]
 
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
         data["sandbox"] = self.sandbox.to_dict(**kwargs) if self.sandbox else None
@@ -564,6 +591,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             del custom_metadata["files"]
         if "images" in custom_metadata:
             del custom_metadata["images"]
+        if "videos" in custom_metadata:
+            del custom_metadata["videos"]
         if "tool_params" in custom_metadata:
             del custom_metadata["tool_params"]
 
@@ -603,6 +632,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         log_data = input_data.model_dump()
         if log_data.get("images"):
             log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
+        if log_data.get("videos"):
+            log_data["videos"] = [f"video_{i}" for i in range(len(log_data["videos"]))]
         if log_data.get("files"):
             log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]
 
@@ -660,9 +691,61 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             else:
                 history_messages = None
 
-            files = input_data.files
-            if files:
-                normalized_files = self._ensure_named_files(files)
+            images = []
+            videos = []
+            for item in input_data.images or []:
+                if not isinstance(item, str) and is_video_file(item):
+                    videos.append(item)
+                else:
+                    images.append(item)
+            for item in input_data.videos or []:
+                if not isinstance(item, str) and is_image_file(item):
+                    images.append(item)
+                else:
+                    videos.append(item)
+
+            other_files = []
+            for file in input_data.files or []:
+                if is_image_file(file):
+                    images.append(file)
+                elif is_video_file(file):
+                    videos.append(file)
+                else:
+                    other_files.append(file)
+
+            media_url_references = []
+
+            if videos and not self.llm.is_video_input_supported:
+                logger.warning(
+                    "Agent %s - %s: LLM '%s' does not support video input; treating %d video "
+                    "attachment(s) as generic files instead.",
+                    self.name, self.id, self.llm.model, len(videos),
+                )
+                for index, video in enumerate(videos):
+                    self._append_unsupported_media_attachment(
+                        video, other_files, media_url_references, media_type="video", index=index
+                    )
+                videos = []
+
+            if images and not self.llm.is_vision_supported:
+                logger.warning(
+                    "Agent %s - %s: LLM '%s' does not support vision input; treating %d image "
+                    "attachment(s) as generic files instead.",
+                    self.name, self.id, self.llm.model, len(images),
+                )
+                for index, image in enumerate(images):
+                    self._append_unsupported_media_attachment(
+                        image, other_files, media_url_references, media_type="image", index=index
+                    )
+                images = []
+
+            if media_url_references:
+                input_message = self._inject_attached_media_references_into_message(
+                    input_message, media_url_references
+                )
+
+            if other_files:
+                normalized_files = self._ensure_named_files(other_files)
                 file_paths = []
                 if self.sandbox_backend:
                     file_paths = self._upload_files_to_sandbox(normalized_files)
@@ -674,6 +757,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 input_message = self._inject_attached_files_into_message(
                     input_message, normalized_files, file_paths=file_paths
                 )
+
+            if images or videos:
+                input_message = self._inject_attached_media_into_message(input_message, images=images, videos=videos)
 
             if input_data.tool_params:
                 kwargs["tool_params"] = input_data.tool_params
@@ -1586,6 +1672,104 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         return named
 
     @staticmethod
+    def _extension_for_mime_type(mime_type: str) -> str:
+        """Return a stable file extension for a MIME type."""
+        if not mime_type:
+            return ".bin"
+
+        extension = mimetypes.guess_extension(mime_type)
+        if extension:
+            return extension
+
+        if "/" not in mime_type:
+            return ".bin"
+
+        subtype = mime_type.rsplit("/", 1)[-1].split("+", 1)[0]
+        return f".{subtype}" if subtype else ".bin"
+
+    @classmethod
+    def _data_url_to_file(cls, data_url: str, *, media_type: str, index: int) -> io.BytesIO:
+        """Decode a data URL into a named BytesIO suitable for the generic file pipeline."""
+        match = re.match(r"^data:([^;,]+)?((?:;[^,]*)*),(.*)$", data_url, flags=re.DOTALL)
+        if not match:
+            raise ValueError("invalid data URL")
+
+        mime_type = match.group(1) or "application/octet-stream"
+        params = [param.lower() for param in match.group(2).split(";") if param]
+        payload = match.group(3)
+
+        try:
+            if "base64" in params:
+                content = base64.b64decode(payload.strip(), validate=True)
+            else:
+                content = unquote_to_bytes(payload)
+        except (binascii.Error, ValueError) as e:
+            raise ValueError("invalid data URL payload") from e
+
+        file_obj = io.BytesIO(content)
+        file_obj.name = f"{media_type}_{index}{cls._extension_for_mime_type(mime_type)}"
+        file_obj.description = f"User-provided {media_type} attachment decoded from data URL"
+        file_obj.content_type = mime_type
+        return file_obj
+
+    @staticmethod
+    def _local_media_path_to_file(path: str, *, media_type: str) -> io.BytesIO | None:
+        """Read an existing local media path into a file object for generic file upload."""
+        local_path = Path(path).expanduser()
+        if not local_path.is_file():
+            return None
+
+        content = local_path.read_bytes()
+        file_obj = io.BytesIO(content)
+        file_obj.name = local_path.name
+        file_obj.description = f"User-provided {media_type} attachment loaded from local path"
+        file_obj.content_type = mimetypes.guess_type(local_path.name)[0] or "application/octet-stream"
+        return file_obj
+
+    def _append_unsupported_media_attachment(
+        self,
+        attachment: str | io.BytesIO | bytes,
+        other_files: list[io.BytesIO | bytes],
+        media_url_references: list[str],
+        *,
+        media_type: str,
+        index: int,
+    ) -> None:
+        """Route unsupported media to file upload or short textual references."""
+        if not isinstance(attachment, str):
+            other_files.append(attachment)
+            return
+
+        if not attachment.startswith("data:"):
+            try:
+                if file_obj := self._local_media_path_to_file(attachment, media_type=media_type):
+                    other_files.append(file_obj)
+                    return
+            except OSError as e:
+                logger.warning(
+                    "Agent %s - %s: failed to read unsupported %s local path attachment '%s': %s",
+                    self.name,
+                    self.id,
+                    media_type,
+                    attachment,
+                    e,
+                )
+            media_url_references.append(attachment)
+            return
+
+        try:
+            other_files.append(self._data_url_to_file(attachment, media_type=media_type, index=index))
+        except ValueError as e:
+            logger.warning(
+                "Agent %s - %s: failed to decode unsupported %s data URL attachment: %s",
+                self.name,
+                self.id,
+                media_type,
+                e,
+            )
+            media_url_references.append(f"{media_type} data URL attachment could not be decoded")
+
+    @staticmethod
     def _split_upload_filename(file_name: str) -> tuple[str, str]:
         """Split a file name into stem and extension for suffixing."""
         stem, dot, extension = file_name.rpartition(".")
@@ -1754,7 +1938,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 self.file_store_backend.store(
                     file_path=unique_file_name,
                     content=content,
-                    content_type="application/octet-stream",
+                    content_type=getattr(file_obj, "content_type", "application/octet-stream"),
                     metadata={"description": description, "source": "user_upload"},
                     overwrite=False,
                 )
@@ -1838,6 +2022,89 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             input_message.content = input_message.content + file_section
 
         return input_message
+
+    def _inject_attached_media_references_into_message(
+        self, input_message: Message | VisionMessage, references: list[str]
+    ) -> Message | VisionMessage:
+        """Surface media URLs/paths as plain text when the LLM can't consume them as vision
+        content. These are external references (not binary payloads), so they're rendered
+        as text rather than routed through the file-upload pipeline, which only handles
+        bytes/BytesIO content.
+        """
+        if not references or not isinstance(input_message, Message):
+            return input_message
+
+        lines = [f"- {ref}" for ref in references]
+        section = (
+            "\n".join(["\nMedia attachments not supported by this model (referenced by URL/path):"] + lines) + "\n"
+        )
+
+        if isinstance(input_message.content, str):
+            input_message.content = f"{input_message.content.rstrip()}{section}"
+        else:
+            input_message.content = input_message.content + section
+
+        return input_message
+
+    def _inject_attached_media_into_message(
+        self,
+        input_message: Message | VisionMessage,
+        images: list[str | io.BytesIO | bytes],
+        videos: list[str | io.BytesIO | bytes],
+    ) -> Message | VisionMessage:
+        """Convert image/video attachments into vision content blocks the LLM can actually
+        see, instead of leaving them as opaque text references.
+
+        Only applies when input_message is still a plain Message -- a caller-provided
+        VisionMessage (e.g. one built with its own Jinja placeholders, like `input_message=`
+        on Agent construction) is left untouched, matching `_inject_attached_files_into_message`.
+        Callers are expected to have already dropped any images/videos the configured LLM
+        doesn't support (see `is_vision_supported`/`is_video_input_supported`).
+        """
+        if not images and not videos:
+            return input_message
+
+        if not isinstance(input_message, Message):
+            return input_message
+
+        content = []
+        if input_message.content:
+            content.append(VisionMessageTextContent(text=input_message.content))
+
+        for image in images:
+            try:
+                if isinstance(image, str):
+                    if image.startswith(("http://", "https://", "data:")):
+                        image_url = image
+                    else:
+                        with open(image, "rb") as file:
+                            image_url = bytes_to_data_url(file.read())
+                else:
+                    image_bytes = image.getvalue() if isinstance(image, io.BytesIO) else image
+                    image_url = bytes_to_data_url(image_bytes)
+                content.append(VisionMessageImageContent(image_url=VisionMessageImageURL(url=image_url)))
+            except Exception as e:
+                logger.error(f"Agent {self.name} - {self.id}: error processing image attachment: {str(e)}")
+
+        for video in videos:
+            try:
+                if isinstance(video, str):
+                    if video.startswith(("http://", "https://", "data:", "gs://")):
+                        video_url = video
+                    else:
+                        with open(video, "rb") as file:
+                            video_url = bytes_to_data_url(file.read())
+                else:
+                    video_bytes = video.getvalue() if isinstance(video, io.BytesIO) else video
+                    video_url = bytes_to_data_url(video_bytes)
+                content.append(VisionMessageFileContent(file=VisionMessageFileData(file_data=video_url)))
+            except Exception as e:
+                logger.error(f"Agent {self.name} - {self.id}: error processing video attachment: {str(e)}")
+
+        if not content:
+            return input_message
+
+        return VisionMessage(content=content, role=input_message.role, static=input_message.static)
 
     @property
     def file_store_backend(self) -> FileStore | None:
@@ -1991,6 +2258,9 @@ class AgentManager(Agent):
 
         if log_data.get("images"):
             log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
+
+        if log_data.get("videos"):
+            log_data["videos"] = [f"video_{i}" for i in range(len(log_data["videos"]))]
 
         if log_data.get("files"):
             log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]

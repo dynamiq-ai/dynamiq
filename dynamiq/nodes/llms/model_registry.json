@@ -1,4 +1,37 @@
 {
+    "gemini-3.5-flash": {
+        "supports_video_input": true
+    },
+    "gemini-3.1-pro-preview": {
+        "supports_video_input": true
+    },
+    "gemini-3.1-pro-preview-customtools": {
+        "supports_video_input": true
+    },
+    "gemini-3.1-flash-lite": {
+        "supports_video_input": true
+    },
+    "gemini-3-flash-preview": {
+        "supports_video_input": true
+    },
+    "gemini-3.1-flash-live-preview": {
+        "supports_video_input": true
+    },
+    "gemini-2.5-pro": {
+        "supports_video_input": true
+    },
+    "gemini-2.5-flash": {
+        "supports_video_input": true
+    },
+    "gemini-2.0-flash": {
+        "supports_video_input": true
+    },
+    "gemini-1.5-pro": {
+        "supports_video_input": true
+    },
+    "gemini-1.5-flash": {
+        "supports_video_input": true
+    },
     "accounts/fireworks/models/glm-5": {
         "max_input_tokens": 202000,
         "max_output_tokens": 131072,
