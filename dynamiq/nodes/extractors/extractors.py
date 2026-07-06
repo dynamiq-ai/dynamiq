@@ -1,7 +1,8 @@
+import csv
 import enum
 import re
 import zipfile
-from io import BytesIO
+from io import BytesIO, StringIO
 from typing import Any, ClassVar, Literal
 
 import filetype
@@ -145,7 +146,7 @@ EXTENSION_MAP = {
     },
     FileType.DOCUMENT: {"doc", "docx", "odt", "rtf"},
     FileType.PDF: {"pdf"},
-    FileType.SPREADSHEET: {"xls", "xlsx", "csv", "ods"},
+    FileType.SPREADSHEET: {"xlsx", "csv", "tsv"},
     FileType.PRESENTATION: {"ppt", "pptx", "odp"},
     FileType.ARCHIVE: {
         "zip",
@@ -176,10 +177,16 @@ EXTENSION_MAP = {
     FileType.EXECUTABLE: {"exe"},
     FileType.DATABASE: {"sqlite"},
     FileType.EBOOK: {"epub"},
-    FileType.HTML: {"html"},
-    FileType.TEXT: {"txt"},
-    FileType.MARKDOWN: {"md"},
+    FileType.HTML: {"html", "htm", "xhtml"},
+    FileType.TEXT: {"txt", "json", "xml", "yaml", "yml", "log", "rst"},
+    FileType.MARKDOWN: {"md", "markdown"},
 }
+
+UNSUPPORTED_SPREADSHEET_EXTENSIONS = {"xls", "ods"}
+HTML_START_RE = re.compile(
+    r"^\s*(?:<!doctype\s+html\b|<html(?:\s|>|/)|<\?xml[^>]*\?>\s*(?:<!doctype\s+html\b|<html(?:\s|>|/)))",
+    re.IGNORECASE,
+)
 
 EXTENSION_TO_FILE_TYPE = {
     extension.lower(): file_type for file_type, extensions in EXTENSION_MAP.items() for extension in extensions
@@ -193,9 +200,9 @@ ZIP_DIRECTORY_MAP = {
 ZIP_MIMETYPE_MAP = {
     "application/epub+zip": FileType.EBOOK,
     "application/vnd.oasis.opendocument.text": FileType.DOCUMENT,
-    "application/vnd.oasis.opendocument.spreadsheet": FileType.SPREADSHEET,
     "application/vnd.oasis.opendocument.presentation": FileType.PRESENTATION,
 }
+UNSUPPORTED_ZIP_MIMETYPES = {"application/vnd.oasis.opendocument.spreadsheet"}
 
 _MARKDOWN_RE = re.compile(
     r"""
@@ -232,7 +239,7 @@ class FileTypeExtractorInputSchema(BaseModel):
 class FileTypeExtractor(Node):
     group: Literal[NodeGroup.EXTRACTORS] = NodeGroup.EXTRACTORS
     name: str = "file-type-extractor"
-    description: str = "Node that extract file category based on file extension or content"
+    description: str = "Node that extracts file category based on file extension, falling back to file content"
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -288,6 +295,8 @@ class FileTypeExtractor(Node):
                 names = archive.namelist()
                 if "mimetype" in names:
                     mimetype = archive.read("mimetype").decode("utf-8", errors="ignore").strip().lower()
+                    if mimetype in UNSUPPORTED_ZIP_MIMETYPES:
+                        return None
                     file_type = ZIP_MIMETYPE_MAP.get(mimetype)
                     if file_type is not None:
                         return file_type
@@ -310,18 +319,25 @@ class FileTypeExtractor(Node):
             sample (bytes): The leading bytes of the file.
 
         Returns:
-            FileType | None: ``FileType.HTML`` or ``FileType.TEXT`` for confirmed text, otherwise ``None``.
+            FileType | None: A detected text-based file category, otherwise ``None``.
         """
+        if b"\x00" in sample:
+            return None
+
         match = from_bytes(sample).best()
         if match is None:
             return None
 
         text = str(match)
-        head = text.lstrip().lower()
-        if head.startswith(("<!doctype html", "<html")) or "<html" in head[:4096]:
+        if not text.strip():
+            return None
+
+        if HTML_START_RE.match(text):
             return FileType.HTML
         if _MARKDOWN_RE.search(text):
             return FileType.MARKDOWN
+        if FileTypeExtractor._looks_like_delimited_table(text):
+            return FileType.SPREADSHEET
         return FileType.TEXT
 
     @classmethod
@@ -342,8 +358,7 @@ class FileTypeExtractor(Node):
         # ZIP container: covers OOXML, ODF, epub and plain archives.
         if header.startswith(b"PK"):
             zip_type = cls._guess_type_from_zip(file)
-            if zip_type is not None:
-                return zip_type
+            return zip_type
 
         # Other binary formats with a stable magic-byte signature.
         extension = filetype.guess_extension(header)
@@ -382,6 +397,8 @@ class FileTypeExtractor(Node):
             if filename and "." in filename:
                 file_ext = filename.rsplit(".", 1)[-1].lower()
                 result = EXTENSION_TO_FILE_TYPE.get(file_ext)
+                if result is None and file_ext in UNSUPPORTED_SPREADSHEET_EXTENSIONS:
+                    return {"type": None}
 
             if result is None:
                 result = self._guess_type_from_content(file)
@@ -389,3 +406,32 @@ class FileTypeExtractor(Node):
             return {"type": result}
         except Exception as e:
             raise ValueError(f"Encountered an error while performing extension extraction. \nError details: {e}")
+
+    @classmethod
+    def _detect_type_from_content(cls, file: BytesIO | bytes | None) -> FileType | None:
+        """Backward-compatible alias for content-based type detection."""
+        return cls._guess_type_from_content(file)
+
+    @staticmethod
+    def _looks_like_delimited_table(text: str) -> bool:
+        """Return True for simple CSV/TSV-style text with multiple consistent rows."""
+        lines = [line for line in text.strip("\ufeff").splitlines() if line.strip()]
+        if len(lines) < 2:
+            return False
+
+        sample = "\n".join(lines[:10])
+        for delimiter in (",", "\t"):
+            rows = list(csv.reader(StringIO(sample), delimiter=delimiter))
+            rows = [row for row in rows if any(cell.strip() for cell in row)]
+            if len(rows) < 2:
+                continue
+
+            widths = [len(row) for row in rows]
+            if max(widths) < 2:
+                continue
+
+            most_common_width = max(set(widths), key=widths.count)
+            if most_common_width >= 2 and widths.count(most_common_width) / len(widths) >= 0.8:
+                return True
+
+        return False
