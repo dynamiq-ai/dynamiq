@@ -939,7 +939,6 @@ def is_image_file(file) -> bool:
             b"\x89PNG\r\n\x1a\n": "png",  # PNG
             b"GIF87a": "gif",  # GIF87a
             b"GIF89a": "gif",  # GIF89a
-            b"RIFF": "webp",  # WebP
             b"MM\x00*": "tiff",  # TIFF (big endian)
             b"II*\x00": "tiff",  # TIFF (little endian)
             b"BM": "bmp",  # BMP
@@ -948,6 +947,11 @@ def is_image_file(file) -> bool:
         for sig, fmt in signatures.items():
             if file_bytes.startswith(sig):
                 return True
+
+        # RIFF is a generic container (WebP, AVI, WAV, ...); the real format is a 4-byte
+        # tag at offset 8, so only RIFF/WEBP should be treated as an image here.
+        if file_bytes.startswith(b"RIFF") and file_bytes[8:12] == b"WEBP":
+            return True
 
         if isinstance(file, io.BytesIO):
             pos = file.tell()
