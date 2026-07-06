@@ -1,5 +1,6 @@
 import copy
 import json
+import re
 import warnings
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
@@ -168,13 +169,18 @@ class LLMCheckpointState(BaseCheckpointState):
 
 SAMPLING_PARAMS: tuple[str, ...] = ("temperature", "top_p", "top_k")
 
-SAMPLING_UNSUPPORTED_MODEL_MARKERS: tuple[str, ...] = (
-    "claude-opus-4-7",
-    "claude-opus-4-8",
-    "claude-fable-5",
-    "claude-mythos-5",
-    "claude-mythos-preview",
-)
+# Model families where every version rejects sampling params.
+_SAMPLING_UNSUPPORTED_FAMILIES_ALL: frozenset[str] = frozenset({"mythos"})
+
+# Model families that reject sampling params at or above a (major, minor) version.
+_SAMPLING_UNSUPPORTED_MIN_VERSION: dict[str, tuple[int, int]] = {
+    "opus": (4, 7),
+    "sonnet": (5, 0),
+    "fable": (5, 0),
+}
+
+# Matches `claude-<family>-<major>[-<minor>]` anywhere in a model id
+_CLAUDE_MODEL_RE = re.compile(r"claude-(opus|sonnet|haiku|fable|mythos)(?:-(\d{1,2})(?!\d)(?:-(\d{1,2})(?!\d))?)?")
 
 _SAMPLING_UNSUPPORTED_INDICATORS: tuple[str, ...] = (
     "not permitted",
@@ -701,9 +707,25 @@ class BaseLLM(ConnectionNode):
         return response_format, tools
 
     def _model_rejects_sampling_params(self) -> bool:
-        """Whether self.model is known to reject sampling params with a 400."""
-        model_lower = self.model.lower()
-        return any(marker in model_lower for marker in SAMPLING_UNSUPPORTED_MODEL_MARKERS)
+        """Whether self.model is known to reject sampling params (temperature/top_p/top_k)
+        with a 400.
+
+        Recognizes Anthropic models by family and version, so future releases that follow
+        the existing naming scheme are handled without a code change (e.g. claude-opus-5 and
+        claude-sonnet-6 reject; claude-haiku-5 does not, matching current Haiku behavior).
+        Models not matched here that nonetheless reject are caught at runtime by
+        ``_recover_completion_params``.
+        """
+        match = _CLAUDE_MODEL_RE.search(self.model.lower())
+        if not match:
+            return False
+        family, major, minor = match.group(1), match.group(2), match.group(3)
+        if family in _SAMPLING_UNSUPPORTED_FAMILIES_ALL:
+            return True
+        cutoff = _SAMPLING_UNSUPPORTED_MIN_VERSION.get(family)
+        if cutoff is None or major is None:
+            return False
+        return (int(major), int(minor or 0)) >= cutoff
 
     def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """
@@ -895,7 +917,7 @@ class BaseLLM(ConnectionNode):
         re-raise the original error.
 
         Default implementation: backstop for models that reject sampling params with a 400
-        but are not yet listed in SAMPLING_UNSUPPORTED_MODEL_MARKERS. Returns the params
+        but are not matched by ``_model_rejects_sampling_params``. Returns the params
         with the sampling params stripped. Only fires when the error both names a present
         sampling param and looks like an unsupported-param error, so genuine validation
         errors (e.g. out-of-range temperature) still surface.
@@ -907,7 +929,7 @@ class BaseLLM(ConnectionNode):
         if present and references_param and looks_unsupported:
             logger.warning(
                 "LLM '%s': model '%s' rejected sampling params %s; retrying without them "
-                "(add the model to SAMPLING_UNSUPPORTED_MODEL_MARKERS to skip this failed attempt).",
+                "(extend _SAMPLING_UNSUPPORTED_MIN_VERSION/_FAMILIES_ALL to skip this failed attempt).",
                 self.name,
                 self.model,
                 present,
