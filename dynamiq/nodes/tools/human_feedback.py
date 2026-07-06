@@ -32,6 +32,7 @@ class HFStreamingInputEventMessage(StreamingEventMessage):
 class HFStreamingOutputEventMessageData(BaseModel):
     prompt: str
     action: HumanFeedbackAction = HumanFeedbackAction.ASK
+    is_browser_takeover: bool = False
 
 
 class HFStreamingOutputEventMessage(StreamingEventMessage):
@@ -125,7 +126,6 @@ Examples:
 
 Important:
 - Use 'ask' for approval, confirmation, clarification, or information.
-- The user can only provide text responses - they can not perform actions.
 - This tool should be used to gather information from user and send status updates during agent execution.
 """
     input_method: FeedbackMethod | InputMethodCallable = FeedbackMethod.CONSOLE
@@ -136,13 +136,36 @@ Important:
     )
     input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
     msg_template: str = "{{input}}"
+    is_browser_takeover: bool = Field(
+        default=False,
+        description="If True, streamed feedback events are marked as a browser-takeover request so a chat UI can "
+        "render an interactive browser session instead of a plain text prompt. Requires a browser tool "
+        "(e.g. Stagehand with live view enabled) in the same run to provide the live session.",
+    )
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    _GUIDANCE_ANCHOR: ClassVar[str] = "\nInteraction mode:"
 
     @model_validator(mode="after")
     def update_description(self):
-        msg_template = self.msg_template
-        self.description += (
-            f"\nMessage template: '{msg_template}'." " Parameters will be substituted based on the provided input data."
+        # Strip any previously generated guidance before regenerating so repeated validation,
+        # serialization round-trips, and flag changes stay idempotent and never stack
+        # conflicting notes (e.g. both the takeover and the text-only line).
+        base = self.description.split(self._GUIDANCE_ANCHOR, 1)[0].rstrip()
+
+        if self.is_browser_takeover:
+            interaction = (
+                "Interaction mode: browser takeover is ENABLED - the user interacts directly with a live "
+                "browser session (navigating, clicking, typing), not only text responses. Coordinate with the "
+                "browser tool and hand off control to the user when manual action is required."
+            )
+        else:
+            interaction = "Interaction mode: the user can only provide text responses - they can not perform actions."
+
+        self.description = (
+            f"{base}\n{interaction}"
+            f"\nMessage template: '{self.msg_template}'."
+            " Parameters will be substituted based on the provided input data."
         )
         return self
 
@@ -195,7 +218,9 @@ Important:
         event = HFStreamingOutputEventMessage(
             wf_run_id=config.run_id,
             entity_id=self.id,
-            data=HFStreamingOutputEventMessageData(prompt=prompt, action=HumanFeedbackAction.ASK),
+            data=HFStreamingOutputEventMessageData(
+                prompt=prompt, action=HumanFeedbackAction.ASK, is_browser_takeover=self.is_browser_takeover
+            ),
             event=streaming.event,
             source=StreamingEntitySource(
                 id=self.id,
@@ -237,7 +262,9 @@ Important:
         event = HFStreamingOutputEventMessage(
             wf_run_id=config.run_id,
             entity_id=self.id,
-            data=HFStreamingOutputEventMessageData(prompt=message, action=HumanFeedbackAction.INFO),
+            data=HFStreamingOutputEventMessageData(
+                prompt=message, action=HumanFeedbackAction.INFO, is_browser_takeover=self.is_browser_takeover
+            ),
             event=streaming.event,
             source=StreamingEntitySource(
                 id=self.id,
