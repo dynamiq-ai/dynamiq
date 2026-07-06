@@ -686,8 +686,19 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             else:
                 history_messages = None
 
-            images = list(input_data.images or [])
-            videos = list(input_data.videos or [])
+            images = []
+            videos = []
+            for item in input_data.images or []:
+                if not isinstance(item, str) and is_video_file(item):
+                    videos.append(item)
+                else:
+                    images.append(item)
+            for item in input_data.videos or []:
+                if not isinstance(item, str) and is_image_file(item):
+                    images.append(item)
+                else:
+                    videos.append(item)
+
             other_files = []
             for file in input_data.files or []:
                 if is_image_file(file):
