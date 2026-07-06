@@ -45,7 +45,7 @@ EXTENSION_MAP = {
     FileType.DOCX_DOCUMENT: {"docx"},
     FileType.DOCUMENT: {"doc", "docx", "odt", "rtf"},
     FileType.PDF: {"pdf"},
-    FileType.SPREADSHEET: {"xls", "xlsx", "csv", "ods"},
+    FileType.SPREADSHEET: {"xlsx", "csv", "tsv"},
     FileType.PRESENTATION: {"ppt", "pptx", "odp"},
     FileType.PPTX_PRESENTATION: {"pptx"},
     FileType.ARCHIVE: {
