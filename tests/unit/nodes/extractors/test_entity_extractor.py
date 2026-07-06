@@ -131,6 +131,8 @@ class TestToWriteGraphPayload:
             },
             {"labels": ["PERSON", "Entity"], "identity_key": "id", "properties": {"id": "jane", "name": "Jane Doe"}},
         ]
+        # Endpoint names are snapshotted onto the edge (src_name/dst_name) so retrieval renders from the
+        # ACL-bearing edge, never the shared/merged entity node.
         assert graph_rels == [
             {
                 "type": "WORKS_AT",
@@ -140,7 +142,7 @@ class TestToWriteGraphPayload:
                 "end_identity_key": "id",
                 "start_identity": "jane",
                 "end_identity": "acme",
-                "properties": {"since": 2020},
+                "properties": {"since": 2020, "src_name": "Jane Doe", "dst_name": "Acme Capital"},
             }
         ]
         _assert_valid_for_neo4j(nodes, graph_rels)
@@ -275,6 +277,10 @@ class TestExecuteEndToEndWithStubLLM:
         assert attr_edge["start_identity"] == "jane@doc-1"
         assert attr_edge["end_identity"] == "jane@doc-1::salary::doc-1"
         assert attr_edge["properties"]["key"] == "salary"
+        # Endpoint-name snapshot rides on the ACL-bearing edge: owner name + the value itself, so retrieval
+        # renders "Jane Doe -[salary]-> $250,000" without dereferencing the shared node or the value node.
+        assert attr_edge["properties"]["src_name"] == "Jane Doe"
+        assert attr_edge["properties"]["dst_name"] == "$250,000"
 
     def test_execute_stamps_doc_discriminator_on_relationships(self):
         # Each relationship carries a scalar source_doc_id + identity_keys so the store keeps the SAME
