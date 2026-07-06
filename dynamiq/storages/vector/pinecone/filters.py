@@ -309,6 +309,40 @@ def _in(field: str, value: Any) -> dict[str, Any]:
     return {field: {"$in": value}}
 
 
+def _contains_any(field: str, value: Any) -> dict[str, Any]:
+    """
+    Creates a 'contains any' (union) comparison filter.
+
+    Matches vectors whose list-valued metadata ``field`` shares at least one element
+    with ``value``. Pinecone's ``$in`` operator matches when a list metadata field
+    contains any of the given values.
+
+    Args:
+        field (str): The field to compare.
+        value (Any): The list of values to compare against.
+
+    Returns:
+        dict[str, Any]: A 'contains any' comparison filter.
+
+    Raises:
+        VectorStoreFilterException: If the value is not a list or contains unsupported types.
+    """
+    if not isinstance(value, list):
+        msg = f"{field}'s value must be a list when using 'contains_any' comparator in Pinecone"
+        raise VectorStoreFilterException(msg)
+
+    supported_types = (int, float, str)
+    for v in value:
+        if not isinstance(v, supported_types):
+            msg = (
+                f"Unsupported type for 'contains_any' comparison: {type(v)}. "
+                f"Types supported by Pinecone are: {supported_types}"
+            )
+            raise VectorStoreFilterException(msg)
+
+    return {field: {"$in": value}}
+
+
 COMPARISON_OPERATORS = {
     "==": _equal,
     "!=": _not_equal,
@@ -318,6 +352,7 @@ COMPARISON_OPERATORS = {
     "<=": _less_than_equal,
     "in": _in,
     "not in": _not_in,
+    "contains_any": _contains_any,
 }
 
 LOGICAL_OPERATORS = {"AND": "$and", "OR": "$or"}
