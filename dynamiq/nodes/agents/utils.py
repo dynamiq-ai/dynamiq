@@ -858,6 +858,14 @@ def create_message_from_input(input_data: dict) -> Message | VisionMessage:
     else:
         videos = list(videos)
 
+    declared_images, images = images, []
+    for item in declared_images:
+        (videos if not isinstance(item, str) and is_video_file(item) else images).append(item)
+
+    declared_videos, videos = videos, []
+    for item in declared_videos:
+        (images if not isinstance(item, str) and is_image_file(item) else videos).append(item)
+
     for file in files:
         if is_image_file(file):
             logger.debug(f"File detected as image, adding to vision processing: {getattr(file, 'name', 'unnamed')}")
