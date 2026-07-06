@@ -7,6 +7,7 @@ import re
 from contextvars import ContextVar
 from copy import deepcopy
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, ClassVar, Union
 from urllib.parse import unquote_to_bytes
 from uuid import uuid4
@@ -1711,6 +1712,20 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         file_obj.content_type = mime_type
         return file_obj
 
+    @staticmethod
+    def _local_media_path_to_file(path: str, *, media_type: str) -> io.BytesIO | None:
+        """Read an existing local media path into a file object for generic file upload."""
+        local_path = Path(path).expanduser()
+        if not local_path.is_file():
+            return None
+
+        content = local_path.read_bytes()
+        file_obj = io.BytesIO(content)
+        file_obj.name = local_path.name
+        file_obj.description = f"User-provided {media_type} attachment loaded from local path"
+        file_obj.content_type = mimetypes.guess_type(local_path.name)[0] or "application/octet-stream"
+        return file_obj
+
     def _append_unsupported_media_attachment(
         self,
         attachment: str | io.BytesIO | bytes,
@@ -1726,6 +1741,19 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             return
 
         if not attachment.startswith("data:"):
+            try:
+                if file_obj := self._local_media_path_to_file(attachment, media_type=media_type):
+                    other_files.append(file_obj)
+                    return
+            except OSError as e:
+                logger.warning(
+                    "Agent %s - %s: failed to read unsupported %s local path attachment '%s': %s",
+                    self.name,
+                    self.id,
+                    media_type,
+                    attachment,
+                    e,
+                )
             media_url_references.append(attachment)
             return
 

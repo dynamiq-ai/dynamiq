@@ -968,6 +968,36 @@ def test_execute_video_data_url_falls_back_as_uploaded_file(openai_node, mocker)
     assert stored_file.content_type == "video/mp4"
 
 
+def test_execute_video_local_path_falls_back_as_uploaded_file(openai_node, mocker, tmp_path):
+    """A local path should be read and uploaded when the LLM lacks video support."""
+    agent = Agent(name="No Video Support Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    assert agent.llm.is_video_input_supported is False
+
+    answer_result = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        output={"content": "Thought: no video support.\nAnswer: Can't watch it."},
+    )
+    mock_run_llm = mocker.patch.object(agent, "_run_llm", return_value=answer_result)
+
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(_MP4_BYTES)
+
+    result = agent.run(input_data={"input": "What's happening in this video?", "videos": [str(video_path)]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    messages = mock_run_llm.call_args.kwargs["messages"]
+    user_message = next(m for m in messages if m.role == "user")
+
+    assert isinstance(user_message, Message)
+    assert str(video_path) not in user_message.content
+    assert "Media attachments not supported by this model" not in user_message.content
+    assert "Attached files available to you:" in user_message.content
+    assert "clip.mp4" in user_message.content
+    assert agent.file_store_backend.retrieve("clip.mp4") == _MP4_BYTES
+    stored_file = agent.file_store_backend.list_files()[0]
+    assert stored_file.content_type == "video/mp4"
+
+
 def test_execute_auto_detects_video_file_as_vision_content(mocker):
     """A video passed via `files` becomes a real video content block when the configured
     LLM is registered as supporting video input (Gemini)."""
