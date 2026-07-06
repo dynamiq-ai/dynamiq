@@ -466,46 +466,71 @@ class KnowledgeGraphWriter(Node):
     def _blocking_candidates(self, label: str, name: str, vector: list[float] | None) -> list[tuple[str, str]]:
         """Bounded set of existing same-label entities near ``name`` for fuzzy resolution (Neo4j only).
 
-        Replaces the old full-label scan with an index seek: the entity vector index when a name embedding
-        is available (catches synonyms), else the entity-name full-text index. Best-effort — any failure
-        (e.g. the index doesn't exist yet on the first write) yields no candidates, so resolution simply
-        keeps the deterministic id. Returns ``(id, name)`` pairs.
+        Prefers the entity vector index when a name embedding is available (catches synonyms). If that
+        query FAILS (missing / dim-mismatched vector index, permissions), it degrades to the entity-name
+        full-text index rather than silently returning nothing — otherwise a transient vector-index fault
+        would blind resolution to existing nodes and write duplicate entities. Best-effort throughout: any
+        remaining failure yields no candidates, so resolution keeps the deterministic id. Returns
+        ``(id, name)`` pairs.
+        """
+        if vector is not None:
+            candidates = self._vector_candidates(label, vector)
+            if candidates is not None:  # vector query ran (may legitimately be empty) — trust it
+                return candidates
+            # vector index errored -> degrade to the lexical full-text path instead of returning []
+        return self._fulltext_candidates(label, name)
+
+    def _vector_candidates(self, label: str, vector: list[float]) -> list[tuple[str, str]] | None:
+        """Nearest same-label entities by name embedding (semantic near-dups). Returns ``None`` on query
+        failure so the caller can fall back to full-text; an empty list means the query ran but matched
+        nothing.
         """
         try:
-            if vector is not None:
-                # Over-fetch (queryNodes returns nearest across ALL types) then keep this label's.
-                records, _, _ = self._graph_store.run_cypher(
-                    "CALL db.index.vector.queryNodes($index, $k, $vec) YIELD node "
-                    "WHERE $label IN labels(node) AND node.name IS NOT NULL "
-                    "RETURN node.id AS id, node.name AS name",
-                    parameters={
-                        "index": ENTITY_EMBEDDING_VECTOR_INDEX,
-                        "k": max(self.resolution_top_k * 5, self.resolution_top_k),
-                        "vec": vector,
-                        "label": label,
-                    },
-                    database=self.database,
-                )
-            else:
-                lucene = _lucene_or_query(name)
-                if not lucene:
-                    return []
-                records, _, _ = self._graph_store.run_cypher(
-                    "CALL db.index.fulltext.queryNodes($index, $q) YIELD node "
-                    "WHERE $label IN labels(node) AND node.name IS NOT NULL "
-                    "RETURN node.id AS id, node.name AS name LIMIT $k",
-                    parameters={
-                        "index": ENTITY_NAME_FULLTEXT_INDEX,
-                        "q": lucene,
-                        "label": label,
-                        "k": self.resolution_top_k,
-                    },
-                    database=self.database,
-                )
+            # Over-fetch (queryNodes returns nearest across ALL types) then keep this label's.
+            records, _, _ = self._graph_store.run_cypher(
+                "CALL db.index.vector.queryNodes($index, $k, $vec) YIELD node "
+                "WHERE $label IN labels(node) AND node.name IS NOT NULL "
+                "RETURN node.id AS id, node.name AS name",
+                parameters={
+                    "index": ENTITY_EMBEDDING_VECTOR_INDEX,
+                    "k": max(self.resolution_top_k * 5, self.resolution_top_k),
+                    "vec": vector,
+                    "label": label,
+                },
+                database=self.database,
+            )
             return [(r.get("id"), r.get("name")) for r in self._graph_store.format_records(records)]
         except Exception as e:  # noqa: BLE001
             logger.warning(
-                f"Node {self.name} - {self.id}: fuzzy candidate lookup failed ({e}); using deterministic id."
+                f"Node {self.name} - {self.id}: vector candidate lookup failed ({e}); " "falling back to full-text."
+            )
+            return None
+
+    def _fulltext_candidates(self, label: str, name: str) -> list[tuple[str, str]]:
+        """Same-label entities lexically near ``name`` via the entity-name full-text index. Best-effort:
+        any failure (e.g. the index doesn't exist yet on the first write) yields no candidates, so
+        resolution keeps the deterministic id.
+        """
+        lucene = _lucene_or_query(name)
+        if not lucene:
+            return []
+        try:
+            records, _, _ = self._graph_store.run_cypher(
+                "CALL db.index.fulltext.queryNodes($index, $q) YIELD node "
+                "WHERE $label IN labels(node) AND node.name IS NOT NULL "
+                "RETURN node.id AS id, node.name AS name LIMIT $k",
+                parameters={
+                    "index": ENTITY_NAME_FULLTEXT_INDEX,
+                    "q": lucene,
+                    "label": label,
+                    "k": self.resolution_top_k,
+                },
+                database=self.database,
+            )
+            return [(r.get("id"), r.get("name")) for r in self._graph_store.format_records(records)]
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                f"Node {self.name} - {self.id}: full-text candidate lookup failed ({e}); " "using deterministic id."
             )
             return []
 
@@ -575,7 +600,11 @@ class KnowledgeGraphWriter(Node):
             if old_id in det_by_old:
                 continue  # wiring ids are doc-scoped, so a repeat means the same in-document entity
             name = node["properties"].get("name")
-            det_by_old[old_id] = self._deterministic_id(node["labels"][0], name) if name else generate_uuid()
+            # Gate on the NORMALIZED name: a name that is only whitespace/apostrophes normalizes to "" and
+            # must stay nameless (fresh uuid), else every such entity would collide on the "{label}:" id.
+            det_by_old[old_id] = (
+                self._deterministic_id(node["labels"][0], name) if name and normalize_name(name) else generate_uuid()
+            )
 
         # Tier 2 GATE: an entity whose deterministic id is ALREADY in the graph is an established exact
         # node — keep it and skip fuzzy, so re-ingestion is a no-op and fuzzy can never re-merge it into a

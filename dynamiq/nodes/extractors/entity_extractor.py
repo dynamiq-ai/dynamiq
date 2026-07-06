@@ -41,11 +41,12 @@ KG_ENTITY_IDS_KEY = "kg_entity_ids"
 
 
 def normalize_name(name: str) -> str:
-    """Canonical form of an entity name for identity & matching: lowercased, non-alphanumerics stripped,
-    whitespace collapsed. Single source of truth so "Acme", "acme", and "ACME  Corp" converge — used both
-    for the deterministic node id (``uuid5(label:normalize_name(name))``) and the trigram similarity input.
+    """Canonical form of an entity name for identity & matching: whitespace collapsed, lower-cased,
+    spaces -> underscores, apostrophes dropped. Unicode-safe (non-Latin scripts are preserved instead
+    of being stripped to an empty string). Used for both the deterministic node id and the trigram input.
     """
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", "", (name or "").lower())).strip()
+    collapsed = re.sub(r"\s+", " ", (name or "")).strip()
+    return collapsed.lower().replace(" ", "_").replace("'", "")
 
 
 def build_fact_text(src_name: str, rel_label: str, dst_name: str, description: str | None = None) -> str:
