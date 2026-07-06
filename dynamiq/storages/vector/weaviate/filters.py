@@ -62,7 +62,17 @@ def _invert_condition(filters: dict[str, Any]) -> dict[str, Any]:
     inverted_condition = filters.copy()
     if "operator" not in filters:
         return inverted_condition
-    inverted_condition["operator"] = OPERATOR_INVERSE[filters["operator"]]
+    operator = filters["operator"]
+    if operator not in OPERATOR_INVERSE:
+        # 'contains_any' / 'contains_all' have no single-operator negation in Weaviate
+        # ("contains none" is not a native operator), so a NOT wrapping them cannot be
+        # inverted. Fail with a clear message instead of a KeyError.
+        msg = (
+            f"Operator '{operator}' cannot be used inside a 'NOT' filter for Weaviate. "
+            f"Invertible operators are: {sorted(OPERATOR_INVERSE)}"
+        )
+        raise VectorStoreFilterException(msg)
+    inverted_condition["operator"] = OPERATOR_INVERSE[operator]
     if "conditions" in filters:
         inverted_condition["conditions"] = []
         for condition in filters["conditions"]:

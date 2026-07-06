@@ -40,3 +40,17 @@ def test_convert_filters_contains_any_inside_logical():
         ],
     }
     assert convert_filters(filters) is not None
+
+
+@pytest.mark.parametrize("operator", ["contains_any", "contains_all"])
+def test_not_wrapping_contains_raises_clear_error(operator):
+    # `contains_*` have no invertible counterpart in Weaviate; a NOT around them must
+    # raise a clear VectorStoreFilterException, not a KeyError.
+    filters = {
+        "operator": "NOT",
+        "conditions": [
+            {"field": "tags", "operator": operator, "value": ["ai", "ml"]},
+        ],
+    }
+    with pytest.raises(VectorStoreFilterException, match="cannot be used inside a 'NOT' filter"):
+        convert_filters(filters)
