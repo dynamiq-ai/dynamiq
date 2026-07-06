@@ -1,5 +1,6 @@
 from .csv import CSVConverter
 from .docx import DOCXFileConverter
+from .excel import ExcelFileConverter
 from .html import HTMLConverter
 from .llm_text_extractor import LLMImageConverter, LLMPDFConverter
 from .multi_file_type_converter import MultiFileTypeConverter
