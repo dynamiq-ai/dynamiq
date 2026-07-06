@@ -57,6 +57,7 @@ class DynamiqKnowledgebaseVectorSearch(ConnectionNode):
         ),
     )
     timeout: float = 30
+    user: str | None = None
     success_codes: list[int] = [200]
     input_schema: ClassVar[type[DynamiqKnowledgebaseVectorSearchInputSchema]] = (
         DynamiqKnowledgebaseVectorSearchInputSchema
@@ -74,6 +75,7 @@ class DynamiqKnowledgebaseVectorSearch(ConnectionNode):
             if input_data.similarity_threshold is not None
             else self.similarity_threshold
         )
+        user = self.user
 
         body: dict[str, Any] = {"query": input_data.query}
         if limit is not None:
@@ -82,6 +84,8 @@ class DynamiqKnowledgebaseVectorSearch(ConnectionNode):
             body["filters"] = filters
         if similarity_threshold is not None:
             body["similarity_threshold"] = similarity_threshold
+        if user is not None:
+            body["user"] = user
 
         return {
             "method": "POST",
