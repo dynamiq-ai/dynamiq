@@ -236,7 +236,7 @@ class GraphRetriever(ConnectionNode):
     # the WHOLE question embedding — simpler, no LLM, context-preserving. Facts are then reranked by the same
     # vector. Off by default (keeps entity-anchored extraction). Requires a text_embedder + entity index.
     seed_by_query: bool = False
-    # optional grounding source: any object with get_documents_by_ids(ids) -> list[Document]
+    # optional grounding source: any object with get_documents_by_id(ids) -> list[Document]
     document_retriever: Any = None
     # when True, LLM-compose an answer from the retrieved context; when False (default) return raw facts/source
     summarize: bool = False
@@ -659,10 +659,10 @@ class GraphRetriever(ConnectionNode):
 
         Each fact came from an ACL-visible edge whose ACL equals its source document's, so the caller is
         already entitled to those documents; the distinct ``source_doc_ids`` (every per-document edge behind
-        a deduped fact) are pulled via the ``document_retriever``'s ``get_documents_by_ids`` with no extra
+        a deduped fact) are pulled via the ``document_retriever``'s ``get_documents_by_id`` with no extra
         ACL check. Returns ``[]`` when no retriever is set, no fact carries provenance, or the fetch fails.
         """
-        if not self.document_retriever or not hasattr(self.document_retriever, "get_documents_by_ids"):
+        if not self.document_retriever or not hasattr(self.document_retriever, "get_documents_by_id"):
             return []
         ids: list[str] = []
         for d in documents:
@@ -672,7 +672,7 @@ class GraphRetriever(ConnectionNode):
         if not ids:
             return []
         try:
-            return self.document_retriever.get_documents_by_ids(ids)
+            return self.document_retriever.get_documents_by_id(ids)
         except Exception as e:
             logger.warning(f"Tool {self.name} - {self.id}: source-document fetch failed: {e}")
             return []
