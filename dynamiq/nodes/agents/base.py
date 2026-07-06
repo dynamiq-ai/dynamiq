@@ -708,13 +708,16 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 else:
                     other_files.append(file)
 
+            media_url_references = []
+
             if videos and not self.llm.is_video_input_supported:
                 logger.warning(
                     "Agent %s - %s: LLM '%s' does not support video input; treating %d video "
                     "attachment(s) as generic files instead.",
                     self.name, self.id, self.llm.model, len(videos),
                 )
-                other_files.extend(videos)
+                for video in videos:
+                    (media_url_references if isinstance(video, str) else other_files).append(video)
                 videos = []
 
             if images and not self.llm.is_vision_supported:
@@ -723,8 +726,14 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     "attachment(s) as generic files instead.",
                     self.name, self.id, self.llm.model, len(images),
                 )
-                other_files.extend(images)
+                for image in images:
+                    (media_url_references if isinstance(image, str) else other_files).append(image)
                 images = []
+
+            if media_url_references:
+                input_message = self._inject_attached_media_references_into_message(
+                    input_message, media_url_references
+                )
 
             if other_files:
                 normalized_files = self._ensure_named_files(other_files)
@@ -1904,6 +1913,29 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             input_message.content = f"{input_message.content.rstrip()}{file_section}"
         else:
             input_message.content = input_message.content + file_section
+
+        return input_message
+
+    def _inject_attached_media_references_into_message(
+        self, input_message: Message | VisionMessage, references: list[str]
+    ) -> Message | VisionMessage:
+        """Surface media URLs/paths as plain text when the LLM can't consume them as vision
+        content. These are external references (not binary payloads), so they're rendered
+        as text rather than routed through the file-upload pipeline, which only handles
+        bytes/BytesIO content.
+        """
+        if not references or not isinstance(input_message, Message):
+            return input_message
+
+        lines = [f"- {ref}" for ref in references]
+        section = (
+            "\n".join(["\nMedia attachments not supported by this model (referenced by URL/path):"] + lines) + "\n"
+        )
+
+        if isinstance(input_message.content, str):
+            input_message.content = f"{input_message.content.rstrip()}{section}"
+        else:
+            input_message.content = input_message.content + section
 
         return input_message
 
