@@ -1,3 +1,4 @@
+import base64
 import uuid
 from io import BytesIO
 from unittest.mock import PropertyMock, patch
@@ -935,6 +936,36 @@ def test_execute_video_file_falls_back_when_llm_unsupported(openai_node, mocker)
     assert isinstance(user_message, Message)
     assert "Attached files available to you:" in user_message.content
     assert "clip.mp4" in user_message.content
+
+
+def test_execute_video_data_url_falls_back_as_uploaded_file(openai_node, mocker):
+    """A data URL should not be pasted into the prompt when the LLM lacks video support."""
+    agent = Agent(name="No Video Support Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    assert agent.llm.is_video_input_supported is False
+
+    answer_result = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        output={"content": "Thought: no video support.\nAnswer: Can't watch it."},
+    )
+    mock_run_llm = mocker.patch.object(agent, "_run_llm", return_value=answer_result)
+
+    encoded_video = base64.b64encode(_MP4_BYTES).decode("ascii")
+    video_data_url = f"data:video/mp4;base64,{encoded_video}"
+
+    result = agent.run(input_data={"input": "What's happening in this video?", "videos": [video_data_url]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    messages = mock_run_llm.call_args.kwargs["messages"]
+    user_message = next(m for m in messages if m.role == "user")
+
+    assert isinstance(user_message, Message)
+    assert video_data_url not in user_message.content
+    assert encoded_video not in user_message.content
+    assert "Attached files available to you:" in user_message.content
+    assert "video_0.mp4" in user_message.content
+    assert agent.file_store_backend.retrieve("video_0.mp4") == _MP4_BYTES
+    stored_file = agent.file_store_backend.list_files()[0]
+    assert stored_file.content_type == "video/mp4"
 
 
 def test_execute_auto_detects_video_file_as_vision_content(mocker):

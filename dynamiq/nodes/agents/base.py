@@ -1,10 +1,14 @@
+import base64
+import binascii
 import io
 import json
+import mimetypes
 import re
 from contextvars import ContextVar
 from copy import deepcopy
 from enum import Enum
 from typing import Any, Callable, ClassVar, Union
+from urllib.parse import unquote_to_bytes
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer, model_validator
@@ -716,8 +720,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     "attachment(s) as generic files instead.",
                     self.name, self.id, self.llm.model, len(videos),
                 )
-                for video in videos:
-                    (media_url_references if isinstance(video, str) else other_files).append(video)
+                for index, video in enumerate(videos):
+                    self._append_unsupported_media_attachment(
+                        video, other_files, media_url_references, media_type="video", index=index
+                    )
                 videos = []
 
             if images and not self.llm.is_vision_supported:
@@ -726,8 +732,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     "attachment(s) as generic files instead.",
                     self.name, self.id, self.llm.model, len(images),
                 )
-                for image in images:
-                    (media_url_references if isinstance(image, str) else other_files).append(image)
+                for index, image in enumerate(images):
+                    self._append_unsupported_media_attachment(
+                        image, other_files, media_url_references, media_type="image", index=index
+                    )
                 images = []
 
             if media_url_references:
@@ -1663,6 +1671,77 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         return named
 
     @staticmethod
+    def _extension_for_mime_type(mime_type: str) -> str:
+        """Return a stable file extension for a MIME type."""
+        if not mime_type:
+            return ".bin"
+
+        extension = mimetypes.guess_extension(mime_type)
+        if extension:
+            return extension
+
+        if "/" not in mime_type:
+            return ".bin"
+
+        subtype = mime_type.rsplit("/", 1)[-1].split("+", 1)[0]
+        return f".{subtype}" if subtype else ".bin"
+
+    @classmethod
+    def _data_url_to_file(cls, data_url: str, *, media_type: str, index: int) -> io.BytesIO:
+        """Decode a data URL into a named BytesIO suitable for the generic file pipeline."""
+        match = re.match(r"^data:([^;,]+)?((?:;[^,]*)*),(.*)$", data_url, flags=re.DOTALL)
+        if not match:
+            raise ValueError("invalid data URL")
+
+        mime_type = match.group(1) or "application/octet-stream"
+        params = [param.lower() for param in match.group(2).split(";") if param]
+        payload = match.group(3)
+
+        try:
+            if "base64" in params:
+                content = base64.b64decode(payload.strip(), validate=True)
+            else:
+                content = unquote_to_bytes(payload)
+        except (binascii.Error, ValueError) as e:
+            raise ValueError("invalid data URL payload") from e
+
+        file_obj = io.BytesIO(content)
+        file_obj.name = f"{media_type}_{index}{cls._extension_for_mime_type(mime_type)}"
+        file_obj.description = f"User-provided {media_type} attachment decoded from data URL"
+        file_obj.content_type = mime_type
+        return file_obj
+
+    def _append_unsupported_media_attachment(
+        self,
+        attachment: str | io.BytesIO | bytes,
+        other_files: list[io.BytesIO | bytes],
+        media_url_references: list[str],
+        *,
+        media_type: str,
+        index: int,
+    ) -> None:
+        """Route unsupported media to file upload or short textual references."""
+        if not isinstance(attachment, str):
+            other_files.append(attachment)
+            return
+
+        if not attachment.startswith("data:"):
+            media_url_references.append(attachment)
+            return
+
+        try:
+            other_files.append(self._data_url_to_file(attachment, media_type=media_type, index=index))
+        except ValueError as e:
+            logger.warning(
+                "Agent %s - %s: failed to decode unsupported %s data URL attachment: %s",
+                self.name,
+                self.id,
+                media_type,
+                e,
+            )
+            media_url_references.append(f"{media_type} data URL attachment could not be decoded")
+
+    @staticmethod
     def _split_upload_filename(file_name: str) -> tuple[str, str]:
         """Split a file name into stem and extension for suffixing."""
         stem, dot, extension = file_name.rpartition(".")
@@ -1831,7 +1910,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 self.file_store_backend.store(
                     file_path=unique_file_name,
                     content=content,
-                    content_type="application/octet-stream",
+                    content_type=getattr(file_obj, "content_type", "application/octet-stream"),
                     metadata={"description": description, "source": "user_upload"},
                     overwrite=False,
                 )
