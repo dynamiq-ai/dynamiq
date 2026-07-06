@@ -53,6 +53,13 @@ _QUERY_ENTITY_RESPONSE_FORMAT: dict[str, Any] = {
     },
 }
 
+# Prompt for the optional `summarize` step: compose the retrieved context into a written answer.
+_SUMMARIZE_PROMPT = (
+    "Answer the QUESTION using ONLY the CONTEXT below (facts and/or passages retrieved from a knowledge "
+    "graph). If the context is insufficient, say what is missing. Be concise.\n\n"
+    "CONTEXT:\n{{context}}\n\nQUESTION:\n{{query}}"
+)
+
 # Supported edge-filter operators -> Cypher predicate builders. `c` is the qualified property
 # (e.g. ``r.source_url``); `p` is the bound-parameter name.
 _FILTER_OPERATORS: dict[str, Any] = {
@@ -224,6 +231,11 @@ class GraphRetriever(ConnectionNode):
     filters: dict[str, Any] | None = None  # LOCKED: always applied; not overridable from the input schema
     top_k: int = 50
     document_reranker: Node | None = None  # optional rerank of rendered facts; top_k here = candidate pool
+    # optional grounding source: a retriever node exposing get_documents_by_ids(ids) -> list[Document]
+    # (e.g. PGVectorDocumentRetriever). Typed as Node so the YAML/serializer builds it from its `type:`.
+    document_retriever: Node | None = None
+    # when True, LLM-compose an answer from the retrieved context; when False (default) return raw facts/source
+    summarize: bool = False
 
     input_schema: ClassVar[type[GraphRetrieverInputSchema]] = GraphRetrieverInputSchema
 
@@ -236,13 +248,15 @@ class GraphRetriever(ConnectionNode):
 
     @property
     def to_dict_exclude_params(self) -> dict:
-        return super().to_dict_exclude_params | {"llm": True, "document_reranker": True}
+        return super().to_dict_exclude_params | {"llm": True, "document_reranker": True, "document_retriever": True}
 
     def to_dict(self, **kwargs) -> dict:
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
         if self.document_reranker:
             data["document_reranker"] = self.document_reranker.to_dict(**kwargs)
+        if self.document_retriever is not None and hasattr(self.document_retriever, "to_dict"):
+            data["document_retriever"] = self.document_retriever.to_dict(**kwargs)
         return data
 
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
@@ -253,6 +267,10 @@ class GraphRetriever(ConnectionNode):
             self.llm.init_components(connection_manager)
         if self.document_reranker and self.document_reranker.is_postponed_component_init:
             self.document_reranker.init_components(connection_manager)
+        if self.document_retriever is not None and getattr(
+            self.document_retriever, "is_postponed_component_init", False
+        ):
+            self.document_retriever.init_components(connection_manager)
         if self._graph_store is None:
             self._graph_store = self._build_graph_store()
         self._use_fulltext = self._probe_fulltext()
@@ -453,7 +471,19 @@ class GraphRetriever(ConnectionNode):
             logger.info(f"Tool {self.name} - {self.id}: retrieved {len(documents)} fact(s).")
             documents = self._maybe_rerank(documents, input_data.query, config, **kwargs)
             content = "\n".join(f"- {d.content}" for d in documents) or "No matching facts found."
-            return {"content": content, "documents": documents}
+            output = {"content": content, "documents": documents}
+            source_documents = self._fetch_source_documents(documents)
+            if source_documents:
+                # Replace triples with verbatim source text. ACL-safe with no extra check: each source_doc_id
+                # came from an ACL-visible edge whose ACL equals its source document's. `facts` keeps the triples.
+                output["source_documents"] = source_documents
+                output["facts"] = content
+                output["content"] = "\n\n".join(d.content for d in source_documents if d.content) or content
+            if self.summarize and documents:
+                # keep the raw retrieval under `context`; `content` becomes the composed answer
+                output["context"] = output["content"]
+                output["content"] = self._summarize(input_data.query, output["context"], config, **kwargs)
+            return output
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: execution error: {e}", exc_info=True)
             raise ToolExecutionException(
@@ -486,10 +516,60 @@ class GraphRetriever(ConnectionNode):
         logger.info(f"Tool {self.name} - {self.id}: reranked {before} -> {len(reranked)} fact(s).")
         return reranked
 
+    def _fetch_source_documents(self, documents: list[Document]) -> list[Document]:
+        """Fetch the verbatim source documents behind the retrieved facts (optional grounding).
+
+        Each fact came from an ACL-visible edge whose ACL equals its source document's, so the caller is
+        already entitled to those documents; the distinct ``source_doc_ids`` (every per-document edge behind
+        a deduped fact) are pulled via the ``document_retriever``'s ``get_documents_by_ids`` with no extra
+        ACL check. Returns ``[]`` when no retriever is set, no fact carries provenance, or the fetch fails.
+        """
+        if not self.document_retriever or not hasattr(self.document_retriever, "get_documents_by_ids"):
+            return []
+        ids: list[str] = []
+        for d in documents:
+            md = d.metadata
+            ids.extend(md.get("source_doc_ids") or ([md["source_doc_id"]] if md.get("source_doc_id") else []))
+        ids = list(dict.fromkeys(ids))  # dedupe across facts, preserve order
+        if not ids:
+            return []
+        try:
+            return self.document_retriever.get_documents_by_ids(ids)
+        except Exception as e:
+            logger.warning(f"Tool {self.name} - {self.id}: source-document fetch failed: {e}")
+            return []
+
+    def _summarize(self, query: str, context: str, config: RunnableConfig, **kwargs) -> str:
+        """LLM-compose an answer from the retrieved context, reusing this node's ``llm``.
+
+        Degrades to the raw context on any failure, so this optional step never fails the read.
+        """
+        try:
+            prompt = Prompt(messages=[Message(role="user", content=_SUMMARIZE_PROMPT)])
+            run_kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
+            run_kwargs.pop("run_depends", None)
+            result = self.llm.run(
+                input_data={"query": query, "context": context},
+                prompt=prompt,
+                config=config,
+                run_depends=self._run_depends,
+                **run_kwargs,
+            )
+            self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
+            if result.status != RunnableStatus.SUCCESS:
+                logger.warning(f"Tool {self.name} - {self.id}: summarization failed; returning raw context.")
+                return context
+            return result.output.get("content") or context
+        except Exception as e:
+            logger.warning(f"Tool {self.name} - {self.id}: summarization error: {e}; returning raw context.")
+            return context
+
     @staticmethod
     def _render_single_hop(rows: list[dict[str, Any]]) -> list[Document]:
         documents: list[Document] = []
-        seen: set[str] = set()  # the same fact can arrive via several per-document edges -> show it once
+        # The same fact can arrive via several per-document edges -> show it once, but MERGE every edge's
+        # source_doc_id onto the kept fact so grounding fetches all the source chunks, not just the first.
+        seen: dict[str, Document] = {}
         for rank, row in enumerate(rows):
             source, rel, target = row.get("a_name"), row.get("rel"), row.get("b_name")
             if source is None or target is None or not rel:
@@ -504,15 +584,25 @@ class GraphRetriever(ConnectionNode):
             # cannot convey -- append it so it reaches the answer, not just the metadata.
             if rprops.get("description"):
                 fact = f"{fact}: {rprops['description']}"
+            source_doc_id = rprops.get("source_doc_id")
             if fact in seen:
+                # duplicate fact from another per-document edge: keep its source doc for grounding
+                if source_doc_id:
+                    doc_ids = seen[fact].metadata.setdefault("source_doc_ids", [])
+                    if source_doc_id not in doc_ids:
+                        doc_ids.append(source_doc_id)
                 continue
-            seen.add(fact)
             metadata = {"source": source, "target": target, "rel": rel, **rprops}
+            # Normalize provenance to a list so later duplicate facts can accumulate every source doc.
+            if source_doc_id:
+                metadata["source_doc_ids"] = [source_doc_id]
             # Endpoint entity ids (when available) let a caller iterate: feed a fact's neighbor id back as
             # the next hop's seed instead of doing an exploding variable-length expansion.
             if row.get("a_id") is not None:
                 metadata["source_id"] = row["a_id"]
             if row.get("b_id") is not None:
                 metadata["target_id"] = row["b_id"]
-            documents.append(Document(content=fact, metadata=metadata, score=1.0 / (1.0 + rank)))
+            document = Document(content=fact, metadata=metadata, score=1.0 / (1.0 + rank))
+            seen[fact] = document
+            documents.append(document)
         return documents
