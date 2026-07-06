@@ -442,12 +442,17 @@ def _contains_any(field: str, value: Any) -> tuple[str, list]:
 
     text_values = [str(v) for v in value]
 
-    if field.startswith("metadata."):
-        field_name = field.split(".", 1)[1]
-        return "metadata->%s ?| %s::text[]", [field_name, text_values]
+    if not field.startswith("metadata."):
+        msg = f"'contains_any' is only supported on metadata list fields, got '{field}'"
+        raise VectorStoreFilterException(msg)
 
-    # Fallback for a top-level JSONB column (the default schema has no such array column).
-    return f"{field} ?| %s::text[]", [text_values]
+    field_name = field.split(".", 1)[1]
+    query = (
+        "EXISTS (SELECT 1 FROM jsonb_array_elements_text("
+        "CASE WHEN jsonb_typeof(metadata->%s) = 'array' THEN metadata->%s ELSE '[]'::jsonb END"
+        ") AS elem WHERE elem = ANY(%s::text[]))"
+    )
+    return query, [field_name, field_name, text_values]
 
 
 LOGICAL_OPERATORS = ["AND", "OR"]
