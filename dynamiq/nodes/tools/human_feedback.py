@@ -144,19 +144,28 @@ Important:
     )
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    _GUIDANCE_ANCHOR: ClassVar[str] = "\nInteraction mode:"
+
     @model_validator(mode="after")
     def update_description(self):
-        msg_template = self.msg_template
+        # Strip any previously generated guidance before regenerating so repeated validation,
+        # serialization round-trips, and flag changes stay idempotent and never stack
+        # conflicting notes (e.g. both the takeover and the text-only line).
+        base = self.description.split(self._GUIDANCE_ANCHOR, 1)[0].rstrip()
+
         if self.is_browser_takeover:
-            self.description += (
-                "\n- Browser takeover is ENABLED: the user interacts directly with a live browser session "
-                "(navigating, clicking, typing), not only text responses. Coordinate with the browser tool "
-                "and hand off control to the user when manual action is required."
+            interaction = (
+                "Interaction mode: browser takeover is ENABLED - the user interacts directly with a live "
+                "browser session (navigating, clicking, typing), not only text responses. Coordinate with the "
+                "browser tool and hand off control to the user when manual action is required."
             )
         else:
-            self.description += "\n- The user can only provide text responses - they can not perform actions."
-        self.description += (
-            f"\nMessage template: '{msg_template}'." " Parameters will be substituted based on the provided input data."
+            interaction = "Interaction mode: the user can only provide text responses - they can not perform actions."
+
+        self.description = (
+            f"{base}\n{interaction}"
+            f"\nMessage template: '{self.msg_template}'."
+            " Parameters will be substituted based on the provided input data."
         )
         return self
 

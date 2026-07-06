@@ -104,3 +104,23 @@ def test_description_keeps_text_only_caveat_by_default():
     tool = HumanFeedbackTool()
 
     assert "can not perform actions" in tool.description.lower()
+
+
+def test_description_is_idempotent_across_rebuilds():
+    """Rebuilding from a serialized (already-generated) description must not stack guidance."""
+    tool = HumanFeedbackTool(is_browser_takeover=True)
+    rebuilt = HumanFeedbackTool(description=tool.description, is_browser_takeover=True)
+
+    assert rebuilt.description == tool.description, "description must be stable across round-trips"
+    assert rebuilt.description.lower().count("browser takeover is enabled") == 1
+    assert rebuilt.description.count("Message template:") == 1
+
+
+def test_description_flag_flip_does_not_stack_conflicting_notes():
+    """Rebuilding a takeover-flavored description with the flag off must drop the takeover note."""
+    takeover = HumanFeedbackTool(is_browser_takeover=True)
+    flipped = HumanFeedbackTool(description=takeover.description, is_browser_takeover=False)
+    desc = flipped.description.lower()
+
+    assert "browser takeover is enabled" not in desc
+    assert "can not perform actions" in desc
