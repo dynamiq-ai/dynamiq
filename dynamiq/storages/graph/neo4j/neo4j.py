@@ -8,9 +8,8 @@ from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.storages.graph.base import BaseGraphStore
 from dynamiq.utils.logger import logger
 
-# Labels / relationship types / property keys must match this pattern — the safe identifier subset.
-# These are spliced into Cypher text (structure cannot be parameterized), so they are validated, never
-# escaped. Anything else is rejected.
+# Labels / relationship types / property keys are spliced into Cypher text (structure can't be
+# parameterized), so they must match this safe-identifier pattern; anything else is rejected.
 LABEL_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 PROPERTY_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
