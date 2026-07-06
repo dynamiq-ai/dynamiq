@@ -1899,8 +1899,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     def _inject_attached_media_into_message(
         self,
         input_message: Message | VisionMessage,
-        images: list[io.BytesIO | bytes],
-        videos: list[io.BytesIO | bytes],
+        images: list[str | io.BytesIO | bytes],
+        videos: list[str | io.BytesIO | bytes],
     ) -> Message | VisionMessage:
         """Convert image/video attachments into vision content blocks the LLM can actually
         see, instead of leaving them as opaque text references.
@@ -1923,16 +1923,30 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         for image in images:
             try:
-                image_bytes = image.getvalue() if isinstance(image, io.BytesIO) else image
-                image_url = bytes_to_data_url(image_bytes)
+                if isinstance(image, str):
+                    if image.startswith(("http://", "https://", "data:")):
+                        image_url = image
+                    else:
+                        with open(image, "rb") as file:
+                            image_url = bytes_to_data_url(file.read())
+                else:
+                    image_bytes = image.getvalue() if isinstance(image, io.BytesIO) else image
+                    image_url = bytes_to_data_url(image_bytes)
                 content.append(VisionMessageImageContent(image_url=VisionMessageImageURL(url=image_url)))
             except Exception as e:
                 logger.error(f"Agent {self.name} - {self.id}: error processing image attachment: {str(e)}")
 
         for video in videos:
             try:
-                video_bytes = video.getvalue() if isinstance(video, io.BytesIO) else video
-                video_url = bytes_to_data_url(video_bytes)
+                if isinstance(video, str):
+                    if video.startswith(("http://", "https://", "data:", "gs://")):
+                        video_url = video
+                    else:
+                        with open(video, "rb") as file:
+                            video_url = bytes_to_data_url(file.read())
+                else:
+                    video_bytes = video.getvalue() if isinstance(video, io.BytesIO) else video
+                    video_url = bytes_to_data_url(video_bytes)
                 content.append(VisionMessageFileContent(file=VisionMessageFileData(file_data=video_url)))
             except Exception as e:
                 logger.error(f"Agent {self.name} - {self.id}: error processing video attachment: {str(e)}")
