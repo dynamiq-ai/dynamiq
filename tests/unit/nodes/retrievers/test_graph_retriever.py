@@ -667,3 +667,19 @@ class TestMultiHopBeam:
         node = make_multihop_retriever([HOP1, []], max_hops=3)
         node.execute(GraphRetrieverInputSchema(query="Sven"))
         assert len(node._graph_store.calls) == 2  # empty hop 2 -> no hop 3
+
+    def test_total_facts_capped_at_top_k(self):
+        # An explicit beam_width can exceed the per-hop split; the FINAL count must still honor top_k,
+        # dropping deepest-hop facts first (rows are ordered hop-by-hop).
+        hop1 = [
+            {"a_name": f"P{i}", "a_id": f"p{i}", "rel": "WORKS_AT", "rprops": {}, "b_name": "Acme", "b_id": "acme"}
+            for i in range(3)
+        ]
+        hop2 = [
+            {"a_name": "Acme", "a_id": "acme", "rel": "USES", "rprops": {}, "b_name": f"S{i}", "b_id": f"s{i}"}
+            for i in range(3)
+        ]
+        node = make_multihop_retriever([hop1, hop2], max_hops=2, beam_width=5, top_k=4)
+        out = node.execute(GraphRetrieverInputSchema(query="Acme"))
+        assert len(out["documents"]) == 4  # 6 rendered facts -> capped to top_k
+        assert out["documents"][0].content.endswith("Acme")  # hop-1 facts survive the cut

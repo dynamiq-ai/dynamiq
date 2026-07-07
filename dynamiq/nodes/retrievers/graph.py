@@ -694,6 +694,10 @@ class GraphRetriever(ConnectionNode):
                 frontier = endpoint_ids - visited
                 visited |= endpoint_ids
             documents = self._render_single_hop(rows)
+            # Enforce the top_k contract: an explicit beam_width (or the >=1-per-hop floor) can make the
+            # per-hop sum exceed `limit`. Rows are ordered hop-by-hop, so the cut drops deepest facts first.
+            if len(documents) > limit:
+                documents = documents[:limit]
             logger.info(f"Tool {self.name} - {self.id}: retrieved {len(documents)} fact(s).")
             documents = self._maybe_rerank(documents, input_data.query, config, **kwargs)
             content = "\n".join(f"- {d.content}" for d in documents) or "No matching facts found."
