@@ -575,3 +575,95 @@ class TestFactRerank:
         # seed_by_query -> no LLM extraction; seeding falls to the whole-query vector.
         node = make_retriever(seed_by_query=True, llm=StubLLM(response_content='{"names": ["Acme"]}'))
         assert node._seed_entity_names(GraphRetrieverInputSchema(query="who at Acme?"), config=None) == []
+
+
+class SequencedGraphStore(StubGraphStore):
+    """Returns a different canned row batch per run_cypher call; records every (query, params)."""
+
+    def __init__(self, batches: list[list[dict[str, Any]]]):
+        super().__init__()
+        self.batches = list(batches)
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def run_cypher(self, query, parameters=None, database=None, **kwargs):
+        self.calls.append((query, parameters))
+        rows = self.batches.pop(0) if self.batches else []
+        return rows, None, []
+
+
+HOP1 = [
+    {"a_name": "Sven", "a_id": "id-sven", "rel": "WORKS_AT", "rprops": {}, "b_name": "Nortech", "b_id": "id-nortech"}
+]
+HOP2 = [{"a_name": "Nortech", "a_id": "id-nortech", "rel": "USES", "rprops": {}, "b_name": "Aegis", "b_id": "id-aegis"}]
+
+
+def make_multihop_retriever(batches, **kwargs) -> GraphRetriever:
+    node = make_retriever(**kwargs)
+    node._graph_store = SequencedGraphStore(batches)
+    return node
+
+
+class TestMultiHopBeam:
+    def test_default_stays_single_hop(self):
+        node = make_multihop_retriever([HOP1])
+        node.execute(GraphRetrieverInputSchema(query="Sven"))
+        assert len(node._graph_store.calls) == 1  # no expansion queries by default
+
+    def test_two_hops_reaches_the_chain_fact(self):
+        # The chain case: hop 1 finds the bridge (Sven -> Nortech), hop 2 expands FROM the bridge's
+        # endpoints and reaches the fact the question is actually about (Nortech -> Aegis).
+        node = make_multihop_retriever([HOP1, HOP2], max_hops=2)
+        out = node.execute(GraphRetrieverInputSchema(query="what does Sven's employer use?"))
+        assert [d.content for d in out["documents"]] == [
+            "Sven -[WORKS_AT]-> Nortech",
+            "Nortech -[USES]-> Aegis",
+        ]
+        hop_query, hop_params = node._graph_store.calls[1]
+        assert set(hop_params["frontier"]) == {"id-sven", "id-nortech"}  # expands from hop-1 endpoints
+        assert "NOT (startNode(r).id IN $visited AND endNode(r).id IN $visited)" in hop_query
+        assert "WITH DISTINCT r" in hop_query
+
+    def test_input_max_hops_overrides_node_default(self):
+        node = make_multihop_retriever([HOP1, HOP2])  # node default max_hops=1
+        node.execute(GraphRetrieverInputSchema(query="Sven", max_hops=2))
+        assert len(node._graph_store.calls) == 2
+
+    def test_hop_query_applies_locked_acl(self):
+        # The ACL invariant: every hop is filtered by the LOCKED filters, not just hop 1.
+        node = make_multihop_retriever([HOP1, HOP2], max_hops=2, filters=LOCKED_ACL)
+        node.execute(GraphRetrieverInputSchema(query="Sven"))
+        hop_query, hop_params = node._graph_store.calls[1]
+        assert "coalesce(r.allowed_principals, [])" in hop_query
+        assert hop_params["lf0_intersects"] == ["group:a"]
+
+    def test_beam_budget_split_across_hops(self):
+        # top_k=50, max_hops=2 -> 25 per hop; explicit beam_width wins.
+        node = make_multihop_retriever([HOP1, HOP2], max_hops=2)
+        node.execute(GraphRetrieverInputSchema(query="Sven"))
+        assert node._graph_store.calls[0][1]["limit"] == 25
+        assert node._graph_store.calls[1][1]["limit"] == 25
+
+        node = make_multihop_retriever([HOP1, HOP2], max_hops=2, beam_width=7)
+        node.execute(GraphRetrieverInputSchema(query="Sven"))
+        assert node._graph_store.calls[1][1]["limit"] == 7
+
+    def test_stops_when_frontier_exhausted(self):
+        # hop 2 returns only already-visited endpoints -> no new frontier -> hop 3 never runs.
+        hop2_no_new = [
+            {
+                "a_name": "Sven",
+                "a_id": "id-sven",
+                "rel": "KNOWS",
+                "rprops": {},
+                "b_name": "Nortech",
+                "b_id": "id-nortech",
+            }
+        ]
+        node = make_multihop_retriever([HOP1, hop2_no_new, HOP2], max_hops=3)
+        node.execute(GraphRetrieverInputSchema(query="Sven"))
+        assert len(node._graph_store.calls) == 2
+
+    def test_stops_on_empty_hop(self):
+        node = make_multihop_retriever([HOP1, []], max_hops=3)
+        node.execute(GraphRetrieverInputSchema(query="Sven"))
+        assert len(node._graph_store.calls) == 2  # empty hop 2 -> no hop 3

@@ -142,6 +142,14 @@ def _compile_edge_filters(
 class GraphRetrieverInputSchema(BaseModel):
     query: str = Field(..., description="Natural-language question to retrieve graph context for.")
     top_k: int | None = Field(default=None, description="Override the node-level maximum number of facts.")
+    max_hops: int | None = Field(
+        default=None,
+        ge=1,
+        le=4,
+        description="Override the node-level traversal depth: how many hops to expand from the seed "
+        "entities (beam search — each hop keeps only the most relevant edges and expands from those). "
+        "Use 2 for chain questions whose answer is about a neighbor of the named entity.",
+    )
     entities: list[str] | None = Field(
         default=None,
         description="Optional explicit entity names to start from. When omitted, entry entities are those "
@@ -165,8 +173,9 @@ class GraphRetriever(ConnectionNode):
     The graph sibling of :class:`~dynamiq.nodes.retrievers.retriever.VectorStoreRetriever`, and the
     controlled alternative to ``CypherExecutor`` for read access. An LLM first extracts the entities the
     question is about (constrained to the ontology's types), the retriever finds those entry-point entities
-    by name, expands ONE hop through **visible** edges, and renders the resulting facts as ``Document``
-    objects an agent can consume directly. Deeper exploration is by iteration: each fact carries its
+    by name, expands ``max_hops`` hops through **visible** edges (beam search: each hop keeps the most
+    relevant edges and expands only from those), and renders the resulting facts as ``Document`` objects an
+    agent can consume directly. Deeper exploration is also possible by iteration: each fact carries its
     neighbor's ``source_id``/``target_id``, which an agent feeds back as the next call's ``entity_ids``.
 
     Entry-point selection is backend-agnostic: on Neo4j with the entity-name full-text index present
@@ -202,6 +211,10 @@ class GraphRetriever(ConnectionNode):
             here via the ``$intersects`` operator.
         top_k (int): Maximum number of facts to fetch from the graph. With a ``document_reranker`` this is
             the CANDIDATE pool that gets reranked; the reranker's own ``top_k`` decides the final count.
+        max_hops (int): Beam-search traversal depth (default 1 = single hop, the previous behavior).
+            At 2+, chain questions ("what does X's employer use?") resolve in one call: hop 1 finds
+            ``X -WORKS_AT-> Acme``, hop 2 expands from Acme to ``Acme -USES-> ...``. Overridable per call.
+        beam_width (int | None): Edges kept per hop when ``max_hops > 1`` (default ``top_k // max_hops``).
         document_reranker (Node | None): Optional reranker (e.g. a cross-encoder ``CohereReranker``) applied
             to the rendered facts. A high-degree (hub) entity can expand to many edges that all match the
             seed equally; the reranker scores each fact against the query and keeps the most relevant, so
@@ -214,8 +227,9 @@ class GraphRetriever(ConnectionNode):
     name: str = "graph-retriever"
     description: str = (
         "Retrieves facts from a knowledge graph for a natural-language question. Input: a 'query' string "
-        "(and optionally 'entities'/'entity_ids' to start from, or 'top_k'). Returns one hop of related "
-        "facts as bullet points; call again with a fact's neighbor id to go deeper."
+        "(and optionally 'entities'/'entity_ids' to start from, 'top_k', or 'max_hops'). Returns related "
+        "facts as bullet points. Set 'max_hops': 2 for chain questions about a neighbor of the named "
+        "entity (e.g. \"what does X's employer use\"); or call again with a fact's neighbor id."
     )
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     connection: Neo4j | ApacheAGE | AWSNeptune
@@ -226,6 +240,14 @@ class GraphRetriever(ConnectionNode):
     create_graph_if_not_exists: bool = False
     filters: dict[str, Any] | None = None  # LOCKED: always applied; not overridable from the input schema
     top_k: int = 50
+    # Beam-search traversal depth. 1 (default) = today's single hop. At >1, each hop keeps only the
+    # `beam_width` most relevant edges and expands ONLY from their endpoints — so the frontier stays
+    # bounded (no hub explosion) and hop-N candidates compete against hop-N siblings, never against
+    # seed-adjacent facts that trivially sound more like the question. Every hop applies the same locked
+    # ACL filters. Reliable ranking across hops needs edge embeddings (writer's `entity_embedder`).
+    max_hops: int = 1
+    # Edges kept per hop when max_hops > 1. None -> top_k // max_hops (total budget stays ~top_k).
+    beam_width: int | None = None
     document_reranker: Node | None = None  # optional rerank of rendered facts; top_k here = candidate pool
     # Optional semantic seeding: when set AND the entity vector index exists, entry entities are found by
     # embedding the query's entity names and vector-searching, instead of the full-text/CONTAINS name match.
@@ -582,6 +604,49 @@ class GraphRetriever(ConnectionNode):
         user_clauses, user_params = _compile_edge_filters(rel_var, user_filters, param_prefix="uf")
         return [*locked_clauses, *user_clauses], {**locked_params, **user_params}
 
+    def _hop_query(
+        self,
+        frontier_ids: list[str],
+        visited_ids: list[str],
+        limit: int,
+        user_filters: dict[str, Any] | None,
+        query_vector: list[float] | None,
+    ) -> tuple[str, dict[str, Any]]:
+        """One beam-search expansion step: the ACL-filtered edges of the frontier entities, ranked by fact
+        relevance and cut to the per-hop beam.
+
+        The ``NOT (start AND end IN $visited)`` guard keeps frontier->NEW edges (the walk) while dropping
+        the edges we arrived by. The SAME locked filters as hop 1 apply, so ACL holds on every hop.
+        ``DISTINCT r``: an undirected match binds an edge from both endpoints when both are in the frontier.
+        Ranking uses the same edge-embedding cosine as hop 1 — the cut happens among same-hop siblings, so a
+        chain answer never competes against seed-adjacent facts that sound more like the question.
+        """
+        params: dict[str, Any] = {"frontier": frontier_ids, "visited": visited_ids, "limit": limit}
+        rel_clauses, filter_params = self._edge_predicates("r", user_filters)
+        params.update(filter_params)
+        where = " AND ".join(["NOT (startNode(r).id IN $visited AND endNode(r).id IN $visited)", *rel_clauses])
+        lines = [
+            f"MATCH (a:{ENTITY_LABEL}) WHERE a.id IN $frontier",
+            "MATCH (a)-[r]-(b)",
+            f"WHERE {where}",
+            "WITH DISTINCT r",
+            "RETURN r.src_name AS a_name, startNode(r).id AS a_id, type(r) AS rel, "
+            "properties(r) AS rprops, r.dst_name AS b_name, endNode(r).id AS b_id",
+        ]
+        if query_vector:
+            params["qvec"] = query_vector
+            lines.append(
+                "ORDER BY CASE WHEN r.embedding IS NULL THEN -1.0 "
+                "ELSE vector.similarity.cosine(r.embedding, $qvec) END DESC"
+            )
+        lines.append("LIMIT $limit")
+        return "\n".join(lines), params
+
+    @staticmethod
+    def _endpoint_ids(rows: list[dict[str, Any]]) -> set[str]:
+        """The distinct entity ids on either end of the returned edges (next hop's frontier candidates)."""
+        return {rid for row in rows for rid in (row.get("a_id"), row.get("b_id")) if rid}
+
     def execute(
         self, input_data: GraphRetrieverInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
@@ -596,15 +661,38 @@ class GraphRetriever(ConnectionNode):
             raise ToolExecutionException("GraphRetriever: graph store is not initialized.", recoverable=True)
 
         limit = input_data.top_k or self.top_k
+        max_hops = input_data.max_hops or self.max_hops
+        # Per-hop beam: with multi-hop the budget is split across hops so the total stays ~top_k, and the
+        # LIMIT cut at every hop happens among same-hop siblings (see _hop_query).
+        hop_limit = limit if max_hops <= 1 else (self.beam_width or max(1, limit // max_hops))
         try:
             seed_names = self._seed_entity_names(input_data, config, **kwargs)
             # Embed the whole question once (when vectors are on): reused as the fact-rank vector AND, when
             # there are no seed names, the seed vector — so seeding and reranking share one embedding.
             query_vector = self._query_vector(input_data.query, config, **kwargs)
             seed_vectors = self._seed_vectors(input_data, seed_names, query_vector, config, **kwargs)
-            query, params = self._build_query(input_data, limit, seed_names, seed_vectors, query_vector)
+            query, params = self._build_query(input_data, hop_limit, seed_names, seed_vectors, query_vector)
             records, _, _ = self._graph_store.run_cypher(query, parameters=params, database=self.database)
             rows = self._graph_store.format_records(records)
+            # Beam expansion: hop N+1 expands ONLY from the endpoints of the edges hop N kept, excluding
+            # edges already inside the visited set. ACL-filtered and relevance-ranked per hop.
+            visited = self._endpoint_ids(rows)
+            frontier = set(visited)
+            for _ in range(max_hops - 1):
+                if not frontier:
+                    break
+                check_cancellation(config)
+                hop_query, hop_params = self._hop_query(
+                    sorted(frontier), sorted(visited), hop_limit, input_data.filters, query_vector
+                )
+                records, _, _ = self._graph_store.run_cypher(hop_query, parameters=hop_params, database=self.database)
+                hop_rows = self._graph_store.format_records(records)
+                if not hop_rows:
+                    break
+                rows.extend(hop_rows)
+                endpoint_ids = self._endpoint_ids(hop_rows)
+                frontier = endpoint_ids - visited
+                visited |= endpoint_ids
             documents = self._render_single_hop(rows)
             logger.info(f"Tool {self.name} - {self.id}: retrieved {len(documents)} fact(s).")
             documents = self._maybe_rerank(documents, input_data.query, config, **kwargs)
