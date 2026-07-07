@@ -694,15 +694,6 @@ class GraphRetriever(ConnectionNode):
             return []
         try:
             return self.document_retriever.get_documents_by_id(ids)
-        except NotImplementedError:
-            # Every Retriever now inherits get_documents_by_id, but its store may not support fetch-by-id
-            # (base raises NotImplementedError). That's an unsupported backend, not a failure: skip grounding
-            # quietly, exactly as the pre-refactor hasattr guard did.
-            logger.debug(
-                f"Tool {self.name} - {self.id}: document retriever's store does not support fetch-by-id; "
-                "skipping source-document grounding."
-            )
-            return []
         except Exception as e:
             logger.warning(f"Tool {self.name} - {self.id}: source-document fetch failed: {e}")
             return []
