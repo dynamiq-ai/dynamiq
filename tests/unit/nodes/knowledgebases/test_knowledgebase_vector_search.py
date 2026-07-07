@@ -66,7 +66,7 @@ def test_execute_builds_request_and_parses_documents(retriever):
     assert kwargs["method"] == "POST"
     assert kwargs["url"] == "https://api.example.ai/v1/knowledgebases/kb-123/vector-search"
     assert kwargs["headers"] == {"Authorization": "Bearer secret-token"}
-    assert kwargs["json"] == {"query": "hello", "limit": 3, "filters": {"k": "v"}}
+    assert kwargs["json"] == {"query": "hello", "limit": 3, "filters": {"k": "v"}, "alpha": 0.5}
 
     # Response forwarded as retriever-shaped output
     assert all(isinstance(doc, Document) for doc in result["documents"])
@@ -102,7 +102,7 @@ def test_execute_uses_node_defaults_for_limit(retriever):
     retriever.execute(DynamiqKnowledgebaseVectorSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
 
     _, kwargs = retriever.client.request.call_args
-    assert kwargs["json"] == {"query": "q", "limit": 5}  # node-level limit default, no empty filters
+    assert kwargs["json"] == {"query": "q", "limit": 5, "alpha": 0.5}  # node-level limit default, no empty filters
 
 
 def test_execute_handles_empty_data(retriever):
@@ -191,5 +191,5 @@ def test_yaml_roundtrip(tmp_path):
 
     _, kwargs = roundtrip_node.client.request.call_args
     assert kwargs["url"] == "https://api.example.ai/v1/knowledgebases/kb-123/vector-search"
-    assert kwargs["json"] == {"query": "q", "limit": 7}  # node-level limit survived the roundtrip
+    assert kwargs["json"] == {"query": "q", "limit": 7, "alpha": 0.5}  # node-level limit survived the roundtrip
     assert [doc.content for doc in result["documents"]] == ["hit"]
