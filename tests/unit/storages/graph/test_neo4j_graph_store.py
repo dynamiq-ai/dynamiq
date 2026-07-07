@@ -195,3 +195,20 @@ def test_delete_documents_rejects_invalid_label():
     store, _ = _store([])
     with pytest.raises(ValueError, match="Invalid document-scoped label"):
         store.delete_documents(["d1"], doc_scoped_labels=["bad-label!"])
+
+
+def test_delete_documents_custom_provenance_key():
+    # e.g. deleting by knowledgebase file id: edges carry r.file_id via flattened chunk metadata.
+    store, client = _store([([], _summary(relationships_deleted=2), [])])
+
+    result = store.delete_documents(["f1"], provenance_key="file_id")
+
+    assert client.execute_query.call_args_list[0].args[0] == ("MATCH ()-[r]->() WHERE r.file_id IN $doc_ids DELETE r")
+    assert result == {"nodes_deleted": 0, "relationships_deleted": 2}
+
+
+def test_delete_documents_rejects_injection_shaped_provenance_key():
+    store, client = _store([])
+    with pytest.raises(ValueError, match="Invalid provenance key"):
+        store.delete_documents(["d1"], provenance_key="file_id IS NOT NULL OR true //")
+    assert client.execute_query.call_count == 0  # rejected before any query runs

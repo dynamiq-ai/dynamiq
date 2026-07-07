@@ -675,3 +675,69 @@ class TestEmbedEdges:
 
     def test_edge_triplet_text_none_without_endpoint_names(self):
         assert KnowledgeGraphWriter._edge_triplet_text(edge("USES", "ORG", "SYS", "a", "b", {})) is None
+
+
+class _DeleteStore:
+    """Records delete_documents delegations; the store owns the deletion implementation."""
+
+    def __init__(self, totals=None, error: Exception | None = None):
+        self.totals = totals or {"relationships_deleted": 0, "nodes_deleted": 0}
+        self.error = error
+        self.calls: list[dict] = []
+
+    def delete_documents(self, document_ids, *, doc_scoped_labels=None, provenance_key="source_doc_id", database=None):
+        self.calls.append(
+            {
+                "document_ids": document_ids,
+                "doc_scoped_labels": doc_scoped_labels,
+                "provenance_key": provenance_key,
+                "database": database,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        return self.totals
+
+
+class TestDeleteDocuments:
+    def _writer_with(self, store):
+        writer = KnowledgeGraphWriter(
+            connection=Neo4j(uri="bolt://localhost:7687", username="neo4j", password="password"),
+            is_postponed_component_init=True,
+        )
+        writer._graph_store = store
+        return writer
+
+    def test_delegates_to_the_store_with_attribute_value_scope(self):
+        store = _DeleteStore(totals={"relationships_deleted": 3, "nodes_deleted": 2})
+        writer = self._writer_with(store)
+        out = writer.delete_documents(["docA", 7])
+        assert out == {"relationships_deleted": 3, "nodes_deleted": 2}
+        assert store.calls == [
+            {
+                "document_ids": ["docA", "7"],  # ids coerced to str, matching stored provenance values
+                "doc_scoped_labels": ["AttributeValue"],
+                "provenance_key": "source_doc_id",
+                "database": None,
+            }
+        ]
+
+    def test_custom_provenance_key_passed_through(self):
+        # e.g. catalyst deletes by knowledgebase file id: edges carry r.file_id via flattened chunk metadata
+        store = _DeleteStore()
+        writer = self._writer_with(store)
+        writer.delete_documents(["file-1"], key="file_id")
+        assert store.calls[0]["provenance_key"] == "file_id"
+
+    def test_empty_ids_is_a_noop(self):
+        store = _DeleteStore()
+        writer = self._writer_with(store)
+        assert writer.delete_documents([]) == {"relationships_deleted": 0, "nodes_deleted": 0}
+        assert store.calls == []
+
+    def test_unsupported_backend_error_propagates(self):
+        # Non-writing backends raise from the store (base.delete_documents); the writer adds no gate.
+        store = _DeleteStore(error=NotImplementedError("no writes"))
+        writer = self._writer_with(store)
+        with pytest.raises(NotImplementedError):
+            writer.delete_documents(["docA"])

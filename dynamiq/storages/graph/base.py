@@ -69,6 +69,7 @@ class BaseGraphStore(ABC):
         document_ids: list[str],
         *,
         doc_scoped_labels: list[str] | None = None,
+        provenance_key: str = "source_doc_id",
         database: str | None = None,
         **kwargs: Any,
     ) -> dict[str, int]:

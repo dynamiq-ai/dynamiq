@@ -198,18 +198,26 @@ class Neo4jGraphStore(BaseGraphStore):
         document_ids: list[str],
         *,
         doc_scoped_labels: list[str] | None = None,
+        provenance_key: str = "source_doc_id",
         database: str | None = None,
         **kwargs: Any,
     ) -> dict[str, int]:
         """Delete the given documents' edges (and their document-scoped nodes), leaving entities intact.
 
+        ``provenance_key`` is the edge property the ids match against — ``source_doc_id`` (default, the
+        ingestion chunk id) or any other flattened document-metadata key, e.g. ``file_id`` to delete
+        everything extracted from any chunk of a knowledgebase file. Validated as an identifier (it is
+        spliced into the query text; the id VALUES are always bound parameters).
+
         For each label in ``doc_scoped_labels`` (e.g. ``AttributeValue``), the node is the end of an edge
-        stamped with one of these documents' ``source_doc_id`` and belongs to exactly that document, so a
+        stamped with one of these documents' provenance and belongs to exactly that document, so a
         ``DETACH DELETE`` removes the node and that edge together. Any remaining per-document edges
         (entity-to-entity) are then deleted; identity (entity) nodes are deliberately never matched.
         """
         if not document_ids:
             return {"nodes_deleted": 0, "relationships_deleted": 0}
+        if not PROPERTY_KEY_PATTERN.match(provenance_key):
+            raise ValueError(f"Invalid provenance key for delete: {provenance_key!r}")
 
         totals = {"nodes_deleted": 0, "relationships_deleted": 0}
         params = {"doc_ids": list(document_ids)}
@@ -217,17 +225,13 @@ class Neo4jGraphStore(BaseGraphStore):
         for label in doc_scoped_labels or []:
             if not LABEL_PATTERN.match(label):
                 raise ValueError(f"Invalid document-scoped label for delete: {label!r}")
-            query = (
-                "MATCH ()-[r]->(v:`" + label + "`)\n"
-                "WHERE r.source_doc_id IN $doc_ids\n"
-                "DETACH DELETE v"
-            )
+            query = "MATCH ()-[r]->(v:`" + label + "`)\n" f"WHERE r.{provenance_key} IN $doc_ids\n" "DETACH DELETE v"
             _, summary, _ = self.run_cypher(query, params, database=database)
             totals["nodes_deleted"] += summary.counters.nodes_deleted
             totals["relationships_deleted"] += summary.counters.relationships_deleted
 
         _, summary, _ = self.run_cypher(
-            "MATCH ()-[r]->() WHERE r.source_doc_id IN $doc_ids DELETE r",
+            f"MATCH ()-[r]->() WHERE r.{provenance_key} IN $doc_ids DELETE r",
             params,
             database=database,
         )
