@@ -24,7 +24,7 @@ class DynamiqKnowledgebaseGraphSearchInputSchema(BaseModel):
         default_factory=dict,
         description="Parameter to provide edge-property filters (e.g. ACL) to narrow results.",
     )
-    top_k: int | None = Field(default=None, description="Parameter to provide how many facts to retrieve.")
+    limit: int | None = Field(default=None, description="Parameter to provide how many facts to retrieve.")
 
 
 class DynamiqKnowledgebaseGraphSearch(ConnectionNode):
@@ -32,11 +32,11 @@ class DynamiqKnowledgebaseGraphSearch(ConnectionNode):
 
     The graph analogue of ``DynamiqKnowledgebaseVectorSearch``: instead of vector-similar chunks it
     returns facts (edges) relevant to the query. It calls
-    ``POST {connection.url}/v1/knowledgebases/{knowledgebase_id}/graph-search`` and is a transparent
-    pass-through — it validates the status and forwards the API response body as-is. The API owns the
-    response shape (entity resolution, ACL-filtered traversal, and formatting run server-side); depending
-    on server settings it returns ``content`` (the field the agent reads) plus optional extras such as
-    ``documents`` / ``facts`` / ``source_documents`` / ``context``.
+    ``POST {connection.url}/v1/knowledgebases/{knowledgebase_id}/graph-search``, validates the status, and
+    unwraps the response's ``data`` envelope — relaying the inner object as-is. The API owns that inner
+    shape (entity resolution, ACL-filtered traversal, and formatting run server-side); depending on server
+    settings it returns ``content`` (the field the agent reads) plus optional extras such as ``documents``
+    / ``facts`` / ``source_documents`` / ``context``.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -45,7 +45,7 @@ class DynamiqKnowledgebaseGraphSearch(ConnectionNode):
     description: str = DESCRIPTION
     connection: DynamiqConnection = Field(default_factory=DynamiqConnection)
     knowledgebase_id: str
-    top_k: int | None = None
+    limit: int | None = None
     filters: dict[str, Any] = Field(default_factory=dict)
     timeout: float = 30
     user: str | None = None
@@ -60,12 +60,12 @@ class DynamiqKnowledgebaseGraphSearch(ConnectionNode):
     def _build_request_kwargs(self, input_data: DynamiqKnowledgebaseGraphSearchInputSchema) -> dict[str, Any]:
         """Build the kwargs for the graph-search request. Input overrides node-level defaults."""
         filters = input_data.filters or self.filters
-        top_k = input_data.top_k if input_data.top_k is not None else self.top_k
+        limit = input_data.limit if input_data.limit is not None else self.limit
         user = self.user
 
         body: dict[str, Any] = {"query": input_data.query}
-        if top_k is not None:
-            body["top_k"] = top_k
+        if limit is not None:
+            body["limit"] = limit
         if filters:
             body["filters"] = filters
         if user is not None:
@@ -80,12 +80,13 @@ class DynamiqKnowledgebaseGraphSearch(ConnectionNode):
         }
 
     def _parse_response(self, response: Any) -> dict[str, Any]:
-        """Validate status and forward the API response body as-is.
+        """Validate status and unwrap the API response's ``data`` envelope.
 
-        The graph-search API owns the response shape: depending on server-side settings it may return
+        The graph-search API wraps its result in ``{"data": {...}}``; this node unpacks and relays the
+        inner object as-is. The API owns that inner shape: depending on server-side settings it may return
         ``content`` alone, or additionally ``documents`` / ``facts`` / ``source_documents`` / ``context``.
-        This node is a transparent pass-through — it relays whatever the API produced. The contract
-        guarantees a ``content`` string (the field the agent reads); the rest are optional extras.
+        The contract guarantees a ``content`` string (the field the agent reads); the rest are optional
+        extras.
         """
         if response.status_code not in self.success_codes:
             logger.error(f"Tool {self.name} - {self.id}: failed to get results.")
@@ -96,7 +97,7 @@ class DynamiqKnowledgebaseGraphSearch(ConnectionNode):
             )
 
         try:
-            return response.json()
+            return response.json()["data"]
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to parse response. Error: {str(e)}")
             raise ToolExecutionException(
