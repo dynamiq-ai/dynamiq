@@ -77,3 +77,23 @@ def test_share_disabled_when_backend_lacks_view_support():
 
 def test_contextvar_defaults_to_none():
     assert _shared_session.get() is None
+
+
+def test_shared_session_defaults_to_all_scope():
+    from dynamiq.nodes.agents.shared_session import SandboxSharingScope, SharedSession
+
+    assert SharedSession().sharing_scope == SandboxSharingScope.ALL
+
+
+def test_shared_session_accepts_augment_scope():
+    from dynamiq.nodes.agents.shared_session import SandboxSharingScope, SharedSession
+
+    s = SharedSession(sharing_scope=SandboxSharingScope.AUGMENT)
+    assert s.sharing_scope == SandboxSharingScope.AUGMENT
+
+
+def test_sandbox_sharing_scope_is_str_enum():
+    from dynamiq.nodes.agents.shared_session import SandboxSharingScope
+
+    assert SandboxSharingScope.ALL == "all"
+    assert SandboxSharingScope.AUGMENT == "augment"

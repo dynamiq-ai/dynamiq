@@ -1,6 +1,7 @@
 import re
 import threading
 from contextvars import ContextVar
+from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -16,6 +17,13 @@ def slugify(value: str) -> str:
     return slug or "agent"
 
 
+class SandboxSharingScope(str, Enum):
+    """Which subagents join the owner's shared sandbox when sharing is enabled."""
+
+    ALL = "all"          # every subagent uses the shared sandbox (overrides a subagent's own)
+    AUGMENT = "augment"  # only subagents that bring no sandbox of their own
+
+
 class SharedSession:
     """Holds resources shared by an agent and its subagents for one run.
 
@@ -24,12 +32,20 @@ class SharedSession:
     isolated base_path) via `sandbox_view_for`.
     """
 
-    def __init__(self, *, sandbox: "Sandbox | None" = None, share_sandbox: bool = False, owner_run_id: str = ""):
+    def __init__(
+        self,
+        *,
+        sandbox: "Sandbox | None" = None,
+        share_sandbox: bool = False,
+        owner_run_id: str = "",
+        sharing_scope: SandboxSharingScope = SandboxSharingScope.ALL,
+    ):
         self.sandbox = sandbox
         # Only backends that can produce per-agent views (e.g. E2B) can be shared;
         # others degrade to no-sharing so subagents fall back to their own sandbox.
         self.share_sandbox = bool(share_sandbox and sandbox is not None and getattr(sandbox, "supports_views", False))
         self.owner_run_id = owner_run_id
+        self.sharing_scope = sharing_scope
         self._lock = threading.Lock()
 
     def get_sandbox(self) -> "Sandbox | None":
