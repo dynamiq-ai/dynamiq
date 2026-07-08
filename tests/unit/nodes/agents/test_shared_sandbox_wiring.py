@@ -216,3 +216,23 @@ def test_owner_propagates_augment_scope_to_session(test_llm):
         assert _shared_session.get().sharing_scope == SandboxSharingScope.AUGMENT
     finally:
         agent._exit_shared_session(token)
+
+
+def test_agent_records_its_own_sandbox_tool_ids(test_llm):
+    from dynamiq.sandboxes.tools.shell import SandboxShellTool
+
+    agent = _sandboxed_agent(test_llm)  # has its own sandbox
+    own_shell = next(t for t in agent.tools if isinstance(t, SandboxShellTool))
+    assert agent._own_sandbox_tool_ids  # non-empty
+    assert own_shell.id in agent._own_sandbox_tool_ids
+
+
+def test_agent_without_sandbox_records_no_own_sandbox_tool_ids(test_llm):
+    agent = Agent(name="Plain", llm=test_llm, role="r", tools=[])
+    assert agent._own_sandbox_tool_ids == set()
+
+
+def test_shared_sandbox_tools_contextvar_defaults_none():
+    from dynamiq.nodes.agents.base import _shared_sandbox_tools
+
+    assert _shared_sandbox_tools.get() is None

@@ -72,6 +72,10 @@ from dynamiq.utils.utils import deep_merge
 # per thread / per asyncio task via ContextVar.
 _run_extra_tools: ContextVar[list["Node"] | None] = ContextVar("dynamiq_agent_run_extra_tools", default=None)
 
+# Per-call overlay of shared-sandbox-backed tools (later task); isolated per
+# thread / per asyncio task via ContextVar, same pattern as `_run_extra_tools`.
+_shared_sandbox_tools: ContextVar[list["Node"] | None] = ContextVar("dynamiq_shared_sandbox_tools", default=None)
+
 
 class StreamChunkChoiceDelta(BaseModel):
     """Delta model for content chunks."""
@@ -298,6 +302,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     description: str | None = Field(default=None, description="Short human-readable description of the agent.")
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
     _excluded_tool_ids: set[str] = PrivateAttr(default_factory=set)
+    _own_sandbox_tool_ids: set[str] = PrivateAttr(default_factory=set)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
     _history_offset: int = PrivateAttr(
         default=DEFAULT_HISTORY_OFFSET,
@@ -391,6 +396,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             # Add sandbox tools when sandbox is enabled (not serialized; recreated from sandbox config on load)
             sandbox_tools = tools_sandbox.get_tools(llm=self.llm)
             self._excluded_tool_ids.update(t.id for t in sandbox_tools)
+            self._own_sandbox_tool_ids.update(t.id for t in sandbox_tools)
             self.tools.extend(sandbox_tools)
 
         elif self.file_store_backend:
