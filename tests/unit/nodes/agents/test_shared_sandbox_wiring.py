@@ -100,7 +100,8 @@ def test_cleanup_kills_owned_sandbox():
     agent.sandbox_backend.close.assert_called_once_with(kill=True)
 
 
-def test_subagent_under_session_uses_view_backed_tools(test_llm):
+def test_construction_under_session_does_not_resolve_shared_sandbox(test_llm):
+    """P1.5: construction no longer borrows — resolution moved to run time (execute)."""
     from dynamiq.nodes.agents.shared_session import SharedSession
     from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
@@ -109,18 +110,15 @@ def test_subagent_under_session_uses_view_backed_tools(test_llm):
     token = _shared_session.set(session)
     try:
         sub = Agent(name="Researcher", llm=test_llm, role="r", tools=[])  # no own sandbox
-        shell = next(t for t in sub.tools if isinstance(t, SandboxShellTool))
-        assert sub._sandbox_is_shared is True
-        assert shell.sandbox.sandbox_id == "sbx-shared"
-        assert shell.sandbox.base_path.startswith("/home/user/work/researcher-")
+        assert sub._sandbox_is_shared is False
+        assert not any(isinstance(t, SandboxShellTool) for t in sub.tools)
     finally:
         _shared_session.reset(token)
 
 
 def test_borrowed_subagent_sandbox_backend_is_the_shared_view(test_llm):
-    """A subagent that borrows the shared sandbox must expose it as sandbox_backend,
-    so execute()'s file upload / output collection / skills paths use the shared
-    sandbox instead of falling back to an in-memory file store."""
+    """After run-time borrow, the subagent exposes the shared view as sandbox_backend so
+    execute()'s file upload / output collection / skills paths target the shared sandbox."""
     from dynamiq.nodes.agents.shared_session import SharedSession
     from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
@@ -128,42 +126,25 @@ def test_borrowed_subagent_sandbox_backend_is_the_shared_view(test_llm):
     session = SharedSession(sandbox=shared, share_sandbox=True, owner_run_id="owner")
     token = _shared_session.set(session)
     try:
-        sub = Agent(name="Researcher", llm=test_llm, role="r", tools=[])  # brings no sandbox
-        assert sub._sandbox_is_shared is True
-        assert sub.sandbox_backend is not None
+        sub = Agent(name="Researcher", llm=test_llm, role="r", tools=[])
+        overlay = sub._maybe_borrow_shared_sandbox()  # what execute() does at run time
+        assert sub.sandbox_backend is sub._shared_sandbox_view
         assert sub.sandbox_backend.sandbox_id == "sbx-shared"
-        assert sub.sandbox_backend.base_path.startswith("/home/user/work/researcher-")
-        # exactly the view feeding the shell tool — no split brain
-        shell = next(t for t in sub.tools if isinstance(t, SandboxShellTool))
+        shell = next(t for t in overlay if isinstance(t, SandboxShellTool))
         assert sub.sandbox_backend is shell.sandbox
     finally:
         _shared_session.reset(token)
 
 
-def test_subagent_with_own_sandbox_is_not_overridden(test_llm):
-    """A subagent configured with its own sandbox keeps it — the shared session
-    must not silently swap its tools onto the parent's view while other paths
-    (cleanup, skills) still point at its own backend."""
-    from dynamiq.nodes.agents.shared_session import SharedSession
-    from dynamiq.sandboxes.tools.shell import SandboxShellTool
+def test_release_shared_sandbox_view_disconnects_without_kill(test_llm):
+    from unittest.mock import MagicMock
 
-    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
-    session = SharedSession(sandbox=shared, share_sandbox=True, owner_run_id="owner")
-    token = _shared_session.set(session)
-    try:
-        sub = Agent(
-            name="Sub",
-            llm=test_llm,
-            role="r",
-            tools=[],
-            sandbox=SandboxConfig(enabled=True, backend=E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-own")),
-        )
-        assert sub._sandbox_is_shared is False
-        assert sub.sandbox_backend.sandbox_id == "sbx-own"
-        shell = next(t for t in sub.tools if isinstance(t, SandboxShellTool))
-        assert shell.sandbox.sandbox_id == "sbx-own"
-    finally:
-        _shared_session.reset(token)
+    sub = Agent(name="Researcher", llm=test_llm, role="r", tools=[])
+    view = MagicMock()
+    sub._shared_sandbox_view = view
+    sub._release_shared_sandbox_view()
+    view.close.assert_called_once_with(kill=False)
+    assert sub._shared_sandbox_view is None
 
 
 def test_owner_without_active_session_uses_own_backend(test_llm):
@@ -176,7 +157,6 @@ def test_owner_without_active_session_uses_own_backend(test_llm):
 
 
 def test_two_subagents_share_one_sandbox_distinct_workdirs(test_llm):
-    from dynamiq.nodes.agents.shared_session import _shared_session
     from dynamiq.nodes.tools.agent_tool import SubAgentTool
     from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
@@ -185,9 +165,11 @@ def test_two_subagents_share_one_sandbox_distinct_workdirs(test_llm):
     try:
         sub1 = Agent(name="Researcher", llm=test_llm, role="r", tools=[])
         sub2 = Agent(name="Researcher", llm=test_llm, role="r", tools=[])
+        ov1 = sub1._maybe_borrow_shared_sandbox()
+        ov2 = sub2._maybe_borrow_shared_sandbox()
 
-        shell1 = next(t for t in sub1.tools if isinstance(t, SandboxShellTool))
-        shell2 = next(t for t in sub2.tools if isinstance(t, SandboxShellTool))
+        shell1 = next(t for t in ov1 if isinstance(t, SandboxShellTool))
+        shell2 = next(t for t in ov2 if isinstance(t, SandboxShellTool))
 
         # same underlying sandbox
         assert shell1.sandbox.sandbox_id == "sbx-shared"
@@ -204,6 +186,74 @@ def test_two_subagents_share_one_sandbox_distinct_workdirs(test_llm):
     finally:
         owner._exit_shared_session(token)
     assert _shared_session.get() is None
+
+
+def test_runtime_tools_includes_overlay(test_llm):
+    from dynamiq.nodes.agents.base import _shared_sandbox_tools
+    from dynamiq.nodes.agents.shared_session import SharedSession
+    from dynamiq.sandboxes.tools.shell import SandboxShellTool
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(sandbox=shared, share_sandbox=True, owner_run_id="owner")
+    stoken = _shared_session.set(session)
+    try:
+        sub = Agent(name="Researcher", llm=test_llm, role="r", tools=[])
+        overlay = sub._maybe_borrow_shared_sandbox()
+        otoken = _shared_sandbox_tools.set(overlay)
+        try:
+            assert any(isinstance(t, SandboxShellTool) for t in sub._runtime_tools)
+            assert not any(isinstance(t, SandboxShellTool) for t in sub.tools)
+        finally:
+            _shared_sandbox_tools.reset(otoken)
+    finally:
+        _shared_session.reset(stoken)
+
+
+def test_runtime_tools_hides_own_sandbox_tools_when_overridden(test_llm):
+    from dynamiq.nodes.agents.base import _shared_sandbox_tools
+    from dynamiq.nodes.agents.shared_session import SandboxSharingScope, SharedSession
+    from dynamiq.sandboxes.tools.shell import SandboxShellTool
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(
+        sandbox=shared, share_sandbox=True, owner_run_id="owner", sharing_scope=SandboxSharingScope.ALL
+    )
+    stoken = _shared_session.set(session)
+    try:
+        sub = Agent(
+            name="Sub",
+            llm=test_llm,
+            role="r",
+            tools=[],
+            sandbox=SandboxConfig(enabled=True, backend=E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-own")),
+        )
+        overlay = sub._maybe_borrow_shared_sandbox()
+        otoken = _shared_sandbox_tools.set(overlay)
+        try:
+            shells = [t for t in sub._runtime_tools if isinstance(t, SandboxShellTool)]
+            assert len(shells) == 1
+            assert shells[0].sandbox.sandbox_id == "sbx-shared"
+        finally:
+            _shared_sandbox_tools.reset(otoken)
+    finally:
+        _shared_session.reset(stoken)
+
+
+def test_runtime_tools_composes_overlay_with_ltm(test_llm):
+    from dynamiq.nodes.agents.base import _run_extra_tools, _shared_sandbox_tools
+    from dynamiq.sandboxes.tools.shell import SandboxShellTool
+
+    sub = Agent(name="Researcher", llm=test_llm, role="r", tools=[])
+    fake_ltm = SandboxShellTool(sandbox=E2BSandbox(connection=E2B(api_key="t"), sandbox_id="ltm"))
+    fake_sandbox = SandboxShellTool(sandbox=E2BSandbox(connection=E2B(api_key="t"), sandbox_id="ov"))
+    ltoken = _run_extra_tools.set([fake_ltm])
+    otoken = _shared_sandbox_tools.set([fake_sandbox])
+    try:
+        rt = sub._runtime_tools
+        assert fake_ltm in rt and fake_sandbox in rt
+    finally:
+        _shared_sandbox_tools.reset(otoken)
+        _run_extra_tools.reset(ltoken)
 
 
 def test_owner_session_defaults_to_all_scope(test_llm):

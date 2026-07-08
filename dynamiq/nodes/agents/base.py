@@ -701,6 +701,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         # parent's overlay via `ContextAwareThreadPoolExecutor`.
         ltm_token = _run_extra_tools.set(ltm_tools)
         shared_session_token = self._maybe_enter_shared_session(kwargs)
+        # Borrowers resolve a per-agent view of the shared sandbox at run time (both factory- and
+        # initialized-mode subagents). Always set the overlay (even to None) so a nested subagent
+        # does not inherit this agent's overlay via ContextAwareThreadPoolExecutor.
+        sandbox_overlay_token = _shared_sandbox_tools.set(self._maybe_borrow_shared_sandbox())
         try:
             if use_memory:
                 history_messages = self._retrieve_memory(input_data)
@@ -875,6 +879,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
             return execution_result
         finally:
+            _shared_sandbox_tools.reset(sandbox_overlay_token)
+            self._release_shared_sandbox_view()
             _run_extra_tools.reset(ltm_token)
             self._exit_shared_session(shared_session_token)
 
@@ -2176,25 +2182,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             _shared_session.reset(token)
 
     def _resolve_tools_sandbox(self):
-        """Choose the sandbox to build this agent's sandbox tools from.
+        """The sandbox this agent builds its OWN sandbox tools from at construction.
 
-        Under an active shared session (i.e. this agent is a subagent of a sharing
-        owner), return a per-agent view of the shared sandbox and mark it borrowed.
-        Otherwise return this agent's own sandbox_backend (unchanged behavior).
+        Shared-sandbox borrowing is resolved at run time in ``execute()`` (see
+        ``_maybe_borrow_shared_sandbox``), not here — that is what lets initialized-mode
+        subagents share too. At construction ``_shared_sandbox_view`` is always None, so
+        ``sandbox_backend`` returns exactly this agent's own configured backend.
         """
-        session = _shared_session.get()
-        if (
-            session is not None
-            and session.share_sandbox
-            and self.file_store_backend is None
-            and self.sandbox_backend is None  # only borrow when this agent brings no sandbox of its own
-        ):
-            key = f"{(self.sanitize_tool_name(self.name) or 'subagent').lower()}-{uuid4().hex[:8]}"
-            view = session.sandbox_view_for(key)
-            if view is not None:
-                self._sandbox_is_shared = True
-                self._shared_sandbox_view = view
-                return view
         return self.sandbox_backend
 
     def _configured_sandbox_backend(self) -> "Sandbox | None":
@@ -2255,11 +2249,42 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             tool.is_optimized_for_agents = True
         return tools
 
+    def _release_shared_sandbox_view(self) -> None:
+        """Disconnect and drop a per-call borrowed shared-sandbox view.
+
+        ``kill=False`` keeps the underlying shared sandbox alive for the owner and other
+        subagents; only this agent's client connection is dropped. ``_sandbox_is_shared``
+        stays latched so ``cleanup_factory_agent`` never kills the shared sandbox.
+        """
+        view = self._shared_sandbox_view
+        if view is None:
+            return
+        self._shared_sandbox_view = None
+        try:
+            view.close(kill=False)
+        except Exception as e:
+            logger.warning("Agent %s - %s: shared sandbox view close failed: %s", self.name, self.id, e)
+
     @property
     def _runtime_tools(self) -> list[Node]:
-        """Instance tools plus any per-call overlay (LTM tools bound to user_id)."""
-        extra = _run_extra_tools.get()
-        return self.tools + extra if extra else self.tools
+        """Instance tools plus any per-call overlays.
+
+        Overlays: long-term-memory tools bound to user_id (``_run_extra_tools``) and shared-sandbox
+        tools bound to a per-agent view (``_shared_sandbox_tools``). When a shared-sandbox overlay is
+        active, this agent's OWN sandbox tools are hidden (scope=ALL override) so the model sees a
+        single, consistent sandbox toolset.
+        """
+        tools = self.tools
+        sandbox_overlay = _shared_sandbox_tools.get()
+        if sandbox_overlay is not None and self._own_sandbox_tool_ids:
+            tools = [t for t in tools if t.id not in self._own_sandbox_tool_ids]
+        result = list(tools)
+        ltm_overlay = _run_extra_tools.get()
+        if ltm_overlay:
+            result += ltm_overlay
+        if sandbox_overlay:
+            result += sandbox_overlay
+        return result
 
     @property
     def tool_description(self) -> str:
