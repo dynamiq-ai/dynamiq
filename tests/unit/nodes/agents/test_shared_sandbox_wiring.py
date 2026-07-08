@@ -192,3 +192,27 @@ def test_two_subagents_share_one_sandbox_distinct_workdirs(test_llm):
     finally:
         owner._exit_shared_session(token)
     assert _shared_session.get() is None
+
+
+def test_owner_session_defaults_to_all_scope(test_llm):
+    from dynamiq.nodes.agents.shared_session import SandboxSharingScope
+
+    agent = _sandboxed_agent(test_llm, share_sandbox_with_subagents=True)
+    token = agent._maybe_enter_shared_session({"run_id": "run-1"})
+    try:
+        assert _shared_session.get().sharing_scope == SandboxSharingScope.ALL
+    finally:
+        agent._exit_shared_session(token)
+
+
+def test_owner_propagates_augment_scope_to_session(test_llm):
+    from dynamiq.nodes.agents.shared_session import SandboxSharingScope
+
+    agent = _sandboxed_agent(
+        test_llm, share_sandbox_with_subagents=True, sandbox_sharing_scope=SandboxSharingScope.AUGMENT
+    )
+    token = agent._maybe_enter_shared_session({"run_id": "run-1"})
+    try:
+        assert _shared_session.get().sharing_scope == SandboxSharingScope.AUGMENT
+    finally:
+        agent._exit_shared_session(token)

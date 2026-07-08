@@ -22,7 +22,7 @@ from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentIterati
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
-from dynamiq.nodes.agents.shared_session import SharedSession, _shared_session
+from dynamiq.nodes.agents.shared_session import SandboxSharingScope, SharedSession, _shared_session
 from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     ToolCacheEntry,
@@ -270,6 +270,14 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         default=False,
         description="When enabled, subagents (SubAgentTool) share this agent's sandbox "
         "instead of each provisioning their own. Each subagent gets an isolated working directory.",
+    )
+    sandbox_sharing_scope: SandboxSharingScope = Field(
+        default=SandboxSharingScope.ALL,
+        description=(
+            "When share_sandbox_with_subagents is on, which subagents join the shared sandbox: "
+            "ALL (default) routes every subagent onto the shared sandbox, overriding a subagent's "
+            "own sandbox; AUGMENT only shares to subagents that bring no sandbox of their own."
+        ),
     )
     skills: SkillsConfig = Field(
         default_factory=SkillsConfig,
@@ -2152,6 +2160,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             sandbox=self.sandbox_backend,
             share_sandbox=True,
             owner_run_id=str(kwargs.get("run_id") or self.id),
+            sharing_scope=self.sandbox_sharing_scope,
         )
         return _shared_session.set(session)
 
