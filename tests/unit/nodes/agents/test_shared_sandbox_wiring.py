@@ -7,6 +7,8 @@ from dynamiq.nodes.agents.shared_session import _shared_session
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.sandboxes.base import SandboxConfig
 from dynamiq.sandboxes.e2b import E2BSandbox
+from dynamiq.storages.file.base import FileStoreConfig
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 
 
 @pytest.fixture
@@ -22,6 +24,16 @@ def _sandboxed_agent(llm, **kwargs):
         tools=[],
         sandbox=SandboxConfig(enabled=True, backend=E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared")),
         **kwargs,
+    )
+
+
+def _file_store_agent(llm):
+    return Agent(
+        name="Sub",
+        llm=llm,
+        role="r",
+        tools=[],
+        file_store=FileStoreConfig(enabled=True, backend=InMemoryFileStore()),
     )
 
 
@@ -236,3 +248,103 @@ def test_shared_sandbox_tools_contextvar_defaults_none():
     from dynamiq.nodes.agents.base import _shared_sandbox_tools
 
     assert _shared_sandbox_tools.get() is None
+
+
+def test_borrow_returns_none_without_session(test_llm):
+    sub = Agent(name="Researcher", llm=test_llm, role="r", tools=[])
+    assert sub._maybe_borrow_shared_sandbox() is None
+    assert sub._sandbox_is_shared is False
+
+
+def test_borrow_builds_view_tools_for_plain_subagent(test_llm):
+    from dynamiq.nodes.agents.shared_session import SharedSession
+    from dynamiq.sandboxes.tools.shell import SandboxShellTool
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(sandbox=shared, share_sandbox=True, owner_run_id="owner")
+    token = _shared_session.set(session)
+    try:
+        sub = Agent(name="Researcher", llm=test_llm, role="r", tools=[])  # no own sandbox
+        overlay = sub._maybe_borrow_shared_sandbox()
+        assert overlay is not None
+        shell = next(t for t in overlay if isinstance(t, SandboxShellTool))
+        assert shell.sandbox.sandbox_id == "sbx-shared"
+        assert shell.sandbox.base_path.startswith("/home/user/work/researcher-")
+        assert shell.is_optimized_for_agents is True
+        assert sub._sandbox_is_shared is True
+        assert sub._shared_sandbox_view is shell.sandbox
+    finally:
+        _shared_session.reset(token)
+
+
+def test_owner_does_not_borrow_its_own_shared_sandbox(test_llm):
+    owner = _sandboxed_agent(test_llm, name="Owner", share_sandbox_with_subagents=True)
+    token = owner._maybe_enter_shared_session({"run_id": "run-1"})
+    try:
+        assert owner._maybe_borrow_shared_sandbox() is None
+        assert owner._sandbox_is_shared is False
+    finally:
+        owner._exit_shared_session(token)
+
+
+def test_augment_scope_keeps_own_sandbox(test_llm):
+    from dynamiq.nodes.agents.shared_session import SandboxSharingScope, SharedSession
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(
+        sandbox=shared, share_sandbox=True, owner_run_id="owner", sharing_scope=SandboxSharingScope.AUGMENT
+    )
+    token = _shared_session.set(session)
+    try:
+        sub = Agent(
+            name="Sub",
+            llm=test_llm,
+            role="r",
+            tools=[],
+            sandbox=SandboxConfig(enabled=True, backend=E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-own")),
+        )
+        assert sub._maybe_borrow_shared_sandbox() is None
+        assert sub._sandbox_is_shared is False
+    finally:
+        _shared_session.reset(token)
+
+
+def test_all_scope_overrides_own_sandbox(test_llm):
+    from dynamiq.nodes.agents.shared_session import SandboxSharingScope, SharedSession
+    from dynamiq.sandboxes.tools.shell import SandboxShellTool
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(
+        sandbox=shared, share_sandbox=True, owner_run_id="owner", sharing_scope=SandboxSharingScope.ALL
+    )
+    token = _shared_session.set(session)
+    try:
+        sub = Agent(
+            name="Sub",
+            llm=test_llm,
+            role="r",
+            tools=[],
+            sandbox=SandboxConfig(enabled=True, backend=E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-own")),
+        )
+        overlay = sub._maybe_borrow_shared_sandbox()
+        assert overlay is not None
+        shell = next(t for t in overlay if isinstance(t, SandboxShellTool))
+        assert shell.sandbox.sandbox_id == "sbx-shared"
+        assert sub._sandbox_is_shared is True
+    finally:
+        _shared_session.reset(token)
+
+
+def test_file_store_subagent_never_borrows(test_llm):
+    from dynamiq.nodes.agents.shared_session import SharedSession
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(sandbox=shared, share_sandbox=True, owner_run_id="owner")
+    token = _shared_session.set(session)
+    try:
+        sub = _file_store_agent(test_llm)
+        assert sub.file_store_backend is not None
+        assert sub._maybe_borrow_shared_sandbox() is None
+        assert sub._sandbox_is_shared is False
+    finally:
+        _shared_session.reset(token)

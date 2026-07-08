@@ -2197,6 +2197,64 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 return view
         return self.sandbox_backend
 
+    def _configured_sandbox_backend(self) -> "Sandbox | None":
+        """This agent's OWN configured sandbox backend, ignoring any borrowed shared view."""
+        return self.sandbox.backend if self.sandbox and self.sandbox.enabled else None
+
+    def _maybe_borrow_shared_sandbox(self) -> list[Node] | None:
+        """Resolve a per-agent view of the owner's shared sandbox at run time.
+
+        Called from ``execute()``. When this agent is a *borrower* under an active shared
+        session, build sandbox tools on a fresh per-agent view of the shared sandbox and
+        return them as a run-time overlay (published via ``_shared_sandbox_tools``). Returns
+        None when this agent should not borrow:
+
+        - no active/shareable session;
+        - this agent *owns* the shared sandbox (its own tools already use it);
+        - it uses a file store (file store and sandbox are mutually exclusive); or
+        - scope is AUGMENT and it brings its own sandbox.
+
+        Sets ``_shared_sandbox_view`` / ``_sandbox_is_shared`` as a side effect when it borrows.
+        Works for both factory- and initialized-mode subagents because the ContextVar is
+        always visible in ``execute()`` regardless of when the instance was constructed.
+        """
+        session = _shared_session.get()
+        if session is None or not session.share_sandbox:
+            return None
+
+        own = self._configured_sandbox_backend()
+        if own is not None and session.get_sandbox() is own:
+            return None  # this agent owns the shared sandbox — nothing to borrow
+
+        if self.file_store_backend is not None:
+            return None  # file-store agents never join the shared sandbox
+
+        if session.sharing_scope == SandboxSharingScope.AUGMENT and own is not None:
+            return None  # augment: keep this subagent's own sandbox
+
+        key = f"{(self.sanitize_tool_name(self.name) or 'subagent').lower()}-{uuid4().hex[:8]}"
+        view = session.sandbox_view_for(key)
+        if view is None:
+            return None
+
+        if own is not None:
+            logger.warning(
+                "Agent %s - %s: sandbox_sharing_scope=ALL overrides this subagent's own sandbox; "
+                "routing it onto the owner's shared sandbox instead.",
+                self.name,
+                self.id,
+            )
+
+        self._sandbox_is_shared = True
+        self._shared_sandbox_view = view
+
+        tools = view.get_tools(llm=self.llm)
+        for tool in tools:
+            if tool.is_postponed_component_init:
+                tool.init_components()
+            tool.is_optimized_for_agents = True
+        return tools
+
     @property
     def _runtime_tools(self) -> list[Node]:
         """Instance tools plus any per-call overlay (LTM tools bound to user_id)."""
