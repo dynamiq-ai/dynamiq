@@ -7,7 +7,7 @@ from dynamiq import Workflow
 from dynamiq.connections import Dynamiq
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
-from dynamiq.nodes.knowledgebases.knowledgebase import (
+from dynamiq.nodes.knowledgebases.knowledgebase_vector import (
     DynamiqKnowledgebaseVectorSearch,
     DynamiqKnowledgebaseVectorSearchInputSchema,
 )

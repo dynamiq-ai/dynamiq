@@ -24,17 +24,7 @@ class DynamiqKnowledgebaseGraphSearchInputSchema(BaseModel):
         default_factory=dict,
         description="Parameter to provide edge-property filters (e.g. ACL) to narrow results.",
     )
-    limit: int | None = Field(default=None, description="Parameter to provide how many facts to retrieve.")
-    entities: list[str] | None = Field(
-        default=None,
-        description="Optional explicit entity names to start traversal from. When omitted, entry entities "
-        "are inferred from the query.",
-    )
-    entity_ids: list[str] | None = Field(
-        default=None,
-        description="Optional resolved entity ids to start from (unique, variant-proof). Takes precedence "
-        "over 'entities' and the query.",
-    )
+    top_k: int | None = Field(default=None, description="Parameter to provide how many facts to retrieve.")
 
 
 class DynamiqKnowledgebaseGraphSearch(ConnectionNode):
@@ -55,7 +45,7 @@ class DynamiqKnowledgebaseGraphSearch(ConnectionNode):
     description: str = DESCRIPTION
     connection: DynamiqConnection = Field(default_factory=DynamiqConnection)
     knowledgebase_id: str
-    limit: int | None = None
+    top_k: int | None = None
     filters: dict[str, Any] = Field(default_factory=dict)
     timeout: float = 30
     user: str | None = None
@@ -70,20 +60,14 @@ class DynamiqKnowledgebaseGraphSearch(ConnectionNode):
     def _build_request_kwargs(self, input_data: DynamiqKnowledgebaseGraphSearchInputSchema) -> dict[str, Any]:
         """Build the kwargs for the graph-search request. Input overrides node-level defaults."""
         filters = input_data.filters or self.filters
-        limit = input_data.limit if input_data.limit is not None else self.limit
-        entities = input_data.entities
-        entity_ids = input_data.entity_ids
+        top_k = input_data.top_k if input_data.top_k is not None else self.top_k
         user = self.user
 
         body: dict[str, Any] = {"query": input_data.query}
-        if limit is not None:
-            body["limit"] = limit
+        if top_k is not None:
+            body["top_k"] = top_k
         if filters:
             body["filters"] = filters
-        if entities:
-            body["entities"] = entities
-        if entity_ids:
-            body["entity_ids"] = entity_ids
         if user is not None:
             body["user"] = user
 

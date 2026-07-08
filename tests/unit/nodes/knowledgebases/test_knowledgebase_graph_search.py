@@ -21,7 +21,7 @@ def connection():
 
 @pytest.fixture
 def retriever(connection):
-    node = DynamiqKnowledgebaseGraphSearch(connection=connection, knowledgebase_id="kb-123", limit=5)
+    node = DynamiqKnowledgebaseGraphSearch(connection=connection, knowledgebase_id="kb-123", top_k=5)
     node.client = MagicMock()  # bypass real connection initialization
     return node
 
@@ -52,7 +52,7 @@ def test_execute_builds_request_and_forwards_body(retriever):
     retriever.client.request.return_value = _mock_response(payload)
 
     input_data = DynamiqKnowledgebaseGraphSearchInputSchema(
-        query="what systems does Acme use", filters={"k": "v"}, limit=3, entities=["Acme"], entity_ids=["ent_1"]
+        query="what systems does Acme use", filters={"k": "v"}, top_k=3
     )
     result = retriever.execute(input_data, RunnableConfig(callbacks=[]))
 
@@ -63,10 +63,8 @@ def test_execute_builds_request_and_forwards_body(retriever):
     assert kwargs["headers"] == {"Authorization": "Bearer secret-token"}
     assert kwargs["json"] == {
         "query": "what systems does Acme use",
-        "limit": 3,
+        "top_k": 3,
         "filters": {"k": "v"},
-        "entities": ["Acme"],
-        "entity_ids": ["ent_1"],
     }
 
     # Pass-through: the API body is forwarded verbatim (not reshaped into documents/content).
@@ -90,13 +88,13 @@ def test_execute_forwards_variable_shape(retriever):
     assert result == payload  # every key relayed, identical
 
 
-def test_execute_uses_node_defaults_for_limit(retriever):
+def test_execute_uses_node_defaults_for_top_k(retriever):
     retriever.client.request.return_value = _mock_response({"content": ""})
 
     retriever.execute(DynamiqKnowledgebaseGraphSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
 
     _, kwargs = retriever.client.request.call_args
-    assert kwargs["json"] == {"query": "q", "limit": 5}  # node-level limit default, no empty filters
+    assert kwargs["json"] == {"query": "q", "top_k": 5}  # node-level top_k default, no empty filters
 
 
 def test_execute_raises_on_error_status(retriever):
@@ -140,7 +138,7 @@ def test_yaml_roundtrip(tmp_path):
         id="kb-graph-node",
         connection=connection,
         knowledgebase_id="kb-123",
-        limit=7,
+        top_k=7,
         filters={"allowed_principals": {"$intersects": ["group:a"]}},
     )
     workflow = Workflow(id="kb-workflow", flow=Flow(id="kb-flow", nodes=[node]))
@@ -158,7 +156,7 @@ def test_yaml_roundtrip(tmp_path):
     roundtrip_node = Workflow.from_yaml_file(str(roundtrip_path), init_components=True).flow.nodes[0]
 
     assert roundtrip_node.knowledgebase_id == "kb-123"
-    assert roundtrip_node.limit == 7
+    assert roundtrip_node.top_k == 7
     assert roundtrip_node.filters == {"allowed_principals": {"$intersects": ["group:a"]}}
     assert roundtrip_node.connection.id == "dynamiq-conn"
     assert roundtrip_node.connection.url == "https://api.example.ai/"
@@ -175,7 +173,7 @@ def test_yaml_roundtrip(tmp_path):
     assert kwargs["url"] == "https://api.example.ai/v1/knowledgebases/kb-123/graph-search"
     assert kwargs["json"] == {
         "query": "q",
-        "limit": 7,  # node-level limit survived the roundtrip
+        "top_k": 7,  # node-level top_k survived the roundtrip
         "filters": {"allowed_principals": {"$intersects": ["group:a"]}},  # locked filters survived
     }
     assert result == {"content": "hit", "documents": [{"id": "e1"}]}
