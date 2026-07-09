@@ -82,7 +82,8 @@ def _validate_identifier(name: str) -> str:
     """Guard a property key that will be interpolated into Cypher text."""
     if not _IDENTIFIER_PATTERN.match(name):
         raise ValueError(
-            f"KnowledgeGraphRetriever: unsafe property identifier {name!r} " f"(must match {_IDENTIFIER_PATTERN.pattern})."
+            f"KnowledgeGraphRetriever: unsafe property identifier {name!r} "
+            f"(must match {_IDENTIFIER_PATTERN.pattern})."
         )
     return name
 

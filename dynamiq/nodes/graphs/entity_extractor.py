@@ -565,14 +565,18 @@ class KnowledgeGraphEntityExtractor(Node):
                 kept_rels.append(rel)
                 continue
             logger.debug(
-                f"KnowledgeGraphEntityExtractor: dropping relationship ({start_label})-[{rel_type}]->({end_label}): {reason}"
+                f"KnowledgeGraphEntityExtractor: dropping relationship "
+                f"({start_label})-[{rel_type}]->({end_label}): {reason}"
             )
 
         # 3) Commit only AttributeValue nodes still reached by a surviving HAS_ATTRIBUTE edge -- one whose
         #    owner was dropped lost its edge in step 2, so it is dropped here too, never orphaned with no ACL.
         referenced_attr_ids = {r["end_identity"] for r in kept_rels if r["type"] == HAS_ATTRIBUTE_TYPE}
         for attr_id in attribute_nodes.keys() - referenced_attr_ids:
-            logger.debug(f"KnowledgeGraphEntityExtractor: dropping orphaned AttributeValue id={attr_id!r} (owner removed)")
+            logger.debug(
+                f"KnowledgeGraphEntityExtractor: dropping orphaned AttributeValue "
+                f"id={attr_id!r} (owner removed)"
+            )
         kept_nodes.extend(attribute_nodes[attr_id] for attr_id in referenced_attr_ids)
 
         dropped_n, dropped_r = len(nodes) - len(kept_nodes), len(relationships) - len(kept_rels)

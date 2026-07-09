@@ -149,7 +149,8 @@ class TestToWriteGraphPayload:
 
     def test_entity_without_type_or_id_is_skipped(self):
         entities = [{"id": "x"}, {"type": "Person"}, {"id": "y", "type": "Person"}]
-        nodes, _ = KnowledgeGraphEntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)._to_write_graph_payload(entities, [])
+        extractor = KnowledgeGraphEntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)
+        nodes, _ = extractor._to_write_graph_payload(entities, [])
         assert [n["properties"]["id"] for n in nodes] == ["y"]
 
     def test_relationship_description_rides_on_edge_properties(self):
@@ -164,7 +165,8 @@ class TestToWriteGraphPayload:
     def test_entity_description_is_not_written_to_the_node(self):
         # Descriptions are edge-only: an entity-level description must never land on the (shared) node.
         entities = [{"id": "jane", "type": "Person", "name": "Jane", "description": "the CFO"}]
-        nodes, _ = KnowledgeGraphEntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)._to_write_graph_payload(entities, [])
+        extractor = KnowledgeGraphEntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)
+        nodes, _ = extractor._to_write_graph_payload(entities, [])
         assert nodes[0]["properties"] == {"id": "jane", "name": "Jane"}
 
 
