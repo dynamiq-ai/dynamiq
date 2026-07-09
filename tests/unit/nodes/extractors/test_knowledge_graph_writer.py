@@ -17,14 +17,14 @@ from dynamiq import Workflow
 from dynamiq.connections import Neo4j
 from dynamiq.flows import Flow
 from dynamiq.nodes.embedders.base import DocumentEmbedder
-from dynamiq.nodes.extractors import KnowledgeGraphWriter
-from dynamiq.nodes.extractors.entity_extractor import (
+from dynamiq.nodes.graphs import KnowledgeGraphWriter
+from dynamiq.nodes.graphs.entity_extractor import (
     ATTRIBUTE_VALUE_LABEL,
     ENTITY_EMBEDDING_VECTOR_INDEX,
     HAS_ATTRIBUTE_TYPE,
     KG_ENTITY_IDS_KEY,
 )
-from dynamiq.nodes.extractors.knowledge_graph import _entity_ids_by_doc
+from dynamiq.nodes.graphs.writer import _entity_ids_by_doc
 from dynamiq.nodes.node import InputTransformer, Node, NodeDependency
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableStatus
