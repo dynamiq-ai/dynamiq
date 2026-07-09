@@ -267,6 +267,16 @@ def test_yaml_roundtrip(tmp_path):
     assert isinstance(loaded_node.graph_search, DynamiqKnowledgebaseGraphSearch)
     assert isinstance(loaded_node.reranker, CohereReranker)
     assert loaded_node.reranker.top_k == 5
+    # Connections survive the roundtrip with their fields intact (id, url, api_key), and the shared
+    # Dynamiq connection resolves back to ONE instance for both sub-searches -- not two copies.
+    loaded_dynamiq_connection = loaded_node.vector_search.connection
+    assert loaded_dynamiq_connection.id == dynamiq_connection.id == "dynamiq-conn"
+    assert loaded_dynamiq_connection.url == dynamiq_connection.url == "https://api.example.ai/"
+    assert loaded_dynamiq_connection.api_key == dynamiq_connection.api_key == "secret-token"
+    assert loaded_node.vector_search.connection is loaded_node.graph_search.connection
+    # The reranker keeps its own distinct Cohere connection.
+    assert loaded_node.reranker.connection.id == cohere_connection.id == "cohere-conn"
+    assert loaded_node.reranker.connection.api_key == cohere_connection.api_key == "cohere-key"
 
     # The deserialized node still executes end-to-end (sub-node HTTP clients mocked, reranker unused here).
     loaded_node.reranker = None
