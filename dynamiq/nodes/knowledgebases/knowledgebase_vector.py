@@ -29,6 +29,12 @@ class DynamiqKnowledgebaseVectorSearchInputSchema(BaseModel):
         default=None,
         description="Parameter to provide minimal similarity or maximal distance score for retrieved documents.",
     )
+    alpha: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Parameter to provide alpha for hybrid retrieval. 0 is keyword-only, 1 is semantic-only.",
+    )
 
 
 class DynamiqKnowledgebaseVectorSearch(ConnectionNode):
@@ -49,6 +55,12 @@ class DynamiqKnowledgebaseVectorSearch(ConnectionNode):
     limit: int | None = None
     filters: dict[str, Any] = Field(default_factory=dict)
     similarity_threshold: float | None = None
+    alpha: float = Field(
+        default=0.5,
+        ge=0,
+        le=1,
+        description="Default alpha for hybrid retrieval. 0 is keyword-only, 1 is semantic-only.",
+    )
     metadata_fields: list[str] | None = Field(
         default_factory=lambda: ["title", "source_url", "url", "source"],
         description=(
@@ -75,6 +87,7 @@ class DynamiqKnowledgebaseVectorSearch(ConnectionNode):
             if input_data.similarity_threshold is not None
             else self.similarity_threshold
         )
+        alpha = input_data.alpha if input_data.alpha is not None else self.alpha
         user = self.user
 
         body: dict[str, Any] = {"query": input_data.query}
@@ -84,6 +97,8 @@ class DynamiqKnowledgebaseVectorSearch(ConnectionNode):
             body["filters"] = filters
         if similarity_threshold is not None:
             body["similarity_threshold"] = similarity_threshold
+        if alpha is not None:
+            body["alpha"] = alpha
         if user is not None:
             body["user"] = user
 
