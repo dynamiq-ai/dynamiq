@@ -232,6 +232,27 @@ def test_execute_propagates_sub_node_failure(vector_node, graph_node):
         )
 
 
+def test_sub_runs_nest_under_hybrid_in_trace(vector_node, graph_node):
+    """Sub-searches + reranker must record the hybrid's run as their parent, so the tracer nests them --
+    otherwise each looks like a root and TracingCallbackHandler.flush()es when a sub-run finishes,
+    truncating the hybrid's trace tree."""
+    from dynamiq.callbacks.tracing import TracingCallbackHandler
+
+    node = _hybrid(vector_node, graph_node, reranker=_StubReranker())
+    vector_node.client.request.return_value = _vector_response([{"id": "1", "content": "a"}])
+    graph_node.client.request.return_value = _graph_response({"content": "", "facts": "", "source_documents": []})
+
+    tracer = TracingCallbackHandler()
+    node.run(input_data={"query": "q"}, config=RunnableConfig(callbacks=[tracer]))
+
+    by_name = {run.name: run for run in tracer.runs.values()}
+    hybrid_run = by_name[node.name]
+    # The hybrid is the root of this tree; every sub-run points its parent_run_id back at the hybrid.
+    assert hybrid_run.parent_run_id is None
+    for sub_name in (vector_node.name, graph_node.name, node.reranker.name):
+        assert by_name[sub_name].parent_run_id == hybrid_run.id
+
+
 @pytest.mark.asyncio
 async def test_execute_async_fans_out_and_merges(vector_node, graph_node):
     node = _hybrid(vector_node, graph_node)

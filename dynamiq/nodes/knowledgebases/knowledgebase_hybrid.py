@@ -106,6 +106,18 @@ class DynamiqKnowledgebaseHybridSearch(Node):
         return payload
 
     @staticmethod
+    def _sub_run_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Tracing kwargs for a sub-run: reparent it under THIS node's run.
+
+        Sets ``parent_run_id`` to the hybrid node's own ``run_id`` so the vector/graph/reranker runs nest
+        under it in the trace tree (mirrors ``Agent``). Without it the sub-runs record no parent, the tracer
+        treats each as a root, and ``TracingCallbackHandler`` flushes when a sub-search finishes -- before the
+        hybrid run completes. ``trace_id``/``session_id`` need no threading: they live on the shared tracer
+        reached via ``config.callbacks``.
+        """
+        return {"parent_run_id": kwargs.get("run_id")}
+
+    @staticmethod
     def _output_or_raise(result, source: str) -> dict[str, Any]:
         """Unwrap a sub-node ``RunnableResult``, propagating cancellation and failures."""
         if result.status == RunnableStatus.CANCELED:
@@ -173,6 +185,7 @@ class DynamiqKnowledgebaseHybridSearch(Node):
             input_data={"query": query, "documents": documents},
             config=config,
             run_depends=kwargs.get("run_depends", []),
+            **self._sub_run_kwargs(kwargs),
         )
         return self._output_or_raise(result, self.reranker.name).get("documents", documents)
 
@@ -197,11 +210,12 @@ class DynamiqKnowledgebaseHybridSearch(Node):
         logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
 
         run_depends = kwargs.get("run_depends", [])
+        sub_kwargs = self._sub_run_kwargs(kwargs)
         vector_result = self.vector_search.run(
-            input_data=self._sub_input(input_data, graph=False), config=config, run_depends=run_depends
+            input_data=self._sub_input(input_data, graph=False), config=config, run_depends=run_depends, **sub_kwargs
         )
         graph_result = self.graph_search.run(
-            input_data=self._sub_input(input_data, graph=True), config=config, run_depends=run_depends
+            input_data=self._sub_input(input_data, graph=True), config=config, run_depends=run_depends, **sub_kwargs
         )
 
         vector_output = self._output_or_raise(vector_result, self.vector_search.name)
@@ -218,12 +232,19 @@ class DynamiqKnowledgebaseHybridSearch(Node):
         logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
 
         run_depends = kwargs.get("run_depends", [])
+        sub_kwargs = self._sub_run_kwargs(kwargs)
         vector_result, graph_result = await asyncio.gather(
             self.vector_search.run_async(
-                input_data=self._sub_input(input_data, graph=False), config=config, run_depends=run_depends
+                input_data=self._sub_input(input_data, graph=False),
+                config=config,
+                run_depends=run_depends,
+                **sub_kwargs,
             ),
             self.graph_search.run_async(
-                input_data=self._sub_input(input_data, graph=True), config=config, run_depends=run_depends
+                input_data=self._sub_input(input_data, graph=True),
+                config=config,
+                run_depends=run_depends,
+                **sub_kwargs,
             ),
         )
 
