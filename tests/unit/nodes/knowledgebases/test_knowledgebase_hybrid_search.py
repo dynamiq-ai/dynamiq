@@ -107,9 +107,12 @@ def test_execute_merges_dedupes_and_appends_graph_facts(vector_node, graph_node)
             {"id": "2", "content": "beta"},
         ]
     )
+    # Realistic graph shape when source docs are present: `content` is the source-doc text concatenated
+    # (a duplicate of `source_documents`), while `facts` holds the unique relationship triples.
     graph_node.client.request.return_value = _graph_response(
         {
-            "content": "Acme -[USES]-> Helios",
+            "content": "beta\n\ngamma",
+            "facts": "Acme -[USES]-> Helios",
             "source_documents": [{"id": "2", "content": "beta"}, {"id": "3", "content": "gamma"}],
         }
     )
@@ -122,8 +125,9 @@ def test_execute_merges_dedupes_and_appends_graph_facts(vector_node, graph_node)
     assert [doc.id for doc in result["documents"]] == ["1", "2", "3"]
     # Provenance tagged on every document.
     assert [doc.metadata["retrieval_source"] for doc in result["documents"]] == ["vector", "vector", "graph"]
-    # Graph facts appended to the formatted content; no separate `facts` key.
+    # The `facts` triples are appended -- NOT the `content`, which would duplicate the source-doc text.
     assert "--- Graph Facts ---\nAcme -[USES]-> Helios" in result["content"]
+    assert result["content"].count("gamma") == 1  # source-doc text appears once (from the pool), not duplicated
 
 
 def test_execute_reranks_and_applies_top_k(vector_node, graph_node):
@@ -143,6 +147,24 @@ def test_execute_reranks_and_applies_top_k(vector_node, graph_node):
 
     # Stub reranker reverses order -> [3, 2, 1], then top_k=2 -> [3, 2].
     assert [doc.id for doc in result["documents"]] == ["3", "2"]
+
+
+def test_execute_applies_top_k_without_reranker(vector_node, graph_node):
+    """top_k caps the merged pool even when no reranker is configured (order preserved)."""
+    node = _hybrid(vector_node, graph_node, top_k=2)  # no reranker
+    vector_node.client.request.return_value = _vector_response(
+        [{"id": "1", "content": "a"}, {"id": "2", "content": "b"}, {"id": "3", "content": "c"}]
+    )
+    graph_node.client.request.return_value = _graph_response(
+        {"content": "", "source_documents": [{"id": "4", "content": "d"}]}
+    )
+
+    result = node.execute(
+        DynamiqKnowledgebaseHybridSearchInputSchema(query="q"), RunnableConfig(callbacks=[])
+    )
+
+    # Merged pool is [1, 2, 3, 4]; top_k=2 caps to the first two in merge order.
+    assert [doc.id for doc in result["documents"]] == ["1", "2"]
 
 
 def test_execute_graph_content_only_fallback(vector_node, graph_node):

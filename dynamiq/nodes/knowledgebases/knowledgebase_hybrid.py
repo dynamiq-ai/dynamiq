@@ -147,6 +147,8 @@ class DynamiqKnowledgebaseHybridSearch(Node):
             merged.append(document)
 
         documents = self._rerank(query, merged, config, **kwargs)
+        if self.top_k is not None:
+            documents = documents[: self.top_k]  # cap uniformly, whether or not a reranker reordered
 
         # Append graph ``facts`` (triples), not ``content`` (source-doc text already in the pool -> would duplicate).
         graph_facts = (graph_output.get("facts") or graph_output.get("content") or "").strip()
@@ -159,7 +161,11 @@ class DynamiqKnowledgebaseHybridSearch(Node):
     def _rerank(
         self, query: str, documents: list[Document], config: RunnableConfig, **kwargs
     ) -> list[Document]:
-        """Rerank merged documents when a reranker is configured; otherwise return them all."""
+        """Reorder merged documents by query relevance when a reranker is configured.
+
+        Returns the documents unchanged (order preserved) when no reranker is set. The ``top_k`` cap is
+        applied by the caller so it holds for both the reranked and the unranked paths.
+        """
         if not documents or self.reranker is None:
             return documents
 
@@ -168,10 +174,7 @@ class DynamiqKnowledgebaseHybridSearch(Node):
             config=config,
             run_depends=kwargs.get("run_depends", []),
         )
-        reranked = self._output_or_raise(result, self.reranker.name).get("documents", documents)
-        if self.top_k is not None:
-            return reranked[: self.top_k]
-        return reranked
+        return self._output_or_raise(result, self.reranker.name).get("documents", documents)
 
     @staticmethod
     def _as_document(item: Any, source: str) -> Document:
