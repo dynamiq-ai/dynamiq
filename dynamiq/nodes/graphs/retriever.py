@@ -631,16 +631,16 @@ class KnowledgeGraphRetriever(ConnectionNode):
             content = "\n".join(f"- {d.content}" for d in documents) or "No matching facts found."
             output = {"content": content, "documents": documents}
             source_documents = self._fetch_source_documents(documents)
-            # if source_documents:
-            #     # Replace triples with verbatim source text. ACL-safe with no extra check: each source_doc_id
-            #     # came from an ACL-visible edge whose ACL equals its source document's. `facts` keeps the triples.
-            #     output["source_documents"] = source_documents
-            #     output["facts"] = content
-            #     output["content"] = "\n\n".join(d.content for d in source_documents if d.content) or content
-            # if self.summarize and documents:
-            #     # keep the raw retrieval under `context`; `content` becomes the composed answer
-            #     output["context"] = output["content"]
-            #     output["content"] = self._summarize(input_data.query, output["context"], config, **kwargs)
+            if source_documents:
+                # Replace triples with verbatim source text. ACL-safe with no extra check: each source_doc_id
+                # came from an ACL-visible edge whose ACL equals its source document's. `facts` keeps the triples.
+                output["source_documents"] = source_documents
+                output["facts"] = content
+                output["content"] = "\n\n".join(d.content for d in source_documents if d.content) or content
+            if self.summarize and documents:
+                # keep the raw retrieval under `context`; `content` becomes the composed answer
+                output["context"] = output["content"]
+                output["content"] = self._summarize(input_data.query, output["context"], config, **kwargs)
             return output
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: execution error: {e}", exc_info=True)
