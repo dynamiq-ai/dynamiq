@@ -150,8 +150,8 @@ class DynamiqKnowledgebaseHybridSearch(Node):
         if self.top_k is not None:
             documents = documents[: self.top_k]  # cap uniformly, whether or not a reranker reordered
 
-        # Append graph ``facts`` (triples), not ``content`` (source-doc text already in the pool -> would duplicate).
-        graph_facts = (graph_output.get("facts") or graph_output.get("content") or "").strip()
+        # Append the graph's ``facts`` (triples) -- its unique signal; source-doc text is already in the pool.
+        graph_facts = (graph_output.get("facts") or "").strip()
         content = self._format_content(documents)
         if graph_facts:
             content = f"{content}\n\n--- Graph Facts ---\n{graph_facts}" if content else graph_facts

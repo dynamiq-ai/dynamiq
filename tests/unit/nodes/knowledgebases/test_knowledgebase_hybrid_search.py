@@ -167,18 +167,37 @@ def test_execute_applies_top_k_without_reranker(vector_node, graph_node):
     assert [doc.id for doc in result["documents"]] == ["1", "2"]
 
 
-def test_execute_graph_content_only_fallback(vector_node, graph_node):
-    """Graph returns only `content` (no structured source docs): docs come from vector, facts appended."""
+def test_execute_graph_facts_only(vector_node, graph_node):
+    """Graph returns facts but no source docs: docs come from vector, facts appended to content."""
     node = _hybrid(vector_node, graph_node)
     vector_node.client.request.return_value = _vector_response([{"id": "1", "content": "alpha"}])
-    graph_node.client.request.return_value = _graph_response({"content": "only facts here"})
+    graph_node.client.request.return_value = _graph_response(
+        {"content": "only facts here", "facts": "only facts here", "source_documents": []}
+    )
 
     result = node.execute(
         DynamiqKnowledgebaseHybridSearchInputSchema(query="q"), RunnableConfig(callbacks=[])
     )
 
     assert [doc.id for doc in result["documents"]] == ["1"]
-    assert "only facts here" in result["content"]
+    assert "--- Graph Facts ---\nonly facts here" in result["content"]
+
+
+def test_execute_ignores_graph_content_without_facts(vector_node, graph_node):
+    """A graph result carrying only `content` (no `facts`) contributes no appended text -- `content` is
+    the source-doc text, which is already in the pool via `source_documents`; appending it would duplicate."""
+    node = _hybrid(vector_node, graph_node)
+    vector_node.client.request.return_value = _vector_response([{"id": "1", "content": "alpha"}])
+    graph_node.client.request.return_value = _graph_response(
+        {"content": "alpha", "source_documents": [{"id": "1", "content": "alpha"}]}
+    )
+
+    result = node.execute(
+        DynamiqKnowledgebaseHybridSearchInputSchema(query="q"), RunnableConfig(callbacks=[])
+    )
+
+    assert "--- Graph Facts ---" not in result["content"]
+    assert result["content"].count("alpha") == 1
 
 
 def test_execute_drops_vector_only_params_from_graph_request(vector_node, graph_node):
@@ -221,7 +240,9 @@ async def test_execute_async_fans_out_and_merges(vector_node, graph_node):
     vector_client.request = AsyncMock(return_value=_vector_response([{"id": "1", "content": "alpha"}]))
     graph_client = MagicMock()
     graph_client.request = AsyncMock(
-        return_value=_graph_response({"content": "fact", "source_documents": [{"id": "2", "content": "beta"}]})
+        return_value=_graph_response(
+            {"content": "beta", "facts": "fact", "source_documents": [{"id": "2", "content": "beta"}]}
+        )
     )
 
     with patch.object(
@@ -283,7 +304,7 @@ def test_yaml_roundtrip(tmp_path):
     loaded_node.vector_search.client = _mock_client()
     loaded_node.vector_search.client.request.return_value = _vector_response([{"id": "1", "content": "hit"}])
     loaded_node.graph_search.client = _mock_client()
-    loaded_node.graph_search.client.request.return_value = _graph_response({"content": "fact"})
+    loaded_node.graph_search.client.request.return_value = _graph_response({"content": "fact", "facts": "fact"})
 
     result = loaded_node.execute(
         DynamiqKnowledgebaseHybridSearchInputSchema(query="q"), RunnableConfig(callbacks=[])

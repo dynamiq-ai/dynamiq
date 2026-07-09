@@ -628,15 +628,13 @@ class GraphRetriever(ConnectionNode):
             documents = self._render_single_hop(rows)
             logger.info(f"Tool {self.name} - {self.id}: retrieved {len(documents)} fact(s).")
             documents = self._maybe_rerank(documents, input_data.query, config, **kwargs)
-            content = "\n".join(f"- {d.content}" for d in documents) or "No matching facts found."
-            output = {"content": content, "documents": documents}
+            facts = "\n".join(f"- {d.content}" for d in documents) or "No matching facts found."
             source_documents = self._fetch_source_documents(documents)
+            # `facts` (triples) and `source_documents` (passages) are ALWAYS present so consumers never infer.
+            output = {"content": facts, "facts": facts, "documents": documents, "source_documents": source_documents}
             if source_documents:
-                # Replace triples with verbatim source text. ACL-safe with no extra check: each source_doc_id
-                # came from an ACL-visible edge whose ACL equals its source document's. `facts` keeps the triples.
-                output["source_documents"] = source_documents
-                output["facts"] = content
-                output["content"] = "\n\n".join(d.content for d in source_documents if d.content) or content
+                # `content` prefers verbatim source text. ACL-safe: each source_doc_id came from an ACL-visible edge.
+                output["content"] = "\n\n".join(d.content for d in source_documents if d.content) or facts
             if self.summarize and documents:
                 # keep the raw retrieval under `context`; `content` becomes the composed answer
                 output["context"] = output["content"]
