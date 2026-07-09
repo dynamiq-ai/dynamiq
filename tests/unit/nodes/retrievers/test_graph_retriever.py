@@ -9,6 +9,7 @@ canned records so ``execute`` is exercised end-to-end without Neo4j.
 from typing import Any, ClassVar
 
 import pytest
+from pydantic import ValidationError
 
 from dynamiq.connections import Neo4j
 from dynamiq.nodes.embedders.base import TextEmbedder
@@ -104,8 +105,8 @@ class StubGraphStore:
 
 
 def make_retriever(rows=None, **kwargs) -> GraphRetriever:
-    # llm + ontology are required; default to an empty-names stub so query-seeding tests that don't care
-    # about extraction fall back to the raw query (unchanged behavior).
+    # llm + ontology are optional on the node, but default to an empty-names stub here so query-seeding
+    # tests that don't care about extraction fall back to the raw query. Pass llm=None for the no-llm path.
     kwargs.setdefault("llm", StubLLM())
     kwargs.setdefault("ontology", _ONTOLOGY)
     node = GraphRetriever(
@@ -422,6 +423,19 @@ class TestExecuteRendering:
         out = node.execute(GraphRetrieverInputSchema(query="who is Jane?"))  # must not raise
         assert node._graph_store.last_params["q"] == "who is Jane?"
         assert out["documents"] == []
+
+    def test_no_llm_falls_back_to_whole_query(self):
+        # llm is optional: with no llm, entity extraction is skipped and seeding falls to the raw query.
+        node = make_retriever(llm=None, ontology=None)
+        node._use_fulltext = False
+        out = node.execute(GraphRetrieverInputSchema(query="who is Jane?"))  # must not raise
+        assert node._graph_store.last_params["q"] == "who is Jane?"
+        assert out["documents"] == []
+
+    def test_summarize_without_llm_is_rejected_at_construction(self):
+        # `summarize` composes an answer with the llm, so it can't be enabled without one.
+        with pytest.raises(ValidationError):
+            make_retriever(llm=None, ontology=None, summarize=True)
 
     def test_explicit_entities_skip_extraction(self):
         # Explicit entities are used as seed names directly -> the LLM is never consulted, and they seed

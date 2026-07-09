@@ -2,7 +2,7 @@ import itertools
 import re
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from dynamiq.connections import ApacheAGE, AWSNeptune, Neo4j
 from dynamiq.connections.managers import ConnectionManager
@@ -262,8 +262,12 @@ class GraphRetriever(ConnectionNode):
     )
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     connection: Neo4j | ApacheAGE | AWSNeptune
-    llm: Node
-    ontology: Ontology
+    # Optional: only used to extract the query's entities (default seeding path) and to `summarize`. When
+    # omitted, seeding falls back to the raw query; `summarize=True` then requires an llm (see validator).
+    llm: Node | None = None
+    # Optional: constrains query-entity extraction to these types. Only used alongside `llm`; unused when
+    # seeding by entities/entity_ids/seed_by_query or with no llm.
+    ontology: Ontology | None = None
     database: str | None = None
     graph_name: str | None = None
     create_graph_if_not_exists: bool = False
@@ -291,6 +295,15 @@ class GraphRetriever(ConnectionNode):
     _use_vector: bool = PrivateAttr(default=False)
     _run_depends: list = PrivateAttr(default_factory=list)
 
+    @model_validator(mode="after")
+    def _validate_llm_requirements(self):
+        # `summarize` composes an answer with the llm, so it can't run without one. The default entity
+        # extraction path also needs an llm, but that degrades gracefully to raw-query seeding (see
+        # `_seed_entity_names`), so it isn't enforced here.
+        if self.summarize and self.llm is None:
+            raise ValueError("GraphRetriever: `summarize=True` requires an `llm`.")
+        return self
+
     def reset_run_state(self) -> None:
         self._run_depends = []
 
@@ -305,7 +318,8 @@ class GraphRetriever(ConnectionNode):
 
     def to_dict(self, **kwargs) -> dict:
         data = super().to_dict(**kwargs)
-        data["llm"] = self.llm.to_dict(**kwargs)
+        if self.llm:
+            data["llm"] = self.llm.to_dict(**kwargs)
         if self.document_reranker:
             data["document_reranker"] = self.document_reranker.to_dict(**kwargs)
         if self.text_embedder:
@@ -318,7 +332,7 @@ class GraphRetriever(ConnectionNode):
         """Select the concrete graph store from the connection type (same dispatch as CypherExecutor)."""
         connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
-        if self.llm.is_postponed_component_init:
+        if self.llm and self.llm.is_postponed_component_init:
             self.llm.init_components(connection_manager)
         if self.document_reranker and self.document_reranker.is_postponed_component_init:
             self.document_reranker.init_components(connection_manager)
@@ -412,7 +426,10 @@ class GraphRetriever(ConnectionNode):
             run_kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
             run_kwargs.pop("run_depends", None)
             result = self.llm.run(
-                input_data={"query": query, "entity_types": ", ".join(self.ontology.entity_types)},
+                input_data={
+                    "query": query,
+                    "entity_types": ", ".join(self.ontology.entity_types if self.ontology else []),
+                },
                 prompt=prompt,
                 response_format=_QUERY_ENTITY_RESPONSE_FORMAT,
                 config=config,
@@ -438,6 +455,7 @@ class GraphRetriever(ConnectionNode):
         - explicit ``entities`` -> used as the seed names directly, **skipping LLM extraction**.
         - explicit ``entity_ids`` -> ``[]`` (anchored exactly by id in ``_entry``, not by name).
         - ``seed_by_query`` -> ``[]`` (no names; seed on the WHOLE question vector, no LLM extraction).
+        - no ``llm`` set -> ``[]`` (no extractor; seed on the raw query via ``_entry``'s no-names fallback).
         - otherwise -> extracted from the question by the LLM.
 
         An empty list means "no seed names" -> ``_entry`` seeds on the whole-query vector (or the raw query).
@@ -446,6 +464,8 @@ class GraphRetriever(ConnectionNode):
             return []
         if input_data.entities:
             return input_data.entities
+        if self.llm is None:
+            return []
         return self._extract_entity_names(input_data.query, config, **kwargs)
 
     def _embed_query(self, text: str, config: RunnableConfig, **kwargs) -> list[float] | None:
@@ -705,7 +725,8 @@ class GraphRetriever(ConnectionNode):
         Each fact came from an ACL-visible edge whose ACL equals its source document's, so the caller is
         already entitled to those documents; the distinct ``source_doc_ids`` (every per-document edge behind
         a deduped fact) are pulled via the ``document_retriever``'s ``get_documents_by_id`` with no extra
-        ACL check. Returns ``[]`` when no retriever is set, no fact carries provenance, or the fetch fails.
+        ACL check. Returns ``[]`` when no retriever is set, no fact carries provenance, the backend can't
+        fetch by id, or the fetch fails.
         """
         if not self.document_retriever or not hasattr(self.document_retriever, "get_documents_by_id"):
             return []
