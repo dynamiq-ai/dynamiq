@@ -227,13 +227,12 @@ class TestEntryModes:
         assert "db.index.fulltext.queryNodes('entity_name', $q) YIELD node AS a" in query
         assert "CONTAINS" not in query  # no scan
         assert params["q"] == "What~ OR does~ OR Jane~ OR use~"  # fuzzy Lucene OR-query
-        # anchored expansion is undirected; real direction recovered via startNode/endNode
+        # anchored expansion is undirected; per-edge direction comes from the r.src_name/r.dst_name snapshot
         assert "MATCH (a)-[r]-(b)" in query
-        assert "startNode(r)" in query and "endNode(r)" in query
         assert "coalesce(r.allowed_principals, [])" in query  # ACL still enforced on the edge
         # names render from the edge's own ACL-bearing snapshot, never the shared merged node
         assert "r.src_name AS a_name" in query and "r.dst_name AS b_name" in query
-        assert "startNode(r).name" not in query and "endNode(r).name" not in query
+        assert "startNode(r)" not in query and "endNode(r)" not in query  # shared node ids never surface
 
     def test_scan_fallback_when_index_absent(self):
         node = make_retriever(filters=LOCKED_ACL)
@@ -285,8 +284,8 @@ class TestExecuteRendering:
         assert out["content"] == "- Jane Doe -[WORKS_AT]-> Acme\n- Jane Doe -[salary]-> $250,000"
         assert out["documents"][0].score > out["documents"][1].score  # rank-derived ordering
 
-    def test_single_hop_exposes_endpoint_entity_ids_for_iteration(self):
-        # Endpoint ids let a caller feed a fact's neighbor back as the next hop's seed (no *1..N).
+    def test_single_hop_does_not_expose_endpoint_node_ids(self):
+        # Node ids are a public-namespace hash of the canonical name -> never surfaced to the caller.
         rows = [
             {
                 "a_name": "Jane Doe",
@@ -299,8 +298,8 @@ class TestExecuteRendering:
         ]
         node = make_retriever(rows=rows)
         out = node.execute(GraphRetrieverInputSchema(query="Jane Doe"))
-        assert out["documents"][0].metadata["source_id"] == "id-jane"
-        assert out["documents"][0].metadata["target_id"] == "id-acme"
+        assert "source_id" not in out["documents"][0].metadata
+        assert "target_id" not in out["documents"][0].metadata
 
     def test_empty_result_message(self):
         node = make_retriever(rows=[])
