@@ -148,10 +148,11 @@ class DynamiqKnowledgebaseHybridSearch(Node):
 
         documents = self._rerank(query, merged, config, **kwargs)
 
-        graph_content = (graph_output.get("content") or "").strip()
+        # Append graph ``facts`` (triples), not ``content`` (source-doc text already in the pool -> would duplicate).
+        graph_facts = (graph_output.get("facts") or graph_output.get("content") or "").strip()
         content = self._format_content(documents)
-        if graph_content:
-            content = f"{content}\n\n--- Graph Facts ---\n{graph_content}" if content else graph_content
+        if graph_facts:
+            content = f"{content}\n\n--- Graph Facts ---\n{graph_facts}" if content else graph_facts
 
         return {"content": content, "documents": documents}
 
