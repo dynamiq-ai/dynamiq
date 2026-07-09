@@ -2238,6 +2238,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 self.name,
                 self.id,
             )
+            # The dedicated backend is now orphaned: sandbox_backend returns the shared view,
+            # cleanup_factory_agent skips teardown once _sandbox_is_shared latches, and initialized
+            # subagents never reach cleanup_factory_agent at all. Release it here so it can't leak.
+            try:
+                own.close(kill=True)
+            except Exception as e:
+                logger.warning("Agent %s - %s: overridden own-sandbox teardown failed: %s", self.name, self.id, e)
 
         self._sandbox_is_shared = True
         self._shared_sandbox_view = view
@@ -2276,7 +2283,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         """
         tools = self.tools
         sandbox_overlay = _shared_sandbox_tools.get()
-        if sandbox_overlay is not None and self._own_sandbox_tool_ids:
+        # Only strip own sandbox tools when the overlay actually provides replacements. An empty
+        # (but non-None) overlay must not leave the agent with no sandbox tools at all.
+        if sandbox_overlay and self._own_sandbox_tool_ids:
             tools = [t for t in tools if t.id not in self._own_sandbox_tool_ids]
         result = list(tools)
         ltm_overlay = _run_extra_tools.get()

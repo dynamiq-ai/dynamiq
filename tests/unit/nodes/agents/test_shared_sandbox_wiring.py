@@ -398,3 +398,83 @@ def test_file_store_subagent_never_borrows(test_llm):
         assert sub._sandbox_is_shared is False
     finally:
         _shared_session.reset(token)
+
+
+def test_runtime_tools_empty_overlay_keeps_own_sandbox_tools(test_llm):
+    """A non-None but EMPTY sandbox overlay must not strip the agent's own sandbox tools,
+    otherwise the agent would be left with no sandbox tools at all (Bugbot: empty overlay
+    hides sandbox tools)."""
+    from dynamiq.nodes.agents.base import _shared_sandbox_tools
+
+    agent = _sandboxed_agent(test_llm)  # brings its own sandbox tools
+    assert agent._own_sandbox_tool_ids  # sanity: it owns sandbox tools
+    otoken = _shared_sandbox_tools.set([])  # active-but-empty overlay
+    try:
+        assert [t.id for t in agent._runtime_tools] == [t.id for t in agent.tools]
+    finally:
+        _shared_sandbox_tools.reset(otoken)
+
+
+def test_override_tears_down_subagents_dedicated_sandbox(test_llm):
+    """scope=ALL override must release the subagent's now-orphaned dedicated sandbox:
+    cleanup_factory_agent skips teardown once _sandbox_is_shared latches, and initialized
+    subagents never reach cleanup_factory_agent at all (Bugbot: dedicated sandbox leaks on
+    override)."""
+    from unittest.mock import MagicMock
+
+    from dynamiq.nodes.agents.shared_session import SandboxSharingScope, SharedSession
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(
+        sandbox=shared, share_sandbox=True, owner_run_id="owner", sharing_scope=SandboxSharingScope.ALL
+    )
+    token = _shared_session.set(session)
+    try:
+        sub = Agent(
+            name="Sub",
+            llm=test_llm,
+            role="r",
+            tools=[],
+            sandbox=SandboxConfig(enabled=True, backend=E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-own")),
+        )
+        # Spy on the dedicated backend's teardown (field assignment: SandboxConfig has no
+        # validate_assignment, and E2BSandbox.close is a no-op when unprovisioned so we must mock it).
+        own_spy = MagicMock()
+        sub.sandbox.backend = own_spy
+
+        sub._maybe_borrow_shared_sandbox()
+
+        own_spy.close.assert_called_once_with(kill=True)
+        assert sub._sandbox_is_shared is True
+        assert sub._shared_sandbox_view.sandbox_id == "sbx-shared"
+    finally:
+        _shared_session.reset(token)
+
+
+def test_augment_scope_does_not_tear_down_own_sandbox(test_llm):
+    """Under AUGMENT, a subagent keeps its own sandbox — it must NOT be torn down."""
+    from unittest.mock import MagicMock
+
+    from dynamiq.nodes.agents.shared_session import SandboxSharingScope, SharedSession
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(
+        sandbox=shared, share_sandbox=True, owner_run_id="owner", sharing_scope=SandboxSharingScope.AUGMENT
+    )
+    token = _shared_session.set(session)
+    try:
+        sub = Agent(
+            name="Sub",
+            llm=test_llm,
+            role="r",
+            tools=[],
+            sandbox=SandboxConfig(enabled=True, backend=E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-own")),
+        )
+        own_spy = MagicMock()
+        sub.sandbox.backend = own_spy
+
+        assert sub._maybe_borrow_shared_sandbox() is None
+        own_spy.close.assert_not_called()
+        assert sub._sandbox_is_shared is False
+    finally:
+        _shared_session.reset(token)
