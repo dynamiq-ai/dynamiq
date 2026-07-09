@@ -451,6 +451,44 @@ def test_override_tears_down_subagents_dedicated_sandbox(test_llm):
         _shared_session.reset(token)
 
 
+def test_borrow_failure_rolls_back_and_does_not_latch_or_kill_own(test_llm):
+    """If tool-building fails mid-borrow, the agent must be left untouched: no latched view,
+    not marked shared, and its dedicated sandbox NOT torn down (Bugbot: shared sandbox setup
+    lacks cleanup). Build-then-commit ordering guarantees this."""
+    from unittest.mock import MagicMock
+
+    from dynamiq.nodes.agents.shared_session import SandboxSharingScope, SharedSession
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(
+        sandbox=shared, share_sandbox=True, owner_run_id="owner", sharing_scope=SandboxSharingScope.ALL
+    )
+    bad_view = MagicMock()
+    bad_view.get_tools.side_effect = RuntimeError("boom")
+    session.sandbox_view_for = MagicMock(return_value=bad_view)
+
+    token = _shared_session.set(session)
+    try:
+        sub = Agent(
+            name="Sub",
+            llm=test_llm,
+            role="r",
+            tools=[],
+            sandbox=SandboxConfig(enabled=True, backend=E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-own")),
+        )
+        own_spy = MagicMock()
+        sub.sandbox.backend = own_spy
+
+        with pytest.raises(RuntimeError, match="boom"):
+            sub._maybe_borrow_shared_sandbox()
+
+        assert sub._shared_sandbox_view is None
+        assert sub._sandbox_is_shared is False
+        own_spy.close.assert_not_called()
+    finally:
+        _shared_session.reset(token)
+
+
 def test_augment_scope_does_not_tear_down_own_sandbox(test_llm):
     """Under AUGMENT, a subagent keeps its own sandbox — it must NOT be torn down."""
     from unittest.mock import MagicMock

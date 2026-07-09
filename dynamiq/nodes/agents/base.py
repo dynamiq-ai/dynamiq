@@ -700,12 +700,16 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         # Always set — a sub-agent without LTM would otherwise inherit the
         # parent's overlay via `ContextAwareThreadPoolExecutor`.
         ltm_token = _run_extra_tools.set(ltm_tools)
-        shared_session_token = self._maybe_enter_shared_session(kwargs)
-        # Borrowers resolve a per-agent view of the shared sandbox at run time (both factory- and
-        # initialized-mode subagents). Always set the overlay (even to None) so a nested subagent
-        # does not inherit this agent's overlay via ContextAwareThreadPoolExecutor.
-        sandbox_overlay_token = _shared_sandbox_tools.set(self._maybe_borrow_shared_sandbox())
+        # Session/borrow setup lives INSIDE the try so the finally always resets the ContextVars and
+        # releases any borrowed view, even if setup raises. Tokens stay None until each set succeeds.
+        shared_session_token = None
+        sandbox_overlay_token = None
         try:
+            shared_session_token = self._maybe_enter_shared_session(kwargs)
+            # Borrowers resolve a per-agent view of the shared sandbox at run time (both factory- and
+            # initialized-mode subagents). Always set the overlay (even to None) so a nested subagent
+            # does not inherit this agent's overlay via ContextAwareThreadPoolExecutor.
+            sandbox_overlay_token = _shared_sandbox_tools.set(self._maybe_borrow_shared_sandbox())
             if use_memory:
                 history_messages = self._retrieve_memory(input_data)
                 if len(history_messages) > 0:
@@ -879,7 +883,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
             return execution_result
         finally:
-            _shared_sandbox_tools.reset(sandbox_overlay_token)
+            if sandbox_overlay_token is not None:
+                _shared_sandbox_tools.reset(sandbox_overlay_token)
             self._release_shared_sandbox_view()
             _run_extra_tools.reset(ltm_token)
             self._exit_shared_session(shared_session_token)
@@ -2231,6 +2236,14 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         if view is None:
             return None
 
+        # Build tools BEFORE committing any instance state, so a failure here leaves this agent
+        # untouched: no latched view and the dedicated sandbox not yet released.
+        tools = view.get_tools(llm=self.llm)
+        for tool in tools:
+            if tool.is_postponed_component_init:
+                tool.init_components()
+            tool.is_optimized_for_agents = True
+
         if own is not None:
             logger.warning(
                 "Agent %s - %s: sandbox_sharing_scope=ALL overrides this subagent's own sandbox; "
@@ -2248,12 +2261,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         self._sandbox_is_shared = True
         self._shared_sandbox_view = view
-
-        tools = view.get_tools(llm=self.llm)
-        for tool in tools:
-            if tool.is_postponed_component_init:
-                tool.init_components()
-            tool.is_optimized_for_agents = True
         return tools
 
     def _release_shared_sandbox_view(self) -> None:
