@@ -1,0 +1,229 @@
+import asyncio
+from typing import Any, ClassVar, Literal
+
+from pydantic import BaseModel, Field
+
+from dynamiq.connections.managers import ConnectionManager
+from dynamiq.nodes import NodeGroup
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
+from dynamiq.nodes.node import Node, ensure_config
+from dynamiq.nodes.types import ActionType
+from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types import Document
+from dynamiq.types.cancellation import CanceledException, check_cancellation
+from dynamiq.utils.logger import logger
+
+from .knowledgebase_graph import DynamiqKnowledgebaseGraphSearch
+from .knowledgebase_vector import DynamiqKnowledgebaseVectorSearch
+
+DESCRIPTION = (
+    "Hybrid retrieval over a Dynamiq knowledgebase: runs vector search and graph search together, "
+    "merges the vector chunks with the graph's source documents, and reranks the combined set for the "
+    "query. Graph facts are appended to the returned content. Access control is enforced by the "
+    "Dynamiq API based on the connection credentials."
+)
+
+
+class DynamiqKnowledgebaseHybridSearchInputSchema(BaseModel):
+    query: str = Field(..., description="Parameter to provide a query to retrieve documents.")
+    filters: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Parameter to provide filters to apply for retrieving specific documents.",
+    )
+    limit: int | None = Field(default=None, description="Parameter to provide how many documents to retrieve.")
+    similarity_threshold: float | None = Field(
+        default=None,
+        description="Parameter to provide minimal similarity or maximal distance score for retrieved documents.",
+    )
+    alpha: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Parameter to provide alpha for hybrid vector retrieval. 0 is keyword-only, 1 is semantic-only.",
+    )
+
+
+class DynamiqKnowledgebaseHybridSearch(Node):
+    """Composes ``DynamiqKnowledgebaseVectorSearch`` and ``DynamiqKnowledgebaseGraphSearch`` into one tool.
+
+    The two sub-searches run concurrently (via ``execute_async``). Vector chunks and the graph's structured
+    source documents are merged and deduplicated, then reranked against the query when a reranker is
+    configured (otherwise all merged documents are returned). The graph's ``content`` (facts block) is
+    always appended to the formatted output.
+    """
+
+    group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.SEMANTIC_SEARCH
+    name: str = "dynamiq-knowledgebase-hybrid-search"
+    description: str = DESCRIPTION
+
+    vector_search: DynamiqKnowledgebaseVectorSearch
+    graph_search: DynamiqKnowledgebaseGraphSearch
+    # Any RANKERS-group node with a ``{query, documents}`` -> ``{documents}`` contract (e.g. CohereReranker).
+    reranker: Node | None = None
+    top_k: int | None = None
+
+    input_schema: ClassVar[type[DynamiqKnowledgebaseHybridSearchInputSchema]] = (
+        DynamiqKnowledgebaseHybridSearchInputSchema
+    )
+
+    @property
+    def to_dict_exclude_params(self):
+        # Sub-nodes are serialized via their own ``to_dict`` (below) so their non-serializable runtime
+        # state (e.g. HTTP ``client``) is excluded; keep them out of the parent ``model_dump``.
+        return super().to_dict_exclude_params | {
+            "vector_search": True,
+            "graph_search": True,
+            "reranker": True,
+        }
+
+    def to_dict(self, **kwargs) -> dict:
+        """Serialize composed sub-nodes through their own ``to_dict`` so the node roundtrips via YAML."""
+        data = super().to_dict(**kwargs)
+        data["vector_search"] = self.vector_search.to_dict(**kwargs)
+        data["graph_search"] = self.graph_search.to_dict(**kwargs)
+        data["reranker"] = self.reranker.to_dict(**kwargs) if self.reranker else None
+        return data
+
+    def init_components(self, connection_manager: ConnectionManager | None = None):
+        """Initialize the composed sub-nodes so they share the parent's connection manager."""
+        connection_manager = connection_manager or ConnectionManager()
+        super().init_components(connection_manager)
+        for component in (self.vector_search, self.graph_search, self.reranker):
+            if component is not None and component.is_postponed_component_init:
+                component.init_components(connection_manager)
+
+    def _sub_input(self, input_data: DynamiqKnowledgebaseHybridSearchInputSchema, *, graph: bool) -> dict[str, Any]:
+        """Build the input dict for a sub-search, dropping keys the graph search does not accept."""
+        payload: dict[str, Any] = {"query": input_data.query, "filters": input_data.filters}
+        if input_data.limit is not None:
+            payload["limit"] = input_data.limit
+        if not graph:
+            if input_data.similarity_threshold is not None:
+                payload["similarity_threshold"] = input_data.similarity_threshold
+            if input_data.alpha is not None:
+                payload["alpha"] = input_data.alpha
+        return payload
+
+    @staticmethod
+    def _output_or_raise(result, source: str) -> dict[str, Any]:
+        """Unwrap a sub-node ``RunnableResult``, propagating cancellation and failures."""
+        if result.status == RunnableStatus.CANCELED:
+            raise CanceledException()
+        if result.status != RunnableStatus.SUCCESS:
+            error = result.error.to_dict() if result.error else "unknown error"
+            raise ToolExecutionException(
+                f"Hybrid search sub-node '{source}' failed: {error}. "
+                f"Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
+        return result.output or {}
+
+    def _merge(
+        self,
+        query: str,
+        vector_output: dict[str, Any],
+        graph_output: dict[str, Any],
+        config: RunnableConfig,
+        **kwargs,
+    ) -> dict[str, Any]:
+        """Merge vector chunks with graph source documents, rerank, and append graph facts.
+
+        Deduplication is by ``Document.id`` when present, else by content. Vector documents win ties so
+        their scores/metadata are preserved; every document is tagged with its ``retrieval_source``.
+        """
+        vector_documents = [self._as_document(item, "vector") for item in (vector_output.get("documents") or [])]
+
+        raw_graph_docs = graph_output.get("source_documents") or []
+        graph_documents = [self._as_document(item, "graph") for item in raw_graph_docs]
+
+        merged: list[Document] = []
+        seen: set[str] = set()
+        for document in [*vector_documents, *graph_documents]:
+            key = document.id or (document.content or "")
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(document)
+
+        documents = self._rerank(query, merged, config, **kwargs)
+
+        graph_content = (graph_output.get("content") or "").strip()
+        content = self._format_content(documents)
+        if graph_content:
+            content = f"{content}\n\n--- Graph Facts ---\n{graph_content}" if content else graph_content
+
+        return {"content": content, "documents": documents}
+
+    def _rerank(
+        self, query: str, documents: list[Document], config: RunnableConfig, **kwargs
+    ) -> list[Document]:
+        """Rerank merged documents when a reranker is configured; otherwise return them all."""
+        if not documents or self.reranker is None:
+            return documents
+
+        result = self.reranker.run(
+            input_data={"query": query, "documents": documents},
+            config=config,
+            run_depends=kwargs.get("run_depends", []),
+        )
+        reranked = self._output_or_raise(result, self.reranker.name).get("documents", documents)
+        if self.top_k is not None:
+            return reranked[: self.top_k]
+        return reranked
+
+    @staticmethod
+    def _as_document(item: Any, source: str) -> Document:
+        document = DynamiqKnowledgebaseVectorSearch._to_document(item)
+        metadata = dict(document.metadata or {})
+        metadata.setdefault("retrieval_source", source)
+        document.metadata = metadata
+        return document
+
+    def _format_content(self, documents: list[Document]) -> str:
+        """Format merged documents by delegating to the vector search's numbered-source formatter."""
+        return self.vector_search._format_content(documents)
+
+    def execute(
+        self, input_data: DynamiqKnowledgebaseHybridSearchInputSchema, config: RunnableConfig = None, **kwargs
+    ) -> dict[str, Any]:
+        config = ensure_config(config)
+        check_cancellation(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
+
+        run_depends = kwargs.get("run_depends", [])
+        vector_result = self.vector_search.run(
+            input_data=self._sub_input(input_data, graph=False), config=config, run_depends=run_depends
+        )
+        graph_result = self.graph_search.run(
+            input_data=self._sub_input(input_data, graph=True), config=config, run_depends=run_depends
+        )
+
+        vector_output = self._output_or_raise(vector_result, self.vector_search.name)
+        graph_output = self._output_or_raise(graph_result, self.graph_search.name)
+
+        return self._merge(input_data.query, vector_output, graph_output, config, **kwargs)
+
+    async def execute_async(
+        self, input_data: DynamiqKnowledgebaseHybridSearchInputSchema, config: RunnableConfig = None, **kwargs
+    ) -> dict[str, Any]:
+        config = ensure_config(config)
+        check_cancellation(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
+
+        run_depends = kwargs.get("run_depends", [])
+        vector_result, graph_result = await asyncio.gather(
+            self.vector_search.run_async(
+                input_data=self._sub_input(input_data, graph=False), config=config, run_depends=run_depends
+            ),
+            self.graph_search.run_async(
+                input_data=self._sub_input(input_data, graph=True), config=config, run_depends=run_depends
+            ),
+        )
+
+        vector_output = self._output_or_raise(vector_result, self.vector_search.name)
+        graph_output = self._output_or_raise(graph_result, self.graph_search.name)
+
+        return self._merge(input_data.query, vector_output, graph_output, config, **kwargs)
