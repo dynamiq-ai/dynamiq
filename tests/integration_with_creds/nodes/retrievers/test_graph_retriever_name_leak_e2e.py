@@ -90,7 +90,7 @@ def _facts_for(graph_connection, principals):
         connection=graph_connection,
         llm=OpenAI(connection=OpenAIConnection(), model="gpt-4o-mini", temperature=0),
         ontology=ONTOLOGY,
-        filters={"allowed_principals": {"$intersects": principals}},
+        filters={"field": "allowed_principals", "operator": "contains_any", "value": principals},
     )
     retriever.init_components()
     try:
@@ -202,7 +202,7 @@ def test_paraphrased_query_seeds_via_vector_similarity(embedded_graph, graph_con
         llm=OpenAI(connection=OpenAIConnection(), model="gpt-4o-mini", temperature=0),
         text_embedder=OpenAITextEmbedder(connection=OpenAIConnection()),
         ontology=ONTOLOGY,
-        filters={"allowed_principals": {"$intersects": [GROUP_PUBLIC]}},
+        filters={"field": "allowed_principals", "operator": "contains_any", "value": [GROUP_PUBLIC]},
     )
     retriever.init_components()
     assert retriever._use_vector, "vector seeding should be active (embedder set + vector index present)"

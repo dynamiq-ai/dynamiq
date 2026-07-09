@@ -1,3 +1,4 @@
+import itertools
 import re
 from typing import Any, ClassVar, Literal
 
@@ -23,6 +24,7 @@ from dynamiq.storages.graph.age import ApacheAgeGraphStore
 from dynamiq.storages.graph.base import BaseGraphStore
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
 from dynamiq.storages.graph.neptune import NeptuneGraphStore
+from dynamiq.storages.vector.utils import normalize_filters
 from dynamiq.types import Document
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.json_parser import parse_llm_json_output
@@ -59,23 +61,27 @@ _SUMMARIZE_PROMPT = (
     "CONTEXT:\n{{context}}\n\nQUESTION:\n{{query}}"
 )
 
-# Supported edge-filter operators -> Cypher predicate builders. `c` is the qualified property
-# (e.g. ``r.source_url``); `p` is the bound-parameter name.
-_FILTER_OPERATORS: dict[str, Any] = {
-    "$eq": lambda c, p: f"{c} = ${p}",
-    "$ne": lambda c, p: f"{c} <> ${p}",
-    "$in": lambda c, p: f"{c} IN ${p}",
-    "$nin": lambda c, p: f"NOT {c} IN ${p}",
-    "$gt": lambda c, p: f"{c} > ${p}",
-    "$gte": lambda c, p: f"{c} >= ${p}",
-    "$lt": lambda c, p: f"{c} < ${p}",
-    "$lte": lambda c, p: f"{c} <= ${p}",
-    "$contains": lambda c, p: f"{c} CONTAINS ${p}",  # substring (string properties)
-    "$any": lambda c, p: f"${p} IN {c}",  # membership (scalar value in a list property)
-    # list-list intersection (default-deny): keep the edge only if its list shares >=1 element with the
-    # param list. How ACL is expressed: {"allowed_principals": {"$intersects": [...]}}. Null -> [] -> excluded.
-    "$intersects": lambda c, p: f"size([x IN coalesce({c}, []) WHERE x IN ${p}]) > 0",
+# Supported comparison operators -> Cypher predicate builders. This is the SAME filter DSL the
+# vector-store retrievers expose (see ``dynamiq/storages/vector/*/filters.py``), so filters are written
+# identically for both retriever families. `c` is the qualified edge property (e.g. ``r.source_url``);
+# `p` is the bound-parameter name.
+_COMPARISON_OPERATORS: dict[str, Any] = {
+    "==": lambda c, p: f"{c} = ${p}",
+    "!=": lambda c, p: f"{c} <> ${p}",
+    ">": lambda c, p: f"{c} > ${p}",
+    ">=": lambda c, p: f"{c} >= ${p}",
+    "<": lambda c, p: f"{c} < ${p}",
+    "<=": lambda c, p: f"{c} <= ${p}",
+    "in": lambda c, p: f"{c} IN ${p}",  # scalar property equals one of the value list
+    "not in": lambda c, p: f"NOT {c} IN ${p}",
+    # list-list intersection (default-deny): keep the edge only if its list property shares >=1 element
+    # with the value list. Null property -> [] -> excluded. How ACL is expressed:
+    # {"field": "allowed_principals", "operator": "contains_any", "value": [...]}.
+    "contains_any": lambda c, p: f"size([x IN coalesce({c}, []) WHERE x IN ${p}]) > 0",
 }
+
+# Logical operators for nesting conditions (mirrors the vector-store ``LOGICAL_OPERATORS``).
+_LOGICAL_OPERATORS = {"AND", "OR"}
 
 
 def _validate_identifier(name: str) -> str:
@@ -114,29 +120,62 @@ def _grouped_lucene_query(names: list[str]) -> str:
 
 def _compile_edge_filters(
     rel_var: str, filters: dict[str, Any] | None, *, param_prefix: str = "f"
-) -> tuple[list[str], dict[str, Any]]:
-    """Compile a metadata filter dict into parameterized Cypher predicates on edge properties.
+) -> tuple[str, dict[str, Any]]:
+    """Compile a structured metadata filter into a parameterized Cypher predicate on edge properties.
 
-    Each entry is either ``{"key": value}`` (equality) or ``{"key": {"$op": value, ...}}`` using the
-    operators in ``_FILTER_OPERATORS``. Keys are validated as identifiers; values are always bound
-    parameters (never interpolated), so this cannot be an injection vector.
+    Uses the SAME filter grammar as the vector-store retrievers (see ``dynamiq/storages/vector/*/filters.py``),
+    so filters are written identically for both retriever families:
+
+      - comparison: ``{"field": <name>, "operator": <op>, "value": <v>}`` where ``<op>`` is one of
+        ``_COMPARISON_OPERATORS``;
+      - logical:    ``{"operator": "AND"|"OR", "conditions": [ <comparison-or-logical>, ... ]}`` (nestable).
+
+    The shared ``normalize_filters`` helper first accepts the ``{"field": value}`` shorthand as well (again,
+    the same front-door the vector stores use). Field names are validated as identifiers; values are always
+    bound parameters (never interpolated), so this cannot be an injection vector. Returns ``("", {})`` for an
+    empty filter.
     """
-    clauses: list[str] = []
+    filters = normalize_filters(filters)
+    if not filters:
+        return "", {}
+
     params: dict[str, Any] = {}
-    for i, (key, condition) in enumerate(sorted((filters or {}).items())):
-        column = f"{rel_var}.{_validate_identifier(key)}"
-        if isinstance(condition, dict):
-            for op, value in condition.items():
-                if op not in _FILTER_OPERATORS:
-                    raise ValueError(f"GraphRetriever: unsupported filter operator {op!r}.")
-                pname = f"{param_prefix}{i}_{op.lstrip('$')}"
-                clauses.append(_FILTER_OPERATORS[op](column, pname))
-                params[pname] = value
-        else:
-            pname = f"{param_prefix}{i}"
-            clauses.append(f"{column} = ${pname}")
-            params[pname] = condition
-    return clauses, params
+    counter = itertools.count()
+
+    def compile_node(condition: Any) -> str:
+        if not isinstance(condition, dict):
+            raise ValueError(f"GraphRetriever: filter condition must be a dict, got {type(condition)}.")
+        # 'field' is only present in comparison conditions; otherwise treat it as logical (AND/OR).
+        return compile_comparison(condition) if "field" in condition else compile_logical(condition)
+
+    def compile_logical(condition: dict[str, Any]) -> str:
+        if "operator" not in condition:
+            raise ValueError(f"GraphRetriever: 'operator' key missing in {condition!r}.")
+        if "conditions" not in condition:
+            raise ValueError(f"GraphRetriever: 'conditions' key missing in {condition!r}.")
+        operator = condition["operator"]
+        if operator not in _LOGICAL_OPERATORS:
+            raise ValueError(f"GraphRetriever: unsupported logical operator {operator!r}.")
+        parts = [p for p in (compile_node(c) for c in condition["conditions"]) if p]
+        if not parts:
+            return ""
+        joiner = " AND " if operator == "AND" else " OR "
+        return "(" + joiner.join(parts) + ")"
+
+    def compile_comparison(condition: dict[str, Any]) -> str:
+        if "operator" not in condition:
+            raise ValueError(f"GraphRetriever: 'operator' key missing in {condition!r}.")
+        if "value" not in condition:
+            raise ValueError(f"GraphRetriever: 'value' key missing in {condition!r}.")
+        operator = condition["operator"]
+        if operator not in _COMPARISON_OPERATORS:
+            raise ValueError(f"GraphRetriever: unsupported filter operator {operator!r}.")
+        column = f"{rel_var}.{_validate_identifier(condition['field'])}"
+        pname = f"{param_prefix}{next(counter)}"
+        params[pname] = condition["value"]
+        return _COMPARISON_OPERATORS[operator](column, pname)
+
+    return compile_node(filters), params
 
 
 class GraphRetrieverInputSchema(BaseModel):
@@ -154,8 +193,9 @@ class GraphRetrieverInputSchema(BaseModel):
     )
     filters: dict[str, Any] | None = Field(
         default=None,
-        description="Optional edge-property filters to narrow results. AND-ed on top of the node's locked "
-        "filters (can only further restrict, never widen).",
+        description="Optional edge-property filters to narrow results, in the same structured format as the "
+        'vector-store retrievers ({"field","operator","value"} or {"operator","conditions"}). '
+        "AND-ed on top of the node's locked filters (can only further restrict, never widen).",
     )
 
 
@@ -176,14 +216,16 @@ class GraphRetriever(ConnectionNode):
     entities reachable through a visible edge are surfaced.
 
     Why a node (not LLM-written Cypher): filters and result bounds are compiled server-side into a single
-    parameterized query. Two filter tiers (mirroring how ``VectorStoreRetriever`` exposes filters, but with
-    a locked layer added):
+    parameterized query. Filters use the SAME structured grammar as the vector-store retrievers — a
+    comparison ``{"field": <name>, "operator": <op>, "value": <v>}`` or a logical
+    ``{"operator": "AND"|"OR", "conditions": [...]}`` (nestable) — applied to edge properties. Two filter
+    tiers (mirroring how ``VectorStoreRetriever`` exposes filters, but with a locked layer added):
 
       - ``filters`` (node config) are LOCKED — always AND-applied and NOT overridable from the input. This
         is the access-control point: express ACL here, e.g.
-        ``filters={"allowed_principals": {"$intersects": ["group:a"]}}`` keeps only edges whose
-        ``allowed_principals`` list shares a principal with the caller's (default-deny — a missing list is
-        excluded). Because it is not on the input schema, an agent cannot drop or widen it.
+        ``filters={"field": "allowed_principals", "operator": "contains_any", "value": ["group:a"]}`` keeps
+        only edges whose ``allowed_principals`` list shares a principal with the caller's (default-deny — a
+        missing list is excluded). Because it is not on the input schema, an agent cannot drop or widen it.
       - input ``filters`` (caller/agent-supplied) are AND-ed on top — they can only further narrow.
 
     ACL model: this graph keeps all access metadata on EDGES; a node is visible exactly when reachable
@@ -198,8 +240,9 @@ class GraphRetriever(ConnectionNode):
             ontology used at ingestion so the question is parsed for the entity kinds the graph contains.
         database (str | None): Optional target database (Neo4j).
         graph_name (str | None): Graph name (Apache AGE).
-        filters (dict | None): LOCKED edge-property filters, always applied (operator grammar). ACL lives
-            here via the ``$intersects`` operator.
+        filters (dict | None): LOCKED edge-property filters, always applied. Same structured
+            ``{"field","operator","value"}`` / ``{"operator","conditions"}`` grammar as the vector-store
+            retrievers. ACL lives here via the ``contains_any`` operator.
         top_k (int): Maximum number of facts to fetch from the graph. With a ``document_reranker`` this is
             the CANDIDATE pool that gets reranked; the reranker's own ``top_k`` decides the final count.
         document_reranker (Node | None): Optional reranker (e.g. a cross-encoder ``CohereReranker``) applied
@@ -540,9 +583,9 @@ class GraphRetriever(ConnectionNode):
         # in RETURN via startNode/endNode. The scan keeps the directed pattern with a=source, b=target.
         arrow = "-[{rel}]-" if anchored else "-[{rel}]->"
 
-        rel_clauses, filter_params = self._edge_predicates("r", input_data.filters)
+        rel_clause, filter_params = self._edge_predicates("r", input_data.filters)
         params.update(filter_params)
-        where = " AND ".join([t for t in [entry_where, *rel_clauses] if t])
+        where = " AND ".join([t for t in [entry_where, rel_clause] if t])
         # Names come from the edge's own ACL-bearing snapshot (r.src_name/r.dst_name), never the shared
         # merged node, so a differently-scoped name can't leak. Node ids still come from the nodes (for
         # next-hop iteration).
@@ -572,15 +615,17 @@ class GraphRetriever(ConnectionNode):
         lines.append("LIMIT $limit")
         return "\n".join(lines), params
 
-    def _edge_predicates(self, rel_var: str, user_filters: dict[str, Any] | None) -> tuple[list[str], dict[str, Any]]:
+    def _edge_predicates(self, rel_var: str, user_filters: dict[str, Any] | None) -> tuple[str, dict[str, Any]]:
         """Compile the locked node filters + the caller's filters for an edge variable, AND-ed together.
 
         Locked (node) filters always apply; caller filters can only narrow further. Distinct parameter
-        prefixes ("lf"/"uf") keep the two sets from colliding.
+        prefixes ("lf"/"uf") keep the two sets from colliding. Returns a single combined WHERE fragment
+        ("" when neither is set) plus its bound parameters.
         """
-        locked_clauses, locked_params = _compile_edge_filters(rel_var, self.filters, param_prefix="lf")
-        user_clauses, user_params = _compile_edge_filters(rel_var, user_filters, param_prefix="uf")
-        return [*locked_clauses, *user_clauses], {**locked_params, **user_params}
+        locked_clause, locked_params = _compile_edge_filters(rel_var, self.filters, param_prefix="lf")
+        user_clause, user_params = _compile_edge_filters(rel_var, user_filters, param_prefix="uf")
+        combined = " AND ".join(c for c in (locked_clause, user_clause) if c)
+        return combined, {**locked_params, **user_params}
 
     def execute(
         self, input_data: GraphRetrieverInputSchema, config: RunnableConfig = None, **kwargs

@@ -1,8 +1,9 @@
 """Unit tests for GraphRetriever: ACL/filter compilation, query building, and rendering (no DB).
 
-The security-critical pieces are the pure compiler functions (``_acl_clause``, ``_compile_edge_filters``)
-and the fact that filter VALUES are always bound parameters. A ``StubGraphStore`` returns canned records
-so ``execute`` is exercised end-to-end without Neo4j.
+The security-critical piece is the pure compiler function ``_compile_edge_filters`` and the fact that
+filter VALUES are always bound parameters. Filters use the same structured grammar as the vector-store
+retrievers ({"field","operator","value"} / {"operator","conditions"}). A ``StubGraphStore`` returns
+canned records so ``execute`` is exercised end-to-end without Neo4j.
 """
 
 from typing import Any, ClassVar
@@ -116,45 +117,80 @@ def make_retriever(rows=None, **kwargs) -> GraphRetriever:
     return node
 
 
-LOCKED_ACL = {"allowed_principals": {"$intersects": ["group:a"]}}
+LOCKED_ACL = {"field": "allowed_principals", "operator": "contains_any", "value": ["group:a"]}
 
 
 class TestCompileEdgeFilters:
-    def test_equality_shorthand(self):
-        clauses, params = _compile_edge_filters("r", {"source_url": "http://x"})
-        assert clauses == ["r.source_url = $f0"]
+    def test_comparison_equality(self):
+        clause, params = _compile_edge_filters("r", {"field": "source_url", "operator": "==", "value": "http://x"})
+        assert clause == "r.source_url = $f0"
         assert params == {"f0": "http://x"}
 
-    def test_operators(self):
-        clauses, params = _compile_edge_filters("r", {"year": {"$gte": 2020, "$lt": 2025}})
-        assert clauses == ["r.year >= $f0_gte", "r.year < $f0_lt"]
-        assert params == {"f0_gte": 2020, "f0_lt": 2025}
+    def test_shorthand_is_normalized_like_vector_stores(self):
+        # The {"field": value} shorthand is normalized (via the shared normalize_filters helper) to an AND
+        # group, same as the vector-store retrievers accept it.
+        clause, params = _compile_edge_filters("r", {"source_url": "http://x"})
+        assert clause == "(r.source_url = $f0)"
+        assert params == {"f0": "http://x"}
 
-    def test_in_and_any_membership(self):
-        clauses, params = _compile_edge_filters("r", {"workspace": {"$in": ["a", "b"]}, "tags": {"$any": "x"}})
-        # keys are sorted -> tags (f0) before workspace (f1)
-        assert clauses == ["$f0_any IN r.tags", "r.workspace IN $f1_in"]
-        assert params == {"f0_any": "x", "f1_in": ["a", "b"]}
+    def test_operators_nested_with_and(self):
+        clause, params = _compile_edge_filters(
+            "r",
+            {
+                "operator": "AND",
+                "conditions": [
+                    {"field": "year", "operator": ">=", "value": 2020},
+                    {"field": "year", "operator": "<", "value": 2025},
+                ],
+            },
+        )
+        assert clause == "(r.year >= $f0 AND r.year < $f1)"
+        assert params == {"f0": 2020, "f1": 2025}
 
-    def test_intersects_is_default_deny_list_intersection(self):
-        # ACL is expressed as a filter: keep edges whose list shares an element with the param list.
-        clauses, params = _compile_edge_filters("r", {"allowed_principals": {"$intersects": ["group:a"]}})
-        assert clauses == ["size([x IN coalesce(r.allowed_principals, []) WHERE x IN $f0_intersects]) > 0"]
-        assert params == {"f0_intersects": ["group:a"]}
+    def test_in_membership(self):
+        clause, params = _compile_edge_filters("r", {"field": "workspace", "operator": "in", "value": ["a", "b"]})
+        assert clause == "r.workspace IN $f0"
+        assert params == {"f0": ["a", "b"]}
+
+    def test_or_logical_grouping(self):
+        clause, params = _compile_edge_filters(
+            "r",
+            {
+                "operator": "OR",
+                "conditions": [
+                    {"field": "a", "operator": "==", "value": 1},
+                    {"field": "b", "operator": "==", "value": 2},
+                ],
+            },
+        )
+        assert clause == "(r.a = $f0 OR r.b = $f1)"
+        assert params == {"f0": 1, "f1": 2}
+
+    def test_contains_any_is_default_deny_list_intersection(self):
+        # ACL is expressed as a filter: keep edges whose list shares an element with the value list.
+        clause, params = _compile_edge_filters(
+            "r", {"field": "allowed_principals", "operator": "contains_any", "value": ["group:a"]}
+        )
+        assert clause == "size([x IN coalesce(r.allowed_principals, []) WHERE x IN $f0]) > 0"
+        assert params == {"f0": ["group:a"]}
 
     def test_values_are_parameters_not_interpolated(self):
         # An injection-looking value must end up as a bound param, never in the clause text.
-        clauses, params = _compile_edge_filters("r", {"name": "' OR 1=1 //"})
-        assert clauses == ["r.name = $f0"]
+        clause, params = _compile_edge_filters("r", {"field": "name", "operator": "==", "value": "' OR 1=1 //"})
+        assert clause == "r.name = $f0"
         assert params == {"f0": "' OR 1=1 //"}
 
     def test_unsafe_key_rejected(self):
         with pytest.raises(ValueError):
-            _compile_edge_filters("r", {"bad key; DROP": "x"})
+            _compile_edge_filters("r", {"field": "bad key; DROP", "operator": "==", "value": "x"})
 
     def test_unsupported_operator_rejected(self):
         with pytest.raises(ValueError):
-            _compile_edge_filters("r", {"year": {"$regex": ".*"}})
+            _compile_edge_filters("r", {"field": "year", "operator": "$regex", "value": ".*"})
+
+    def test_unsupported_logical_operator_rejected(self):
+        with pytest.raises(ValueError):
+            _compile_edge_filters("r", {"operator": "XOR", "conditions": []})
 
 
 class TestQueryBuilding:
@@ -163,7 +199,7 @@ class TestQueryBuilding:
         query, params = node._build_query(GraphRetrieverInputSchema(query="who works at Acme?"), 10)
         assert "toLower($q) CONTAINS toLower(a.name)" in query
         assert params["q"] == "who works at Acme?"
-        assert params["lf0_intersects"] == ["group:a"]  # locked ACL filter applied
+        assert params["lf0"] == ["group:a"]  # locked ACL filter applied
         assert "coalesce(r.allowed_principals, [])" in query
 
     def test_explicit_entities_seed_by_name_fuzzily(self):
@@ -198,11 +234,16 @@ class TestQueryBuilding:
         # Locked node filter (ACL) and user input filter are both AND-ed in, with non-colliding params.
         node = make_retriever(filters=LOCKED_ACL)
         query, params = node._build_query(
-            GraphRetrieverInputSchema(query="x", entities=["Acme"], filters={"source_url": "http://x"}), 5
+            GraphRetrieverInputSchema(
+                query="x",
+                entities=["Acme"],
+                filters={"field": "source_url", "operator": "==", "value": "http://x"},
+            ),
+            5,
         )
-        assert "$lf0_intersects" in query  # locked, always applied
+        assert "$lf0" in query  # locked, always applied
         assert "r.source_url = $uf0" in query  # user, AND-ed on top
-        assert params["lf0_intersects"] == ["group:a"]
+        assert params["lf0"] == ["group:a"]
         assert params["uf0"] == "http://x"
 
     def test_user_filters_cannot_drop_locked(self):
@@ -210,7 +251,9 @@ class TestQueryBuilding:
         node = make_retriever(filters=LOCKED_ACL)
         query, _ = node._build_query(
             GraphRetrieverInputSchema(
-                query="x", entities=["Acme"], filters={"allowed_principals": {"$intersects": ["group:b"]}}
+                query="x",
+                entities=["Acme"],
+                filters={"field": "allowed_principals", "operator": "contains_any", "value": ["group:b"]},
             ),
             5,
         )
@@ -270,7 +313,9 @@ class TestExecuteRendering:
             {"a_name": "Jane Doe", "rel": "WORKS_AT", "rprops": {"source_url": "u"}, "b_name": "Acme"},
             {"a_name": "Jane Doe", "rel": "HAS_ATTRIBUTE", "rprops": {"key": "salary"}, "b_name": "$250,000"},
         ]
-        node = make_retriever(rows=rows, filters={"allowed_principals": {"$intersects": ["u:jane"]}})
+        node = make_retriever(
+            rows=rows, filters={"field": "allowed_principals", "operator": "contains_any", "value": ["u:jane"]}
+        )
         out = node.execute(GraphRetrieverInputSchema(query="Jane Doe"))
 
         contents = [d.content for d in out["documents"]]
