@@ -85,6 +85,7 @@ def test_cleanup_skips_shared_sandbox():
 
     agent = MagicMock()
     agent._sandbox_is_shared = True
+    agent._configured_sandbox_backend.return_value = None  # pure borrower: no own sandbox
     SubAgentTool.cleanup_factory_agent(agent)
     agent.sandbox_backend.close.assert_not_called()
 
@@ -415,11 +416,11 @@ def test_runtime_tools_empty_overlay_keeps_own_sandbox_tools(test_llm):
         _shared_sandbox_tools.reset(otoken)
 
 
-def test_override_tears_down_subagents_dedicated_sandbox(test_llm):
-    """scope=ALL override must release the subagent's now-orphaned dedicated sandbox:
-    cleanup_factory_agent skips teardown once _sandbox_is_shared latches, and initialized
-    subagents never reach cleanup_factory_agent at all (Bugbot: dedicated sandbox leaks on
-    override)."""
+def test_override_does_not_kill_own_sandbox_at_borrow_time(test_llm):
+    """scope=ALL override routes the subagent onto the shared view but must NOT tear down its own
+    dedicated sandbox at borrow time: this path is shared by reused initialized subagents, which
+    must keep their own sandbox for later standalone use (Bugbot: own sandbox killed on reuse).
+    Teardown of a *factory* agent's orphaned backend happens in cleanup_factory_agent instead."""
     from unittest.mock import MagicMock
 
     from dynamiq.nodes.agents.shared_session import SandboxSharingScope, SharedSession
@@ -437,18 +438,36 @@ def test_override_tears_down_subagents_dedicated_sandbox(test_llm):
             tools=[],
             sandbox=SandboxConfig(enabled=True, backend=E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-own")),
         )
-        # Spy on the dedicated backend's teardown (field assignment: SandboxConfig has no
-        # validate_assignment, and E2BSandbox.close is a no-op when unprovisioned so we must mock it).
         own_spy = MagicMock()
         sub.sandbox.backend = own_spy
 
-        sub._maybe_borrow_shared_sandbox()
+        overlay = sub._maybe_borrow_shared_sandbox()
 
-        own_spy.close.assert_called_once_with(kill=True)
+        assert overlay is not None
+        own_spy.close.assert_not_called()  # own sandbox left intact for reuse
         assert sub._sandbox_is_shared is True
         assert sub._shared_sandbox_view.sandbox_id == "sbx-shared"
     finally:
         _shared_session.reset(token)
+
+
+def test_cleanup_factory_agent_kills_overridden_own_sandbox(test_llm):
+    """A factory agent whose own sandbox was overridden (scope=ALL) must have that orphaned
+    dedicated backend torn down when the disposable factory agent is cleaned up."""
+    from unittest.mock import MagicMock
+
+    from dynamiq.nodes.tools.agent_tool import SubAgentTool
+
+    sub = _sandboxed_agent(test_llm)  # has its own dedicated sandbox
+    own_spy = MagicMock()
+    sub.sandbox.backend = own_spy
+    # Simulate the post-borrow state: routed onto a shared view (view already released in execute()).
+    sub._sandbox_is_shared = True
+    sub._shared_sandbox_view = None
+
+    SubAgentTool.cleanup_factory_agent(sub)
+
+    own_spy.close.assert_called_once_with(kill=True)
 
 
 def test_borrow_failure_rolls_back_and_does_not_latch_or_kill_own(test_llm):

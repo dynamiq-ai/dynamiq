@@ -2245,19 +2245,16 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             tool.is_optimized_for_agents = True
 
         if own is not None:
+            # scope=ALL routes this subagent onto the shared view instead of its own sandbox. We do
+            # NOT tear the dedicated backend down here: this borrow path is shared by reused
+            # initialized subagents, which must keep their own sandbox for later standalone use.
+            # A *factory* subagent's orphaned backend is torn down in cleanup_factory_agent instead.
             logger.warning(
                 "Agent %s - %s: sandbox_sharing_scope=ALL overrides this subagent's own sandbox; "
                 "routing it onto the owner's shared sandbox instead.",
                 self.name,
                 self.id,
             )
-            # The dedicated backend is now orphaned: sandbox_backend returns the shared view,
-            # cleanup_factory_agent skips teardown once _sandbox_is_shared latches, and initialized
-            # subagents never reach cleanup_factory_agent at all. Release it here so it can't leak.
-            try:
-                own.close(kill=True)
-            except Exception as e:
-                logger.warning("Agent %s - %s: overridden own-sandbox teardown failed: %s", self.name, self.id, e)
 
         self._sandbox_is_shared = True
         self._shared_sandbox_view = view
