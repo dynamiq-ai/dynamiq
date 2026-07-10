@@ -1,4 +1,4 @@
-"""Unit tests for GraphRetriever: ACL/filter compilation, query building, and rendering (no DB).
+"""Unit tests for KnowledgeGraphRetriever: ACL/filter compilation, query building, and rendering (no DB).
 
 The security-critical pieces are the pure compiler functions (``_acl_clause``, ``_compile_edge_filters``)
 and the fact that filter VALUES are always bound parameters. A ``StubGraphStore`` returns canned records
@@ -12,11 +12,11 @@ from pydantic import ValidationError
 
 from dynamiq.connections import Neo4j
 from dynamiq.nodes.embedders.base import TextEmbedder
-from dynamiq.nodes.extractors import Ontology
-from dynamiq.nodes.extractors.entity_extractor import ENTITY_EMBEDDING_VECTOR_INDEX
+from dynamiq.nodes.knowledge_graph import Ontology
+from dynamiq.nodes.knowledge_graph.entity_extractor import ENTITY_EMBEDDING_VECTOR_INDEX
 from dynamiq.nodes.node import Node, NodeGroup
-from dynamiq.nodes.retrievers import GraphRetriever
-from dynamiq.nodes.retrievers.graph import GraphRetrieverInputSchema, _compile_edge_filters
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphRetriever
+from dynamiq.nodes.knowledge_graph.retriever import GraphRetrieverInputSchema, _compile_edge_filters
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
 
 
@@ -103,12 +103,12 @@ class StubGraphStore:
         return list(records)
 
 
-def make_retriever(rows=None, **kwargs) -> GraphRetriever:
+def make_retriever(rows=None, **kwargs) -> KnowledgeGraphRetriever:
     # llm + ontology are optional on the node, but default to an empty-names stub here so query-seeding
     # tests that don't care about extraction fall back to the raw query. Pass llm=None for the no-llm path.
     kwargs.setdefault("llm", StubLLM())
     kwargs.setdefault("ontology", _ONTOLOGY)
-    node = GraphRetriever(
+    node = KnowledgeGraphRetriever(
         connection=Neo4j(uri="bolt://localhost:7687", username="neo4j", password="password"),
         is_postponed_component_init=True,
         **kwargs,
@@ -580,7 +580,7 @@ class TestFactRerank:
                 "rprops": {"embedding": [0.1, 0.2, 0.3], "description": "for trading"},
             }
         ]
-        docs = GraphRetriever._render_single_hop(rows)
+        docs = KnowledgeGraphRetriever._render_single_hop(rows)
         assert "embedding" not in docs[0].metadata  # edge vector never surfaces to the caller
         assert docs[0].content == "Acme -[USES]-> Helios: for trading"
 
