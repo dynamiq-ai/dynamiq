@@ -2170,7 +2170,16 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         """
         if _shared_session.get() is not None:
             return None  # inherit the ancestor's session
-        if not self.share_sandbox_with_subagents or self.sandbox_backend is None:
+        if not self.share_sandbox_with_subagents:
+            return None
+        if self.sandbox_backend is None:
+            logger.warning(
+                "Agent %s - %s: share_sandbox_with_subagents is enabled but this agent has no sandbox "
+                "of its own to share; subagents will not share a sandbox. Configure a sandbox on this "
+                "agent to enable sharing.",
+                self.name,
+                self.id,
+            )
             return None
 
         session = SharedSession(

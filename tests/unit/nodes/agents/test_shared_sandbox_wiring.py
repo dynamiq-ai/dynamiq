@@ -57,6 +57,32 @@ def test_no_session_when_flag_off(test_llm):
     assert _shared_session.get() is None
 
 
+def test_owner_warns_when_flag_on_but_no_sandbox(test_llm):
+    """share_sandbox_with_subagents on but the owner has no sandbox is a silent no-op; it must
+    warn so the misconfiguration is visible (reviewer feedback)."""
+    from unittest.mock import patch
+
+    agent = Agent(name="Owner", llm=test_llm, role="r", tools=[], share_sandbox_with_subagents=True)
+    with patch("dynamiq.nodes.agents.base.logger") as mock_logger:
+        token = agent._maybe_enter_shared_session({"run_id": "r"})
+    assert token is None
+    assert mock_logger.warning.called
+    assert "no sandbox" in mock_logger.warning.call_args[0][0]
+
+
+def test_owner_does_not_warn_when_sandbox_present(test_llm):
+    from unittest.mock import patch
+
+    agent = _sandboxed_agent(test_llm, share_sandbox_with_subagents=True)
+    with patch("dynamiq.nodes.agents.base.logger") as mock_logger:
+        token = agent._maybe_enter_shared_session({"run_id": "r"})
+    try:
+        assert token is not None
+        mock_logger.warning.assert_not_called()
+    finally:
+        agent._exit_shared_session(token)
+
+
 def test_no_session_when_no_sandbox(test_llm):
     agent = Agent(name="Owner", llm=test_llm, role="r", tools=[], share_sandbox_with_subagents=True)
     token = agent._maybe_enter_shared_session({"run_id": "run-1"})
