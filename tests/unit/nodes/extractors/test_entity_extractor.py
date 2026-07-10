@@ -5,8 +5,8 @@ from typing import ClassVar
 
 import pytest
 
-from dynamiq.nodes.graphs import KnowledgeGraphEntityExtractor, Ontology
-from dynamiq.nodes.graphs.entity_extractor import ATTRIBUTE_VALUE_LABEL, ENTITY_LABEL, HAS_ATTRIBUTE_TYPE
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphEntityExtractor, Ontology
+from dynamiq.nodes.knowledge_graph.entity_extractor import ATTRIBUTE_VALUE_LABEL, ENTITY_LABEL, HAS_ATTRIBUTE_TYPE
 from dynamiq.nodes.node import Node, NodeGroup
 from dynamiq.storages.graph.neo4j.neo4j import Neo4jGraphStore
 from dynamiq.types import Document
@@ -255,8 +255,8 @@ class TestExecuteEndToEndWithStubLLM:
         assert result["relationships"] == []
 
     def test_execute_promotes_declared_attributes_to_doc_scoped_value_nodes(self):
-        from dynamiq.nodes.graphs import Ontology
-        from dynamiq.nodes.graphs.entity_extractor import ATTRIBUTE_VALUE_LABEL, HAS_ATTRIBUTE_TYPE
+        from dynamiq.nodes.knowledge_graph import Ontology
+        from dynamiq.nodes.knowledge_graph.entity_extractor import ATTRIBUTE_VALUE_LABEL, HAS_ATTRIBUTE_TYPE
 
         payload = {
             "entities": [{"id": "jane", "type": "Person", "name": "Jane Doe", "properties": {"salary": "$250,000"}}],

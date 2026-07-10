@@ -1,15 +1,15 @@
 """Deprecated module path.
 
-``EntityExtractor`` has moved to :mod:`dynamiq.nodes.graphs.entity_extractor` and been
+``EntityExtractor`` has moved to :mod:`dynamiq.nodes.knowledge_graph.entity_extractor` and been
 renamed to :class:`KnowledgeGraphEntityExtractor`. This shim re-exports the public surface
 under the old names so existing imports and serialized workflows keep working. Import from
-``dynamiq.nodes.graphs`` instead.
+``dynamiq.nodes.knowledge_graph`` instead.
 """
 
 import warnings
 
-from dynamiq.nodes.graphs.entity_extractor import *  # noqa: F401,F403
-from dynamiq.nodes.graphs.entity_extractor import (  # noqa: F401
+from dynamiq.nodes.knowledge_graph.entity_extractor import *  # noqa: F401,F403
+from dynamiq.nodes.knowledge_graph.entity_extractor import (  # noqa: F401
     KnowledgeGraphEntityExtractor,
 )
 
@@ -18,7 +18,7 @@ EntityExtractor = KnowledgeGraphEntityExtractor
 
 warnings.warn(
     "dynamiq.nodes.extractors.entity_extractor is deprecated; import from "
-    "dynamiq.nodes.graphs instead (EntityExtractor -> KnowledgeGraphEntityExtractor).",
+    "dynamiq.nodes.knowledge_graph instead (EntityExtractor -> KnowledgeGraphEntityExtractor).",
     DeprecationWarning,
     stacklevel=2,
 )

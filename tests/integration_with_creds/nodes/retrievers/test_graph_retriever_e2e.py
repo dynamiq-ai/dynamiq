@@ -18,10 +18,10 @@ import pytest
 
 from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.graphs import KnowledgeGraphEntityExtractor, KnowledgeGraphWriter, Ontology
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphEntityExtractor, KnowledgeGraphWriter, Ontology
 from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.nodes.graphs import KnowledgeGraphRetriever
-from dynamiq.nodes.graphs.retriever import GraphRetrieverInputSchema
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphRetriever
+from dynamiq.nodes.knowledge_graph.retriever import GraphRetrieverInputSchema
 from dynamiq.types import Document
 
 # Plain proper nouns the extraction LLM won't mangle; isolation comes from wiping the DB, not the names.

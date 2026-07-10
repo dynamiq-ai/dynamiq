@@ -27,7 +27,7 @@ from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
-from dynamiq.nodes.graphs import KnowledgeGraphEntityExtractor, KnowledgeGraphWriter, Ontology, Triple
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphEntityExtractor, KnowledgeGraphWriter, Ontology, Triple
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.node import InputTransformer, NodeDependency
 from dynamiq.nodes.writers import QdrantDocumentWriter

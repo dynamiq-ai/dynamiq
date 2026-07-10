@@ -20,7 +20,7 @@ import os
 
 from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.graphs import KnowledgeGraphEntityExtractor, KnowledgeGraphWriter, Ontology
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphEntityExtractor, KnowledgeGraphWriter, Ontology
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.operators import Map
 from dynamiq.runnables import RunnableConfig, RunnableStatus

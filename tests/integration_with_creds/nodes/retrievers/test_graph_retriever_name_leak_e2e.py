@@ -23,11 +23,11 @@ import pytest
 from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder, OpenAITextEmbedder
-from dynamiq.nodes.graphs import KnowledgeGraphWriter, Ontology
-from dynamiq.nodes.graphs.entity_extractor import ENTITY_EMBEDDING_VECTOR_INDEX
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphWriter, Ontology
+from dynamiq.nodes.knowledge_graph.entity_extractor import ENTITY_EMBEDDING_VECTOR_INDEX
 from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.nodes.graphs import KnowledgeGraphRetriever
-from dynamiq.nodes.graphs.retriever import GraphRetrieverInputSchema
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphRetriever
+from dynamiq.nodes.knowledge_graph.retriever import GraphRetrieverInputSchema
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
 
 ORG_ID = "org-1"

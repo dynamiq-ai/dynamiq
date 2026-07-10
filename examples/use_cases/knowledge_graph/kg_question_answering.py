@@ -21,7 +21,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAITextEmbedder
-from dynamiq.nodes.graphs import KnowledgeGraphRetriever, Ontology
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphRetriever, Ontology
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.retrievers import QdrantDocumentRetriever, VectorStoreRetriever
 from dynamiq.nodes.tools import CypherExecutor

@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 from dynamiq.connections import ApacheAGE, AWSNeptune, Neo4j
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.embedders.base import DocumentEmbedder
-from dynamiq.nodes.graphs.entity_extractor import (
+from dynamiq.nodes.knowledge_graph.entity_extractor import (
     ATTRIBUTE_VALUE_LABEL,
     ENTITY_EMBEDDING_VECTOR_INDEX,
     ENTITY_ID_INDEX,
