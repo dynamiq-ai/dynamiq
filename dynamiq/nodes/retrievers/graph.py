@@ -166,8 +166,8 @@ class GraphRetriever(ConnectionNode):
     controlled alternative to ``CypherExecutor`` for read access. An LLM first extracts the entities the
     question is about (constrained to the ontology's types), the retriever finds those entry-point entities
     by name, expands ONE hop through **visible** edges, and renders the resulting facts as ``Document``
-    objects an agent can consume directly. Deeper exploration is by iteration: each fact carries its
-    neighbor's ``source_id``/``target_id``, which an agent feeds back as the next call's ``entity_ids``.
+    objects an agent can consume directly. Deeper exploration is by iteration: an agent feeds a fact's
+    neighbor name back as the next call's ``entities`` seed.
 
     Entry-point selection is backend-agnostic: on Neo4j with the entity-name full-text index present
     (created by ``KnowledgeGraphWriter``) it uses an index seek and expands only the seed's neighborhood;
@@ -556,27 +556,20 @@ class GraphRetriever(ConnectionNode):
         """
         params: dict[str, Any] = {"limit": limit}
         lead, entry_where, anchored = self._entry(input_data, params, seed_names, seed_vectors)
-        # Anchored expansion is undirected (catch edges into and out of the seed); direction is recovered
-        # in RETURN via startNode/endNode. The scan keeps the directed pattern with a=source, b=target.
+        # Anchored expansion is undirected (catch edges into and out of the seed); each edge's direction is
+        # carried by its own r.src_name/r.dst_name snapshot. The scan keeps the directed pattern with
+        # a=source, b=target.
         arrow = "-[{rel}]-" if anchored else "-[{rel}]->"
 
         rel_clauses, filter_params = self._edge_predicates("r", input_data.filters)
         params.update(filter_params)
         where = " AND ".join([t for t in [entry_where, *rel_clauses] if t])
         # Names come from the edge's own ACL-bearing snapshot (r.src_name/r.dst_name), never the shared
-        # merged node, so a differently-scoped name can't leak. Node ids still come from the nodes (for
-        # next-hop iteration).
-        if anchored:
-            ret = (
-                "RETURN r.src_name AS a_name, startNode(r).id AS a_id, "
-                "type(r) AS rel, properties(r) AS rprops, "
-                "r.dst_name AS b_name, endNode(r).id AS b_id"
-            )
-        else:
-            ret = (
-                "RETURN r.src_name AS a_name, a.id AS a_id, type(r) AS rel, "
-                "properties(r) AS rprops, r.dst_name AS b_name, b.id AS b_id"
-            )
+        # merged node, so a differently-scoped name can't leak.
+        ret = (
+            "RETURN r.src_name AS a_name, type(r) AS rel, "
+            "properties(r) AS rprops, r.dst_name AS b_name"
+        )
         lines = [*lead, f"MATCH (a){arrow.format(rel='r')}(b)"]
         if where:
             lines.append(f"WHERE {where}")
@@ -759,12 +752,6 @@ class GraphRetriever(ConnectionNode):
             # Normalize provenance to a list so later duplicate facts can accumulate every source doc.
             if source_doc_id:
                 metadata["source_doc_ids"] = [source_doc_id]
-            # Endpoint entity ids (when available) let a caller iterate: feed a fact's neighbor id back as
-            # the next hop's seed instead of doing an exploding variable-length expansion.
-            if row.get("a_id") is not None:
-                metadata["source_id"] = row["a_id"]
-            if row.get("b_id") is not None:
-                metadata["target_id"] = row["b_id"]
             document = Document(content=fact, metadata=metadata, score=1.0 / (1.0 + rank))
             seen[fact] = document
             documents.append(document)
