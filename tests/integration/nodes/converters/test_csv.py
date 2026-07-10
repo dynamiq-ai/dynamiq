@@ -73,6 +73,11 @@ def empty_csv_bytesio():
 
 
 @pytest.fixture
+def header_only_csv_bytesio():
+    return write_csv_to_bytesio(["Target", "Feature_1", "Feature_2"], [], "header_only.csv")
+
+
+@pytest.fixture
 def invalid_csv_file_path(tmp_path):
     invalid_file = tmp_path / "invalid.csv"
     invalid_file.write_text('Column1,Column2\n"unterminated quote,value2')
@@ -215,6 +220,16 @@ def test_csv_loader_without_content_column_creates_self_describing_rows(csv_byte
     assert documents[0]["metadata"]["row_number"] == 2
 
 
+def test_csv_loader_without_content_column_rejects_header_only_file(header_only_csv_bytesio):
+    result = CSVConverter().run(input_data={"files": [header_only_csv_bytesio]})
+
+    assert result.status == RunnableStatus.FAILURE
+    assert result.error is not None
+    assert result.error.message == (
+        "No documents were created from the provided inputs. Please check your files and try again."
+    )
+
+
 def test_csv_loader_generic_rows_preserve_source_url_and_duplicate_headers():
     file = write_csv_to_bytesio(["", "plan", "plan"], [["Feature", "Free", "Pro"]], "pricing.csv")
     source_url = "https://example.com/pricing"
@@ -307,11 +322,10 @@ def test_workflow_with_csv_converter_empty(
 
     response = workflow_with_csv_converter_and_output.run(input_data=input_data)
 
-    assert response.status == RunnableStatus.SUCCESS
-    assert response.output[csv_converter.id]["status"] == RunnableStatus.SUCCESS.value
-    assert "documents" in response.output[csv_converter.id]["output"]
-    assert len(response.output[csv_converter.id]["output"]["documents"]) == 0
-    assert response.output[output_node.id]["status"] == RunnableStatus.SUCCESS.value
+    assert response.status == RunnableStatus.FAILURE
+    assert response.output[csv_converter.id]["status"] == RunnableStatus.FAILURE.value
+    assert "No documents were created" in response.output[csv_converter.id]["error"]["message"]
+    assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
 
 
 @pytest.mark.parametrize(

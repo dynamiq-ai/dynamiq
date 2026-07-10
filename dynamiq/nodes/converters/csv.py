@@ -197,6 +197,11 @@ class CSVConverter(Node):
         if success_count < total_files:
             logger.warning(f"Processed {success_count} out of {total_files} files successfully")
 
+        if not all_documents:
+            raise ValueError(
+                "No documents were created from the provided inputs. Please check your files and try again."
+            )
+
         return {"documents": all_documents}
 
     def _process_text(
