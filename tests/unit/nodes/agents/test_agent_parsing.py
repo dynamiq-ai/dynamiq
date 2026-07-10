@@ -426,7 +426,7 @@ def _mock_llm_stream(text: str):
         yield model_r
 
 
-def _make_agent(inference_mode=None, response_format=None):
+def _make_agent(inference_mode=None, response_format=None, tools=None):
     """Build a minimal Agent suitable for in-process unit tests."""
     import uuid
 
@@ -445,7 +445,7 @@ def _make_agent(inference_mode=None, response_format=None):
     return Agent(
         name="test-agent",
         llm=llm,
-        tools=[],
+        tools=tools or [],
         inference_mode=inference_mode or InferenceMode.DEFAULT,
         response_format=response_format,
     )
@@ -620,6 +620,23 @@ def test_agent_structured_output_finish_with_json_string_action_input():
     assert action == "final_answer"
     coerced = agent._coerce_to_response_format(action_input)
     assert coerced == {"title": "HP"}
+
+
+def test_agent_structured_output_wraps_bare_string_for_input_tool():
+    from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
+    from dynamiq.nodes.types import InferenceMode
+
+    agent = _make_agent(inference_mode=InferenceMode.STRUCTURED_OUTPUT, tools=[HumanFeedbackTool()])
+    output = (
+        '{"thought": "ask user", "action": "message-sender", '
+        '"action_input": "What kind of book would you like me to recommend?", "output_files": ""}'
+    )
+
+    thought, action, action_input = agent._handle_structured_output_mode(output, loop_num=1)
+
+    assert thought == "ask user"
+    assert action == "message-sender"
+    assert action_input == {"input": "What kind of book would you like me to recommend?"}
 
 
 def test_agent_uses_resolved_schema_for_param_modes():

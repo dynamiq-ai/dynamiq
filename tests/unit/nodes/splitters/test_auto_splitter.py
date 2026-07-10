@@ -1,7 +1,12 @@
 import json
 
 from dynamiq import Workflow
-from dynamiq.components.splitters.auto import AutoSplitterRule, AutoSplitterStrategy, _default_rules
+from dynamiq.components.splitters.auto import (
+    AutoSplitterRule,
+    AutoSplitterStrategy,
+    _default_rules,
+    _repair_flattened_markdown,
+)
 from dynamiq.flows import Flow
 from dynamiq.nodes.converters import TextFileConverter
 from dynamiq.nodes.node import NodeDependency
@@ -25,6 +30,100 @@ def test_auto_splitter_routes_markdown_by_extension():
     assert chunks[1].metadata["h2"] == "Details"
     assert all(chunk.metadata["source_id"] == document.id for chunk in chunks)
     assert all(chunk.metadata["splitter_strategy"] == "markdown_header" for chunk in chunks)
+
+
+def test_auto_splitter_repairs_flattened_markdown_headings_before_splitting():
+    content = "Navigation text # Article title Answer text ## Details More information"
+    splitter = AutoSplitter(markdown_strip_headers=False)
+    splitter.init_components()
+    document = Document(content=content, metadata={"file_path": "article.md"})
+
+    chunks = splitter.execute(splitter.input_schema(documents=[document]))["documents"]
+
+    assert [chunk.content for chunk in chunks] == [
+        "Navigation text",
+        "# Article title Answer text",
+        "## Details More information",
+    ]
+    assert chunks[1].metadata["h1"] == "Article title Answer text"
+    assert chunks[2].metadata["h2"] == "Details More information"
+    assert all(chunk.metadata["content_normalization"] == "flattened_markdown" for chunk in chunks)
+    assert all(chunk.metadata["content_normalization_length_preserving"] is True for chunk in chunks)
+
+
+def test_flattened_markdown_repair_is_length_preserving_and_skips_structured_documents():
+    flattened = "Introduction #### Section Body ##### Feature detail"
+    repaired = _repair_flattened_markdown(flattened)
+
+    assert repaired == "Introduction\n#### Section Body ##### Feature detail"
+    assert len(repaired) == len(flattened)
+
+    structured = "# First\nBody\nInline text ## not a heading"
+    assert _repair_flattened_markdown(structured) == structured
+
+
+def test_auto_splitter_infers_flattened_markdown_without_file_metadata():
+    splitter = AutoSplitter(markdown_strip_headers=False)
+    splitter.init_components()
+    document = Document(content="Preamble ## First section Body ### Second section More")
+
+    chunks = splitter.execute(splitter.input_schema(documents=[document]))["documents"]
+
+    assert len(chunks) == 3
+    assert all(chunk.metadata["splitter_strategy"] == "markdown_header" for chunk in chunks)
+    assert all(chunk.metadata["content_normalization"] == "flattened_markdown" for chunk in chunks)
+
+
+def test_auto_splitter_routes_from_converter_file_type_without_filename_or_content_inference():
+    splitter = AutoSplitter(infer_from_content=False)
+    splitter.init_components()
+    document = Document(
+        content="# Title\nIntro\n## Details\nBody",
+        metadata={"file_type": "markdown", "source": "item-id-without-extension"},
+    )
+
+    chunks = splitter.execute(splitter.input_schema(documents=[document]))["documents"]
+
+    assert len(chunks) == 2
+    assert all(chunk.metadata["splitter_strategy"] == "markdown_header" for chunk in chunks)
+
+
+def test_auto_splitter_refines_oversized_markdown_sections_and_preserves_source_metadata():
+    splitter = AutoSplitter(chunk_size=45, chunk_overlap=0)
+    splitter.init_components()
+    document = Document(
+        content="# Pricing\n" + " ".join(["enterprise-plan"] * 12),
+        metadata={
+            "file_path": "pricing.md",
+            "dynamiq_item_source_provider_url": "https://example.com/pricing",
+        },
+    )
+
+    chunks = splitter.execute(splitter.input_schema(documents=[document]))["documents"]
+
+    assert len(chunks) > 1
+    assert all(len(chunk.content) <= 45 for chunk in chunks)
+    assert all(chunk.metadata["h1"] == "Pricing" for chunk in chunks)
+    assert all(chunk.metadata["source_id"] == document.id for chunk in chunks)
+    assert all(chunk.metadata["dynamiq_item_source_provider_url"] == "https://example.com/pricing" for chunk in chunks)
+    assert [chunk.metadata["chunk_index"] for chunk in chunks] == list(range(len(chunks)))
+
+
+def test_auto_splitter_maps_repeated_structured_sections_to_monotonic_source_offsets():
+    repeated_body = " ".join(["same-section-content"] * 8)
+    source_text = f"# First\n{repeated_body}\n# Second\n{repeated_body}"
+    splitter = AutoSplitter(chunk_size=45, chunk_overlap=0)
+    splitter.init_components()
+
+    chunks = splitter.execute(
+        splitter.input_schema(documents=[Document(content=source_text, metadata={"file_type": "markdown"})])
+    )["documents"]
+
+    first_offsets = [chunk.metadata["start_index"] for chunk in chunks if chunk.metadata.get("h1") == "First"]
+    second_offsets = [chunk.metadata["start_index"] for chunk in chunks if chunk.metadata.get("h1") == "Second"]
+    assert first_offsets and second_offsets
+    assert max(first_offsets) < min(second_offsets)
+    assert min(second_offsets) >= source_text.index(repeated_body, source_text.index("# Second"))
 
 
 def test_auto_splitter_routes_json_by_extension():

@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pptx import Presentation
 
 from dynamiq.components.converters.base import BaseConverter
-from dynamiq.components.converters.utils import get_filename_for_bytesio
+from dynamiq.components.converters.utils import build_source_metadata, get_filename_for_bytesio
 from dynamiq.types import Document, DocumentCreationMode
 
 
@@ -89,8 +89,7 @@ class PPTXConverter(BaseConverter):
                 "\n".join(shape.text for shape in slide.shapes if hasattr(shape, "text") and shape.text)
                 for slide in elements.slides
             )
-            metadata = copy.deepcopy(metadata)
-            metadata["file_path"] = filepath
+            metadata = build_source_metadata(metadata, filepath)
             docs = [Document(content=text_all_slides, metadata=metadata)]
 
         elif document_creation_mode == DocumentCreationMode.ONE_DOC_PER_PAGE:
@@ -98,9 +97,12 @@ class PPTXConverter(BaseConverter):
                 "\n".join(shape.text for shape in slide.shapes if hasattr(shape, "text") and shape.text)
                 for slide in elements.slides
             ]
-            metadata = copy.deepcopy(metadata)
-            metadata["file_path"] = filepath
+            metadata = build_source_metadata(metadata, filepath)
 
-            docs = [Document(content=text, metadata=metadata) for text in texts_per_page]
+            docs = []
+            for page_number, text in enumerate(texts_per_page, start=1):
+                page_metadata = copy.deepcopy(metadata)
+                page_metadata["page_number"] = page_number
+                docs.append(Document(content=text, metadata=page_metadata))
 
         return docs

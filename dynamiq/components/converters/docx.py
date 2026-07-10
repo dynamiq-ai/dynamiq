@@ -11,7 +11,7 @@ from docx.text.paragraph import Paragraph
 from docx.text.run import Run
 
 from dynamiq.components.converters.base import BaseConverter
-from dynamiq.components.converters.utils import get_filename_for_bytesio
+from dynamiq.components.converters.utils import build_source_metadata, get_filename_for_bytesio
 from dynamiq.types import Document, DocumentCreationMode
 
 
@@ -27,8 +27,8 @@ class DOCXConverter(BaseConverter):
             Determines how to create Documents from the elements of the Word document. Options are:
             - `"one-doc-per-file"`: Creates one Document per file.
                 All elements are concatenated into one text field.
-            - `"one-doc-per-page"`: Creates one Document per page.
-                All elements on a page are concatenated into one text field.
+            - `"one-doc-per-page"`: Legacy name for splitting on DOCX section breaks.
+                DOCX does not contain stable rendered page boundaries.
             Defaults to `"one-doc-per-file"`.
 
     Usage example:
@@ -109,6 +109,8 @@ class DOCXConverter(BaseConverter):
 
                 if element.tag.endswith("p"):
                     text = self._process_paragraph(element, elements)
+                    if contains_blip:
+                        text = f"{text}\n\n{self.image_placeholder}" if text.strip() else self.image_placeholder
                     if text.strip():
                         text_content.append(text)
                 elif element.tag.endswith("tbl"):
@@ -127,19 +129,20 @@ class DOCXConverter(BaseConverter):
                                 text_content.append(text)
 
             full_text = "\n\n".join(text_content)
+            if not full_text.strip():
+                raise ValueError(f"DOCX file '{filepath}' contains no extractable content.")
 
-            metadata = copy.deepcopy(metadata)
-            metadata["file_path"] = filepath
+            metadata = build_source_metadata(metadata, filepath)
             docs = [Document(content=full_text, metadata=metadata)]
 
         elif document_creation_mode == DocumentCreationMode.ONE_DOC_PER_PAGE:
             sections = self._split_into_sections(elements)
-            metadata = copy.deepcopy(metadata)
-            metadata["file_path"] = filepath
+            metadata = build_source_metadata(metadata, filepath)
 
             for idx, section_content in enumerate(sections, start=1):
                 section_metadata = copy.deepcopy(metadata)
-                section_metadata["page_number"] = idx
+                section_metadata["section_number"] = idx
+                section_metadata["document_type"] = "section"
                 docs.append(Document(content=section_content, metadata=section_metadata))
 
         return docs
@@ -149,42 +152,36 @@ class DOCXConverter(BaseConverter):
         Process a paragraph element with formatting and hyperlinks.
         """
         paragraph = Paragraph(paragraph_element, docx_obj)
-        text = paragraph.text
-
         paragraph_elements = self._get_paragraph_elements(paragraph)
         is_list_item, list_marker, list_level = self._check_for_list_item(paragraph)
         is_header, header_level = self._check_for_header(paragraph)
-
-        formatted_text = ""
+        inline_text = self._render_paragraph_elements(paragraph_elements)
 
         if is_header:
             header_prefix = "#" * header_level
-            formatted_text = f"{header_prefix} {text}"
-        elif is_list_item:
+            return f"{header_prefix} {inline_text}"
+        if is_list_item:
             indent = "  " * (list_level - 1) if list_level > 1 else ""
-            formatted_text = f"{indent}{list_marker} {text}"
-        else:
-            formatted_parts = []
-            for txt, format_info, hyperlink in paragraph_elements:
-                if not txt.strip():
-                    continue
+            return f"{indent}{list_marker} {inline_text}"
+        return inline_text
 
-                if format_info:
-                    if format_info.get("bold", False):
-                        txt = f"**{txt}**"
-                    if format_info.get("italic", False):
-                        txt = f"*{txt}*"
-                    if format_info.get("underline", False):
-                        txt = f"_{txt}_"
-
-                if hyperlink:
-                    txt = f"[{txt}]({hyperlink})"
-
-                formatted_parts.append(txt)
-
-            formatted_text = " ".join(formatted_parts)
-
-        return formatted_text
+    @staticmethod
+    def _render_paragraph_elements(paragraph_elements: list[tuple[str, dict | None, str | None]]) -> str:
+        formatted_parts = []
+        for text, format_info, hyperlink in paragraph_elements:
+            if not text:
+                continue
+            if format_info:
+                if format_info.get("bold", False):
+                    text = f"**{text}**"
+                if format_info.get("italic", False):
+                    text = f"*{text}*"
+                if format_info.get("underline", False):
+                    text = f"_{text}_"
+            if hyperlink:
+                text = f"[{text}]({hyperlink})"
+            formatted_parts.append(text)
+        return "".join(formatted_parts)
 
     def _process_table(self, table_element, docx_obj) -> str:
         """
@@ -203,7 +200,7 @@ class DOCXConverter(BaseConverter):
         if table.rows:
             header_cells = []
             for cell in table.rows[0].cells:
-                header_cells.append(cell.text.strip() or "")
+                header_cells.append(self._escape_table_cell(cell.text))
             table_rows.append("| " + " | ".join(header_cells) + " |")
             table_rows.append("| " + " | ".join(["---"] * len(header_cells)) + " |")
 
@@ -219,13 +216,17 @@ class DOCXConverter(BaseConverter):
                     continue
                 cell_set.add(cell._tc)
 
-                cell_text = cell.text.strip() or ""
+                cell_text = self._escape_table_cell(cell.text)
                 row_cells.append(cell_text)
 
             if row_cells:
                 table_rows.append("| " + " | ".join(row_cells) + " |")
 
         return "\n".join(table_rows)
+
+    @staticmethod
+    def _escape_table_cell(value: str) -> str:
+        return value.strip().replace("|", "\\|").replace("\n", "<br>")
 
     def _get_paragraph_elements(self, paragraph):
         """
@@ -241,12 +242,12 @@ class DOCXConverter(BaseConverter):
                 text = content.text
                 hyperlink = content.address if hasattr(content, "address") else None
                 format_info = self._get_format_from_run(content.runs[0] if content.runs else None)
-                if text.strip():
+                if text:
                     paragraph_elements.append((text, format_info, hyperlink))
             elif isinstance(content, Run):
                 text = content.text
                 format_info = self._get_format_from_run(content)
-                if text.strip():
+                if text:
                     paragraph_elements.append((text, format_info, None))
 
         if not paragraph_elements and paragraph.text.strip():
@@ -326,8 +327,15 @@ class DOCXConverter(BaseConverter):
                     current_section = []
             elif element.tag.endswith("p"):
                 text = self._process_paragraph(element, doc)
+                contains_blip = any(child.tag == self.blip_tag for child in element.iter())
+                if contains_blip:
+                    text = f"{text}\n\n{self.image_placeholder}" if text.strip() else self.image_placeholder
                 if text.strip():
                     current_section.append(text)
+                section_break = element.find(".//w:sectPr", namespaces=element.nsmap)
+                if section_break is not None and current_section:
+                    sections.append("\n\n".join(current_section))
+                    current_section = []
             elif element.tag.endswith("tbl"):
                 text = self._process_table(element, doc)
                 if text.strip():

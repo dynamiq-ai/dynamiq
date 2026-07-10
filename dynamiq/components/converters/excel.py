@@ -7,11 +7,12 @@ from typing import Any, Literal
 from openpyxl import load_workbook
 
 from dynamiq.components.converters.base import BaseConverter
-from dynamiq.components.converters.utils import get_filename_for_bytesio
+from dynamiq.components.converters.utils import build_source_metadata, get_filename_for_bytesio, normalize_table_headers
 from dynamiq.types import Document, DocumentCreationMode
 
-
 SUPPORTED_EXCEL_EXTENSIONS = {".csv", ".tsv", ".xlsx"}
+DelimitedDocumentCreationMode = Literal["one-doc-per-file", "one-doc-per-row"]
+WorkbookDocumentCreationMode = Literal["one-doc-per-file", "one-doc-per-sheet", "one-doc-per-row"]
 
 
 class ExcelFileConverter(BaseConverter):
@@ -39,6 +40,8 @@ class ExcelFileConverter(BaseConverter):
     """
 
     document_creation_mode: Literal[DocumentCreationMode.ONE_DOC_PER_FILE] = DocumentCreationMode.ONE_DOC_PER_FILE
+    delimited_document_creation_mode: DelimitedDocumentCreationMode = "one-doc-per-file"
+    workbook_document_creation_mode: WorkbookDocumentCreationMode = "one-doc-per-file"
 
     def _process_file(self, file: Path | BytesIO, metadata: dict[str, Any]) -> list[Any]:
         """
@@ -70,10 +73,32 @@ class ExcelFileConverter(BaseConverter):
             )
 
         if extension in {".csv", ".tsv"}:
-            content = self._convert_delimited(data, delimiter="\t" if extension == ".tsv" else ",")
+            delimiter = "\t" if extension == ".tsv" else ","
+            if self.delimited_document_creation_mode == "one-doc-per-row":
+                return self._create_delimited_row_documents(
+                    filepath=filepath,
+                    rows=self._read_delimited_rows(data, delimiter=delimiter),
+                    metadata=metadata,
+                    content_type="text/tab-separated-values" if extension == ".tsv" else "text/csv",
+                )
+            content = self._convert_delimited(data, delimiter=delimiter)
         else:
             delimiter = None if extension else self._detect_delimiter(data)
-            content = self._convert_delimited(data, delimiter=delimiter) if delimiter else self._convert_workbook(data)
+            if delimiter and self.delimited_document_creation_mode == "one-doc-per-row":
+                return self._create_delimited_row_documents(
+                    filepath=filepath,
+                    rows=self._read_delimited_rows(data, delimiter=delimiter),
+                    metadata=metadata,
+                    content_type="text/tab-separated-values" if delimiter == "\t" else "text/csv",
+                )
+            if delimiter:
+                content = self._convert_delimited(data, delimiter=delimiter)
+            elif self.workbook_document_creation_mode == "one-doc-per-row":
+                return self._create_workbook_row_documents(data, filepath, metadata)
+            elif self.workbook_document_creation_mode == "one-doc-per-sheet":
+                return self._create_workbook_sheet_documents(data, filepath, metadata)
+            else:
+                content = self._convert_workbook(data)
 
         return self._create_documents(
             filepath=filepath,
@@ -100,9 +125,139 @@ class ExcelFileConverter(BaseConverter):
 
     def _convert_delimited(self, data: bytes, delimiter: str) -> str:
         """Convert CSV/TSV content to a markdown table."""
+        return self._to_markdown_table(self._read_delimited_rows(data, delimiter))
+
+    @classmethod
+    def _create_workbook_row_documents(
+        cls,
+        data: bytes,
+        filepath: str,
+        metadata: dict[str, Any],
+    ) -> list[Document]:
+        workbook = load_workbook(BytesIO(data), read_only=True, data_only=True)
+        try:
+            documents: list[Document] = []
+            for worksheet in workbook.worksheets:
+                indexed_rows = [
+                    (row_number, ["" if value is None else str(value) for value in row])
+                    for row_number, row in enumerate(worksheet.iter_rows(values_only=True), start=1)
+                    if any(value is not None and str(value).strip() for value in row)
+                ]
+                if len(indexed_rows) < 2:
+                    continue
+
+                _, raw_headers = indexed_rows[0]
+                data_rows = indexed_rows[1:]
+                width = max(len(raw_headers), *(len(row) for _, row in data_rows))
+                headers = normalize_table_headers(raw_headers, width)
+                for row_number, row in data_rows:
+                    padded = row + [""] * (width - len(row))
+                    fields = [f"{headers[index]}: {value}" for index, value in enumerate(padded) if value.strip()]
+                    if not fields:
+                        continue
+                    row_metadata = cls._spreadsheet_metadata(
+                        metadata,
+                        filepath,
+                        worksheet.title,
+                        document_type="table_row",
+                    )
+                    row_metadata["row_number"] = row_number
+                    documents.append(
+                        Document(content=f"Sheet: {worksheet.title}\n" + "\n".join(fields), metadata=row_metadata)
+                    )
+            return documents
+        finally:
+            workbook.close()
+
+    @classmethod
+    def _create_workbook_sheet_documents(
+        cls,
+        data: bytes,
+        filepath: str,
+        metadata: dict[str, Any],
+    ) -> list[Document]:
+        workbook = load_workbook(BytesIO(data), read_only=True, data_only=True)
+        try:
+            documents: list[Document] = []
+            for worksheet in workbook.worksheets:
+                rows = [
+                    ["" if value is None else str(value) for value in row]
+                    for row in worksheet.iter_rows(values_only=True)
+                ]
+                content = cls._to_markdown_table(rows)
+                if not content:
+                    continue
+                sheet_metadata = cls._spreadsheet_metadata(
+                    metadata,
+                    filepath,
+                    worksheet.title,
+                    document_type="table",
+                )
+                sheet_metadata["row_count"] = max(
+                    0, len([row for row in rows if any(cell.strip() for cell in row)]) - 1
+                )
+                documents.append(Document(content=content, metadata=sheet_metadata))
+            return documents
+        finally:
+            workbook.close()
+
+    @classmethod
+    def _spreadsheet_metadata(
+        cls,
+        metadata: dict[str, Any],
+        filepath: str,
+        sheet_name: str,
+        document_type: str,
+    ) -> dict[str, Any]:
+        result = build_source_metadata(metadata, filepath)
+        result["sheet_name"] = sheet_name
+        result["document_type"] = document_type
+        result.setdefault("content_type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        return result
+
+    @staticmethod
+    def _read_delimited_rows(data: bytes, delimiter: str) -> list[list[str]]:
+        """Decode a delimited file and return logical rows, including multiline cells."""
         text = data.decode("utf-8-sig", errors="replace")
-        rows = list(csv.reader(StringIO(text), delimiter=delimiter))
-        return self._to_markdown_table(rows)
+        return list(csv.reader(StringIO(text), delimiter=delimiter))
+
+    @classmethod
+    def _create_delimited_row_documents(
+        cls,
+        filepath: str,
+        rows: list[list[str]],
+        metadata: dict[str, Any],
+        content_type: str,
+    ) -> list[Document]:
+        """Create one self-describing document per CSV/TSV row.
+
+        Column labels are repeated in the embedded text so a retrieved row remains
+        understandable without its original table or a CSV-specific system prompt.
+        """
+        indexed_rows = [
+            (row_number, row) for row_number, row in enumerate(rows, start=1) if any(cell.strip() for cell in row)
+        ]
+        if len(indexed_rows) < 2:
+            return []
+
+        _, header = indexed_rows[0]
+        data_rows = indexed_rows[1:]
+        width = max(len(header), *(len(row) for _, row in data_rows))
+        headers = normalize_table_headers(header, width)
+        source_metadata = build_source_metadata(metadata, filepath)
+        source_metadata.setdefault("content_type", content_type)
+        source_metadata.setdefault("document_type", "table_row")
+
+        documents: list[Document] = []
+        for row_number, row in data_rows:
+            padded = row + [""] * (width - len(row))
+            fields = [f"{headers[index]}: {value}" for index, value in enumerate(padded) if value.strip()]
+            if not fields:
+                continue
+            row_metadata = copy.deepcopy(source_metadata)
+            row_metadata["row_number"] = row_number
+            documents.append(Document(content="\n".join(fields), metadata=row_metadata))
+        return documents
 
     @staticmethod
     def _detect_delimiter(data: bytes) -> str | None:
@@ -167,7 +322,6 @@ class ExcelFileConverter(BaseConverter):
         if document_creation_mode != DocumentCreationMode.ONE_DOC_PER_FILE:
             raise ValueError("ExcelFileConverter only supports one-doc-per-file mode")
 
-        metadata = copy.deepcopy(metadata)
-        metadata["file_path"] = filepath
+        metadata = build_source_metadata(metadata, filepath)
 
         return [Document(content=content.strip(), metadata=metadata)]

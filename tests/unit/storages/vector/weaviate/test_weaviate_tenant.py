@@ -142,83 +142,54 @@ def test_create_vector_store_with_collection_only():
 
 def test_write_documents_with_tenant():
     """Test writing documents with tenant name."""
-    # Patch __new__ to avoid instantiation issues and return a MagicMock
-    with patch.object(WeaviateVectorStore, "__new__") as mock_new:
-        # Create a mock to be returned by __new__
-        mock_instance = MagicMock()
-        mock_new.return_value = mock_instance
-        mock_instance._tenant_name = "test_tenant"
+    mock_instance = MagicMock()
+    mock_instance._tenant_name = "test_tenant"
 
-        # Create documents for testing
-        documents = [
-            Document(id="1", content="Document 1", metadata={"key": "value"}, embedding=[0.1, 0.2]),
-            Document(id="2", content="Document 2", metadata={"key": "value"}, embedding=[0.3, 0.4]),
-        ]
+    documents = [
+        Document(id="1", content="Document 1", metadata={"key": "value"}, embedding=[0.1, 0.2]),
+        Document(id="2", content="Document 2", metadata={"key": "value"}, embedding=[0.3, 0.4]),
+    ]
 
-        # Mock the write_documents method
-        mock_instance.write_documents.return_value = 2
+    mock_instance.write_documents.return_value = 2
+    count = mock_instance.write_documents(documents)
 
-        # Use the instance to write documents
-        count = mock_instance.write_documents(documents)
-
-        # Verify documents were written
-        mock_instance.write_documents.assert_called_once_with(documents)
-        assert count == 2
+    mock_instance.write_documents.assert_called_once_with(documents)
+    assert count == 2
 
 
 def test_search_with_tenant():
     """Test searching documents with tenant name."""
-    # Patch __new__ to avoid instantiation issues and return a MagicMock
-    with patch.object(WeaviateVectorStore, "__new__") as mock_new:
-        # Create a mock to be returned by __new__
-        mock_instance = MagicMock()
-        mock_new.return_value = mock_instance
-        mock_instance._tenant_name = "test_tenant"
+    mock_instance = MagicMock()
+    mock_instance._tenant_name = "test_tenant"
 
-        # Mock the search method
-        mock_search_result = [
-            Document(id="1", content="Content 1", metadata={"source": "test"}, score=0.95),
-            Document(id="2", content="Content 2", metadata={"source": "test"}, score=0.85),
-        ]
-        mock_instance.search.return_value = mock_search_result
+    mock_search_result = [
+        Document(id="1", content="Content 1", metadata={"source": "test"}, score=0.95),
+        Document(id="2", content="Content 2", metadata={"source": "test"}, score=0.85),
+    ]
+    mock_instance.search.return_value = mock_search_result
+    result = mock_instance.search(query_embedding=[0.1, 0.2], top_k=2)
 
-        # Use the instance to search
-        result = mock_instance.search(query_embedding=[0.1, 0.2], top_k=2)
-
-        # Verify search was called with correct parameters
-        mock_instance.search.assert_called_once_with(query_embedding=[0.1, 0.2], top_k=2)
-
-        # Check results
-        assert len(result) == 2
-        assert result[0].id == "1"
-        assert result[1].id == "2"
+    mock_instance.search.assert_called_once_with(query_embedding=[0.1, 0.2], top_k=2)
+    assert len(result) == 2
+    assert result[0].id == "1"
+    assert result[1].id == "2"
 
 
 def test_hybrid_search_with_tenant():
     """Test hybrid search with tenant name."""
-    # Patch __new__ to avoid instantiation issues and return a MagicMock
-    with patch.object(WeaviateVectorStore, "__new__") as mock_new:
-        # Create a mock to be returned by __new__
-        mock_instance = MagicMock()
-        mock_new.return_value = mock_instance
-        mock_instance._tenant_name = "test_tenant"
+    mock_instance = MagicMock()
+    mock_instance._tenant_name = "test_tenant"
 
-        # Mock the hybrid_search method
-        mock_search_result = [
-            Document(id="1", content="Content 1", metadata={"source": "test"}, score=0.95),
-            Document(id="2", content="Content 2", metadata={"source": "test"}, score=0.85),
-        ]
-        mock_instance.hybrid_search.return_value = mock_search_result
+    mock_search_result = [
+        Document(id="1", content="Content 1", metadata={"source": "test"}, score=0.95),
+        Document(id="2", content="Content 2", metadata={"source": "test"}, score=0.85),
+    ]
+    mock_instance.hybrid_search.return_value = mock_search_result
+    result = mock_instance.hybrid_search(query_embedding=[0.1, 0.2], query="test query", alpha=0.7, top_k=2)
 
-        # Use the instance to search
-        result = mock_instance.hybrid_search(query_embedding=[0.1, 0.2], query="test query", alpha=0.7, top_k=2)
-
-        # Verify hybrid_search was called with correct parameters
-        mock_instance.hybrid_search.assert_called_once_with(
-            query_embedding=[0.1, 0.2], query="test query", alpha=0.7, top_k=2
-        )
-
-        # Check results
-        assert len(result) == 2
-        assert result[0].id == "1"
-        assert result[1].id == "2"
+    mock_instance.hybrid_search.assert_called_once_with(
+        query_embedding=[0.1, 0.2], query="test query", alpha=0.7, top_k=2
+    )
+    assert len(result) == 2
+    assert result[0].id == "1"
+    assert result[1].id == "2"

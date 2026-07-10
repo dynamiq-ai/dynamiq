@@ -6,7 +6,7 @@ import pytest
 
 from dynamiq import Workflow
 from dynamiq.flows import Flow
-from dynamiq.nodes.converters.csv import CSVConverter
+from dynamiq.nodes.converters.csv import CSVConverter, CSVDocumentCreationMode
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.utils import Output
 from dynamiq.runnables import RunnableResult, RunnableStatus
@@ -202,6 +202,80 @@ def test_csv_loader_missing_metadata_columns(csv_file_path):
     first_doc = result.output["documents"][0]
     assert "Feature_1" in first_doc["metadata"]
     assert "NonExistentFeature" not in first_doc["metadata"]
+
+
+def test_csv_loader_without_content_column_creates_self_describing_rows(csv_bytesio):
+    csv_loader = CSVConverter()
+
+    result = csv_loader.run(input_data={"files": [csv_bytesio]})
+
+    documents = result.output["documents"]
+    assert documents[0]["content"] == "Target: Document 1\nFeature_1: Value 1A\nFeature_2: Value 2A"
+    assert documents[0]["metadata"]["document_type"] == "table_row"
+    assert documents[0]["metadata"]["row_number"] == 2
+
+
+def test_csv_loader_generic_rows_preserve_source_url_and_duplicate_headers():
+    file = write_csv_to_bytesio(["", "plan", "plan"], [["Feature", "Free", "Pro"]], "pricing.csv")
+    source_url = "https://example.com/pricing"
+    csv_loader = CSVConverter()
+
+    result = csv_loader.run(
+        input_data={
+            "files": [file],
+            "metadata": [{"dynamiq_item_source_provider_url": source_url}],
+        }
+    )
+
+    document = result.output["documents"][0]
+    assert document["content"] == "column_1: Feature\nplan: Free\nplan_2: Pro"
+    assert document["metadata"]["dynamiq_item_source_provider_url"] == source_url
+    assert document["metadata"]["source"] == source_url
+
+
+def test_csv_loader_keeps_generated_headers_globally_unique():
+    file = write_csv_to_bytesio(["plan", "plan", "plan_2"], [["Free", "Pro", "Business"]], "plans.csv")
+
+    result = CSVConverter().run(input_data={"files": [file]})
+
+    assert result.output["documents"][0]["content"] == ("plan: Free\nplan_3: Pro\nplan_2: Business")
+
+
+def test_csv_loader_can_preserve_whole_file_as_plain_text(csv_bytesio):
+    csv_loader = CSVConverter(document_creation_mode=CSVDocumentCreationMode.ONE_DOC_PER_FILE)
+
+    result = csv_loader.run(input_data={"files": [csv_bytesio]})
+
+    documents = result.output["documents"]
+    assert len(documents) == 1
+    assert documents[0]["content"].startswith("Target,Feature_1,Feature_2")
+    assert "Document 2,Value 1B,Value 2B" in documents[0]["content"]
+    assert documents[0]["metadata"]["document_type"] == "table"
+    assert documents[0]["metadata"]["row_count"] == 2
+
+
+def test_csv_input_can_override_document_creation_mode(csv_bytesio):
+    csv_loader = CSVConverter(document_creation_mode=CSVDocumentCreationMode.ONE_DOC_PER_FILE)
+
+    result = csv_loader.run(
+        input_data={
+            "files": [csv_bytesio],
+            "document_creation_mode": CSVDocumentCreationMode.ONE_DOC_PER_ROW,
+        }
+    )
+
+    assert len(result.output["documents"]) == 2
+
+
+def test_csv_loader_labels_tsv_content_type():
+    file = BytesIO(b"name\tprice\nBasic\t10\n")
+    file.name = "pricing.tsv"
+
+    result = CSVConverter(delimiter="\t").run(input_data={"files": [file]})
+
+    document = result.output["documents"][0]
+    assert document["content"] == "name: Basic\nprice: 10"
+    assert document["metadata"]["content_type"] == "text/tab-separated-values"
 
 
 def test_workflow_with_csv_converter_file_not_found(

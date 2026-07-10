@@ -1,3 +1,5 @@
+from typing import Literal
+
 from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.connections import Cohere as CohereConnection
 
@@ -9,12 +11,14 @@ class CohereEmbedder(BaseEmbedder):
     Attributes:
         connection (CohereConnection): The connection to the  Cohere API. A new connection
             is created if none is provided.
-        model (str): The model name to use for embedding. Defaults to "cohere/embed-english-v2.0"
+        model (str): The model name to use for embedding. Defaults to "embed-v4.0".
         input_type (str): Specifies the type of input you're giving to the model. Defaults to "search_query"
     """
     connection: CohereConnection
-    model: str = "cohere/embed-english-v2.0"
+    model: str = "embed-v4.0"
     input_type: str = "search_query"
+    truncate: Literal["NONE", "START", "END"] = "NONE"
+    truncation_enabled: bool = False
 
     def __init__(self, **kwargs):
         if kwargs.get("client") is None and kwargs.get("connection") is None:
@@ -27,5 +31,7 @@ class CohereEmbedder(BaseEmbedder):
         params["input_type"] = self.input_type
         if self.truncate:
             params["truncate"] = self.truncate
+        if self.dimensions:
+            params["dimensions"] = self.dimensions
 
         return params

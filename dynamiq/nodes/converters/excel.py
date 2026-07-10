@@ -32,6 +32,14 @@ class ExcelFileConverter(Node):
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
     name: str = "excel-file-converter"
+    delimited_document_creation_mode: Literal["one-doc-per-file", "one-doc-per-row"] = Field(
+        default="one-doc-per-file",
+        description="Create one document per CSV/TSV file or one self-describing document per data row.",
+    )
+    workbook_document_creation_mode: Literal["one-doc-per-file", "one-doc-per-sheet", "one-doc-per-row"] = Field(
+        default="one-doc-per-file",
+        description="Create one document per XLSX workbook, sheet, or self-describing data row.",
+    )
     error_handling: ErrorHandling = Field(
         default_factory=lambda: ErrorHandling(timeout_seconds=60.0),
         description="Default execution timeout. Set timeout_seconds to None to disable.",
@@ -54,7 +62,10 @@ class ExcelFileConverter(Node):
         connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.file_converter is None:
-            self.file_converter = ExcelFileConverterComponent()
+            self.file_converter = ExcelFileConverterComponent(
+                delimited_document_creation_mode=self.delimited_document_creation_mode,
+                workbook_document_creation_mode=self.workbook_document_creation_mode,
+            )
 
     def execute(
         self, input_data: ExcelFileConverterInputSchema, config: RunnableConfig | None = None, **kwargs

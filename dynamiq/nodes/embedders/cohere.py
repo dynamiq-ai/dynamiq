@@ -1,3 +1,7 @@
+from typing import Literal
+
+from pydantic import Field
+
 from dynamiq.components.embedders.cohere import CohereEmbedder as CohereEmbedderComponent
 from dynamiq.connections import Cohere as CohereConnection
 from dynamiq.connections.managers import ConnectionManager
@@ -20,12 +24,26 @@ class CohereDocumentEmbedder(DocumentEmbedder):
     Args:
         connection (Optional[CohereConnection]): The connection to the Cohere API. A new connection
             is created if none is provided.
-        model (str): The model name to use for embedding. Defaults to 'cohere/embed-english-v2.0'.
+        model (str): The model name to use for embedding. Defaults to `embed-v4.0`.
     """
 
     name: str = "cohere-document-embedder"
     connection: CohereConnection | None = None
-    model: str = "cohere/embed-english-v2.0"
+    model: str = "embed-v4.0"
+    input_type: Literal["search_document", "search_query", "classification", "clustering"] = Field(
+        default="search_document",
+        description="Cohere embedding task. Use search_document for chunks stored in a RAG index.",
+    )
+    batch_size: int = Field(default=32, ge=1, le=96)
+    meta_fields_to_embed: list[str] = Field(default_factory=list)
+    truncate: Literal["NONE", "START", "END"] = Field(
+        default="NONE",
+        description="Cohere provider truncation policy. NONE fails instead of silently dropping content.",
+    )
+    dimensions: Literal[256, 512, 1024, 1536] | None = Field(
+        default=None,
+        description="Embed v4 output dimensions. Must match the query embedder and vector index.",
+    )
     document_embedder: CohereEmbedderComponent | None = None
 
     def __init__(self, **kwargs):
@@ -55,7 +73,14 @@ class CohereDocumentEmbedder(DocumentEmbedder):
         super().init_components(connection_manager)
         if self.document_embedder is None:
             self.document_embedder = CohereEmbedderComponent(
-                connection=self.connection, model=self.model, client=self.client
+                connection=self.connection,
+                model=self.model,
+                client=self.client,
+                input_type=self.input_type,
+                batch_size=self.batch_size,
+                meta_fields_to_embed=self.meta_fields_to_embed,
+                truncate=self.truncate,
+                dimensions=self.dimensions,
             )
 
 
@@ -68,8 +93,7 @@ class CohereTextEmbedder(TextEmbedder):
     Args:
         connection (Optional[CohereConnection]): An existing connection to Cohere API. If not
             provided, a new connection will be established using environment variables.
-        model (str): The identifier of the Cohere model for text embeddings. Defaults to
-            'cohere/embed-english-v2.0'.
+        model (str): The identifier of the Cohere model for text embeddings. Defaults to `embed-v4.0`.
 
     Attributes:
         group (Literal[NodeGroup.EMBEDDERS]): The group the node belongs to.
@@ -82,7 +106,19 @@ class CohereTextEmbedder(TextEmbedder):
 
     name: str = "cohere-text-embedder"
     connection: CohereConnection | None = None
-    model: str = "cohere/embed-english-v2.0"
+    model: str = "embed-v4.0"
+    input_type: Literal["search_query", "search_document", "classification", "clustering"] = Field(
+        default="search_query",
+        description="Cohere embedding task. Use search_query for RAG retrieval queries.",
+    )
+    truncate: Literal["NONE", "START", "END"] = Field(
+        default="NONE",
+        description="Cohere provider truncation policy. NONE fails instead of silently dropping query text.",
+    )
+    dimensions: Literal[256, 512, 1024, 1536] | None = Field(
+        default=None,
+        description="Embed v4 output dimensions. Must match document embeddings and the vector index.",
+    )
     text_embedder: CohereEmbedderComponent = None
 
     def __init__(self, **kwargs):
@@ -112,5 +148,10 @@ class CohereTextEmbedder(TextEmbedder):
         super().init_components(connection_manager)
         if self.text_embedder is None:
             self.text_embedder = CohereEmbedderComponent(
-                connection=self.connection, model=self.model, client=self.client
+                connection=self.connection,
+                model=self.model,
+                client=self.client,
+                input_type=self.input_type,
+                truncate=self.truncate,
+                dimensions=self.dimensions,
             )
