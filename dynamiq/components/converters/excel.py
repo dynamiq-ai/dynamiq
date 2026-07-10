@@ -7,7 +7,11 @@ from typing import Any, Literal
 from openpyxl import load_workbook
 
 from dynamiq.components.converters.base import BaseConverter
-from dynamiq.components.converters.utils import build_source_metadata, get_filename_for_bytesio, normalize_table_headers
+from dynamiq.components.converters.utils import (
+    build_source_metadata,
+    get_filename_for_bytesio,
+    normalize_table_headers,
+)
 from dynamiq.types import Document, DocumentCreationMode
 
 SUPPORTED_EXCEL_EXTENSIONS = {".csv", ".tsv", ".xlsx"}
@@ -74,35 +78,51 @@ class ExcelFileConverter(BaseConverter):
 
         if extension in {".csv", ".tsv"}:
             delimiter = "\t" if extension == ".tsv" else ","
-            if self.delimited_document_creation_mode == "one-doc-per-row":
-                return self._create_delimited_row_documents(
-                    filepath=filepath,
-                    rows=self._read_delimited_rows(data, delimiter=delimiter),
-                    metadata=metadata,
-                    content_type="text/tab-separated-values" if extension == ".tsv" else "text/csv",
-                )
-            content = self._convert_delimited(data, delimiter=delimiter)
-        else:
-            delimiter = None if extension else self._detect_delimiter(data)
-            if delimiter and self.delimited_document_creation_mode == "one-doc-per-row":
-                return self._create_delimited_row_documents(
-                    filepath=filepath,
-                    rows=self._read_delimited_rows(data, delimiter=delimiter),
-                    metadata=metadata,
-                    content_type="text/tab-separated-values" if delimiter == "\t" else "text/csv",
-                )
-            if delimiter:
-                content = self._convert_delimited(data, delimiter=delimiter)
-            elif self.workbook_document_creation_mode == "one-doc-per-row":
-                return self._create_workbook_row_documents(data, filepath, metadata)
-            elif self.workbook_document_creation_mode == "one-doc-per-sheet":
-                return self._create_workbook_sheet_documents(data, filepath, metadata)
-            else:
-                content = self._convert_workbook(data)
+            return self._create_delimited_documents(data, filepath, metadata, delimiter)
 
+        delimiter = None if extension else self._detect_delimiter(data)
+        if delimiter:
+            return self._create_delimited_documents(data, filepath, metadata, delimiter)
+        return self._create_workbook_documents(data, filepath, metadata)
+
+    def _create_delimited_documents(
+        self,
+        data: bytes,
+        filepath: str,
+        metadata: dict[str, Any],
+        delimiter: str,
+    ) -> list[Document]:
+        content_type = "text/tab-separated-values" if delimiter == "\t" else "text/csv"
+        if self.delimited_document_creation_mode == "one-doc-per-row":
+            return self._create_delimited_row_documents(
+                filepath=filepath,
+                rows=self._read_delimited_rows(data, delimiter=delimiter),
+                metadata=metadata,
+                content_type=content_type,
+            )
         return self._create_documents(
             filepath=filepath,
-            content=content,
+            content=self._convert_delimited(data, delimiter=delimiter),
+            document_creation_mode=self.document_creation_mode,
+            metadata=metadata,
+        )
+
+    def _create_workbook_documents(
+        self,
+        data: bytes,
+        filepath: str,
+        metadata: dict[str, Any],
+    ) -> list[Document]:
+        creators = {
+            "one-doc-per-row": self._create_workbook_row_documents,
+            "one-doc-per-sheet": self._create_workbook_sheet_documents,
+        }
+        creator = creators.get(self.workbook_document_creation_mode)
+        if creator:
+            return creator(data, filepath, metadata)
+        return self._create_documents(
+            filepath=filepath,
+            content=self._convert_workbook(data),
             document_creation_mode=self.document_creation_mode,
             metadata=metadata,
         )

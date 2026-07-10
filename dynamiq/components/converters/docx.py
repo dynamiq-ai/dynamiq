@@ -14,6 +14,13 @@ from dynamiq.components.converters.base import BaseConverter
 from dynamiq.components.converters.utils import build_source_metadata, get_filename_for_bytesio
 from dynamiq.types import Document, DocumentCreationMode
 
+InlineElement = tuple[str, dict | None, str | None]
+MARKDOWN_FORMAT_MARKERS = (
+    ("bold", "**"),
+    ("italic", "*"),
+    ("underline", "_"),
+)
+
 
 class DOCXConverter(BaseConverter):
     """
@@ -137,6 +144,8 @@ class DOCXConverter(BaseConverter):
 
         elif document_creation_mode == DocumentCreationMode.ONE_DOC_PER_PAGE:
             sections = self._split_into_sections(elements)
+            if not sections:
+                raise ValueError(f"DOCX file '{filepath}' contains no extractable content.")
             metadata = build_source_metadata(metadata, filepath)
 
             for idx, section_content in enumerate(sections, start=1):
@@ -165,23 +174,26 @@ class DOCXConverter(BaseConverter):
             return f"{indent}{list_marker} {inline_text}"
         return inline_text
 
+    @classmethod
+    def _render_paragraph_elements(cls, paragraph_elements: list[InlineElement]) -> str:
+        return "".join(cls._render_inline_element(*element) for element in paragraph_elements if element[0])
+
     @staticmethod
-    def _render_paragraph_elements(paragraph_elements: list[tuple[str, dict | None, str | None]]) -> str:
-        formatted_parts = []
-        for text, format_info, hyperlink in paragraph_elements:
-            if not text:
-                continue
-            if format_info:
-                if format_info.get("bold", False):
-                    text = f"**{text}**"
-                if format_info.get("italic", False):
-                    text = f"*{text}*"
-                if format_info.get("underline", False):
-                    text = f"_{text}_"
-            if hyperlink:
-                text = f"[{text}]({hyperlink})"
-            formatted_parts.append(text)
-        return "".join(formatted_parts)
+    def _render_inline_element(text: str, format_info: dict | None, hyperlink: str | None) -> str:
+        """Render one DOCX inline element without placing Markdown markers around whitespace."""
+        if not text.strip():
+            return text
+        leading_space = text[: len(text) - len(text.lstrip())]
+        trailing_space = text[len(text.rstrip()) :]
+        rendered = text.strip()
+
+        for style, marker in MARKDOWN_FORMAT_MARKERS:
+            if rendered and format_info and format_info.get(style, False):
+                rendered = f"{marker}{rendered}{marker}"
+
+        if rendered and hyperlink:
+            rendered = f"[{rendered}]({hyperlink})"
+        return f"{leading_space}{rendered}{trailing_space}"
 
     def _process_table(self, table_element, docx_obj) -> str:
         """
@@ -343,7 +355,4 @@ class DOCXConverter(BaseConverter):
 
         if current_section:
             sections.append("\n\n".join(current_section))
-        if not sections:
-            return [""]
-
         return sections

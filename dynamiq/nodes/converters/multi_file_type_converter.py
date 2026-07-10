@@ -716,27 +716,32 @@ class MultiFileTypeConverter(Node):
         effective_name = str(getattr(file, "name", None) or filename)
         extension = Path(effective_name).suffix.lower().lstrip(".")
         source_type = detected_type.value if isinstance(detected_type, FileType) else detected_type
-        if isinstance(converter, CSVConverter):
-            converted_type = "csv"
-        elif isinstance(converter, (DOCXFileConverter, ExcelFileConverter, HTMLConverter)):
-            converted_type = "markdown"
-        elif isinstance(converter, TextFileConverter) and source_type == FileType.MARKDOWN.value:
-            converted_type = "markdown"
-        else:
-            converted_type = "text"
 
         for document in documents:
             metadata = build_source_metadata(document.metadata, effective_name)
-            document_file_type = converted_type
-            if isinstance(converter, ExcelFileConverter) and metadata.get("document_type") == "table_row":
-                document_file_type = "text"
             metadata.setdefault("filename", effective_name)
             if extension:
                 metadata.setdefault("extension", extension)
-            metadata.setdefault("file_type", document_file_type)
+            metadata.setdefault(
+                "file_type",
+                MultiFileTypeConverter._converted_file_type(converter, source_type, metadata),
+            )
             if source_type:
                 metadata.setdefault("source_file_type", str(source_type))
             document.metadata = metadata
+
+    @staticmethod
+    def _converted_file_type(converter: Node, source_type: str | None, metadata: dict[str, Any]) -> str:
+        """Describe converter output for downstream splitting, independently of its source format."""
+        if isinstance(converter, CSVConverter):
+            return "csv"
+        if isinstance(converter, ExcelFileConverter):
+            return "text" if metadata.get("document_type") == "table_row" else "markdown"
+        if isinstance(converter, (DOCXFileConverter, HTMLConverter)):
+            return "markdown"
+        if isinstance(converter, TextFileConverter) and source_type == FileType.MARKDOWN.value:
+            return "markdown"
+        return "text"
 
     def _convert_with_fallback_converter(
         self, file: BytesIO, filename: str, metadata: dict, run_depends: list[dict], config: RunnableConfig, **kwargs

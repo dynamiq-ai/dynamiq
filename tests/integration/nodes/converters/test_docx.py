@@ -1,5 +1,6 @@
 from io import BytesIO
 
+import pytest
 from docx import Document as DocxDocument
 from docx.enum.section import WD_SECTION
 from docx.opc.constants import RELATIONSHIP_TYPE
@@ -7,6 +8,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 from dynamiq import Workflow
+from dynamiq.components.converters.docx import DOCXConverter
 from dynamiq.flows import Flow
 from dynamiq.nodes.converters.docx import DOCXFileConverter, DOCXFileConverterInputSchema
 from dynamiq.runnables import RunnableResult, RunnableStatus
@@ -60,6 +62,9 @@ def test_docx_converter_preserves_run_spacing_hyperlinks_and_table_cells():
     paragraph.add_run("Read ")
     add_hyperlink(paragraph, "the docs", "https://example.com/docs")
     paragraph.add_run(" now.")
+    formatted_paragraph = doc.add_paragraph()
+    formatted_run = formatted_paragraph.add_run(" important ")
+    formatted_run.bold = True
     table = doc.add_table(rows=2, cols=2)
     table.cell(0, 0).text = "Feature"
     table.cell(0, 1).text = "Value"
@@ -76,6 +81,7 @@ def test_docx_converter_preserves_run_spacing_hyperlinks_and_table_cells():
     assert result.status == RunnableStatus.SUCCESS
     content = result.output["documents"][0].content
     assert "Read [the docs](https://example.com/docs) now." in content
+    assert " **important** " in content
     assert "| A \\| B | Line 1<br>Line 2 |" in content
 
 
@@ -97,3 +103,15 @@ def test_docx_legacy_page_mode_reports_real_section_numbers():
     assert [document.content for document in documents] == ["First section", "Second section"]
     assert [document.metadata["section_number"] for document in documents] == [1, 2]
     assert all("page_number" not in document.metadata for document in documents)
+
+
+def test_docx_section_mode_rejects_document_without_extractable_content():
+    doc = DocxDocument()
+    file = BytesIO()
+    doc.save(file)
+    file.name = "empty.docx"
+
+    converter = DOCXConverter(document_creation_mode="one-doc-per-page")
+
+    with pytest.raises(ValueError, match="contains no extractable content"):
+        converter.run(files=[file])
