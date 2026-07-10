@@ -236,6 +236,29 @@ class MilvusVectorStore(BaseVectorStore, DryRunMixin):
 
         return self._get_result_to_documents(result, content_key=content_key, embedding_key=embedding_key)
 
+    def get_documents_by_id(
+        self, ids: list[str], content_key: str | None = None, embedding_key: str | None = None
+    ) -> list[Document]:
+        """
+        Fetch documents by their exact ids (not a similarity search).
+
+        Args:
+            ids (list[str]): The document ids to fetch (the collection primary key).
+            content_key (Optional[str]): The field used to store content in the storage.
+            embedding_key (Optional[str]): The field used to store vector in the storage.
+
+        Returns:
+            List[Document]: The documents whose ids were found. Missing ids are skipped.
+        """
+        if not ids:
+            return []
+
+        if not self.client.has_collection(self.index_name):
+            raise ValueError(f"Collection '{self.index_name}' does not exist.")
+
+        result = self.client.get(collection_name=self.index_name, ids=list(ids), output_fields=["*"])
+        return self._get_result_to_documents(result, content_key=content_key, embedding_key=embedding_key)
+
     def _embedding_retrieval(
         self,
         query_embeddings: list[list[float]],

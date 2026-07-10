@@ -197,6 +197,28 @@ def test_dimension_used_in_schema(dimension):
     pytest.fail("No add_field call found for embedding field")
 
 
+def test_get_documents_by_id_fetches_by_primary_key(milvus_vector_store, mock_milvus_client):
+    mock_milvus_client.has_collection.return_value = True
+    mock_milvus_client.get.return_value = [
+        {"id": "1", "content": "ok", "embedding": [0.1, 0.2], "type": "test"},
+    ]
+
+    docs = milvus_vector_store.get_documents_by_id(["1", "2"])
+
+    assert len(docs) == 1
+    assert docs[0].id == "1"
+    assert docs[0].content == "ok"
+    assert docs[0].metadata == {"type": "test"}
+    mock_milvus_client.get.assert_called_once_with(
+        collection_name="test_collection", ids=["1", "2"], output_fields=["*"]
+    )
+
+
+def test_get_documents_by_id_empty_returns_empty_without_query(milvus_vector_store, mock_milvus_client):
+    assert milvus_vector_store.get_documents_by_id([]) == []
+    mock_milvus_client.get.assert_not_called()
+
+
 def test_writer_params_rejects_negative_dimension():
     with pytest.raises(ValueError):
         MilvusWriterVectorStoreParams(dimension=-1)

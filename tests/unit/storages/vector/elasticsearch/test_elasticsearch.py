@@ -231,6 +231,50 @@ def test_create_alias(es_vector_store, mock_es_client):
     mock_es_client.indices.update_aliases.assert_called_once()
 
 
+def test_get_documents_by_id_fetches_via_mget(es_vector_store, mock_es_client):
+    mock_es_client.mget.return_value = {
+        "docs": [
+            {"_id": "1", "found": True, "_source": {"content": "ok", "metadata": {"k": "v"}}},
+            {"_id": "2", "found": False},
+        ]
+    }
+
+    docs = es_vector_store.get_documents_by_id(["1", "2"])
+
+    assert len(docs) == 1  # not-found id skipped
+    assert docs[0].id == "1"
+    assert docs[0].content == "ok"
+    assert docs[0].metadata == {"k": "v"}
+    assert docs[0].embedding is None
+    mock_es_client.mget.assert_called_once_with(
+        index="test_index",
+        ids=["1", "2"],
+        _source_excludes=[es_vector_store.embedding_key],  # embeddings excluded by default
+    )
+
+
+def test_get_documents_by_id_includes_embeddings_when_requested(es_vector_store, mock_es_client):
+    mock_es_client.mget.return_value = {
+        "docs": [
+            {
+                "_id": "1",
+                "found": True,
+                "_source": {"content": "ok", "metadata": {}, es_vector_store.embedding_key: [0.1, 0.2]},
+            }
+        ]
+    }
+
+    docs = es_vector_store.get_documents_by_id(["1"], include_embeddings=True)
+
+    assert docs[0].embedding == [0.1, 0.2]
+    assert mock_es_client.mget.call_args.kwargs["_source_excludes"] is None
+
+
+def test_get_documents_by_id_empty_returns_empty_without_query(es_vector_store, mock_es_client):
+    assert es_vector_store.get_documents_by_id([]) == []
+    mock_es_client.mget.assert_not_called()
+
+
 def test_close(es_vector_store):
     es_vector_store.close()
     es_vector_store.client.close.assert_called_once()

@@ -347,6 +347,44 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
             all_documents.extend(documents)
         return all_documents
 
+    def get_documents_by_id(
+        self, ids: list[str], content_key: str | None = None, include_embeddings: bool = False
+    ) -> list[Document]:
+        """
+        Fetch documents by their exact ids (not a similarity search).
+
+        Args:
+            ids (list[str]): The document ids to fetch.
+            content_key (Optional[str]): The field used to store content in the storage.
+            include_embeddings (bool): Whether to include document embeddings in the result.
+
+        Returns:
+            list[Document]: The documents whose ids were found. Missing ids are skipped.
+        """
+        if not ids:
+            return []
+
+        response = self._index.fetch(ids=list(ids), namespace=self.namespace)
+
+        documents = []
+        for pinecone_doc in response["vectors"].values():
+            content = pinecone_doc["metadata"].pop(content_key or self.content_key, "")
+
+            embedding = None
+            if include_embeddings and pinecone_doc["values"] != self._dummy_vector:
+                embedding = pinecone_doc["values"]
+
+            documents.append(
+                Document(
+                    id=pinecone_doc["id"],
+                    content=content,
+                    metadata=pinecone_doc["metadata"],
+                    embedding=embedding,
+                    score=None,
+                )
+            )
+        return documents
+
     def _namespace_exists(self, index=None) -> bool:
         """
         Check if the namespace exists in an index.

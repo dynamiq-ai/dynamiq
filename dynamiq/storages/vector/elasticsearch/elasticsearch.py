@@ -400,6 +400,55 @@ class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
 
         return doc
 
+    def get_documents_by_id(
+        self,
+        ids: list[str],
+        content_key: str | None = None,
+        embedding_key: str | None = None,
+        include_embeddings: bool = False,
+    ) -> list[Document]:
+        """
+        Fetch documents by their exact ids (not a similarity search).
+
+        Args:
+            ids (list[str]): The document ids to fetch (stored as the Elasticsearch ``_id``).
+            content_key (Optional[str]): The field used to store content in the storage.
+            embedding_key (Optional[str]): The field used to store vector in the storage.
+            include_embeddings (bool): Whether to include document embeddings in the result.
+
+        Returns:
+            list[Document]: The documents whose ids were found. Missing ids are skipped.
+        """
+        if not ids:
+            return []
+
+        embedding_key = embedding_key or self.embedding_key
+        content_key = content_key or self.content_key
+
+        response = self.client.mget(
+            index=self.index_name,
+            ids=list(ids),
+            _source_excludes=([embedding_key] if not include_embeddings else None),
+        )
+
+        documents = []
+        for hit in response["docs"]:
+            if not hit.get("found"):
+                continue
+            source = hit["_source"]
+            if content_key not in source:
+                continue
+            doc = Document(
+                id=hit["_id"],
+                content=source[content_key],
+                metadata=source.get("metadata", {}),
+            )
+            if include_embeddings and embedding_key in source:
+                doc.embedding = source[embedding_key]
+            documents.append(doc)
+
+        return documents
+
     def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
         """
         Delete documents from the store.
