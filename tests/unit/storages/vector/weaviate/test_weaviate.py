@@ -125,6 +125,46 @@ def test_hybrid_retrieval_forwards_custom_content_key_to_document_conversion() -
     assert store._collection.query.hybrid.call_args.kwargs["query_properties"] == ["custom_content", "file_name"]
 
 
+def test_get_documents_by_id_fetches_by_generated_uuid() -> None:
+    from weaviate.util import generate_uuid5
+
+    store = WeaviateVectorStore.__new__(WeaviateVectorStore)
+    store.content_key = "content"
+
+    collection_properties = [
+        SimpleNamespace(name="content"),
+        SimpleNamespace(name="file_name"),
+    ]
+    result_object = SimpleNamespace(objects=[SimpleNamespace(properties={"_original_id": "1", "content": "ok"})])
+    store._collection = MagicMock()
+    store._collection.config.get.return_value.properties = collection_properties
+    store._collection.query.fetch_objects.return_value = result_object
+    store._to_document = MagicMock(return_value=Document(content="ok"))
+
+    docs = store.get_documents_by_id(["1", "2"], content_key="content")
+
+    assert len(docs) == 1
+    assert docs[0].content == "ok"
+    store._to_document.assert_called_once_with(result_object.objects[0], content_key="content")
+
+    call_kwargs = store._collection.query.fetch_objects.call_args.kwargs
+    assert call_kwargs["include_vector"] is False
+    assert call_kwargs["limit"] == 2
+    assert call_kwargs["return_properties"] == ["content", "file_name"]
+    # ids are resolved to the same deterministic UUIDs used by the write/delete paths
+    filter_ids = call_kwargs["filters"].value
+    assert set(filter_ids) == {generate_uuid5("1"), generate_uuid5("2")}
+
+
+def test_get_documents_by_id_empty_returns_empty_without_query() -> None:
+    store = WeaviateVectorStore.__new__(WeaviateVectorStore)
+    store.content_key = "content"
+    store._collection = MagicMock()
+
+    assert store.get_documents_by_id([]) == []
+    store._collection.query.fetch_objects.assert_not_called()
+
+
 @patch("dynamiq.storages.vector.weaviate.weaviate.Weaviate")
 def test_to_data_object_with_valid_properties(mock_weaviate):
     """Test the _to_data_object method with valid property names."""

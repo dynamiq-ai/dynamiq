@@ -660,6 +660,48 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
             documents.append(document)
         return documents
 
+    def get_documents_by_id(
+        self,
+        ids: list[str],
+        content_key: str | None = None,
+        include_embeddings: bool = False,
+    ) -> list[Document]:
+        """
+        Fetch documents by their exact ids (not a similarity search).
+
+        Documents are stored under a deterministic Weaviate UUID derived from the Dynamiq
+        document id (see ``generate_uuid5`` usage in the write/delete paths), so the ids are
+        resolved the same way here.
+
+        Args:
+            ids (list[str]): The Dynamiq document ids to fetch.
+            content_key (Optional[str]): The field used to store content in the storage.
+            include_embeddings (bool): Whether to include document embeddings in the result.
+
+        Returns:
+            list[Document]: The documents whose ids were found. Missing ids are skipped.
+
+        Raises:
+            VectorStoreException: If the query fails.
+        """
+        if not ids:
+            return []
+
+        weaviate_ids = [generate_uuid5(doc_id) for doc_id in ids]
+        properties = [p.name for p in self._collection.config.get().properties]
+        try:
+            result = self._collection.query.fetch_objects(
+                filters=Filter.by_id().contains_any(weaviate_ids),
+                include_vector=include_embeddings,
+                limit=len(weaviate_ids),
+                return_properties=properties,
+            )
+        except WeaviateQueryError as e:
+            msg = f"Failed to fetch documents by id in Weaviate. Error: {e.message}"
+            raise VectorStoreException(msg) from e
+
+        return [self._to_document(obj, content_key=content_key) for obj in result.objects]
+
     def _batch_write(self, documents: list[Document], content_key: str | None = None) -> int:
         """
         Write documents to Weaviate in batches.
