@@ -685,11 +685,20 @@ class _DeleteStore:
         self.error = error
         self.calls: list[dict] = []
 
-    def delete_documents(self, document_ids, *, doc_scoped_labels=None, provenance_key="source_doc_id", database=None):
+    def delete_documents(
+        self,
+        document_ids,
+        *,
+        doc_scoped_labels=None,
+        orphan_labels=None,
+        provenance_key="source_doc_id",
+        database=None,
+    ):
         self.calls.append(
             {
                 "document_ids": document_ids,
                 "doc_scoped_labels": doc_scoped_labels,
+                "orphan_labels": orphan_labels,
                 "provenance_key": provenance_key,
                 "database": database,
             }
@@ -717,6 +726,7 @@ class TestDeleteDocuments:
             {
                 "document_ids": ["docA", "7"],  # ids coerced to str, matching stored provenance values
                 "doc_scoped_labels": ["AttributeValue"],
+                "orphan_labels": ["Entity"],  # entities left edgeless by this delete are swept
                 "provenance_key": "source_doc_id",
                 "database": None,
             }

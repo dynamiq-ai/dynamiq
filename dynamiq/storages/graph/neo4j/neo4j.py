@@ -198,11 +198,12 @@ class Neo4jGraphStore(BaseGraphStore):
         document_ids: list[str],
         *,
         doc_scoped_labels: list[str] | None = None,
+        orphan_labels: list[str] | None = None,
         provenance_key: str = "source_doc_id",
         database: str | None = None,
         **kwargs: Any,
     ) -> dict[str, int]:
-        """Delete the given documents' edges (and their document-scoped nodes), leaving entities intact.
+        """Delete the given documents' edges (and their document-scoped nodes); optionally sweep orphans.
 
         ``provenance_key`` is the edge property the ids match against — ``source_doc_id`` (default, the
         ingestion chunk id) or any other flattened document-metadata key, e.g. ``file_id`` to delete
@@ -212,30 +213,72 @@ class Neo4jGraphStore(BaseGraphStore):
         For each label in ``doc_scoped_labels`` (e.g. ``AttributeValue``), the node is the end of an edge
         stamped with one of these documents' provenance and belongs to exactly that document, so a
         ``DETACH DELETE`` removes the node and that edge together. Any remaining per-document edges
-        (entity-to-entity) are then deleted; identity (entity) nodes are deliberately never matched.
+        (entity-to-entity) are then deleted.
+
+        With ``orphan_labels`` (e.g. ``Entity``), an endpoint of a removed edge is deleted IFF it is left
+        with no remaining relationships — i.e. this document held its last edge. Provenance stays on the
+        (ACL-scoped) edges; a node still cited by another document keeps an edge and survives, so cleanup
+        is derived from edge degree rather than any per-node state. The sweep is FOLDED INTO each deleting
+        statement — Cypher clauses see the statement's own deletes, so the endpoints of the just-removed
+        edges are degree-checked and deleted in the same statement. No candidate ids are ever
+        materialized client-side, and the check-then-delete has no gap for concurrent writes to slip
+        into: a node that just gained another document's edge fails the degree guard and is skipped
+        (plain ``DELETE``, never ``DETACH`` — an unexpected surviving edge can only ever spare the node,
+        not be destroyed with it). Nodes already edgeless before this delete are endpoints of no removed
+        edge, so isolated nodes are never matched.
         """
         if not document_ids:
             return {"nodes_deleted": 0, "relationships_deleted": 0}
         if not PROPERTY_KEY_PATTERN.match(provenance_key):
             raise ValueError(f"Invalid provenance key for delete: {provenance_key!r}")
+        for label in doc_scoped_labels or []:
+            if not LABEL_PATTERN.match(label):
+                raise ValueError(f"Invalid document-scoped label for delete: {label!r}")
+        for label in orphan_labels or []:
+            if not LABEL_PATTERN.match(label):
+                raise ValueError(f"Invalid orphan label for delete: {label!r}")
+        # e.g. "n:`Entity`" — the sweep's label filter; empty string disables the sweep entirely.
+        orphan_predicate = " OR ".join("n:`" + label + "`" for label in orphan_labels or [])
 
         totals = {"nodes_deleted": 0, "relationships_deleted": 0}
         params = {"doc_ids": list(document_ids)}
 
         for label in doc_scoped_labels or []:
-            if not LABEL_PATTERN.match(label):
-                raise ValueError(f"Invalid document-scoped label for delete: {label!r}")
-            query = "MATCH ()-[r]->(v:`" + label + "`)\n" f"WHERE r.{provenance_key} IN $doc_ids\n" "DETACH DELETE v"
+            if orphan_predicate:
+                # DETACH DELETE above already removed the owner->value edges, so the owner's degree
+                # check sees the post-delete state within this same statement.
+                query = (
+                    "MATCH (n)-[r]->(v:`" + label + "`)\n"
+                    f"WHERE r.{provenance_key} IN $doc_ids\n"
+                    "DETACH DELETE v\n"
+                    "WITH DISTINCT n\n"
+                    f"WHERE ({orphan_predicate}) AND NOT (n)--()\n"
+                    "DELETE n"
+                )
+            else:
+                query = (
+                    "MATCH ()-[r]->(v:`" + label + "`)\n" f"WHERE r.{provenance_key} IN $doc_ids\n" "DETACH DELETE v"
+                )
             _, summary, _ = self.run_cypher(query, params, database=database)
             totals["nodes_deleted"] += summary.counters.nodes_deleted
             totals["relationships_deleted"] += summary.counters.relationships_deleted
 
-        _, summary, _ = self.run_cypher(
-            f"MATCH ()-[r]->() WHERE r.{provenance_key} IN $doc_ids DELETE r",
-            params,
-            database=database,
-        )
+        if orphan_predicate:
+            query = (
+                "MATCH (a)-[r]->(b)\n"
+                f"WHERE r.{provenance_key} IN $doc_ids\n"
+                "DELETE r\n"
+                "WITH a, b\n"
+                "UNWIND [a, b] AS n\n"
+                "WITH DISTINCT n\n"
+                f"WHERE ({orphan_predicate}) AND NOT (n)--()\n"
+                "DELETE n"
+            )
+        else:
+            query = f"MATCH ()-[r]->() WHERE r.{provenance_key} IN $doc_ids DELETE r"
+        _, summary, _ = self.run_cypher(query, params, database=database)
         totals["relationships_deleted"] += summary.counters.relationships_deleted
+        totals["nodes_deleted"] += summary.counters.nodes_deleted
         return totals
 
     def _build_node_statements(self, nodes: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:

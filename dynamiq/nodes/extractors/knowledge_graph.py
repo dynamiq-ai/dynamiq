@@ -422,9 +422,9 @@ class KnowledgeGraphWriter(Node):
         Deletion is clean by construction: every edge carries the provenance of the document that
         asserted it, and the same fact from two documents is two separate edges — so removing one
         document's edges never erases another document's identical claim. Doc-scoped ``AttributeValue``
-        holders are removed with their edges; shared entity (identity) nodes are deliberately KEPT — a
-        later re-ingestion re-MERGEs them unchanged, and an entity with no remaining visible edge is
-        invisible to retrieval anyway.
+        holders are removed with their edges. A shared entity (identity) node is kept while another
+        document still cites it, and swept once this delete removes its last edge — an entity with no
+        remaining edge is invisible to retrieval anyway, so it is cleaned up rather than left orphaned.
 
         ``key`` is the edge property the ids match against: ``source_doc_id`` (default) deletes by the
         ingestion chunk id; any other flattened document-metadata key works too — e.g. ``file_id`` deletes
@@ -441,12 +441,14 @@ class KnowledgeGraphWriter(Node):
         totals = self._graph_store.delete_documents(
             [str(document_id) for document_id in document_ids],
             doc_scoped_labels=[ATTRIBUTE_VALUE_LABEL],
+            orphan_labels=[ENTITY_LABEL],
             provenance_key=key,
             database=self.database,
         )
         logger.info(
             f"Node {self.name} - {self.id}: deleted {totals.get('relationships_deleted')} relationship(s) "
-            f"and {totals.get('nodes_deleted')} document-scoped node(s) for {len(document_ids)} document(s)."
+            f"and {totals.get('nodes_deleted')} node(s) (doc-scoped + newly-orphaned entities) for "
+            f"{len(document_ids)} document(s)."
         )
         return totals
 

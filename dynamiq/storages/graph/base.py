@@ -69,6 +69,7 @@ class BaseGraphStore(ABC):
         document_ids: list[str],
         *,
         doc_scoped_labels: list[str] | None = None,
+        orphan_labels: list[str] | None = None,
         provenance_key: str = "source_doc_id",
         database: str | None = None,
         **kwargs: Any,
@@ -81,10 +82,16 @@ class BaseGraphStore(ABC):
 
         Deletes every relationship stamped with one of these ``source_doc_id`` values, and the
         document-scoped nodes whose label is in ``doc_scoped_labels`` (e.g. ``AttributeValue`` — value
-        nodes that belong to exactly one document). Identity nodes (entities) are SHARED across
-        documents and are NEVER deleted here: a subsequent ``write_graph`` re-MERGEs them unchanged,
-        keeping their write-once ``name``. The caller passes the labels so this layer stays neutral of
-        KG semantics. Returns ``{"nodes_deleted", "relationships_deleted"}``.
+        nodes that belong to exactly one document).
+
+        Identity nodes (entities) are SHARED across documents, so they are kept as long as another
+        document still cites them. When ``orphan_labels`` is given (e.g. ``Entity``), a node with one of
+        those labels is deleted once removing this document's edges leaves it with NO remaining
+        relationship — i.e. this was its last citing document. Because provenance lives on the edges, this
+        is derived from edge degree, not from any per-node bookkeeping. When ``orphan_labels`` is omitted,
+        entities are never deleted here and a later ``write_graph`` re-MERGEs them unchanged. The caller
+        passes the labels so this layer stays neutral of KG semantics. Returns
+        ``{"nodes_deleted", "relationships_deleted"}``.
 
         No default implementation — each writing backend defines its own delete path. Backends that do
         not support writing inherit this and raise.

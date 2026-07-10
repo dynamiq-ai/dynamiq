@@ -212,3 +212,99 @@ def test_delete_documents_rejects_injection_shaped_provenance_key():
     with pytest.raises(ValueError, match="Invalid provenance key"):
         store.delete_documents(["d1"], provenance_key="file_id IS NOT NULL OR true //")
     assert client.execute_query.call_count == 0  # rejected before any query runs
+
+
+class _GraphState:
+    """A tiny in-memory property graph that EXECUTES the statements ``delete_documents`` emits.
+
+    Applies each statement's documented semantics (provenance-filtered edge match, ``DETACH DELETE`` of
+    value nodes, the folded zero-degree orphan sweep) to real state, so the end-to-end test asserts the
+    NET EFFECT on the graph — what survives a document's deletion — instead of query strings. Any
+    statement shape it does not recognize fails the test.
+    """
+
+    def __init__(self, nodes: dict[str, set[str]], edges: list[dict]):
+        self.nodes = {node_id: set(labels) for node_id, labels in nodes.items()}
+        self.edges = [dict(edge) for edge in edges]  # {"start", "end", "type", "doc"}
+
+    def _degree(self, node_id: str) -> int:
+        return sum(1 for edge in self.edges if node_id in (edge["start"], edge["end"]))
+
+    def _sweep(self, candidates: set[str]) -> int:
+        """The folded orphan sweep: delete candidate Entity nodes left with zero edges."""
+        swept = 0
+        for node_id in sorted(candidates):
+            if node_id in self.nodes and "Entity" in self.nodes[node_id] and self._degree(node_id) == 0:
+                del self.nodes[node_id]
+                swept += 1
+        return swept
+
+    def execute_query(self, query, parameters_, **kwargs):
+        doc_ids = set(parameters_["doc_ids"])
+        nodes_deleted = relationships_deleted = 0
+        if "DETACH DELETE v" in query:  # doc-scoped value-node statement
+            assert "WHERE (n:`Entity`) AND NOT (n)--()" in query  # sweep folded into the same statement
+            hits = [e for e in self.edges if e["doc"] in doc_ids and "AttributeValue" in self.nodes[e["end"]]]
+            owners = {e["start"] for e in hits}
+            for value_id in {e["end"] for e in hits}:  # DETACH: the node and every edge touching it
+                relationships_deleted += self._degree(value_id)
+                self.edges = [e for e in self.edges if value_id not in (e["start"], e["end"])]
+                del self.nodes[value_id]
+                nodes_deleted += 1
+            nodes_deleted += self._sweep(owners)
+        elif "DELETE r" in query:  # edge statement
+            assert "WHERE (n:`Entity`) AND NOT (n)--()" in query
+            hits = [e for e in self.edges if e["doc"] in doc_ids]
+            endpoints = {e["start"] for e in hits} | {e["end"] for e in hits}
+            self.edges = [e for e in self.edges if e["doc"] not in doc_ids]
+            relationships_deleted += len(hits)
+            nodes_deleted += self._sweep(endpoints)
+        else:
+            raise AssertionError(f"unexpected delete statement:\n{query}")
+        return [], _summary(nodes_deleted=nodes_deleted, relationships_deleted=relationships_deleted), []
+
+
+def test_delete_documents_end_to_end_removes_document_edges_and_orphans():
+    # Full document-deletion scenario executed against in-memory graph state. Two documents:
+    #   d1: (steve)-[:FOUNDED]->(apple), (apple)-[:MAKES]->(iphone), apple + acme revenue attributes
+    #   d2: (apple)-[:MAKES]->(iphone)   — the same fact as d1's, deliberately its own edge
+    # Deleting d1 must remove ALL of d1's edges and value nodes, sweep the entities only d1 sustained
+    # (steve: relationship-only; acme: attribute-only), and leave everything else untouched.
+    graph = _GraphState(
+        nodes={
+            "apple": {"Entity"},
+            "iphone": {"Entity"},
+            "steve": {"Entity"},
+            "acme": {"Entity"},
+            "v_apple_rev": {"AttributeValue"},
+            "v_acme_rev": {"AttributeValue"},
+            "ghost": {"Entity"},  # edgeless before the delete: the sweep must never touch it
+        },
+        edges=[
+            {"start": "steve", "end": "apple", "type": "FOUNDED", "doc": "d1"},
+            {"start": "apple", "end": "iphone", "type": "MAKES", "doc": "d1"},
+            {"start": "apple", "end": "v_apple_rev", "type": "HAS_ATTRIBUTE", "doc": "d1"},
+            {"start": "acme", "end": "v_acme_rev", "type": "HAS_ATTRIBUTE", "doc": "d1"},
+            {"start": "apple", "end": "iphone", "type": "MAKES", "doc": "d2"},
+        ],
+    )
+    client = MagicMock()
+    client.execute_query.side_effect = graph.execute_query
+    store = Neo4jGraphStore(client=client)
+
+    result = store.delete_documents(["d1"], doc_scoped_labels=["AttributeValue"], orphan_labels=["Entity"])
+
+    # every d1 edge is gone; d2's identical MAKES claim survives untouched
+    assert [e["doc"] for e in graph.edges] == ["d2"]
+    # d1's value nodes and the entities it alone sustained are gone; shared entities survive through
+    # d2's edge; the pre-existing isolated node is never matched by the sweep
+    assert set(graph.nodes) == {"apple", "iphone", "ghost"}
+    # counters: 4 nodes (2 value nodes + acme + steve), 4 edges (FOUNDED, MAKES d1, 2 HAS_ATTRIBUTE)
+    assert result == {"nodes_deleted": 4, "relationships_deleted": 4}
+
+
+def test_delete_documents_rejects_invalid_orphan_label():
+    store, client = _store([])
+    with pytest.raises(ValueError, match="Invalid orphan label"):
+        store.delete_documents(["d1"], orphan_labels=["bad-label!"])
+    assert client.execute_query.call_count == 0  # rejected before any query runs
