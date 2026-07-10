@@ -552,6 +552,31 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
         )
         return response["aggregations"]["stats"]
 
+    def replace_document_metadata(self, document_ids: str | list[str], metadata: dict[str, Any]) -> None:
+        """Replace the metadata of one or more documents with new metadata (full replacement).
+
+        A scripted update assigns the whole ``metadata`` object, so keys absent from ``metadata``
+        are dropped rather than merged (a plain partial update would deep-merge the object).
+
+        Args:
+            document_ids (str | list[str]): The id, or list of ids, of the documents to update.
+            metadata (dict[str, Any]): The new metadata that fully replaces the existing one.
+        """
+        ids = self._normalize_document_ids(document_ids)
+        for document_id in ids:
+            self.client.update(
+                index=self.index_name,
+                id=document_id,
+                body={
+                    "script": {
+                        "source": "ctx._source.metadata = params.metadata",
+                        "lang": "painless",
+                        "params": {"metadata": metadata},
+                    }
+                },
+                refresh=True,
+            )
+
     def update_document_by_file_id(
         self,
         file_id: str,

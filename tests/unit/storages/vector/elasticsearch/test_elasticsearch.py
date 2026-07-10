@@ -45,6 +45,24 @@ def test_initialization(es_vector_store):
     assert es_vector_store.client is not None
 
 
+def test_replace_document_metadata(es_vector_store, mock_es_client):
+    es_vector_store.replace_document_metadata("d1", {"tags": ["x", "y"]})
+    mock_es_client.update.assert_called_once()
+    _, kwargs = mock_es_client.update.call_args
+    assert kwargs["id"] == "d1"
+    assert kwargs["index"] == "test_index"
+    # A script fully replaces the metadata object (rather than a merging partial update).
+    assert kwargs["body"]["script"]["source"] == "ctx._source.metadata = params.metadata"
+    assert kwargs["body"]["script"]["params"]["metadata"] == {"tags": ["x", "y"]}
+
+
+def test_replace_document_metadata_multiple_ids(es_vector_store, mock_es_client):
+    es_vector_store.replace_document_metadata(["d1", "d2"], {"tags": ["x"]})
+    assert mock_es_client.update.call_count == 2
+    updated_ids = [kwargs["id"] for _, kwargs in mock_es_client.update.call_args_list]
+    assert updated_ids == ["d1", "d2"]
+
+
 def test_initialization_with_connection(mock_es_client):
     store = ElasticsearchVectorStore(connection=mock_es_client)
     assert store.client == mock_es_client.connect.return_value

@@ -22,6 +22,9 @@ CHROMA_OPERATOR_MAPPING = {
     "<=": "$lte",
     "in": "$in",
     "not in": "$nin",
+    # Chroma metadata is scalar-only, so 'contains any' maps to `$in` (value is one of the
+    # given values) — the union/membership check Chroma can express.
+    "contains_any": "$in",
 }
 
 
@@ -117,6 +120,23 @@ class ChromaVectorStore(BaseVectorStore, DryRunMixin):
             self._track_documents([doc.id])
 
         return len(documents)
+
+    def replace_document_metadata(self, document_ids: str | list[str], metadata: dict[str, Any]) -> None:
+        """
+        Replace the metadata of one or more documents with new metadata (full replacement).
+
+        Chroma's ``update`` overwrites the stored metadata for the given ids while keeping the
+        document text and embedding.
+
+        Args:
+            document_ids (str | list[str]): The id, or list of ids, of the documents to update.
+            metadata (dict[str, Any]): The new metadata that fully replaces the existing one.
+        """
+        ids = self._normalize_document_ids(document_ids)
+        if not ids:
+            return
+        self._collection.update(ids=ids, metadatas=[metadata for _ in ids])
+        logger.debug(f"Replaced metadata for {len(ids)} document(s): {ids}.")
 
     def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
         """

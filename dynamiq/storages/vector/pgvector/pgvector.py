@@ -809,6 +809,35 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         self._track_documents(document_ids)
         return len(documents)
 
+    def replace_document_metadata(self, document_ids: str | list[str], metadata: dict[str, Any]) -> None:
+        """
+        Replace the metadata of one or more documents with new metadata (full replacement).
+
+        Args:
+            document_ids (str | list[str]): The id, or list of ids, of the documents to update.
+            metadata (dict[str, Any]): The new metadata that fully replaces the existing one.
+
+        Raises:
+            VectorStoreException: If none of the given ids exist.
+        """
+        ids = self._normalize_document_ids(document_ids)
+        if not ids:
+            return
+
+        query = SQL("UPDATE {schema_name}.{table_name} SET metadata = %s WHERE id = ANY(%s)").format(
+            schema_name=Identifier(self.schema_name),
+            table_name=Identifier(self.table_name),
+        )
+        with self._get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(query, (Jsonb(metadata), ids))
+                updated = cur.rowcount
+                conn.commit()
+
+        if not updated:
+            raise VectorStoreException(f"No documents found for ids {ids} in {self.schema_name}.{self.table_name}")
+        logger.debug(f"Replaced metadata for {updated} document(s): {ids}.")
+
     def delete_documents_by_filters(self, filters: dict[str, Any]) -> None:
         """
         Delete documents from the pgvector vector store using filters.

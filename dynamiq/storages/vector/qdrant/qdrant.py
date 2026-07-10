@@ -420,6 +420,27 @@ class QdrantVectorStore(BaseVectorStore, DryRunMixin):
 
         return len(document_objects)
 
+    def replace_document_metadata(self, document_ids: str | list[str], metadata: dict[str, Any]) -> None:
+        """Replace the metadata of one or more documents with new metadata (full replacement).
+
+        Qdrant stores document metadata under the ``metadata`` payload key, so overwriting that
+        single key replaces the metadata wholesale while leaving the content and vector intact.
+
+        Args:
+            document_ids (str | list[str]): The id, or list of ids, of the documents to update.
+            metadata (dict[str, Any]): The new metadata that fully replaces the existing one.
+        """
+        ids = self._normalize_document_ids(document_ids)
+        if not ids:
+            return
+        self.client.set_payload(
+            collection_name=self.index_name,
+            payload={"metadata": metadata},
+            points=[convert_id(_id) for _id in ids],
+            wait=self.wait_result_from_api,
+        )
+        logger.debug(f"Replaced metadata for {len(ids)} document(s): {ids}.")
+
     def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
         """Deletes documents that match the provided `document_ids` from the document store.
 

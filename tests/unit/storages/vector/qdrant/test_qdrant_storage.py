@@ -39,6 +39,26 @@ def test_write_documents(qdrant_vector_store, mock_documents):
         assert qdrant_vector_store.write_documents(mock_documents) == 2
 
 
+def test_replace_document_metadata(qdrant_vector_store, mock_qdrant_client):
+    qdrant_vector_store.replace_document_metadata("1", {"tags": ["x", "y"]})
+    mock_qdrant_client.set_payload.assert_called_once_with(
+        collection_name=qdrant_vector_store.index_name,
+        payload={"metadata": {"tags": ["x", "y"]}},
+        points=[convert_id("1")],
+        wait=qdrant_vector_store.wait_result_from_api,
+    )
+
+
+def test_replace_document_metadata_multiple_ids(qdrant_vector_store, mock_qdrant_client):
+    qdrant_vector_store.replace_document_metadata(["1", "2"], {"tags": ["x"]})
+    mock_qdrant_client.set_payload.assert_called_once_with(
+        collection_name=qdrant_vector_store.index_name,
+        payload={"metadata": {"tags": ["x"]}},
+        points=[convert_id("1"), convert_id("2")],
+        wait=qdrant_vector_store.wait_result_from_api,
+    )
+
+
 def test_delete_documents(qdrant_vector_store, mock_qdrant_client):
     qdrant_vector_store.delete_documents(document_ids=["1"])
     mock_qdrant_client.delete.assert_called_once()

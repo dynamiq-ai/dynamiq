@@ -784,6 +784,39 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
 
         return self._write(documents, policy, content_key=content_key)
 
+    def replace_document_metadata(self, document_ids: str | list[str], metadata: dict[str, Any]) -> None:
+        """
+        Replace the metadata of one or more documents with new metadata (full replacement).
+
+        Weaviate flattens metadata into object properties, so each object is fetched (with its
+        vector and content) and re-written under the same id. Re-writing overwrites the object
+        entirely, which drops metadata keys not present in ``metadata`` instead of merging.
+
+        Args:
+            document_ids (str | list[str]): The id, or list of ids, of the documents to update.
+            metadata (dict[str, Any]): The new metadata that fully replaces the existing one.
+
+        Raises:
+            VectorStoreException: If any of the given ids does not exist.
+        """
+        ids = self._normalize_document_ids(document_ids)
+        documents, missing = [], []
+        for document_id in ids:
+            uuid = generate_uuid5(document_id)
+            obj = self._collection.query.fetch_object_by_id(uuid, include_vector=True)
+            if obj is None:
+                missing.append(document_id)
+                continue
+            content = obj.properties.get(self.content_key, "")
+            vector = obj.vector.get("default") if isinstance(obj.vector, dict) else obj.vector
+            documents.append(Document(id=document_id, content=content, embedding=vector, metadata=metadata))
+
+        if missing:
+            raise VectorStoreException(f"Documents {missing} not found in collection '{self._collection.name}'")
+        if documents:
+            self.write_documents(documents, policy=DuplicatePolicy.OVERWRITE)
+        logger.debug(f"Replaced metadata for {len(documents)} document(s): {ids}.")
+
     def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
         """
         Delete documents from the DocumentStore.

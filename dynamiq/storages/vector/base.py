@@ -46,6 +46,27 @@ class BaseVectorStore(ABC):
         """
         raise NotImplementedError(f"{type(self).__name__} does not support fetch-by-id.")
 
+    @staticmethod
+    def _normalize_document_ids(document_ids: "str | list[str]") -> list[str]:
+        """Normalize a single id or a list of ids into a de-duplicated (order-preserving) list."""
+        ids = [document_ids] if isinstance(document_ids, str) else list(document_ids)
+        seen: set[str] = set()
+        return [i for i in ids if not (i in seen or seen.add(i))]
+
+    def replace_document_metadata(self, document_ids: "str | list[str]", metadata: dict[str, Any]) -> None:
+        """Replace the metadata of one or more documents, identified by their ids.
+
+        Each targeted document's existing metadata is fully replaced with ``metadata`` (not
+        merged); content and embedding are preserved. ``document_ids`` may be a single id or a
+        list of ids, in which case every listed document receives the same ``metadata``. Every
+        backend overrides this with its native implementation.
+
+        Args:
+            document_ids (str | list[str]): The id, or list of ids, of the documents to update.
+            metadata (dict[str, Any]): The new metadata to store in place of the existing one.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support replace_document_metadata.")
+
     @abstractmethod
     def delete_documents_by_filters(self, filters: dict[str, Any]) -> None:
         """
