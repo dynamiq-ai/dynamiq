@@ -12,7 +12,7 @@ from docx.text.run import Run
 
 from dynamiq.components.converters.base import BaseConverter
 from dynamiq.components.converters.utils import build_source_metadata, get_filename_for_bytesio
-from dynamiq.types import Document, DocumentCreationMode
+from dynamiq.types import Document, DocumentCreationMode, DocumentType
 
 InlineElement = tuple[str, dict | None, str | None]
 MARKDOWN_FORMAT_MARKERS = (
@@ -151,7 +151,7 @@ class DOCXConverter(BaseConverter):
             for idx, section_content in enumerate(sections, start=1):
                 section_metadata = copy.deepcopy(metadata)
                 section_metadata["section_number"] = idx
-                section_metadata["document_type"] = "section"
+                section_metadata["document_type"] = DocumentType.SECTION.value
                 docs.append(Document(content=section_content, metadata=section_metadata))
 
         return docs

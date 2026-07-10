@@ -1,12 +1,13 @@
 import csv
 import enum
-from io import BytesIO, StringIO
-from typing import Any, ClassVar, Iterator, Literal
+from io import BytesIO, StringIO, TextIOWrapper
+from typing import Any, ClassVar, Iterator, Literal, TextIO
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dynamiq.components.converters.utils import build_source_metadata, normalize_table_headers
 from dynamiq.nodes.node import Node, NodeGroup, RunnableConfig, ensure_config
+from dynamiq.types import DocumentType
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
 
@@ -146,8 +147,8 @@ class CSVConverter(Node):
                 try:
                     with open(path, encoding="utf-8-sig", newline="") as csv_file:
                         external_metadata = self._metadata_for_source(input_data.metadata, source_index, total_files)
-                        for doc in self._process_text(
-                            csv_file.read(),
+                        for doc in self._process_stream(
+                            csv_file,
                             path,
                             delimiter,
                             document_creation_mode,
@@ -173,17 +174,20 @@ class CSVConverter(Node):
 
                     external_metadata = self._metadata_for_source(input_data.metadata, source_index, total_files)
                     file_obj.seek(0)
-                    text = file_obj.read().decode("utf-8-sig", errors="replace")
-                    for doc in self._process_text(
-                        text,
-                        source_name,
-                        delimiter,
-                        document_creation_mode,
-                        content_column,
-                        metadata_columns,
-                        external_metadata,
-                    ):
-                        all_documents.append(doc)
+                    text_stream = TextIOWrapper(file_obj, encoding="utf-8-sig", errors="replace", newline="")
+                    try:
+                        for doc in self._process_stream(
+                            text_stream,
+                            source_name,
+                            delimiter,
+                            document_creation_mode,
+                            content_column,
+                            metadata_columns,
+                            external_metadata,
+                        ):
+                            all_documents.append(doc)
+                    finally:
+                        text_stream.detach()
                     success_count += 1
                 except Exception as e:
                     logger.error(f"Error processing file {source_name}: {str(e)}")
@@ -214,30 +218,50 @@ class CSVConverter(Node):
         metadata_columns: list[str] | None,
         external_metadata: dict | None,
     ) -> Iterator[dict]:
+        yield from self._process_stream(
+            StringIO(text),
+            source,
+            delimiter,
+            document_creation_mode,
+            content_column,
+            metadata_columns,
+            external_metadata,
+        )
+
+    def _process_stream(
+        self,
+        stream: TextIO,
+        source: str,
+        delimiter: str,
+        document_creation_mode: CSVDocumentCreationMode,
+        content_column: str | None,
+        metadata_columns: list[str] | None,
+        external_metadata: dict | None,
+    ) -> Iterator[dict]:
         if document_creation_mode == CSVDocumentCreationMode.ONE_DOC_PER_FILE:
-            content = text.strip()
+            content = stream.read().strip()
             if not content:
                 return
 
             # Plain-text mode must preserve malformed or non-strict delimited input.
             # Parse tolerantly only to provide the logical data-row count metadata.
             try:
-                row_count = max(0, sum(1 for _ in csv.reader(StringIO(text), delimiter=delimiter)) - 1)
+                row_count = max(0, sum(1 for _ in csv.reader(StringIO(content), delimiter=delimiter)) - 1)
             except csv.Error:
-                row_count = max(0, len(text.splitlines()) - 1)
+                row_count = max(0, len(content.splitlines()) - 1)
 
             metadata = self._build_metadata(source, external_metadata)
             metadata.update(
                 {
                     "content_type": self._content_type(source, delimiter),
-                    "document_type": "table",
+                    "document_type": DocumentType.TABLE.value,
                     "row_count": row_count,
                 }
             )
             yield {"content": content, "metadata": metadata}
             return
 
-        reader = csv.reader(StringIO(text), delimiter=delimiter, strict=True)
+        reader = csv.reader(stream, delimiter=delimiter, strict=True)
         yield from self._process_reader(
             reader,
             source,
@@ -298,7 +322,13 @@ class CSVConverter(Node):
             if not fields:
                 continue
             metadata = self._build_metadata(source, external_metadata)
-            metadata.update({"content_type": content_type, "document_type": "table_row", "row_number": row_number})
+            metadata.update(
+                {
+                    "content_type": content_type,
+                    "document_type": DocumentType.TABLE_ROW.value,
+                    "row_number": row_number,
+                }
+            )
             yield {"content": "\n".join(fields), "metadata": metadata}
 
     @staticmethod

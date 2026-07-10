@@ -26,6 +26,15 @@ def build_xlsx_bytesio(filename: str = "test.xlsx") -> BytesIO:
     return buffer
 
 
+def build_empty_xlsx_bytesio(filename: str = "empty.xlsx") -> BytesIO:
+    workbook = ExcelWorkbook()
+    buffer = BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+    buffer.name = filename
+    return buffer
+
+
 def build_csv_bytesio(filename: str = "test.csv") -> BytesIO:
     buffer = BytesIO(b"name,age\nAlice,30\nBob,25\n")
     buffer.name = filename
@@ -58,6 +67,17 @@ def test_excel_converter_with_xlsx():
     assert "| Alice | 30 |" in content
     assert "| Bob | 25 |" in content
     assert documents[0]["metadata"]["file_path"] == "test.xlsx"
+
+
+@pytest.mark.parametrize("mode", ["one-doc-per-file", "one-doc-per-row", "one-doc-per-sheet"])
+def test_excel_converter_rejects_empty_workbook_in_all_creation_modes(mode):
+    converter = ExcelFileConverter(workbook_document_creation_mode=mode)
+    workflow = Workflow(flow=Flow(nodes=[converter]))
+
+    response = workflow.run(input_data={"files": [build_empty_xlsx_bytesio()]})
+
+    assert response.status == RunnableStatus.FAILURE
+    assert "contains no extractable content" in response.output[converter.id]["error"]["message"]
 
 
 def test_excel_converter_creates_self_describing_xlsx_row_documents():

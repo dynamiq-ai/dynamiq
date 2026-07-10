@@ -88,6 +88,31 @@ def test_auto_splitter_routes_from_converter_file_type_without_filename_or_conte
     assert all(chunk.metadata["splitter_strategy"] == "markdown_header" for chunk in chunks)
 
 
+def test_auto_splitter_does_not_infer_markdown_for_stamped_csv_content():
+    content = "Plan: Basic # Features support ## Pricing free"
+    splitter = AutoSplitter(markdown_strip_headers=False)
+    splitter.init_components()
+    document = Document(content=content, metadata={"file_type": "csv", "source": "upload-id"})
+
+    chunks = splitter.execute(splitter.input_schema(documents=[document]))["documents"]
+
+    assert [chunk.content for chunk in chunks] == [content]
+    assert all(chunk.metadata["splitter_strategy"] == "recursive_character" for chunk in chunks)
+    assert all("content_normalization" not in chunk.metadata for chunk in chunks)
+
+
+def test_auto_splitter_allows_explicit_rules_for_stamped_plain_content():
+    splitter = AutoSplitter(
+        rules=[AutoSplitterRule(strategy=AutoSplitterStrategy.MARKDOWN_HEADER, file_types=["csv"])]
+    )
+    splitter.init_components()
+    document = Document(content="# Title\nBody", metadata={"file_type": "csv"})
+
+    chunks = splitter.execute(splitter.input_schema(documents=[document]))["documents"]
+
+    assert chunks[0].metadata["splitter_strategy"] == "markdown_header"
+
+
 def test_auto_splitter_refines_oversized_markdown_sections_and_preserves_source_metadata():
     splitter = AutoSplitter(chunk_size=45, chunk_overlap=0)
     splitter.init_components()

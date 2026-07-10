@@ -13,7 +13,7 @@ from dynamiq.components.splitters.json import RecursiveJsonSplitterComponent
 from dynamiq.components.splitters.language import Language
 from dynamiq.components.splitters.markdown_header import MarkdownHeaderSplitterComponent
 from dynamiq.components.splitters.recursive_character import RecursiveCharacterSplitterComponent
-from dynamiq.types import Document
+from dynamiq.types import Document, DocumentContentNormalization, DocumentType
 from dynamiq.utils.logger import logger
 
 
@@ -220,7 +220,7 @@ class AutoSplitterComponent(BaseModel):
             return document
 
         metadata = dict(document.metadata or {})
-        metadata["content_normalization"] = "flattened_markdown"
+        metadata["content_normalization"] = DocumentContentNormalization.FLATTENED_MARKDOWN.value
         metadata["content_normalization_length_preserving"] = True
         return document.model_copy(update={"content": repaired_content, "metadata": metadata})
 
@@ -278,6 +278,11 @@ class AutoSplitterComponent(BaseModel):
             return AutoSplitterStrategy.JSON, False
         if features.file_type == "markdown":
             return AutoSplitterStrategy.MARKDOWN_HEADER, False
+        if features.file_type in _PLAIN_TEXT_FILE_TYPES:
+            for rule in self.rules:
+                if features.matches(rule):
+                    return rule.strategy, False
+            return self.fallback_strategy, False
 
         if features.extension == "json":
             return AutoSplitterStrategy.JSON, False
@@ -459,6 +464,8 @@ _STRATEGY_ALIASES = {
     "code": AutoSplitterStrategy.CODE,
     "codesplitter": AutoSplitterStrategy.CODE,
 }
+
+_PLAIN_TEXT_FILE_TYPES = {"csv", "text", DocumentType.TABLE.value, DocumentType.TABLE_ROW.value}
 
 _EXTENSION_TO_LANGUAGE = {
     "c": Language.C,

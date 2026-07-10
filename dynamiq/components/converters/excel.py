@@ -12,7 +12,7 @@ from dynamiq.components.converters.utils import (
     get_filename_for_bytesio,
     normalize_table_headers,
 )
-from dynamiq.types import Document, DocumentCreationMode
+from dynamiq.types import Document, DocumentCreationMode, DocumentType
 
 SUPPORTED_EXCEL_EXTENSIONS = {".csv", ".tsv", ".xlsx"}
 DelimitedDocumentCreationMode = Literal["one-doc-per-file", "one-doc-per-row"]
@@ -78,12 +78,17 @@ class ExcelFileConverter(BaseConverter):
 
         if extension in {".csv", ".tsv"}:
             delimiter = "\t" if extension == ".tsv" else ","
-            return self._create_delimited_documents(data, filepath, metadata, delimiter)
+            documents = self._create_delimited_documents(data, filepath, metadata, delimiter)
+        else:
+            delimiter = None if extension else self._detect_delimiter(data)
+            if delimiter:
+                documents = self._create_delimited_documents(data, filepath, metadata, delimiter)
+            else:
+                documents = self._create_workbook_documents(data, filepath, metadata)
 
-        delimiter = None if extension else self._detect_delimiter(data)
-        if delimiter:
-            return self._create_delimited_documents(data, filepath, metadata, delimiter)
-        return self._create_workbook_documents(data, filepath, metadata)
+        if not documents:
+            raise ValueError(f"Spreadsheet file '{filepath}' contains no extractable content.")
+        return documents
 
     def _create_delimited_documents(
         self,
@@ -179,7 +184,7 @@ class ExcelFileConverter(BaseConverter):
                         metadata,
                         filepath,
                         worksheet.title,
-                        document_type="table_row",
+                        document_type=DocumentType.TABLE_ROW,
                     )
                     row_metadata["row_number"] = row_number
                     documents.append(
@@ -211,7 +216,7 @@ class ExcelFileConverter(BaseConverter):
                     metadata,
                     filepath,
                     worksheet.title,
-                    document_type="table",
+                    document_type=DocumentType.TABLE,
                 )
                 sheet_metadata["row_count"] = max(
                     0, len([row for row in rows if any(cell.strip() for cell in row)]) - 1
@@ -227,11 +232,11 @@ class ExcelFileConverter(BaseConverter):
         metadata: dict[str, Any],
         filepath: str,
         sheet_name: str,
-        document_type: str,
+        document_type: DocumentType,
     ) -> dict[str, Any]:
         result = build_source_metadata(metadata, filepath)
         result["sheet_name"] = sheet_name
-        result["document_type"] = document_type
+        result["document_type"] = document_type.value
         result.setdefault("content_type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         return result
 
@@ -266,7 +271,7 @@ class ExcelFileConverter(BaseConverter):
         headers = normalize_table_headers(header, width)
         source_metadata = build_source_metadata(metadata, filepath)
         source_metadata.setdefault("content_type", content_type)
-        source_metadata.setdefault("document_type", "table_row")
+        source_metadata.setdefault("document_type", DocumentType.TABLE_ROW.value)
 
         documents: list[Document] = []
         for row_number, row in data_rows:
@@ -341,6 +346,9 @@ class ExcelFileConverter(BaseConverter):
         """
         if document_creation_mode != DocumentCreationMode.ONE_DOC_PER_FILE:
             raise ValueError("ExcelFileConverter only supports one-doc-per-file mode")
+
+        if not content.strip():
+            raise ValueError(f"Spreadsheet file '{filepath}' contains no extractable content.")
 
         metadata = build_source_metadata(metadata, filepath)
 

@@ -24,7 +24,7 @@ from dynamiq.nodes.extractors.extractors import EXTENSION_MAP, FileType, FileTyp
 from dynamiq.nodes.node import ErrorHandling, Node, NodeDependency, ensure_config
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig, RunnableStatus
-from dynamiq.types import Document
+from dynamiq.types import Document, DocumentType
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 
 logger = logging.getLogger(__name__)
@@ -736,7 +736,7 @@ class MultiFileTypeConverter(Node):
         if isinstance(converter, CSVConverter):
             return "csv"
         if isinstance(converter, ExcelFileConverter):
-            return "text" if metadata.get("document_type") == "table_row" else "markdown"
+            return "text" if metadata.get("document_type") == DocumentType.TABLE_ROW.value else "markdown"
         if isinstance(converter, (DOCXFileConverter, HTMLConverter)):
             return "markdown"
         if isinstance(converter, TextFileConverter) and source_type == FileType.MARKDOWN.value:

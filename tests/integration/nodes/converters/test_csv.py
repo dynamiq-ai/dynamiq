@@ -220,6 +220,25 @@ def test_csv_loader_without_content_column_creates_self_describing_rows(csv_byte
     assert documents[0]["metadata"]["row_number"] == 2
 
 
+def test_csv_loader_streams_uploaded_rows_without_reading_the_whole_file():
+    class NoReadAllBytesIO(BytesIO):
+        def read(self, size=-1):
+            if size == -1:
+                raise AssertionError("row mode must not read the entire upload at once")
+            return super().read(size)
+
+    file = NoReadAllBytesIO(b"name,price\nBasic,10\nPro,20\n")
+    file.name = "pricing.csv"
+
+    result = CSVConverter().run(input_data={"files": [file]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert [document["content"] for document in result.output["documents"]] == [
+        "name: Basic\nprice: 10",
+        "name: Pro\nprice: 20",
+    ]
+
+
 def test_csv_loader_without_content_column_rejects_header_only_file(header_only_csv_bytesio):
     result = CSVConverter().run(input_data={"files": [header_only_csv_bytesio]})
 
