@@ -416,6 +416,42 @@ class KnowledgeGraphWriter(Node):
             "relationships_created": write_result.get("relationships_created"),
         }
 
+    def delete_documents(self, document_ids: list[str], key: str = "source_doc_id") -> dict[str, int]:
+        """Remove everything the given documents contributed to the graph (delegates to the store).
+
+        Deletion is clean by construction: every edge carries the provenance of the document that
+        asserted it, and the same fact from two documents is two separate edges — so removing one
+        document's edges never erases another document's identical claim. Doc-scoped ``AttributeValue``
+        holders are removed with their edges. A shared entity (identity) node is kept while another
+        document still cites it, and swept once this delete removes its last edge — an entity with no
+        remaining edge is invisible to retrieval anyway, so it is cleaned up rather than left orphaned.
+
+        ``key`` is the edge property the ids match against: ``source_doc_id`` (default) deletes by the
+        ingestion chunk id; any other flattened document-metadata key works too — e.g. ``file_id`` deletes
+        every edge extracted from any chunk of a knowledgebase file (the store validates it).
+
+        The documents' chunks in the vector store are NOT touched — delete those separately with the
+        vector store's own delete-by-ids (this node does not own that store). Backends without graph
+        writes raise ``NotImplementedError`` (only Neo4j implements deletion today).
+
+        Returns ``{"relationships_deleted": int, "nodes_deleted": int}``.
+        """
+        if not document_ids:
+            return {"relationships_deleted": 0, "nodes_deleted": 0}
+        totals = self._graph_store.delete_documents(
+            [str(document_id) for document_id in document_ids],
+            doc_scoped_labels=[ATTRIBUTE_VALUE_LABEL],
+            orphan_labels=[ENTITY_LABEL],
+            provenance_key=key,
+            database=self.database,
+        )
+        logger.info(
+            f"Node {self.name} - {self.id}: deleted {totals.get('relationships_deleted')} relationship(s) "
+            f"and {totals.get('nodes_deleted')} node(s) (doc-scoped + newly-orphaned entities) for "
+            f"{len(document_ids)} document(s)."
+        )
+        return totals
+
     @staticmethod
     def _attach_entity_ids(documents: list, relationships: list[dict]) -> list:
         """Return COPIES of the chunks, each with ``kg_entity_ids`` = the resolved entity ids it mentions.
