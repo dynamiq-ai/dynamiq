@@ -21,9 +21,9 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAITextEmbedder
-from dynamiq.nodes.extractors import Ontology
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphRetriever, Ontology
 from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.nodes.retrievers import GraphRetriever, QdrantDocumentRetriever, VectorStoreRetriever
+from dynamiq.nodes.retrievers import QdrantDocumentRetriever, VectorStoreRetriever
 from dynamiq.nodes.tools import CypherExecutor
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -79,7 +79,7 @@ def build_workflow() -> Workflow:
     # Tool 2: bounded, ACL-filtered graph context. The `filters` are LOCKED node config (not on the
     # tool's input schema), so the agent cannot drop or widen them — the controlled alternative to
     # LLM-written Cypher. ACL is expressed via the $intersects operator on the edge ACL property.
-    graph_tool = GraphRetriever(
+    graph_tool = KnowledgeGraphRetriever(
         name="graph-retriever",
         connection=Neo4jConnection(),
         # Same entity types the graph was ingested with, so the question is parsed for those kinds.
