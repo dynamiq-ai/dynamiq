@@ -11,11 +11,11 @@ class CohereEmbedder(BaseEmbedder):
     Attributes:
         connection (CohereConnection): The connection to the  Cohere API. A new connection
             is created if none is provided.
-        model (str): The model name to use for embedding. Defaults to "embed-v4.0".
+        model (str): The model name to use for embedding. Defaults to "cohere/embed-v4.0".
         input_type (str): Specifies the type of input you're giving to the model. Defaults to "search_query"
     """
     connection: CohereConnection
-    model: str = "embed-v4.0"
+    model: str = "cohere/embed-v4.0"
     input_type: str = "search_query"
     truncate: Literal["NONE", "START", "END"] = "NONE"
     truncation_enabled: bool = False

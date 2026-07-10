@@ -130,12 +130,14 @@ def test_cohere_rag_defaults_use_distinct_input_types_and_no_silent_truncation(c
     document_embedder.init_components()
     text_embedder.init_components()
 
-    assert document_embedder.model == "embed-v4.0"
+    assert document_embedder.model == "cohere/embed-v4.0"
+    assert document_embedder.document_embedder.model == "cohere/embed-v4.0"
     assert document_embedder.document_embedder.input_type == "search_document"
     assert document_embedder.document_embedder.truncate == "NONE"
     assert document_embedder.document_embedder.truncation_enabled is False
 
-    assert text_embedder.model == "embed-v4.0"
+    assert text_embedder.model == "cohere/embed-v4.0"
+    assert text_embedder.text_embedder.model == "cohere/embed-v4.0"
     assert text_embedder.text_embedder.input_type == "search_query"
     assert text_embedder.text_embedder.truncate == "NONE"
     assert text_embedder.text_embedder.truncation_enabled is False

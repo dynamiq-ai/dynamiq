@@ -214,21 +214,30 @@ class CSVConverter(Node):
         metadata_columns: list[str] | None,
         external_metadata: dict | None,
     ) -> Iterator[dict]:
-        reader = csv.reader(StringIO(text), delimiter=delimiter, strict=True)
         if document_creation_mode == CSVDocumentCreationMode.ONE_DOC_PER_FILE:
-            rows = list(reader)
-            if not rows:
+            content = text.strip()
+            if not content:
                 return
+
+            # Plain-text mode must preserve malformed or non-strict delimited input.
+            # Parse tolerantly only to provide the logical data-row count metadata.
+            try:
+                row_count = max(0, sum(1 for _ in csv.reader(StringIO(text), delimiter=delimiter)) - 1)
+            except csv.Error:
+                row_count = max(0, len(text.splitlines()) - 1)
+
             metadata = self._build_metadata(source, external_metadata)
             metadata.update(
                 {
                     "content_type": self._content_type(source, delimiter),
                     "document_type": "table",
-                    "row_count": max(0, len(rows) - 1),
+                    "row_count": row_count,
                 }
             )
-            yield {"content": text.strip(), "metadata": metadata}
+            yield {"content": content, "metadata": metadata}
             return
+
+        reader = csv.reader(StringIO(text), delimiter=delimiter, strict=True)
         yield from self._process_reader(
             reader,
             source,

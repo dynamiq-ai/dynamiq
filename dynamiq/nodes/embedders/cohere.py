@@ -24,12 +24,12 @@ class CohereDocumentEmbedder(DocumentEmbedder):
     Args:
         connection (Optional[CohereConnection]): The connection to the Cohere API. A new connection
             is created if none is provided.
-        model (str): The model name to use for embedding. Defaults to `embed-v4.0`.
+        model (str): The model name to use for embedding. Defaults to `cohere/embed-v4.0`.
     """
 
     name: str = "cohere-document-embedder"
     connection: CohereConnection | None = None
-    model: str = "embed-v4.0"
+    model: str = "cohere/embed-v4.0"
     input_type: Literal["search_document", "search_query", "classification", "clustering"] = Field(
         default="search_document",
         description="Cohere embedding task. Use search_document for chunks stored in a RAG index.",
@@ -93,7 +93,7 @@ class CohereTextEmbedder(TextEmbedder):
     Args:
         connection (Optional[CohereConnection]): An existing connection to Cohere API. If not
             provided, a new connection will be established using environment variables.
-        model (str): The identifier of the Cohere model for text embeddings. Defaults to `embed-v4.0`.
+        model (str): The identifier of the Cohere model for text embeddings. Defaults to `cohere/embed-v4.0`.
 
     Attributes:
         group (Literal[NodeGroup.EMBEDDERS]): The group the node belongs to.
@@ -106,7 +106,7 @@ class CohereTextEmbedder(TextEmbedder):
 
     name: str = "cohere-text-embedder"
     connection: CohereConnection | None = None
-    model: str = "embed-v4.0"
+    model: str = "cohere/embed-v4.0"
     input_type: Literal["search_query", "search_document", "classification", "clustering"] = Field(
         default="search_query",
         description="Cohere embedding task. Use search_query for RAG retrieval queries.",

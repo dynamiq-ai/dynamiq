@@ -269,6 +269,16 @@ def test_csv_loader_can_preserve_whole_file_as_plain_text(csv_bytesio):
     assert documents[0]["metadata"]["row_count"] == 2
 
 
+def test_csv_loader_plain_text_mode_preserves_malformed_csv(corrupted_csv_bytesio, corrupted_csv_content):
+    csv_loader = CSVConverter(document_creation_mode=CSVDocumentCreationMode.ONE_DOC_PER_FILE)
+
+    result = csv_loader.run(input_data={"files": [corrupted_csv_bytesio]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["documents"][0]["content"] == corrupted_csv_content
+    assert result.output["documents"][0]["metadata"]["row_count"] == 1
+
+
 def test_csv_input_can_override_document_creation_mode(csv_bytesio):
     csv_loader = CSVConverter(document_creation_mode=CSVDocumentCreationMode.ONE_DOC_PER_FILE)
 
