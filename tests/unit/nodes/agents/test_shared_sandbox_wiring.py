@@ -157,6 +157,30 @@ def test_owner_without_active_session_uses_own_backend(test_llm):
     assert shell.sandbox is agent.sandbox_backend
 
 
+def test_reused_subagent_keeps_stable_workdir_across_calls(test_llm):
+    """A reused initialized subagent must land in the SAME workdir on every borrow so its
+    relative-path files persist across parent calls (Bugbot: subagent workdir resets each call)."""
+    from dynamiq.nodes.agents.shared_session import SharedSession
+    from dynamiq.sandboxes.tools.shell import SandboxShellTool
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(sandbox=shared, share_sandbox=True, owner_run_id="owner")
+    token = _shared_session.set(session)
+    try:
+        sub = Agent(name="Researcher", llm=test_llm, role="r", tools=[])
+
+        ov1 = sub._maybe_borrow_shared_sandbox()
+        wd1 = next(t for t in ov1 if isinstance(t, SandboxShellTool)).sandbox.base_path
+        sub._release_shared_sandbox_view()  # end of call 1, as execute()'s finally does
+
+        ov2 = sub._maybe_borrow_shared_sandbox()
+        wd2 = next(t for t in ov2 if isinstance(t, SandboxShellTool)).sandbox.base_path
+
+        assert wd1 == wd2  # same instance -> same workdir across calls
+    finally:
+        _shared_session.reset(token)
+
+
 def test_two_subagents_share_one_sandbox_distinct_workdirs(test_llm):
     from dynamiq.nodes.tools.agent_tool import SubAgentTool
     from dynamiq.sandboxes.tools.shell import SandboxShellTool

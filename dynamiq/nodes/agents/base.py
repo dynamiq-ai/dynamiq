@@ -2231,7 +2231,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         if session.sharing_scope == SandboxSharingScope.AUGMENT and own is not None:
             return None  # augment: keep this subagent's own sandbox
 
-        key = f"{(self.sanitize_tool_name(self.name) or 'subagent').lower()}-{uuid4().hex[:8]}"
+        # Key the workdir on this agent's stable instance id, not a per-call random suffix, so a
+        # reused initialized subagent lands in the SAME /work/<key> across calls within a run (its
+        # relative-path files persist). Distinct instances still get distinct ids -> distinct
+        # workdirs; factory subagents are rebuilt per call and so still rotate, as intended.
+        key = f"{(self.sanitize_tool_name(self.name) or 'subagent').lower()}-{self.id}"
         view = session.sandbox_view_for(key)
         if view is None:
             return None
