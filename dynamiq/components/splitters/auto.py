@@ -282,6 +282,12 @@ class AutoSplitterComponent(BaseModel):
             for rule in self.rules:
                 if features.matches(rule):
                     return rule.strategy, False
+            if features.extension == "json":
+                return AutoSplitterStrategy.JSON, False
+            if features.extension in {"md", "markdown", "mdx"}:
+                return AutoSplitterStrategy.MARKDOWN_HEADER, False
+            if features.extension in _EXTENSION_TO_LANGUAGE:
+                return AutoSplitterStrategy.CODE, False
             return self.fallback_strategy, False
 
         if features.extension == "json":
