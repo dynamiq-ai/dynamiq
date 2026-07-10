@@ -2181,6 +2181,16 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 self.id,
             )
             return None
+        if not getattr(self.sandbox_backend, "supports_views", False):
+            logger.warning(
+                "Agent %s - %s: share_sandbox_with_subagents is enabled but this agent's sandbox backend "
+                "(%s) does not support shared views; subagents will not share a sandbox. Use a "
+                "view-capable backend (e.g. E2B) to enable sharing.",
+                self.name,
+                self.id,
+                type(self.sandbox_backend).__name__,
+            )
+            return None
 
         session = SharedSession(
             sandbox=self.sandbox_backend,

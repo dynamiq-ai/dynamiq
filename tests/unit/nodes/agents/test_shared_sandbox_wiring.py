@@ -83,6 +83,25 @@ def test_owner_does_not_warn_when_sandbox_present(test_llm):
         agent._exit_shared_session(token)
 
 
+def test_owner_warns_and_skips_session_when_backend_lacks_view_support(test_llm):
+    """Flag on but the owner's sandbox backend can't do views (e.g. Daytona): sharing can't happen,
+    so warn instead of publishing a useless session (Bugbot: viewless backend breaks sharing
+    silently)."""
+    from unittest.mock import MagicMock, patch
+
+    agent = _sandboxed_agent(test_llm, share_sandbox_with_subagents=True)
+    viewless = MagicMock()
+    viewless.supports_views = False
+    agent.sandbox.backend = viewless  # swap in a view-incapable backend
+
+    with patch("dynamiq.nodes.agents.base.logger") as mock_logger:
+        token = agent._maybe_enter_shared_session({"run_id": "r"})
+
+    assert token is None  # no session published
+    assert mock_logger.warning.called
+    assert "does not support shared views" in mock_logger.warning.call_args[0][0]
+
+
 def test_no_session_when_no_sandbox(test_llm):
     agent = Agent(name="Owner", llm=test_llm, role="r", tools=[], share_sandbox_with_subagents=True)
     token = agent._maybe_enter_shared_session({"run_id": "run-1"})
