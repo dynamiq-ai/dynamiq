@@ -8,6 +8,23 @@ from .qdrant import QdrantDocumentRetriever
 from .retriever import VectorStoreRetriever
 from .weaviate import WeaviateDocumentRetriever
 
+# ``GraphRetriever`` resolves via __getattr__ (below), so it is NOT in this module's __dict__.
+# ``from ... import *`` skips __getattr__ when no __all__ is defined (it reads __dict__), which would
+# drop ``GraphRetriever``. Listing it in __all__ makes ``import *`` do a real getattr per name, which
+# DOES invoke __getattr__ -- restoring the star-import export while keeping the lazy, cycle-safe load.
+__all__ = [
+    "ChromaDocumentRetriever",
+    "ElasticsearchDocumentRetriever",
+    "MilvusDocumentRetriever",
+    "OpenSearchDocumentRetriever",
+    "PGVectorDocumentRetriever",
+    "PineconeDocumentRetriever",
+    "QdrantDocumentRetriever",
+    "VectorStoreRetriever",
+    "WeaviateDocumentRetriever",
+    "GraphRetriever",
+]
+
 
 def __getattr__(name):
     # Back-compat: GraphRetriever moved to dynamiq.nodes.knowledge_graph.KnowledgeGraphRetriever.
