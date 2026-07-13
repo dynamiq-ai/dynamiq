@@ -88,12 +88,32 @@ def test_get_query_properties_includes_searchable_metadata_fields() -> None:
     store.content_key = "content"
     properties = [
         SimpleNamespace(name="content"),
+        SimpleNamespace(name="filename"),
         SimpleNamespace(name="file_name"),
         SimpleNamespace(name="file_path"),
+        SimpleNamespace(name="dynamiq_item_source_provider_title"),
         SimpleNamespace(name="file_content_hash"),
     ]
 
-    assert store._get_query_properties(properties) == ["content", "file_name", "file_path"]
+    assert store._get_query_properties(properties) == [
+        "content",
+        "filename",
+        "file_name",
+        "file_path",
+        "dynamiq_item_source_provider_title",
+    ]
+
+
+def test_to_document_does_not_mutate_weaviate_properties() -> None:
+    store = WeaviateVectorStore.__new__(WeaviateVectorStore)
+    store.content_key = "content"
+    properties = {"_original_id": "doc-1", "content": "Body", "filename": "guide.md"}
+    data = SimpleNamespace(properties=properties, vector=None, metadata=None)
+
+    document = store._to_document(data)
+
+    assert document.content == "Body"
+    assert properties == {"_original_id": "doc-1", "content": "Body", "filename": "guide.md"}
 
 
 def test_hybrid_retrieval_forwards_custom_content_key_to_document_conversion() -> None:

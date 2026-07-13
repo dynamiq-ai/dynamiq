@@ -2,9 +2,13 @@ from typing import Any
 
 
 DEFAULT_SEARCHABLE_TEXT_METADATA_FIELDS: tuple[str, ...] = (
+    "filename",
     "file_name",
     "file_path",
     "title",
+    "dynamiq_item_source_provider_title",
+    "sheet_name",
+    "section",
     "source",
     "url",
 )

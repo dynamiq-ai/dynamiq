@@ -1,6 +1,7 @@
 import enum
 import hashlib
 from copy import deepcopy
+from functools import lru_cache
 from typing import Any, Callable, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -8,6 +9,21 @@ from pydantic.json_schema import SkipJsonSchema
 
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
+
+
+@lru_cache(maxsize=1)
+def _default_tokenizer() -> Any:
+    try:
+        import tiktoken
+    except ImportError as exc:
+        raise ImportError(
+            "Token length measurement requires the 'tiktoken' package. Install with `pip install tiktoken`."
+        ) from exc
+    return tiktoken.get_encoding("cl100k_base")
+
+
+def _default_token_length(text: str) -> int:
+    return len(_default_tokenizer().encode(text, disallowed_special=()))
 
 
 class LengthUnit(str, enum.Enum):
@@ -60,7 +76,7 @@ class SplitterComponentBase(BaseModel):
         if self.parent_chunk_overlap is None:
             self.parent_chunk_overlap = self.chunk_overlap
         if self.length_function is None:
-            self.length_function = len
+            self.length_function = _default_token_length if self.length_unit == LengthUnit.TOKENS else len
         return self
 
     def split_text(self, text: str) -> list[str]:

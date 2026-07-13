@@ -1,4 +1,3 @@
-import copy
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Literal
@@ -6,7 +5,7 @@ from typing import Any, Literal
 from charset_normalizer import from_bytes
 
 from dynamiq.components.converters.base import BaseConverter
-from dynamiq.components.converters.utils import get_filename_for_bytesio
+from dynamiq.components.converters.utils import build_source_metadata, get_filename_for_bytesio
 from dynamiq.types import Document, DocumentCreationMode
 from dynamiq.utils.logger import logger
 
@@ -83,9 +82,10 @@ class TextFileConverter(BaseConverter):
             raise ValueError("TextFileConverter only supports one-doc-per-file mode")
 
         content = content.strip()
+        if not content:
+            raise ValueError(f"Text file '{filepath}' contains no extractable content.")
 
-        metadata = copy.deepcopy(metadata)
-        metadata["file_path"] = filepath
+        metadata = build_source_metadata(metadata, filepath)
 
         docs = [Document(content=content, metadata=metadata)]
         return docs
