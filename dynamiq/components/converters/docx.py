@@ -150,6 +150,8 @@ class DOCXConverter(BaseConverter):
 
             for idx, section_content in enumerate(sections, start=1):
                 section_metadata = copy.deepcopy(metadata)
+                # Keep the legacy key for consumers of the existing one-doc-per-page API.
+                section_metadata["page_number"] = idx
                 section_metadata["section_number"] = idx
                 section_metadata["document_type"] = DocumentType.SECTION.value
                 docs.append(Document(content=section_content, metadata=section_metadata))

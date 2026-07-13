@@ -101,8 +101,8 @@ def test_docx_legacy_page_mode_reports_real_section_numbers():
     assert result.status == RunnableStatus.SUCCESS
     documents = result.output["documents"]
     assert [document.content for document in documents] == ["First section", "Second section"]
+    assert [document.metadata["page_number"] for document in documents] == [1, 2]
     assert [document.metadata["section_number"] for document in documents] == [1, 2]
-    assert all("page_number" not in document.metadata for document in documents)
 
 
 def test_docx_section_mode_rejects_document_without_extractable_content():
