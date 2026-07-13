@@ -494,6 +494,27 @@ class ChromaVectorStore(BaseVectorStore, DryRunMixin):
 
         return {field: {chroma_operator: value}}
 
+    def get_documents_by_id(self, ids: list[str], include_embeddings: bool = False) -> list[Document]:
+        """
+        Fetch documents by their exact ids (not a similarity search).
+
+        Args:
+            ids (list[str]): The document ids to fetch.
+            include_embeddings (bool): Whether to include document embeddings in the result.
+
+        Returns:
+            list[Document]: The documents whose ids were found. Missing ids are skipped.
+        """
+        if not ids:
+            return []
+
+        include = ["documents", "metadatas"]
+        if include_embeddings:
+            include.append("embeddings")
+
+        result = self._collection.get(ids=list(ids), include=include)
+        return self._get_result_to_documents(result)
+
     @staticmethod
     def _query_result_to_documents(result: "QueryResult") -> list[list[Document]]:
         """
