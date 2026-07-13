@@ -7,11 +7,7 @@ from typing import Any, Literal
 from openpyxl import load_workbook
 
 from dynamiq.components.converters.base import BaseConverter
-from dynamiq.components.converters.utils import (
-    build_source_metadata,
-    get_filename_for_bytesio,
-    normalize_table_headers,
-)
+from dynamiq.components.converters.utils import build_source_metadata, get_filename_for_bytesio, normalize_table_headers
 from dynamiq.types import Document, DocumentCreationMode, DocumentType
 
 SUPPORTED_EXCEL_EXTENSIONS = {".csv", ".tsv", ".xlsx"}
