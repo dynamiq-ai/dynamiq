@@ -820,9 +820,11 @@ class TestYamlRoundtrip:
         assert rt_agent.sandbox.enabled is True
         assert isinstance(rt_agent.sandbox.backend, E2BSandbox)
 
-    def test_example_yaml_files_load(self, tmp_path):
+    def test_example_yaml_files_load(self, tmp_path, monkeypatch):
         """Verify example YAML files load and factory roundtrips correctly."""
         import os
+
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
         examples_dir = os.path.join(
             os.path.dirname(__file__),
