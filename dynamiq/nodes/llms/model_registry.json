@@ -92,7 +92,7 @@
         "input_cost_per_token": 0.0000003,
         "output_cost_per_token": 0.0000012
     },
-    "MiniMaxAI/MiniMax-M2.7": {
+    "minimax/MiniMax-M2.7": {
         "max_input_tokens": 204800,
         "max_output_tokens": 204800,
         "max_tokens": 204800,
@@ -105,6 +105,7 @@
         "supports_parallel_function_calling": true,
         "supports_response_schema": true,
         "supports_system_messages": true,
+        "supports_tool_choice": true,
         "supports_prompt_caching": true,
         "supports_reasoning": true,
         "supports_adaptive_thinking": false,
@@ -113,7 +114,7 @@
         "cache_creation_input_token_cost": 0.000000375,
         "cache_read_input_token_cost": 0.00000006
     },
-    "MiniMaxAI/MiniMax-M3": {
+    "minimax/MiniMax-M3": {
         "max_input_tokens": 1000000,
         "max_output_tokens": 524288,
         "max_tokens": 524288,
@@ -130,6 +131,7 @@
         "supports_prompt_caching": true,
         "supports_reasoning": true,
         "supports_adaptive_thinking": true,
+        "supports_service_tier": true,
         "input_cost_per_token": 0.0000003,
         "output_cost_per_token": 0.0000012,
         "cache_read_input_token_cost": 0.00000006,
