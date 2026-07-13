@@ -79,6 +79,20 @@ def test_build_filter_expression_with_not_in_operator():
     assert expression == "status not in ['inactive', 'banned']"
 
 
+def test_build_filter_expression_with_contains_any_operator():
+    filter_term = {"field": "tags", "operator": "contains_any", "value": ["ai", "ml"]}
+    filter_instance = Filter(filter_term)
+    expression = filter_instance.build_filter_expression()
+    assert expression == "json_contains_any(tags, ['ai', 'ml'])"
+
+
+def test_build_filter_expression_with_contains_any_non_list_raises():
+    filter_term = {"field": "tags", "operator": "contains_any", "value": "ai"}
+    filter_instance = Filter(filter_term)
+    with pytest.raises(ValueError, match="must be a list"):
+        filter_instance.build_filter_expression()
+
+
 def test_build_filter_expression_with_invalid_structure():
     filter_term = {"operator": "AND", "field": "age", "value": 30}
     filter_instance = Filter(filter_term)

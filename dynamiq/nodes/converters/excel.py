@@ -7,6 +7,7 @@ from dynamiq.components.converters.excel import ExcelFileConverter as ExcelFileC
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.node import ErrorHandling, Node, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types import DocumentCreationMode
 from dynamiq.utils.logger import logger
 
 
@@ -32,6 +33,21 @@ class ExcelFileConverter(Node):
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
     name: str = "excel-file-converter"
+    delimited_document_creation_mode: Literal[
+        DocumentCreationMode.ONE_DOC_PER_FILE,
+        DocumentCreationMode.ONE_DOC_PER_ROW,
+    ] = Field(
+        default=DocumentCreationMode.ONE_DOC_PER_FILE,
+        description="Create one document per CSV/TSV file or one self-describing document per data row.",
+    )
+    workbook_document_creation_mode: Literal[
+        DocumentCreationMode.ONE_DOC_PER_FILE,
+        DocumentCreationMode.ONE_DOC_PER_SHEET,
+        DocumentCreationMode.ONE_DOC_PER_ROW,
+    ] = Field(
+        default=DocumentCreationMode.ONE_DOC_PER_FILE,
+        description="Create one document per XLSX workbook, sheet, or self-describing data row.",
+    )
     error_handling: ErrorHandling = Field(
         default_factory=lambda: ErrorHandling(timeout_seconds=60.0),
         description="Default execution timeout. Set timeout_seconds to None to disable.",
@@ -54,7 +70,10 @@ class ExcelFileConverter(Node):
         connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.file_converter is None:
-            self.file_converter = ExcelFileConverterComponent()
+            self.file_converter = ExcelFileConverterComponent(
+                delimited_document_creation_mode=self.delimited_document_creation_mode,
+                workbook_document_creation_mode=self.workbook_document_creation_mode,
+            )
 
     def execute(
         self, input_data: ExcelFileConverterInputSchema, config: RunnableConfig | None = None, **kwargs
