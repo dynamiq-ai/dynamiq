@@ -258,6 +258,30 @@ def test_get_documents_by_id_empty_returns_empty_without_query(milvus_vector_sto
     mock_milvus_client.get.assert_not_called()
 
 
+def test_get_documents_by_id_omits_embedding_by_default(milvus_vector_store, mock_milvus_client):
+    # Parity with the other backends: embedding is None unless include_embeddings=True is passed.
+    mock_milvus_client.has_collection.return_value = True
+    mock_milvus_client.get.return_value = [
+        {"id": "1", "content": "ok", "embedding": [0.1, 0.2], "type": "test"},
+    ]
+
+    docs = milvus_vector_store.get_documents_by_id(["1"])
+
+    assert docs[0].embedding is None
+    assert docs[0].metadata == {"type": "test"}
+
+
+def test_get_documents_by_id_includes_embedding_when_requested(milvus_vector_store, mock_milvus_client):
+    mock_milvus_client.has_collection.return_value = True
+    mock_milvus_client.get.return_value = [
+        {"id": "1", "content": "ok", "embedding": [0.1, 0.2], "type": "test"},
+    ]
+
+    docs = milvus_vector_store.get_documents_by_id(["1"], include_embeddings=True)
+
+    assert docs[0].embedding == [0.1, 0.2]
+
+
 def test_writer_params_rejects_negative_dimension():
     with pytest.raises(ValueError):
         MilvusWriterVectorStoreParams(dimension=-1)

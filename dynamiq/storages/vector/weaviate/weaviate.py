@@ -690,18 +690,25 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
 
         weaviate_ids = [generate_uuid5(doc_id) for doc_id in ids]
         properties = [p.name for p in self._collection.config.get().properties]
-        try:
-            result = self._collection.query.fetch_objects(
-                filters=Filter.by_id().contains_any(weaviate_ids),
-                include_vector=include_embeddings,
-                limit=len(weaviate_ids),
-                return_properties=properties,
-            )
-        except WeaviateQueryError as e:
-            msg = f"Failed to fetch documents by id in Weaviate. Error: {e.message}"
-            raise VectorStoreException(msg) from e
 
-        return [self._to_document(obj, content_key=content_key) for obj in result.objects]
+        objects = []
+        # Chunk the id filter so a large batch never exceeds Weaviate's max-results cap (DEFAULT_QUERY_LIMIT).
+        # Each chunk filters to exactly its ids, so one fetch per chunk (limit=len(chunk)) returns them all.
+        for start in range(0, len(weaviate_ids), DEFAULT_QUERY_LIMIT):
+            chunk = weaviate_ids[start : start + DEFAULT_QUERY_LIMIT]
+            try:
+                result = self._collection.query.fetch_objects(
+                    filters=Filter.by_id().contains_any(chunk),
+                    include_vector=include_embeddings,
+                    limit=len(chunk),
+                    return_properties=properties,
+                )
+            except WeaviateQueryError as e:
+                msg = f"Failed to fetch documents by id in Weaviate. Error: {e.message}"
+                raise VectorStoreException(msg) from e
+            objects.extend(result.objects)
+
+        return [self._to_document(obj, content_key=content_key) for obj in objects]
 
     def _batch_write(self, documents: list[Document], content_key: str | None = None) -> int:
         """
