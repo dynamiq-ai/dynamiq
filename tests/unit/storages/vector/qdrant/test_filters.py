@@ -3,6 +3,7 @@ from qdrant_client.http import models
 
 from dynamiq.storages.vector.exceptions import VectorStoreFilterException as FilterError
 from dynamiq.storages.vector.qdrant.filters import (
+    _build_contains_any_condition,
     _build_eq_condition,
     _build_gt_condition,
     _build_gte_condition,
@@ -90,6 +91,24 @@ def test_build_in_condition():
             models.FieldCondition(key="metadata.field", match=models.MatchText(text="value2")),
         ]
     )
+    assert result.model_dump() == expected.model_dump()
+
+
+def test_build_contains_any_condition():
+    result = _build_contains_any_condition("metadata.tags", ["ai", "ml"])
+    expected = models.FieldCondition(key="metadata.tags", match=models.MatchAny(any=["ai", "ml"]))
+    assert result.model_dump() == expected.model_dump()
+
+
+def test_build_contains_any_condition_non_list_raises():
+    with pytest.raises(FilterError):
+        _build_contains_any_condition("metadata.tags", "ai")
+
+
+def test_convert_filters_to_qdrant_with_contains_any():
+    filter_term = {"operator": "contains_any", "field": "tags", "value": ["ai", "ml"]}
+    result = convert_filters_to_qdrant(filter_term)
+    expected = models.Filter(must=[models.FieldCondition(key="metadata.tags", match=models.MatchAny(any=["ai", "ml"]))])
     assert result.model_dump() == expected.model_dump()
 
 

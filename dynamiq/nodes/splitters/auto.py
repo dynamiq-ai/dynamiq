@@ -33,6 +33,20 @@ class AutoSplitter(BaseSplitterNode):
     infer_from_content: bool = Field(default=True, description="Infer strategy from lightweight content sniffing.")
     add_splitter_metadata: bool = Field(default=True, description="Stamp selected splitter strategy into metadata.")
     splitter_metadata_key: str = Field(default="splitter_strategy", description="Metadata key for selected strategy.")
+    refine_structured_chunks: bool = Field(
+        default=True,
+        description="Recursively split oversized Markdown/HTML sections while retaining section metadata.",
+    )
+    repair_flattened_markdown: bool = Field(
+        default=True,
+        description="Restore line starts before inline Markdown headings in otherwise flattened documents.",
+    )
+    flattened_markdown_max_heading_level: int = Field(
+        default=4,
+        ge=1,
+        le=6,
+        description="Deepest inline Markdown heading level restored in flattened documents.",
+    )
 
     json_max_chunk_size: int = Field(default=2000, gt=0, description="Maximum serialized JSON chunk size.")
     json_min_chunk_size: int | None = Field(default=None, description="Minimum serialized JSON chunk size.")
@@ -68,6 +82,9 @@ class AutoSplitter(BaseSplitterNode):
             infer_from_content=self.infer_from_content,
             add_splitter_metadata=self.add_splitter_metadata,
             splitter_metadata_key=self.splitter_metadata_key,
+            refine_structured_chunks=self.refine_structured_chunks,
+            repair_flattened_markdown=self.repair_flattened_markdown,
+            flattened_markdown_max_heading_level=self.flattened_markdown_max_heading_level,
             json_max_chunk_size=self.json_max_chunk_size,
             json_min_chunk_size=self.json_min_chunk_size,
             json_convert_lists=self.json_convert_lists,

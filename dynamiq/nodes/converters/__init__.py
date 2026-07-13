@@ -1,4 +1,4 @@
-from .csv import CSVConverter
+from .csv import CSVConverter, CSVDocumentCreationMode
 from .docx import DOCXFileConverter
 from .excel import ExcelFileConverter
 from .html import HTMLConverter

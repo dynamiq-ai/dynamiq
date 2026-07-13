@@ -1,4 +1,4 @@
-"""Unit tests for GraphRetriever: ACL/filter compilation, query building, and rendering (no DB).
+"""Unit tests for KnowledgeGraphRetriever: ACL/filter compilation, query building, and rendering (no DB).
 
 The security-critical pieces are the pure compiler functions (``_acl_clause``, ``_compile_edge_filters``)
 and the fact that filter VALUES are always bound parameters. A ``StubGraphStore`` returns canned records
@@ -12,11 +12,10 @@ from pydantic import ValidationError
 
 from dynamiq.connections import Neo4j
 from dynamiq.nodes.embedders.base import TextEmbedder
-from dynamiq.nodes.extractors import Ontology
-from dynamiq.nodes.extractors.entity_extractor import ENTITY_EMBEDDING_VECTOR_INDEX
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphRetriever, Ontology
+from dynamiq.nodes.knowledge_graph.entity_extractor import ENTITY_EMBEDDING_VECTOR_INDEX
+from dynamiq.nodes.knowledge_graph.retriever import GraphRetrieverInputSchema, _compile_edge_filters
 from dynamiq.nodes.node import Node, NodeGroup
-from dynamiq.nodes.retrievers import GraphRetriever
-from dynamiq.nodes.retrievers.graph import GraphRetrieverInputSchema, _compile_edge_filters
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
 
 
@@ -103,12 +102,12 @@ class StubGraphStore:
         return list(records)
 
 
-def make_retriever(rows=None, **kwargs) -> GraphRetriever:
+def make_retriever(rows=None, **kwargs) -> KnowledgeGraphRetriever:
     # llm + ontology are optional on the node, but default to an empty-names stub here so query-seeding
     # tests that don't care about extraction fall back to the raw query. Pass llm=None for the no-llm path.
     kwargs.setdefault("llm", StubLLM())
     kwargs.setdefault("ontology", _ONTOLOGY)
-    node = GraphRetriever(
+    node = KnowledgeGraphRetriever(
         connection=Neo4j(uri="bolt://localhost:7687", username="neo4j", password="password"),
         is_postponed_component_init=True,
         **kwargs,
@@ -227,13 +226,12 @@ class TestEntryModes:
         assert "db.index.fulltext.queryNodes('entity_name', $q) YIELD node AS a" in query
         assert "CONTAINS" not in query  # no scan
         assert params["q"] == "What~ OR does~ OR Jane~ OR use~"  # fuzzy Lucene OR-query
-        # anchored expansion is undirected; real direction recovered via startNode/endNode
+        # anchored expansion is undirected; per-edge direction comes from the r.src_name/r.dst_name snapshot
         assert "MATCH (a)-[r]-(b)" in query
-        assert "startNode(r)" in query and "endNode(r)" in query
         assert "coalesce(r.allowed_principals, [])" in query  # ACL still enforced on the edge
         # names render from the edge's own ACL-bearing snapshot, never the shared merged node
         assert "r.src_name AS a_name" in query and "r.dst_name AS b_name" in query
-        assert "startNode(r).name" not in query and "endNode(r).name" not in query
+        assert "startNode(r)" not in query and "endNode(r)" not in query  # shared node ids never surface
 
     def test_scan_fallback_when_index_absent(self):
         node = make_retriever(filters=LOCKED_ACL)
@@ -285,8 +283,8 @@ class TestExecuteRendering:
         assert out["content"] == "- Jane Doe -[WORKS_AT]-> Acme\n- Jane Doe -[salary]-> $250,000"
         assert out["documents"][0].score > out["documents"][1].score  # rank-derived ordering
 
-    def test_single_hop_exposes_endpoint_entity_ids_for_iteration(self):
-        # Endpoint ids let a caller feed a fact's neighbor back as the next hop's seed (no *1..N).
+    def test_single_hop_does_not_expose_endpoint_node_ids(self):
+        # Node ids are a public-namespace hash of the canonical name -> never surfaced to the caller.
         rows = [
             {
                 "a_name": "Jane Doe",
@@ -299,8 +297,8 @@ class TestExecuteRendering:
         ]
         node = make_retriever(rows=rows)
         out = node.execute(GraphRetrieverInputSchema(query="Jane Doe"))
-        assert out["documents"][0].metadata["source_id"] == "id-jane"
-        assert out["documents"][0].metadata["target_id"] == "id-acme"
+        assert "source_id" not in out["documents"][0].metadata
+        assert "target_id" not in out["documents"][0].metadata
 
     def test_empty_result_message(self):
         node = make_retriever(rows=[])
@@ -581,7 +579,7 @@ class TestFactRerank:
                 "rprops": {"embedding": [0.1, 0.2, 0.3], "description": "for trading"},
             }
         ]
-        docs = GraphRetriever._render_single_hop(rows)
+        docs = KnowledgeGraphRetriever._render_single_hop(rows)
         assert "embedding" not in docs[0].metadata  # edge vector never surfaces to the caller
         assert docs[0].content == "Acme -[USES]-> Helios: for trading"
 
@@ -611,7 +609,7 @@ HOP1 = [
 HOP2 = [{"a_name": "Nortech", "a_id": "id-nortech", "rel": "USES", "rprops": {}, "b_name": "Aegis", "b_id": "id-aegis"}]
 
 
-def make_multihop_retriever(batches, **kwargs) -> GraphRetriever:
+def make_multihop_retriever(batches, **kwargs) -> KnowledgeGraphRetriever:
     node = make_retriever(**kwargs)
     node._graph_store = SequencedGraphStore(batches)
     return node

@@ -92,4 +92,14 @@ def test_normalize_filters_preserves_structured_filter():
 
 
 def test_default_searchable_text_metadata_fields():
-    assert DEFAULT_SEARCHABLE_TEXT_METADATA_FIELDS == ("file_name", "file_path", "title", "source", "url")
+    assert DEFAULT_SEARCHABLE_TEXT_METADATA_FIELDS == (
+        "filename",
+        "file_name",
+        "file_path",
+        "title",
+        "dynamiq_item_source_provider_title",
+        "sheet_name",
+        "section",
+        "source",
+        "url",
+    )
