@@ -655,7 +655,15 @@ class SequencedGraphStore(StubGraphStore):
 
 
 HOP1 = [
-    {"a_name": "Sven", "a_id": "id-sven", "rel": "WORKS_AT", "rprops": {}, "b_name": "Nortech", "b_id": "id-nortech"}
+    {
+        "a_name": "Sven",
+        "a_id": "id-sven",
+        "rel": "WORKS_AT",
+        "rprops": {},
+        "b_name": "Nortech",
+        "b_id": "id-nortech",
+        "anchor_id": "id-sven",  # the MATCH-bound seed — excluded from the hop-2 frontier
+    }
 ]
 HOP2 = [{"a_name": "Nortech", "a_id": "id-nortech", "rel": "USES", "rprops": {}, "b_name": "Aegis", "b_id": "id-aegis"}]
 
@@ -682,7 +690,10 @@ class TestMultiHopBeam:
             "Nortech -[USES]-> Aegis",
         ]
         hop_query, hop_params = node._graph_store.calls[1]
-        assert set(hop_params["frontier"]) == {"id-sven", "id-nortech"}  # expands from hop-1 endpoints
+        # frontier = NEW nodes only: the seed (anchor) is excluded, so its leftover 1-hop edges never
+        # compete in hop 2's beam against true chain facts; it stays in $visited (no walking back).
+        assert set(hop_params["frontier"]) == {"id-nortech"}
+        assert set(hop_params["visited"]) == {"id-sven", "id-nortech"}
         assert "NOT (startNode(r).id IN $visited AND endNode(r).id IN $visited)" in hop_query
         assert "WITH DISTINCT r" in hop_query
 
@@ -694,6 +705,7 @@ class TestMultiHopBeam:
         hop1_query = node._graph_store.calls[0][0]
         assert "startNode(r).id AS a_id" in hop1_query
         assert "endNode(r).id AS b_id" in hop1_query
+        assert "a.id AS anchor_id" in hop1_query  # seed identity, so the frontier can exclude the anchors
 
         node = make_multihop_retriever([HOP1])
         node.execute(GraphRetrieverInputSchema(query="Sven"))

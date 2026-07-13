@@ -644,9 +644,12 @@ class KnowledgeGraphRetriever(ConnectionNode):
         # merged node, so a differently-scoped name can't leak.
         if include_endpoint_ids:
             # Endpoint ids feed _endpoint_ids -> the hop-2 frontier; keep the shape identical to _hop_query.
+            # anchor_id is the MATCH-bound seed (`a`), so the hop-2 frontier can exclude the seeds
+            # themselves — otherwise hop 2 re-expands the seeds and their leftover 1-hop edges (the ones
+            # hop 1's beam cut) would compete against true chain facts.
             ret = (
                 "RETURN r.src_name AS a_name, startNode(r).id AS a_id, type(r) AS rel, "
-                "properties(r) AS rprops, r.dst_name AS b_name, endNode(r).id AS b_id"
+                "properties(r) AS rprops, r.dst_name AS b_name, endNode(r).id AS b_id, a.id AS anchor_id"
             )
         else:
             ret = "RETURN r.src_name AS a_name, type(r) AS rel, " "properties(r) AS rprops, r.dst_name AS b_name"
@@ -748,10 +751,14 @@ class KnowledgeGraphRetriever(ConnectionNode):
             )
             records, _, _ = self._graph_store.run_cypher(query, parameters=params, database=self.database)
             rows = self._graph_store.format_records(records)
-            # Beam expansion: hop N+1 expands ONLY from the endpoints of the edges hop N kept, excluding
-            # edges already inside the visited set. ACL-filtered and relevance-ranked per hop.
-            visited = self._endpoint_ids(rows)
-            frontier = set(visited)
+            # Beam expansion: hop N+1 expands ONLY from the NEW nodes the previous hop reached, excluding
+            # edges already inside the visited set. The seeds (anchors) are excluded from the first
+            # frontier — hop 1 already expanded them, and re-expanding would let their leftover 1-hop
+            # edges compete against true chain facts. ACL-filtered and relevance-ranked per hop.
+            anchor_ids = {row.get("anchor_id") for row in rows if row.get("anchor_id")}
+            endpoint_ids = self._endpoint_ids(rows)
+            visited = endpoint_ids | anchor_ids
+            frontier = endpoint_ids - anchor_ids
             for _ in range(max_hops - 1):
                 if not frontier:
                     break
