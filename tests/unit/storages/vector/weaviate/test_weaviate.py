@@ -145,6 +145,75 @@ def test_hybrid_retrieval_forwards_custom_content_key_to_document_conversion() -
     assert store._collection.query.hybrid.call_args.kwargs["query_properties"] == ["custom_content", "file_name"]
 
 
+def test_get_documents_by_id_fetches_by_generated_uuid() -> None:
+    from weaviate.util import generate_uuid5
+
+    store = WeaviateVectorStore.__new__(WeaviateVectorStore)
+    store.content_key = "content"
+
+    collection_properties = [
+        SimpleNamespace(name="content"),
+        SimpleNamespace(name="file_name"),
+    ]
+    result_object = SimpleNamespace(objects=[SimpleNamespace(properties={"_original_id": "1", "content": "ok"})])
+    store._collection = MagicMock()
+    store._collection.config.get.return_value.properties = collection_properties
+    store._collection.query.fetch_objects.return_value = result_object
+    store._to_document = MagicMock(return_value=Document(content="ok"))
+
+    docs = store.get_documents_by_id(["1", "2"], content_key="content")
+
+    assert len(docs) == 1
+    assert docs[0].content == "ok"
+    store._to_document.assert_called_once_with(result_object.objects[0], content_key="content")
+
+    call_kwargs = store._collection.query.fetch_objects.call_args.kwargs
+    assert call_kwargs["include_vector"] is False
+    assert call_kwargs["limit"] == 2
+    assert call_kwargs["return_properties"] == ["content", "file_name"]
+    # ids are resolved to the same deterministic UUIDs used by the write/delete paths
+    filter_ids = call_kwargs["filters"].value
+    assert set(filter_ids) == {generate_uuid5("1"), generate_uuid5("2")}
+
+
+def test_get_documents_by_id_empty_returns_empty_without_query() -> None:
+    store = WeaviateVectorStore.__new__(WeaviateVectorStore)
+    store.content_key = "content"
+    store._collection = MagicMock()
+
+    assert store.get_documents_by_id([]) == []
+    store._collection.query.fetch_objects.assert_not_called()
+
+
+def test_get_documents_by_id_chunks_large_batches(monkeypatch) -> None:
+    # A batch larger than DEFAULT_QUERY_LIMIT must be split into multiple capped fetches, not one
+    # oversized call that could hit Weaviate's max-results cap. Patch the limit small to keep it fast.
+    import dynamiq.storages.vector.weaviate.weaviate as weaviate_mod
+
+    monkeypatch.setattr(weaviate_mod, "DEFAULT_QUERY_LIMIT", 2)
+
+    store = WeaviateVectorStore.__new__(WeaviateVectorStore)
+    store.content_key = "content"
+    store._collection = MagicMock()
+    store._collection.config.get.return_value.properties = [SimpleNamespace(name="content")]
+    store._to_document = lambda obj, content_key=None: Document(content=str(obj))
+
+    # Echo each chunk's ids back as its objects so we can verify chunk sizes and full accumulation.
+    store._collection.query.fetch_objects.side_effect = lambda **kwargs: SimpleNamespace(
+        objects=list(kwargs["filters"].value)
+    )
+
+    docs = store.get_documents_by_id(["1", "2", "3", "4", "5"])
+
+    calls = store._collection.query.fetch_objects.call_args_list
+    # 5 ids, chunk size 2 -> 3 calls of sizes 2, 2, 1
+    assert [len(c.kwargs["filters"].value) for c in calls] == [2, 2, 1]
+    # each call's limit matches its chunk size (never the full 5, never > DEFAULT_QUERY_LIMIT)
+    assert all(c.kwargs["limit"] == len(c.kwargs["filters"].value) for c in calls)
+    # every id is fetched and accumulated across chunks
+    assert len(docs) == 5
+
+
 @patch("dynamiq.storages.vector.weaviate.weaviate.Weaviate")
 def test_to_data_object_with_valid_properties(mock_weaviate):
     """Test the _to_data_object method with valid property names."""
