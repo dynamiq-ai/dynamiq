@@ -277,10 +277,20 @@ class CSVConverter(Node):
             headers = next(reader)
         except StopIteration:
             return
-        dict_reader = (dict(zip(headers, row)) for row in reader)
+        dict_reader = (self._map_named_row(headers, row) for row in reader)
         yield from self._process_rows_generator(
             dict_reader, source, content_column, metadata_columns, external_metadata
         )
+
+    @staticmethod
+    def _map_named_row(headers: list[str], row: list[str]) -> dict[str | None, str | list[str] | None]:
+        """Map a parsed row with the same ragged-row semantics as ``csv.DictReader``."""
+        mapped_row: dict[str | None, str | list[str] | None] = dict(zip(headers, row))
+        if len(row) > len(headers):
+            mapped_row[None] = row[len(headers) :]
+        elif len(row) < len(headers):
+            mapped_row.update(dict.fromkeys(headers[len(row) :]))
+        return mapped_row
 
     def _process_all_columns(
         self,
@@ -329,7 +339,7 @@ class CSVConverter(Node):
 
     def _process_rows_generator(
         self,
-        reader: Iterator[dict[str, str]],
+        reader: Iterator[dict[str | None, str | list[str] | None]],
         source: str,
         content_column: str,
         metadata_columns: list[str] | None,

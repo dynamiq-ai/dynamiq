@@ -209,6 +209,20 @@ def test_csv_loader_missing_metadata_columns(csv_file_path):
     assert "NonExistentFeature" not in first_doc["metadata"]
 
 
+def test_csv_loader_named_rows_preserve_dict_reader_ragged_row_semantics():
+    csv_loader = CSVConverter(content_column="content", metadata_columns=["category"])
+    file = BytesIO(b"content,category\nshort\nlong,news,extra\n")
+    file.name = "ragged.csv"
+
+    result = csv_loader.run(input_data={"files": [file]})
+
+    documents = result.output["documents"]
+    assert documents[0]["content"] == "short"
+    assert documents[0]["metadata"]["category"] is None
+    assert documents[1]["content"] == "long"
+    assert csv_loader._map_named_row(["content", "category"], ["long", "news", "extra"])[None] == ["extra"]
+
+
 def test_csv_loader_without_content_column_creates_self_describing_rows(csv_bytesio):
     csv_loader = CSVConverter()
 

@@ -7,6 +7,7 @@ from dynamiq.components.converters.excel import ExcelFileConverter as ExcelFileC
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.node import ErrorHandling, Node, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types import DocumentCreationMode
 from dynamiq.utils.logger import logger
 
 
@@ -32,12 +33,19 @@ class ExcelFileConverter(Node):
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
     name: str = "excel-file-converter"
-    delimited_document_creation_mode: Literal["one-doc-per-file", "one-doc-per-row"] = Field(
-        default="one-doc-per-file",
+    delimited_document_creation_mode: Literal[
+        DocumentCreationMode.ONE_DOC_PER_FILE,
+        DocumentCreationMode.ONE_DOC_PER_ROW,
+    ] = Field(
+        default=DocumentCreationMode.ONE_DOC_PER_FILE,
         description="Create one document per CSV/TSV file or one self-describing document per data row.",
     )
-    workbook_document_creation_mode: Literal["one-doc-per-file", "one-doc-per-sheet", "one-doc-per-row"] = Field(
-        default="one-doc-per-file",
+    workbook_document_creation_mode: Literal[
+        DocumentCreationMode.ONE_DOC_PER_FILE,
+        DocumentCreationMode.ONE_DOC_PER_SHEET,
+        DocumentCreationMode.ONE_DOC_PER_ROW,
+    ] = Field(
+        default=DocumentCreationMode.ONE_DOC_PER_FILE,
         description="Create one document per XLSX workbook, sheet, or self-describing data row.",
     )
     error_handling: ErrorHandling = Field(

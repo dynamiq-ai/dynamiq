@@ -44,6 +44,8 @@ class DocumentCreationMode(str, enum.Enum):
     ONE_DOC_PER_FILE = "one-doc-per-file"
     ONE_DOC_PER_PAGE = "one-doc-per-page"
     ONE_DOC_PER_ELEMENT = "one-doc-per-element"
+    ONE_DOC_PER_SHEET = "one-doc-per-sheet"
+    ONE_DOC_PER_ROW = "one-doc-per-row"
 
 
 class DocumentType(str, enum.Enum):

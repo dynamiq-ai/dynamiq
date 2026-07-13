@@ -15,8 +15,15 @@ from dynamiq.components.converters.utils import (
 from dynamiq.types import Document, DocumentCreationMode, DocumentType
 
 SUPPORTED_EXCEL_EXTENSIONS = {".csv", ".tsv", ".xlsx"}
-DelimitedDocumentCreationMode = Literal["one-doc-per-file", "one-doc-per-row"]
-WorkbookDocumentCreationMode = Literal["one-doc-per-file", "one-doc-per-sheet", "one-doc-per-row"]
+DelimitedDocumentCreationMode = Literal[
+    DocumentCreationMode.ONE_DOC_PER_FILE,
+    DocumentCreationMode.ONE_DOC_PER_ROW,
+]
+WorkbookDocumentCreationMode = Literal[
+    DocumentCreationMode.ONE_DOC_PER_FILE,
+    DocumentCreationMode.ONE_DOC_PER_SHEET,
+    DocumentCreationMode.ONE_DOC_PER_ROW,
+]
 
 
 class ExcelFileConverter(BaseConverter):
@@ -44,8 +51,8 @@ class ExcelFileConverter(BaseConverter):
     """
 
     document_creation_mode: Literal[DocumentCreationMode.ONE_DOC_PER_FILE] = DocumentCreationMode.ONE_DOC_PER_FILE
-    delimited_document_creation_mode: DelimitedDocumentCreationMode = "one-doc-per-file"
-    workbook_document_creation_mode: WorkbookDocumentCreationMode = "one-doc-per-file"
+    delimited_document_creation_mode: DelimitedDocumentCreationMode = DocumentCreationMode.ONE_DOC_PER_FILE
+    workbook_document_creation_mode: WorkbookDocumentCreationMode = DocumentCreationMode.ONE_DOC_PER_FILE
 
     def _process_file(self, file: Path | BytesIO, metadata: dict[str, Any]) -> list[Any]:
         """
@@ -98,7 +105,7 @@ class ExcelFileConverter(BaseConverter):
         delimiter: str,
     ) -> list[Document]:
         content_type = "text/tab-separated-values" if delimiter == "\t" else "text/csv"
-        if self.delimited_document_creation_mode == "one-doc-per-row":
+        if self.delimited_document_creation_mode == DocumentCreationMode.ONE_DOC_PER_ROW:
             return self._create_delimited_row_documents(
                 filepath=filepath,
                 rows=self._read_delimited_rows(data, delimiter=delimiter),
@@ -119,8 +126,8 @@ class ExcelFileConverter(BaseConverter):
         metadata: dict[str, Any],
     ) -> list[Document]:
         creators = {
-            "one-doc-per-row": self._create_workbook_row_documents,
-            "one-doc-per-sheet": self._create_workbook_sheet_documents,
+            DocumentCreationMode.ONE_DOC_PER_ROW: self._create_workbook_row_documents,
+            DocumentCreationMode.ONE_DOC_PER_SHEET: self._create_workbook_sheet_documents,
         }
         creator = creators.get(self.workbook_document_creation_mode)
         if creator:

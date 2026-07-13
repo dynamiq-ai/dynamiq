@@ -10,6 +10,7 @@ from dynamiq.nodes.converters.csv import CSVConverter
 from dynamiq.nodes.converters.excel import ExcelFileConverter
 from dynamiq.nodes.converters.multi_file_type_converter import MultiFileTypeConverter
 from dynamiq.runnables import RunnableStatus
+from dynamiq.types import DocumentCreationMode
 
 
 def build_xlsx_bytesio(filename: str = "test.xlsx") -> BytesIO:
@@ -69,7 +70,14 @@ def test_excel_converter_with_xlsx():
     assert documents[0]["metadata"]["file_path"] == "test.xlsx"
 
 
-@pytest.mark.parametrize("mode", ["one-doc-per-file", "one-doc-per-row", "one-doc-per-sheet"])
+@pytest.mark.parametrize(
+    "mode",
+    [
+        DocumentCreationMode.ONE_DOC_PER_FILE,
+        DocumentCreationMode.ONE_DOC_PER_ROW,
+        DocumentCreationMode.ONE_DOC_PER_SHEET,
+    ],
+)
 def test_excel_converter_rejects_empty_workbook_in_all_creation_modes(mode):
     converter = ExcelFileConverter(workbook_document_creation_mode=mode)
     workflow = Workflow(flow=Flow(nodes=[converter]))
