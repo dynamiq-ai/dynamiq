@@ -123,19 +123,23 @@ class DynamiqKnowledgebaseHybridSearch(Node):
         """
         return {"parent_run_id": kwargs.get("run_id")}
 
-    @staticmethod
-    def _output_or_raise(result: RunnableResult, source: str) -> dict[str, Any]:
-        """Unwrap a sub-node ``RunnableResult``, propagating cancellation and failures."""
+    def _rerank_or_degrade(self, result: RunnableResult, documents: list[Document]) -> list[Document]:
+        """Unwrap a reranker ``RunnableResult``; on failure degrade to the unranked ``documents``.
+
+        Reranking is an optional refinement -- a reranker failure must not abort a hybrid search whose
+        sub-searches already succeeded (mirrors ``KnowledgeGraphRetriever._maybe_rerank``). Cancellation
+        still propagates.
+        """
         if result.status == RunnableStatus.CANCELED:
             raise CanceledException()
         if result.status != RunnableStatus.SUCCESS:
             error = result.error.to_dict() if result.error else "unknown error"
-            raise ToolExecutionException(
-                f"Hybrid search sub-node '{source}' failed: {error}. "
-                f"Please analyze the error and take appropriate action.",
-                recoverable=True,
+            logger.warning(
+                f"Tool {self.name} - {self.id}: reranker '{self.reranker.name}' failed: {error}; "
+                f"returning unranked documents."
             )
-        return result.output or {}
+            return documents
+        return (result.output or {}).get("documents", documents)
 
     def _output_or_degrade(self, result: RunnableResult, label: str) -> dict[str, Any] | None:
         """Like ``_output_or_raise`` but degrades a failed sub-search to ``None`` (logged) instead of raising.
@@ -251,7 +255,7 @@ class DynamiqKnowledgebaseHybridSearch(Node):
             run_depends=kwargs.get("run_depends", []),
             **self._sub_run_kwargs(kwargs),
         )
-        return self._output_or_raise(result, self.reranker.name).get("documents", documents)
+        return self._rerank_or_degrade(result, documents)
 
     async def _rerank_async(
         self, query: str, documents: list[Document], config: RunnableConfig, **kwargs
@@ -267,7 +271,7 @@ class DynamiqKnowledgebaseHybridSearch(Node):
             run_depends=kwargs.get("run_depends", []),
             **self._sub_run_kwargs(kwargs),
         )
-        return self._output_or_raise(result, self.reranker.name).get("documents", documents)
+        return self._rerank_or_degrade(result, documents)
 
     @staticmethod
     def _as_document(item: Any, source: str) -> Document:

@@ -260,6 +260,33 @@ def test_resolve_outputs_propagates_cancellation(vector_node, graph_node):
         node._resolve_outputs(ok, canceled)
 
 
+def test_execute_degrades_when_reranker_fails(vector_node, graph_node):
+    """A reranker failure must NOT abort a hybrid call whose sub-searches succeeded; it degrades to
+    the unranked merged documents (order preserved)."""
+    node = _hybrid(vector_node, graph_node, reranker=_StubReranker())
+    vector_node.client.request.return_value = _vector_response(
+        [{"id": "1", "content": "a"}, {"id": "2", "content": "b"}]
+    )
+    graph_node.client.request.return_value = _graph_response({"content": ""})
+
+    with patch.object(_StubReranker, "execute", side_effect=RuntimeError("reranker boom")):
+        result = node.execute(
+            DynamiqKnowledgebaseHybridSearchInputSchema(query="q"), RunnableConfig(callbacks=[])
+        )
+
+    # Reranker failed -> merged order preserved, no exception raised.
+    assert [doc.id for doc in result["documents"]] == ["1", "2"]
+
+
+def test_rerank_or_degrade_propagates_cancellation(vector_node, graph_node):
+    """A canceled reranker run re-raises CanceledException rather than degrading."""
+    node = _hybrid(vector_node, graph_node, reranker=_StubReranker())
+    canceled = RunnableResult(status=RunnableStatus.CANCELED, input={}, output=None, error=None)
+
+    with pytest.raises(CanceledException):
+        node._rerank_or_degrade(canceled, [Document(id="1", content="a")])
+
+
 def test_sub_runs_nest_under_hybrid_in_trace(vector_node, graph_node):
     """Sub-searches + reranker must record the hybrid's run as their parent, so the tracer nests them --
     otherwise each looks like a root and TracingCallbackHandler.flush()es when a sub-run finishes,
