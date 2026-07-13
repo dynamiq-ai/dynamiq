@@ -552,6 +552,45 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
         )
         return response["aggregations"]["stats"]
 
+    def replace_document_metadata(self, document_ids: str | list[str], metadata: dict[str, Any]) -> None:
+        """Replace the metadata of one or more documents with new metadata (full replacement).
+
+        A scripted update assigns the whole ``metadata`` object, so keys absent from ``metadata``
+        are dropped rather than merged (a plain partial update would deep-merge the object).
+
+        Args:
+            document_ids (str | list[str]): The id, or list of ids, of the documents to update.
+            metadata (dict[str, Any]): The new metadata that fully replaces the existing one.
+
+        Raises:
+            VectorStoreException: If any of the given ids does not exist. No document is
+                modified in that case (fail-fast), so the call never partially applies.
+        """
+        ids = self._normalize_document_ids(document_ids)
+        if not ids:
+            return
+
+        # Fail-fast: verify every id exists before mutating anything, otherwise a missing id
+        # mid-loop would raise after earlier ids were already updated (a partial write).
+        response = self.client.mget(index=self.index_name, body={"ids": ids}, _source=False)
+        missing = [doc["_id"] for doc in response["docs"] if not doc.get("found")]
+        if missing:
+            raise VectorStoreException(f"Documents {missing} not found in index '{self.index_name}'")
+
+        for document_id in ids:
+            self.client.update(
+                index=self.index_name,
+                id=document_id,
+                body={
+                    "script": {
+                        "source": "ctx._source.metadata = params.metadata",
+                        "lang": "painless",
+                        "params": {"metadata": metadata},
+                    }
+                },
+                refresh=True,
+            )
+
     def update_document_by_file_id(
         self,
         file_id: str,
