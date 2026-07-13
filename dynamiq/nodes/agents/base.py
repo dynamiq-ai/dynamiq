@@ -637,7 +637,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         Failures are logged but never propagate — cleanup must not break the agent run.
         """
         try:
-            for tool in self.tools:
+            # Use _runtime_tools, not self.tools, so a borrowed shared sandbox's TodoWriteTool
+            # (delivered via the _shared_sandbox_tools overlay) also gets cleared — otherwise its
+            # workdir keeps stale todos for the next run.
+            for tool in self._runtime_tools:
                 if isinstance(tool, TodoWriteTool):
                     tool.clear()
             if getattr(self, "state", None) is not None:

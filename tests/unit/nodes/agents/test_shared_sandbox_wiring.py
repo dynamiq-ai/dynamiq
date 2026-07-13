@@ -675,3 +675,23 @@ def test_release_restores_outer_view_for_nested_execute(test_llm):
     assert sub.sandbox_backend is outer_view
     inner_view.close.assert_called_once_with(kill=False)  # only the nested view disconnected
     outer_view.close.assert_not_called()  # outer view left connected for the outer run
+
+
+def test_clear_todos_clears_borrowed_overlay_todo_tool(test_llm):
+    """Todo cleanup must clear TodoWriteTool from the shared-sandbox overlay, not only self.tools —
+    otherwise a borrowed workdir keeps stale todos across runs (Bugbot: todo cleanup skips borrowed
+    sandbox tools)."""
+    from unittest.mock import MagicMock
+
+    from dynamiq.nodes.agents.base import _shared_sandbox_tools
+    from dynamiq.nodes.tools.todo_tools import TodoWriteTool
+
+    sub = Agent(name="Researcher", llm=test_llm, role="r", tools=[])  # no own sandbox/todo tool
+    overlay_todo = MagicMock(spec=TodoWriteTool)
+    otoken = _shared_sandbox_tools.set([overlay_todo])  # borrowed sandbox tools, as execute() sets
+    try:
+        sub._clear_todos_file()
+    finally:
+        _shared_sandbox_tools.reset(otoken)
+
+    overlay_todo.clear.assert_called_once()
