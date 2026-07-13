@@ -182,6 +182,36 @@ def test_borrowed_subagent_sandbox_backend_is_the_shared_view(test_llm):
         _shared_session.reset(token)
 
 
+def test_borrowing_subagent_ingests_skills_into_shared_view(test_llm):
+    """A borrowing subagent must ingest its sandbox-skills into the borrowed view at run time:
+    init-time ingestion is skipped because it has no own sandbox then, but the SkillsTool it
+    exposes reads SKILL.md files from the shared sandbox (Bugbot: borrowing subagents skip
+    skills ingestion)."""
+    from unittest.mock import patch
+
+    from dynamiq.nodes.agents.shared_session import SharedSession
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(sandbox=shared, share_sandbox=True, owner_run_id="owner")
+    token = _shared_session.set(session)
+    seen_backend = []
+    try:
+        sub = Agent(name="Researcher", llm=test_llm, role="r", tools=[])
+        with patch.object(
+            Agent,
+            "_ensure_skills_ingested_for_sandbox",
+            autospec=True,
+            side_effect=lambda self: seen_backend.append(self.sandbox_backend),
+        ) as ingest:
+            sub._maybe_borrow_shared_sandbox()
+        ingest.assert_called_once()
+        # Ingestion must target the borrowed shared view, not the absent own backend.
+        assert sub._shared_sandbox_view is not None
+        assert seen_backend == [sub._shared_sandbox_view]
+    finally:
+        _shared_session.reset(token)
+
+
 def test_release_shared_sandbox_view_disconnects_without_kill(test_llm):
     from unittest.mock import MagicMock
 

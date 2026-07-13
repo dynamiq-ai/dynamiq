@@ -2285,6 +2285,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         self._overridden_own_backend = own if overrode_own else None
         self._sandbox_is_shared = True
         self._shared_sandbox_view = view
+        # Ingest this subagent's sandbox-skills into the borrowed view. Init-time ingestion was
+        # skipped (it had no own sandbox then), but its SkillsTool reads SKILL.md files from the
+        # shared sandbox, so they must be present there. No-op when the agent has no sandbox-skills.
+        self._ensure_skills_ingested_for_sandbox()
         return tools
 
     def _release_shared_sandbox_view(self, restore_to: "Sandbox | None" = None) -> None:
