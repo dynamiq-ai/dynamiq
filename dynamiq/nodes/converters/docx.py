@@ -37,7 +37,13 @@ class DOCXFileConverter(Node):
         default_factory=lambda: ErrorHandling(timeout_seconds=60.0),
         description="Default execution timeout. Set timeout_seconds to None to disable.",
     )
-    document_creation_mode: DocumentCreationMode = DocumentCreationMode.ONE_DOC_PER_FILE
+    document_creation_mode: Literal[
+        DocumentCreationMode.ONE_DOC_PER_FILE,
+        DocumentCreationMode.ONE_DOC_PER_PAGE,
+    ] = Field(
+        default=DocumentCreationMode.ONE_DOC_PER_FILE,
+        description="Create one document per DOCX file or, for the legacy page value, per Word section break.",
+    )
     file_converter: DOCXConverterComponent | None = None
     input_schema: ClassVar[type[DOCXFileConverterInputSchema]] = DOCXFileConverterInputSchema
 

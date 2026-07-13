@@ -17,8 +17,7 @@ class RetrieverInputSchema(BaseModel):
     top_k: int = Field(default=0, description="Parameter to provided how many documents to retrieve.")
     similarity_threshold: float | None = Field(
         default=None,
-        description="Parameter to provide minimal similarity "
-        "or maximal distance score accepted for retrieved documents.",
+        description="Post-retrieval score threshold. Hybrid scores may be query-relative rather than absolute.",
     )
     content_key: str | None = Field(default=None, description="Parameter to provide content key.")
     embedding_key: str | None = Field(default=None, description="Parameter to provide embedding key.")
@@ -28,6 +27,11 @@ class RetrieverInputSchema(BaseModel):
         ge=0,
         le=1,
         description="Parameter to provide alpha for hybrid retrieval.",
+    )
+    max_vector_distance: float | None = Field(
+        default=None,
+        ge=0,
+        description="Maximum vector distance accepted by hybrid retrieval backends that support it.",
     )
 
 

@@ -1,17 +1,17 @@
-"""Unit tests for ``EntityExtractor`` transform/sanitize logic (no LLM, no Neo4j)."""
+"""Unit tests for ``KnowledgeGraphEntityExtractor`` transform/sanitize logic (no LLM, no Neo4j)."""
 
 import json
 from typing import ClassVar
 
 import pytest
 
-from dynamiq.nodes.extractors import EntityExtractor, Ontology
-from dynamiq.nodes.extractors.entity_extractor import ATTRIBUTE_VALUE_LABEL, ENTITY_LABEL, HAS_ATTRIBUTE_TYPE
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphEntityExtractor, Ontology
+from dynamiq.nodes.knowledge_graph.entity_extractor import ATTRIBUTE_VALUE_LABEL, ENTITY_LABEL, HAS_ATTRIBUTE_TYPE
 from dynamiq.nodes.node import Node, NodeGroup
 from dynamiq.storages.graph.neo4j.neo4j import Neo4jGraphStore
 from dynamiq.types import Document
 
-# ``ontology`` is required on EntityExtractor; this permissive schema covers the types the tests emit so
+# ``ontology`` is required on KnowledgeGraphEntityExtractor; this permissive schema covers the types the tests emit so
 # enforcement keeps them. Tests that exercise attribute reification or guidance pass their own ontology.
 _ONTOLOGY = Ontology(entity_types=["Hedge Fund", "Person", "Org"], relationship_types=["works at"])
 
@@ -94,11 +94,11 @@ class TestSanitizeIdentifier:
         ],
     )
     def test_sanitize(self, raw, expected):
-        assert EntityExtractor._sanitize_identifier(raw) == expected
+        assert KnowledgeGraphEntityExtractor._sanitize_identifier(raw) == expected
 
     def test_output_always_valid_for_neo4j(self):
         for raw in ["Hedge Fund", "1abc", "a.b.c", "EVENT/2024", "Ünïcödé"]:
-            assert _IDENTIFIER_MATCHES(EntityExtractor._sanitize_identifier(raw))
+            assert _IDENTIFIER_MATCHES(KnowledgeGraphEntityExtractor._sanitize_identifier(raw))
 
 
 def _IDENTIFIER_MATCHES(value: str) -> bool:
@@ -118,7 +118,7 @@ class TestToWriteGraphPayload:
             {"source_id": "jane", "target_id": "acme", "type": "works at", "properties": {"since": 2020}},
             {"source_id": "jane", "target_id": "ghost", "type": "KNOWS"},  # dangling -> dropped
         ]
-        extractor = EntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)
+        extractor = KnowledgeGraphEntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)
         nodes, graph_rels = extractor._to_write_graph_payload(entities, relationships)
 
         # Every entity carries its type label first plus the shared "Entity" label (the full-text index hook),
@@ -149,7 +149,8 @@ class TestToWriteGraphPayload:
 
     def test_entity_without_type_or_id_is_skipped(self):
         entities = [{"id": "x"}, {"type": "Person"}, {"id": "y", "type": "Person"}]
-        nodes, _ = EntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)._to_write_graph_payload(entities, [])
+        extractor = KnowledgeGraphEntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)
+        nodes, _ = extractor._to_write_graph_payload(entities, [])
         assert [n["properties"]["id"] for n in nodes] == ["y"]
 
     def test_relationship_description_rides_on_edge_properties(self):
@@ -157,14 +158,15 @@ class TestToWriteGraphPayload:
         relationships = [
             {"source_id": "jane", "target_id": "acme", "type": "WORKS_AT", "description": "CFO since 2020"}
         ]
-        extractor = EntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)
+        extractor = KnowledgeGraphEntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)
         _, graph_rels = extractor._to_write_graph_payload(entities, relationships)
         assert graph_rels[0]["properties"]["description"] == "CFO since 2020"
 
     def test_entity_description_is_not_written_to_the_node(self):
         # Descriptions are edge-only: an entity-level description must never land on the (shared) node.
         entities = [{"id": "jane", "type": "Person", "name": "Jane", "description": "the CFO"}]
-        nodes, _ = EntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)._to_write_graph_payload(entities, [])
+        extractor = KnowledgeGraphEntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)
+        nodes, _ = extractor._to_write_graph_payload(entities, [])
         assert nodes[0]["properties"] == {"id": "jane", "name": "Jane"}
 
 
@@ -176,7 +178,7 @@ class TestTypeGuidance:
             entity_descriptions={"Person": "an individual human"},  # Org intentionally undescribed
             relationship_descriptions={"WORKS_AT": "employment of a person by an organization"},
         )
-        guidance = EntityExtractor(llm=StubLLM(), ontology=ontology)._build_type_guidance()
+        guidance = KnowledgeGraphEntityExtractor(llm=StubLLM(), ontology=ontology)._build_type_guidance()
 
         assert "Person (an individual human)" in guidance
         assert "Org" in guidance and "Org (" not in guidance  # bare when no description
@@ -185,27 +187,27 @@ class TestTypeGuidance:
 
 class TestParseLLMJson:
     def test_plain_json(self):
-        assert EntityExtractor._parse_llm_json('{"entities": [], "relationships": []}') == {
+        assert KnowledgeGraphEntityExtractor._parse_llm_json('{"entities": [], "relationships": []}') == {
             "entities": [],
             "relationships": [],
         }
 
     def test_markdown_fenced(self):
         raw = '```json\n{"entities": [{"id": "a"}], "relationships": []}\n```'
-        assert EntityExtractor._parse_llm_json(raw)["entities"] == [{"id": "a"}]
+        assert KnowledgeGraphEntityExtractor._parse_llm_json(raw)["entities"] == [{"id": "a"}]
 
     def test_prose_around_json(self):
         raw = 'Here you go:\n{"entities": [], "relationships": []}\nHope that helps!'
-        assert EntityExtractor._parse_llm_json(raw) == {"entities": [], "relationships": []}
+        assert KnowledgeGraphEntityExtractor._parse_llm_json(raw) == {"entities": [], "relationships": []}
 
     def test_garbage_returns_none(self):
-        assert EntityExtractor._parse_llm_json("not json at all") is None
+        assert KnowledgeGraphEntityExtractor._parse_llm_json("not json at all") is None
 
     def test_none_returns_none(self):
-        assert EntityExtractor._parse_llm_json(None) is None
+        assert KnowledgeGraphEntityExtractor._parse_llm_json(None) is None
 
     def test_non_dict_json_returns_none(self):
-        assert EntityExtractor._parse_llm_json('[{"id": "a"}]') is None
+        assert KnowledgeGraphEntityExtractor._parse_llm_json('[{"id": "a"}]') is None
 
 
 class TestExecuteEndToEndWithStubLLM:
@@ -218,10 +220,10 @@ class TestExecuteEndToEndWithStubLLM:
             "relationships": [{"source_id": "jane", "target_id": "acme", "type": "works at"}],
         }
         llm = StubLLM(response_content=json.dumps(payload))
-        extractor = EntityExtractor(llm=llm, ontology=_ONTOLOGY)
+        extractor = KnowledgeGraphEntityExtractor(llm=llm, ontology=_ONTOLOGY)
 
         result = extractor.execute(
-            EntityExtractor.input_schema(documents=[Document(content="Jane Doe works at Acme Capital.")])
+            KnowledgeGraphEntityExtractor.input_schema(documents=[Document(content="Jane Doe works at Acme Capital.")])
         )
 
         assert {n["labels"][0] for n in result["nodes"]} == {"HEDGE_FUND", "PERSON"}
@@ -235,36 +237,36 @@ class TestExecuteEndToEndWithStubLLM:
             "relationships": [],
         }
         llm = SequenceStubLLM(responses=["sorry, here is the graph you asked for", json.dumps(payload)])
-        extractor = EntityExtractor(llm=llm, ontology=_ONTOLOGY)
+        extractor = KnowledgeGraphEntityExtractor(llm=llm, ontology=_ONTOLOGY)
 
-        result = extractor.execute(EntityExtractor.input_schema(documents=[Document(content="Acme.")]))
+        result = extractor.execute(KnowledgeGraphEntityExtractor.input_schema(documents=[Document(content="Acme.")]))
 
         assert llm.calls == 2  # initial call + one repair round-trip
         assert [n["properties"]["name"] for n in result["nodes"]] == ["Acme"]
 
     def test_execute_skips_document_when_recovery_fails(self):
         llm = SequenceStubLLM(responses=["garbage", "still garbage"])
-        extractor = EntityExtractor(llm=llm, ontology=_ONTOLOGY)
+        extractor = KnowledgeGraphEntityExtractor(llm=llm, ontology=_ONTOLOGY)
 
-        result = extractor.execute(EntityExtractor.input_schema(documents=[Document(content="Acme.")]))
+        result = extractor.execute(KnowledgeGraphEntityExtractor.input_schema(documents=[Document(content="Acme.")]))
 
         assert llm.calls == 2
         assert result["nodes"] == []
         assert result["relationships"] == []
 
     def test_execute_promotes_declared_attributes_to_doc_scoped_value_nodes(self):
-        from dynamiq.nodes.extractors import Ontology
-        from dynamiq.nodes.extractors.entity_extractor import ATTRIBUTE_VALUE_LABEL, HAS_ATTRIBUTE_TYPE
+        from dynamiq.nodes.knowledge_graph import Ontology
+        from dynamiq.nodes.knowledge_graph.entity_extractor import ATTRIBUTE_VALUE_LABEL, HAS_ATTRIBUTE_TYPE
 
         payload = {
             "entities": [{"id": "jane", "type": "Person", "name": "Jane Doe", "properties": {"salary": "$250,000"}}],
             "relationships": [],
         }
         ontology = Ontology(entity_types=["Person"], relationship_types=[], attributes={"Person": ["salary"]})
-        extractor = EntityExtractor(llm=StubLLM(response_content=json.dumps(payload)), ontology=ontology)
+        extractor = KnowledgeGraphEntityExtractor(llm=StubLLM(response_content=json.dumps(payload)), ontology=ontology)
         document = Document(id="doc-1", content="Jane Doe's salary is $250,000.")
 
-        result = extractor.execute(EntityExtractor.input_schema(documents=[document]))
+        result = extractor.execute(KnowledgeGraphEntityExtractor.input_schema(documents=[document]))
 
         person = next(n for n in result["nodes"] if n["labels"][0] == "PERSON")
         assert person["properties"]["id"] == "jane@doc-1"  # wiring id is doc-scoped
@@ -292,9 +294,9 @@ class TestExecuteEndToEndWithStubLLM:
             ],
             "relationships": [{"source_id": "jane", "target_id": "acme", "type": "works at"}],
         }
-        extractor = EntityExtractor(llm=StubLLM(response_content=json.dumps(payload)), ontology=_ONTOLOGY)
+        extractor = KnowledgeGraphEntityExtractor(llm=StubLLM(response_content=json.dumps(payload)), ontology=_ONTOLOGY)
         result = extractor.execute(
-            EntityExtractor.input_schema(documents=[Document(id="doc-1", content="Jane works at Acme.")])
+            KnowledgeGraphEntityExtractor.input_schema(documents=[Document(id="doc-1", content="Jane works at Acme.")])
         )
 
         rel = next(r for r in result["relationships"] if r["type"] == "WORKS_AT")
@@ -308,10 +310,10 @@ class TestExecuteEndToEndWithStubLLM:
             "relationships": [],
         }
         llm = StubLLM(response_content=json.dumps(payload))
-        extractor = EntityExtractor(llm=llm, ontology=_ONTOLOGY)
+        extractor = KnowledgeGraphEntityExtractor(llm=llm, ontology=_ONTOLOGY)
         doc_one, doc_two = Document(id="d1", content="doc one"), Document(id="d2", content="doc two")
 
-        result = extractor.execute(EntityExtractor.input_schema(documents=[doc_one, doc_two]))
+        result = extractor.execute(KnowledgeGraphEntityExtractor.input_schema(documents=[doc_one, doc_two]))
 
         # The same LLM id from two documents must NOT alias: wiring ids are doc-scoped, and identity
         # is assigned later by KnowledgeGraphWriter name resolution (which converges them by name).
@@ -325,21 +327,21 @@ class TestExecuteEndToEndWithStubLLM:
         # A transient LLM failure on one document must NOT abort the batch; remaining documents still process.
         payload = {"entities": [{"id": "acme", "type": "Org", "name": "Acme"}], "relationships": []}
         llm = FlakyStubLLM(fail_calls=[0], response_content=json.dumps(payload))  # doc 1 fails, doc 2 succeeds
-        extractor = EntityExtractor(llm=llm, ontology=_ONTOLOGY)
+        extractor = KnowledgeGraphEntityExtractor(llm=llm, ontology=_ONTOLOGY)
         docs = [Document(id="d1", content="doc one"), Document(id="d2", content="doc two")]
 
-        result = extractor.execute(EntityExtractor.input_schema(documents=docs))
+        result = extractor.execute(KnowledgeGraphEntityExtractor.input_schema(documents=docs))
 
         # Only doc 2's entity survives; doc 1 was skipped, not fatal.
         assert [n["properties"]["name"] for n in result["nodes"]] == ["Acme"]
 
     def test_all_documents_failing_raises_systemic_error(self):
         # When EVERY document fails, that's systemic (e.g. bad credentials) — raise instead of an empty graph.
-        extractor = EntityExtractor(llm=FailingStubLLM(), ontology=_ONTOLOGY)
+        extractor = KnowledgeGraphEntityExtractor(llm=FailingStubLLM(), ontology=_ONTOLOGY)
         docs = [Document(id="d1", content="a"), Document(id="d2", content="b")]
 
         with pytest.raises(ValueError, match="all 2 document"):
-            extractor.execute(EntityExtractor.input_schema(documents=docs))
+            extractor.execute(KnowledgeGraphEntityExtractor.input_schema(documents=docs))
 
     def test_documents_without_id_get_one_so_acl_edges_stay_separate(self):
         # An explicit id=None used to drop the source_doc_id discriminator: identical facts from two docs
@@ -353,11 +355,11 @@ class TestExecuteEndToEndWithStubLLM:
             "relationships": [{"source_id": "jane", "target_id": "acme", "type": "works at"}],
         }
         llm = StubLLM(response_content=json.dumps(payload))
-        extractor = EntityExtractor(llm=llm, ontology=_ONTOLOGY)
+        extractor = KnowledgeGraphEntityExtractor(llm=llm, ontology=_ONTOLOGY)
         doc_a = Document(id=None, content="Jane works at Acme.", metadata={"allowed_principals": ["group:a"]})
         doc_b = Document(id=None, content="Jane works at Acme.", metadata={"allowed_principals": ["group:b"]})
 
-        result = extractor.execute(EntityExtractor.input_schema(documents=[doc_a, doc_b]))
+        result = extractor.execute(KnowledgeGraphEntityExtractor.input_schema(documents=[doc_a, doc_b]))
 
         # Ids are assigned on copies, so the caller's input objects are left untouched.
         assert doc_a.id is None and doc_b.id is None
@@ -383,7 +385,7 @@ class TestEnforceOntology:
 
     def _extractor(self):
         ontology = Ontology(entity_types=["Person"], relationship_types=[], attributes={"Person": ["salary"]})
-        return EntityExtractor(llm=StubLLM(), ontology=ontology)
+        return KnowledgeGraphEntityExtractor(llm=StubLLM(), ontology=ontology)
 
     def _attribute_graph(self, owner_label):
         # (owner)-[:HAS_ATTRIBUTE {key}]->(:AttributeValue {value}); owner_label decides if the owner survives.

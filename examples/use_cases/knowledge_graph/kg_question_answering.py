@@ -2,16 +2,16 @@
 
 An Agent is given three tools and decides which to use (or several) per question:
 
-  - VectorStoreRetriever  → semantic search over the Qdrant vector store (unstructured context).
-  - GraphRetriever        → bounded, ACL-filtered facts from the Neo4j knowledge graph.
-  - CypherExecutor        → raw Cypher queries against the Neo4j knowledge graph (power tool).
+  - VectorStoreRetriever       → semantic search over the Qdrant vector store (unstructured context).
+  - KnowledgeGraphRetriever    → bounded, ACL-filtered facts from the Neo4j knowledge graph.
+  - CypherExecutor             → raw Cypher queries against the Neo4j knowledge graph (power tool).
 
 Run ``kg_ingestion.py`` first to populate both stores, then run this script.
 
 Two modes:
   - ``python kg_question_answering.py ["your question"]`` — the GraphRAG agent answers a question.
   - ``python kg_question_answering.py --demo-acl``       — a self-contained demonstration that
-    GraphRetriever WITHHOLDS facts from a caller whose principals don't match an edge's ACL (access-control
+    KnowledgeGraphRetriever WITHHOLDS facts from a caller whose principals don't match an edge's ACL (access-control
     denial). It seeds its OWN access-scoped edges and deletes them afterwards, so it needs a running Neo4j
     but NOT the ingested demo data.
 
@@ -29,10 +29,10 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAITextEmbedder
-from dynamiq.nodes.extractors import Ontology
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphRetriever, Ontology
+from dynamiq.nodes.knowledge_graph.retriever import GraphRetrieverInputSchema
 from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.nodes.retrievers import GraphRetriever, QdrantDocumentRetriever, VectorStoreRetriever
-from dynamiq.nodes.retrievers.graph import GraphRetrieverInputSchema
+from dynamiq.nodes.retrievers import QdrantDocumentRetriever, VectorStoreRetriever
 from dynamiq.nodes.tools import CypherExecutor
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -90,7 +90,7 @@ def build_workflow() -> Workflow:
     # tool's input schema), so the agent cannot drop or widen them — the controlled alternative to
     # LLM-written Cypher. Filters use the same structured grammar as the vector-store retrievers; ACL is
     # expressed via the `contains_any` operator on the edge ACL property.
-    graph_tool = GraphRetriever(
+    graph_tool = KnowledgeGraphRetriever(
         name="graph-retriever",
         connection=Neo4jConnection(),
         # Same entity types the graph was ingested with, so the question is parsed for those kinds.
@@ -122,7 +122,7 @@ def build_workflow() -> Workflow:
 # ---------------------------------------------------------------------------
 # ACL denial demonstration (`--demo-acl`)
 # ---------------------------------------------------------------------------
-# Self-contained proof that GraphRetriever hides facts a caller isn't entitled to. It seeds two
+# Self-contained proof that KnowledgeGraphRetriever hides facts a caller isn't entitled to. It seeds two
 # access-scoped edges from ONE org (a public system + a restricted system), then runs the SAME anchored
 # query as three callers. The only thing that changes between runs is the caller's principals (the locked
 # ACL filter), so any difference in what comes back is the access control at work. Uses uniquely-prefixed
@@ -194,7 +194,7 @@ def _graph_facts_for(openai_connection: OpenAIConnection, principals: list[str])
     Anchored by ``entity_ids`` so there's NO LLM entity-extraction randomness — the caller's principals
     (the locked ACL filter) are the only variable across the three runs.
     """
-    retriever = GraphRetriever(
+    retriever = KnowledgeGraphRetriever(
         name="graph-retriever",
         connection=Neo4jConnection(),
         llm=OpenAI(connection=openai_connection, model="gpt-4o-mini", temperature=0),

@@ -13,7 +13,7 @@ from dynamiq.components.splitters.json import RecursiveJsonSplitterComponent
 from dynamiq.components.splitters.language import Language
 from dynamiq.components.splitters.markdown_header import MarkdownHeaderSplitterComponent
 from dynamiq.components.splitters.recursive_character import RecursiveCharacterSplitterComponent
-from dynamiq.types import Document
+from dynamiq.types import Document, DocumentContentNormalization, DocumentType
 from dynamiq.utils.logger import logger
 
 
@@ -128,6 +128,9 @@ class AutoSplitterComponent(BaseModel):
     infer_from_content: bool = True
     add_splitter_metadata: bool = True
     splitter_metadata_key: str = "splitter_strategy"
+    refine_structured_chunks: bool = True
+    repair_flattened_markdown: bool = True
+    flattened_markdown_max_heading_level: int = Field(default=4, ge=1, le=6)
 
     json_max_chunk_size: int = Field(default=2000, gt=0)
     json_min_chunk_size: int | None = None
@@ -173,8 +176,9 @@ class AutoSplitterComponent(BaseModel):
 
     def _split_document(self, document: Document) -> list[Document]:
         strategy, explicit = self._select_strategy(document)
+        working_document = self._prepare_document(document, strategy)
         try:
-            output = self._get_splitter(strategy, document).run(documents=[document])
+            output = self._get_splitter(strategy, working_document).run(documents=[working_document])
             chunks = output["documents"]
         except Exception as exc:
             if explicit or not self.fallback_on_error or strategy == self.fallback_strategy:
@@ -187,7 +191,15 @@ class AutoSplitterComponent(BaseModel):
                 exc,
             )
             strategy = self.fallback_strategy
-            chunks = self._get_splitter(strategy, document).run(documents=[document])["documents"]
+            working_document = document
+            chunks = self._get_splitter(strategy, working_document).run(documents=[working_document])["documents"]
+
+        if self.refine_structured_chunks and strategy in {
+            AutoSplitterStrategy.MARKDOWN_HEADER,
+            AutoSplitterStrategy.HTML_HEADER,
+            AutoSplitterStrategy.HTML_SECTION,
+        }:
+            chunks = self._refine_structured_chunks(working_document, chunks)
 
         if self.add_splitter_metadata:
             for chunk in chunks:
@@ -195,6 +207,60 @@ class AutoSplitterComponent(BaseModel):
                 metadata[self.splitter_metadata_key] = strategy.value
                 chunk.metadata = metadata
         return chunks
+
+    def _prepare_document(self, document: Document, strategy: AutoSplitterStrategy) -> Document:
+        if not self.repair_flattened_markdown or strategy != AutoSplitterStrategy.MARKDOWN_HEADER:
+            return document
+
+        repaired_content = _repair_flattened_markdown(
+            document.content,
+            max_heading_level=self.flattened_markdown_max_heading_level,
+        )
+        if repaired_content == document.content:
+            return document
+
+        metadata = dict(document.metadata or {})
+        metadata["content_normalization"] = DocumentContentNormalization.FLATTENED_MARKDOWN.value
+        metadata["content_normalization_length_preserving"] = True
+        return document.model_copy(update={"content": repaired_content, "metadata": metadata})
+
+    def _refine_structured_chunks(self, source: Document, chunks: list[Document]) -> list[Document]:
+        """Recursively split oversized sections without discarding their structural metadata."""
+        recursive_splitter = self._get_splitter(AutoSplitterStrategy.RECURSIVE_CHARACTER, source)
+        refined: list[Document] = []
+        search_position = 0
+        for chunk in chunks:
+            section_start, section_end = _find_content_span(source.content, chunk.content, search_position)
+            if section_start >= 0:
+                search_position = section_end
+            if recursive_splitter._length(chunk.content) <= self.chunk_size:
+                refined.append(chunk)
+                continue
+
+            child_chunks = recursive_splitter.run(documents=[chunk])["documents"]
+            child_search_position = section_start
+            for child in child_chunks:
+                metadata = dict(child.metadata or {})
+                metadata["source_id"] = source.id
+                child_start, _ = _find_content_span(
+                    source.content,
+                    child.content,
+                    child_search_position,
+                    section_end,
+                )
+                if section_start >= 0 and child_start >= 0 and "start_index" in metadata:
+                    metadata["start_index"] = child_start
+                    child_search_position = child_start + 1
+                else:
+                    metadata.pop("start_index", None)
+                child.metadata = metadata
+            refined.extend(child_chunks)
+
+        for chunk_index, chunk in enumerate(refined):
+            metadata = dict(chunk.metadata or {})
+            metadata["chunk_index"] = chunk_index
+            chunk.metadata = metadata
+        return refined
 
     def _select_strategy(self, document: Document) -> tuple[AutoSplitterStrategy, bool]:
         metadata = document.metadata or {}
@@ -213,14 +279,37 @@ class AutoSplitterComponent(BaseModel):
             if "markdown" in features.content_type:
                 return AutoSplitterStrategy.MARKDOWN_HEADER, False
 
+        if features.file_type == "html":
+            return AutoSplitterStrategy.HTML_SECTION, False
+        if features.file_type == "json":
+            return AutoSplitterStrategy.JSON, False
+        if features.file_type == "markdown":
+            return AutoSplitterStrategy.MARKDOWN_HEADER, False
+        if features.file_type in _PLAIN_TEXT_FILE_TYPES:
+            for rule in self.rules:
+                if features.matches(rule):
+                    return rule.strategy, False
+            if features.extension == "json":
+                return AutoSplitterStrategy.JSON, False
+            if features.extension in {"md", "markdown", "mdx"}:
+                return AutoSplitterStrategy.MARKDOWN_HEADER, False
+            if features.extension in _EXTENSION_TO_LANGUAGE:
+                return AutoSplitterStrategy.CODE, False
+            return self.fallback_strategy, False
+
         if features.extension == "json":
             return AutoSplitterStrategy.JSON, False
+        if features.extension in {"md", "markdown", "mdx"}:
+            return AutoSplitterStrategy.MARKDOWN_HEADER, False
         if features.extension in _EXTENSION_TO_LANGUAGE:
             return AutoSplitterStrategy.CODE, False
 
         if self.infer_from_content and _looks_like_html(content):
             return AutoSplitterStrategy.HTML_SECTION, False
-        if self.infer_from_content and _looks_like_markdown(content):
+        if self.infer_from_content and (
+            _looks_like_markdown(content)
+            or (self.repair_flattened_markdown and _looks_like_flattened_markdown(content))
+        ):
             return AutoSplitterStrategy.MARKDOWN_HEADER, False
         if self.infer_from_content and _looks_like_json(content):
             return AutoSplitterStrategy.JSON, False
@@ -389,6 +478,8 @@ _STRATEGY_ALIASES = {
     "codesplitter": AutoSplitterStrategy.CODE,
 }
 
+_PLAIN_TEXT_FILE_TYPES = {"csv", "text", DocumentType.TABLE.value, DocumentType.TABLE_ROW.value}
+
 _EXTENSION_TO_LANGUAGE = {
     "c": Language.C,
     "cc": Language.CPP,
@@ -412,6 +503,23 @@ _EXTENSION_TO_LANGUAGE = {
     "ts": Language.TS,
     "tsx": Language.TS,
 }
+
+
+def _find_content_span(source: str, content: str, start: int = 0, end: int | None = None) -> tuple[int, int]:
+    """Locate splitter output while allowing Markdown-removed blank lines."""
+    search_end = len(source) if end is None else end
+    exact_start = source.find(content, start, search_end)
+    if exact_start >= 0:
+        return exact_start, exact_start + len(content)
+    if "\n" not in content:
+        return -1, -1
+
+    blank_lines = r"\n(?:[^\S\n]*\n)*"
+    pattern = blank_lines.join(re.escape(line) for line in content.split("\n"))
+    match = re.search(pattern, source[start:search_end])
+    if match is None:
+        return -1, -1
+    return start + match.start(), start + match.end()
 
 
 def _coerce_strategy(value: Any) -> AutoSplitterStrategy | None:
@@ -447,6 +555,12 @@ def _looks_like_markdown(text: str) -> bool:
     return re.search(r"(?m)^\s{0,3}#{1,6}\s+\S", text[:4000]) is not None
 
 
+def _looks_like_flattened_markdown(text: str) -> bool:
+    if text.count("\n") > 1:
+        return False
+    return len(re.findall(r"(?<=\S)[ \t]+#{1,6}[ \t]+\S", text[:4000])) >= 2
+
+
 def _looks_like_json(text: str) -> bool:
     stripped = text.strip()
     if not stripped or stripped[0] not in "[{":
@@ -456,3 +570,15 @@ def _looks_like_json(text: str) -> bool:
     except json.JSONDecodeError:
         return False
     return True
+
+
+def _repair_flattened_markdown(text: str, max_heading_level: int = 4) -> str:
+    """Restore line starts before inline Markdown headings in flattened documents."""
+    if text.count("\n") > 1:
+        return text
+
+    return re.sub(
+        rf"(?<=\S)[ \t]+(?=#{{1,{max_heading_level}}}[ \t]+\S)",
+        lambda match: "\n" + match.group(0)[1:],
+        text,
+    )

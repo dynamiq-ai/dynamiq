@@ -1,6 +1,6 @@
 from typing import ClassVar, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
@@ -13,6 +13,14 @@ from dynamiq.utils.utils import TRUNCATE_EMBEDDINGS_LIMIT
 
 class DocumentEmbedderInputSchema(BaseModel):
     documents: list[Document] = Field(..., description="Parameter to provide documents to find embeddings for.")
+
+    @field_validator("documents")
+    @classmethod
+    def validate_document_content(cls, documents: list[Document]) -> list[Document]:
+        for index, document in enumerate(documents):
+            if not document.content.strip():
+                raise ValueError(f"Document at index {index} has empty content.")
+        return documents
 
 
 class DocumentEmbedder(ConnectionNode):
@@ -63,6 +71,13 @@ class DocumentEmbedder(ConnectionNode):
 
 class TextEmbedderInputSchema(BaseModel):
     query: str = Field(..., description="Parameter to provide query to find embeddings for.")
+
+    @field_validator("query")
+    @classmethod
+    def validate_query(cls, query: str) -> str:
+        if not query.strip():
+            raise ValueError("Query must not be empty.")
+        return query
 
 
 class TextEmbeddingOutput(dict):

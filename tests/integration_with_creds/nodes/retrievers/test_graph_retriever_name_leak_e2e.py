@@ -23,11 +23,10 @@ import pytest
 from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder, OpenAITextEmbedder
-from dynamiq.nodes.extractors import KnowledgeGraphWriter, Ontology
-from dynamiq.nodes.extractors.entity_extractor import ENTITY_EMBEDDING_VECTOR_INDEX
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphRetriever, KnowledgeGraphWriter, Ontology
+from dynamiq.nodes.knowledge_graph.entity_extractor import ENTITY_EMBEDDING_VECTOR_INDEX
+from dynamiq.nodes.knowledge_graph.retriever import GraphRetrieverInputSchema
 from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.nodes.retrievers import GraphRetriever
-from dynamiq.nodes.retrievers.graph import GraphRetrieverInputSchema
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
 
 ORG_ID = "org-1"
@@ -86,7 +85,7 @@ def shared_node_graph(graph_connection):
 
 
 def _facts_for(graph_connection, principals):
-    retriever = GraphRetriever(
+    retriever = KnowledgeGraphRetriever(
         connection=graph_connection,
         llm=OpenAI(connection=OpenAIConnection(), model="gpt-4o-mini", temperature=0),
         ontology=ONTOLOGY,
@@ -197,7 +196,7 @@ def test_vector_index_created_and_entities_embedded(embedded_graph, graph_connec
 
 def test_paraphrased_query_seeds_via_vector_similarity(embedded_graph, graph_connection):
     # "automaker" never appears as a stored name; only a semantic (vector) seed can reach "Car Manufacturer".
-    retriever = GraphRetriever(
+    retriever = KnowledgeGraphRetriever(
         connection=graph_connection,
         llm=OpenAI(connection=OpenAIConnection(), model="gpt-4o-mini", temperature=0),
         text_embedder=OpenAITextEmbedder(connection=OpenAIConnection()),
