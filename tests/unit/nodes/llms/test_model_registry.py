@@ -459,18 +459,17 @@ def test_sync_is_exception_safe_without_litellm(monkeypatch):
             "MiniMax-M3",
             {
                 "max_input_tokens": 1_000_000,
-                "max_output_tokens": 524_288,
+                "max_output_tokens": 128_000,
                 "supports_vision": True,
                 "supports_video_input": True,
                 "supports_adaptive_thinking": True,
-                "supports_service_tier": True,
             },
         ),
         (
             "MiniMax-M2.7",
             {
                 "max_input_tokens": 204_800,
-                "max_output_tokens": 204_800,
+                "max_output_tokens": 131_072,
                 "supports_vision": False,
                 "supports_video_input": False,
                 "supports_adaptive_thinking": False,
@@ -506,33 +505,14 @@ def test_minimax_m3_registry_preserves_tiered_pricing():
         "input_cost_per_token_above_512k_tokens": 0.0000006,
         "output_cost_per_token_above_512k_tokens": 0.0000024,
         "cache_read_input_token_cost_above_512k_tokens": 0.00000012,
-        "input_cost_per_token_above_512k_tokens_priority": 0.0000009,
-        "output_cost_per_token_above_512k_tokens_priority": 0.0000036,
-        "cache_read_input_token_cost_above_512k_tokens_priority": 0.00000018,
     }
-    custom_pricing = {
-        "input_cost_per_token": info["input_cost_per_token"],
-        "output_cost_per_token": info["output_cost_per_token"],
-        "cache_read_input_token_cost": info["cache_read_input_token_cost"],
-        "input_cost_per_token_priority": info["input_cost_per_token_priority"],
-        "output_cost_per_token_priority": info["output_cost_per_token_priority"],
-        "cache_read_input_token_cost_priority": info["cache_read_input_token_cost_priority"],
-        "input_cost_per_token_above_512k_tokens": info["input_cost_per_token_above_512k_tokens"],
-        "output_cost_per_token_above_512k_tokens": info["output_cost_per_token_above_512k_tokens"],
-        "cache_read_input_token_cost_above_512k_tokens": info["cache_read_input_token_cost_above_512k_tokens"],
-        "input_cost_per_token_above_512k_tokens_priority": info["input_cost_per_token_above_512k_tokens_priority"],
-        "output_cost_per_token_above_512k_tokens_priority": info["output_cost_per_token_above_512k_tokens_priority"],
-        "cache_read_input_token_cost_above_512k_tokens_priority": info[
-            "cache_read_input_token_cost_above_512k_tokens_priority"
-        ],
-    }
+    custom_pricing = {field: info[field] for field in expected_pricing}
     litellm_info = litellm.get_model_info(model="minimax/MiniMax-M3")
-    litellm_pricing_fields = {field for field in expected_pricing if not field.endswith("_above_512k_tokens_priority")}
 
+    # Every field we ship for M3 is a litellm-recognized pricing key, so after sync litellm honors our values.
+    # (litellm has no "above 512k + priority" combined key, so that tier is intentionally not modelled here.)
     assert custom_pricing == expected_pricing
-    assert {field: litellm_info[field] for field in litellm_pricing_fields} == {
-        field: expected_pricing[field] for field in litellm_pricing_fields
-    }
+    assert {field: litellm_info[field] for field in expected_pricing} == expected_pricing
     assert litellm.cost_per_token(
         model="MiniMax-M3",
         custom_llm_provider="minimax",

@@ -46,7 +46,6 @@ class ModelMetadata(BaseModel):
     supports_prompt_caching: bool | None = None
     supports_reasoning: bool | None = None
     supports_adaptive_thinking: bool | None = None
-    supports_service_tier: bool | None = None
     input_cost_per_token: float | None = None
     output_cost_per_token: float | None = None
     cache_creation_input_token_cost: float | None = None
@@ -57,9 +56,6 @@ class ModelMetadata(BaseModel):
     input_cost_per_token_above_512k_tokens: float | None = None
     output_cost_per_token_above_512k_tokens: float | None = None
     cache_read_input_token_cost_above_512k_tokens: float | None = None
-    input_cost_per_token_above_512k_tokens_priority: float | None = None
-    output_cost_per_token_above_512k_tokens_priority: float | None = None
-    cache_read_input_token_cost_above_512k_tokens_priority: float | None = None
 
 
 def _as_info_dict(info: ModelMetadata | dict[str, Any]) -> dict[str, Any]:
