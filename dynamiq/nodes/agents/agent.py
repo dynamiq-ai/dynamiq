@@ -2189,25 +2189,26 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         self.system_prompt_manager.build_react_prompt(self._react_prompt_config())
 
-    def _react_prompt_config(self) -> ReactPromptConfig:
-        """Build the ReAct prompt config from the agent's *effective* runtime tools and sandbox.
+    def _react_prompt_config(self, tools: list | None = None) -> ReactPromptConfig:
+        """Build the ReAct prompt config for the given tool list (defaults to ``self.tools``).
 
-        Reads ``_runtime_tools``/``sandbox_backend`` (not just ``self.tools``) so it is correct both
-        at construction (no overlay -> same as ``self.tools``) and at run time, when a borrowed
-        shared sandbox has added tools and a view via the overlay.
+        Init passes ``self.tools`` — immune to any ancestor's per-run overlay that may be visible on
+        the ContextVars while a factory subagent is being constructed inside the parent's execute().
+        The run-time sandbox sync passes ``_runtime_tools`` so a borrower advertises the sandbox
+        tools it only receives at run time.
         """
+        tools = self.tools if tools is None else tools
         ltm_enabled = self.long_term_memory is not None and self.long_term_memory.enabled
-        runtime_tools = self._runtime_tools
         return ReactPromptConfig(
             inference_mode=self.inference_mode,
-            has_tools=bool(runtime_tools) or (self.skills.enabled and self.skills.source is not None) or ltm_enabled,
+            has_tools=bool(tools) or (self.skills.enabled and self.skills.source is not None) or ltm_enabled,
             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
             delegation_allowed=self.delegation_allowed,
             context_compaction_enabled=self.summarization_config.enabled,
             todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
             or bool(self.sandbox_backend),
             sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
-            has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in runtime_tools),
+            has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in tools),
             role=self.role,
             instructions=self.instructions,
         )
@@ -2222,7 +2223,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         borrowing = self._shared_sandbox_view is not None
         if borrowing == self._prompt_reflects_shared_sandbox:
             return
-        self.system_prompt_manager.build_react_prompt(self._react_prompt_config())
+        self.system_prompt_manager.build_react_prompt(self._react_prompt_config(self._runtime_tools))
         # build_react_prompt only *sets* the environment block when a sandbox is present; it never
         # clears a stale one. Clear it explicitly when this run has no sandbox so a reused subagent
         # does not keep advertising a sandbox it released.

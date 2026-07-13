@@ -239,6 +239,24 @@ def test_tool_less_borrower_react_prompt_advertises_sandbox_tools(test_llm):
         _shared_session.reset(token)
 
 
+def test_init_prompt_ignores_ancestor_run_overlay(test_llm):
+    """A tool-less agent constructed while an ancestor's overlay is active on the ContextVar must
+    still build a 'no tools' init prompt: init reads self.tools, not _runtime_tools, so a factory
+    subagent built inside a parent's execute() is not polluted by the parent's overlay tools."""
+    from unittest.mock import MagicMock
+
+    from dynamiq.nodes.agents.base import _run_extra_tools
+
+    ancestor_tool = MagicMock()
+    ancestor_tool.name = "recall"
+    token = _run_extra_tools.set([ancestor_tool])
+    try:
+        sub = Agent(name="Coder", llm=test_llm, role="r", tools=[])
+        assert sub.system_prompt_manager._prompt_blocks.get("tools") == ""
+    finally:
+        _run_extra_tools.reset(token)
+
+
 def test_borrow_prompt_sync_restores_structure_when_not_borrowing(test_llm):
     """A reused subagent that borrowed then runs standalone must not keep advertising the shared
     sandbox: the sync restores the tool-less structure and clears the environment block."""
