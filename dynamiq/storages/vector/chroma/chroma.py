@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from dynamiq.connections import Chroma
 from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore
+from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.types import Document
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.logger import logger
@@ -125,17 +126,44 @@ class ChromaVectorStore(BaseVectorStore, DryRunMixin):
         """
         Replace the metadata of one or more documents with new metadata (full replacement).
 
-        Chroma's ``update`` overwrites the stored metadata for the given ids while keeping the
-        document text and embedding.
+        Chroma's ``update`` MERGES metadata: keys omitted from the new dict are left in place and
+        only keys explicitly set to ``None`` are removed. To honor the full-replacement contract,
+        each document's current metadata is fetched and any key absent from ``metadata`` is nulled
+        out (Chroma deletes null-valued keys), so stale keys do not survive. Document text and
+        embedding are left untouched.
 
         Args:
             document_ids (str | list[str]): The id, or list of ids, of the documents to update.
             metadata (dict[str, Any]): The new metadata that fully replaces the existing one.
+
+        Raises:
+            VectorStoreException: If any of the given ids does not exist. Nothing is modified in
+                that case (fail-fast), matching the other backends' contract.
         """
         ids = self._normalize_document_ids(document_ids)
         if not ids:
             return
-        self._collection.update(ids=ids, metadatas=[metadata for _ in ids])
+
+        existing = self._collection.get(ids=ids, include=["metadatas"])
+        found_ids = set(existing["ids"])
+        missing = [_id for _id in ids if _id not in found_ids]
+        if missing:
+            raise VectorStoreException(f"Documents {missing} not found in collection '{self.index_name}'")
+
+        old_metadata_by_id = {_id: (md or {}) for _id, md in zip(existing["ids"], existing["metadatas"])}
+        update_ids: list[str] = []
+        update_metadatas: list[dict[str, Any]] = []
+        for _id in ids:
+            # Null out keys the document currently has but the replacement omits so Chroma drops
+            # them; the new keys overwrite the rest.
+            stale_keys = {key: None for key in old_metadata_by_id[_id] if key not in metadata}
+            new_metadata = {**stale_keys, **metadata}
+            if new_metadata:  # Chroma rejects an empty update dict; nothing to do when it's empty.
+                update_ids.append(_id)
+                update_metadatas.append(new_metadata)
+
+        if update_ids:
+            self._collection.update(ids=update_ids, metadatas=update_metadatas)
         logger.debug(f"Replaced metadata for {len(ids)} document(s): {ids}.")
 
     def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
