@@ -32,8 +32,13 @@ class VectorStoreRetrieverInputSchema(BaseModel):
     top_k: int | None = Field(default=None, description="Parameter to provide how many documents to retrieve.")
     similarity_threshold: float | None = Field(
         default=None,
-        description="Parameter to provide minimal similarity "
-        "or maximal distance score accepted for retrieved documents.",
+        description="Post-retrieval score threshold. For Weaviate hybrid search this is a query-relative fused score, "
+        "not an absolute semantic similarity; prefer max_vector_distance for semantic gating.",
+    )
+    max_vector_distance: float | None = Field(
+        default=None,
+        ge=0,
+        description="Maximum vector distance for hybrid search; supported by Weaviate.",
     )
 
 
@@ -69,7 +74,11 @@ class VectorStoreRetriever(Node):
         le=1,
         description="Default alpha for hybrid retrieval. 0 is keyword-only, 1 is semantic-only.",
     )
-    similarity_threshold: float | None = None
+    similarity_threshold: float | None = Field(
+        default=None,
+        description="Post-retrieval score threshold; hybrid fused scores are query-relative.",
+    )
+    max_vector_distance: float | None = Field(default=None, ge=0)
     agent_metadata_fields: list[str] | None = Field(
         default_factory=lambda: [
             "score",
@@ -428,6 +437,9 @@ class VectorStoreRetriever(Node):
             if input_data.similarity_threshold is not None
             else self.similarity_threshold
         )
+        max_vector_distance = (
+            input_data.max_vector_distance if input_data.max_vector_distance is not None else self.max_vector_distance
+        )
 
         alpha = input_data.alpha if input_data.alpha is not None else self.alpha
         query = input_data.query
@@ -456,6 +468,7 @@ class VectorStoreRetriever(Node):
                     "alpha": alpha,
                     **({"query": query} if query is not None else {}),
                     **({"similarity_threshold": similarity_threshold} if similarity_threshold is not None else {}),
+                    **({"max_vector_distance": max_vector_distance} if max_vector_distance is not None else {}),
                 },
                 run_depends=self._run_depends,
                 config=config,
@@ -481,6 +494,11 @@ class VectorStoreRetriever(Node):
                     config=config,
                     **kwargs,
                 )
+                if document_reranker_result.status != RunnableStatus.SUCCESS:
+                    error = (
+                        document_reranker_result.error.message if document_reranker_result.error else "unknown error"
+                    )
+                    raise RuntimeError(f"Document reranker failed: {error}")
                 self._run_depends = [NodeDependency(node=self.document_reranker).to_dict(for_tracing=True)]
                 retrieved_documents = document_reranker_result.output.get("documents", [])
                 logger.info(

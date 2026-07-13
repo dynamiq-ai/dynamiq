@@ -333,6 +333,40 @@ class TestExecute:
         assert result["nodes_created"] == 0 and result["relationships_created"] == 0
         assert writer._graph_store.written is None  # write_graph never called
 
+    def test_execute_skips_bare_nodes_with_no_relationship(self):
+        # A bare mention (an entity with no relationship and no attribute edge) is never persisted:
+        # provenance lives on edges, so a bare node could not be attributed to a document, reached by
+        # retrieval, or removed by delete_documents. Its content-addressed id makes recreation free.
+        writer = make_writer({})
+        store = FakeGraphStore()
+        writer._graph_store = store
+
+        nodes = [
+            entity("PERSON", "jane@d1", "Jane"),
+            entity("ORGANIZATION", "acme@d1", "Acme"),
+            entity("PERSON", "steve@d1", "Steve"),  # bare: no relationship references it
+        ]
+        rels = [edge("WORKS_AT", "PERSON", "ORGANIZATION", "jane@d1", "acme@d1", {"source_doc_id": "d1"})]
+
+        result = writer.execute(KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=rels, documents=[]))
+
+        assert result["nodes_created"] == 2
+        assert {n["properties"]["name"] for n in store.written[0]} == {"Jane", "Acme"}  # Steve skipped
+
+    def test_execute_all_nodes_bare_writes_nothing(self):
+        writer = make_writer({})
+        store = FakeGraphStore()
+        writer._graph_store = store
+
+        result = writer.execute(
+            KnowledgeGraphWriter.input_schema(
+                nodes=[entity("PERSON", "steve@d1", "Steve")], relationships=[], documents=[]
+            )
+        )
+
+        assert result["nodes_created"] == 0
+        assert store.written is None  # write_graph never called
+
     def test_execute_rejects_relationship_endpoints_absent_from_nodes(self):
         # A relationship endpoint not present in `nodes` can never be resolved: it would write with an
         # ephemeral wiring id that MATCHes no graph node (no edge created) and mis-tag chunks with that id.

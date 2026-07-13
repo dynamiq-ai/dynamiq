@@ -4,7 +4,7 @@ from qdrant_client.http import models
 
 from dynamiq.storages.vector.exceptions import VectorStoreFilterException as FilterError
 
-COMPARISON_OPERATORS = {"==", "!=", ">", ">=", "<", "<=", "in", "not in"}
+COMPARISON_OPERATORS = {"==", "!=", ">", ">=", "<", "<=", "in", "not in", "contains_any"}
 LOGICAL_OPERATORS = {"AND", "OR", "NOT"}
 
 
@@ -209,6 +209,7 @@ def _parse_comparison_operation(
         ">=": _build_gte_condition,
         "<": _build_lt_condition,
         "<=": _build_lte_condition,
+        "contains_any": _build_contains_any_condition,
     }
 
     condition_builder = condition_builder_mapping.get(comparison_operation)
@@ -242,6 +243,14 @@ def _build_in_condition(key: str, value: list[models.ValueVariants]) -> models.C
             for item in value
         ]
     )
+
+
+def _build_contains_any_condition(key: str, value: list[models.ValueVariants]) -> models.Condition:
+    """Match points whose array field shares at least one element with ``value`` (union)."""
+    if not isinstance(value, list):
+        msg = f"Value {value} is not a list"
+        raise FilterError(msg)
+    return models.FieldCondition(key=key, match=models.MatchAny(any=value))
 
 
 def _build_ne_condition(key: str, value: models.ValueVariants) -> models.Condition:
