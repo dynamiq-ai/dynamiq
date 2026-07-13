@@ -208,26 +208,6 @@ class CSVConverter(Node):
 
         return {"documents": all_documents}
 
-    def _process_text(
-        self,
-        text: str,
-        source: str,
-        delimiter: str,
-        document_creation_mode: CSVDocumentCreationMode,
-        content_column: str | None,
-        metadata_columns: list[str] | None,
-        external_metadata: dict | None,
-    ) -> Iterator[dict]:
-        yield from self._process_stream(
-            StringIO(text),
-            source,
-            delimiter,
-            document_creation_mode,
-            content_column,
-            metadata_columns,
-            external_metadata,
-        )
-
     def _process_stream(
         self,
         stream: TextIO,
