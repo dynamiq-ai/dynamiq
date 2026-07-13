@@ -61,7 +61,8 @@ class DynamiqKnowledgebaseHybridSearch(Node):
     graph_search: DynamiqKnowledgebaseGraphSearch
     # Any RANKERS-group node with a ``{query, documents}`` -> ``{documents}`` contract (e.g. CohereReranker).
     reranker: Node | None = None
-    top_k: int | None = None
+    # Per-source fetch size and the final cap on the merged result; overridable per call via input ``limit``.
+    limit: int | None = None
 
     input_schema: ClassVar[type[DynamiqKnowledgebaseHybridSearchInputSchema]] = (
         DynamiqKnowledgebaseHybridSearchInputSchema
@@ -93,11 +94,16 @@ class DynamiqKnowledgebaseHybridSearch(Node):
             if component is not None and component.is_postponed_component_init:
                 component.init_components(connection_manager)
 
+    def _resolve_limit(self, input_data: DynamiqKnowledgebaseHybridSearchInputSchema) -> int | None:
+        """Effective limit for this run: per-call input wins over the node default."""
+        return input_data.limit if input_data.limit is not None else self.limit
+
     def _sub_input(self, input_data: DynamiqKnowledgebaseHybridSearchInputSchema, *, graph: bool) -> dict[str, Any]:
         """Build the input dict for a sub-search, dropping keys the graph search does not accept."""
         payload: dict[str, Any] = {"query": input_data.query, "filters": input_data.filters}
-        if input_data.limit is not None:
-            payload["limit"] = input_data.limit
+        limit = self._resolve_limit(input_data)
+        if limit is not None:
+            payload["limit"] = limit
         if not graph:
             if input_data.similarity_threshold is not None:
                 payload["similarity_threshold"] = input_data.similarity_threshold
@@ -137,6 +143,7 @@ class DynamiqKnowledgebaseHybridSearch(Node):
         vector_output: dict[str, Any],
         graph_output: dict[str, Any],
         config: RunnableConfig,
+        limit: int | None = None,
         **kwargs,
     ) -> dict[str, Any]:
         """Merge vector chunks with graph source documents, rerank, and append graph facts.
@@ -159,8 +166,8 @@ class DynamiqKnowledgebaseHybridSearch(Node):
             merged.append(document)
 
         documents = self._rerank(query, merged, config, **kwargs)
-        if self.top_k is not None:
-            documents = documents[: self.top_k]  # cap uniformly, whether or not a reranker reordered
+        if limit is not None:
+            documents = documents[:limit]  # cap uniformly, whether or not a reranker reordered
 
         # Append the graph's ``facts`` (triples) -- its unique signal; source-doc text is already in the pool.
         graph_facts = (graph_output.get("facts") or "").strip()
@@ -175,7 +182,7 @@ class DynamiqKnowledgebaseHybridSearch(Node):
     ) -> list[Document]:
         """Reorder merged documents by query relevance when a reranker is configured.
 
-        Returns the documents unchanged (order preserved) when no reranker is set. The ``top_k`` cap is
+        Returns the documents unchanged (order preserved) when no reranker is set. The ``limit`` cap is
         applied by the caller so it holds for both the reranked and the unranked paths.
         """
         if not documents or self.reranker is None:
@@ -221,7 +228,9 @@ class DynamiqKnowledgebaseHybridSearch(Node):
         vector_output = self._output_or_raise(vector_result, self.vector_search.name)
         graph_output = self._output_or_raise(graph_result, self.graph_search.name)
 
-        return self._merge(input_data.query, vector_output, graph_output, config, **kwargs)
+        return self._merge(
+            input_data.query, vector_output, graph_output, config, limit=self._resolve_limit(input_data), **kwargs
+        )
 
     async def execute_async(
         self, input_data: DynamiqKnowledgebaseHybridSearchInputSchema, config: RunnableConfig = None, **kwargs
@@ -251,4 +260,6 @@ class DynamiqKnowledgebaseHybridSearch(Node):
         vector_output = self._output_or_raise(vector_result, self.vector_search.name)
         graph_output = self._output_or_raise(graph_result, self.graph_search.name)
 
-        return self._merge(input_data.query, vector_output, graph_output, config, **kwargs)
+        return self._merge(
+            input_data.query, vector_output, graph_output, config, limit=self._resolve_limit(input_data), **kwargs
+        )

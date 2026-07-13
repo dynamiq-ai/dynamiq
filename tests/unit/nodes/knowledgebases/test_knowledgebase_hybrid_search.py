@@ -130,8 +130,8 @@ def test_execute_merges_dedupes_and_appends_graph_facts(vector_node, graph_node)
     assert result["content"].count("gamma") == 1  # source-doc text appears once (from the pool), not duplicated
 
 
-def test_execute_reranks_and_applies_top_k(vector_node, graph_node):
-    node = _hybrid(vector_node, graph_node, reranker=_StubReranker(), top_k=2)
+def test_execute_reranks_and_applies_limit(vector_node, graph_node):
+    node = _hybrid(vector_node, graph_node, reranker=_StubReranker(), limit=2)
     vector_node.client.request.return_value = _vector_response(
         [
             {"id": "1", "content": "a"},
@@ -145,13 +145,13 @@ def test_execute_reranks_and_applies_top_k(vector_node, graph_node):
         DynamiqKnowledgebaseHybridSearchInputSchema(query="q"), RunnableConfig(callbacks=[])
     )
 
-    # Stub reranker reverses order -> [3, 2, 1], then top_k=2 -> [3, 2].
+    # Stub reranker reverses order -> [3, 2, 1], then limit=2 -> [3, 2].
     assert [doc.id for doc in result["documents"]] == ["3", "2"]
 
 
-def test_execute_applies_top_k_without_reranker(vector_node, graph_node):
-    """top_k caps the merged pool even when no reranker is configured (order preserved)."""
-    node = _hybrid(vector_node, graph_node, top_k=2)  # no reranker
+def test_execute_applies_limit_without_reranker(vector_node, graph_node):
+    """limit caps the merged pool even when no reranker is configured (order preserved)."""
+    node = _hybrid(vector_node, graph_node, limit=2)  # no reranker
     vector_node.client.request.return_value = _vector_response(
         [{"id": "1", "content": "a"}, {"id": "2", "content": "b"}, {"id": "3", "content": "c"}]
     )
@@ -163,7 +163,7 @@ def test_execute_applies_top_k_without_reranker(vector_node, graph_node):
         DynamiqKnowledgebaseHybridSearchInputSchema(query="q"), RunnableConfig(callbacks=[])
     )
 
-    # Merged pool is [1, 2, 3, 4]; top_k=2 caps to the first two in merge order.
+    # Merged pool is [1, 2, 3, 4]; limit=2 caps to the first two in merge order.
     assert [doc.id for doc in result["documents"]] == ["1", "2"]
 
 
@@ -282,7 +282,7 @@ def test_yaml_roundtrip(tmp_path):
     cohere_connection = Cohere(id="cohere-conn", api_key="cohere-key")
     node = DynamiqKnowledgebaseHybridSearch(
         id="kb-hybrid",
-        top_k=3,
+        limit=3,
         vector_search=DynamiqKnowledgebaseVectorSearch(
             id="kb-vector", connection=dynamiq_connection, knowledgebase_id="kb-123", limit=7
         ),
@@ -300,7 +300,7 @@ def test_yaml_roundtrip(tmp_path):
     loaded_node = loaded.flow.nodes[0]
 
     assert isinstance(loaded_node, DynamiqKnowledgebaseHybridSearch)
-    assert loaded_node.top_k == 3
+    assert loaded_node.limit == 3
     # Composed sub-nodes survive the roundtrip and are initialized by init_components.
     assert isinstance(loaded_node.vector_search, DynamiqKnowledgebaseVectorSearch)
     assert loaded_node.vector_search.knowledgebase_id == "kb-123"
