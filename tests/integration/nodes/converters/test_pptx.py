@@ -10,7 +10,7 @@ from dynamiq.nodes.converters.pptx import PPTXFileConverter, PPTXFileConverterIn
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.utils import Output
 from dynamiq.runnables import RunnableResult, RunnableStatus
-from dynamiq.types import Document
+from dynamiq.types import Document, DocumentCreationMode
 
 
 def write_presentation_to_path(path: Path, presentation: Presentation) -> str:
@@ -174,11 +174,36 @@ def test_workflow_with_pptx_converter(request, input_type, input_fixture):
     pptx_converter_expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input=dict(PPTXFileConverterInputSchema(**input_data)),
-        output={"documents": [Document(id=document_id, content=content, metadata={"file_path": expected_file_path})]},
+        output={
+            "documents": [
+                Document(
+                    id=document_id,
+                    content=content,
+                    metadata={"file_path": expected_file_path, "source": expected_file_path},
+                )
+            ]
+        },
     ).to_dict(skip_format_types={BytesIO, bytes})
 
     expected_output = {pptx_converter.id: pptx_converter_expected_result}
     assert response == RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=expected_output)
+
+
+def test_pptx_one_doc_per_page_adds_page_number_metadata():
+    presentation, _ = create_pptx_with_content("First slide")
+    slide = presentation.slides.add_slide(presentation.slide_layouts[0])
+    slide.shapes.title.text = "Second slide"
+    file = write_presentation_to_bytesio(presentation, "slides.pptx")
+    converter = PPTXFileConverter(document_creation_mode=DocumentCreationMode.ONE_DOC_PER_PAGE)
+    converter.init_components()
+
+    result = converter.run(input_data={"files": [file]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    documents = result.output["documents"]
+    assert [document.metadata["page_number"] for document in documents] == [1, 2]
+    assert all(document.metadata["file_path"] == "slides.pptx" for document in documents)
+    assert all(document.metadata["source"] == "slides.pptx" for document in documents)
 
 
 @pytest.mark.parametrize(

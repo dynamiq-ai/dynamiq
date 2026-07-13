@@ -57,6 +57,19 @@ class TestWeaviateDocumentRetriever:
 
         assert result == {"documents": mock_documents}
 
+    def test_hybrid_forwards_max_vector_distance(self, mock_documents):
+        mock_vector_store = MagicMock(spec=WeaviateVectorStore)
+        mock_vector_store._hybrid_retrieval.return_value = mock_documents
+        retriever = WeaviateDocumentRetriever(vector_store=mock_vector_store)
+
+        retriever.run(
+            query_embedding=[0.1, 0.2],
+            query="pricing",
+            max_vector_distance=0.35,
+        )
+
+        assert mock_vector_store._hybrid_retrieval.call_args.kwargs["max_vector_distance"] == 0.35
+
     def test_run_method_with_defaults(self, mock_documents, mock_filters):
         mock_vector_store = MagicMock(spec=WeaviateVectorStore)
         mock_vector_store._embedding_retrieval.return_value = mock_documents
