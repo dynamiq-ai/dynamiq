@@ -18,13 +18,13 @@ import pytest
 
 from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.knowledge_graph import (
+from dynamiq.nodes.knowledge_graphs import (
     KnowledgeGraphEntityExtractor,
     KnowledgeGraphRetriever,
     KnowledgeGraphWriter,
     Ontology,
 )
-from dynamiq.nodes.knowledge_graph.retriever import GraphRetrieverInputSchema
+from dynamiq.nodes.knowledge_graphs.retriever import GraphRetrieverInputSchema
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.types import Document
 
