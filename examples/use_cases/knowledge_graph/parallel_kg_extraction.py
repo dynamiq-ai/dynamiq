@@ -2,10 +2,10 @@
 
 Extraction (the LLM calls) is the slow, embarrassingly-parallel part of building a knowledge graph;
 write-time entity resolution is NOT parallelizable (two writers racing would both mint fresh ids for the
-same name and create duplicates). Splitting ``EntityExtractor`` from ``KnowledgeGraphWriter`` lets us fan
+same name and create duplicates). Splitting ``KnowledgeGraphEntityExtractor`` from ``KnowledgeGraphWriter`` lets us fan
 extraction out and funnel it into one serial writer:
 
-    documents ──shard──►  Map(EntityExtractor, max_workers=N)   ──►  merge  ──►  KnowledgeGraphWriter
+    documents ──shard──►  Map(KnowledgeGraphEntityExtractor, max_workers=N)   ──►  merge  ──►  KnowledgeGraphWriter
                           (N chunks extracted concurrently)        (one payload)   (single, serial)
 
 The ``Map`` operator runs the extractor over a list of inputs on a thread pool — ideal here because LLM
@@ -20,7 +20,7 @@ import os
 
 from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.extractors import EntityExtractor, KnowledgeGraphWriter, Ontology
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphEntityExtractor, KnowledgeGraphWriter, Ontology
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.operators import Map
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -61,7 +61,7 @@ def main() -> None:
     openai_connection = OpenAIConnection()
 
     # 1) One extractor, run in parallel over shards via Map(max_workers=SHARDS).
-    extractor = EntityExtractor(
+    extractor = KnowledgeGraphEntityExtractor(
         llm=OpenAI(connection=openai_connection, model="gpt-4o-mini", temperature=0.0, max_tokens=4000),
         ontology=ONTOLOGY,
     )
@@ -78,7 +78,7 @@ def main() -> None:
 
     # 2) Merge the per-shard payloads into one. (In a Flow this is a small merge node between the
     #    Map and the writer; resolution still happens once, across the whole merged payload.)
-    per_shard = map_result.output["output"]  # list of EntityExtractor outputs, one per shard
+    per_shard = map_result.output["output"]  # list of KnowledgeGraphEntityExtractor outputs, one per shard
     nodes = [n for shard_out in per_shard for n in shard_out["nodes"]]
     relationships = [r for shard_out in per_shard for r in shard_out["relationships"]]
     documents = [d for shard_out in per_shard for d in shard_out["documents"]]

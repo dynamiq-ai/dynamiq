@@ -6,6 +6,7 @@ from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, RRFRank
 from dynamiq.connections import Milvus
 from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.milvus.filter import Filter
 from dynamiq.types import Document
 from dynamiq.types.dry_run import DryRunConfig
@@ -159,6 +160,43 @@ class MilvusVectorStore(BaseVectorStore, DryRunMixin):
             data=data_to_upsert,
         )
         return response["upsert_count"]
+
+    def replace_document_metadata(self, document_ids: str | list[str], metadata: dict[str, Any]) -> None:
+        """
+        Replace the metadata of one or more documents with new metadata (full replacement).
+
+        Milvus stores metadata as dynamic JSON fields, so each row is fetched (to keep its content
+        and embedding) and re-upserted. An upsert replaces the whole row by primary key, dropping
+        metadata keys not present in ``metadata`` instead of merging.
+
+        Args:
+            document_ids (str | list[str]): The id, or list of ids, of the documents to update.
+            metadata (dict[str, Any]): The new metadata that fully replaces the existing one.
+
+        Raises:
+            VectorStoreException: If any of the given ids does not exist.
+        """
+        ids = self._normalize_document_ids(document_ids)
+        if not ids:
+            return
+
+        entities = self.client.get(collection_name=self.index_name, ids=ids)
+        found = {str(entity.get("id")): entity for entity in entities}
+        missing = [_id for _id in ids if _id not in found]
+        if missing:
+            raise VectorStoreException(f"Documents {missing} not found in collection '{self.index_name}'")
+
+        documents = [
+            Document(
+                id=_id,
+                content=found[_id].get(self.content_key, ""),
+                embedding=found[_id].get(self.embedding_key),
+                metadata=metadata,
+            )
+            for _id in ids
+        ]
+        self.write_documents(documents)
+        logger.debug(f"Replaced metadata for {len(documents)} document(s): {ids}.")
 
     def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
         """

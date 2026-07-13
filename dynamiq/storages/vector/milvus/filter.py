@@ -12,6 +12,7 @@ class Filter:
         "<=": "<=",
         "in": "in",
         "not in": "not in",
+        "contains_any": "contains_any",
     }
 
     def __init__(self, filter_criteria: dict[str, Any]):
@@ -79,7 +80,14 @@ class Filter:
         if operator not in self.COMPARISON_OPERATORS:
             raise ValueError(f"Unsupported comparison operator: {operator}")
 
-        if operator == "in" and isinstance(value, list):
+        if operator == "contains_any":
+            if not isinstance(value, list):
+                raise ValueError(f"{field}'s value must be a list when using 'contains_any' comparator")
+            # dynamiq's MilvusVectorStore stores metadata as dynamic JSON fields, so the JSON
+            # variant is used rather than ARRAY_CONTAINS_ANY (which targets typed Array fields).
+            # https://milvus.io/docs/json-operators.md
+            return f"json_contains_any({field}, {value})"
+        elif operator == "in" and isinstance(value, list):
             return f"{field} in {value}"
         elif operator == "not in" and isinstance(value, list):
             return f"{field} not in {value}"

@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.milvus.filter import Filter
 from dynamiq.storages.vector.milvus.milvus import MilvusVectorStore, MilvusWriterVectorStoreParams
 from dynamiq.types import Document
@@ -34,6 +35,44 @@ def test_write_documents(milvus_vector_store, mock_milvus_client):
     ]
     assert milvus_vector_store.write_documents(documents) == 2
     mock_milvus_client.upsert.assert_called_once()
+
+
+def test_replace_document_metadata(milvus_vector_store, mock_milvus_client):
+    mock_milvus_client.get.return_value = [{"id": "1", "content": "Document 1", "embedding": [0.1, 0.2]}]
+    mock_milvus_client.upsert.return_value = {"upsert_count": 1}
+
+    milvus_vector_store.replace_document_metadata("1", {"tags": ["x", "y"]})
+
+    mock_milvus_client.get.assert_called_once_with(collection_name="test_collection", ids=["1"])
+    _, kwargs = mock_milvus_client.upsert.call_args
+    upserted = kwargs["data"][0]
+    # Metadata is flattened; content and embedding are preserved from the fetched row.
+    assert upserted["id"] == "1"
+    assert upserted["tags"] == ["x", "y"]
+    assert upserted["content"] == "Document 1"
+    assert upserted["embedding"] == [0.1, 0.2]
+
+
+def test_replace_document_metadata_not_found(milvus_vector_store, mock_milvus_client):
+    mock_milvus_client.get.return_value = []
+    with pytest.raises(VectorStoreException):
+        milvus_vector_store.replace_document_metadata("missing", {"tags": ["x"]})
+
+
+def test_replace_document_metadata_multiple_ids(milvus_vector_store, mock_milvus_client):
+    mock_milvus_client.get.return_value = [
+        {"id": "1", "content": "Doc 1", "embedding": [0.1, 0.2]},
+        {"id": "2", "content": "Doc 2", "embedding": [0.3, 0.4]},
+    ]
+    mock_milvus_client.upsert.return_value = {"upsert_count": 2}
+
+    milvus_vector_store.replace_document_metadata(["1", "2"], {"tags": ["x"]})
+
+    mock_milvus_client.get.assert_called_once_with(collection_name="test_collection", ids=["1", "2"])
+    _, kwargs = mock_milvus_client.upsert.call_args
+    data = kwargs["data"]
+    assert {d["id"] for d in data} == {"1", "2"}
+    assert all(d["tags"] == ["x"] for d in data)
 
 
 def test_delete_documents_with_ids(milvus_vector_store, mock_milvus_client):
