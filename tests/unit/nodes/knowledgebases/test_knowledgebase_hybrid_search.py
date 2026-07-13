@@ -277,6 +277,32 @@ async def test_execute_async_fans_out_and_merges(vector_node, graph_node):
     assert "fact" in result["content"]
 
 
+@pytest.mark.asyncio
+async def test_execute_async_reranks_via_run_async_not_blocking_sync_run(vector_node, graph_node):
+    """The async path must await the reranker (run_async, thread-offloaded) and never call sync run()."""
+    node = _hybrid(vector_node, graph_node, reranker=_StubReranker())
+
+    vector_client = MagicMock()
+    vector_client.request = AsyncMock(return_value=_vector_response([{"id": "1", "content": "alpha"}]))
+    graph_client = MagicMock()
+    graph_client.request = AsyncMock(
+        return_value=_graph_response({"content": "", "source_documents": [{"id": "2", "content": "beta"}]})
+    )
+
+    # Sync run() blocks the event loop -- if the async path ever calls it, fail. run_async offloads via
+    # run_sync (a different method), so a legitimately-awaited reranker never trips this.
+    with patch.object(_StubReranker, "run", side_effect=AssertionError("async path must not call sync run()")):
+        with patch.object(
+            DynamiqKnowledgebaseVectorSearch, "get_async_client", AsyncMock(return_value=vector_client)
+        ), patch.object(DynamiqKnowledgebaseGraphSearch, "get_async_client", AsyncMock(return_value=graph_client)):
+            result = await node.execute_async(
+                DynamiqKnowledgebaseHybridSearchInputSchema(query="q"), RunnableConfig(callbacks=[])
+            )
+
+    # Stub reranker reverses [1, 2] -> [2, 1], proving it ran via the awaited async path.
+    assert [doc.id for doc in result["documents"]] == ["2", "1"]
+
+
 def test_yaml_roundtrip(tmp_path):
     dynamiq_connection = Dynamiq(id="dynamiq-conn", url="https://api.example.ai/", api_key="secret-token")
     cohere_connection = Cohere(id="cohere-conn", api_key="cohere-key")

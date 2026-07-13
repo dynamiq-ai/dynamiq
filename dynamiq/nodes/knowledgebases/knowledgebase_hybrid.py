@@ -137,16 +137,8 @@ class DynamiqKnowledgebaseHybridSearch(Node):
             )
         return result.output or {}
 
-    def _merge(
-        self,
-        query: str,
-        vector_output: dict[str, Any],
-        graph_output: dict[str, Any],
-        config: RunnableConfig,
-        limit: int | None = None,
-        **kwargs,
-    ) -> dict[str, Any]:
-        """Merge vector chunks with graph source documents, rerank, and append graph facts.
+    def _dedupe_merge(self, vector_output: dict[str, Any], graph_output: dict[str, Any]) -> list[Document]:
+        """Merge and deduplicate vector chunks with graph source documents (pre-rerank).
 
         Deduplication is by ``Document.id`` when present, else by content. Vector documents win ties so
         their scores/metadata are preserved; every document is tagged with its ``retrieval_source``.
@@ -164,8 +156,12 @@ class DynamiqKnowledgebaseHybridSearch(Node):
                 continue
             seen.add(key)
             merged.append(document)
+        return merged
 
-        documents = self._rerank(query, merged, config, **kwargs)
+    def _finalize(
+        self, documents: list[Document], graph_output: dict[str, Any], limit: int | None
+    ) -> dict[str, Any]:
+        """Apply the limit cap and append the graph facts block to form the final output."""
         if limit is not None:
             documents = documents[:limit]  # cap uniformly, whether or not a reranker reordered
 
@@ -176,6 +172,34 @@ class DynamiqKnowledgebaseHybridSearch(Node):
             content = f"{content}\n\n--- Graph Facts ---\n{graph_facts}" if content else graph_facts
 
         return {"content": content, "documents": documents}
+
+    def _merge(
+        self,
+        query: str,
+        vector_output: dict[str, Any],
+        graph_output: dict[str, Any],
+        config: RunnableConfig,
+        limit: int | None = None,
+        **kwargs,
+    ) -> dict[str, Any]:
+        """Merge vector chunks with graph source documents, rerank, and append graph facts."""
+        merged = self._dedupe_merge(vector_output, graph_output)
+        documents = self._rerank(query, merged, config, **kwargs)
+        return self._finalize(documents, graph_output, limit)
+
+    async def _merge_async(
+        self,
+        query: str,
+        vector_output: dict[str, Any],
+        graph_output: dict[str, Any],
+        config: RunnableConfig,
+        limit: int | None = None,
+        **kwargs,
+    ) -> dict[str, Any]:
+        """Async counterpart of ``_merge``: awaits the reranker so the event loop is never blocked."""
+        merged = self._dedupe_merge(vector_output, graph_output)
+        documents = await self._rerank_async(query, merged, config, **kwargs)
+        return self._finalize(documents, graph_output, limit)
 
     def _rerank(
         self, query: str, documents: list[Document], config: RunnableConfig, **kwargs
@@ -189,6 +213,22 @@ class DynamiqKnowledgebaseHybridSearch(Node):
             return documents
 
         result = self.reranker.run(
+            input_data={"query": query, "documents": documents},
+            config=config,
+            run_depends=kwargs.get("run_depends", []),
+            **self._sub_run_kwargs(kwargs),
+        )
+        return self._output_or_raise(result, self.reranker.name).get("documents", documents)
+
+    async def _rerank_async(
+        self, query: str, documents: list[Document], config: RunnableConfig, **kwargs
+    ) -> list[Document]:
+        """Async counterpart of ``_rerank`` -- awaits ``run_async`` so a sync reranker is offloaded to a
+        thread (via ``Node.run_async``) instead of blocking the event loop."""
+        if not documents or self.reranker is None:
+            return documents
+
+        result = await self.reranker.run_async(
             input_data={"query": query, "documents": documents},
             config=config,
             run_depends=kwargs.get("run_depends", []),
@@ -260,6 +300,6 @@ class DynamiqKnowledgebaseHybridSearch(Node):
         vector_output = self._output_or_raise(vector_result, self.vector_search.name)
         graph_output = self._output_or_raise(graph_result, self.graph_search.name)
 
-        return self._merge(
+        return await self._merge_async(
             input_data.query, vector_output, graph_output, config, limit=self._resolve_limit(input_data), **kwargs
         )
