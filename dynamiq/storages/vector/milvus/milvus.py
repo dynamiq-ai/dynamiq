@@ -274,6 +274,38 @@ class MilvusVectorStore(BaseVectorStore, DryRunMixin):
 
         return self._get_result_to_documents(result, content_key=content_key, embedding_key=embedding_key)
 
+    def get_documents_by_id(
+        self,
+        ids: list[str],
+        content_key: str | None = None,
+        embedding_key: str | None = None,
+        include_embeddings: bool = False,
+    ) -> list[Document]:
+        """
+        Fetch documents by their exact ids (not a similarity search).
+
+        Args:
+            ids (list[str]): The document ids to fetch (the collection primary key).
+            content_key (Optional[str]): The field used to store content in the storage.
+            embedding_key (Optional[str]): The field used to store vector in the storage.
+            include_embeddings (bool): Whether to include document embeddings in the result. Defaults to False.
+
+        Returns:
+            List[Document]: The documents whose ids were found. Missing ids are skipped.
+        """
+        if not ids:
+            return []
+
+        if not self.client.has_collection(self.index_name):
+            raise ValueError(f"Collection '{self.index_name}' does not exist.")
+
+        # ``output_fields=["*"]`` is required to retrieve arbitrary dynamic-field metadata (the schema uses
+        # ``enable_dynamic_field=True``); embeddings are then dropped in ``_get_result_to_documents`` unless asked.
+        result = self.client.get(collection_name=self.index_name, ids=list(ids), output_fields=["*"])
+        return self._get_result_to_documents(
+            result, content_key=content_key, embedding_key=embedding_key, return_embeddings=include_embeddings
+        )
+
     def _embedding_retrieval(
         self,
         query_embeddings: list[list[float]],
@@ -386,7 +418,11 @@ class MilvusVectorStore(BaseVectorStore, DryRunMixin):
         return self._get_result_to_documents(result, content_key=content_key, embedding_key=embedding_key)
 
     def _get_result_to_documents(
-        self, result: list[dict[str, Any]], content_key: str | None = None, embedding_key: str | None = None
+        self,
+        result: list[dict[str, Any]],
+        content_key: str | None = None,
+        embedding_key: str | None = None,
+        return_embeddings: bool = True,
     ) -> list[Document]:
         """
         Convert Milvus query result into Documents.
@@ -395,6 +431,9 @@ class MilvusVectorStore(BaseVectorStore, DryRunMixin):
             result (List[Dict[str, Any]]): The result from a Milvus query operation.
             content_key (Optional[str]): The field used to store content in the storage.
             embedding_key (Optional[str]): The field used to store vector in the storage.
+            return_embeddings (bool): Whether to set the embedding on each Document. Defaults to True to
+                preserve the behavior of ``list_documents``/``filter_documents``; ``get_documents_by_id``
+                passes False so the embedding is left at its ``None`` default unless explicitly requested.
 
         Returns:
             List[Document]: A list containing Document objects created from the Milvus query result.
@@ -406,8 +445,9 @@ class MilvusVectorStore(BaseVectorStore, DryRunMixin):
             document_dict: dict[str, Any] = {
                 "id": str(entry.get("id", "")),
                 "content": entry.get(content_key, ""),
-                "embedding": entry.get(embedding_key, []),
             }
+            if return_embeddings:
+                document_dict["embedding"] = entry.get(embedding_key, [])
             metadata = {k: v for k, v in entry.items() if k not in ("id", content_key, embedding_key)}
 
             if metadata:
