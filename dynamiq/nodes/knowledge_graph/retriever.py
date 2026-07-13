@@ -168,6 +168,15 @@ def _compile_edge_filters(
             raise ValueError(f"KnowledgeGraphRetriever: 'operator' key missing in {condition!r}.")
         if "value" not in condition:
             raise ValueError(f"KnowledgeGraphRetriever: 'value' key missing in {condition!r}.")
+        # A dict value is never meaningful (graph properties can't be maps) — it is the signature of the
+        # LEGACY nested-operator grammar ({"key": {"$op": value}}), which the {"field": value} shorthand
+        # would otherwise normalize into a silently-never-matching equality. Fail loudly instead.
+        if isinstance(condition["value"], dict):
+            raise ValueError(
+                "KnowledgeGraphRetriever: dict filter values are not valid — this looks like the legacy "
+                '{"key": {"$op": ...}} filter grammar; use {"field": ..., "operator": ..., "value": ...} '
+                "instead (e.g. operator 'contains_any' for ACL list intersection)."
+            )
         operator = condition["operator"]
         if operator not in _COMPARISON_OPERATORS:
             raise ValueError(f"KnowledgeGraphRetriever: unsupported filter operator {operator!r}.")
