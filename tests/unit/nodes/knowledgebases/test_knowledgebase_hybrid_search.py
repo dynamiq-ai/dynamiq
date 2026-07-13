@@ -16,8 +16,9 @@ from dynamiq.nodes.knowledgebases.knowledgebase_hybrid import (
 from dynamiq.nodes.knowledgebases.knowledgebase_vector import DynamiqKnowledgebaseVectorSearch
 from dynamiq.nodes.node import Node, NodeGroup
 from dynamiq.nodes.rankers import CohereReranker
-from dynamiq.runnables import RunnableConfig
+from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types import Document
+from dynamiq.types.cancellation import CanceledException
 
 
 @pytest.fixture
@@ -221,15 +222,42 @@ def test_execute_drops_vector_only_params_from_graph_request(vector_node, graph_
     assert graph_kwargs["json"]["limit"] == 4
 
 
-def test_execute_propagates_sub_node_failure(vector_node, graph_node):
+def test_execute_degrades_when_one_source_fails(vector_node, graph_node):
+    """A single sub-search failure degrades to the surviving source instead of failing the whole call."""
+    vector_node.client.request.return_value = _vector_response([], status_code=403)  # vector fails
+    graph_node.client.request.return_value = _graph_response(
+        {"content": "", "source_documents": [{"id": "2", "content": "beta"}]}
+    )
     node = _hybrid(vector_node, graph_node)
+
+    result = node.execute(
+        DynamiqKnowledgebaseHybridSearchInputSchema(query="q"), RunnableConfig(callbacks=[])
+    )
+
+    # Only the graph source doc survives; no exception raised.
+    assert [doc.id for doc in result["documents"]] == ["2"]
+
+
+def test_execute_raises_when_both_sources_fail(vector_node, graph_node):
+    """When BOTH sub-searches fail there is nothing to return, so the hybrid call raises."""
     vector_node.client.request.return_value = _vector_response([], status_code=403)
-    graph_node.client.request.return_value = _graph_response({"content": ""})
+    graph_node.client.request.return_value = _graph_response({"content": ""}, status_code=500)
+    node = _hybrid(vector_node, graph_node)
 
     with pytest.raises(ToolExecutionException):
         node.execute(
             DynamiqKnowledgebaseHybridSearchInputSchema(query="q"), RunnableConfig(callbacks=[])
         )
+
+
+def test_resolve_outputs_propagates_cancellation(vector_node, graph_node):
+    """A canceled sub-run is never degraded around -- it re-raises CanceledException."""
+    node = _hybrid(vector_node, graph_node)
+    ok = RunnableResult(status=RunnableStatus.SUCCESS, input={}, output={"documents": []}, error=None)
+    canceled = RunnableResult(status=RunnableStatus.CANCELED, input={}, output=None, error=None)
+
+    with pytest.raises(CanceledException):
+        node._resolve_outputs(ok, canceled)
 
 
 def test_sub_runs_nest_under_hybrid_in_trace(vector_node, graph_node):

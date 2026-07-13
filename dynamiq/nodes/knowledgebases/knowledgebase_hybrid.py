@@ -8,7 +8,7 @@ from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import Node, ensure_config
 from dynamiq.nodes.types import ActionType
-from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types import Document
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.utils.logger import logger
@@ -124,7 +124,7 @@ class DynamiqKnowledgebaseHybridSearch(Node):
         return {"parent_run_id": kwargs.get("run_id")}
 
     @staticmethod
-    def _output_or_raise(result, source: str) -> dict[str, Any]:
+    def _output_or_raise(result: RunnableResult, source: str) -> dict[str, Any]:
         """Unwrap a sub-node ``RunnableResult``, propagating cancellation and failures."""
         if result.status == RunnableStatus.CANCELED:
             raise CanceledException()
@@ -136,6 +136,39 @@ class DynamiqKnowledgebaseHybridSearch(Node):
                 recoverable=True,
             )
         return result.output or {}
+
+    def _output_or_degrade(self, result: RunnableResult, label: str) -> dict[str, Any] | None:
+        """Like ``_output_or_raise`` but degrades a failed sub-search to ``None`` (logged) instead of raising.
+
+        Cancellation still propagates -- a canceled sub-run is never routed around.
+        """
+        if result.status == RunnableStatus.CANCELED:
+            raise CanceledException()
+        if result.status != RunnableStatus.SUCCESS:
+            error = result.error.to_dict() if result.error else "unknown error"
+            logger.warning(
+                f"Tool {self.name} - {self.id}: {label} search failed: {error}; returning the other source."
+            )
+            return None
+        return result.output or {}
+
+    def _resolve_outputs(
+        self, vector_result: RunnableResult, graph_result: RunnableResult
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Resolve both sub-search outputs, tolerating a single failure. Fails only when BOTH fail.
+
+        A failed source is logged (in ``_output_or_degrade``) and replaced by ``{}`` so the merge proceeds
+        on whatever survived. Cancellation still propagates.
+        """
+        vector_output = self._output_or_degrade(vector_result, "vector")
+        graph_output = self._output_or_degrade(graph_result, "graph")
+        if vector_output is None and graph_output is None:
+            raise ToolExecutionException(
+                "Hybrid search failed: both the vector and graph sub-searches errored. "
+                "Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
+        return vector_output or {}, graph_output or {}
 
     def _dedupe_merge(self, vector_output: dict[str, Any], graph_output: dict[str, Any]) -> list[Document]:
         """Merge and deduplicate vector chunks with graph source documents (pre-rerank).
@@ -265,8 +298,7 @@ class DynamiqKnowledgebaseHybridSearch(Node):
             input_data=self._sub_input(input_data, graph=True), config=config, run_depends=run_depends, **sub_kwargs
         )
 
-        vector_output = self._output_or_raise(vector_result, self.vector_search.name)
-        graph_output = self._output_or_raise(graph_result, self.graph_search.name)
+        vector_output, graph_output = self._resolve_outputs(vector_result, graph_result)
 
         return self._merge(
             input_data.query, vector_output, graph_output, config, limit=self._resolve_limit(input_data), **kwargs
@@ -297,8 +329,7 @@ class DynamiqKnowledgebaseHybridSearch(Node):
             ),
         )
 
-        vector_output = self._output_or_raise(vector_result, self.vector_search.name)
-        graph_output = self._output_or_raise(graph_result, self.graph_search.name)
+        vector_output, graph_output = self._resolve_outputs(vector_result, graph_result)
 
         return await self._merge_async(
             input_data.query, vector_output, graph_output, config, limit=self._resolve_limit(input_data), **kwargs
