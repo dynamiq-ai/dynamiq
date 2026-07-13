@@ -284,6 +284,12 @@ def _contains_any(field: str, value: Any) -> dict[str, Any]:
         msg = f"{field}'s value must be a list when using 'contains_any' comparator in Elasticsearch"
         raise VectorStoreFilterException(msg)
 
+    # A `terms` query is not analyzed, so on the default object mapping (string values are
+    # analyzed `text` with a `.keyword` sub-field) it must target `.keyword` to exact-match
+    # string tags/arrays. Mirrors OpenSearch's `_contains_any`.
+    if value and all(isinstance(v, str) for v in value):
+        field = f"{field}.keyword"
+
     return {"terms": {field: value}}
 
 

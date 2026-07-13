@@ -525,8 +525,22 @@ class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
         Args:
             document_ids (str | list[str]): The id, or list of ids, of the documents to update.
             metadata (dict[str, Any]): The new metadata that fully replaces the existing one.
+
+        Raises:
+            VectorStoreException: If any of the given ids does not exist. No document is
+                modified in that case (fail-fast), so the call never partially applies.
         """
         ids = self._normalize_document_ids(document_ids)
+        if not ids:
+            return
+
+        # Fail-fast: verify every id exists before mutating anything, otherwise a missing id
+        # mid-loop would raise after earlier ids were already updated (a partial write).
+        response = self.client.mget(index=self.index_name, body={"ids": ids}, _source=False)
+        missing = [doc["_id"] for doc in response["docs"] if not doc.get("found")]
+        if missing:
+            raise VectorStoreException(f"Documents {missing} not found in index '{self.index_name}'")
+
         for document_id in ids:
             self.client.update(
                 index=self.index_name,
