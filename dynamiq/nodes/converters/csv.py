@@ -380,11 +380,15 @@ class CSVConverter(Node):
                     f"Content column '{content_column}' not found in CSV " f"(source: {source}) at row {index}"
                 )
 
+            content = row[content_column]
+            if not isinstance(content, str) or not content.strip():
+                continue
+
             merged_metadata = self._build_metadata(source, external_metadata)
             merged_metadata.update({col: row[col] for col in metadata_columns if col in row})
             merged_metadata["row_number"] = index + 2
 
             yield {
-                "content": row[content_column],
+                "content": content,
                 "metadata": merged_metadata,
             }

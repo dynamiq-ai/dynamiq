@@ -223,6 +223,32 @@ def test_csv_loader_named_rows_preserve_dict_reader_ragged_row_semantics():
     assert csv_loader._map_named_row(["content", "category"], ["long", "news", "extra"])[None] == ["extra"]
 
 
+def test_csv_loader_content_column_skips_rows_with_empty_content():
+    csv_loader = CSVConverter(content_column="content", metadata_columns=["category"])
+    file = BytesIO(b"content,category\n,empty\nkept,first\n   ,blank\nalso kept,second\n")
+    file.name = "sparse.csv"
+
+    result = csv_loader.run(input_data={"files": [file]})
+
+    documents = result.output["documents"]
+    assert [document["content"] for document in documents] == ["kept", "also kept"]
+    assert [document["metadata"]["row_number"] for document in documents] == [3, 5]
+
+
+def test_csv_loader_content_column_rejects_file_with_only_empty_content():
+    csv_loader = CSVConverter(content_column="content")
+    file = BytesIO(b"content,category\n,empty\n   ,blank\n")
+    file.name = "empty-content.csv"
+
+    result = csv_loader.run(input_data={"files": [file]})
+
+    assert result.status == RunnableStatus.FAILURE
+    assert result.error is not None
+    assert result.error.message == (
+        "No documents were created from the provided inputs. Please check your files and try again."
+    )
+
+
 def test_csv_loader_without_content_column_creates_self_describing_rows(csv_bytesio):
     csv_loader = CSVConverter()
 
