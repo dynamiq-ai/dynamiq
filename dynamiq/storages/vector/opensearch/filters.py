@@ -290,12 +290,41 @@ def _less_than_equal(field: str, value: Any) -> dict[str, Any]:
     return {"range": {field: {"lte": value}}}
 
 
+def _contains_any(field: str, value: Any) -> dict[str, Any]:
+    """
+    Creates a 'contains any' (union) comparison filter.
+
+    Matches documents whose ``field`` (which may be an array) contains at least one of the
+    given values, using OpenSearch's ``terms`` query. When all values are strings the
+    ``.keyword`` sub-field is used for exact matching, mirroring ``_equal``.
+
+    Args:
+        field (str): The field to compare.
+        value (Any): The list of values to compare against.
+
+    Returns:
+        dict[str, Any]: A 'contains any' comparison filter.
+
+    Raises:
+        VectorStoreFilterException: If the value is not a list.
+    """
+    if not isinstance(value, list):
+        msg = f"{field}'s value must be a list when using 'contains_any' comparator in OpenSearch"
+        raise VectorStoreFilterException(msg)
+
+    if value and all(isinstance(v, str) for v in value):
+        field = f"{field}.keyword"
+
+    return {"terms": {field: value}}
+
+
 COMPARISON_OPERATORS = {
     "==": _equal,
     ">": _greater_than,
     ">=": _greater_than_equal,
     "<": _less_than,
     "<=": _less_than_equal,
+    "contains_any": _contains_any,
 }
 
 LOGICAL_OPERATORS = {"AND": "must", "OR": "should", "NOT": "must_not"}
