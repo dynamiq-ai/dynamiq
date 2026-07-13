@@ -2172,7 +2172,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         (flag off, no sandbox, or a session already exists and is inherited).
         """
         if _shared_session.get() is not None:
-            return None  # inherit the ancestor's session
+            # Inherit the ancestor's session. By design the OUTERMOST sharing owner owns the whole
+            # subtree's session: a nested agent that also sets share_sandbox_with_subagents does not
+            # open a separate sub-session, so its own sharing_scope is intentionally not re-applied to
+            # its descendants (they keep borrowing the outer owner's sandbox).
+            return None
         if not self.share_sandbox_with_subagents:
             return None
         if self.sandbox_backend is None:
