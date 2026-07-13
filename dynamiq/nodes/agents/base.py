@@ -72,8 +72,7 @@ from dynamiq.utils.utils import deep_merge
 # per thread / per asyncio task via ContextVar.
 _run_extra_tools: ContextVar[list["Node"] | None] = ContextVar("dynamiq_agent_run_extra_tools", default=None)
 
-# Per-call overlay of shared-sandbox-backed tools (later task); isolated per
-# thread / per asyncio task via ContextVar, same pattern as `_run_extra_tools`.
+# Per-call overlay of shared-sandbox tools; isolated per thread / asyncio task, like `_run_extra_tools`.
 _shared_sandbox_tools: ContextVar[list["Node"] | None] = ContextVar("dynamiq_shared_sandbox_tools", default=None)
 
 
@@ -702,13 +701,15 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         ltm_token = _run_extra_tools.set(ltm_tools)
         # Session/borrow setup lives INSIDE the try so the finally always resets the ContextVars and
         # releases any borrowed view, even if setup raises. Tokens stay None until each set succeeds.
+        # Capture any view already active on this instance so a nested execute() restores it rather
+        # than clearing the outer run's view.
         shared_session_token = None
         sandbox_overlay_token = None
+        prev_shared_view = self._shared_sandbox_view
         try:
             shared_session_token = self._maybe_enter_shared_session(kwargs)
-            # Borrowers resolve a per-agent view of the shared sandbox at run time (both factory- and
-            # initialized-mode subagents). Always set the overlay (even to None) so a nested subagent
-            # does not inherit this agent's overlay via ContextAwareThreadPoolExecutor.
+            # Always set the overlay (even to None, for non-borrowers) so a nested subagent does not
+            # inherit this agent's overlay via ContextAwareThreadPoolExecutor.
             sandbox_overlay_token = _shared_sandbox_tools.set(self._maybe_borrow_shared_sandbox())
             if use_memory:
                 history_messages = self._retrieve_memory(input_data)
@@ -885,7 +886,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         finally:
             if sandbox_overlay_token is not None:
                 _shared_sandbox_tools.reset(sandbox_overlay_token)
-            self._release_shared_sandbox_view()
+            self._release_shared_sandbox_view(restore_to=prev_shared_view)
             _run_extra_tools.reset(ltm_token)
             self._exit_shared_session(shared_session_token)
 
@@ -2151,12 +2152,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
     @property
     def sandbox_backend(self) -> Sandbox | None:
-        """Get the effective sandbox backend for this agent.
-
-        When this agent borrows an owner's shared sandbox, the per-agent view is the
-        effective backend so uploads, output collection, skills ingestion and cleanup
-        all target the same sandbox as the sandbox tools. Otherwise falls back to the
-        agent's own configured backend (if enabled).
+        """The effective sandbox backend: a borrowed shared-sandbox view when set (so uploads,
+        output collection, skills and cleanup target it too), else the own configured backend.
         """
         if self._shared_sandbox_view is not None:
             return self._shared_sandbox_view
@@ -2196,6 +2193,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             sandbox=self.sandbox_backend,
             share_sandbox=True,
             owner_run_id=str(kwargs.get("run_id") or self.id),
+            owner_agent_id=self.id,
             sharing_scope=self.sandbox_sharing_scope,
         )
         return _shared_session.set(session)
@@ -2206,12 +2204,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             _shared_session.reset(token)
 
     def _resolve_tools_sandbox(self):
-        """The sandbox this agent builds its OWN sandbox tools from at construction.
-
-        Shared-sandbox borrowing is resolved at run time in ``execute()`` (see
-        ``_maybe_borrow_shared_sandbox``), not here — that is what lets initialized-mode
-        subagents share too. At construction ``_shared_sandbox_view`` is always None, so
-        ``sandbox_backend`` returns exactly this agent's own configured backend.
+        """The sandbox this agent builds its OWN tools from at construction — always its own
+        backend. Borrowing is resolved at run time in ``execute()`` instead (that is what lets
+        initialized-mode subagents share, since ``_shared_sandbox_view`` is None at construction).
         """
         return self.sandbox_backend
 
@@ -2232,28 +2227,29 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         - it uses a file store (file store and sandbox are mutually exclusive); or
         - scope is AUGMENT and it brings its own sandbox.
 
-        Sets ``_shared_sandbox_view`` / ``_sandbox_is_shared`` as a side effect when it borrows.
-        Works for both factory- and initialized-mode subagents because the ContextVar is
-        always visible in ``execute()`` regardless of when the instance was constructed.
+        Sets ``_shared_sandbox_view`` / ``_sandbox_is_shared`` when it borrows. Works for both
+        factory- and initialized-mode subagents since the session ContextVar is visible in
+        ``execute()`` regardless of when the instance was built.
         """
         session = _shared_session.get()
         if session is None or not session.share_sandbox:
             return None
 
-        own = self._configured_sandbox_backend()
-        if own is not None and session.get_sandbox() is own:
-            return None  # this agent owns the shared sandbox — nothing to borrow
+        # Identify the owner by agent id, not backend object identity: a subagent may be configured
+        # with the same Sandbox object as the owner and must still get its own isolated /work view.
+        if session.owner_agent_id == self.id:
+            return None  # the owner already uses the shared sandbox via its own tools
 
+        own = self._configured_sandbox_backend()
         if self.file_store_backend is not None:
             return None  # file-store agents never join the shared sandbox
 
         if session.sharing_scope == SandboxSharingScope.AUGMENT and own is not None:
             return None  # augment: keep this subagent's own sandbox
 
-        # Key the workdir on this agent's stable instance id, not a per-call random suffix, so a
-        # reused initialized subagent lands in the SAME /work/<key> across calls within a run (its
-        # relative-path files persist). Distinct instances still get distinct ids -> distinct
-        # workdirs; factory subagents are rebuilt per call and so still rotate, as intended.
+        # Key the workdir on the stable instance id so a reused initialized subagent lands in the
+        # SAME /work/<key> across calls (its relative-path files persist). Factory subagents are
+        # rebuilt per call and so still rotate.
         key = f"{(self.sanitize_tool_name(self.name) or 'subagent').lower()}-{self.id}"
         view = session.sandbox_view_for(key)
         if view is None:
@@ -2268,10 +2264,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             tool.is_optimized_for_agents = True
 
         if own is not None:
-            # scope=ALL routes this subagent onto the shared view instead of its own sandbox. We do
-            # NOT tear the dedicated backend down here: this borrow path is shared by reused
-            # initialized subagents, which must keep their own sandbox for later standalone use.
-            # A *factory* subagent's orphaned backend is torn down in cleanup_factory_agent instead.
+            # scope=ALL routes this subagent onto the shared view. We do NOT tear its dedicated
+            # backend down here — reused initialized subagents must keep it for later standalone use;
+            # a factory subagent's orphaned backend is torn down in cleanup_factory_agent instead.
             logger.warning(
                 "Agent %s - %s: sandbox_sharing_scope=ALL overrides this subagent's own sandbox; "
                 "routing it onto the owner's shared sandbox instead.",
@@ -2283,17 +2278,19 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         self._shared_sandbox_view = view
         return tools
 
-    def _release_shared_sandbox_view(self) -> None:
-        """Disconnect and drop a per-call borrowed shared-sandbox view.
+    def _release_shared_sandbox_view(self, restore_to: "Sandbox | None" = None) -> None:
+        """Disconnect this call's borrowed view and restore the previously active one.
 
-        ``kill=False`` keeps the underlying shared sandbox alive for the owner and other
-        subagents; only this agent's client connection is dropped. ``_sandbox_is_shared``
-        stays latched so ``cleanup_factory_agent`` never kills the shared sandbox.
+        ``restore_to`` is the view that was active before this call borrowed; passing it lets a
+        nested ``execute()`` on the same instance restore the outer run's view instead of clearing
+        it. ``kill=False`` keeps the shared sandbox alive for the owner and other subagents; only
+        this call's client connection is dropped. ``_sandbox_is_shared`` stays latched so
+        ``cleanup_factory_agent`` never kills the shared sandbox.
         """
         view = self._shared_sandbox_view
-        if view is None:
+        self._shared_sandbox_view = restore_to
+        if view is None or view is restore_to:
             return
-        self._shared_sandbox_view = None
         try:
             view.close(kill=False)
         except Exception as e:

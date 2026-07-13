@@ -604,3 +604,53 @@ def test_augment_scope_does_not_tear_down_own_sandbox(test_llm):
         assert sub._sandbox_is_shared is False
     finally:
         _shared_session.reset(token)
+
+
+def test_owner_identified_by_id_not_backend_object(test_llm):
+    """A subagent configured with the SAME backend object as the owner is still a borrower, not
+    the owner, so it must get its own isolated /work view (Bugbot: same backend skips workdir
+    isolation)."""
+    from dynamiq.sandboxes.tools.shell import SandboxShellTool
+
+    owner = _sandboxed_agent(test_llm, name="Owner", share_sandbox_with_subagents=True)
+    token = owner._maybe_enter_shared_session({"run_id": "run-1"})
+    try:
+        # Configure the subagent with the exact same Sandbox object the session holds.
+        sub = Agent(
+            name="Researcher",
+            llm=test_llm,
+            role="r",
+            tools=[],
+            sandbox=SandboxConfig(enabled=True, backend=owner.sandbox_backend),
+        )
+        assert sub._configured_sandbox_backend() is owner.sandbox_backend  # same object reference
+
+        overlay = sub._maybe_borrow_shared_sandbox()
+
+        assert overlay is not None  # borrowed, not mistaken for the owner
+        shell = next(t for t in overlay if isinstance(t, SandboxShellTool))
+        assert shell.sandbox.base_path.startswith("/home/user/work/researcher-")
+        assert sub._sandbox_is_shared is True
+    finally:
+        owner._exit_shared_session(token)
+
+
+def test_release_restores_outer_view_for_nested_execute(test_llm):
+    """A nested execute() on the same borrowing instance must restore the OUTER run's view in its
+    finally, not clear it, so the outer run keeps its effective sandbox_backend (Bugbot: nested
+    execute clears borrowed view)."""
+    from unittest.mock import MagicMock
+
+    sub = Agent(name="Researcher", llm=test_llm, role="r", tools=[])
+    outer_view, inner_view = MagicMock(name="outer"), MagicMock(name="inner")
+
+    sub._shared_sandbox_view = outer_view  # outer run is mid-flight with its borrowed view
+    prev = sub._shared_sandbox_view  # what the nested run captures before borrowing
+    sub._shared_sandbox_view = inner_view  # nested run borrows a fresh view
+
+    sub._release_shared_sandbox_view(restore_to=prev)  # nested finally
+
+    assert sub._shared_sandbox_view is outer_view  # outer view restored, not cleared
+    assert sub.sandbox_backend is outer_view
+    inner_view.close.assert_called_once_with(kill=False)  # only the nested view disconnected
+    outer_view.close.assert_not_called()  # outer view left connected for the outer run

@@ -262,9 +262,8 @@ class SubAgentTool(Node):
         """Kill sandbox resources on a factory-created agent (unless it borrowed a shared one)."""
         if getattr(agent, "_sandbox_is_shared", False):
             # Never kill the borrowed shared sandbox. But if scope=ALL overrode this factory agent's
-            # OWN dedicated sandbox, that orphaned backend still needs teardown. Safe here because
-            # cleanup_factory_agent only runs for disposable factory agents — reused initialized
-            # subagents keep their own sandbox and never reach this path.
+            # own dedicated sandbox, that orphaned backend still needs teardown — safe here because
+            # this runs only for disposable factory agents, never reused initialized subagents.
             own = agent._configured_sandbox_backend() if hasattr(agent, "_configured_sandbox_backend") else None
             if own is not None:
                 try:

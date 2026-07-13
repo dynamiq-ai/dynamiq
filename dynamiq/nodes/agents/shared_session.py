@@ -38,6 +38,7 @@ class SharedSession:
         sandbox: "Sandbox | None" = None,
         share_sandbox: bool = False,
         owner_run_id: str = "",
+        owner_agent_id: str = "",
         sharing_scope: SandboxSharingScope = SandboxSharingScope.ALL,
     ):
         self.sandbox = sandbox
@@ -45,6 +46,7 @@ class SharedSession:
         # others degrade to no-sharing so subagents fall back to their own sandbox.
         self.share_sandbox = bool(share_sandbox and sandbox is not None and getattr(sandbox, "supports_views", False))
         self.owner_run_id = owner_run_id
+        self.owner_agent_id = owner_agent_id
         self.sharing_scope = sharing_scope
         self._lock = threading.Lock()
 
