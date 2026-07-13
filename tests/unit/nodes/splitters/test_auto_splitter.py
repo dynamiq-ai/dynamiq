@@ -151,6 +151,29 @@ def test_auto_splitter_maps_repeated_structured_sections_to_monotonic_source_off
     assert min(second_offsets) >= source_text.index(repeated_body, source_text.index("# Second"))
 
 
+def test_auto_splitter_maps_multi_paragraph_markdown_chunks_to_source_offsets():
+    first_body = " ".join(f"first-{index}" for index in range(16))
+    first_tail = " ".join(f"first-tail-{index}" for index in range(10))
+    second_body = " ".join(f"second-{index}" for index in range(16))
+    second_tail = " ".join(f"second-tail-{index}" for index in range(10))
+    source_text = "\n".join(
+        [
+            f"# First\n{first_body}\n\n{first_tail}",
+            f"# Second\n{second_body}\n\n{second_tail}",
+        ]
+    )
+    splitter = AutoSplitter(chunk_size=45, chunk_overlap=0)
+    splitter.init_components()
+
+    chunks = splitter.execute(
+        splitter.input_schema(documents=[Document(content=source_text, metadata={"file_type": "markdown"})])
+    )["documents"]
+
+    assert len(chunks) > 2
+    assert {chunk.metadata.get("h1") for chunk in chunks} == {"First", "Second"}
+    assert all(chunk.metadata["start_index"] == source_text.index(chunk.content) for chunk in chunks)
+
+
 def test_auto_splitter_routes_json_by_extension():
     splitter = AutoSplitter(json_max_chunk_size=50)
     splitter.init_components()

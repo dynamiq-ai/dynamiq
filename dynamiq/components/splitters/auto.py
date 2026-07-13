@@ -230,20 +230,27 @@ class AutoSplitterComponent(BaseModel):
         refined: list[Document] = []
         search_position = 0
         for chunk in chunks:
-            section_start = source.content.find(chunk.content, search_position)
+            section_start, section_end = _find_content_span(source.content, chunk.content, search_position)
             if section_start >= 0:
-                search_position = section_start + len(chunk.content)
+                search_position = section_end
             if recursive_splitter._length(chunk.content) <= self.chunk_size:
                 refined.append(chunk)
                 continue
 
             child_chunks = recursive_splitter.run(documents=[chunk])["documents"]
+            child_search_position = section_start
             for child in child_chunks:
                 metadata = dict(child.metadata or {})
                 metadata["source_id"] = source.id
-                relative_start = metadata.get("start_index")
-                if section_start >= 0 and isinstance(relative_start, int):
-                    metadata["start_index"] = section_start + relative_start
+                child_start, _ = _find_content_span(
+                    source.content,
+                    child.content,
+                    child_search_position,
+                    section_end,
+                )
+                if section_start >= 0 and child_start >= 0 and "start_index" in metadata:
+                    metadata["start_index"] = child_start
+                    child_search_position = child_start + 1
                 else:
                     metadata.pop("start_index", None)
                 child.metadata = metadata
@@ -496,6 +503,23 @@ _EXTENSION_TO_LANGUAGE = {
     "ts": Language.TS,
     "tsx": Language.TS,
 }
+
+
+def _find_content_span(source: str, content: str, start: int = 0, end: int | None = None) -> tuple[int, int]:
+    """Locate splitter output while allowing Markdown-removed blank lines."""
+    search_end = len(source) if end is None else end
+    exact_start = source.find(content, start, search_end)
+    if exact_start >= 0:
+        return exact_start, exact_start + len(content)
+    if "\n" not in content:
+        return -1, -1
+
+    blank_lines = r"\n(?:[^\S\n]*\n)*"
+    pattern = blank_lines.join(re.escape(line) for line in content.split("\n"))
+    match = re.search(pattern, source[start:search_end])
+    if match is None:
+        return -1, -1
+    return start + match.start(), start + match.end()
 
 
 def _coerce_strategy(value: Any) -> AutoSplitterStrategy | None:
