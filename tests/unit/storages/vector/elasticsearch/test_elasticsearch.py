@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dynamiq.storages.vector import ElasticsearchVectorStore
+from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.types import Document
 
 
@@ -43,6 +44,34 @@ def mock_es_filters():
 
 def test_initialization(es_vector_store):
     assert es_vector_store.client is not None
+
+
+def test_replace_document_metadata(es_vector_store, mock_es_client):
+    mock_es_client.mget.return_value = {"docs": [{"_id": "d1", "found": True}]}
+    es_vector_store.replace_document_metadata("d1", {"tags": ["x", "y"]})
+    mock_es_client.update.assert_called_once()
+    _, kwargs = mock_es_client.update.call_args
+    assert kwargs["id"] == "d1"
+    assert kwargs["index"] == "test_index"
+    # A script fully replaces the metadata object (rather than a merging partial update).
+    assert kwargs["body"]["script"]["source"] == "ctx._source.metadata = params.metadata"
+    assert kwargs["body"]["script"]["params"]["metadata"] == {"tags": ["x", "y"]}
+
+
+def test_replace_document_metadata_multiple_ids(es_vector_store, mock_es_client):
+    mock_es_client.mget.return_value = {"docs": [{"_id": "d1", "found": True}, {"_id": "d2", "found": True}]}
+    es_vector_store.replace_document_metadata(["d1", "d2"], {"tags": ["x"]})
+    assert mock_es_client.update.call_count == 2
+    updated_ids = [kwargs["id"] for _, kwargs in mock_es_client.update.call_args_list]
+    assert updated_ids == ["d1", "d2"]
+
+
+def test_replace_document_metadata_missing_id_fails_fast(es_vector_store, mock_es_client):
+    # d1 exists, d2 is missing: the whole call must raise and update nothing (no partial write).
+    mock_es_client.mget.return_value = {"docs": [{"_id": "d1", "found": True}, {"_id": "d2", "found": False}]}
+    with pytest.raises(VectorStoreException, match="d2"):
+        es_vector_store.replace_document_metadata(["d1", "d2"], {"tags": ["x"]})
+    mock_es_client.update.assert_not_called()
 
 
 def test_initialization_with_connection(mock_es_client):

@@ -15,6 +15,8 @@ from dynamiq.prompts import (
     Message,
     MessageRole,
     VisionMessage,
+    VisionMessageFileContent,
+    VisionMessageFileData,
     VisionMessageImageContent,
     VisionMessageImageURL,
     VisionMessageTextContent,
@@ -823,19 +825,27 @@ class XMLParser:
 def create_message_from_input(input_data: dict) -> Message | VisionMessage:
     """
     Create appropriate message type based on input data,
-    automatically detecting and handling images from either images or files fields
+    automatically detecting and handling images and videos from either the
+    dedicated images/videos fields or the generic files field.
 
     Args:
         input_data (dict): Input data dictionary containing:
             - 'input': Text input string
             - 'images': List of image data (URLs, bytes, or BytesIO objects)
+            - 'videos': List of video data (URLs, bytes, or BytesIO objects)
             - 'files': List of file data (bytes or BytesIO objects)
 
     Returns:
         Message or VisionMessage: Appropriate message type for the input
+
+    Note:
+        Video content is only useful to models that accept native video input
+        (e.g. Gemini). Check the target LLM's `is_video_input_supported` before
+        relying on it; this function builds the content block regardless.
     """
     text_input = input_data.get("input", "")
     images = input_data.get("images", []) or []
+    videos = input_data.get("videos", []) or []
     files = input_data.get("files", []) or []
 
     if not isinstance(images, list):
@@ -843,12 +853,28 @@ def create_message_from_input(input_data: dict) -> Message | VisionMessage:
     else:
         images = list(images)
 
+    if not isinstance(videos, list):
+        videos = [videos]
+    else:
+        videos = list(videos)
+
+    declared_images, images = images, []
+    for item in declared_images:
+        (videos if not isinstance(item, str) and is_video_file(item) else images).append(item)
+
+    declared_videos, videos = videos, []
+    for item in declared_videos:
+        (images if not isinstance(item, str) and is_image_file(item) else videos).append(item)
+
     for file in files:
         if is_image_file(file):
             logger.debug(f"File detected as image, adding to vision processing: {getattr(file, 'name', 'unnamed')}")
             images.append(file)
+        elif is_video_file(file):
+            logger.debug(f"File detected as video, adding to vision processing: {getattr(file, 'name', 'unnamed')}")
+            videos.append(file)
 
-    if not images:
+    if not images and not videos:
         return Message(role=MessageRole.USER, content=text_input)
 
     content = []
@@ -875,6 +901,22 @@ def create_message_from_input(input_data: dict) -> Message | VisionMessage:
             content.append(VisionMessageImageContent(image_url=VisionMessageImageURL(url=image_url)))
         except Exception as e:
             logger.error(f"Error processing image: {str(e)}")
+
+    for video in videos:
+        try:
+            if isinstance(video, str):
+                if video.startswith(("http://", "https://", "data:", "gs://")):
+                    video_url = video
+                else:
+                    with open(video, "rb") as file:
+                        video_url = bytes_to_data_url(file.read())
+            else:
+                video_bytes = video.getvalue() if isinstance(video, io.BytesIO) else video
+                video_url = bytes_to_data_url(video_bytes)
+
+            content.append(VisionMessageFileContent(file=VisionMessageFileData(file_data=video_url)))
+        except Exception as e:
+            logger.error(f"Error processing video: {str(e)}")
 
     return VisionMessage(content=content, role=MessageRole.USER)
 
@@ -905,7 +947,6 @@ def is_image_file(file) -> bool:
             b"\x89PNG\r\n\x1a\n": "png",  # PNG
             b"GIF87a": "gif",  # GIF87a
             b"GIF89a": "gif",  # GIF89a
-            b"RIFF": "webp",  # WebP
             b"MM\x00*": "tiff",  # TIFF (big endian)
             b"II*\x00": "tiff",  # TIFF (little endian)
             b"BM": "bmp",  # BMP
@@ -914,6 +955,11 @@ def is_image_file(file) -> bool:
         for sig, fmt in signatures.items():
             if file_bytes.startswith(sig):
                 return True
+
+        # RIFF is a generic container (WebP, AVI, WAV, ...); the real format is a 4-byte
+        # tag at offset 8, so only RIFF/WEBP should be treated as an image here.
+        if file_bytes.startswith(b"RIFF") and file_bytes[8:12] == b"WEBP":
+            return True
 
         if isinstance(file, io.BytesIO):
             pos = file.tell()
@@ -928,6 +974,34 @@ def is_image_file(file) -> bool:
         return False
     except Exception as e:
         logger.error(f"Error checking if file is an image: {str(e)}")
+        return False
+
+
+def is_video_file(file) -> bool:
+    """
+    Determine if a file is a video by examining its content.
+
+    Args:
+        file: File-like object or bytes
+
+    Returns:
+        bool: True if the file is a video, False otherwise
+    """
+    try:
+        if isinstance(file, io.BytesIO):
+            pos = file.tell()
+            file.seek(0)
+            file_bytes = file.read(4096)
+            file.seek(pos)
+        elif isinstance(file, bytes):
+            file_bytes = file[:4096]
+        else:
+            return False
+
+        mime = filetype.guess_mime(file_bytes)
+        return mime is not None and mime.startswith("video/")
+    except Exception as e:
+        logger.error(f"Error checking if file is a video: {str(e)}")
         return False
 
 

@@ -57,6 +57,7 @@ class WeaviateDocumentRetriever(Retriever, WeaviateRetrieverVectorStoreParams):
     @property
     def vector_store_params(self):
         params = self.model_dump(include=set(WeaviateRetrieverVectorStoreParams.model_fields))
+        params.pop("max_vector_distance", None)
         params.update(
             {
                 "connection": self.connection,
@@ -83,6 +84,7 @@ class WeaviateDocumentRetriever(Retriever, WeaviateRetrieverVectorStoreParams):
                 filters=self.filters,
                 top_k=self.top_k,
                 similarity_threshold=self.similarity_threshold,
+                max_vector_distance=self.max_vector_distance,
             )
 
     def execute(self, input_data: RetrieverInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
@@ -115,9 +117,11 @@ class WeaviateDocumentRetriever(Retriever, WeaviateRetrieverVectorStoreParams):
 
         alpha = input_data.alpha if input_data.alpha is not None else self.alpha
         query = input_data.query
+        max_vector_distance = (
+            input_data.max_vector_distance if input_data.max_vector_distance is not None else self.max_vector_distance
+        )
 
-        output = self.document_retriever.run(
-            query_embedding,
+        retrieval_kwargs = dict(
             filters=filters,
             top_k=top_k,
             content_key=content_key,
@@ -125,6 +129,9 @@ class WeaviateDocumentRetriever(Retriever, WeaviateRetrieverVectorStoreParams):
             alpha=alpha,
             similarity_threshold=similarity_threshold,
         )
+        if max_vector_distance is not None:
+            retrieval_kwargs["max_vector_distance"] = max_vector_distance
+        output = self.document_retriever.run(query_embedding, **retrieval_kwargs)
 
         return {
             "documents": output["documents"],

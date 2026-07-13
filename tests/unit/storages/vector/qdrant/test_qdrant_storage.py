@@ -1,11 +1,18 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from qdrant_client.http import models as rest
 
+from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.qdrant.converters import convert_id
 from dynamiq.storages.vector.qdrant.qdrant import QdrantVectorStore
 from dynamiq.types import Document
+
+
+def _qdrant_points(*original_ids):
+    """Retrieve() stubs: points whose ids normalise (via convert_id) back to the originals."""
+    return [SimpleNamespace(id=convert_id(_id)) for _id in original_ids]
 
 
 @pytest.fixture
@@ -37,6 +44,36 @@ def test_filter_documents(qdrant_vector_store, mock_qdrant_client):
 def test_write_documents(qdrant_vector_store, mock_documents):
     with patch.object(qdrant_vector_store, "_set_up_collection", return_value=None):
         assert qdrant_vector_store.write_documents(mock_documents) == 2
+
+
+def test_replace_document_metadata(qdrant_vector_store, mock_qdrant_client):
+    mock_qdrant_client.retrieve.return_value = _qdrant_points("1")
+    qdrant_vector_store.replace_document_metadata("1", {"tags": ["x", "y"]})
+    mock_qdrant_client.set_payload.assert_called_once_with(
+        collection_name=qdrant_vector_store.index_name,
+        payload={"metadata": {"tags": ["x", "y"]}},
+        points=[convert_id("1")],
+        wait=qdrant_vector_store.wait_result_from_api,
+    )
+
+
+def test_replace_document_metadata_multiple_ids(qdrant_vector_store, mock_qdrant_client):
+    mock_qdrant_client.retrieve.return_value = _qdrant_points("1", "2")
+    qdrant_vector_store.replace_document_metadata(["1", "2"], {"tags": ["x"]})
+    mock_qdrant_client.set_payload.assert_called_once_with(
+        collection_name=qdrant_vector_store.index_name,
+        payload={"metadata": {"tags": ["x"]}},
+        points=[convert_id("1"), convert_id("2")],
+        wait=qdrant_vector_store.wait_result_from_api,
+    )
+
+
+def test_replace_document_metadata_missing_id_fails_fast(qdrant_vector_store, mock_qdrant_client):
+    # Only "1" exists; "2" is missing -> raise before set_payload so nothing is written.
+    mock_qdrant_client.retrieve.return_value = _qdrant_points("1")
+    with pytest.raises(VectorStoreException, match="2"):
+        qdrant_vector_store.replace_document_metadata(["1", "2"], {"tags": ["x"]})
+    mock_qdrant_client.set_payload.assert_not_called()
 
 
 def test_delete_documents(qdrant_vector_store, mock_qdrant_client):

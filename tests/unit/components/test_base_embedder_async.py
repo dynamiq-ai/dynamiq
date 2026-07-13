@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from litellm.types.utils import EmbeddingResponse, Usage
@@ -141,6 +141,58 @@ class TestEmbedDocumentsAsync:
         embedder = _make_openai_embedder()
         with pytest.raises(TypeError, match="DocumentEmbedder expects a list"):
             await embedder.embed_documents_async("not a list")
+
+
+class TestEmbedderInputIntegrity:
+    def test_document_embedding_applies_metadata_prefix_and_suffix(self):
+        from dynamiq.types import Document
+
+        embedder = _make_openai_embedder()
+        embedder.meta_fields_to_embed = ["title"]
+        embedder.prefix = "[content] "
+        embedder.suffix = " [/content]"
+        embedder._embedding = MagicMock(
+            return_value=_make_embedding_response(
+                model="text-embedding-3-small",
+                embedding=[0.1, 0.2],
+            )
+        )
+
+        embedder.embed_documents([Document(content="Body", metadata={"title": "Article"})])
+
+        assert embedder._embedding.call_args.kwargs["input"] == ["Article\n[content] Body [/content]"]
+
+    def test_document_embedding_rejects_response_count_mismatch_before_mutation(self):
+        from dynamiq.types import Document
+
+        embedder = _make_openai_embedder()
+        embedder._embedding = MagicMock(
+            return_value=_make_embedding_response(
+                model="text-embedding-3-small",
+                embedding=[0.1],
+            )
+        )
+        documents = [Document(content="one"), Document(content="two", embedding=[9.9])]
+
+        with pytest.raises(ValueError, match="returned 1 embeddings for 2 inputs"):
+            embedder.embed_documents(documents)
+
+        assert documents[0].embedding is None
+        assert documents[1].embedding == [9.9]
+
+    def test_document_embedding_validates_every_document_type(self):
+        from dynamiq.types import Document
+
+        embedder = _make_openai_embedder()
+
+        with pytest.raises(TypeError, match="DocumentEmbedder expects a list"):
+            embedder.embed_documents([Document(content="valid"), "invalid"])
+
+    def test_text_embedding_rejects_whitespace_only_input(self):
+        embedder = _make_openai_embedder()
+
+        with pytest.raises(ValueError, match="non-empty text"):
+            embedder.embed_text("   \n")
 
 
 class TestHuggingFaceAsyncOverrides:

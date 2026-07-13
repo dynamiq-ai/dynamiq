@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode
 from dynamiq.nodes.types import ActionType
+from dynamiq.types import Document
 
 
 class RetrieverInputSchema(BaseModel):
@@ -16,8 +17,7 @@ class RetrieverInputSchema(BaseModel):
     top_k: int = Field(default=0, description="Parameter to provided how many documents to retrieve.")
     similarity_threshold: float | None = Field(
         default=None,
-        description="Parameter to provide minimal similarity "
-        "or maximal distance score accepted for retrieved documents.",
+        description="Post-retrieval score threshold. Hybrid scores may be query-relative rather than absolute.",
     )
     content_key: str | None = Field(default=None, description="Parameter to provide content key.")
     embedding_key: str | None = Field(default=None, description="Parameter to provide embedding key.")
@@ -27,6 +27,11 @@ class RetrieverInputSchema(BaseModel):
         ge=0,
         le=1,
         description="Parameter to provide alpha for hybrid retrieval.",
+    )
+    max_vector_distance: float | None = Field(
+        default=None,
+        ge=0,
+        description="Maximum vector distance accepted by hybrid retrieval backends that support it.",
     )
 
 
@@ -41,3 +46,14 @@ class Retriever(VectorStoreNode, ABC):
     @property
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"document_retriever": True}
+
+    def get_documents_by_id(self, ids: list[str]) -> list[Document]:
+        """Fetch documents by their exact ids, forwarding to the underlying vector store.
+
+        Shared by every retriever node; backends whose store can't fetch by id raise NotImplementedError.
+        """
+        if not ids:
+            return []
+        if self.vector_store is None:
+            self.init_components()
+        return self.vector_store.get_documents_by_id(list(ids))

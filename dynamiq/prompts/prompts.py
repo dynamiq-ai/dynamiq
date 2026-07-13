@@ -182,9 +182,13 @@ class VisionMessageFileData(BaseModel):
 
     Attributes:
         file_data (str): The base64 formatted data of the file.
+        video_metadata (dict | None): Optional video-specific parameters (e.g. ``fps``,
+            ``start_offset``, ``end_offset``), forwarded as-is to providers that support
+            video input (e.g. Gemini). Ignored by providers/content that aren't video.
     """
 
     file_data: str
+    video_metadata: dict[str, Any] | None = None
 
 
 class VisionMessageFileContent(BaseModel):
@@ -307,6 +311,7 @@ class VisionMessage(BaseModel):
                     VisionMessageFileContent(
                         file=VisionMessageFileData(
                             file_data=self._Template(content.file.file_data).render(**kwargs),
+                            video_metadata=content.file.video_metadata,
                         )
                     )
                 )

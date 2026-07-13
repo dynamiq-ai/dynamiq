@@ -1,6 +1,6 @@
 """E2E extraction test with a real LLM (OPENAI_API_KEY required).
 
-Feeds one document with known facts through ``EntityExtractor`` and verifies that the
+Feeds one document with known facts through ``KnowledgeGraphEntityExtractor`` and verifies that the
 entities, the ontology-declared attributes, and the relationships stated in the text are
 correctly extracted — and that the ontology / edge-metadata guarantees hold on real output.
 
@@ -13,8 +13,8 @@ import os
 import pytest
 
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.extractors import EntityExtractor, Ontology, Triple
-from dynamiq.nodes.extractors.entity_extractor import ATTRIBUTE_VALUE_LABEL, HAS_ATTRIBUTE_TYPE
+from dynamiq.nodes.knowledge_graphs import KnowledgeGraphEntityExtractor, Ontology, Triple
+from dynamiq.nodes.knowledge_graphs.entity_extractor import ATTRIBUTE_VALUE_LABEL, HAS_ATTRIBUTE_TYPE
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.types import Document
 
@@ -42,7 +42,7 @@ def extractor():
     if not os.getenv("OPENAI_API_KEY"):
         pytest.skip("OPENAI_API_KEY is not set; skipping credentials-required test.")
     llm = OpenAI(connection=OpenAIConnection(), model="gpt-4o-mini", temperature=0)
-    return EntityExtractor(llm=llm, ontology=ONTOLOGY)
+    return KnowledgeGraphEntityExtractor(llm=llm, ontology=ONTOLOGY)
 
 
 def test_extracts_entities_attributes_and_relationships(extractor):
@@ -51,7 +51,7 @@ def test_extracts_entities_attributes_and_relationships(extractor):
         metadata={"allowed_principals": ["group:finance"], "source": "hr-wiki"},
     )
 
-    result = extractor.execute(EntityExtractor.input_schema(documents=[document]))
+    result = extractor.execute(KnowledgeGraphEntityExtractor.input_schema(documents=[document]))
     nodes, relationships = result["nodes"], result["relationships"]
 
     by_label: dict[str, list[dict]] = {}

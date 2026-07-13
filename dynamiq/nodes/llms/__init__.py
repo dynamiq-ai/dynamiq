@@ -15,6 +15,7 @@ from .gemini import Gemini
 from .groq import Groq
 from .huggingface import HuggingFace
 from .mistral import Mistral
+from .novita import Novita
 from .nvidia_nim import NvidiaNIM
 from .ollama import Ollama
 from .openai import OpenAI

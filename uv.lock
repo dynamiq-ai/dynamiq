@@ -1340,7 +1340,7 @@ wheels = [
 
 [[package]]
 name = "dynamiq"
-version = "0.55.0"
+version = "0.57.0"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -1471,8 +1471,8 @@ requires-dist = [
     { name = "databricks-sql-connector", specifier = ">=4.0.3,<4.1.0" },
     { name = "datamodel-code-generator", specifier = "==0.30.0" },
     { name = "daytona", specifier = ">=0.161.0,<0.162.0" },
-    { name = "e2b", specifier = ">=2.25.1,<3.0.0" },
-    { name = "e2b-code-interpreter", specifier = ">=2.0.0,<2.1.0" },
+    { name = "e2b", specifier = ">=2.26.0,<3.0.0" },
+    { name = "e2b-code-interpreter", specifier = ">=2.8.1,<3.0.0" },
     { name = "e2b-desktop", specifier = ">=2.2.0,<3.0.0" },
     { name = "elasticsearch", specifier = ">=8.12.0,<8.13.0" },
     { name = "filetype", specifier = ">=1.2.0,<1.3.0" },
@@ -1598,16 +1598,16 @@ wheels = [
 
 [[package]]
 name = "e2b-code-interpreter"
-version = "2.0.0"
+version = "2.8.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
     { name = "e2b" },
     { name = "httpx" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/42/84/e94cb706d88ac3510748be9d0030fb0a896a25b43677903aff20213b3cc1/e2b_code_interpreter-2.0.0.tar.gz", hash = "sha256:19136916be8de60bfd0a678742501d1d0335442bb6e86405c7dd6f98059b73c4", size = 10029, upload-time = "2025-08-22T10:16:57.169Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d9/9b/e24eeb48fba1342f6a81e98bf6ff51622a7d5c3353a89d452623f158bcb8/e2b_code_interpreter-2.8.1.tar.gz", hash = "sha256:900bc847a4a6f90a571e0de4112531c79c550fbdb1ec94a1d2b2c9f0d058a674", size = 11467, upload-time = "2026-06-17T09:58:51.217Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5e/f1/135acbaffe4b2e63addecfc2a6c2ecf9ea3e5394aa2a9a829e3eb6f2098d/e2b_code_interpreter-2.0.0-py3-none-any.whl", hash = "sha256:273642d4dd78f09327fb1553fe4f7ddcf17892b78f98236e038d29985e42dca5", size = 12939, upload-time = "2025-08-22T10:16:55.698Z" },
+    { url = "https://files.pythonhosted.org/packages/df/47/c9acfeb0a63925d5b2e782b496be1287665bb649eee48d947fc46b9bdeee/e2b_code_interpreter-2.8.1-py3-none-any.whl", hash = "sha256:8449ff1abb507e4c28134c9cbc4e59f76c09fadceab879c8c4031399b31a126a", size = 15210, upload-time = "2026-06-17T09:58:50.043Z" },
 ]
 
 [[package]]
@@ -2911,7 +2911,7 @@ wheels = [
 
 [[package]]
 name = "litellm"
-version = "1.89.3"
+version = "1.90.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -2927,9 +2927,9 @@ dependencies = [
     { name = "tiktoken" },
     { name = "tokenizers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/56/f1/f7cfead063f2ab1877c8fb465d0d7fe300b75f081bcb73525f6d550aeb1c/litellm-1.89.3.tar.gz", hash = "sha256:8fcdb2b7a0ef3381d41adf164443842e31ef9f0cd5bcda6fc3c0bd8bc2959510", size = 14080611, upload-time = "2026-06-20T22:42:26.997Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fa/c8/18d0c831d97ef6e7a971e1e984aa0a07740adb3f343e4596f21a5e880840/litellm-1.90.3.tar.gz", hash = "sha256:1b15776011745ea4f90259d9bd2f269835a8541cd7948751bec726b1d21647fa", size = 14820738, upload-time = "2026-07-03T19:53:20.112Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d1/f1/34d174ff1d84e459b30f971606ac9cb7078ad24cd7661e9786b25adf7def/litellm-1.89.3-py3-none-any.whl", hash = "sha256:414ef5aee504b2b3eb1b219d39f1c11902db399cbdbc06e5fb550c15d731abeb", size = 15495226, upload-time = "2026-06-20T22:42:23.156Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/ad/b40e8a29ec9b4564c5fd96829c4b22512c24ca76045304b1b521d6ea68c1/litellm-1.90.3-py3-none-any.whl", hash = "sha256:0ba6844865c0637719b3e76f43cf1089e3bd578a456b7be6a7f64afbbc259472", size = 16613824, upload-time = "2026-07-03T19:53:17.393Z" },
 ]
 
 [[package]]

@@ -1,12 +1,13 @@
+import zipfile
 from io import BytesIO
 
 import pytest
+
 from dynamiq import Workflow
 from dynamiq.flows import Flow
+from dynamiq.nodes.extractors import ByIndexExtractor, ByRegexExtractor, FileTypeExtractor
 from dynamiq.runnables import RunnableResult, RunnableStatus
 from dynamiq.types import Document
-
-from dynamiq.nodes.extractors import ByIndexExtractor, ByRegexExtractor, FileTypeExtractor
 
 
 @pytest.mark.parametrize(
@@ -75,12 +76,15 @@ def create_bytesio_with_name(content, name):
         ("presentation.pptx", None, "presentation"),
         ("file.pdf", None, "pdf"),
         ("spreadsheet.xlsx", None, "spreadsheet"),
+        ("legacy.xls", None, None),
+        ("open_document.ods", None, None),
         ("archive.zip", None, "archive"),
         ("audio.mp3", None, "audio"),
         ("video.mp4", None, "video"),
         ("image.gif", None, "image"),
         ("unknownfile.xyz", None, None),
-        (None, create_bytesio_with_name(b"file content with name", "unknownfile.xyz"), None),
+        # Unknown extension, but readable text content: detected from content.
+        (None, create_bytesio_with_name(b"file content with name", "unknownfile.xyz"), "text"),
         (None, create_bytesio_with_name(b"image content", "file_with_name.jpg"), "image"),
         (None, create_bytesio_with_name(b"spreadsheet content", "test.xlsx"), "spreadsheet"),
         (None, create_bytesio_with_name(b"presentation content", "test.pptx"), "presentation"),
@@ -96,9 +100,18 @@ def create_bytesio_with_name(content, name):
         (None, create_bytesio_with_name(b"font content", "test.otf"), "font"),
         (None, create_bytesio_with_name(b"executable content", "test.exe"), "executable"),
         (None, create_bytesio_with_name(b"ebook content", "test.epub"), "ebook"),
-        (None, create_bytesio_with_name(b"unknown content", "unknownfile.xyz"), None),
-        ("file_0", create_bytesio_with_name(b"content", ""), None),
-        (None, create_bytesio_with_name(b"content", ""), None),
+        # Missing or unknown extension: type is detected from content.
+        (None, create_bytesio_with_name(b"unknown content", "unknownfile.xyz"), "text"),
+        (None, create_bytesio_with_name(b"name,age\nAlice,30\nBob,25\n", ""), "spreadsheet"),
+        (None, create_bytesio_with_name(b"name\tage\nAlice\t30\nBob\t25\n", ""), "spreadsheet"),
+        (None, create_bytesio_with_name(b"name,age\nAlice,30\n", "legacy.xls"), None),
+        (None, create_bytesio_with_name(b'Text log mentioning <html but not starting with it', ""), "text"),
+        ("file_0", create_bytesio_with_name(b"content", ""), "text"),
+        (None, create_bytesio_with_name(b"content", ""), "text"),
+        (None, create_bytesio_with_name(b"%PDF-1.4 fake pdf body", ""), "pdf"),
+        (None, create_bytesio_with_name(b"<!DOCTYPE html><html><body>hi</body></html>", ""), "html"),
+        (None, create_bytesio_with_name(b"\x00\x01\x02 binary garbage \xff\xfe", ""), None),
+        (None, create_bytesio_with_name(b"", ""), None),
         ("", None, None),
     ],
 )
@@ -121,6 +134,91 @@ def test_workflow_with_file_type_extraction(filename, file, result):
         input=input_data,
         output=expected_output,
     )
+
+
+def create_bytesio_without_extension(content, name=None):
+    """Build a BytesIO whose name (if any) has no extension, forcing content-based detection."""
+    file = BytesIO(content)
+    if name is not None:
+        file.name = name
+    return file
+
+
+def create_pptx_content():
+    """Minimal OOXML presentation: a ZIP carrying a top-level ``ppt/`` directory."""
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("ppt/presentation.xml", "<presentation/>")
+    return buffer.getvalue()
+
+
+def create_ods_content():
+    """Minimal OpenDocument spreadsheet ZIP with the ODS mimetype marker."""
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("mimetype", "application/vnd.oasis.opendocument.spreadsheet")
+        archive.writestr("content.xml", "<office:document-content/>")
+    return buffer.getvalue()
+
+
+PDF_CONTENT = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"
+TEXT_CONTENT = b"This is a plain text document.\nIt has a couple of lines.\n"
+MARKDOWN_CONTENT = b"# Heading\n\nParagraph with **bold** and a [link](https://example.com).\n"
+HTML_CONTENT = b"<!DOCTYPE html>\n<html><head><title>Page</title></head><body><p>Hi</p></body></html>\n"
+BINARY_CONTENT = b"\x00\x01\x02\x03\xff\xfe\xfd\xfc" * 128
+ODS_CONTENT = create_ods_content()
+
+
+@pytest.mark.parametrize(
+    "filename, file, result",
+    [
+        (None, create_bytesio_without_extension(PDF_CONTENT), "pdf"),
+        (None, create_bytesio_without_extension(TEXT_CONTENT), "text"),
+        (None, create_bytesio_without_extension(MARKDOWN_CONTENT), "markdown"),
+        (None, create_bytesio_without_extension(HTML_CONTENT), "html"),
+        (None, create_bytesio_without_extension(create_pptx_content()), "presentation"),
+        (None, create_bytesio_without_extension(ODS_CONTENT), None),
+        (None, create_bytesio_without_extension(BINARY_CONTENT), None),  # binary -> unidentified
+        ("document", create_bytesio_without_extension(PDF_CONTENT), "pdf"),
+        ("notes", create_bytesio_without_extension(TEXT_CONTENT), "text"),
+        ("readme", create_bytesio_without_extension(MARKDOWN_CONTENT), "markdown"),
+        ("page", create_bytesio_without_extension(HTML_CONTENT), "html"),
+        ("slides", create_bytesio_without_extension(create_pptx_content()), "presentation"),
+        ("open_document", create_bytesio_without_extension(ODS_CONTENT), None),
+        ("blob", create_bytesio_without_extension(BINARY_CONTENT), None),  # binary -> unidentified
+        (None, create_bytesio_without_extension(PDF_CONTENT, "document"), "pdf"),
+        (None, create_bytesio_without_extension(create_pptx_content(), "slides"), "presentation"),
+    ],
+)
+def test_file_type_extraction_from_content(filename, file, result):
+    wf_file_type_extraction = Workflow(flow=Flow(nodes=[FileTypeExtractor()]))
+
+    input_data = {"filename": filename, "file": file}
+    output = {"type": result}
+    response = wf_file_type_extraction.run(input_data=input_data)
+
+    expected_result = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        input=input_data,
+        output=output,
+    ).to_dict(skip_format_types={BytesIO})
+
+    expected_output = {wf_file_type_extraction.flow.nodes[0].id: expected_result}
+    assert response == RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        input=input_data,
+        output=expected_output,
+    )
+
+
+def test_unsupported_zip_mimetype_does_not_fall_back_to_archive(monkeypatch):
+    monkeypatch.setattr(
+        "dynamiq.nodes.extractors.extractors.filetype.guess_extension",
+        lambda _: "zip",
+    )
+
+    assert FileTypeExtractor._guess_type_from_content(ODS_CONTENT) is None
 
 
 @pytest.mark.parametrize(

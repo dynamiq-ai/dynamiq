@@ -1,4 +1,5 @@
 import copy
+import csv
 import logging
 from concurrent.futures import wait
 from io import BytesIO
@@ -8,9 +9,12 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from dynamiq.components.converters.utils import build_source_metadata
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
+from dynamiq.nodes.converters.csv import CSVConverter
 from dynamiq.nodes.converters.docx import DOCXFileConverter
+from dynamiq.nodes.converters.excel import ExcelFileConverter
 from dynamiq.nodes.converters.html import HTMLConverter
 from dynamiq.nodes.converters.llm_text_extractor import LLMImageConverter, LLMPDFConverter
 from dynamiq.nodes.converters.pptx import PPTXFileConverter
@@ -20,7 +24,7 @@ from dynamiq.nodes.extractors.extractors import EXTENSION_MAP, FileType, FileTyp
 from dynamiq.nodes.node import ErrorHandling, Node, NodeDependency, ensure_config
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig, RunnableStatus
-from dynamiq.types import Document
+from dynamiq.types import Document, DocumentType
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 
 logger = logging.getLogger(__name__)
@@ -30,6 +34,7 @@ DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP = {
     FileType.PDF: PyPDFConverter,
     FileType.DOCUMENT: DOCXFileConverter,
     FileType.PRESENTATION: PPTXFileConverter,
+    FileType.SPREADSHEET: ExcelFileConverter,
     FileType.HTML: HTMLConverter,
     FileType.TEXT: TextFileConverter,
     FileType.MARKDOWN: TextFileConverter,
@@ -40,6 +45,7 @@ FILE_TYPE_TO_SUPPORTED_CONVERTER_CLASS_MAP = {
     FileType.IMAGE: (LLMImageConverter,),
     FileType.DOCUMENT: (DOCXFileConverter,),
     FileType.PRESENTATION: (PPTXFileConverter,),
+    FileType.SPREADSHEET: (ExcelFileConverter,),
     FileType.HTML: (HTMLConverter,),
     FileType.TEXT: (TextFileConverter,),
     FileType.MARKDOWN: (TextFileConverter,),
@@ -79,8 +85,9 @@ class MultiFileTypeConverter(Node):
         - LLMPDFConverter
         - DOCXFileConverter
         - PPTXFileConverter
+        - ExcelFileConverter
         - HTMLConverter
-        - UnstructuredFileConverter (fallback)
+        - A configured fallback converter for unsupported types or failed conversions
     """
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
@@ -88,11 +95,12 @@ class MultiFileTypeConverter(Node):
     description: str = "Meta converter that routes documents to appropriate converters based on file type."
     fallback_converter: Node | None = Field(
         default=None,
-        description="Fallback converter to use for unsupported file types. Defaults to UnstructuredFileConverter.",
+        description="Optional fallback converter for unsupported file types or failed conversions.",
     )
     file_type_extractor: FileTypeExtractor | None = None
     converters: list[Node] | None = None
     converter_mapping: dict[FileType, Node] | None = None
+    extension_converter_mapping: dict[str, Node] | None = Field(default=None, exclude=True)
     error_handling: ErrorHandling = Field(
         default_factory=lambda: ErrorHandling(timeout_seconds=DEFAULT_TIMEOUT_SECONDS),
         description="Overall execution timeout for the whole batch. Sub-converters carry their own "
@@ -136,6 +144,7 @@ class MultiFileTypeConverter(Node):
             "file_type_extractor": True,
             "converters": True,
             "converter_mapping": True,
+            "extension_converter_mapping": True,
         }
 
     def to_dict(self, **kwargs) -> dict:
@@ -171,9 +180,11 @@ class MultiFileTypeConverter(Node):
 
         self._setup_converters()
 
-        # Initialize components for converters in the mapping
         initialized_converters = set()
-        for converter in self.converter_mapping.values():
+        configured_converters = list(self.converter_mapping.values()) + list(
+            (self.extension_converter_mapping or {}).values()
+        )
+        for converter in configured_converters:
             if id(converter) not in initialized_converters:
                 if converter.is_postponed_component_init:
                     converter.init_components(connection_manager)
@@ -183,6 +194,8 @@ class MultiFileTypeConverter(Node):
     def _setup_converters(self):
         """Setup internal converter components."""
 
+        self.extension_converter_mapping = {}
+
         if not self.converters:
             # Create default converter instances
             self.converter_mapping = {
@@ -190,6 +203,9 @@ class MultiFileTypeConverter(Node):
                 for file_type, converter_class in DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP.items()
             }
         else:
+            for converter in self.converters:
+                if isinstance(converter, CSVConverter):
+                    self.extension_converter_mapping.update({".csv": converter, ".tsv": converter})
             self._add_file_type_mapping(self.converters)
 
     def _add_file_type_mapping(self, converter_instances: list[Node]):
@@ -381,7 +397,7 @@ class MultiFileTypeConverter(Node):
             meta_list = self._normalize_metadata(metadata, len(files))
             for i, (file, meta) in enumerate(zip(files, meta_list)):
                 check_cancellation(config)
-                filename = meta.get("filename", f"file_{i}")
+                filename = meta.get("filename") or getattr(file, "name", f"file_{i}")
                 file_copy = BytesIO(file.getvalue())
                 original_name = getattr(file, "name", None)
                 if original_name is not None:
@@ -599,8 +615,9 @@ class MultiFileTypeConverter(Node):
             detected_type = file_type_extractor_result.get("type")
             logger.info(f"Detected file type: {detected_type} for file: {filename}")
 
-            if detected_type and detected_type in self.converter_mapping:
-                converter = self._clone_for_worker(self.converter_mapping[detected_type])
+            converter_template = self._select_converter(file, filename, detected_type)
+            if converter_template is not None:
+                converter = self._clone_for_worker(converter_template)
                 converter_name = converter.name
 
                 try:
@@ -610,6 +627,8 @@ class MultiFileTypeConverter(Node):
                     converter_input = {"files": [file]}
                     if metadata:
                         converter_input["metadata"] = [metadata]
+                    if isinstance(converter, CSVConverter):
+                        converter_input["delimiter"] = self._detect_delimited_text_delimiter(file)
 
                     check_cancellation(config)
                     result, run_depends = self.call_converter(
@@ -620,7 +639,12 @@ class MultiFileTypeConverter(Node):
                         **kwargs,
                     )
                     logger.info(f"Successfully converted using {converter_name}")
-                    return result.get("documents", []), run_depends
+                    documents = [
+                        document if isinstance(document, Document) else Document(**document)
+                        for document in result.get("documents", [])
+                    ]
+                    self._stamp_routing_metadata(documents, file, filename, detected_type, converter)
+                    return documents, run_depends
 
                 except CanceledException:
                     raise
@@ -645,6 +669,79 @@ class MultiFileTypeConverter(Node):
             error_msg = f"Failed to convert document {filename}: {str(e)}"
             logger.error(error_msg)
             raise ValueError(error_msg)
+
+    def _select_converter(self, file: BytesIO, filename: str, detected_type: FileType | None) -> Node | None:
+        """Prefer extension-specific converters before the broader file-type mapping."""
+        effective_name = getattr(file, "name", None) or filename
+        extension = Path(str(effective_name)).suffix.lower()
+        extension_converter = (self.extension_converter_mapping or {}).get(extension)
+        if extension_converter is not None:
+            return extension_converter
+
+        if detected_type == FileType.SPREADSHEET and self.extension_converter_mapping:
+            position = file.tell()
+            file.seek(0)
+            try:
+                is_zip_container = file.read(2) == b"PK"
+            finally:
+                file.seek(position)
+            if not is_zip_container:
+                return next(iter(self.extension_converter_mapping.values()))
+
+        return self.converter_mapping.get(detected_type) if detected_type else None
+
+    @staticmethod
+    def _detect_delimited_text_delimiter(file: BytesIO) -> str:
+        """Detect the delimiter without consuming the shared upload stream."""
+        position = file.tell()
+        file.seek(0)
+        try:
+            sample = file.read(8192).decode("utf-8-sig", errors="replace")
+        finally:
+            file.seek(position)
+        try:
+            return csv.Sniffer().sniff(sample, delimiters=",\t;|").delimiter
+        except csv.Error:
+            return ","
+
+    @staticmethod
+    def _stamp_routing_metadata(
+        documents: list[Document],
+        file: BytesIO,
+        filename: str,
+        detected_type: FileType | None,
+        converter: Node,
+    ) -> None:
+        """Persist file detection so downstream splitters do not need to guess again."""
+        effective_name = str(getattr(file, "name", None) or filename)
+        extension = Path(effective_name).suffix.lower().lstrip(".")
+        source_type = detected_type.value if isinstance(detected_type, FileType) else detected_type
+
+        for document in documents:
+            metadata = build_source_metadata(document.metadata, effective_name)
+            metadata.setdefault("filename", effective_name)
+            if extension:
+                metadata.setdefault("extension", extension)
+            metadata.setdefault(
+                "file_type",
+                MultiFileTypeConverter._converted_file_type(converter, source_type, metadata),
+            )
+            if source_type:
+                metadata.setdefault("source_file_type", str(source_type))
+            document.metadata = metadata
+
+    @staticmethod
+    def _converted_file_type(converter: Node, source_type: str | None, metadata: dict[str, Any]) -> str:
+        """Describe converter output for downstream splitting, independently of its source format."""
+        if isinstance(converter, CSVConverter):
+            return "csv"
+        if isinstance(converter, ExcelFileConverter):
+            return "text" if metadata.get("document_type") == DocumentType.TABLE_ROW.value else "markdown"
+        if isinstance(converter, (DOCXFileConverter, HTMLConverter)):
+            return "markdown"
+        if isinstance(converter, TextFileConverter) and source_type == FileType.MARKDOWN.value:
+            return "markdown"
+        return "text"
 
     def _convert_with_fallback_converter(
         self, file: BytesIO, filename: str, metadata: dict, run_depends: list[dict], config: RunnableConfig, **kwargs
@@ -683,7 +780,12 @@ class MultiFileTypeConverter(Node):
             logger.info(
                 f"Successfully converted using fallback converter: {fallback_converter.__class__.__name__}"
             )
-            return result.get("documents", []), run_depends
+            documents = [
+                document if isinstance(document, Document) else Document(**document)
+                for document in result.get("documents", [])
+            ]
+            self._stamp_routing_metadata(documents, file, filename, None, fallback_converter)
+            return documents, run_depends
 
         except CanceledException:
             raise

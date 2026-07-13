@@ -10,6 +10,7 @@ from pydantic import Field, field_validator
 from dynamiq.connections import Pinecone
 from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.pinecone.filters import _normalize_filters
 from dynamiq.types import Document
 from dynamiq.types.dry_run import DryRunConfig
@@ -411,6 +412,45 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
 
         written_docs = result["upserted_count"]
         return written_docs
+
+    def replace_document_metadata(self, document_ids: str | list[str], metadata: dict[str, Any]) -> None:
+        """
+        Replace the metadata of one or more documents with new metadata (full replacement).
+
+        Pinecone flattens content into the stored metadata and its partial update cannot remove
+        keys, so each vector is fetched (to keep its values and content) and re-upserted. The
+        upsert overwrites the record's metadata entirely instead of merging.
+
+        Args:
+            document_ids (str | list[str]): The id, or list of ids, of the documents to update.
+            metadata (dict[str, Any]): The new metadata that fully replaces the existing one.
+
+        Raises:
+            VectorStoreException: If any of the given ids does not exist.
+        """
+        ids = self._normalize_document_ids(document_ids)
+        if not ids:
+            return
+
+        response = self._index.fetch(ids=ids, namespace=self.namespace)
+        vectors = response["vectors"]
+        missing = [_id for _id in ids if _id not in vectors]
+        if missing:
+            raise VectorStoreException(
+                f"Documents {missing} not found in index '{self.index_name}' (namespace '{self.namespace}')"
+            )
+
+        documents = [
+            Document(
+                id=_id,
+                content=(vectors[_id].get("metadata") or {}).get(self.content_key, ""),
+                embedding=vectors[_id]["values"],
+                metadata=metadata,
+            )
+            for _id in ids
+        ]
+        self.write_documents(documents)
+        logger.debug(f"Replaced metadata for {len(documents)} document(s): {ids}.")
 
     def _convert_documents_to_pinecone_format(
         self,

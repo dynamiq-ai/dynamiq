@@ -8,6 +8,8 @@ from dynamiq.prompts.prompts import (
     MessageRole,
     Prompt,
     VisionMessage,
+    VisionMessageFileContent,
+    VisionMessageFileData,
     VisionMessageImageContent,
     VisionMessageImageURL,
     VisionMessageType,
@@ -113,6 +115,76 @@ def test_vision_prompt_unsupported_type():
 
     with pytest.raises(ValueError):
         prompt.format_messages(image=12345)
+
+
+@pytest.fixture
+def sample_mp4_bytes():
+    """Minimal bytes recognized by `filetype` as video/mp4 (a bare ftyp box, no real media)."""
+    return b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + b"\x00" * 20
+
+
+def test_vision_prompt_with_video_file_content(sample_mp4_bytes):
+    """
+    Tests that a video passed via VisionMessageFileContent is base64-encoded with the
+    correct video mime type, and that video_metadata survives formatting — this is the
+    wire shape litellm's Gemini transformation expects for native video input.
+    """
+    video_bytes_io = io.BytesIO(sample_mp4_bytes)
+
+    prompt = Prompt(
+        id="test_video",
+        messages=[
+            VisionMessage(
+                content=[
+                    VisionMessageFileContent(
+                        file=VisionMessageFileData(
+                            file_data="{{ video }}",
+                            video_metadata={"fps": 1, "start_offset": "0s", "end_offset": "10s"},
+                        )
+                    )
+                ],
+                role=MessageRole.USER,
+            )
+        ],
+    )
+
+    out_messages = prompt.format_messages(video=video_bytes_io)
+
+    assert len(out_messages) == 1
+    msg = out_messages[0]
+    assert msg["role"] == MessageRole.USER
+    assert len(msg["content"]) == 1
+
+    file_content = msg["content"][0]
+    assert file_content["type"] == VisionMessageType.FILE
+
+    file_data = file_content["file"]["file_data"]
+    assert file_data.startswith("data:video/mp4;base64,")
+
+    encoded_part = file_data.split("base64,")[-1]
+    decoded_part = base64.b64decode(encoded_part)
+    assert decoded_part.startswith(b"\x00\x00\x00\x18ftypmp42")
+
+    assert file_content["file"]["video_metadata"] == {"fps": 1, "start_offset": "0s", "end_offset": "10s"}
+
+
+def test_vision_prompt_video_file_content_without_metadata():
+    """video_metadata is optional and excluded from the dumped dict when unset."""
+    prompt = Prompt(
+        id="test_video_no_metadata",
+        messages=[
+            VisionMessage(
+                content=[VisionMessageFileContent(file=VisionMessageFileData(file_data="{{ video_url }}"))],
+                role=MessageRole.USER,
+            )
+        ],
+    )
+
+    out_messages = prompt.format_messages(video_url="https://example.com/clip.mp4")
+    file_content = out_messages[0]["content"][0]
+
+    assert file_content["file"]["file_data"] == "https://example.com/clip.mp4"
+    assert "video_metadata" not in file_content["file"]
 
 
 class TestFunctionCallingProtocolMessages:
