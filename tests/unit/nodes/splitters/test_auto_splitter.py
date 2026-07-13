@@ -102,9 +102,7 @@ def test_auto_splitter_does_not_infer_markdown_for_stamped_csv_content():
 
 
 def test_auto_splitter_allows_explicit_rules_for_stamped_plain_content():
-    splitter = AutoSplitter(
-        rules=[AutoSplitterRule(strategy=AutoSplitterStrategy.MARKDOWN_HEADER, file_types=["csv"])]
-    )
+    splitter = AutoSplitter(rules=[AutoSplitterRule(strategy=AutoSplitterStrategy.MARKDOWN_HEADER, file_types=["csv"])])
     splitter.init_components()
     document = Document(content="# Title\nBody", metadata={"file_type": "csv"})
 
