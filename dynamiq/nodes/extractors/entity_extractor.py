@@ -9,9 +9,7 @@ under the old names so existing imports and serialized workflows keep working. I
 import warnings
 
 from dynamiq.nodes.knowledge_graph.entity_extractor import *  # noqa: F401,F403
-from dynamiq.nodes.knowledge_graph.entity_extractor import (  # noqa: F401
-    KnowledgeGraphEntityExtractor,
-)
+from dynamiq.nodes.knowledge_graph.entity_extractor import KnowledgeGraphEntityExtractor  # noqa: F401
 
 # Back-compat alias for the renamed class.
 EntityExtractor = KnowledgeGraphEntityExtractor

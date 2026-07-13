@@ -8,10 +8,7 @@ Import from ``dynamiq.nodes.knowledge_graph`` instead.
 import warnings
 
 from dynamiq.nodes.knowledge_graph.writer import *  # noqa: F401,F403
-from dynamiq.nodes.knowledge_graph.writer import (  # noqa: F401
-    KnowledgeGraphWriter,
-    _entity_ids_by_doc,
-)
+from dynamiq.nodes.knowledge_graph.writer import KnowledgeGraphWriter, _entity_ids_by_doc  # noqa: F401
 
 warnings.warn(
     "dynamiq.nodes.extractors.knowledge_graph is deprecated; import KnowledgeGraphWriter "

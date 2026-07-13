@@ -574,8 +574,7 @@ class KnowledgeGraphEntityExtractor(Node):
         referenced_attr_ids = {r["end_identity"] for r in kept_rels if r["type"] == HAS_ATTRIBUTE_TYPE}
         for attr_id in attribute_nodes.keys() - referenced_attr_ids:
             logger.debug(
-                f"KnowledgeGraphEntityExtractor: dropping orphaned AttributeValue "
-                f"id={attr_id!r} (owner removed)"
+                f"KnowledgeGraphEntityExtractor: dropping orphaned AttributeValue " f"id={attr_id!r} (owner removed)"
             )
         kept_nodes.extend(attribute_nodes[attr_id] for attr_id in referenced_attr_ids)
 

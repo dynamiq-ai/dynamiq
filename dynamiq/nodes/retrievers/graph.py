@@ -9,11 +9,7 @@ so existing imports and serialized workflows keep working. Import from
 import warnings
 
 from dynamiq.nodes.knowledge_graph.retriever import *  # noqa: F401,F403
-from dynamiq.nodes.knowledge_graph.retriever import (  # noqa: F401
-    GraphRetrieverInputSchema,
-    KnowledgeGraphRetriever,
-    _compile_edge_filters,
-)
+from dynamiq.nodes.knowledge_graph.retriever import KnowledgeGraphRetriever  # noqa: F401
 
 # Back-compat alias for the renamed class.
 GraphRetriever = KnowledgeGraphRetriever
