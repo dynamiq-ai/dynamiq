@@ -13,9 +13,9 @@ from pydantic import ValidationError
 
 from dynamiq.connections import Neo4j
 from dynamiq.nodes.embedders.base import TextEmbedder
-from dynamiq.nodes.knowledge_graph import KnowledgeGraphRetriever, Ontology
-from dynamiq.nodes.knowledge_graph.entity_extractor import ENTITY_EMBEDDING_VECTOR_INDEX
-from dynamiq.nodes.knowledge_graph.retriever import GraphRetrieverInputSchema, _compile_edge_filters
+from dynamiq.nodes.knowledge_graphs import KnowledgeGraphRetriever, Ontology
+from dynamiq.nodes.knowledge_graphs.entity_extractor import ENTITY_EMBEDDING_VECTOR_INDEX
+from dynamiq.nodes.knowledge_graphs.retriever import GraphRetrieverInputSchema, _compile_edge_filters
 from dynamiq.nodes.node import Node, NodeGroup
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
 
