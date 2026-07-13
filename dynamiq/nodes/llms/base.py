@@ -23,7 +23,7 @@ from dynamiq.connections import BaseConnection, HttpApiKey
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.llms._fc_sanitization import sanitize_fc_messages
 from dynamiq.nodes.llms.registry import model_registry
-from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.node import ConnectionNode, NodeDependency, ensure_config
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
@@ -1172,6 +1172,25 @@ class BaseLLM(ConnectionNode):
 
         return False
 
+    def _prepare_fallback_run(self, kwargs: dict) -> tuple["BaseLLM", dict]:
+        """Build the fallback LLM and the kwargs used to run it.
+
+        Args:
+            kwargs: The keyword arguments the primary run received.
+
+        Returns:
+            Tuple of (fallback LLM, kwargs to pass to its ``run_sync``/``run_async``).
+        """
+        fallback_llm = self.fallback.llm
+        fallback_llm._is_fallback_run = True
+
+        fallback_kwargs = {k: v for k, v in kwargs.items() if k != "run_depends"}
+        fallback_kwargs["parent_run_id"] = kwargs.get("parent_run_id")
+        if self.prompt is not None:
+            fallback_kwargs.setdefault("prompt", self.prompt)
+        fallback_kwargs["run_depends"] = [NodeDependency(node=self).to_dict(for_tracing=True)]
+        return fallback_llm, fallback_kwargs
+
     def run_sync(
         self,
         input_data: dict,
@@ -1210,8 +1229,7 @@ class BaseLLM(ConnectionNode):
         if not self._should_trigger_fallback(result.error.type, result.error.message):
             return result
 
-        fallback_llm = self.fallback.llm
-        fallback_llm._is_fallback_run = True
+        fallback_llm, fallback_kwargs = self._prepare_fallback_run(kwargs)
         logger.warning(
             f"LLM {self.name} - {self.id}: Primary LLM ({self.model}) failed. "
             f"Error: {result.error.type.__name__}: {result.error.message}. "
@@ -1220,9 +1238,6 @@ class BaseLLM(ConnectionNode):
 
         # Use the primary's already transformed input for fallback
         # This ensures fallback works with the same prepared input as primary
-        fallback_kwargs = {k: v for k, v in kwargs.items() if k != "run_depends"}
-        fallback_kwargs["parent_run_id"] = kwargs.get("parent_run_id")
-
         fallback_input = result.input.model_dump() if hasattr(result.input, "model_dump") else result.input
         fallback_result = fallback_llm.run_sync(
             input_data=fallback_input,
@@ -1286,16 +1301,12 @@ class BaseLLM(ConnectionNode):
         if not self._should_trigger_fallback(result.error.type, result.error.message):
             return result
 
-        fallback_llm = self.fallback.llm
-        fallback_llm._is_fallback_run = True
+        fallback_llm, fallback_kwargs = self._prepare_fallback_run(kwargs)
         logger.warning(
             f"LLM {self.name} - {self.id}: Primary LLM ({self.model}) failed. "
             f"Error: {result.error.type.__name__}: {result.error.message}. "
             f"Attempting fallback to {fallback_llm.name} - {fallback_llm.id}"
         )
-
-        fallback_kwargs = {k: v for k, v in kwargs.items() if k != "run_depends"}
-        fallback_kwargs["parent_run_id"] = kwargs.get("parent_run_id")
 
         fallback_input = result.input.model_dump() if hasattr(result.input, "model_dump") else result.input
         fallback_result = await fallback_llm.run_async(
