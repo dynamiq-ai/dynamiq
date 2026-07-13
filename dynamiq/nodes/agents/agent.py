@@ -10,7 +10,7 @@ from pydantic_core import from_json
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.agents.base import Agent as BaseAgent
-from dynamiq.nodes.agents.base import _run_extra_tools
+from dynamiq.nodes.agents.base import _run_extra_tools, _shared_sandbox_tools
 from dynamiq.nodes.agents.components import parser, schema_generator
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
@@ -1170,6 +1170,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             input_message: The user's input message
             history_messages: Optional conversation history
         """
+        # Reflect a run-time borrowed shared sandbox (tools/env attached after the init-time build).
+        self._sync_react_prompt_for_shared_sandbox()
         system_message = Message(
             role=MessageRole.SYSTEM,
             content=self.generate_prompt(
@@ -2154,8 +2156,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
         return fc_tools, response_format
 
     def _effective_inference_schemas(self) -> tuple:
-        """Inference schemas including any per-call LTM tool overlay."""
-        if not _run_extra_tools.get():
+        """Inference schemas including any per-call tool overlay (LTM or borrowed shared sandbox)."""
+        if not (_run_extra_tools.get() or _shared_sandbox_tools.get()):
             return self._tools, self._response_format
         return self._build_inference_schemas(self._runtime_tools)
 
@@ -2185,24 +2187,48 @@ class Agent(HistoryManagerMixin, BaseAgent):
             response_format_schema=response_format_schema,
         )
 
+        self.system_prompt_manager.build_react_prompt(self._react_prompt_config())
+
+    def _react_prompt_config(self) -> ReactPromptConfig:
+        """Build the ReAct prompt config from the agent's *effective* runtime tools and sandbox.
+
+        Reads ``_runtime_tools``/``sandbox_backend`` (not just ``self.tools``) so it is correct both
+        at construction (no overlay -> same as ``self.tools``) and at run time, when a borrowed
+        shared sandbox has added tools and a view via the overlay.
+        """
         ltm_enabled = self.long_term_memory is not None and self.long_term_memory.enabled
-        self.system_prompt_manager.build_react_prompt(
-            ReactPromptConfig(
-                inference_mode=self.inference_mode,
-                has_tools=bool(self.tools)
-                or (self.skills.enabled and self.skills.source is not None)
-                or ltm_enabled,
-                parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
-                delegation_allowed=self.delegation_allowed,
-                context_compaction_enabled=self.summarization_config.enabled,
-                todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
-                or bool(self.sandbox_backend),
-                sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
-                has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
-                role=self.role,
-                instructions=self.instructions,
-            )
+        runtime_tools = self._runtime_tools
+        return ReactPromptConfig(
+            inference_mode=self.inference_mode,
+            has_tools=bool(runtime_tools) or (self.skills.enabled and self.skills.source is not None) or ltm_enabled,
+            parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
+            delegation_allowed=self.delegation_allowed,
+            context_compaction_enabled=self.summarization_config.enabled,
+            todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
+            or bool(self.sandbox_backend),
+            sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
+            has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in runtime_tools),
+            role=self.role,
+            instructions=self.instructions,
         )
+
+    def _sync_react_prompt_for_shared_sandbox(self) -> None:
+        """Rebuild the ReAct prompt so its tool instructions and sandbox environment reflect a
+        borrowed shared sandbox, whose tools/view are attached at run time (after the init-time
+        build). Symmetric: when a reused subagent later runs without borrowing, it restores the
+        init-time structure and clears the borrowed environment block. No-op when the borrow state
+        already matches the built prompt, so non-sharing runs are untouched.
+        """
+        borrowing = self._shared_sandbox_view is not None
+        if borrowing == self._prompt_reflects_shared_sandbox:
+            return
+        self.system_prompt_manager.build_react_prompt(self._react_prompt_config())
+        # build_react_prompt only *sets* the environment block when a sandbox is present; it never
+        # clears a stale one. Clear it explicitly when this run has no sandbox so a reused subagent
+        # does not keep advertising a sandbox it released.
+        if not self.sandbox_backend:
+            self.system_prompt_manager.set_block("environment", "")
+        self._prompt_reflects_shared_sandbox = borrowing
 
     def _coerce_to_response_format(self, final_answer: Any) -> Any:
         """Parse the raw final answer into a dict matching ``response_format``.

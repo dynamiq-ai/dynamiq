@@ -317,6 +317,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     # This agent's own dedicated backend when scope=ALL routed it onto the shared sandbox instead —
     # the orphan cleanup_factory_agent tears down. None when it had no distinct own backend.
     _overridden_own_backend: Sandbox | None = PrivateAttr(default=None)
+    # Whether the currently built ReAct prompt reflects a borrowed shared sandbox; drives the
+    # run-time prompt rebuild so a borrower advertises the sandbox tools it only gets at run time.
+    _prompt_reflects_shared_sandbox: bool = PrivateAttr(default=False)
     # Loop progress and pending-tool-call state are declared on AgentIterativeCheckpointMixin.
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

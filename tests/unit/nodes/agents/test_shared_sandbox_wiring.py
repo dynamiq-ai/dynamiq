@@ -212,6 +212,85 @@ def test_borrowing_subagent_ingests_skills_into_shared_view(test_llm):
         _shared_session.reset(token)
 
 
+def test_tool_less_borrower_react_prompt_advertises_sandbox_tools(test_llm):
+    """A subagent tool-less at init that borrows a shared sandbox at run time must get a React
+    prompt advertising the sandbox tools + environment, not the frozen 'no tools' prompt built at
+    construction (Bugbot: borrowed sandbox omits XML tool instructions)."""
+    from dynamiq.nodes.agents.base import _shared_sandbox_tools
+    from dynamiq.nodes.agents.shared_session import SharedSession
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(sandbox=shared, share_sandbox=True, owner_run_id="owner")
+    token = _shared_session.set(session)
+    try:
+        sub = Agent(name="Coder", llm=test_llm, role="r", tools=[])
+        # Built tool-less at construction: the React 'tools' block is empty.
+        assert sub.system_prompt_manager._prompt_blocks.get("tools") == ""
+
+        overlay = sub._maybe_borrow_shared_sandbox()  # what execute() does at run time
+        overlay_token = _shared_sandbox_tools.set(overlay)
+        try:
+            sub._sync_react_prompt_for_shared_sandbox()  # what execute()'s prompt setup does
+            assert sub.system_prompt_manager._prompt_blocks.get("tools") != ""
+            assert sub.system_prompt_manager._prompt_blocks.get("environment")
+        finally:
+            _shared_sandbox_tools.reset(overlay_token)
+    finally:
+        _shared_session.reset(token)
+
+
+def test_borrow_prompt_sync_restores_structure_when_not_borrowing(test_llm):
+    """A reused subagent that borrowed then runs standalone must not keep advertising the shared
+    sandbox: the sync restores the tool-less structure and clears the environment block."""
+    from dynamiq.nodes.agents.base import _shared_sandbox_tools
+    from dynamiq.nodes.agents.shared_session import SharedSession
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(sandbox=shared, share_sandbox=True, owner_run_id="owner")
+    token = _shared_session.set(session)
+    sub = Agent(name="Coder", llm=test_llm, role="r", tools=[])
+    try:
+        overlay = sub._maybe_borrow_shared_sandbox()
+        overlay_token = _shared_sandbox_tools.set(overlay)
+        try:
+            sub._sync_react_prompt_for_shared_sandbox()
+            assert sub.system_prompt_manager._prompt_blocks.get("environment")
+        finally:
+            _shared_sandbox_tools.reset(overlay_token)
+        sub._release_shared_sandbox_view()  # end of the borrow run
+    finally:
+        _shared_session.reset(token)
+
+    # Standalone run: no session/overlay -> structure restored, environment cleared.
+    sub._sync_react_prompt_for_shared_sandbox()
+    assert sub.system_prompt_manager._prompt_blocks.get("tools") == ""
+    assert not sub.system_prompt_manager._prompt_blocks.get("environment")
+
+
+def test_borrowed_sandbox_tools_in_function_calling_schemas(test_llm):
+    """In FUNCTION_CALLING mode, a borrowing subagent's sandbox tools must appear in the effective
+    inference schemas — the FC-schema half of the same finding."""
+    from dynamiq.nodes.agents.base import _shared_sandbox_tools
+    from dynamiq.nodes.agents.shared_session import SharedSession
+    from dynamiq.nodes.types import InferenceMode
+
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session = SharedSession(sandbox=shared, share_sandbox=True, owner_run_id="owner")
+    token = _shared_session.set(session)
+    try:
+        sub = Agent(name="Coder", llm=test_llm, role="r", tools=[], inference_mode=InferenceMode.FUNCTION_CALLING)
+        overlay = sub._maybe_borrow_shared_sandbox()
+        overlay_token = _shared_sandbox_tools.set(overlay)
+        try:
+            effective = sub._effective_inference_schemas()
+            assert effective[0]  # borrowed sandbox tools present in the FC schema
+            assert effective[0] != sub._tools  # not the frozen tool-less init schema
+        finally:
+            _shared_sandbox_tools.reset(overlay_token)
+    finally:
+        _shared_session.reset(token)
+
+
 def test_release_shared_sandbox_view_disconnects_without_kill(test_llm):
     from unittest.mock import MagicMock
 
