@@ -374,6 +374,9 @@ class KnowledgeGraphWriter(Node):
                     "endpoint nodes."
                 )
 
+        # Bare nodes (referenced by no relationship) are never persisted -- see _drop_bare_nodes.
+        nodes = self._drop_bare_nodes(nodes, relationships)
+
         if nodes:
             # Embed BEFORE resolving so one embed call serves both: the fuzzy candidate lookup (Tier 2)
             # and node storage. Ensure the vector index up front so resolution can query it this write.
@@ -451,6 +454,29 @@ class KnowledgeGraphWriter(Node):
             f"{len(document_ids)} document(s)."
         )
         return totals
+
+    def _drop_bare_nodes(self, nodes: list[dict], relationships: list[dict]) -> list[dict]:
+        """Drop nodes referenced by NO relationship (bare mentions) instead of writing them.
+
+        All provenance and ACL live on edges, so a bare node could never be attributed to any document:
+        retrieval (edge-driven) cannot reach it, no chunk references it (``kg_entity_ids`` come from
+        relationship endpoints), and ``delete_documents`` could never remove it — the orphan sweep only
+        examines endpoints of removed edges. Skipping the write keeps the invariant that everything
+        persisted is reachable through at least one provenance-stamped edge, so deleting a document
+        provably removes all it contributed. Nothing is lost: entity ids are content-addressed
+        (``uuid5`` of label + normalized name), so a future document asserting a fact about the same
+        name re-creates the identical node.
+        """
+        if not nodes:
+            return nodes
+        referenced = {r["start_identity"] for r in relationships} | {r["end_identity"] for r in relationships}
+        kept = [node for node in nodes if node["properties"]["id"] in referenced]
+        if len(kept) != len(nodes):
+            logger.info(
+                f"Node {self.name} - {self.id}: skipping {len(nodes) - len(kept)} bare node(s) "
+                "referenced by no relationship."
+            )
+        return kept
 
     @staticmethod
     def _attach_entity_ids(documents: list, relationships: list[dict]) -> list:
