@@ -530,13 +530,33 @@ def test_cleanup_factory_agent_kills_overridden_own_sandbox(test_llm):
     sub = _sandboxed_agent(test_llm)  # has its own dedicated sandbox
     own_spy = MagicMock()
     sub.sandbox.backend = own_spy
-    # Simulate the post-borrow state: routed onto a shared view (view already released in execute()).
+    # Simulate the post-borrow state: routed onto a shared view, own distinct backend recorded as
+    # the orphan to tear down (view already released in execute()).
     sub._sandbox_is_shared = True
     sub._shared_sandbox_view = None
+    sub._overridden_own_backend = own_spy
 
     SubAgentTool.cleanup_factory_agent(sub)
 
     own_spy.close.assert_called_once_with(kill=True)
+
+
+def test_cleanup_skips_teardown_when_no_overridden_backend(test_llm):
+    """When a borrower recorded no orphaned own backend (its own backend WAS the shared object, or
+    it had none), cleanup must tear down nothing (Bugbot: cleanup kills shared owner sandbox)."""
+    from unittest.mock import MagicMock
+
+    from dynamiq.nodes.tools.agent_tool import SubAgentTool
+
+    sub = _sandboxed_agent(test_llm)
+    shared_view = MagicMock()
+    sub._sandbox_is_shared = True
+    sub._shared_sandbox_view = shared_view
+    sub._overridden_own_backend = None  # own was the shared object (or none) — no orphan to kill
+
+    SubAgentTool.cleanup_factory_agent(sub)
+
+    shared_view.close.assert_not_called()
 
 
 def test_borrow_failure_rolls_back_and_does_not_latch_or_kill_own(test_llm):
@@ -631,6 +651,7 @@ def test_owner_identified_by_id_not_backend_object(test_llm):
         shell = next(t for t in overlay if isinstance(t, SandboxShellTool))
         assert shell.sandbox.base_path.startswith("/home/user/work/researcher-")
         assert sub._sandbox_is_shared is True
+        assert sub._overridden_own_backend is None  # own IS the shared sandbox — not an orphan
     finally:
         owner._exit_shared_session(token)
 

@@ -261,13 +261,14 @@ class SubAgentTool(Node):
     def cleanup_factory_agent(agent: Agent) -> None:
         """Kill sandbox resources on a factory-created agent (unless it borrowed a shared one)."""
         if getattr(agent, "_sandbox_is_shared", False):
-            # Never kill the borrowed shared sandbox. But if scope=ALL overrode this factory agent's
-            # own dedicated sandbox, that orphaned backend still needs teardown — safe here because
-            # this runs only for disposable factory agents, never reused initialized subagents.
-            own = agent._configured_sandbox_backend() if hasattr(agent, "_configured_sandbox_backend") else None
-            if own is not None:
+            # Never kill the borrowed shared sandbox. Only a distinct own backend that scope=ALL
+            # orphaned needs teardown; _overridden_own_backend is None when the agent had no own
+            # backend or its own backend WAS the shared sandbox object. Safe here because this runs
+            # only for disposable factory agents, never reused initialized subagents.
+            orphan = getattr(agent, "_overridden_own_backend", None)
+            if orphan is not None:
                 try:
-                    own.close(kill=True)
+                    orphan.close(kill=True)
                     logger.info(f"SubAgentTool '{agent.id}': cleaned up overridden dedicated sandbox")
                 except Exception as e:
                     logger.warning("Overridden dedicated sandbox cleanup failed: %s", e)

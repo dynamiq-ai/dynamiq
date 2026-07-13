@@ -314,6 +314,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     # A borrowed per-agent view of an owner's shared sandbox; when set it is this
     # agent's effective sandbox_backend for the whole run (tools, uploads, output).
     _shared_sandbox_view: Sandbox | None = PrivateAttr(default=None)
+    # This agent's own dedicated backend when scope=ALL routed it onto the shared sandbox instead —
+    # the orphan cleanup_factory_agent tears down. None when it had no distinct own backend.
+    _overridden_own_backend: Sandbox | None = PrivateAttr(default=None)
     # Loop progress and pending-tool-call state are declared on AgentIterativeCheckpointMixin.
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -2263,10 +2266,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 tool.init_components()
             tool.is_optimized_for_agents = True
 
-        if own is not None:
-            # scope=ALL routes this subagent onto the shared view. We do NOT tear its dedicated
-            # backend down here — reused initialized subagents must keep it for later standalone use;
-            # a factory subagent's orphaned backend is torn down in cleanup_factory_agent instead.
+        # A distinct own backend (not the shared sandbox itself) that scope=ALL routes off. We do NOT
+        # tear it down here — reused initialized subagents must keep it for later standalone use; a
+        # factory subagent's orphan is torn down in cleanup_factory_agent. Record it so cleanup can
+        # find it, but never treat the shared sandbox object as an orphan to kill.
+        overrode_own = own is not None and own is not session.get_sandbox()
+        if overrode_own:
             logger.warning(
                 "Agent %s - %s: sandbox_sharing_scope=ALL overrides this subagent's own sandbox; "
                 "routing it onto the owner's shared sandbox instead.",
@@ -2274,6 +2279,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 self.id,
             )
 
+        self._overridden_own_backend = own if overrode_own else None
         self._sandbox_is_shared = True
         self._shared_sandbox_view = view
         return tools
