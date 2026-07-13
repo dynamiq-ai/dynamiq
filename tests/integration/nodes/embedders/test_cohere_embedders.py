@@ -8,6 +8,7 @@ from dynamiq import connections
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.nodes.embedders import CohereDocumentEmbedder, CohereTextEmbedder
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types import Document
 from tests.integration.nodes.embedders.conftest import (
     assert_embedder_failure,
     assert_embedder_success,
@@ -69,6 +70,7 @@ def test_workflow_with_cohere_text_embedder(
         input=[query_input["query"]],
         model=cohere_model,
         api_key="api_key",
+        truncate="NONE",
     )
 
 
@@ -85,10 +87,60 @@ def test_workflow_with_cohere_document_embedder(
     assert_embedder_success(response, embedder, output_node)
     mock_embedding_executor.assert_called_once_with(
         input=[document_input["documents"][0].content],
-        input_type="search_query",
+        input_type="search_document",
         model=cohere_model,
         api_key="api_key",
+        truncate="NONE",
     )
+
+
+def test_cohere_document_embedder_can_embed_selected_metadata(mock_embedding_executor, cohere_connection, cohere_model):
+    embedder = CohereDocumentEmbedder(
+        connection=cohere_connection,
+        model=cohere_model,
+        meta_fields_to_embed=["dynamiq_item_source_provider_title"],
+        dimensions=1024,
+    )
+    embedder.init_components()
+    document_input = {
+        "documents": [
+            Document(
+                content="Pricing details",
+                metadata={"dynamiq_item_source_provider_title": "Plans and pricing"},
+            )
+        ]
+    }
+
+    result = embedder.run(input_data=document_input)
+
+    assert result.status == RunnableStatus.SUCCESS
+    mock_embedding_executor.assert_called_once_with(
+        input=["Plans and pricing\nPricing details"],
+        input_type="search_document",
+        model=cohere_model,
+        api_key="api_key",
+        truncate="NONE",
+        dimensions=1024,
+    )
+
+
+def test_cohere_rag_defaults_use_distinct_input_types_and_no_silent_truncation(cohere_connection):
+    document_embedder = CohereDocumentEmbedder(connection=cohere_connection)
+    text_embedder = CohereTextEmbedder(connection=cohere_connection)
+    document_embedder.init_components()
+    text_embedder.init_components()
+
+    assert document_embedder.model == "cohere/embed-v4.0"
+    assert document_embedder.document_embedder.model == "cohere/embed-v4.0"
+    assert document_embedder.document_embedder.input_type == "search_document"
+    assert document_embedder.document_embedder.truncate == "NONE"
+    assert document_embedder.document_embedder.truncation_enabled is False
+
+    assert text_embedder.model == "cohere/embed-v4.0"
+    assert text_embedder.text_embedder.model == "cohere/embed-v4.0"
+    assert text_embedder.text_embedder.input_type == "search_query"
+    assert text_embedder.text_embedder.truncate == "NONE"
+    assert text_embedder.text_embedder.truncation_enabled is False
 
 
 @pytest.mark.parametrize(
@@ -116,7 +168,11 @@ def test_text_embedder_api_errors(cohere_text_embedder_workflow, error_class, er
 
         assert_embedder_failure(response, embedder, output_node, expected_type, error_msg)
         mock_embedding.assert_called_once_with(
-            model=embedder.model, input=["Test query"], input_type="search_query", api_key=embedder.connection.api_key
+            model=embedder.model,
+            input=["Test query"],
+            input_type="search_query",
+            api_key=embedder.connection.api_key,
+            truncate="NONE",
         )
 
 
@@ -158,8 +214,9 @@ def test_document_embedder_api_errors(
         mock_embedding.assert_called_once_with(
             model=embedder.model,
             input=[document_input["documents"][0].content],
-            input_type="search_query",
+            input_type="search_document",
             api_key=embedder.connection.api_key,
+            truncate="NONE",
         )
 
 
@@ -308,6 +365,7 @@ async def test_workflow_with_cohere_text_embedder_async(
         input=[query_input["query"]],
         model=cohere_model,
         api_key="api_key",
+        truncate="NONE",
     )
 
 
@@ -320,7 +378,8 @@ async def test_workflow_with_cohere_document_embedder_async(
     assert result.status == RunnableStatus.SUCCESS
     mock_aembedding_executor.assert_awaited_once_with(
         input=[document_input["documents"][0].content],
-        input_type="search_query",
+        input_type="search_document",
         model=cohere_model,
         api_key="api_key",
+        truncate="NONE",
     )

@@ -809,6 +809,46 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         self._track_documents(document_ids)
         return len(documents)
 
+    def replace_document_metadata(self, document_ids: str | list[str], metadata: dict[str, Any]) -> None:
+        """
+        Replace the metadata of one or more documents with new metadata (full replacement).
+
+        Args:
+            document_ids (str | list[str]): The id, or list of ids, of the documents to update.
+            metadata (dict[str, Any]): The new metadata that fully replaces the existing one.
+
+        Raises:
+            VectorStoreException: If any of the given ids does not exist. The existence check
+                and the update run in the same transaction, so a mixed present/missing list
+                never partially applies (fail-fast).
+        """
+        ids = self._normalize_document_ids(document_ids)
+        if not ids:
+            return
+
+        select_query = SQL("SELECT id FROM {schema_name}.{table_name} WHERE id = ANY(%s)").format(
+            schema_name=Identifier(self.schema_name),
+            table_name=Identifier(self.table_name),
+        )
+        update_query = SQL("UPDATE {schema_name}.{table_name} SET metadata = %s WHERE id = ANY(%s)").format(
+            schema_name=Identifier(self.schema_name),
+            table_name=Identifier(self.table_name),
+        )
+        with self._get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                # Fail-fast in one transaction: raise before the UPDATE if any id is missing,
+                # so a mixed present/missing list is never silently applied to only some rows.
+                cur.execute(select_query, (ids,))
+                found = {row["id"] for row in cur.fetchall()}
+                missing = [document_id for document_id in ids if document_id not in found]
+                if missing:
+                    raise VectorStoreException(f"Documents {missing} not found in {self.schema_name}.{self.table_name}")
+                cur.execute(update_query, (Jsonb(metadata), ids))
+                updated = cur.rowcount
+                conn.commit()
+
+        logger.debug(f"Replaced metadata for {updated} document(s): {ids}.")
+
     def delete_documents_by_filters(self, filters: dict[str, Any]) -> None:
         """
         Delete documents from the pgvector vector store using filters.

@@ -6,7 +6,7 @@ ingestion flow:
     input.documents ─┬─► OpenAIDocumentEmbedder ─► QdrantDocumentWriter   (vector store)
                      └─► KnowledgeGraph                                    (knowledge graph)
 
-An EntityExtractor node does LLM extraction + ontology enforcement; a KnowledgeGraphWriter node then does
+An KnowledgeGraphEntityExtractor node does LLM extraction + ontology enforcement; a KnowledgeGraphWriter node then does
 write-time entity resolution + Neo4j upsert. They are split so extraction can be parallelized (see
 parallel_kg_extraction.py); the writer is the single, serial write path for extracted knowledge graphs.
 
@@ -27,7 +27,7 @@ from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
-from dynamiq.nodes.extractors import EntityExtractor, KnowledgeGraphWriter, Ontology, Triple
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphEntityExtractor, KnowledgeGraphWriter, Ontology, Triple
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.node import InputTransformer, NodeDependency
 from dynamiq.nodes.writers import QdrantDocumentWriter
@@ -108,7 +108,7 @@ def build_workflow() -> Workflow:
     # ---- Graph branch: extract (LLM), then resolve duplicates + write to Neo4j ----
     # Extraction and writing are separate nodes: extraction is parallelizable, the writer must stay single
     # (resolution races otherwise). See parallel_kg_extraction.py for fanning out multiple extractors.
-    entity_extractor = EntityExtractor(
+    entity_extractor = KnowledgeGraphEntityExtractor(
         id="entity_extractor",
         llm=OpenAI(connection=openai_connection, model="gpt-4o-mini", temperature=0.0, max_tokens=4000),
         ontology=ONTOLOGY,

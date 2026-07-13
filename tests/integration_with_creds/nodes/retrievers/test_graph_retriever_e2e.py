@@ -1,4 +1,4 @@
-"""E2E ACL test for GraphRetriever against a real Neo4j (+ OPENAI for extraction).
+"""E2E ACL test for KnowledgeGraphRetriever against a real Neo4j (+ OPENAI for extraction).
 
 Ingests two documents about the same organisation but with DIFFERENT ``allowed_principals``, then
 asserts that retrieving as one principal returns that principal's facts and NEVER leaks the other's —
@@ -18,10 +18,10 @@ import pytest
 
 from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.extractors import EntityExtractor, KnowledgeGraphWriter, Ontology
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphEntityExtractor, KnowledgeGraphWriter, Ontology
 from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.nodes.retrievers import GraphRetriever
-from dynamiq.nodes.retrievers.graph import GraphRetrieverInputSchema
+from dynamiq.nodes.knowledge_graph import KnowledgeGraphRetriever
+from dynamiq.nodes.knowledge_graph.retriever import GraphRetrieverInputSchema
 from dynamiq.types import Document
 
 # Plain proper nouns the extraction LLM won't mangle; isolation comes from wiping the DB, not the names.
@@ -50,7 +50,7 @@ def ingested(graph_connection):
         session.run("MATCH (n) DETACH DELETE n").consume()  # clean slate -> isolation without name suffixes
     driver.close()
 
-    extractor = EntityExtractor(
+    extractor = KnowledgeGraphEntityExtractor(
         llm=OpenAI(connection=OpenAIConnection(), model="gpt-4o-mini", temperature=0),
         ontology=ONTOLOGY,
     )
@@ -64,7 +64,7 @@ def ingested(graph_connection):
         Document(content=f"{ORG} uses a system called {SHARED}.", metadata={"allowed_principals": [GROUP_A]}),
         Document(content=f"{ORG} uses a system called {SHARED}.", metadata={"allowed_principals": [GROUP_B]}),
     ]
-    extraction = extractor.execute(EntityExtractor.input_schema(documents=docs))
+    extraction = extractor.execute(KnowledgeGraphEntityExtractor.input_schema(documents=docs))
     result = writer.execute(
         KnowledgeGraphWriter.input_schema(
             nodes=extraction["nodes"],
@@ -79,7 +79,7 @@ def ingested(graph_connection):
 
 def _facts_for(graph_connection, principals, **kwargs):
     # ACL is expressed as a LOCKED filter via the $intersects operator (node config, not input).
-    retriever = GraphRetriever(
+    retriever = KnowledgeGraphRetriever(
         connection=graph_connection,
         llm=OpenAI(connection=OpenAIConnection(), model="gpt-4o-mini", temperature=0),
         ontology=ONTOLOGY,

@@ -6,7 +6,7 @@ import pytest
 
 from dynamiq import Workflow
 from dynamiq.flows import Flow
-from dynamiq.nodes.converters.csv import CSVConverter
+from dynamiq.nodes.converters.csv import CSVConverter, CSVDocumentCreationMode
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.utils import Output
 from dynamiq.runnables import RunnableResult, RunnableStatus
@@ -70,6 +70,11 @@ def empty_csv_bytesio():
     empty_buffer = BytesIO()
     empty_buffer.name = "empty_bytesio.csv"
     return empty_buffer
+
+
+@pytest.fixture
+def header_only_csv_bytesio():
+    return write_csv_to_bytesio(["Target", "Feature_1", "Feature_2"], [], "header_only.csv")
 
 
 @pytest.fixture
@@ -204,6 +209,159 @@ def test_csv_loader_missing_metadata_columns(csv_file_path):
     assert "NonExistentFeature" not in first_doc["metadata"]
 
 
+def test_csv_loader_named_rows_preserve_dict_reader_ragged_row_semantics():
+    csv_loader = CSVConverter(content_column="content", metadata_columns=["category"])
+    file = BytesIO(b"content,category\nshort\nlong,news,extra\n")
+    file.name = "ragged.csv"
+
+    result = csv_loader.run(input_data={"files": [file]})
+
+    documents = result.output["documents"]
+    assert documents[0]["content"] == "short"
+    assert documents[0]["metadata"]["category"] is None
+    assert documents[1]["content"] == "long"
+    assert csv_loader._map_named_row(["content", "category"], ["long", "news", "extra"])[None] == ["extra"]
+
+
+def test_csv_loader_content_column_skips_rows_with_empty_content():
+    csv_loader = CSVConverter(content_column="content", metadata_columns=["category"])
+    file = BytesIO(b"content,category\n,empty\nkept,first\n   ,blank\nalso kept,second\n")
+    file.name = "sparse.csv"
+
+    result = csv_loader.run(input_data={"files": [file]})
+
+    documents = result.output["documents"]
+    assert [document["content"] for document in documents] == ["kept", "also kept"]
+    assert [document["metadata"]["row_number"] for document in documents] == [3, 5]
+
+
+def test_csv_loader_content_column_rejects_file_with_only_empty_content():
+    csv_loader = CSVConverter(content_column="content")
+    file = BytesIO(b"content,category\n,empty\n   ,blank\n")
+    file.name = "empty-content.csv"
+
+    result = csv_loader.run(input_data={"files": [file]})
+
+    assert result.status == RunnableStatus.FAILURE
+    assert result.error is not None
+    assert result.error.message == (
+        "No documents were created from the provided inputs. Please check your files and try again."
+    )
+
+
+def test_csv_loader_without_content_column_creates_self_describing_rows(csv_bytesio):
+    csv_loader = CSVConverter()
+
+    result = csv_loader.run(input_data={"files": [csv_bytesio]})
+
+    documents = result.output["documents"]
+    assert documents[0]["content"] == "Target: Document 1\nFeature_1: Value 1A\nFeature_2: Value 2A"
+    assert documents[0]["metadata"]["document_type"] == "table_row"
+    assert documents[0]["metadata"]["row_number"] == 2
+
+
+def test_csv_loader_streams_uploaded_rows_without_reading_the_whole_file():
+    class NoReadAllBytesIO(BytesIO):
+        def read(self, size=-1):
+            if size == -1:
+                raise AssertionError("row mode must not read the entire upload at once")
+            return super().read(size)
+
+    file = NoReadAllBytesIO(b"name,price\nBasic,10\nPro,20\n")
+    file.name = "pricing.csv"
+
+    result = CSVConverter().run(input_data={"files": [file]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert [document["content"] for document in result.output["documents"]] == [
+        "name: Basic\nprice: 10",
+        "name: Pro\nprice: 20",
+    ]
+
+
+def test_csv_loader_without_content_column_rejects_header_only_file(header_only_csv_bytesio):
+    result = CSVConverter().run(input_data={"files": [header_only_csv_bytesio]})
+
+    assert result.status == RunnableStatus.FAILURE
+    assert result.error is not None
+    assert result.error.message == (
+        "No documents were created from the provided inputs. Please check your files and try again."
+    )
+
+
+def test_csv_loader_generic_rows_preserve_source_url_and_duplicate_headers():
+    file = write_csv_to_bytesio(["", "plan", "plan"], [["Feature", "Free", "Pro"]], "pricing.csv")
+    source_url = "https://example.com/pricing"
+    csv_loader = CSVConverter()
+
+    result = csv_loader.run(
+        input_data={
+            "files": [file],
+            "metadata": [{"dynamiq_item_source_provider_url": source_url}],
+        }
+    )
+
+    document = result.output["documents"][0]
+    assert document["content"] == "column_1: Feature\nplan: Free\nplan_2: Pro"
+    assert document["metadata"]["dynamiq_item_source_provider_url"] == source_url
+    assert document["metadata"]["source"] == source_url
+
+
+def test_csv_loader_keeps_generated_headers_globally_unique():
+    file = write_csv_to_bytesio(["plan", "plan", "plan_2"], [["Free", "Pro", "Business"]], "plans.csv")
+
+    result = CSVConverter().run(input_data={"files": [file]})
+
+    assert result.output["documents"][0]["content"] == ("plan: Free\nplan_3: Pro\nplan_2: Business")
+
+
+def test_csv_loader_can_preserve_whole_file_as_plain_text(csv_bytesio):
+    csv_loader = CSVConverter(document_creation_mode=CSVDocumentCreationMode.ONE_DOC_PER_FILE)
+
+    result = csv_loader.run(input_data={"files": [csv_bytesio]})
+
+    documents = result.output["documents"]
+    assert len(documents) == 1
+    assert documents[0]["content"].startswith("Target,Feature_1,Feature_2")
+    assert "Document 2,Value 1B,Value 2B" in documents[0]["content"]
+    assert documents[0]["metadata"]["document_type"] == "table"
+    assert documents[0]["metadata"]["row_count"] == 2
+
+
+def test_csv_loader_plain_text_mode_preserves_malformed_csv(corrupted_csv_bytesio, corrupted_csv_content):
+    csv_loader = CSVConverter(document_creation_mode=CSVDocumentCreationMode.ONE_DOC_PER_FILE)
+
+    result = csv_loader.run(input_data={"files": [corrupted_csv_bytesio]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["documents"][0]["content"] == corrupted_csv_content
+    assert result.output["documents"][0]["metadata"]["row_count"] == 1
+
+
+def test_csv_input_can_override_document_creation_mode(csv_bytesio):
+    csv_loader = CSVConverter(document_creation_mode=CSVDocumentCreationMode.ONE_DOC_PER_FILE)
+
+    result = csv_loader.run(
+        input_data={
+            "files": [csv_bytesio],
+            "document_creation_mode": CSVDocumentCreationMode.ONE_DOC_PER_ROW,
+        }
+    )
+
+    assert len(result.output["documents"]) == 2
+
+
+def test_csv_loader_labels_tsv_content_type():
+    file = BytesIO(b"name\tprice\nBasic\t10\n")
+    file.name = "pricing.tsv"
+
+    result = CSVConverter(delimiter="\t").run(input_data={"files": [file]})
+
+    document = result.output["documents"][0]
+    assert document["content"] == "name: Basic\nprice: 10"
+    assert document["metadata"]["content_type"] == "text/tab-separated-values"
+
+
 def test_workflow_with_csv_converter_file_not_found(
     workflow_with_csv_converter_and_output, csv_converter, output_node, tmp_path
 ):
@@ -233,11 +391,10 @@ def test_workflow_with_csv_converter_empty(
 
     response = workflow_with_csv_converter_and_output.run(input_data=input_data)
 
-    assert response.status == RunnableStatus.SUCCESS
-    assert response.output[csv_converter.id]["status"] == RunnableStatus.SUCCESS.value
-    assert "documents" in response.output[csv_converter.id]["output"]
-    assert len(response.output[csv_converter.id]["output"]["documents"]) == 0
-    assert response.output[output_node.id]["status"] == RunnableStatus.SUCCESS.value
+    assert response.status == RunnableStatus.FAILURE
+    assert response.output[csv_converter.id]["status"] == RunnableStatus.FAILURE.value
+    assert "No documents were created" in response.output[csv_converter.id]["error"]["message"]
+    assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
 
 
 @pytest.mark.parametrize(

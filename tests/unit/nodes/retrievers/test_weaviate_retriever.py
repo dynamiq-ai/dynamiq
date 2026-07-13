@@ -78,7 +78,12 @@ def test_execute(weaviate_document_retriever):
 
 def test_execute_hybrid(weaviate_document_retriever):
     input_data = RetrieverInputSchema(
-        embedding=[0.1, 0.2, 0.3], filters={"field": "value"}, top_k=5, query="query", alpha=0.5
+        embedding=[0.1, 0.2, 0.3],
+        filters={"field": "value"},
+        top_k=5,
+        query="query",
+        alpha=0.5,
+        max_vector_distance=0.4,
     )
     config = RunnableConfig(callbacks=[])
 
@@ -96,6 +101,7 @@ def test_execute_hybrid(weaviate_document_retriever):
         query=input_data.query,
         alpha=input_data.alpha,
         similarity_threshold=None,
+        max_vector_distance=0.4,
     )
 
     assert result == {"documents": mock_output["documents"]}
