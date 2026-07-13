@@ -18,6 +18,7 @@ class WeaviateDocumentRetriever:
         filters: dict[str, Any] | None = None,
         top_k: int = 10,
         similarity_threshold: float | None = None,
+        max_vector_distance: float | None = None,
     ):
         """
         Initializes a component for retrieving documents from a Weaviate vector store with optional filtering.
@@ -38,6 +39,7 @@ class WeaviateDocumentRetriever:
         self.filters = filters or {}
         self.top_k = top_k
         self.similarity_threshold = similarity_threshold
+        self.max_vector_distance = max_vector_distance
 
     def run(
         self,
@@ -49,6 +51,7 @@ class WeaviateDocumentRetriever:
         query: str | None = None,
         alpha: float | None = 0.5,
         similarity_threshold: float | None = None,
+        max_vector_distance: float | None = None,
     ) -> dict[str, list[Document]]:
         """
         Retrieves documents from the WeaviateDocumentStore that are similar to the provided query embedding.
@@ -74,9 +77,10 @@ class WeaviateDocumentRetriever:
         filters = filters or self.filters
 
         threshold = similarity_threshold if similarity_threshold is not None else self.similarity_threshold
+        vector_distance = max_vector_distance if max_vector_distance is not None else self.max_vector_distance
 
         if query:
-            docs = self.vector_store._hybrid_retrieval(
+            hybrid_kwargs = dict(
                 query_embedding=query_embedding,
                 query=query,
                 filters=filters,
@@ -85,6 +89,9 @@ class WeaviateDocumentRetriever:
                 content_key=content_key,
                 alpha=alpha,
             )
+            if vector_distance is not None:
+                hybrid_kwargs["max_vector_distance"] = vector_distance
+            docs = self.vector_store._hybrid_retrieval(**hybrid_kwargs)
             docs = filter_documents_by_threshold(docs, threshold, higher_is_better=True)
 
         else:

@@ -1,3 +1,6 @@
+import pytest
+
+from dynamiq.components.splitters.base import LengthUnit
 from dynamiq.components.splitters.language import Language
 from dynamiq.nodes.splitters.recursive_character import RecursiveCharacterSplitter
 from dynamiq.types import Document
@@ -22,6 +25,24 @@ def test_recursive_character_metadata_propagation():
     chunks = splitter.execute(splitter.input_schema(documents=[document]))["documents"]
     assert all(chunk.metadata["origin"] == "unit-test" for chunk in chunks)
     assert all(chunk.metadata["source_id"] == document.id for chunk in chunks)
+
+
+def test_recursive_character_honors_token_length_unit():
+    tiktoken = pytest.importorskip("tiktoken")
+    splitter = RecursiveCharacterSplitter(
+        chunk_size=6,
+        chunk_overlap=0,
+        length_unit=LengthUnit.TOKENS,
+    )
+    splitter.init_components()
+
+    chunks = splitter.execute(
+        splitter.input_schema(documents=[Document(content="alpha beta gamma delta epsilon zeta eta theta")])
+    )["documents"]
+
+    encoding = tiktoken.get_encoding("cl100k_base")
+    assert len(chunks) > 1
+    assert all(len(encoding.encode(chunk.content)) <= 6 for chunk in chunks)
 
 
 def test_recursive_character_can_disable_short_chunk_merging():

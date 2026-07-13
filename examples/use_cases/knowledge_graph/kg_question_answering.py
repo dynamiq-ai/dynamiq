@@ -1,16 +1,24 @@
 """Answer questions using BOTH the vector store and the knowledge graph (GraphRAG).
 
-An Agent is given two tools and decides which to use (or both) per question:
+An Agent is given three tools and decides which to use (or several) per question:
 
-  - VectorStoreRetriever  → semantic search over the Qdrant vector store (unstructured context).
-  - CypherExecutor        → Cypher queries against the Neo4j knowledge graph (entities/relationships).
+  - VectorStoreRetriever       → semantic search over the Qdrant vector store (unstructured context).
+  - KnowledgeGraphRetriever    → bounded, ACL-filtered facts from the Neo4j knowledge graph.
+  - CypherExecutor             → raw Cypher queries against the Neo4j knowledge graph (power tool).
 
 Run ``kg_ingestion.py`` first to populate both stores, then run this script.
+
+Two modes:
+  - ``python kg_question_answering.py ["your question"]`` — the GraphRAG agent answers a question.
+  - ``python kg_question_answering.py --demo-acl``       — a self-contained demonstration that
+    KnowledgeGraphRetriever WITHHOLDS facts from a caller whose principals don't match an edge's ACL (access-control
+    denial). It seeds its OWN access-scoped edges and deletes them afterwards, so it needs a running Neo4j
+    but NOT the ingested demo data.
 
 Requirements (same as kg_ingestion.py):
   - OPENAI_API_KEY (embeddings + the agent LLM).
   - A running Neo4j with NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD set.
-  - The local on-disk Qdrant produced by kg_ingestion.py (QDRANT_PATH below).
+  - The local on-disk Qdrant produced by kg_ingestion.py (QDRANT_PATH below) — QA mode only.
 """
 
 from qdrant_client import QdrantClient
@@ -22,11 +30,13 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.knowledge_graph import KnowledgeGraphRetriever, Ontology
+from dynamiq.nodes.knowledge_graph.retriever import GraphRetrieverInputSchema
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.retrievers import QdrantDocumentRetriever, VectorStoreRetriever
 from dynamiq.nodes.tools import CypherExecutor
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.storages.graph.neo4j import Neo4jGraphStore
 from dynamiq.storages.vector.qdrant.qdrant import QdrantVectorStore
 from dynamiq.utils.logger import logger
 
@@ -78,7 +88,8 @@ def build_workflow() -> Workflow:
 
     # Tool 2: bounded, ACL-filtered graph context. The `filters` are LOCKED node config (not on the
     # tool's input schema), so the agent cannot drop or widen them — the controlled alternative to
-    # LLM-written Cypher. ACL is expressed via the $intersects operator on the edge ACL property.
+    # LLM-written Cypher. Filters use the same structured grammar as the vector-store retrievers; ACL is
+    # expressed via the `contains_any` operator on the edge ACL property.
     graph_tool = KnowledgeGraphRetriever(
         name="graph-retriever",
         connection=Neo4jConnection(),
@@ -88,7 +99,7 @@ def build_workflow() -> Workflow:
             entity_types=["Person", "Organization", "System", "Event", "Location"],
             relationship_types=["WORKS_AT", "USES", "PRESENTED", "PRESENTED_AT", "LOCATED_IN"],
         ),
-        filters={"allowed_principals": {"$intersects": PRINCIPALS}},
+        filters={"field": "allowed_principals", "operator": "contains_any", "value": PRINCIPALS},
         top_k=20,
     )
 
@@ -108,10 +119,147 @@ def build_workflow() -> Workflow:
     return Workflow(flow=Flow(nodes=[agent]))
 
 
+# ---------------------------------------------------------------------------
+# ACL denial demonstration (`--demo-acl`)
+# ---------------------------------------------------------------------------
+# Self-contained proof that KnowledgeGraphRetriever hides facts a caller isn't entitled to. It seeds two
+# access-scoped edges from ONE org (a public system + a restricted system), then runs the SAME anchored
+# query as three callers. The only thing that changes between runs is the caller's principals (the locked
+# ACL filter), so any difference in what comes back is the access control at work. Uses uniquely-prefixed
+# ids and deletes exactly those afterwards — it never touches the ingested demo graph.
+_ACL_DEMO_ORG = "acl-demo-org"
+_ACL_DEMO_SYS_PUBLIC = "acl-demo-sys-public"
+_ACL_DEMO_SYS_RESTRICTED = "acl-demo-sys-restricted"
+_ACL_DEMO_IDS = [_ACL_DEMO_ORG, _ACL_DEMO_SYS_PUBLIC, _ACL_DEMO_SYS_RESTRICTED]
+_ACL_DEMO_PUBLIC_SYSTEM = "HeliosDemo"  # reachable only via the group:public edge
+_ACL_DEMO_RESTRICTED_SYSTEM = "BorealisDemo"  # reachable only via the group:restricted edge
+
+
+def _seed_acl_demo_edges(store: Neo4jGraphStore) -> None:
+    """Write one org node and two USES edges to it, each carrying its own single-principal ACL."""
+    nodes = [
+        {
+            "labels": ["Organization", "Entity"],
+            "identity_key": "id",
+            "properties": {"id": _ACL_DEMO_ORG, "name": "AcmeDemo"},
+        },
+        {
+            "labels": ["System", "Entity"],
+            "identity_key": "id",
+            "properties": {"id": _ACL_DEMO_SYS_PUBLIC, "name": _ACL_DEMO_PUBLIC_SYSTEM},
+        },
+        {
+            "labels": ["System", "Entity"],
+            "identity_key": "id",
+            "properties": {"id": _ACL_DEMO_SYS_RESTRICTED, "name": _ACL_DEMO_RESTRICTED_SYSTEM},
+        },
+    ]
+
+    def _edge(dst: str, dst_name: str, principal: str, doc_id: str) -> dict:
+        # ACL lives on the EDGE (allowed_principals); src/dst names are per-edge snapshots.
+        return {
+            "type": "USES",
+            "start_label": "Organization",
+            "end_label": "System",
+            "start_identity": _ACL_DEMO_ORG,
+            "end_identity": dst,
+            "start_identity_key": "id",
+            "end_identity_key": "id",
+            "identity_keys": ["source_doc_id"],
+            "properties": {
+                "src_name": "AcmeDemo",
+                "dst_name": dst_name,
+                "allowed_principals": [principal],
+                "source_doc_id": doc_id,
+            },
+        }
+
+    store.write_graph(
+        nodes=nodes,
+        relationships=[
+            _edge(_ACL_DEMO_SYS_PUBLIC, _ACL_DEMO_PUBLIC_SYSTEM, "group:public", "acl-demo-docP"),
+            _edge(_ACL_DEMO_SYS_RESTRICTED, _ACL_DEMO_RESTRICTED_SYSTEM, "group:restricted", "acl-demo-docS"),
+        ],
+    )
+
+
+def _delete_acl_demo_edges(store: Neo4jGraphStore) -> None:
+    """Remove ONLY the seeded demo nodes/edges (leaves the ingested graph untouched)."""
+    store.run_cypher("MATCH (n:Entity) WHERE n.id IN $ids DETACH DELETE n", parameters={"ids": _ACL_DEMO_IDS})
+
+
+def _graph_facts_for(openai_connection: OpenAIConnection, principals: list[str]) -> str:
+    """Run graph-retriever anchored on the demo org for a caller with ``principals``; return its facts.
+
+    Anchored by ``entity_ids`` so there's NO LLM entity-extraction randomness — the caller's principals
+    (the locked ACL filter) are the only variable across the three runs.
+    """
+    retriever = KnowledgeGraphRetriever(
+        name="graph-retriever",
+        connection=Neo4jConnection(),
+        llm=OpenAI(connection=openai_connection, model="gpt-4o-mini", temperature=0),
+        ontology=Ontology(entity_types=["Organization", "System"], relationship_types=["USES"]),
+        filters={"field": "allowed_principals", "operator": "contains_any", "value": principals},
+    )
+    retriever.init_components()
+    try:
+        out = retriever.execute(GraphRetrieverInputSchema(query="What does the org use?", entity_ids=[_ACL_DEMO_ORG]))
+        return out["content"]
+    finally:
+        retriever._graph_store.close()
+
+
+def _require(condition: bool, message: str) -> None:
+    """Fail loudly if an ACL invariant is violated (a plain raise, so it survives ``python -O``)."""
+    if not condition:
+        raise RuntimeError(message)
+
+
+def demonstrate_acl_denial() -> None:
+    """Prove access-control denial: same query, three callers, only the entitled ones see each fact."""
+    openai_connection = OpenAIConnection()
+    graph_connection = Neo4jConnection()
+    store = Neo4jGraphStore(connection=graph_connection, client=graph_connection.connect())
+    try:
+        _seed_acl_demo_edges(store)
+
+        public_facts = _graph_facts_for(openai_connection, ["group:public"])
+        restricted_facts = _graph_facts_for(openai_connection, ["group:restricted"])
+        nobody_facts = _graph_facts_for(openai_connection, ["group:nobody"])
+
+        logger.info("\n=== ACL denial demonstration (identical query, different callers) ===")
+        logger.info(f"caller [group:public] sees -> {public_facts!r}")
+        logger.info(f"caller [group:restricted] sees -> {restricted_facts!r}")
+        logger.info(f"caller [group:nobody] sees -> {nobody_facts!r}")
+
+        # Each caller sees ONLY the system its principal is entitled to; the unknown caller sees neither.
+        _require(
+            _ACL_DEMO_PUBLIC_SYSTEM in public_facts and _ACL_DEMO_RESTRICTED_SYSTEM not in public_facts,
+            f"public caller should see only the public system: {public_facts!r}",
+        )
+        _require(
+            _ACL_DEMO_RESTRICTED_SYSTEM in restricted_facts and _ACL_DEMO_PUBLIC_SYSTEM not in restricted_facts,
+            f"restricted caller should see only the restricted system: {restricted_facts!r}",
+        )
+        _require(
+            _ACL_DEMO_PUBLIC_SYSTEM not in nobody_facts and _ACL_DEMO_RESTRICTED_SYSTEM not in nobody_facts,
+            f"unknown principal must be DENIED all facts: {nobody_facts!r}",
+        )
+        logger.info("Verified: relevant facts exist, but each caller retrieved only what its ACL allows. ✅")
+    finally:
+        _delete_acl_demo_edges(store)
+        store.close()
+
+
 if __name__ == "__main__":
     import sys
 
-    question = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_QUESTION
+    args = sys.argv[1:]
+    if args and args[0] == "--demo-acl":
+        demonstrate_acl_denial()
+        sys.exit(0)
+
+    question = args[0] if args else DEFAULT_QUESTION
     workflow = build_workflow()
 
     try:

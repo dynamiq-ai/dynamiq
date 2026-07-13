@@ -36,6 +36,7 @@ class WeaviateWriterVectorStoreParams(BaseWriterVectorStoreParams):
 class WeaviateRetrieverVectorStoreParams(BaseVectorStoreParams):
     """Parameters for using existing Weaviate collections with tenant context."""
     alpha: float = 0.5
+    max_vector_distance: float | None = None
     tenant_name: str | None = None
 
 
@@ -190,7 +191,7 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
         collection_config_params = {
             "name": collection_name,
             "inverted_index_config": Configure.inverted_index(index_null_state=True),
-            "vector_index_config": Configure.VectorIndex.hnsw(),
+            "vector_config": Configure.Vectors.self_provided(vector_index_config=Configure.VectorIndex.hnsw()),
         }
 
         if tenant_name is not None:
@@ -438,7 +439,7 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
         Returns:
             Document: The converted Document object.
         """
-        document_data = data.properties
+        document_data = dict(data.properties)
         document_id = document_data.pop("_original_id")
 
         content = document_data.pop(content_key or self.content_key) or ""
@@ -981,6 +982,7 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
         alpha: float = 0.5,
         fusion_type: HybridFusion = HybridFusion.RELATIVE_SCORE,
         content_key: str | None = None,
+        max_vector_distance: float | None = None,
     ) -> list[Document]:
         """
         Perform hybrid retrieval on the documents.
@@ -1008,6 +1010,7 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
             return_metadata=["score"],
             alpha=query_alpha,
             fusion_type=fusion_type,
+            max_vector_distance=max_vector_distance,
         )
 
         return [self._to_document(doc, content_key=content_key) for doc in result.objects]

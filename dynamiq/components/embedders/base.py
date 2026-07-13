@@ -1,6 +1,6 @@
 from typing import Any, Callable
 
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr
 
 from dynamiq.connections import BaseConnection
 from dynamiq.types import Document
@@ -103,8 +103,8 @@ class BaseEmbedder(BaseModel):
     connection: BaseConnection
     prefix: str = ""
     suffix: str = ""
-    batch_size: int = 32
-    meta_fields_to_embed: list[str] | None = []
+    batch_size: int = Field(default=32, gt=0)
+    meta_fields_to_embed: list[str] | None = Field(default_factory=list)
     embedding_separator: str = "\n"
     truncate: str | None = None
     input_type: str | None = None
@@ -183,6 +183,8 @@ class BaseEmbedder(BaseModel):
                 "In case you want to embed a list of Documents, please use the DocumentEmbedder."
             )
             raise TypeError(msg)
+        if not text.strip():
+            raise ValueError("TextEmbedder requires non-empty text.")
 
         text_to_embed = self.prefix + text + self.suffix
         text_to_embed = text_to_embed.replace("\n", " ")
@@ -220,6 +222,8 @@ class BaseEmbedder(BaseModel):
                 "In case you want to embed a list of Documents, please use the DocumentEmbedder."
             )
             raise TypeError(msg)
+        if not text.strip():
+            raise ValueError("TextEmbedder requires non-empty text.")
 
         text_to_embed = self.prefix + text + self.suffix
         text_to_embed = text_to_embed.replace("\n", " ")
@@ -251,14 +255,13 @@ class BaseEmbedder(BaseModel):
         texts_to_embed: list[str] = []
         for doc in documents:
             meta_values_to_embed = [
-                str(doc.meta[key])
+                str((doc.metadata or {})[key])
                 for key in self.meta_fields_to_embed
-                if doc.meta.get(key) is not None
+                if (doc.metadata or {}).get(key) is not None
             ]
 
-            text_to_embed = self.embedding_separator.join(
-                meta_values_to_embed + [doc.content or ""]
-            )
+            document_text = self.prefix + doc.content + self.suffix
+            text_to_embed = self.embedding_separator.join(meta_values_to_embed + [document_text])
             text_to_embed = self._apply_text_truncation(text_to_embed)
             texts_to_embed.append(text_to_embed)
         return texts_to_embed
@@ -327,11 +330,7 @@ class BaseEmbedder(BaseModel):
             TypeError: If input is not a list of Documents
             ValueError: If the embedding response is invalid
         """
-        if (
-            not isinstance(documents, list)
-            or documents
-            and not isinstance(documents[0], Document)
-        ):
+        if not isinstance(documents, list) or any(not isinstance(document, Document) for document in documents):
             msg = (
                 "DocumentEmbedder expects a list of Documents as input."
                 "In case you want to embed a string, please use the embed_text."
@@ -342,11 +341,17 @@ class BaseEmbedder(BaseModel):
             # return early if we were passed an empty list
             return {"documents": [], "meta": {}}
 
+        empty_index = next((index for index, document in enumerate(documents) if not document.content.strip()), None)
+        if empty_index is not None:
+            raise ValueError(f"DocumentEmbedder requires non-empty content at index {empty_index}.")
+
         texts_to_embed = self._prepare_documents_to_embed(documents=documents)
 
         embeddings, meta = self._embed_texts_batch(
             texts_to_embed=texts_to_embed, batch_size=self.batch_size
         )
+
+        self._validate_embedding_batch(embeddings, expected_count=len(documents))
 
         for doc, emb in zip(documents, embeddings):
             doc.embedding = emb
@@ -372,11 +377,7 @@ class BaseEmbedder(BaseModel):
             TypeError: If input is not a list of Documents.
             ValueError: If the embedding response is invalid.
         """
-        if (
-            not isinstance(documents, list)
-            or documents
-            and not isinstance(documents[0], Document)
-        ):
+        if not isinstance(documents, list) or any(not isinstance(document, Document) for document in documents):
             msg = (
                 "DocumentEmbedder expects a list of Documents as input."
                 "In case you want to embed a string, please use the embed_text."
@@ -386,11 +387,17 @@ class BaseEmbedder(BaseModel):
         if not documents:
             return {"documents": [], "meta": {}}
 
+        empty_index = next((index for index, document in enumerate(documents) if not document.content.strip()), None)
+        if empty_index is not None:
+            raise ValueError(f"DocumentEmbedder requires non-empty content at index {empty_index}.")
+
         texts_to_embed = self._prepare_documents_to_embed(documents=documents)
 
         embeddings, meta = await self._embed_texts_batch_async(
             texts_to_embed=texts_to_embed, batch_size=self.batch_size
         )
+
+        self._validate_embedding_batch(embeddings, expected_count=len(documents))
 
         for doc, emb in zip(documents, embeddings):
             doc.embedding = emb
@@ -402,3 +409,14 @@ class BaseEmbedder(BaseModel):
             raise ValueError(f"Invalid document embeddings: {str(e)}")
 
         return {"documents": documents, "meta": meta}
+
+    def _validate_embedding_batch(self, embeddings: list[Any], expected_count: int) -> None:
+        if len(embeddings) != expected_count:
+            raise ValueError(f"Embedding provider returned {len(embeddings)} embeddings for {expected_count} inputs.")
+        for index, embedding in enumerate(embeddings):
+            if embedding is None:
+                raise ValueError(f"Document at index {index} has no embedding")
+            try:
+                self.validate_embedding(embedding)
+            except InvalidEmbeddingError as exc:
+                raise ValueError(f"Invalid embedding at index {index}: {exc}") from exc

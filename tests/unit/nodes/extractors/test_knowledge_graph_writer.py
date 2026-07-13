@@ -17,14 +17,14 @@ from dynamiq import Workflow
 from dynamiq.connections import Neo4j
 from dynamiq.flows import Flow
 from dynamiq.nodes.embedders.base import DocumentEmbedder
-from dynamiq.nodes.knowledge_graph import KnowledgeGraphWriter
-from dynamiq.nodes.knowledge_graph.entity_extractor import (
+from dynamiq.nodes.knowledge_graphs import KnowledgeGraphWriter
+from dynamiq.nodes.knowledge_graphs.entity_extractor import (
     ATTRIBUTE_VALUE_LABEL,
     ENTITY_EMBEDDING_VECTOR_INDEX,
     HAS_ATTRIBUTE_TYPE,
     KG_ENTITY_IDS_KEY,
 )
-from dynamiq.nodes.knowledge_graph.writer import _entity_ids_by_doc
+from dynamiq.nodes.knowledge_graphs.writer import _entity_ids_by_doc
 from dynamiq.nodes.node import InputTransformer, Node, NodeDependency
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableStatus
@@ -332,6 +332,40 @@ class TestExecute:
 
         assert result["nodes_created"] == 0 and result["relationships_created"] == 0
         assert writer._graph_store.written is None  # write_graph never called
+
+    def test_execute_skips_bare_nodes_with_no_relationship(self):
+        # A bare mention (an entity with no relationship and no attribute edge) is never persisted:
+        # provenance lives on edges, so a bare node could not be attributed to a document, reached by
+        # retrieval, or removed by delete_documents. Its content-addressed id makes recreation free.
+        writer = make_writer({})
+        store = FakeGraphStore()
+        writer._graph_store = store
+
+        nodes = [
+            entity("PERSON", "jane@d1", "Jane"),
+            entity("ORGANIZATION", "acme@d1", "Acme"),
+            entity("PERSON", "steve@d1", "Steve"),  # bare: no relationship references it
+        ]
+        rels = [edge("WORKS_AT", "PERSON", "ORGANIZATION", "jane@d1", "acme@d1", {"source_doc_id": "d1"})]
+
+        result = writer.execute(KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=rels, documents=[]))
+
+        assert result["nodes_created"] == 2
+        assert {n["properties"]["name"] for n in store.written[0]} == {"Jane", "Acme"}  # Steve skipped
+
+    def test_execute_all_nodes_bare_writes_nothing(self):
+        writer = make_writer({})
+        store = FakeGraphStore()
+        writer._graph_store = store
+
+        result = writer.execute(
+            KnowledgeGraphWriter.input_schema(
+                nodes=[entity("PERSON", "steve@d1", "Steve")], relationships=[], documents=[]
+            )
+        )
+
+        assert result["nodes_created"] == 0
+        assert store.written is None  # write_graph never called
 
     def test_execute_rejects_relationship_endpoints_absent_from_nodes(self):
         # A relationship endpoint not present in `nodes` can never be resolved: it would write with an

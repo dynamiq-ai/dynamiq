@@ -18,10 +18,14 @@ import pytest
 
 from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.knowledge_graph import KnowledgeGraphEntityExtractor, KnowledgeGraphWriter, Ontology
+from dynamiq.nodes.knowledge_graphs import (
+    KnowledgeGraphEntityExtractor,
+    KnowledgeGraphRetriever,
+    KnowledgeGraphWriter,
+    Ontology,
+)
+from dynamiq.nodes.knowledge_graphs.retriever import GraphRetrieverInputSchema
 from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.nodes.knowledge_graph import KnowledgeGraphRetriever
-from dynamiq.nodes.knowledge_graph.retriever import GraphRetrieverInputSchema
 from dynamiq.types import Document
 
 # Plain proper nouns the extraction LLM won't mangle; isolation comes from wiping the DB, not the names.
@@ -78,12 +82,12 @@ def ingested(graph_connection):
 
 
 def _facts_for(graph_connection, principals, **kwargs):
-    # ACL is expressed as a LOCKED filter via the $intersects operator (node config, not input).
+    # ACL is expressed as a LOCKED filter via the contains_any operator (node config, not input).
     retriever = KnowledgeGraphRetriever(
         connection=graph_connection,
         llm=OpenAI(connection=OpenAIConnection(), model="gpt-4o-mini", temperature=0),
         ontology=ONTOLOGY,
-        filters={"allowed_principals": {"$intersects": principals}},
+        filters={"field": "allowed_principals", "operator": "contains_any", "value": principals},
         **kwargs,
     )
     retriever.init_components()
