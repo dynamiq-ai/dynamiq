@@ -2,6 +2,7 @@ import enum
 import json
 import logging
 import re
+import uuid
 from itertools import islice
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Generator, Optional, Pattern, TypeVar, Union
 
@@ -419,6 +420,46 @@ class QdrantVectorStore(BaseVectorStore, DryRunMixin):
         self._track_documents([doc.id for doc in documents])
 
         return len(document_objects)
+
+    def replace_document_metadata(self, document_ids: str | list[str], metadata: dict[str, Any]) -> None:
+        """Replace the metadata of one or more documents with new metadata (full replacement).
+
+        Qdrant stores document metadata under the ``metadata`` payload key, so overwriting that
+        single key replaces the metadata wholesale while leaving the content and vector intact.
+
+        Args:
+            document_ids (str | list[str]): The id, or list of ids, of the documents to update.
+            metadata (dict[str, Any]): The new metadata that fully replaces the existing one.
+
+        Raises:
+            VectorStoreException: If any of the given ids does not exist. Qdrant's ``set_payload``
+                silently ignores unknown point ids, so existence is checked up front to keep the
+                fail-fast contract shared with the other backends; nothing is modified on failure.
+        """
+        ids = self._normalize_document_ids(document_ids)
+        if not ids:
+            return
+
+        converted_ids = [convert_id(_id) for _id in ids]
+        existing = self.client.retrieve(
+            collection_name=self.index_name,
+            ids=converted_ids,
+            with_payload=False,
+            with_vectors=False,
+        )
+        # Qdrant returns point ids in canonical UUID form; normalise to hex to match convert_id.
+        found = {uuid.UUID(str(point.id)).hex for point in existing}
+        missing = [_id for _id, converted in zip(ids, converted_ids) if converted not in found]
+        if missing:
+            raise DocumentStoreError(f"Documents {missing} not found in collection '{self.index_name}'")
+
+        self.client.set_payload(
+            collection_name=self.index_name,
+            payload={"metadata": metadata},
+            points=converted_ids,
+            wait=self.wait_result_from_api,
+        )
+        logger.debug(f"Replaced metadata for {len(ids)} document(s): {ids}.")
 
     def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
         """Deletes documents that match the provided `document_ids` from the document store.
