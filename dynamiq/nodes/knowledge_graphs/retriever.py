@@ -9,7 +9,7 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.embedders.base import TextEmbedder
-from dynamiq.nodes.knowledge_graph.entity_extractor import (
+from dynamiq.nodes.knowledge_graphs.entity_extractor import (
     ENTITY_EMBEDDING_VECTOR_INDEX,
     ENTITY_LABEL,
     ENTITY_NAME_FULLTEXT_INDEX,
