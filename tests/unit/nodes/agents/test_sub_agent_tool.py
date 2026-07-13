@@ -824,7 +824,7 @@ class TestYamlRoundtrip:
         """Verify example YAML files load and factory roundtrips correctly."""
         import os
 
-        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-api-key")
 
         examples_dir = os.path.join(
             os.path.dirname(__file__),

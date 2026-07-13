@@ -21,6 +21,7 @@ MODEL_PROVIDER = "gpt"
 MODEL_NAME = MODEL_NAME_GPT
 TEMPERATURE = 0.1
 MAX_TOKENS = 4000
+SUPPORTED_MODEL_PROVIDERS = ("claude", "gpt", "cohere", "groq", "gemini")
 
 
 def setup_llm(
@@ -33,7 +34,8 @@ def setup_llm(
     Set up and return an LLM based on the specified model provider.
 
     Args:
-        model_provider (str): The model provider to use, either "claude" or "gpt".
+        model_provider (str): The model provider to use. Supported values are "claude", "gpt", "cohere",
+            "groq", and "gemini".
         model_name (str): The name of the  model to use.
         temperature (float): The temperature parameter for the LLM.
         max_tokens (int): The maximum number of tokens for the LLM.
@@ -90,4 +92,7 @@ def setup_llm(
             max_tokens=max_tokens,
         )
     else:
-        raise ValueError(f"Invalid model provider: {model_provider}")
+        raise ValueError(
+            f"Invalid model provider: {model_provider}. "
+            f"Supported providers: {', '.join(SUPPORTED_MODEL_PROVIDERS)}"
+        )
