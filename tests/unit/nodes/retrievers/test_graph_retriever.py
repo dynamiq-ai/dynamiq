@@ -102,10 +102,6 @@ class StubGraphStore:
     def format_records(records):
         return list(records)
 
-    def edge_endpoint_id_selectors(self):
-        # Mirrors Neo4jGraphStore — multi-hop asks the STORE for these dialect-specific expressions.
-        return ("startNode(r).id", "endNode(r).id")
-
 
 def make_retriever(rows=None, **kwargs) -> KnowledgeGraphRetriever:
     # llm + ontology are optional on the node, but default to an empty-names stub here so query-seeding
@@ -684,22 +680,13 @@ class TestMultiHopBeam:
         node.execute(GraphRetrieverInputSchema(query="Sven"))
         assert len(node._graph_store.calls) == 1  # no expansion queries by default
 
-    def test_multi_hop_requires_store_endpoint_selectors(self):
-        # Multi-hop is a per-backend capability: a store without endpoint-id selectors (the base
-        # default) fails fast with NotImplementedError, while single-hop keeps working on it.
-        class NoMultiHopStore(SequencedGraphStore):
-            def edge_endpoint_id_selectors(self):
-                raise NotImplementedError("multi-hop retrieval is not supported")
-
-        node = make_retriever()
-        node._graph_store = NoMultiHopStore([HOP1])
-        out = node.execute(GraphRetrieverInputSchema(query="Sven"))
-        assert len(out["documents"]) == 1  # single-hop never asks for selectors
-
-        node = make_retriever(max_hops=2)
-        node._graph_store = NoMultiHopStore([HOP1, HOP2])
-        with pytest.raises(NotImplementedError, match="multi-hop"):
-            node.execute(GraphRetrieverInputSchema(query="Sven"))
+    def test_multi_hop_queries_are_portable_opencypher(self):
+        # Endpoint ids must come from the bound pattern nodes (a.id/b.id) — never from
+        # startNode()/endNode(), which AGE/Neptune lack — so multi-hop works on every backend.
+        node = make_multihop_retriever([HOP1, HOP2], max_hops=2)
+        node.execute(GraphRetrieverInputSchema(query="Sven"))
+        for query, _ in node._graph_store.calls:
+            assert "startNode(" not in query and "endNode(" not in query
 
     def test_two_hops_reaches_the_chain_fact(self):
         # The chain case: hop 1 finds the bridge (Sven -> Nortech), hop 2 expands FROM the bridge's
@@ -715,9 +702,9 @@ class TestMultiHopBeam:
         # compete in hop 2's beam against true chain facts; it stays in $visited (no walking back).
         assert set(hop_params["frontier"]) == {"id-nortech"}
         assert set(hop_params["visited"]) == {"id-sven", "id-nortech"}
-        # the visited guard uses the STORE's endpoint-id selectors (Neo4j dialect in these tests)
-        assert "NOT (startNode(r).id IN $visited AND endNode(r).id IN $visited)" in hop_query
-        assert "WITH DISTINCT r" in hop_query
+        # the visited guard: `a` is a frontier node (always visited), so "no walking back" is exactly
+        # "b must be NEW" — pure property access, portable to every openCypher backend
+        assert "NOT b.id IN $visited" in hop_query
 
     def test_hop1_query_returns_endpoint_ids_only_for_multi_hop(self):
         # The frontier is built from hop-1's a_id/b_id, so the hop-1 query MUST return them when
@@ -725,9 +712,9 @@ class TestMultiHopBeam:
         node = make_multihop_retriever([HOP1, HOP2], max_hops=2)
         node.execute(GraphRetrieverInputSchema(query="Sven"))
         hop1_query = node._graph_store.calls[0][0]
-        # endpoint ids come from the store's dialect-specific selectors, never hardcoded in the node
-        assert "startNode(r).id AS a_id" in hop1_query
-        assert "endNode(r).id AS b_id" in hop1_query
+        # endpoint ids read off the bound pattern nodes — portable, no dialect functions
+        assert "a.id AS a_id" in hop1_query
+        assert "b.id AS b_id" in hop1_query
         # scan path (no index): the seed can match EITHER endpoint, so the anchor is recomputed per row
         # with the scan's own predicate — never assumed to be `a`.
         assert "[x IN [a, b] WHERE x.name IS NOT NULL AND toLower($q) CONTAINS toLower(x.name) | x.id]" in hop1_query

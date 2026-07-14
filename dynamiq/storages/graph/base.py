@@ -37,16 +37,6 @@ class BaseGraphStore(ABC):
         """Whether this backend implements (and has enabled) :meth:`write_graph`."""
         return type(self)._writes_graph
 
-    def edge_endpoint_id_selectors(self) -> tuple[str, str]:
-        """Cypher expressions yielding an edge ``r``'s (start, end) node ``id`` property.
-
-        Multi-hop retrieval builds each hop's frontier from these. The default is the openCypher-standard
-        ``startNode()``/``endNode()`` functions; a backend whose dialect lacks them (or whose endpoint
-        functions return internal ids instead of the ``id`` property) must override — either with its own
-        expressions or by raising ``NotImplementedError`` to gate multi-hop off explicitly.
-        """
-        return ("startNode(r).id", "endNode(r).id")
-
     def write_graph(
         self,
         *,

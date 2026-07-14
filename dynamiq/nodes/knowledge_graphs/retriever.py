@@ -267,8 +267,8 @@ class KnowledgeGraphRetriever(ConnectionNode):
         max_hops (int): Beam-search traversal depth (default 1 = single hop, the previous behavior).
             At 2+, chain questions ("what does X's employer use?") resolve in one call: hop 1 finds
             ``X -WORKS_AT-> Acme``, hop 2 expands from Acme to ``Acme -USES-> ...``. Overridable per call.
-            Uses the store's ``edge_endpoint_id_selectors`` (openCypher-standard ``startNode``/``endNode``
-            by default); a store may override or raise to gate multi-hop off for its backend.
+            Portable: hop queries read endpoint ids off the bound pattern nodes (``a.id``/``b.id``),
+            so multi-hop needs no dialect-specific functions on any backend.
         beam_width (int | None): Edges kept per hop when ``max_hops > 1`` (default ``top_k // max_hops``).
         document_reranker (Node | None): Optional reranker (e.g. a cross-encoder ``CohereReranker``) applied
             to the rendered facts. A high-degree (hub) entity can expand to many edges that all match the
@@ -656,13 +656,13 @@ class KnowledgeGraphRetriever(ConnectionNode):
                 if anchored
                 else "[x IN [a, b] WHERE x.name IS NOT NULL AND toLower($q) CONTAINS toLower(x.name) | x.id]"
             )
-            # Endpoint id expressions come from the STORE (openCypher-standard startNode(r).id by
-            # default); a backend whose dialect diverges overrides them, or raises NotImplementedError
-            # to gate multi-hop off explicitly rather than failing mid-query.
-            start_id, end_id = self._graph_store.edge_endpoint_id_selectors()
+            # Endpoint ids read straight off the bound pattern nodes — plain property access, portable
+            # to every openCypher backend (no startNode()/endNode(), which AGE/Neptune lack). a_id/b_id
+            # feed set-based frontier building only, so they need not align with src/dst direction (on
+            # anchored entry `a` is the seed side, whichever direction the edge points).
             ret = (
-                f"RETURN r.src_name AS a_name, {start_id} AS a_id, type(r) AS rel, "
-                f"properties(r) AS rprops, r.dst_name AS b_name, {end_id} AS b_id, "
+                "RETURN r.src_name AS a_name, a.id AS a_id, type(r) AS rel, "
+                "properties(r) AS rprops, r.dst_name AS b_name, b.id AS b_id, "
                 f"{anchor_expr} AS anchor_ids"
             )
         else:
@@ -705,25 +705,28 @@ class KnowledgeGraphRetriever(ConnectionNode):
         """One beam-search expansion step: the ACL-filtered edges of the frontier entities, ranked by fact
         relevance and cut to the per-hop beam.
 
-        The ``NOT (start AND end IN $visited)`` guard keeps frontier->NEW edges (the walk) while dropping
-        the edges we arrived by. The SAME locked filters as hop 1 apply, so ACL holds on every hop.
-        ``DISTINCT r``: an undirected match binds an edge from both endpoints when both are in the frontier.
-        Ranking uses the same edge-embedding cosine as hop 1 — the cut happens among same-hop siblings, so a
-        chain answer never competes against seed-adjacent facts that sound more like the question.
+        The ``NOT b.id IN $visited`` guard keeps frontier->NEW edges (the walk) while dropping the edges
+        we arrived by. The SAME locked filters as hop 1 apply, so ACL holds on every hop. Ranking uses the
+        same edge-embedding cosine as hop 1 — the cut happens among same-hop siblings, so a chain answer
+        never competes against seed-adjacent facts that sound more like the question.
         """
         params: dict[str, Any] = {"frontier": frontier_ids, "visited": visited_ids, "limit": limit}
         rel_clause, filter_params = self._edge_predicates("r", user_filters)
         params.update(filter_params)
-        start_id, end_id = self._graph_store.edge_endpoint_id_selectors()
-        guard = f"NOT ({start_id} IN $visited AND {end_id} IN $visited)"
+        # `a` is bound from $frontier and frontier ⊆ visited (execute maintains that invariant), so
+        # "neither endpoint may be already-visited twice over" reduces to: b must be NEW. This drops the
+        # arrived-by edges AND edges between two frontier nodes, and means no edge can bind from both
+        # ends and survive — so no DISTINCT is needed and endpoint ids read straight off the bound
+        # pattern nodes (a.id/b.id): plain property access, portable to every openCypher backend
+        # (startNode()/endNode() are Neo4j dialect; AGE/Neptune lack a usable equivalent).
+        guard = "NOT b.id IN $visited"
         where = " AND ".join([t for t in [guard, rel_clause] if t])
         lines = [
             f"MATCH (a:{ENTITY_LABEL}) WHERE a.id IN $frontier",
             "MATCH (a)-[r]-(b)",
             f"WHERE {where}",
-            "WITH DISTINCT r",
-            f"RETURN r.src_name AS a_name, {start_id} AS a_id, type(r) AS rel, "
-            f"properties(r) AS rprops, r.dst_name AS b_name, {end_id} AS b_id",
+            "RETURN r.src_name AS a_name, a.id AS a_id, type(r) AS rel, "
+            "properties(r) AS rprops, r.dst_name AS b_name, b.id AS b_id",
         ]
         if query_vector:
             params["qvec"] = query_vector
