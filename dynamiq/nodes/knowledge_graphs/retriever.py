@@ -267,8 +267,8 @@ class KnowledgeGraphRetriever(ConnectionNode):
         max_hops (int): Beam-search traversal depth (default 1 = single hop, the previous behavior).
             At 2+, chain questions ("what does X's employer use?") resolve in one call: hop 1 finds
             ``X -WORKS_AT-> Acme``, hop 2 expands from Acme to ``Acme -USES-> ...``. Overridable per call.
-            Backend-gated: requires the store's ``edge_endpoint_id_selectors`` (Neo4j only for now);
-            other backends raise ``NotImplementedError`` when ``max_hops > 1``.
+            Uses the store's ``edge_endpoint_id_selectors`` (openCypher-standard ``startNode``/``endNode``
+            by default); a store may override or raise to gate multi-hop off for its backend.
         beam_width (int | None): Edges kept per hop when ``max_hops > 1`` (default ``top_k // max_hops``).
         document_reranker (Node | None): Optional reranker (e.g. a cross-encoder ``CohereReranker``) applied
             to the rendered facts. A high-degree (hub) entity can expand to many edges that all match the
@@ -656,9 +656,9 @@ class KnowledgeGraphRetriever(ConnectionNode):
                 if anchored
                 else "[x IN [a, b] WHERE x.name IS NOT NULL AND toLower($q) CONTAINS toLower(x.name) | x.id]"
             )
-            # Endpoint id expressions are dialect-specific, so they come from the STORE (Neo4j:
-            # startNode(r).id). Backends without an implementation raise NotImplementedError here —
-            # multi-hop is explicitly unsupported on them rather than failing mid-query.
+            # Endpoint id expressions come from the STORE (openCypher-standard startNode(r).id by
+            # default); a backend whose dialect diverges overrides them, or raises NotImplementedError
+            # to gate multi-hop off explicitly rather than failing mid-query.
             start_id, end_id = self._graph_store.edge_endpoint_id_selectors()
             ret = (
                 f"RETURN r.src_name AS a_name, {start_id} AS a_id, type(r) AS rel, "

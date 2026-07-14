@@ -40,15 +40,12 @@ class BaseGraphStore(ABC):
     def edge_endpoint_id_selectors(self) -> tuple[str, str]:
         """Cypher expressions yielding an edge ``r``'s (start, end) node ``id`` property.
 
-        Multi-hop retrieval needs endpoint ids per edge to build the next hop's frontier, and the
-        expression is dialect-specific (Neo4j: ``startNode(r).id``; AGE/Neptune expose no usable
-        equivalent — their internal edge-endpoint ids are not the ``id`` property). No default —
-        backends without an implementation don't support multi-hop retrieval and raise here.
+        Multi-hop retrieval builds each hop's frontier from these. The default is the openCypher-standard
+        ``startNode()``/``endNode()`` functions; a backend whose dialect lacks them (or whose endpoint
+        functions return internal ids instead of the ``id`` property) must override — either with its own
+        expressions or by raising ``NotImplementedError`` to gate multi-hop off explicitly.
         """
-        raise NotImplementedError(
-            f"{type(self).__name__}: multi-hop retrieval is not supported for this backend "
-            "(no edge endpoint id selectors)."
-        )
+        return ("startNode(r).id", "endNode(r).id")
 
     def write_graph(
         self,
