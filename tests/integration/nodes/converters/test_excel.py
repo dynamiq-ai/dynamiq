@@ -135,7 +135,7 @@ def test_excel_converter_creates_self_describing_csv_row_documents():
     }
 
 
-def test_csv_row_documents_preserve_original_source_url():
+def test_csv_row_documents_preserve_original_provider_url():
     converter = ExcelFileConverter(delimited_document_creation_mode="one-doc-per-row")
     converter.init_components()
     result = converter.run(

@@ -12,8 +12,8 @@ def build_source_metadata(metadata: dict[str, Any] | None, file_path: str) -> di
 
     ``source`` is reserved for the upstream source identifier (typically a UUID),
     so this helper preserves it only when supplied with a non-empty value by the
-    caller. Public URLs stay in their original metadata fields, such as
-    ``dynamiq_item_source_provider_url`` or ``source_url``.
+    caller. A public URL, when supplied, remains separate in
+    ``dynamiq_item_source_provider_url``.
     """
     result = deepcopy(metadata or {})
     effective_file_path = result.get("file_path") or file_path
