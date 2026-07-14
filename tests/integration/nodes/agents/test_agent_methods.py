@@ -721,7 +721,7 @@ def test_clear_todos_file_deletes_file_and_resets_agent_state_todos():
     assert state.todos, "precondition: state has one todo"
 
     dummy = types.SimpleNamespace(
-        tools=[TodoWriteTool(file_store=backend)],
+        _runtime_tools=[TodoWriteTool(file_store=backend)],
         state=state,
         name="A",
         id="id",
