@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from weaviate.classes.config import DataType
+from weaviate.classes.config import DataType, Property
 
 from dynamiq.storages.vector.weaviate.weaviate import WeaviateVectorStore
 from dynamiq.types import Document
@@ -88,12 +88,12 @@ def test_get_query_properties_includes_searchable_metadata_fields() -> None:
     store = WeaviateVectorStore.__new__(WeaviateVectorStore)
     store.content_key = "content"
     properties = [
-        SimpleNamespace(name="content"),
-        SimpleNamespace(name="filename"),
-        SimpleNamespace(name="file_name"),
-        SimpleNamespace(name="file_path"),
-        SimpleNamespace(name="dynamiq_item_source_provider_title"),
-        SimpleNamespace(name="file_content_hash"),
+        Property(name="content", data_type=DataType.TEXT),
+        Property(name="filename", data_type=DataType.TEXT),
+        Property(name="file_name", data_type=DataType.TEXT),
+        Property(name="file_path", data_type=DataType.TEXT),
+        Property(name="dynamiq_item_source_provider_title", data_type=DataType.TEXT),
+        Property(name="file_content_hash", data_type=DataType.TEXT),
     ]
 
     assert store._get_query_properties(properties) == [
@@ -109,13 +109,21 @@ def test_get_query_properties_excludes_uuid_and_non_searchable_properties() -> N
     store = WeaviateVectorStore.__new__(WeaviateVectorStore)
     store.content_key = "content"
     properties = [
-        SimpleNamespace(name="content", data_type=DataType.TEXT, index_searchable=True),
-        SimpleNamespace(name="source", data_type=DataType.UUID, index_searchable=False),
-        SimpleNamespace(name="title", data_type=DataType.TEXT, index_searchable=False),
-        SimpleNamespace(name="url", data_type=DataType.TEXT, index_searchable=True),
+        Property(name="content", data_type=DataType.TEXT, index_searchable=True),
+        Property(name="source", data_type=DataType.UUID, index_searchable=False),
+        Property(name="title", data_type=DataType.TEXT, index_searchable=False),
+        Property(name="url", data_type=DataType.TEXT, index_searchable=True),
     ]
 
     assert store._get_query_properties(properties) == ["content", "url"]
+
+
+def test_get_query_properties_does_not_fallback_to_non_searchable_content() -> None:
+    store = WeaviateVectorStore.__new__(WeaviateVectorStore)
+    store.content_key = "content"
+    properties = [Property(name="content", data_type=DataType.TEXT, index_searchable=False)]
+
+    assert store._get_query_properties(properties) == []
 
 
 def test_to_document_does_not_mutate_weaviate_properties() -> None:
@@ -136,9 +144,9 @@ def test_hybrid_retrieval_forwards_custom_content_key_to_document_conversion() -
     store.alpha = 0.5
 
     collection_properties = [
-        SimpleNamespace(name="custom_content"),
-        SimpleNamespace(name="file_name"),
-        SimpleNamespace(name="source", data_type=DataType.UUID, index_searchable=False),
+        Property(name="custom_content", data_type=DataType.TEXT),
+        Property(name="file_name", data_type=DataType.TEXT),
+        Property(name="source", data_type=DataType.UUID, index_searchable=False),
     ]
     result_object = SimpleNamespace(objects=[SimpleNamespace(properties={"_original_id": "1", "custom_content": "ok"})])
     store._collection = MagicMock()
