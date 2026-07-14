@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from dynamiq.nodes.llms.base import LLM_DEFAULT_MAX_TOKENS
-from dynamiq.nodes.llms.registry import ModelMetadata, ModelRegistry
+from dynamiq.nodes.llms.registry import ModelMetadata, ModelRegistry, model_registry
 
 MODEL_A = "test-org/model-a"
 MODEL_B = "test-org/model-b"
@@ -330,6 +330,39 @@ def test_sync_does_not_clobber_known_litellm_model(monkeypatch):
     assert after["max_input_tokens"] != 1
 
 
+def test_sync_refreshes_known_canonical_provider_model(monkeypatch, mocker):
+    """Canonical provider keys may refresh explicit fields without dropping provider metadata."""
+    import litellm
+
+    monkeypatch.setenv("DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM", "1")
+    existing = {
+        "litellm_provider": "test_provider",
+        "max_input_tokens": 1,
+        "provider_owned_field": "preserved",
+    }
+    mocker.patch.object(litellm, "get_model_info", return_value=existing)
+    register_model = mocker.patch.object(litellm, "register_model")
+
+    reg = ModelRegistry()
+    reg._models = {
+        "test_provider/model-a": {
+            "litellm_provider": "test_provider",
+            "max_input_tokens": 2,
+        }
+    }
+    reg.sync_to_litellm()
+
+    register_model.assert_called_once_with(
+        {
+            "test_provider/model-a": {
+                "litellm_provider": "test_provider",
+                "max_input_tokens": 2,
+                "provider_owned_field": "preserved",
+            }
+        }
+    )
+
+
 def test_sync_disabled_still_registers_models_into_registry(monkeypatch):
     """The disable env only gates the litellm gap-fill -- models passed to sync_to_litellm
     must still be added to the registry itself, and must NOT leak into litellm."""
@@ -417,3 +450,79 @@ def test_sync_is_exception_safe_without_litellm(monkeypatch):
     reg = ModelRegistry()
     reg._models = {MODEL_A.lower(): dict(TEST_REGISTRY_DATA[MODEL_A])}
     reg.sync_to_litellm()  # must not raise
+
+
+@pytest.mark.parametrize(
+    ("model_id", "expected"),
+    [
+        (
+            "MiniMax-M3",
+            {
+                "max_input_tokens": 1_000_000,
+                "max_output_tokens": 128_000,
+                "supports_vision": True,
+                "supports_video_input": True,
+                "supports_adaptive_thinking": True,
+            },
+        ),
+        (
+            "MiniMax-M2.7",
+            {
+                "max_input_tokens": 204_800,
+                "max_output_tokens": 131_072,
+                "supports_vision": False,
+                "supports_video_input": False,
+                "supports_adaptive_thinking": False,
+                "supports_tool_choice": True,
+            },
+        ),
+    ],
+)
+def test_minimax_registry_resolves_official_model_ids(model_id, expected):
+    info = model_registry.get_model_info(model_id)
+
+    assert info is not None
+    assert {field: info[field] for field in expected} == expected
+    assert model_registry.get_model_info(f"minimax/{model_id}") == info
+    assert model_registry.get_model_info(f"anthropic/{model_id}") == info
+    assert f"minimax/{model_id}".lower() in model_registry.list_models()
+    assert ModelMetadata(**info).model_dump(exclude_none=True) == info
+
+
+def test_minimax_m3_registry_preserves_tiered_pricing():
+    import litellm
+
+    info = model_registry.get_model_info("MiniMax-M3")
+
+    assert info is not None
+    expected_pricing = {
+        "input_cost_per_token": 0.0000003,
+        "output_cost_per_token": 0.0000012,
+        "cache_read_input_token_cost": 0.00000006,
+        "input_cost_per_token_priority": 0.00000045,
+        "output_cost_per_token_priority": 0.0000018,
+        "cache_read_input_token_cost_priority": 0.00000009,
+        "input_cost_per_token_above_512k_tokens": 0.0000006,
+        "output_cost_per_token_above_512k_tokens": 0.0000024,
+        "cache_read_input_token_cost_above_512k_tokens": 0.00000012,
+    }
+    custom_pricing = {field: info[field] for field in expected_pricing}
+    litellm_info = litellm.get_model_info(model="minimax/MiniMax-M3")
+
+    # Every field we ship for M3 is a litellm-recognized pricing key, so after sync litellm honors our values.
+    # (litellm has no "above 512k + priority" combined key, so that tier is intentionally not modelled here.)
+    assert custom_pricing == expected_pricing
+    assert {field: litellm_info[field] for field in expected_pricing} == expected_pricing
+    assert litellm.cost_per_token(
+        model="MiniMax-M3",
+        custom_llm_provider="minimax",
+        prompt_tokens=1,
+        completion_tokens=1,
+        service_tier="priority",
+    ) == pytest.approx((0.00000045, 0.0000018))
+    assert litellm.cost_per_token(
+        model="MiniMax-M3",
+        custom_llm_provider="minimax",
+        prompt_tokens=512_001,
+        completion_tokens=1,
+    ) == pytest.approx((512_001 * 0.0000006, 0.0000024))
