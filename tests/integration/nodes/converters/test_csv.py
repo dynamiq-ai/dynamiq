@@ -193,7 +193,8 @@ def test_csv_loader_basic_functionality(request, input_type, input_fixture):
     assert first_doc["metadata"]["Feature_2"] == "Value 2A"
 
     expected_source = csv_input if input_type == "file_paths" else csv_input.name
-    assert first_doc["metadata"]["source"] == expected_source
+    assert first_doc["metadata"]["file_path"] == expected_source
+    assert "source" not in first_doc["metadata"]
 
 
 def test_csv_loader_missing_metadata_columns(csv_file_path):
@@ -289,22 +290,22 @@ def test_csv_loader_without_content_column_rejects_header_only_file(header_only_
     )
 
 
-def test_csv_loader_generic_rows_preserve_source_url_and_duplicate_headers():
+def test_csv_loader_generic_rows_preserve_provider_url_and_duplicate_headers():
     file = write_csv_to_bytesio(["", "plan", "plan"], [["Feature", "Free", "Pro"]], "pricing.csv")
-    source_url = "https://example.com/pricing"
+    provider_url = "https://example.com/pricing"
     csv_loader = CSVConverter()
 
     result = csv_loader.run(
         input_data={
             "files": [file],
-            "metadata": [{"dynamiq_item_source_provider_url": source_url}],
+            "metadata": [{"dynamiq_item_source_provider_url": provider_url}],
         }
     )
 
     document = result.output["documents"][0]
     assert document["content"] == "column_1: Feature\nplan: Free\nplan_2: Pro"
-    assert document["metadata"]["dynamiq_item_source_provider_url"] == source_url
-    assert document["metadata"]["source"] == source_url
+    assert document["metadata"]["dynamiq_item_source_provider_url"] == provider_url
+    assert "source" not in document["metadata"]
 
 
 def test_csv_loader_keeps_generated_headers_globally_unique():

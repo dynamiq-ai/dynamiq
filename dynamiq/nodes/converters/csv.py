@@ -368,7 +368,7 @@ class CSVConverter(Node):
             dict: A document dictionary with two keys:
                 - 'content': The content extracted from the specified `content_column`.
                 - 'metadata': A dict containing merged metadata from CSV and external sources,
-                  plus a 'source' key identifying the file or in-memory data source.
+                  plus a 'file_path' key identifying the file or in-memory data source.
 
         Raises:
             KeyError: If the specified `content_column` is not present in a row of the CSV.

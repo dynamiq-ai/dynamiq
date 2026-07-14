@@ -179,7 +179,7 @@ def test_workflow_with_pptx_converter(request, input_type, input_fixture):
                 Document(
                     id=document_id,
                     content=content,
-                    metadata={"file_path": expected_file_path, "source": expected_file_path},
+                    metadata={"file_path": expected_file_path},
                 )
             ]
         },
@@ -203,7 +203,7 @@ def test_pptx_one_doc_per_page_adds_page_number_metadata():
     documents = result.output["documents"]
     assert [document.metadata["page_number"] for document in documents] == [1, 2]
     assert all(document.metadata["file_path"] == "slides.pptx" for document in documents)
-    assert all(document.metadata["source"] == "slides.pptx" for document in documents)
+    assert all("source" not in document.metadata for document in documents)
 
 
 @pytest.mark.parametrize(
