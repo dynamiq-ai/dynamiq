@@ -644,12 +644,24 @@ class KnowledgeGraphRetriever(ConnectionNode):
         # merged node, so a differently-scoped name can't leak.
         if include_endpoint_ids:
             # Endpoint ids feed _endpoint_ids -> the hop-2 frontier; keep the shape identical to _hop_query.
-            # anchor_id is the MATCH-bound seed (`a`), so the hop-2 frontier can exclude the seeds
-            # themselves — otherwise hop 2 re-expands the seeds and their leftover 1-hop edges (the ones
-            # hop 1's beam cut) would compete against true chain facts.
+            # anchor_ids are the SEED endpoint(s) of the row, so the hop-2 frontier can exclude the seeds —
+            # otherwise hop 2 re-expands them and their leftover 1-hop edges (the ones hop 1's beam cut)
+            # would compete against true chain facts. Anchored modes bind `a` to the seed by construction;
+            # the CONTAINS scan matches the seed on EITHER endpoint, so the anchor is recomputed per row
+            # with the same predicate the scan matched on (both endpoints can be seeds -> a list).
+            anchor_expr = (
+                "[a.id]"
+                if anchored
+                else "[x IN [a, b] WHERE x.name IS NOT NULL AND toLower($q) CONTAINS toLower(x.name) | x.id]"
+            )
+            # Endpoint ids come from the edge's OWN src_id/dst_id snapshots (stamped at write time), not
+            # startNode()/endNode() — those are unusable on AGE/Neptune, so property reads keep multi-hop
+            # portable. Edges written before the snapshots existed yield null ids -> empty frontier ->
+            # multi-hop gracefully degrades to the single-hop result.
             ret = (
-                "RETURN r.src_name AS a_name, startNode(r).id AS a_id, type(r) AS rel, "
-                "properties(r) AS rprops, r.dst_name AS b_name, endNode(r).id AS b_id, a.id AS anchor_id"
+                "RETURN r.src_name AS a_name, r.src_id AS a_id, type(r) AS rel, "
+                "properties(r) AS rprops, r.dst_name AS b_name, r.dst_id AS b_id, "
+                f"{anchor_expr} AS anchor_ids"
             )
         else:
             ret = "RETURN r.src_name AS a_name, type(r) AS rel, " "properties(r) AS rprops, r.dst_name AS b_name"
@@ -700,15 +712,15 @@ class KnowledgeGraphRetriever(ConnectionNode):
         params: dict[str, Any] = {"frontier": frontier_ids, "visited": visited_ids, "limit": limit}
         rel_clause, filter_params = self._edge_predicates("r", user_filters)
         params.update(filter_params)
-        guard = "NOT (startNode(r).id IN $visited AND endNode(r).id IN $visited)"
+        guard = "NOT (r.src_id IN $visited AND r.dst_id IN $visited)"
         where = " AND ".join([t for t in [guard, rel_clause] if t])
         lines = [
             f"MATCH (a:{ENTITY_LABEL}) WHERE a.id IN $frontier",
             "MATCH (a)-[r]-(b)",
             f"WHERE {where}",
             "WITH DISTINCT r",
-            "RETURN r.src_name AS a_name, startNode(r).id AS a_id, type(r) AS rel, "
-            "properties(r) AS rprops, r.dst_name AS b_name, endNode(r).id AS b_id",
+            "RETURN r.src_name AS a_name, r.src_id AS a_id, type(r) AS rel, "
+            "properties(r) AS rprops, r.dst_name AS b_name, r.dst_id AS b_id",
         ]
         if query_vector:
             params["qvec"] = query_vector
@@ -755,7 +767,7 @@ class KnowledgeGraphRetriever(ConnectionNode):
             # edges already inside the visited set. The seeds (anchors) are excluded from the first
             # frontier — hop 1 already expanded them, and re-expanding would let their leftover 1-hop
             # edges compete against true chain facts. ACL-filtered and relevance-ranked per hop.
-            anchor_ids = {row.get("anchor_id") for row in rows if row.get("anchor_id")}
+            anchor_ids = {aid for row in rows for aid in (row.get("anchor_ids") or []) if aid}
             endpoint_ids = self._endpoint_ids(rows)
             visited = endpoint_ids | anchor_ids
             frontier = endpoint_ids - anchor_ids
@@ -775,12 +787,14 @@ class KnowledgeGraphRetriever(ConnectionNode):
                 frontier = endpoint_ids - visited
                 visited |= endpoint_ids
             documents = self._render_single_hop(rows)
-            # Enforce the top_k contract: an explicit beam_width (or the >=1-per-hop floor) can make the
-            # per-hop sum exceed `limit`. Rows are ordered hop-by-hop, so the cut drops deepest facts first.
+            logger.info(f"Tool {self.name} - {self.id}: retrieved {len(documents)} fact(s).")
+            # Rerank BEFORE enforcing top_k: when multi-hop over-fetches (explicit beam_width or the
+            # >=1-per-hop floor), the reranker must see the WHOLE pool so a deep chain fact is kept or
+            # dropped by RELEVANCE. The cap then trims the (reranked, else hop-ordered) list — so without
+            # a reranker the cut still drops deepest facts first.
+            documents = self._maybe_rerank(documents, input_data.query, config, **kwargs)
             if len(documents) > limit:
                 documents = documents[:limit]
-            logger.info(f"Tool {self.name} - {self.id}: retrieved {len(documents)} fact(s).")
-            documents = self._maybe_rerank(documents, input_data.query, config, **kwargs)
             facts = "\n".join(f"- {d.content}" for d in documents) or "No matching facts found."
             source_documents = self._fetch_source_documents(documents)
             # `facts` (triples) and `source_documents` (passages) are ALWAYS present so consumers never infer.

@@ -662,7 +662,7 @@ HOP1 = [
         "rprops": {},
         "b_name": "Nortech",
         "b_id": "id-nortech",
-        "anchor_id": "id-sven",  # the MATCH-bound seed — excluded from the hop-2 frontier
+        "anchor_ids": ["id-sven"],  # the row's seed endpoint(s) — excluded from the hop-2 frontier
     }
 ]
 HOP2 = [{"a_name": "Nortech", "a_id": "id-nortech", "rel": "USES", "rprops": {}, "b_name": "Aegis", "b_id": "id-aegis"}]
@@ -694,7 +694,8 @@ class TestMultiHopBeam:
         # compete in hop 2's beam against true chain facts; it stays in $visited (no walking back).
         assert set(hop_params["frontier"]) == {"id-nortech"}
         assert set(hop_params["visited"]) == {"id-sven", "id-nortech"}
-        assert "NOT (startNode(r).id IN $visited AND endNode(r).id IN $visited)" in hop_query
+        # portable guard: edge-property snapshots, not startNode()/endNode() (unavailable on AGE/Neptune)
+        assert "NOT (r.src_id IN $visited AND r.dst_id IN $visited)" in hop_query
         assert "WITH DISTINCT r" in hop_query
 
     def test_hop1_query_returns_endpoint_ids_only_for_multi_hop(self):
@@ -703,9 +704,13 @@ class TestMultiHopBeam:
         node = make_multihop_retriever([HOP1, HOP2], max_hops=2)
         node.execute(GraphRetrieverInputSchema(query="Sven"))
         hop1_query = node._graph_store.calls[0][0]
-        assert "startNode(r).id AS a_id" in hop1_query
-        assert "endNode(r).id AS b_id" in hop1_query
-        assert "a.id AS anchor_id" in hop1_query  # seed identity, so the frontier can exclude the anchors
+        assert "r.src_id AS a_id" in hop1_query  # edge-property snapshots -> portable to AGE/Neptune
+        assert "r.dst_id AS b_id" in hop1_query
+        assert "startNode(" not in hop1_query and "endNode(" not in hop1_query
+        # scan path (no index): the seed can match EITHER endpoint, so the anchor is recomputed per row
+        # with the scan's own predicate — never assumed to be `a`.
+        assert "[x IN [a, b] WHERE x.name IS NOT NULL AND toLower($q) CONTAINS toLower(x.name) | x.id]" in hop1_query
+        assert "AS anchor_ids" in hop1_query
 
         node = make_multihop_retriever([HOP1])
         node.execute(GraphRetrieverInputSchema(query="Sven"))
@@ -771,3 +776,42 @@ class TestMultiHopBeam:
         out = node.execute(GraphRetrieverInputSchema(query="Acme"))
         assert len(out["documents"]) == 4  # 6 rendered facts -> capped to top_k
         assert out["documents"][0].content.endswith("Acme")  # hop-1 facts survive the cut
+
+    def test_scan_seed_matched_as_destination_expands_the_neighbor(self):
+        # Directed scan row (Sven)-[WORKS_AT]->(Nortech) where the SEED is Nortech (matched as `b`):
+        # the frontier must expand the true new node (Sven) and exclude the seed — not the reverse.
+        hop1 = [
+            {
+                "a_name": "Sven",
+                "a_id": "id-sven",
+                "rel": "WORKS_AT",
+                "rprops": {},
+                "b_name": "Nortech",
+                "b_id": "id-nortech",
+                "anchor_ids": ["id-nortech"],  # seed bound as the DESTINATION endpoint
+            }
+        ]
+        node = make_multihop_retriever([hop1, HOP2], max_hops=2)
+        node.execute(GraphRetrieverInputSchema(query="Nortech"))
+        _, hop_params = node._graph_store.calls[1]
+        assert set(hop_params["frontier"]) == {"id-sven"}  # the neighbor, not the seed
+        assert set(hop_params["visited"]) == {"id-sven", "id-nortech"}
+
+    def test_reranker_sees_deep_facts_before_top_k_cut(self):
+        # The top_k cap must trim AFTER reranking: with an over-fetching beam, deep chain facts have to
+        # reach the reranker so they are kept/dropped by RELEVANCE, not discarded positionally first.
+        hop1 = [
+            {"a_name": f"P{i}", "a_id": f"p{i}", "rel": "WORKS_AT", "rprops": {}, "b_name": "Acme", "b_id": "acme"}
+            for i in range(3)
+        ]
+        hop2 = [
+            {"a_name": "Acme", "a_id": "acme", "rel": "USES", "rprops": {}, "b_name": f"S{i}", "b_id": f"s{i}"}
+            for i in range(3)
+        ]
+        reranker = StubReranker(top_k=2)
+        node = make_multihop_retriever([hop1, hop2], max_hops=2, beam_width=5, top_k=4, document_reranker=reranker)
+        out = node.execute(GraphRetrieverInputSchema(query="Acme"))
+        assert reranker.received == 6  # the WHOLE pool, including hop-2 facts beyond top_k
+        # StubReranker reverses -> a deep (hop-2) fact wins; the cap trims the RERANKED list
+        assert len(out["documents"]) == 2
+        assert out["documents"][0].content.startswith("Acme -[USES]->")
