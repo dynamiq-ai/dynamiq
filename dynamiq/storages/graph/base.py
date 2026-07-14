@@ -37,6 +37,19 @@ class BaseGraphStore(ABC):
         """Whether this backend implements (and has enabled) :meth:`write_graph`."""
         return type(self)._writes_graph
 
+    def edge_endpoint_id_selectors(self) -> tuple[str, str]:
+        """Cypher expressions yielding an edge ``r``'s (start, end) node ``id`` property.
+
+        Multi-hop retrieval needs endpoint ids per edge to build the next hop's frontier, and the
+        expression is dialect-specific (Neo4j: ``startNode(r).id``; AGE/Neptune expose no usable
+        equivalent — their internal edge-endpoint ids are not the ``id`` property). No default —
+        backends without an implementation don't support multi-hop retrieval and raise here.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__}: multi-hop retrieval is not supported for this backend "
+            "(no edge endpoint id selectors)."
+        )
+
     def write_graph(
         self,
         *,

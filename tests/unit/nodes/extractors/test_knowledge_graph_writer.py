@@ -160,20 +160,6 @@ class TestResolveAgainstGraph:
         # the edge endpoint followed the entity onto its new id
         assert resolved_rels[0]["start_identity"] == new_id
 
-    def test_resolved_endpoint_ids_snapshotted_onto_edge(self):
-        # Multi-hop retrieval reads endpoint ids as edge properties (src_id/dst_id) — portable to backends
-        # without startNode()/endNode() — so resolution must stamp the FINAL ids onto every edge.
-        writer = make_writer({"ORGANIZATION": [], "SYSTEM": []})
-        nodes = [entity("ORGANIZATION", "acme", "Acme"), entity("SYSTEM", "helios", "Helios")]
-        rels = [edge("USES", "ORGANIZATION", "SYSTEM", "acme", "helios")]
-
-        _, resolved_rels = writer._resolve_against_graph(nodes, rels)
-
-        rel = resolved_rels[0]
-        assert rel["properties"]["src_id"] == rel["start_identity"]
-        assert rel["properties"]["dst_id"] == rel["end_identity"]
-        assert is_uuid(rel["properties"]["src_id"])  # the resolved id, not the LLM wiring id
-
     def test_matches_existing_by_name_despite_different_id(self):
         writer = make_writer({"ORGANIZATION": [("uuid-existing", "Acme Capital")]})
         nodes = [entity("ORGANIZATION", "acme-capital-llc", "Acme Capital LLC")]

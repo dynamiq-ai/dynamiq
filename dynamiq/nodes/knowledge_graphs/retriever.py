@@ -267,6 +267,8 @@ class KnowledgeGraphRetriever(ConnectionNode):
         max_hops (int): Beam-search traversal depth (default 1 = single hop, the previous behavior).
             At 2+, chain questions ("what does X's employer use?") resolve in one call: hop 1 finds
             ``X -WORKS_AT-> Acme``, hop 2 expands from Acme to ``Acme -USES-> ...``. Overridable per call.
+            Backend-gated: requires the store's ``edge_endpoint_id_selectors`` (Neo4j only for now);
+            other backends raise ``NotImplementedError`` when ``max_hops > 1``.
         beam_width (int | None): Edges kept per hop when ``max_hops > 1`` (default ``top_k // max_hops``).
         document_reranker (Node | None): Optional reranker (e.g. a cross-encoder ``CohereReranker``) applied
             to the rendered facts. A high-degree (hub) entity can expand to many edges that all match the
@@ -654,13 +656,13 @@ class KnowledgeGraphRetriever(ConnectionNode):
                 if anchored
                 else "[x IN [a, b] WHERE x.name IS NOT NULL AND toLower($q) CONTAINS toLower(x.name) | x.id]"
             )
-            # Endpoint ids come from the edge's OWN src_id/dst_id snapshots (stamped at write time), not
-            # startNode()/endNode() — those are unusable on AGE/Neptune, so property reads keep multi-hop
-            # portable. Edges written before the snapshots existed yield null ids -> empty frontier ->
-            # multi-hop gracefully degrades to the single-hop result.
+            # Endpoint id expressions are dialect-specific, so they come from the STORE (Neo4j:
+            # startNode(r).id). Backends without an implementation raise NotImplementedError here —
+            # multi-hop is explicitly unsupported on them rather than failing mid-query.
+            start_id, end_id = self._graph_store.edge_endpoint_id_selectors()
             ret = (
-                "RETURN r.src_name AS a_name, r.src_id AS a_id, type(r) AS rel, "
-                "properties(r) AS rprops, r.dst_name AS b_name, r.dst_id AS b_id, "
+                f"RETURN r.src_name AS a_name, {start_id} AS a_id, type(r) AS rel, "
+                f"properties(r) AS rprops, r.dst_name AS b_name, {end_id} AS b_id, "
                 f"{anchor_expr} AS anchor_ids"
             )
         else:
@@ -712,15 +714,16 @@ class KnowledgeGraphRetriever(ConnectionNode):
         params: dict[str, Any] = {"frontier": frontier_ids, "visited": visited_ids, "limit": limit}
         rel_clause, filter_params = self._edge_predicates("r", user_filters)
         params.update(filter_params)
-        guard = "NOT (r.src_id IN $visited AND r.dst_id IN $visited)"
+        start_id, end_id = self._graph_store.edge_endpoint_id_selectors()
+        guard = f"NOT ({start_id} IN $visited AND {end_id} IN $visited)"
         where = " AND ".join([t for t in [guard, rel_clause] if t])
         lines = [
             f"MATCH (a:{ENTITY_LABEL}) WHERE a.id IN $frontier",
             "MATCH (a)-[r]-(b)",
             f"WHERE {where}",
             "WITH DISTINCT r",
-            "RETURN r.src_name AS a_name, r.src_id AS a_id, type(r) AS rel, "
-            "properties(r) AS rprops, r.dst_name AS b_name, r.dst_id AS b_id",
+            f"RETURN r.src_name AS a_name, {start_id} AS a_id, type(r) AS rel, "
+            f"properties(r) AS rprops, r.dst_name AS b_name, {end_id} AS b_id",
         ]
         if query_vector:
             params["qvec"] = query_vector

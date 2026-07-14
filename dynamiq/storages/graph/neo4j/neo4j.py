@@ -137,6 +137,10 @@ class Neo4jGraphStore(BaseGraphStore):
     def supports_graph_result(self) -> bool:
         return True
 
+    def edge_endpoint_id_selectors(self) -> tuple[str, str]:
+        """Neo4j-native endpoint id expressions — works on any graph, including pre-existing ones."""
+        return ("startNode(r).id", "endNode(r).id")
+
     def _tally_counts(self, totals: dict[str, int], summary: Any) -> None:
         """Read Neo4j's native write counters off each statement's summary into ``totals``.
 

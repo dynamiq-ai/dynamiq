@@ -716,15 +716,6 @@ class KnowledgeGraphWriter(Node):
                 rel["start_identity"] = id_remap[rel["start_identity"]]
             if rel["end_identity"] in id_remap:
                 rel["end_identity"] = id_remap[rel["end_identity"]]
-            # Snapshot the RESOLVED endpoint ids onto the edge (like src_name/dst_name): retrieval reads
-            # endpoint ids as plain edge properties, portable to every openCypher backend — AGE/Neptune
-            # have no usable startNode()/endNode() (AGE's start_id()/end_id() return internal ids, not
-            # our `id` property), so multi-hop frontier building must not depend on graph functions.
-            rel["properties"] = {
-                **(rel.get("properties") or {}),
-                "src_id": rel["start_identity"],
-                "dst_id": rel["end_identity"],
-            }
 
         # Two extracted entities can resolve to the same node -> dedupe by (label, id).
         seen: set[tuple[str, str]] = set()
