@@ -42,8 +42,20 @@ class ModelMetadata(BaseModel):
     supports_parallel_function_calling: bool | None = None
     supports_response_schema: bool | None = None
     supports_system_messages: bool | None = None
+    supports_tool_choice: bool | None = None
+    supports_prompt_caching: bool | None = None
+    supports_reasoning: bool | None = None
+    supports_adaptive_thinking: bool | None = None
     input_cost_per_token: float | None = None
     output_cost_per_token: float | None = None
+    cache_creation_input_token_cost: float | None = None
+    cache_read_input_token_cost: float | None = None
+    input_cost_per_token_priority: float | None = None
+    output_cost_per_token_priority: float | None = None
+    cache_read_input_token_cost_priority: float | None = None
+    input_cost_per_token_above_512k_tokens: float | None = None
+    output_cost_per_token_above_512k_tokens: float | None = None
+    cache_read_input_token_cost_above_512k_tokens: float | None = None
 
 
 def _as_info_dict(info: ModelMetadata | dict[str, Any]) -> dict[str, Any]:
@@ -84,12 +96,13 @@ class ModelRegistry:
         self.sync_to_litellm()
 
     def sync_to_litellm(self, models: dict[str, ModelMetadata | dict[str, Any]] | None = None) -> None:
-        """Gap-fill registry entries into litellm's in-memory ``model_cost``.
+        """Sync registry entries into litellm's in-memory ``model_cost``.
 
-        For every selected model litellm does NOT already recognize, register it so litellm's
-        own metadata lookups honor our values. Never clobbers an entry litellm already knows.
-        Per-process, non-persistent, exception-safe: a missing or misbehaving litellm can
-        never break ``import dynamiq``.
+        Unknown models are registered directly. Existing models are refreshed only when the
+        registry key uses its declared ``litellm_provider/model`` form; explicit registry
+        fields override stale provider metadata while other provider fields are preserved.
+        Unqualified known models are never clobbered. The sync is per-process,
+        non-persistent, and exception-safe.
 
         Args:
             models: New model definitions (``{model_id: info}``) to add to the registry and
@@ -117,24 +130,38 @@ class ModelRegistry:
             logger.debug("ModelRegistry: litellm unavailable, skipping sync: %s", exc)
             return
 
-        registered = skipped = failed = 0
+        registered = refreshed = skipped = failed = 0
         for key, info in items.items():
             try:
                 existing = litellm.get_model_info(model=key)  # case-/prefix-tolerant lookup
             except Exception:
                 existing = None
             if existing:
-                skipped += 1
-                continue
+                provider = info.get("litellm_provider")
+                if not isinstance(provider, str) or not key.startswith(f"{provider.lower()}/"):
+                    skipped += 1
+                    continue
+                sync_info = {**existing, **info}
+            else:
+                sync_info = info
             try:
-                litellm.register_model({key: info})
-                registered += 1
+                litellm.register_model({key: sync_info})
+                if existing:
+                    refreshed += 1
+                else:
+                    registered += 1
             except Exception as exc:
                 failed += 1
                 logger.debug("ModelRegistry: failed to register %s into litellm: %s", key, exc)
 
         log = logger.warning if failed else logger.debug
-        log("ModelRegistry->litellm sync: registered=%d skipped=%d failed=%d", registered, skipped, failed)
+        log(
+            "ModelRegistry->litellm sync: registered=%d refreshed=%d skipped=%d failed=%d",
+            registered,
+            refreshed,
+            skipped,
+            failed,
+        )
 
     def register(self, model: str, info: ModelMetadata | dict[str, Any]) -> None:
         """Add or update a model entry.
@@ -152,16 +179,26 @@ class ModelRegistry:
         """Look up model info, stripping the litellm provider prefix if needed.
 
         Tries the full model string first (e.g. ``"together_ai/zai-org/GLM-5"``),
-        then the part after the first ``/`` (e.g. ``"zai-org/GLM-5"``).
+        then the part after the first ``/`` (e.g. ``"zai-org/GLM-5"``). Finally,
+        a unique canonical ``litellm_provider/model`` entry can satisfy raw model IDs or
+        alternate protocol prefixes.
         """
         model_lower = model.lower()
         info = self._models.get(model_lower)
         if info is not None:
             return info
         sep = model_lower.find("/")
-        if sep != -1:
-            return self._models.get(model_lower[sep + 1 :])
-        return None
+        unprefixed = model_lower[sep + 1 :] if sep != -1 else model_lower
+        info = self._models.get(unprefixed)
+        if info is not None:
+            return info
+
+        canonical_matches = []
+        for registered_model, registered_info in self._models.items():
+            provider = registered_info.get("litellm_provider")
+            if isinstance(provider, str) and registered_model == f"{provider.lower()}/{unprefixed}":
+                canonical_matches.append(registered_info)
+        return canonical_matches[0] if len(canonical_matches) == 1 else None
 
     def get_model_info(self, model: str) -> dict[str, Any] | None:
         """Return the full info dict or ``None`` if the model is unknown."""

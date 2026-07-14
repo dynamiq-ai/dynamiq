@@ -22,6 +22,7 @@ from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentIterati
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
+from dynamiq.nodes.agents.shared_session import SandboxSharingScope, SharedSession, _shared_session
 from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     ToolCacheEntry,
@@ -70,6 +71,9 @@ from dynamiq.utils.utils import deep_merge
 # Per-call tool overlay (e.g. LTM tools bound to a request's user_id); isolated
 # per thread / per asyncio task via ContextVar.
 _run_extra_tools: ContextVar[list["Node"] | None] = ContextVar("dynamiq_agent_run_extra_tools", default=None)
+
+# Per-call overlay of shared-sandbox tools; isolated per thread / asyncio task, like `_run_extra_tools`.
+_shared_sandbox_tools: ContextVar[list["Node"] | None] = ContextVar("dynamiq_shared_sandbox_tools", default=None)
 
 
 class StreamChunkChoiceDelta(BaseModel):
@@ -265,6 +269,19 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         description="Configuration for file storage used by the agent.",
     )
     sandbox: SandboxConfig | None = Field(default=None, description="Configuration for sandbox used by the agent.")
+    share_sandbox_with_subagents: bool = Field(
+        default=False,
+        description="When enabled, subagents (SubAgentTool) share this agent's sandbox "
+        "instead of each provisioning their own. Each subagent gets an isolated working directory.",
+    )
+    sandbox_sharing_scope: SandboxSharingScope = Field(
+        default=SandboxSharingScope.ALL,
+        description=(
+            "When share_sandbox_with_subagents is on, which subagents join the shared sandbox: "
+            "ALL (default) routes every subagent onto the shared sandbox, overriding a subagent's "
+            "own sandbox; AUGMENT only shares to subagents that bring no sandbox of their own."
+        ),
+    )
     skills: SkillsConfig = Field(
         default_factory=SkillsConfig,
         description="Skills config. When enabled and source registry is set, skills are on (Dynamiq or FileSystem).",
@@ -284,6 +301,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     description: str | None = Field(default=None, description="Short human-readable description of the agent.")
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
     _excluded_tool_ids: set[str] = PrivateAttr(default_factory=set)
+    _own_sandbox_tool_ids: set[str] = PrivateAttr(default_factory=set)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
     _history_offset: int = PrivateAttr(
         default=DEFAULT_HISTORY_OFFSET,
@@ -292,6 +310,16 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     _pinned_input: Message | VisionMessage | None = PrivateAttr(default=None)
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
+    _sandbox_is_shared: bool = PrivateAttr(default=False)
+    # A borrowed per-agent view of an owner's shared sandbox; when set it is this
+    # agent's effective sandbox_backend for the whole run (tools, uploads, output).
+    _shared_sandbox_view: Sandbox | None = PrivateAttr(default=None)
+    # This agent's own dedicated backend when scope=ALL routed it onto the shared sandbox instead —
+    # the orphan cleanup_factory_agent tears down. None when it had no distinct own backend.
+    _overridden_own_backend: Sandbox | None = PrivateAttr(default=None)
+    # Whether the currently built ReAct prompt reflects a borrowed shared sandbox; drives the
+    # run-time prompt rebuild so a borrower advertises the sandbox tools it only gets at run time.
+    _prompt_reflects_shared_sandbox: bool = PrivateAttr(default=False)
     # Loop progress and pending-tool-call state are declared on AgentIterativeCheckpointMixin.
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -365,13 +393,15 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 expanded_tools.append(tool)
 
         self.tools = expanded_tools
-        if self.file_store_backend and self.sandbox_backend:
+        tools_sandbox = self._resolve_tools_sandbox()
+        if self.file_store_backend and tools_sandbox:
             raise ValueError("file_store and sandbox cannot both be enabled for an Agent at the same time")
 
-        if self.sandbox_backend:
+        if tools_sandbox:
             # Add sandbox tools when sandbox is enabled (not serialized; recreated from sandbox config on load)
-            sandbox_tools = self.sandbox_backend.get_tools(llm=self.llm)
+            sandbox_tools = tools_sandbox.get_tools(llm=self.llm)
             self._excluded_tool_ids.update(t.id for t in sandbox_tools)
+            self._own_sandbox_tool_ids.update(t.id for t in sandbox_tools)
             self.tools.extend(sandbox_tools)
 
         elif self.file_store_backend:
@@ -610,7 +640,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         Failures are logged but never propagate — cleanup must not break the agent run.
         """
         try:
-            for tool in self.tools:
+            # Use _runtime_tools, not self.tools, so a borrowed shared sandbox's TodoWriteTool
+            # (delivered via the _shared_sandbox_tools overlay) also gets cleared — otherwise its
+            # workdir keeps stale todos for the next run.
+            for tool in self._runtime_tools:
                 if isinstance(tool, TodoWriteTool):
                     tool.clear()
             if getattr(self, "state", None) is not None:
@@ -675,7 +708,18 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         # Always set — a sub-agent without LTM would otherwise inherit the
         # parent's overlay via `ContextAwareThreadPoolExecutor`.
         ltm_token = _run_extra_tools.set(ltm_tools)
+        # Session/borrow setup lives INSIDE the try so the finally always resets the ContextVars and
+        # releases any borrowed view, even if setup raises. Tokens stay None until each set succeeds.
+        # Capture any view already active on this instance so a nested execute() restores it rather
+        # than clearing the outer run's view.
+        shared_session_token = None
+        sandbox_overlay_token = None
+        prev_shared_view = self._shared_sandbox_view
         try:
+            shared_session_token = self._maybe_enter_shared_session(kwargs)
+            # Always set the overlay (even to None, for non-borrowers) so a nested subagent does not
+            # inherit this agent's overlay via ContextAwareThreadPoolExecutor.
+            sandbox_overlay_token = _shared_sandbox_tools.set(self._maybe_borrow_shared_sandbox())
             if use_memory:
                 history_messages = self._retrieve_memory(input_data)
                 if len(history_messages) > 0:
@@ -849,7 +893,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
             return execution_result
         finally:
+            if sandbox_overlay_token is not None:
+                _shared_sandbox_tools.reset(sandbox_overlay_token)
+            self._release_shared_sandbox_view(restore_to=prev_shared_view)
             _run_extra_tools.reset(ltm_token)
+            self._exit_shared_session(shared_session_token)
 
     def retrieve_conversation_history(
         self,
@@ -2113,14 +2161,183 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
     @property
     def sandbox_backend(self) -> Sandbox | None:
-        """Get the sandbox backend from the configuration if enabled."""
+        """The effective sandbox backend: a borrowed shared-sandbox view when set (so uploads,
+        output collection, skills and cleanup target it too), else the own configured backend.
+        """
+        if self._shared_sandbox_view is not None:
+            return self._shared_sandbox_view
         return self.sandbox.backend if self.sandbox and self.sandbox.enabled else None
+
+    def _maybe_enter_shared_session(self, kwargs: dict):
+        """Establish a shared execution session for this subtree if this agent owns one.
+
+        Returns a ContextVar token to reset later, or None when nothing was set
+        (flag off, no sandbox, or a session already exists and is inherited).
+        """
+        if _shared_session.get() is not None:
+            # Inherit the ancestor's session. By design the OUTERMOST sharing owner owns the whole
+            # subtree's session: a nested agent that also sets share_sandbox_with_subagents does not
+            # open a separate sub-session, so its own sharing_scope is intentionally not re-applied to
+            # its descendants (they keep borrowing the outer owner's sandbox).
+            return None
+        if not self.share_sandbox_with_subagents:
+            return None
+        if self.sandbox_backend is None:
+            logger.warning(
+                "Agent %s - %s: share_sandbox_with_subagents is enabled but this agent has no sandbox "
+                "of its own to share; subagents will not share a sandbox. Configure a sandbox on this "
+                "agent to enable sharing.",
+                self.name,
+                self.id,
+            )
+            return None
+        if not getattr(self.sandbox_backend, "supports_views", False):
+            logger.warning(
+                "Agent %s - %s: share_sandbox_with_subagents is enabled but this agent's sandbox backend "
+                "(%s) does not support shared views; subagents will not share a sandbox. Use a "
+                "view-capable backend (e.g. E2B) to enable sharing.",
+                self.name,
+                self.id,
+                type(self.sandbox_backend).__name__,
+            )
+            return None
+
+        session = SharedSession(
+            sandbox=self.sandbox_backend,
+            share_sandbox=True,
+            owner_run_id=str(kwargs.get("run_id") or self.id),
+            owner_agent_id=self.id,
+            sharing_scope=self.sandbox_sharing_scope,
+        )
+        return _shared_session.set(session)
+
+    def _exit_shared_session(self, token) -> None:
+        """Reset the ContextVar set by `_maybe_enter_shared_session`."""
+        if token is not None:
+            _shared_session.reset(token)
+
+    def _resolve_tools_sandbox(self):
+        """The sandbox this agent builds its OWN tools from at construction — always its own
+        backend. Borrowing is resolved at run time in ``execute()`` instead (that is what lets
+        initialized-mode subagents share, since ``_shared_sandbox_view`` is None at construction).
+        """
+        return self.sandbox_backend
+
+    def _configured_sandbox_backend(self) -> "Sandbox | None":
+        """This agent's OWN configured sandbox backend, ignoring any borrowed shared view."""
+        return self.sandbox.backend if self.sandbox and self.sandbox.enabled else None
+
+    def _maybe_borrow_shared_sandbox(self) -> list[Node] | None:
+        """Resolve a per-agent view of the owner's shared sandbox at run time.
+
+        Called from ``execute()``. When this agent is a *borrower* under an active shared
+        session, build sandbox tools on a fresh per-agent view of the shared sandbox and
+        return them as a run-time overlay (published via ``_shared_sandbox_tools``). Returns
+        None when this agent should not borrow:
+
+        - no active/shareable session;
+        - this agent *owns* the shared sandbox (its own tools already use it);
+        - it uses a file store (file store and sandbox are mutually exclusive); or
+        - scope is AUGMENT and it brings its own sandbox.
+
+        Sets ``_shared_sandbox_view`` / ``_sandbox_is_shared`` when it borrows. Works for both
+        factory- and initialized-mode subagents since the session ContextVar is visible in
+        ``execute()`` regardless of when the instance was built.
+        """
+        session = _shared_session.get()
+        if session is None or not session.share_sandbox:
+            return None
+
+        # Identify the owner by agent id, not backend object identity: a subagent may be configured
+        # with the same Sandbox object as the owner and must still get its own isolated /work view.
+        if session.owner_agent_id == self.id:
+            return None  # the owner already uses the shared sandbox via its own tools
+
+        own = self._configured_sandbox_backend()
+        if self.file_store_backend is not None:
+            return None  # file-store agents never join the shared sandbox
+
+        if session.sharing_scope == SandboxSharingScope.AUGMENT and own is not None:
+            return None  # augment: keep this subagent's own sandbox
+
+        # Key the workdir on the stable instance id so a reused initialized subagent lands in the
+        # SAME /work/<key> across calls (its relative-path files persist). Factory subagents are
+        # rebuilt per call and so still rotate.
+        key = f"{(self.sanitize_tool_name(self.name) or 'subagent').lower()}-{self.id}"
+        view = session.sandbox_view_for(key)
+        if view is None:
+            return None
+
+        # Build tools BEFORE committing any instance state, so a failure here leaves this agent
+        # untouched: no latched view and the dedicated sandbox not yet released.
+        tools = view.get_tools(llm=self.llm)
+        for tool in tools:
+            if tool.is_postponed_component_init:
+                tool.init_components()
+            tool.is_optimized_for_agents = True
+
+        # A distinct own backend (not the shared sandbox itself) that scope=ALL routes off. We do NOT
+        # tear it down here — reused initialized subagents must keep it for later standalone use; a
+        # factory subagent's orphan is torn down in cleanup_factory_agent. Record it so cleanup can
+        # find it, but never treat the shared sandbox object as an orphan to kill.
+        overrode_own = own is not None and own is not session.get_sandbox()
+        if overrode_own:
+            logger.warning(
+                "Agent %s - %s: sandbox_sharing_scope=ALL overrides this subagent's own sandbox; "
+                "routing it onto the owner's shared sandbox instead.",
+                self.name,
+                self.id,
+            )
+
+        self._overridden_own_backend = own if overrode_own else None
+        self._sandbox_is_shared = True
+        self._shared_sandbox_view = view
+        # Ingest this subagent's sandbox-skills into the borrowed view. Init-time ingestion was
+        # skipped (it had no own sandbox then), but its SkillsTool reads SKILL.md files from the
+        # shared sandbox, so they must be present there. No-op when the agent has no sandbox-skills.
+        self._ensure_skills_ingested_for_sandbox()
+        return tools
+
+    def _release_shared_sandbox_view(self, restore_to: "Sandbox | None" = None) -> None:
+        """Disconnect this call's borrowed view and restore the previously active one.
+
+        ``restore_to`` is the view that was active before this call borrowed; passing it lets a
+        nested ``execute()`` on the same instance restore the outer run's view instead of clearing
+        it. ``kill=False`` keeps the shared sandbox alive for the owner and other subagents; only
+        this call's client connection is dropped. ``_sandbox_is_shared`` stays latched so
+        ``cleanup_factory_agent`` never kills the shared sandbox.
+        """
+        view = self._shared_sandbox_view
+        self._shared_sandbox_view = restore_to
+        if view is None or view is restore_to:
+            return
+        try:
+            view.close(kill=False)
+        except Exception as e:
+            logger.warning("Agent %s - %s: shared sandbox view close failed: %s", self.name, self.id, e)
 
     @property
     def _runtime_tools(self) -> list[Node]:
-        """Instance tools plus any per-call overlay (LTM tools bound to user_id)."""
-        extra = _run_extra_tools.get()
-        return self.tools + extra if extra else self.tools
+        """Instance tools plus any per-call overlays.
+
+        Overlays: long-term-memory tools bound to user_id (``_run_extra_tools``) and shared-sandbox
+        tools bound to a per-agent view (``_shared_sandbox_tools``). When a shared-sandbox overlay is
+        active, this agent's OWN sandbox tools are hidden (scope=ALL override) so the model sees a
+        single, consistent sandbox toolset.
+        """
+        tools = self.tools
+        sandbox_overlay = _shared_sandbox_tools.get()
+        # Only strip own sandbox tools when the overlay actually provides replacements. An empty
+        # (but non-None) overlay must not leave the agent with no sandbox tools at all.
+        if sandbox_overlay and self._own_sandbox_tool_ids:
+            tools = [t for t in tools if t.id not in self._own_sandbox_tool_ids]
+        result = list(tools)
+        ltm_overlay = _run_extra_tools.get()
+        if ltm_overlay:
+            result += ltm_overlay
+        if sandbox_overlay:
+            result += sandbox_overlay
+        return result
 
     @property
     def tool_description(self) -> str:

@@ -13,8 +13,8 @@ import os
 import pytest
 
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.knowledge_graph import KnowledgeGraphEntityExtractor, Ontology, Triple
-from dynamiq.nodes.knowledge_graph.entity_extractor import ATTRIBUTE_VALUE_LABEL, HAS_ATTRIBUTE_TYPE
+from dynamiq.nodes.knowledge_graphs import KnowledgeGraphEntityExtractor, Ontology, Triple
+from dynamiq.nodes.knowledge_graphs.entity_extractor import ATTRIBUTE_VALUE_LABEL, HAS_ATTRIBUTE_TYPE
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.types import Document
 
