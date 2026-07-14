@@ -6,28 +6,20 @@ import filetype
 
 from dynamiq.utils.utils import generate_uuid
 
-SOURCE_URL_METADATA_KEYS = (
-    "dynamiq_item_source_provider_url",
-    "source_url",
-    "url",
-)
-
 
 def build_source_metadata(metadata: dict[str, Any] | None, file_path: str) -> dict[str, Any]:
-    """Return independent metadata with stable file and canonical source values.
+    """Return independent metadata with a stable file path.
 
-    An explicit non-empty ``source`` wins, followed by known upstream URL fields.
-    When no public URL exists, the file path remains a valid internal provenance
-    locator; callers must not assume that every ``source`` is clickable.
+    ``source`` is reserved for the upstream source identifier (typically a UUID),
+    so this helper preserves it only when supplied with a non-empty value by the
+    caller. Public URLs stay in their original metadata fields, such as
+    ``dynamiq_item_source_provider_url`` or ``source_url``.
     """
     result = deepcopy(metadata or {})
     effective_file_path = result.get("file_path") or file_path
     result["file_path"] = str(effective_file_path)
-
-    source = result.get("source")
-    if not source:
-        source = next((result.get(key) for key in SOURCE_URL_METADATA_KEYS if result.get(key)), None)
-    result["source"] = str(source or effective_file_path)
+    if not result.get("source"):
+        result.pop("source", None)
     return result
 
 

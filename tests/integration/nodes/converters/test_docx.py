@@ -46,9 +46,7 @@ def test_workflow_with_docx_converter():
         status=RunnableStatus.SUCCESS,
         input=dict(DOCXFileConverterInputSchema(**input_data)),
         output={
-            "documents": [
-                Document(id=document_id, content=content, metadata={"file_path": file.name, "source": file.name})
-            ]
+            "documents": [Document(id=document_id, content=content, metadata={"file_path": file.name})]
         },
     ).to_dict(skip_format_types={BytesIO, bytes})
 

@@ -97,7 +97,8 @@ def test_excel_converter_creates_self_describing_xlsx_row_documents():
     assert documents[0]["metadata"]["sheet_name"] == "People"
     assert documents[0]["metadata"]["row_number"] == 2
     assert documents[0]["metadata"]["document_type"] == "table_row"
-    assert documents[0]["metadata"]["source"] == "test.xlsx"
+    assert documents[0]["metadata"]["file_path"] == "test.xlsx"
+    assert "source" not in documents[0]["metadata"]
 
 
 def test_excel_converter_can_create_one_document_per_sheet():
@@ -131,7 +132,6 @@ def test_excel_converter_creates_self_describing_csv_row_documents():
         "document_type": "table_row",
         "file_path": "test.csv",
         "row_number": 2,
-        "source": "test.csv",
     }
 
 
@@ -150,7 +150,7 @@ def test_csv_row_documents_preserve_original_source_url():
     assert all(
         document.metadata["dynamiq_item_source_provider_url"] == "https://example.com/pricing" for document in documents
     )
-    assert all(document.metadata["source"] == "https://example.com/pricing" for document in documents)
+    assert all("source" not in document.metadata for document in documents)
 
 
 def test_csv_row_documents_normalize_blank_and_duplicate_headers():
