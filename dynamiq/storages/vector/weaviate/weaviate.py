@@ -66,12 +66,12 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
             return DataType.TEXT
         return self._PROPERTY_DATA_TYPES.get(property_name, DataType.TEXT)
 
-    def _get_query_properties(self, properties: list[Property], content_key: str | None = None) -> list[str]:
+    def _get_query_properties(self, properties: list[Any], content_key: str | None = None) -> list[str]:
         """Return text properties that should participate in keyword/hybrid search."""
         available_properties = {
             prop.name
             for prop in properties
-            if prop.dataType in {DataType.TEXT, DataType.TEXT_ARRAY} and prop.indexSearchable is not False
+            if prop.data_type in {DataType.TEXT, DataType.TEXT_ARRAY} and prop.index_searchable
         }
         preferred_properties = (content_key or self.content_key, *self._DEFAULT_QUERY_METADATA_PROPERTIES)
         return [prop for prop in preferred_properties if prop in available_properties]
