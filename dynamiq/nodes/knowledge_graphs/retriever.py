@@ -9,7 +9,7 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.embedders.base import TextEmbedder
-from dynamiq.nodes.knowledge_graph.entity_extractor import (
+from dynamiq.nodes.knowledge_graphs.entity_extractor import (
     ENTITY_EMBEDDING_VECTOR_INDEX,
     ENTITY_LABEL,
     ENTITY_NAME_FULLTEXT_INDEX,
@@ -191,6 +191,14 @@ def _compile_edge_filters(
 class GraphRetrieverInputSchema(BaseModel):
     query: str = Field(..., description="Natural-language question to retrieve graph context for.")
     top_k: int | None = Field(default=None, description="Override the node-level maximum number of facts.")
+    max_hops: int | None = Field(
+        default=None,
+        ge=1,
+        le=4,
+        description="Override the node-level traversal depth: how many hops to expand from the seed "
+        "entities (beam search — each hop keeps only the most relevant edges and expands from those). "
+        "Use 2 for chain questions whose answer is about a neighbor of the named entity.",
+    )
     entities: list[str] | None = Field(
         default=None,
         description="Optional explicit entity names to start from. When omitted, entry entities are those "
@@ -215,8 +223,9 @@ class KnowledgeGraphRetriever(ConnectionNode):
     The graph sibling of :class:`~dynamiq.nodes.retrievers.retriever.VectorStoreRetriever`, and the
     controlled alternative to ``CypherExecutor`` for read access. An LLM first extracts the entities the
     question is about (constrained to the ontology's types), the retriever finds those entry-point entities
-    by name, expands ONE hop through **visible** edges, and renders the resulting facts as ``Document``
-    objects an agent can consume directly. Deeper exploration is by iteration: an agent feeds a fact's
+    by name, expands ``max_hops`` hops through **visible** edges (beam search: each hop keeps the most
+    relevant edges and expands only from those), and renders the resulting facts as ``Document`` objects an
+    agent can consume directly. Deeper exploration is also possible by iteration: an agent feeds a fact's
     neighbor name back as the next call's ``entities`` seed.
 
     Entry-point selection is backend-agnostic: on Neo4j with the entity-name full-text index present
@@ -255,6 +264,12 @@ class KnowledgeGraphRetriever(ConnectionNode):
             retrievers. ACL lives here via the ``contains_any`` operator.
         top_k (int): Maximum number of facts to fetch from the graph. With a ``document_reranker`` this is
             the CANDIDATE pool that gets reranked; the reranker's own ``top_k`` decides the final count.
+        max_hops (int): Beam-search traversal depth (default 1 = single hop, the previous behavior).
+            At 2+, chain questions ("what does X's employer use?") resolve in one call: hop 1 finds
+            ``X -WORKS_AT-> Acme``, hop 2 expands from Acme to ``Acme -USES-> ...``. Overridable per call.
+            Portable: hop queries read endpoint ids off the bound pattern nodes (``a.id``/``b.id``),
+            so multi-hop needs no dialect-specific functions on any backend.
+        beam_width (int | None): Edges kept per hop when ``max_hops > 1`` (default ``top_k // max_hops``).
         document_reranker (Node | None): Optional reranker (e.g. a cross-encoder ``CohereReranker``) applied
             to the rendered facts. A high-degree (hub) entity can expand to many edges that all match the
             seed equally; the reranker scores each fact against the query and keeps the most relevant, so
@@ -267,8 +282,9 @@ class KnowledgeGraphRetriever(ConnectionNode):
     name: str = "graph-retriever"
     description: str = (
         "Retrieves facts from a knowledge graph for a natural-language question. Input: a 'query' string "
-        "(and optionally 'entities'/'entity_ids' to start from, or 'top_k'). Returns one hop of related "
-        "facts as bullet points; call again with a fact's neighbor id to go deeper."
+        "(and optionally 'entities'/'entity_ids' to start from, 'top_k', or 'max_hops'). Returns related "
+        "facts as bullet points. Set 'max_hops': 2 for chain questions about a neighbor of the named "
+        "entity (e.g. \"what does X's employer use\"); or call again with a fact's neighbor id."
     )
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     connection: Neo4j | ApacheAGE | AWSNeptune
@@ -283,6 +299,14 @@ class KnowledgeGraphRetriever(ConnectionNode):
     create_graph_if_not_exists: bool = False
     filters: dict[str, Any] | None = None  # LOCKED: always applied; not overridable from the input schema
     top_k: int = 50
+    # Beam-search traversal depth. 1 (default) = today's single hop. At >1, each hop keeps only the
+    # `beam_width` most relevant edges and expands ONLY from their endpoints — so the frontier stays
+    # bounded (no hub explosion) and hop-N candidates compete against hop-N siblings, never against
+    # seed-adjacent facts that trivially sound more like the question. Every hop applies the same locked
+    # ACL filters. Reliable ranking across hops needs edge embeddings (writer's `entity_embedder`).
+    max_hops: int = 1
+    # Edges kept per hop when max_hops > 1. None -> top_k // max_hops (total budget stays ~top_k).
+    beam_width: int | None = None
     document_reranker: Node | None = None  # optional rerank of rendered facts; top_k here = candidate pool
     # Optional semantic seeding: when set AND the entity vector index exists, entry entities are found by
     # embedding the query's entity names and vector-searching, instead of the full-text/CONTAINS name match.
@@ -595,6 +619,7 @@ class KnowledgeGraphRetriever(ConnectionNode):
         seed_names: list[str] | None = None,
         seed_vectors: list[list[float]] | None = None,
         query_vector: list[float] | None = None,
+        include_endpoint_ids: bool = False,
     ) -> tuple[str, dict[str, Any]]:
         """Build the single parameterized one-hop Cypher query and its parameters.
 
@@ -604,6 +629,8 @@ class KnowledgeGraphRetriever(ConnectionNode):
         ``query_vector`` is the embedded query — when present the neighbourhood is ranked server-side by the
         cosine of each edge's ``r.embedding`` so only the top ``limit`` MOST RELEVANT facts come back (a hub
         no longer returns an arbitrary slice), and the embeddings never cross the wire.
+        ``include_endpoint_ids`` additionally returns each edge's endpoint entity ids (``a_id``/``b_id``,
+        same shape as ``_hop_query``) — required when this hop seeds a multi-hop frontier.
         """
         params: dict[str, Any] = {"limit": limit}
         lead, entry_where, anchored = self._entry(input_data, params, seed_names, seed_vectors)
@@ -617,7 +644,29 @@ class KnowledgeGraphRetriever(ConnectionNode):
         where = " AND ".join([t for t in [entry_where, rel_clause] if t])
         # Names come from the edge's own ACL-bearing snapshot (r.src_name/r.dst_name), never the shared
         # merged node, so a differently-scoped name can't leak.
-        ret = "RETURN r.src_name AS a_name, type(r) AS rel, " "properties(r) AS rprops, r.dst_name AS b_name"
+        if include_endpoint_ids:
+            # Endpoint ids feed _endpoint_ids -> the hop-2 frontier; keep the shape identical to _hop_query.
+            # anchor_ids are the SEED endpoint(s) of the row, so the hop-2 frontier can exclude the seeds —
+            # otherwise hop 2 re-expands them and their leftover 1-hop edges (the ones hop 1's beam cut)
+            # would compete against true chain facts. Anchored modes bind `a` to the seed by construction;
+            # the CONTAINS scan matches the seed on EITHER endpoint, so the anchor is recomputed per row
+            # with the same predicate the scan matched on (both endpoints can be seeds -> a list).
+            anchor_expr = (
+                "[a.id]"
+                if anchored
+                else "[x IN [a, b] WHERE x.name IS NOT NULL AND toLower($q) CONTAINS toLower(x.name) | x.id]"
+            )
+            # Endpoint ids read straight off the bound pattern nodes — plain property access, portable
+            # to every openCypher backend (no startNode()/endNode(), which AGE/Neptune lack). a_id/b_id
+            # feed set-based frontier building only, so they need not align with src/dst direction (on
+            # anchored entry `a` is the seed side, whichever direction the edge points).
+            ret = (
+                "RETURN r.src_name AS a_name, a.id AS a_id, type(r) AS rel, "
+                "properties(r) AS rprops, r.dst_name AS b_name, b.id AS b_id, "
+                f"{anchor_expr} AS anchor_ids"
+            )
+        else:
+            ret = "RETURN r.src_name AS a_name, type(r) AS rel, " "properties(r) AS rprops, r.dst_name AS b_name"
         lines = [*lead, f"MATCH (a){arrow.format(rel='r')}(b)"]
         if where:
             lines.append(f"WHERE {where}")
@@ -645,6 +694,54 @@ class KnowledgeGraphRetriever(ConnectionNode):
         combined = " AND ".join(c for c in (locked_clause, user_clause) if c)
         return combined, {**locked_params, **user_params}
 
+    def _hop_query(
+        self,
+        frontier_ids: list[str],
+        visited_ids: list[str],
+        limit: int,
+        user_filters: dict[str, Any] | None,
+        query_vector: list[float] | None,
+    ) -> tuple[str, dict[str, Any]]:
+        """One beam-search expansion step: the ACL-filtered edges of the frontier entities, ranked by fact
+        relevance and cut to the per-hop beam.
+
+        The ``NOT b.id IN $visited`` guard keeps frontier->NEW edges (the walk) while dropping the edges
+        we arrived by. The SAME locked filters as hop 1 apply, so ACL holds on every hop. Ranking uses the
+        same edge-embedding cosine as hop 1 — the cut happens among same-hop siblings, so a chain answer
+        never competes against seed-adjacent facts that sound more like the question.
+        """
+        params: dict[str, Any] = {"frontier": frontier_ids, "visited": visited_ids, "limit": limit}
+        rel_clause, filter_params = self._edge_predicates("r", user_filters)
+        params.update(filter_params)
+        # `a` is bound from $frontier and frontier ⊆ visited (execute maintains that invariant), so
+        # "neither endpoint may be already-visited twice over" reduces to: b must be NEW. This drops the
+        # arrived-by edges AND edges between two frontier nodes, and means no edge can bind from both
+        # ends and survive — so no DISTINCT is needed and endpoint ids read straight off the bound
+        # pattern nodes (a.id/b.id): plain property access, portable to every openCypher backend
+        # (startNode()/endNode() are Neo4j dialect; AGE/Neptune lack a usable equivalent).
+        guard = "NOT b.id IN $visited"
+        where = " AND ".join([t for t in [guard, rel_clause] if t])
+        lines = [
+            f"MATCH (a:{ENTITY_LABEL}) WHERE a.id IN $frontier",
+            "MATCH (a)-[r]-(b)",
+            f"WHERE {where}",
+            "RETURN r.src_name AS a_name, a.id AS a_id, type(r) AS rel, "
+            "properties(r) AS rprops, r.dst_name AS b_name, b.id AS b_id",
+        ]
+        if query_vector:
+            params["qvec"] = query_vector
+            lines.append(
+                "ORDER BY CASE WHEN r.embedding IS NULL THEN -1.0 "
+                "ELSE vector.similarity.cosine(r.embedding, $qvec) END DESC"
+            )
+        lines.append("LIMIT $limit")
+        return "\n".join(lines), params
+
+    @staticmethod
+    def _endpoint_ids(rows: list[dict[str, Any]]) -> set[str]:
+        """The distinct entity ids on either end of the returned edges (next hop's frontier candidates)."""
+        return {rid for row in rows for rid in (row.get("a_id"), row.get("b_id")) if rid}
+
     def execute(self, input_data: GraphRetrieverInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """Retrieve filtered graph context for the query and render it as Documents."""
         logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
@@ -657,27 +754,60 @@ class KnowledgeGraphRetriever(ConnectionNode):
             raise ToolExecutionException("KnowledgeGraphRetriever: graph store is not initialized.", recoverable=True)
 
         limit = input_data.top_k or self.top_k
+        max_hops = input_data.max_hops or self.max_hops
+        # Per-hop beam: with multi-hop the budget is split across hops so the total stays ~top_k, and the
+        # LIMIT cut at every hop happens among same-hop siblings (see _hop_query).
+        hop_limit = limit if max_hops <= 1 else (self.beam_width or max(1, limit // max_hops))
         try:
             seed_names = self._seed_entity_names(input_data, config, **kwargs)
             # Embed the whole question once (when vectors are on): reused as the fact-rank vector AND, when
             # there are no seed names, the seed vector — so seeding and reranking share one embedding.
             query_vector = self._query_vector(input_data.query, config, **kwargs)
             seed_vectors = self._seed_vectors(input_data, seed_names, query_vector, config, **kwargs)
-            query, params = self._build_query(input_data, limit, seed_names, seed_vectors, query_vector)
+            query, params = self._build_query(
+                input_data, hop_limit, seed_names, seed_vectors, query_vector, include_endpoint_ids=max_hops > 1
+            )
             records, _, _ = self._graph_store.run_cypher(query, parameters=params, database=self.database)
             rows = self._graph_store.format_records(records)
+            # Beam expansion: hop N+1 expands ONLY from the NEW nodes the previous hop reached, excluding
+            # edges already inside the visited set. The seeds (anchors) are excluded from the first
+            # frontier — hop 1 already expanded them, and re-expanding would let their leftover 1-hop
+            # edges compete against true chain facts. ACL-filtered and relevance-ranked per hop.
+            anchor_ids = {aid for row in rows for aid in (row.get("anchor_ids") or []) if aid}
+            endpoint_ids = self._endpoint_ids(rows)
+            visited = endpoint_ids | anchor_ids
+            frontier = endpoint_ids - anchor_ids
+            for _ in range(max_hops - 1):
+                if not frontier:
+                    break
+                check_cancellation(config)
+                hop_query, hop_params = self._hop_query(
+                    sorted(frontier), sorted(visited), hop_limit, input_data.filters, query_vector
+                )
+                records, _, _ = self._graph_store.run_cypher(hop_query, parameters=hop_params, database=self.database)
+                hop_rows = self._graph_store.format_records(records)
+                if not hop_rows:
+                    break
+                rows.extend(hop_rows)
+                endpoint_ids = self._endpoint_ids(hop_rows)
+                frontier = endpoint_ids - visited
+                visited |= endpoint_ids
             documents = self._render_single_hop(rows)
             logger.info(f"Tool {self.name} - {self.id}: retrieved {len(documents)} fact(s).")
+            # Rerank BEFORE enforcing top_k: when multi-hop over-fetches (explicit beam_width or the
+            # >=1-per-hop floor), the reranker must see the WHOLE pool so a deep chain fact is kept or
+            # dropped by RELEVANCE. The cap then trims the (reranked, else hop-ordered) list — so without
+            # a reranker the cut still drops deepest facts first.
             documents = self._maybe_rerank(documents, input_data.query, config, **kwargs)
-            content = "\n".join(f"- {d.content}" for d in documents) or "No matching facts found."
-            output = {"content": content, "documents": documents}
+            if len(documents) > limit:
+                documents = documents[:limit]
+            facts = "\n".join(f"- {d.content}" for d in documents) or "No matching facts found."
             source_documents = self._fetch_source_documents(documents)
+            # `facts` (triples) and `source_documents` (passages) are ALWAYS present so consumers never infer.
+            output = {"content": facts, "facts": facts, "documents": documents, "source_documents": source_documents}
             if source_documents:
-                # Replace triples with verbatim source text. ACL-safe with no extra check: each source_doc_id
-                # came from an ACL-visible edge whose ACL equals its source document's. `facts` keeps the triples.
-                output["source_documents"] = source_documents
-                output["facts"] = content
-                output["content"] = "\n\n".join(d.content for d in source_documents if d.content) or content
+                # `content` prefers verbatim source text. ACL-safe: each source_doc_id came from an ACL-visible edge.
+                output["content"] = "\n\n".join(d.content for d in source_documents if d.content) or facts
             if self.summarize and documents:
                 # keep the raw retrieval under `context`; `content` becomes the composed answer
                 output["context"] = output["content"]
