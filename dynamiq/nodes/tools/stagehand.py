@@ -221,7 +221,18 @@ class Stagehand(ConnectionNode):
             return False
         if self._is_steel_browser_connection():
             return False  # Steel sharing is a fast-follow
-        run_key = _current_agent_run.get() or "agent"
+        run_key = _current_agent_run.get()
+        if run_key is None:
+            # The agent's release path (_teardown_shared_browser) releases under the real
+            # per-run key; a substituted key would never match and leak the lease. This
+            # should not happen when the tool runs under Agent.execute (which sets it).
+            logger.warning(
+                "Tool %s - %s: acquiring shared browser lease with no _current_agent_run set; "
+                "falling back to 'agent' key (the owning agent's finally may not release it).",
+                self.name,
+                self.id,
+            )
+            run_key = "agent"
         ss.acquire_browser(run_key)  # held until the owning agent's execute() finally
         shared_sid = ss.browser_session_id()
         if shared_sid:

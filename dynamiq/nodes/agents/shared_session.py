@@ -1,8 +1,9 @@
 import re
 import threading
+from collections.abc import Callable
 from contextvars import ContextVar
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from dynamiq.browsers.base import BrowserSession
@@ -90,7 +91,14 @@ class SharedSession:
     def browser_live_view_url(self) -> str | None:
         return self._browser.live_view_url if self._browser else None
 
-    def record_browser(self, *, session_id, provider="browserbase", live_view_url=None, close_callback=None) -> None:
+    def record_browser(
+        self,
+        *,
+        session_id: str,
+        provider: Literal["browserbase", "steel"] = "browserbase",
+        live_view_url: str | None = None,
+        close_callback: Callable[[], None] | None = None,
+    ) -> None:
         """Record the shared session's identity the first time a tool creates it."""
         from dynamiq.browsers.base import BrowserSession
 
@@ -106,7 +114,13 @@ class SharedSession:
 
     # --- Model A lease (exclusive, reentrant per agent-run, baton hand-off) ---
     def acquire_browser(self, agent_run_key: str) -> None:
-        """Block until this run holds the browser lease (reentrant for the same run)."""
+        """Block until this run holds the browser lease (reentrant for the same run).
+
+        Deadlock invariant: the lease is exclusive and held for the WHOLE agent-run
+        (released only in the owning agent's execute() finally). An agent that drives
+        the browser directly must NOT hold the lease while awaiting a subagent that also
+        needs it — orchestrate/delegate rather than co-drive, or the two will deadlock.
+        """
         with self._lease_cond:
             while self._lease_owner is not None and self._lease_owner != agent_run_key:
                 self._lease_cond.wait()

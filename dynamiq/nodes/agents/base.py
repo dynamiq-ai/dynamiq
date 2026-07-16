@@ -279,7 +279,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         description=(
             "When True, this agent and its subagents share ONE live browser (Browserbase) "
             "session for the run, driven by one agent at a time (exclusive per-agent-run lease). "
-            "Independent of share_sandbox_with_subagents."
+            "Independent of share_sandbox_with_subagents. Deadlock invariant: the lease is "
+            "exclusive and held for the WHOLE agent-run (released only in the agent's execute() "
+            "finally), so an owner that drives the browser directly must not hold the lease while "
+            "awaiting a subagent that also needs it — orchestrate/delegate rather than co-drive, "
+            "otherwise it can deadlock."
         ),
     )
     sandbox_sharing_scope: SandboxSharingScope = Field(

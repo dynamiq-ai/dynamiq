@@ -135,3 +135,29 @@ def test_owner_run_result_surfaces_shared_live_view(llm):
         assert "live_view_url" not in result2
     finally:
         _shared_session.reset(token)
+
+
+def test_stagehand_attach_warns_when_no_current_agent_run(monkeypatch, caplog):
+    from dynamiq.nodes.agents.shared_session import SharedSession
+    from dynamiq.nodes.tools.stagehand import Stagehand
+
+    tool = Stagehand.__new__(Stagehand)
+    tool._session_id = None
+    object.__setattr__(tool, "name", "T")  # bypass pydantic init on a bare instance
+    object.__setattr__(tool, "id", "id-1")
+    monkeypatch.setattr(Stagehand, "_is_steel_browser_connection", lambda self: False)
+
+    ss = SharedSession(share_browser=True)
+    session_token = _shared_session.set(ss)
+    # NOTE: intentionally do NOT set _current_agent_run (defaults to None)
+    assert _current_agent_run.get() is None
+    try:
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            assert tool._attach_shared_browser_before_init() is True
+        assert any("no _current_agent_run set" in r.getMessage() for r in caplog.records)
+        assert ss._lease_owner == "agent"  # fell back to the "agent" key
+    finally:
+        ss.release_browser("agent")
+        _shared_session.reset(session_token)
