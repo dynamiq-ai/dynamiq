@@ -48,6 +48,14 @@ class SandboxInfo(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class SandboxLifecyclePolicy(str, Enum):
+    """What to do with a sandbox when its owning run ends."""
+
+    PAUSE = "pause"          # persist (E2B pause), resumable by sandbox_id; falls back to disconnect if unsupported
+    KILL = "kill"            # destroy the sandbox (default)
+    DISCONNECT = "disconnect"  # close(kill=False): keep alive until the provider's idle timeout
+
+
 class Sandbox(abc.ABC, BaseModel):
     """Abstract base class for sandbox implementations.
 
@@ -387,6 +395,23 @@ class Sandbox(abc.ABC, BaseModel):
         no-sharing instead of raising NotImplementedError.
         """
         return False
+
+    @property
+    def supports_pause(self) -> bool:
+        """Whether this backend can pause a sandbox and resume it by id.
+
+        Backends returning False cause an ``on_run_end=pause`` policy to fall back
+        to ``disconnect`` instead of raising.
+        """
+        return False
+
+    def pause(self) -> str | None:
+        """Pause the sandbox, preserving it for later resume; return its sandbox id."""
+        raise NotImplementedError(f"pause() is not implemented for {self.__class__.__name__}")
+
+    def resume(self) -> str | None:
+        """Resume a previously paused sandbox (reconnect by id); return its sandbox id."""
+        raise NotImplementedError(f"resume() is not implemented for {self.__class__.__name__}")
 
     def ensure_started(self) -> str | None:
         """Materialize the underlying sandbox (assign an id) and return its id."""
