@@ -22,7 +22,13 @@ from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentIterati
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
-from dynamiq.nodes.agents.shared_session import SandboxSharingScope, SharedSession, _current_agent_run, _shared_session
+from dynamiq.nodes.agents.shared_session import (
+    SandboxSharingScope,
+    SharedSession,
+    _agent_run_chain,
+    _current_agent_run,
+    _shared_session,
+)
 from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     ToolCacheEntry,
@@ -278,12 +284,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         default=False,
         description=(
             "When True, this agent and its subagents share ONE live browser (Browserbase) "
-            "session for the run, driven by one agent at a time (exclusive per-agent-run lease). "
-            "Independent of share_sandbox_with_subagents. Deadlock invariant: the lease is "
-            "exclusive and held for the WHOLE agent-run (released only in the agent's execute() "
-            "finally), so an owner that drives the browser directly must not hold the lease while "
-            "awaiting a subagent that also needs it — orchestrate/delegate rather than co-drive, "
-            "otherwise it can deadlock."
+            "session for the run, driven by one agent at a time. Independent of "
+            "share_sandbox_with_subagents. The lease is reentrant down the ancestor chain: the "
+            "owner MAY drive the browser itself AND delegate to subagents — a nested subagent "
+            "borrows the lease its (blocked) ancestor holds, so handoffs do not deadlock — while "
+            "genuinely-parallel subagents are serialized (still one driver at a time)."
         ),
     )
     sandbox_sharing_scope: SandboxSharingScope = Field(
@@ -720,7 +725,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         # Always set — a sub-agent without LTM would otherwise inherit the
         # parent's overlay via `ContextAwareThreadPoolExecutor`.
         ltm_token = _run_extra_tools.set(ltm_tools)
-        agent_run_token = _current_agent_run.set(f"{self.sanitize_tool_name(self.name) or 'agent'}-{uuid4().hex[:8]}")
+        parent_chain = _agent_run_chain.get() or ()
+        my_run_key = f"{self.sanitize_tool_name(self.name) or 'agent'}-{uuid4().hex[:8]}"
+        agent_run_token = _current_agent_run.set(my_run_key)
+        chain_token = _agent_run_chain.set((*parent_chain, my_run_key))
         # Session/borrow setup lives INSIDE the try so the finally always resets the ContextVars and
         # releases any borrowed view, even if setup raises. Tokens stay None until each set succeeds.
         # Capture any view already active on this instance so a nested execute() restores it rather
@@ -913,6 +921,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             self._teardown_shared_browser(shared_session_token)
             _run_extra_tools.reset(ltm_token)
             _current_agent_run.reset(agent_run_token)
+            _agent_run_chain.reset(chain_token)
             self._exit_shared_session(shared_session_token)
 
     def retrieve_conversation_history(

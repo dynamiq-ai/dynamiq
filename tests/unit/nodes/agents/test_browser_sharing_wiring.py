@@ -84,8 +84,8 @@ def test_stagehand_attaches_and_records_under_shared_session(monkeypatch, llm):
         # first tool: no shared id yet -> becomes the creator, attach is a no-op
         shared = tool._attach_shared_browser_before_init()
         assert shared is True
-        assert ss._lease_owner == "runA"       # lease acquired
-        assert tool._session_id is None         # nothing to attach to yet
+        assert ss._lease_stack == ["runA"]  # lease acquired
+        assert tool._session_id is None  # nothing to attach to yet
 
         # simulate _init_client having created the session
         tool._session_id = "created-sid"
@@ -157,7 +157,7 @@ def test_stagehand_attach_warns_when_no_current_agent_run(monkeypatch, caplog):
         with caplog.at_level(logging.WARNING):
             assert tool._attach_shared_browser_before_init() is True
         assert any("no _current_agent_run set" in r.getMessage() for r in caplog.records)
-        assert ss._lease_owner == "agent"  # fell back to the "agent" key
+        assert ss._lease_stack == ["agent"]  # fell back to the "agent" key
     finally:
         ss.release_browser("agent")
         _shared_session.reset(session_token)

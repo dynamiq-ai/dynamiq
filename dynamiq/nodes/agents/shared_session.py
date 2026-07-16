@@ -16,6 +16,11 @@ _shared_session: ContextVar["SharedSession | None"] = ContextVar("dynamiq_shared
 # distinct keys and mutual exclusion holds. See spec §10.4.
 _current_agent_run: ContextVar[str | None] = ContextVar("dynamiq_current_agent_run", default=None)
 
+# Chain of run-keys from the root agent down to self (root->...->self). Set at the
+# top of each Agent.execute. Used only when acquiring the browser lease so a nested
+# run knows its ancestors and may borrow a lease currently held by an ancestor.
+_agent_run_chain: ContextVar[tuple[str, ...] | None] = ContextVar("dynamiq_agent_run_chain", default=None)
+
 
 def slugify(value: str) -> str:
     """Filesystem-safe slug for per-agent working directories."""
@@ -90,11 +95,13 @@ class SharedSession:
         self.sharing_scope = sharing_scope
         self._lock = threading.Lock()
 
-        # browser (Model A): one shared session + an exclusive, reentrant, per-agent-run lease
+        # browser (Model A): one shared session + a lease that is reentrant down the ancestor
+        # chain. The lease holders form a LIFO stack (root owner at the bottom, current driver on
+        # top); a nested run borrows from an ancestor already on the stack, parallel siblings serialize.
         self._browser: "BrowserSession | None" = None
         self._browser_lock = threading.Lock()
         self._lease_cond = threading.Condition()
-        self._lease_owner: str | None = None
+        self._lease_stack: list[str] = []
 
     def get_sandbox(self) -> "Sandbox | None":
         return self.sandbox
@@ -141,25 +148,33 @@ class SharedSession:
                 close_callback=close_callback,
             )
 
-    # --- Model A lease (exclusive, reentrant per agent-run, baton hand-off) ---
-    def acquire_browser(self, agent_run_key: str) -> None:
-        """Block until this run holds the browser lease (reentrant for the same run).
+    # --- Model A lease (reentrant down the ancestor chain, LIFO stack, baton hand-off) ---
+    def acquire_browser(self, agent_run_key: str, ancestor_keys: tuple[str, ...] = ()) -> None:
+        """Block until this run may drive the browser, then push it onto the lease stack.
 
-        Deadlock invariant: the lease is exclusive and held for the WHOLE agent-run
-        (released only in the owning agent's execute() finally). An agent that drives
-        the browser directly must NOT hold the lease while awaiting a subagent that also
-        needs it — orchestrate/delegate rather than co-drive, or the two will deadlock.
+        Reentrant-chain semantics: a run whose ancestor currently holds the lease may borrow
+        it (that ancestor is blocked awaiting this nested call, so still only one run drives at
+        a time) — this lets an owner co-drive the browser AND delegate to subagents without
+        deadlock. Genuinely-parallel siblings (whose holder is neither self nor an ancestor)
+        serialize. Reentry by the same run does not push a duplicate.
         """
+        ancestors = set(ancestor_keys)
         with self._lease_cond:
-            while self._lease_owner is not None and self._lease_owner != agent_run_key:
+            # Block only while the current driver (top of stack) is NEITHER me NOR one of my
+            # ancestors. A held-by-ancestor lease is borrowable because that ancestor is blocked
+            # awaiting me (nested call), so only one run actually drives at a time.
+            while (
+                self._lease_stack and self._lease_stack[-1] != agent_run_key and self._lease_stack[-1] not in ancestors
+            ):
                 self._lease_cond.wait()
-            self._lease_owner = agent_run_key
+            if not self._lease_stack or self._lease_stack[-1] != agent_run_key:
+                self._lease_stack.append(agent_run_key)  # reentrant same-run = no duplicate push
 
     def release_browser(self, agent_run_key: str) -> None:
-        """Release the lease only if this run holds it; wake any waiters."""
+        """Pop the lease if this run is the current driver (LIFO); wake any waiters."""
         with self._lease_cond:
-            if self._lease_owner == agent_run_key:
-                self._lease_owner = None
+            if self._lease_stack and self._lease_stack[-1] == agent_run_key:
+                self._lease_stack.pop()
                 self._lease_cond.notify_all()
 
     def close_browser(self) -> None:

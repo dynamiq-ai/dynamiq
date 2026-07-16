@@ -17,7 +17,7 @@ from dynamiq.connections import Browserbase, StagehandEnvironment, SteelBrowser,
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
-from dynamiq.nodes.agents.shared_session import _current_agent_run, _shared_session
+from dynamiq.nodes.agents.shared_session import _agent_run_chain, _current_agent_run, _shared_session
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.nodes.tools.utils import guess_mime_type_from_bytes, sanitize_filename
 from dynamiq.runnables import RunnableConfig
@@ -233,7 +233,9 @@ class Stagehand(ConnectionNode):
                 self.id,
             )
             run_key = "agent"
-        ss.acquire_browser(run_key)  # held until the owning agent's execute() finally
+        # Pass the ancestor chain so a nested run can borrow a lease held by an ancestor
+        # (owner co-drive + delegate); held until the owning agent's execute() finally.
+        ss.acquire_browser(run_key, tuple(_agent_run_chain.get() or ()))
         shared_sid = ss.browser_session_id()
         if shared_sid:
             self._session_id = shared_sid  # attach via the existing reuse path (client.init)
