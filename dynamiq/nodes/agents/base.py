@@ -900,6 +900,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
             logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
+            self._maybe_surface_sandbox_id(execution_result, shared_session_token)
             return execution_result
         finally:
             if sandbox_overlay_token is not None:
@@ -2254,6 +2255,20 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     backend.close(kill=False)
         except Exception as e:
             logger.warning(f"Agent {self.name}: applying sandbox_on_run_end={policy} failed: {e}")
+
+    def _maybe_surface_sandbox_id(self, execution_result: dict, shared_session_token) -> None:
+        """Add ``sandbox_id`` to the run result when the owner is persisting the sandbox.
+
+        Only when this agent owns the shared session (token set), the policy is ``pause``,
+        and the backend can actually be resumed — so a caller can reconnect by id later.
+        """
+        if shared_session_token is None:
+            return
+        if self.sandbox_on_run_end != SandboxLifecyclePolicy.PAUSE:
+            return
+        backend = self.sandbox_backend
+        if backend is not None and backend.supports_pause:
+            execution_result["sandbox_id"] = backend.current_sandbox_id
 
     def _resolve_tools_sandbox(self):
         """The sandbox this agent builds its OWN tools from at construction — always its own
