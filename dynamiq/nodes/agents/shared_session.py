@@ -5,10 +5,16 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from dynamiq.browsers.base import BrowserSession
     from dynamiq.sandboxes.base import Sandbox
 
 # Set by the owning agent's execute(); read by descendant agents at construction.
 _shared_session: ContextVar["SharedSession | None"] = ContextVar("dynamiq_shared_session", default=None)
+
+# Per-agent-invocation id (NOT the workflow run_id). Set at the top of each
+# Agent.execute and used as the browser-lease key so parallel subagents get
+# distinct keys and mutual exclusion holds. See spec §10.4.
+_current_agent_run: ContextVar[str | None] = ContextVar("dynamiq_current_agent_run", default=None)
 
 
 def slugify(value: str) -> str:
@@ -37,6 +43,7 @@ class SharedSession:
         *,
         sandbox: "Sandbox | None" = None,
         share_sandbox: bool = False,
+        share_browser: bool = False,
         owner_run_id: str = "",
         owner_agent_id: str = "",
         sharing_scope: SandboxSharingScope = SandboxSharingScope.ALL,
@@ -45,10 +52,17 @@ class SharedSession:
         # Only backends that can produce per-agent views (e.g. E2B) can be shared;
         # others degrade to no-sharing so subagents fall back to their own sandbox.
         self.share_sandbox = bool(share_sandbox and sandbox is not None and getattr(sandbox, "supports_views", False))
+        self.share_browser = bool(share_browser)
         self.owner_run_id = owner_run_id
         self.owner_agent_id = owner_agent_id
         self.sharing_scope = sharing_scope
         self._lock = threading.Lock()
+
+        # browser (Model A): one shared session + an exclusive, reentrant, per-agent-run lease
+        self._browser: "BrowserSession | None" = None
+        self._browser_lock = threading.Lock()
+        self._lease_cond = threading.Condition()
+        self._lease_owner: str | None = None
 
     def get_sandbox(self) -> "Sandbox | None":
         return self.sandbox
@@ -68,3 +82,45 @@ class SharedSession:
                 sandbox_id = self.sandbox.current_sandbox_id
             workdir = f"{self.sandbox.base_path.rstrip('/')}/work/{slugify(key)}"
             return self.sandbox.create_view(base_path=workdir, sandbox_id=sandbox_id)
+
+    # --- browser identity (first writer wins) ---
+    def browser_session_id(self) -> str | None:
+        return self._browser.session_id if self._browser else None
+
+    def browser_live_view_url(self) -> str | None:
+        return self._browser.live_view_url if self._browser else None
+
+    def record_browser(self, *, session_id, provider="browserbase", live_view_url=None, close_callback=None) -> None:
+        """Record the shared session's identity the first time a tool creates it."""
+        from dynamiq.browsers.base import BrowserSession
+
+        with self._browser_lock:
+            if self._browser is not None and self._browser.session_id:
+                return  # first writer wins
+            self._browser = BrowserSession(
+                provider=provider,
+                session_id=session_id,
+                live_view_url=live_view_url,
+                close_callback=close_callback,
+            )
+
+    # --- Model A lease (exclusive, reentrant per agent-run, baton hand-off) ---
+    def acquire_browser(self, agent_run_key: str) -> None:
+        """Block until this run holds the browser lease (reentrant for the same run)."""
+        with self._lease_cond:
+            while self._lease_owner is not None and self._lease_owner != agent_run_key:
+                self._lease_cond.wait()
+            self._lease_owner = agent_run_key
+
+    def release_browser(self, agent_run_key: str) -> None:
+        """Release the lease only if this run holds it; wake any waiters."""
+        with self._lease_cond:
+            if self._lease_owner == agent_run_key:
+                self._lease_owner = None
+                self._lease_cond.notify_all()
+
+    def close_browser(self) -> None:
+        """Owner-only: close the shared live session at run end."""
+        with self._browser_lock:
+            if self._browser is not None:
+                self._browser.close()
