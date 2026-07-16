@@ -57,7 +57,7 @@ from dynamiq.prompts import (
     VisionMessageTextContent,
 )
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
-from dynamiq.sandboxes.base import Sandbox, SandboxConfig
+from dynamiq.sandboxes.base import Sandbox, SandboxConfig, SandboxLifecyclePolicy
 from dynamiq.skills.config import SkillsConfig
 from dynamiq.skills.registries.dynamiq import Dynamiq
 from dynamiq.skills.types import SkillMetadata
@@ -273,6 +273,15 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         default=False,
         description="When enabled, subagents (SubAgentTool) share this agent's sandbox "
         "instead of each provisioning their own. Each subagent gets an isolated working directory.",
+    )
+    sandbox_on_run_end: SandboxLifecyclePolicy = Field(
+        default=SandboxLifecyclePolicy.KILL,
+        description=(
+            "What to do with the shared sandbox when the owning run ends: kill (default), "
+            "pause (persist & resume by sandbox_id; E2B only, falls back to disconnect on other "
+            "backends), or disconnect (keep alive until the provider idle timeout). Applied only "
+            "by the shared-session owner; a standalone agent's sandbox is unaffected."
+        ),
     )
     sandbox_sharing_scope: SandboxSharingScope = Field(
         default=SandboxSharingScope.ALL,
@@ -897,6 +906,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 _shared_sandbox_tools.reset(sandbox_overlay_token)
             self._release_shared_sandbox_view(restore_to=prev_shared_view)
             _run_extra_tools.reset(ltm_token)
+            if shared_session_token is not None:
+                self._apply_sandbox_on_run_end()
             self._exit_shared_session(shared_session_token)
 
     def retrieve_conversation_history(
@@ -2215,6 +2226,34 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         """Reset the ContextVar set by `_maybe_enter_shared_session`."""
         if token is not None:
             _shared_session.reset(token)
+
+    def _apply_sandbox_on_run_end(self) -> None:
+        """Owner-only: apply ``sandbox_on_run_end`` to the shared sandbox at run end.
+
+        Called from ``execute()``'s finally only when this agent owns the shared session
+        (``shared_session_token is not None``). Never invoked for inherited subagents or
+        for non-sharing standalone agents, so their sandbox lifecycle is unchanged.
+        """
+        backend = self.sandbox_backend
+        if backend is None:
+            return
+        policy = self.sandbox_on_run_end
+        try:
+            if policy == SandboxLifecyclePolicy.KILL:
+                backend.close(kill=True)
+            elif policy == SandboxLifecyclePolicy.DISCONNECT:
+                backend.close(kill=False)
+            elif policy == SandboxLifecyclePolicy.PAUSE:
+                if backend.supports_pause:
+                    backend.pause()
+                else:
+                    logger.info(
+                        f"Agent {self.name}: sandbox backend {type(backend).__name__} does not "
+                        f"support pause; falling back to disconnect."
+                    )
+                    backend.close(kill=False)
+        except Exception as e:
+            logger.warning(f"Agent {self.name}: applying sandbox_on_run_end={policy} failed: {e}")
 
     def _resolve_tools_sandbox(self):
         """The sandbox this agent builds its OWN tools from at construction — always its own
