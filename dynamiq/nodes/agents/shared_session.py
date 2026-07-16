@@ -6,7 +6,6 @@ from enum import Enum
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from dynamiq.browsers.base import BrowserSession
     from dynamiq.sandboxes.base import Sandbox
 
 # Set by the owning agent's execute(); read by descendant agents at construction.
@@ -29,6 +28,38 @@ class SandboxSharingScope(str, Enum):
 
     ALL = "all"          # every subagent uses the shared sandbox (overrides a subagent's own)
     AUGMENT = "augment"  # only subagents that bring no sandbox of their own
+
+
+# Thin browser-session abstraction shared by an agent and its subagents.
+#
+# There is no unified Browser abstraction in the SDK today (only the Stagehand
+# tool). BrowserSession is a minimal holder for one live session's identity so a
+# SharedSession can hand the same session_id to every agent in a run and close it
+# once at the end. Browserbase only in P3 (see spec §10.4).
+class BrowserSession:
+    """Identity + teardown handle for one shared live browser session."""
+
+    def __init__(
+        self,
+        *,
+        provider: Literal["browserbase", "steel"],
+        session_id: str | None = None,
+        live_view_url: str | None = None,
+        close_callback: Callable[[], None] | None = None,
+    ):
+        self.provider = provider
+        self.session_id = session_id
+        self.live_view_url = live_view_url
+        self._close_callback = close_callback
+        self._closed = False
+
+    def close(self) -> None:
+        """Release the live session exactly once (owner-only, at run end)."""
+        if self._closed:
+            return
+        self._closed = True
+        if self._close_callback is not None:
+            self._close_callback()
 
 
 class SharedSession:
@@ -100,8 +131,6 @@ class SharedSession:
         close_callback: Callable[[], None] | None = None,
     ) -> None:
         """Record the shared session's identity the first time a tool creates it."""
-        from dynamiq.browsers.base import BrowserSession
-
         with self._browser_lock:
             if self._browser is not None and self._browser.session_id:
                 return  # first writer wins

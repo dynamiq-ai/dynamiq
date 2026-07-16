@@ -1,4 +1,4 @@
-from dynamiq.browsers.base import BrowserSession
+from dynamiq.nodes.agents.shared_session import BrowserSession
 
 
 def test_browser_session_holds_identity():
