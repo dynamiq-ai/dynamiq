@@ -1,17 +1,20 @@
-"""Share ONE live browser session across an agent and its subagents.
+"""Share ONE live browser session between an agent and its subagent.
 
-This example demonstrates ``share_browser_session_with_subagents``: an owner
-agent orchestrates two initialized subagents — a "navigator" that opens a URL and
-a "reader" that reports the current page — and both drive the SAME live
-Browserbase session (one logged-in page carried across the handoff), one agent at
-a time via an exclusive per-agent-run lease.
+This example demonstrates ``share_browser_session_with_subagents`` with the owner
+CO-DRIVING the browser: the owner agent has its OWN Stagehand tool, navigates the
+browser to a URL itself, and THEN delegates to a "reader" subagent to report the
+current page. Both drive the SAME live Browserbase session (one logged-in page
+carried across the handoff), one agent at a time.
 
-The owner holds NO browser tool of its own (it only delegates), which respects
-the Model A deadlock invariant. Because the subagents are initialized
-(``SubAgentTool(agent=...)``), we keep references to each one's Stagehand tool and
-print both ``_session_id`` values after the run — they are identical, proving the
-session was shared. We also print the surfaced ``live_view_url`` and the reader's
-final content.
+The browser lease is reentrant down the ancestor chain, so the owner may hold the
+lease (from its own navigation) AND await the subagent without deadlock — the
+subagent borrows the lease its blocked ancestor holds. Genuinely-parallel
+subagents would still serialize (one driver at a time).
+
+Because the reader subagent is initialized (``SubAgentTool(agent=...)``), we keep
+references to both Stagehand tools and print their ``_session_id`` values after
+the run — they are identical, proving the session was shared. We also print the
+surfaced ``live_view_url`` and the reader's final content.
 
 Requires OPENAI_API_KEY, BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID.
 """
@@ -53,28 +56,14 @@ def _stagehand_tool(name: str) -> Stagehand:
 
 
 def build_owner():
-    """Wire an owner + navigator/reader subagents that share one browser session.
+    """Wire an owner that co-drives the browser and delegates to a reader subagent.
 
-    Returns the owner plus the two Stagehand tool references so the caller can
-    inspect their session ids after the run.
+    Returns the owner plus the owner's and the subagent's Stagehand tool references
+    so the caller can inspect their session ids after the run.
     """
-    navigator_tool = _stagehand_tool("navigator-browser")
+    owner_tool = _stagehand_tool("owner-browser")
     reader_tool = _stagehand_tool("reader-browser")
 
-    navigator = Agent(
-        name="navigator",
-        role=(
-            "Your ONLY job is to use your Stagehand browser tool to navigate the browser to the "
-            "EXACT URL you are given, then confirm the navigation succeeded. Do nothing else."
-        ),
-        description="Navigates the shared browser to a given URL using its Stagehand tool.",
-        llm=_llm(),
-        tools=[navigator_tool],
-        inference_mode=InferenceMode.XML,
-        parallel_tool_calls_enabled=False,
-        max_loops=4,
-        is_postponed_component_init=True,
-    )
     reader = Agent(
         name="reader",
         role=(
@@ -94,20 +83,15 @@ def build_owner():
         id="owner",
         name="owner",
         role=(
-            "You coordinate two sub-agents that share ONE live browser session. You have NO browser "
-            "tool of your own — you only delegate. Always invoke a tool as {'input': '<task>'}. "
-            "First delegate to the 'navigator' sub-agent to open the exact URL you are given. "
-            "AFTER navigator confirms, delegate to the 'reader' sub-agent to report the current "
-            "page's URL and title. Then give a short final answer."
+            "You share ONE live browser session with your sub-agent, and you have your OWN Stagehand "
+            "browser tool. Always invoke a tool as {'input': '<task>'}. FIRST use your OWN Stagehand "
+            "tool to navigate the browser to the exact URL you are given. THEN delegate to the "
+            "'reader' sub-agent to report the current page's URL and title. Then give a short answer."
         ),
-        description="Owner agent that shares one browser session across its subagents.",
+        description="Owner agent that drives the browser itself and also delegates on one session.",
         llm=_llm(),
         tools=[
-            SubAgentTool(
-                name="navigator",
-                description="Delegate a browser navigation task. Pass {'input': '<task>'}.",
-                agent=navigator,
-            ),
+            owner_tool,
             SubAgentTool(
                 name="reader",
                 description="Delegate reading the current page. Pass {'input': '<task>'}.",
@@ -120,7 +104,7 @@ def build_owner():
         max_loops=8,
         is_postponed_component_init=True,
     )
-    return owner, navigator_tool, reader_tool
+    return owner, owner_tool, reader_tool
 
 
 def main():
@@ -131,7 +115,7 @@ def main():
         print(f"Missing required environment variables: {', '.join(missing)}. Set them and re-run.")
         return
 
-    owner, navigator_tool, reader_tool = build_owner()
+    owner, owner_tool, reader_tool = build_owner()
 
     with get_connection_manager() as cm:
         wf = Workflow(flow=Flow(connection_manager=cm, init_components=True, nodes=[owner]))
@@ -139,24 +123,24 @@ def main():
             result = wf.run(
                 input_data={
                     "input": (
-                        f"First have the navigator open the URL {TARGET_URL}. After it confirms, have the "
-                        "reader report the current page's URL and title."
+                        f"First navigate the browser to {TARGET_URL} using your own Stagehand tool. After it "
+                        "loads, delegate to the reader sub-agent to report the current page's URL and title."
                     )
                 }
             )
 
             owner_output = result.output.get("owner", {}).get("output", {})
             print("Status:", result.status)
-            print("Navigator tool session_id:", navigator_tool._session_id)
-            print("Reader tool session_id:   ", reader_tool._session_id)
+            print("Owner tool session_id: ", owner_tool._session_id)
+            print("Reader tool session_id:", reader_tool._session_id)
             print(
                 "Shared ONE session:",
-                navigator_tool._session_id is not None and navigator_tool._session_id == reader_tool._session_id,
+                owner_tool._session_id is not None and owner_tool._session_id == reader_tool._session_id,
             )
             print("Surfaced live_view_url:", owner_output.get("live_view_url"))
             print("Reader final content:", owner_output.get("content"))
         finally:
-            for tool in (navigator_tool, reader_tool):
+            for tool in (owner_tool, reader_tool):
                 try:
                     tool.close()
                 except Exception as exc:  # defensive: don't let cleanup mask the run outcome
