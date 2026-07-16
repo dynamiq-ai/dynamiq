@@ -308,10 +308,10 @@ class KnowledgeGraphEntityExtractor(Node):
         """Extract entities/relationships from the input documents.
 
         Returns:
-            dict: ``{"nodes": [...], "relationships": [...], "documents": [...]}``.
-            ``nodes``/``relationships`` are ready for ``BaseGraphStore.write_graph`` and ``documents``
-            passes the source chunks through, so the whole output feeds straight into
-            ``KnowledgeGraphWriter``.
+            dict: ``{"nodes": [...], "relationships": [...]}`` — the provider-neutral graph payload ready
+            for ``BaseGraphStore.write_graph`` (via ``KnowledgeGraphWriter``). Each edge carries its
+            source document's id as ``source_doc_id`` (for ACL/provenance); the documents themselves are
+            not returned.
         """
         config = ensure_config(config)
         self.reset_run_state()
@@ -324,7 +324,6 @@ class KnowledgeGraphEntityExtractor(Node):
         # document's LLM failure skips only that chunk; if EVERY document fails it's systemic (bad creds),
         # so we raise rather than report an empty graph as success.
         failed = 0
-        documents: list[Document] = []
         for document in input_data.documents:
             check_cancellation(config)
             # The document id scopes everything per-document: node wiring ids, attribute ids, and the
@@ -332,7 +331,6 @@ class KnowledgeGraphEntityExtractor(Node):
             # (overwriting allowed_principals). Assign a stable id up front (copy, don't mutate the input).
             if document.id is None:
                 document = document.model_copy(update={"id": uuid.uuid4().hex})
-            documents.append(document)
             try:
                 extracted = self._extract_from_text(document.content, config, **kwargs)
             except ValueError as exc:
@@ -361,7 +359,6 @@ class KnowledgeGraphEntityExtractor(Node):
         return {
             "nodes": nodes,
             "relationships": relationships,
-            "documents": documents,
         }
 
     def _apply_document_metadata(self, relationships: list[dict], document: Document) -> None:
@@ -682,7 +679,9 @@ class KnowledgeGraphEntityExtractor(Node):
             # Type label first (ontology enforcement + resolution key on labels[0]); shared ENTITY_LABEL second
             # so one full-text index over names spans every type.
             nodes.append(
-                GraphNode(labels=[label, ENTITY_LABEL], id=wiring_id, name=entity.get("name")).model_dump(exclude_none=True)
+                GraphNode(labels=[label, ENTITY_LABEL], id=wiring_id, name=entity.get("name")).model_dump(
+                    exclude_none=True
+                )
             )
 
             for attr_key, attr_value in attribute_values.items():

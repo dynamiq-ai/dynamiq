@@ -122,7 +122,6 @@ def build_workflow() -> Workflow:
             selector={
                 "nodes": f"$.{entity_extractor.id}.output.nodes",
                 "relationships": f"$.{entity_extractor.id}.output.relationships",
-                "documents": f"$.{entity_extractor.id}.output.documents",
             }
         ),
     )

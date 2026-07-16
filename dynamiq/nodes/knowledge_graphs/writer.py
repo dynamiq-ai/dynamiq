@@ -14,7 +14,6 @@ from dynamiq.nodes.knowledge_graphs.entity_extractor import (
     ENTITY_LABEL,
     ENTITY_NAME_FULLTEXT_INDEX,
     HAS_ATTRIBUTE_TYPE,
-    KG_ENTITY_IDS_KEY,
     build_attribute_value_id,
     build_fact_text,
     normalize_name,
@@ -80,24 +79,17 @@ def _entity_ids_by_doc(relationships: list[dict]) -> dict[str, list[str]]:
 
 
 class KnowledgeGraphWriterInputSchema(BaseModel):
-    """Input for the writer: an ``EntityExtractor``'s output payload.
-
-    ``nodes`` / ``relationships`` are the provider-neutral graph payload; ``documents`` are the source
-    chunks the payload was extracted from, tagged on output with the resolved entity ids they mention.
-    """
+    """Input for the writer: an ``EntityExtractor``'s output payload (the provider-neutral graph)."""
 
     nodes: list[dict] = Field(default_factory=list, description="Extracted graph nodes (EntityExtractor output).")
     relationships: list[dict] = Field(default_factory=list, description="Extracted graph relationships.")
-    documents: list[Document] = Field(
-        default_factory=list, description="Source chunks to tag with the resolved entity ids each mentions."
-    )
 
 
 class KnowledgeGraphWriter(Node):
     """Writes an extracted knowledge graph to a graph store, assigning durable entity identity first.
 
     Consumes an :class:`~dynamiq.nodes.extractors.entity_extractor.EntityExtractor`'s output
-    (``{nodes, relationships, documents}``) and:
+    (``{nodes, relationships}``) and:
 
       1. Write-time entity resolution: node identity is decided by NAME similarity only — the
          LLM-produced ids are just wiring that links edges to entities within one extraction and
@@ -106,8 +98,6 @@ class KnowledgeGraphWriter(Node):
          otherwise it is written as a new node under a fresh UUID. Re-running ingestion therefore
          converges onto existing entities instead of duplicating them.
       2. Upsert into the graph backend via ``BaseGraphStore.write_graph``.
-      3. Tag each source chunk with the resolved entity ids it mentions (``kg_entity_ids``) so the
-         chunk can go to a vector store and a hybrid retriever can seed graph traversal by unique id.
 
     Split from extraction so extraction can be parallelized in a flow: many ``EntityExtractor`` nodes
     (each on a shard of documents) can fan into a SINGLE ``KnowledgeGraphWriter``. The writer must stay
@@ -119,8 +109,8 @@ class KnowledgeGraphWriter(Node):
     requires a store that implements ``write_graph`` — currently Neo4j; other backends raise a
     clear error until their stores add it.
 
-    Input: ``{"nodes": [...], "relationships": [...], "documents": [Document, ...]}``.
-    Output: the resolved payload plus ``write_stats`` and ``nodes_created`` / ``relationships_created``.
+    Input: ``{"nodes": [...], "relationships": [...]}``.
+    Output: ``{"nodes_created": int, "relationships_created": int}`` — the write counts.
 
     Attributes:
         connection (Neo4j | ApacheAGE | AWSNeptune): The graph backend connection.
@@ -406,15 +396,7 @@ class KnowledgeGraphWriter(Node):
             f"{write_result.get('relationships_created')} new relationship(s)."
         )
 
-        # Return the input chunks tagged with the RESOLVED entity ids each mentions, so they can go to a
-        # vector store and a hybrid retriever can seed graph traversal by unique id (not by ambiguous name).
-        documents = self._attach_entity_ids(input_data.documents, relationships)
-
         return {
-            "nodes": nodes,
-            "relationships": relationships,
-            "documents": documents,
-            "write_stats": write_result,
             "nodes_created": write_result.get("nodes_created"),
             "relationships_created": write_result.get("relationships_created"),
         }
@@ -459,9 +441,8 @@ class KnowledgeGraphWriter(Node):
         """Drop nodes referenced by NO relationship (bare mentions) instead of writing them.
 
         All provenance and ACL live on edges, so a bare node could never be attributed to any document:
-        retrieval (edge-driven) cannot reach it, no chunk references it (``kg_entity_ids`` come from
-        relationship endpoints), and ``delete_documents`` could never remove it — the orphan sweep only
-        examines endpoints of removed edges. Skipping the write keeps the invariant that everything
+        retrieval (edge-driven) cannot reach it, and ``delete_documents`` could never remove it — the
+        orphan sweep only examines endpoints of removed edges. Skipping the write keeps the invariant that everything
         persisted is reachable through at least one provenance-stamped edge, so deleting a document
         provably removes all it contributed. Nothing is lost: entity ids are content-addressed
         (``uuid5`` of label + normalized name), so a future document asserting a fact about the same
@@ -477,22 +458,6 @@ class KnowledgeGraphWriter(Node):
                 "referenced by no relationship."
             )
         return kept
-
-    @staticmethod
-    def _attach_entity_ids(documents: list, relationships: list[dict]) -> list:
-        """Return COPIES of the chunks, each with ``kg_entity_ids`` = the resolved entity ids it mentions.
-
-        Recovered from the resolved relationships by ``source_doc_id`` (see :func:`_entity_ids_by_doc`).
-        The caller's documents are not mutated. A chunk whose entities appear in no relationship gets an
-        empty list — it still flows to the vector store, just with no graph seeds.
-        """
-        by_doc = _entity_ids_by_doc(relationships)
-        enriched = []
-        for document in documents:
-            ids = by_doc.get(str(document.id), [])
-            metadata = {**(document.metadata or {}), KG_ENTITY_IDS_KEY: ids}
-            enriched.append(document.model_copy(update={"metadata": metadata}))
-        return enriched
 
     @staticmethod
     def _deterministic_id(label: str, name: str) -> str:

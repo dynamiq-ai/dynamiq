@@ -164,7 +164,7 @@ class Neo4jGraphStore(BaseGraphStore):
         The base ``write_graph`` remains the default for the other openCypher backends (Neptune, AGE).
 
         Nodes are written with ``MERGE ... ON CREATE SET`` (properties write-once, identity matched on
-        ``identity_key``); relationships with ``MERGE ... SET`` (edge props refreshed each write). Returns
+        ``id``); relationships with ``MERGE ... SET`` (edge props refreshed each write). Returns
         a stats dict: ``nodes_created``, ``relationships_created``, ``properties_set``, ``records``, ``keys``.
         """
         if not self.supports_write_graph():
@@ -286,13 +286,13 @@ class Neo4jGraphStore(BaseGraphStore):
 
         The base builder inlines one ``MERGE`` clause per node into a single statement; that gives the
         planner an N-operator plan that does not scale (≈19 ms/node measured, and large payloads overrun
-        the connection timeout). Here nodes sharing the same labels + identity key are written by one
-        ``UNWIND $rows`` statement — Neo4j compiles a single plan and streams the rows (≈0.1 ms/node).
+        the connection timeout). Here nodes sharing the same labels are written by one ``UNWIND $rows``
+        statement — Neo4j compiles a single plan and streams the rows (≈0.1 ms/node).
         Per-node semantics are identical: ``MERGE (n:Labels {id}) ON CREATE SET n += props`` (identity on
-        ``identity_key`` only, properties write-once). One ``(query, params)`` per label-group.
+        ``id`` only, properties write-once). One ``(query, params)`` per label-group.
         """
-        groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        order: list[tuple[str, str]] = []
+        groups: dict[str, list[dict[str, Any]]] = {}
+        order: list[str] = []
         for idx, node in enumerate(nodes):
             labels = node.get("labels") or []
             node_id = node.get("id")
@@ -304,22 +304,21 @@ class Neo4jGraphStore(BaseGraphStore):
             if node.get("name") is not None:
                 properties["name"] = node["name"]
 
-            signature = (self._format_labels(labels), "id")
-            if signature not in groups:
-                groups[signature] = []
-                order.append(signature)
-            groups[signature].append({"id": node_id, "props": properties})
+            label_string = self._format_labels(labels)
+            if label_string not in groups:
+                groups[label_string] = []
+                order.append(label_string)
+            groups[label_string].append({"id": node_id, "props": properties})
 
         statements: list[tuple[str, dict[str, Any]]] = []
-        for signature in order:
-            label_string, identity_key = signature
+        for label_string in order:
             query = (
                 "UNWIND $rows AS row\n"
-                f"MERGE (n{label_string} {{{identity_key}: row.id}})\n"
+                f"MERGE (n{label_string} {{id: row.id}})\n"
                 "ON CREATE SET n += row.props\n"
                 "RETURN n"
             )
-            statements.append((query, {"rows": groups[signature]}))
+            statements.append((query, {"rows": groups[label_string]}))
         return statements
 
     def _build_relationship_statements(
@@ -328,8 +327,8 @@ class Neo4jGraphStore(BaseGraphStore):
         """Neo4j override: BULK edge upsert via ``UNWIND``, grouped by structure.
 
         The base builder emits one statement per edge (one network round-trip each). Here edges sharing
-        the same shape — relationship type, endpoint labels, identity keys, and the set of
-        ``identity_keys`` folded into the MERGE pattern — are written by one ``UNWIND $rows`` statement.
+        the same shape — relationship type, endpoint labels, and the set of ``identity_keys`` folded into
+        the MERGE pattern — are written by one ``UNWIND $rows`` statement.
         Per-edge semantics are identical: ``MATCH`` both endpoints by id, ``MERGE`` the edge (with
         ``identity_keys`` in the pattern so otherwise-identical edges stay distinct), ``SET r += props``.
         Each row is independent, so a missing endpoint drops only that edge. One ``(query, params)`` per
@@ -341,8 +340,6 @@ class Neo4jGraphStore(BaseGraphStore):
             rel_type = self._format_relationship_type(rel.get("type") or "")
             start_label = self._format_single_label(rel.get("start_label") or "")
             end_label = self._format_single_label(rel.get("end_label") or "")
-            start_identity_key = self._format_property_key(rel.get("start_identity_key") or "id")
-            end_identity_key = self._format_property_key(rel.get("end_identity_key") or "id")
             start_identity = rel.get("start_identity")
             end_identity = rel.get("end_identity")
             # Fold the explicit endpoint-name/description fields into the property bag persisted by
@@ -358,9 +355,7 @@ class Neo4jGraphStore(BaseGraphStore):
 
             present_raw = [k for k in (rel.get("identity_keys") or []) if k in properties]
             present_keys = tuple(self._format_property_key(k) for k in present_raw)
-            signature = (
-                rel_type, start_label, end_label, start_identity_key, end_identity_key, present_keys
-            )
+            signature = (rel_type, start_label, end_label, present_keys)
             row: dict[str, Any] = {
                 "start_id": start_identity, "end_id": end_identity, "props": properties
             }
@@ -374,7 +369,7 @@ class Neo4jGraphStore(BaseGraphStore):
 
         statements: list[tuple[str, dict[str, Any]]] = []
         for signature in order:
-            rel_type, start_label, end_label, start_identity_key, end_identity_key, present_keys = signature
+            rel_type, start_label, end_label, present_keys = signature
             if present_keys:
                 key_fragments = ", ".join(f"{key}: row.{key}" for key in present_keys)
                 merge_pattern = f"MERGE (s)-[r:{rel_type} {{{key_fragments}}}]->(e)"
@@ -383,8 +378,8 @@ class Neo4jGraphStore(BaseGraphStore):
 
             query = (
                 "UNWIND $rows AS row\n"
-                f"MATCH (s:{start_label} {{{start_identity_key}: row.start_id}})\n"
-                f"MATCH (e:{end_label} {{{end_identity_key}: row.end_id}})\n"
+                f"MATCH (s:{start_label} {{id: row.start_id}})\n"
+                f"MATCH (e:{end_label} {{id: row.end_id}})\n"
                 f"{merge_pattern}\n"
                 "SET r += row.props\n"
                 "RETURN r"

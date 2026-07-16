@@ -1,6 +1,5 @@
-"""Unit tests for the ``KnowledgeGraphWriter`` node (no LLM, no graph DB): write-time entity resolution,
-the ``execute`` write path, per-chunk entity-id attachment, and an end-to-end Workflow proving the
-``kg_entity_ids`` reach a downstream retriever.
+"""Unit tests for the ``KnowledgeGraphWriter`` node (no LLM, no graph DB): write-time entity resolution
+and the ``execute`` write path.
 
 Identity contract: LLM-produced ids are intra-extraction wiring only — node identity is decided
 exclusively by trigram name similarity against existing same-label nodes. Match -> adopt the
@@ -8,28 +7,19 @@ existing node's id; no match -> fresh UUID.
 """
 
 import uuid
-from typing import Any, ClassVar
 
 import pytest
-from pydantic import BaseModel, Field
 
-from dynamiq import Workflow
 from dynamiq.connections import Neo4j
-from dynamiq.flows import Flow
 from dynamiq.nodes.embedders.base import DocumentEmbedder
 from dynamiq.nodes.knowledge_graphs import KnowledgeGraphWriter
 from dynamiq.nodes.knowledge_graphs.entity_extractor import (
     ATTRIBUTE_VALUE_LABEL,
     ENTITY_EMBEDDING_VECTOR_INDEX,
     HAS_ATTRIBUTE_TYPE,
-    KG_ENTITY_IDS_KEY,
 )
 from dynamiq.nodes.knowledge_graphs.writer import _entity_ids_by_doc
-from dynamiq.nodes.node import InputTransformer, Node, NodeDependency
-from dynamiq.nodes.types import NodeGroup
-from dynamiq.runnables import RunnableStatus
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
-from dynamiq.types import Document
 
 
 class FakeGraphStore:
@@ -303,35 +293,27 @@ class TestResolveAgainstGraph:
 
 
 class TestExecute:
-    def test_execute_resolves_writes_and_tags_documents(self):
-        # Full write path on a fake store: nodes get resolved ids, the store receives the resolved payload,
-        # and the source chunk is tagged with the resolved entity ids it mentions.
+    def test_execute_resolves_and_writes(self):
+        # Full write path on a fake store: nodes get resolved ids and the store receives the resolved payload.
         writer = make_writer({})
         store = FakeGraphStore()
         writer._graph_store = store
 
         nodes = [entity("PERSON", "jane@d1", "Jane"), entity("ORGANIZATION", "acme@d1", "Acme")]
         rels = [edge("WORKS_AT", "PERSON", "ORGANIZATION", "jane@d1", "acme@d1", {"source_doc_id": "d1"})]
-        document = Document(id="d1", content="Jane works at Acme.")
 
-        result = writer.execute(
-            KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=rels, documents=[document])
-        )
+        result = writer.execute(KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=rels))
 
         # The store was handed the RESOLVED payload (wiring ids replaced by UUIDs).
         assert result["nodes_created"] == 2 and result["relationships_created"] == 1
         written_ids = {n["id"] for n in store.written[0]}
         assert "jane@d1" not in written_ids and all(is_uuid(i) for i in written_ids)
 
-        # The chunk is tagged with both resolved endpoint ids it mentions.
-        tagged = result["documents"][0].metadata["kg_entity_ids"]
-        assert set(tagged) == written_ids
-
     def test_execute_empty_payload_writes_nothing(self):
         writer = make_writer({})
         writer._graph_store = FakeGraphStore()
 
-        result = writer.execute(KnowledgeGraphWriter.input_schema(nodes=[], relationships=[], documents=[]))
+        result = writer.execute(KnowledgeGraphWriter.input_schema(nodes=[], relationships=[]))
 
         assert result["nodes_created"] == 0 and result["relationships_created"] == 0
         assert writer._graph_store.written is None  # write_graph never called
@@ -392,99 +374,6 @@ class TestExecute:
         assert store.written is None  # nothing written in either case
 
 
-# --- Full workflow: the writer tags chunks with kg_entity_ids; the ids must reach the retriever ---
-
-
-class _StubWriter(KnowledgeGraphWriter):
-    """KnowledgeGraphWriter wired to the in-memory FakeGraphStore (no real Neo4j)."""
-
-    def _build_graph_store(self):
-        return FakeGraphStore()
-
-    def _ensure_entity_index(self) -> None:
-        pass
-
-
-class _DocsSchema(BaseModel):
-    documents: list[Any] = Field(default_factory=list)
-
-
-class _Embedder(Node):
-    """Stand-in for the document embedder: passes the (tagged) chunks through, like the real one."""
-
-    group: ClassVar = NodeGroup.UTILS
-    name: str = "embedder"
-    input_schema: ClassVar = _DocsSchema
-
-    def execute(self, input_data: _DocsSchema, config=None, **kwargs):
-        return {"documents": input_data.documents}
-
-
-class _Retriever(Node):
-    """Stand-in for the hybrid retriever: seeds graph traversal from each chunk's kg_entity_ids."""
-
-    group: ClassVar = NodeGroup.UTILS
-    name: str = "retriever"
-    input_schema: ClassVar = _DocsSchema
-
-    def execute(self, input_data: _DocsSchema, config=None, **kwargs):
-        seed_ids = sorted(
-            {eid for doc in input_data.documents for eid in (doc.metadata or {}).get(KG_ENTITY_IDS_KEY, [])}
-        )
-        return {"seed_ids": seed_ids}
-
-
-class TestEntityIdWorkflowFlow:
-    def test_kg_entity_ids_flow_writer_to_embedder_to_retriever(self):
-        writer = _StubWriter(
-            id="kg_writer",
-            connection=Neo4j(uri="bolt://localhost:7687", username="neo4j", password="password"),
-            input_transformer=InputTransformer(
-                selector={"nodes": "$.nodes", "relationships": "$.relationships", "documents": "$.documents"}
-            ),
-        )
-        embedder = _Embedder(
-            id="embedder",
-            depends=[NodeDependency(writer)],
-            input_transformer=InputTransformer(selector={"documents": "$.kg_writer.output.documents"}),
-        )
-        retriever = _Retriever(
-            id="retriever",
-            depends=[NodeDependency(embedder)],
-            input_transformer=InputTransformer(selector={"documents": "$.embedder.output.documents"}),
-        )
-        workflow = Workflow(flow=Flow(nodes=[writer, embedder, retriever]))
-
-        nodes = [
-            {"labels": ["PERSON", "Entity"], "id": "jane@d1", "name": "Jane", "properties": {}},
-            {"labels": ["ORG", "Entity"], "id": "acme@d1", "name": "Acme", "properties": {}},
-        ]
-        relationships = [
-            {
-                "type": "WORKS_AT",
-                "start_label": "PERSON",
-                "end_label": "ORG",
-                "start_identity": "jane@d1",
-                "end_identity": "acme@d1",
-                "properties": {"source_doc_id": "d1"},
-            }
-        ]
-        documents = [Document(id="d1", content="Jane works at Acme.")]
-
-        result = workflow.run(input_data={"nodes": nodes, "relationships": relationships, "documents": documents})
-
-        assert result.status == RunnableStatus.SUCCESS
-        # The writer tagged the chunk with its two resolved entity ids; those ids reached the retriever
-        # after flowing writer -> embedder -> retriever through the input-transformer wiring.
-        seed_ids = result.output["retriever"]["output"]["seed_ids"]
-        assert len(seed_ids) == 2  # resolved ids for Jane + Acme
-
-        # ...and they match exactly what the writer attached to the chunk it emitted. (The workflow result
-        # serializes documents to dicts, so read kg_entity_ids off the serialized metadata.)
-        writer_docs = result.output["kg_writer"]["output"]["documents"]
-        assert sorted(writer_docs[0]["metadata"][KG_ENTITY_IDS_KEY]) == seed_ids
-
-
 class TestEntityIdsByDoc:
     def test_groups_resolved_endpoint_ids_by_source_doc(self):
         resolved = [
@@ -508,34 +397,6 @@ class TestEntityIdsByDoc:
 
     def test_skips_relationships_without_source_doc(self):
         assert _entity_ids_by_doc([{"type": "R", "start_identity": "a", "end_identity": "b", "properties": {}}]) == {}
-
-
-class TestAttachEntityIds:
-    def test_tags_each_chunk_with_its_ids_without_mutating_input(self):
-        docs = [
-            Document(id="c1", content="Jane works at Acme.", metadata={"source": "f"}),
-            Document(id="c2", content="Acme uses Helios."),
-        ]
-        resolved = [
-            {"type": "WORKS_AT", "start_identity": "uuid-jane", "end_identity": "uuid-acme",
-             "properties": {"source_doc_id": "c1"}},
-            {"type": "USES", "start_identity": "uuid-acme", "end_identity": "uuid-helios",
-             "properties": {"source_doc_id": "c2"}},
-        ]
-
-        out = KnowledgeGraphWriter._attach_entity_ids(docs, resolved)
-
-        by_id = {d.id: d for d in out}
-        assert by_id["c1"].metadata[KG_ENTITY_IDS_KEY] == ["uuid-acme", "uuid-jane"]
-        assert by_id["c1"].metadata["source"] == "f"  # existing metadata preserved
-        assert by_id["c2"].metadata[KG_ENTITY_IDS_KEY] == ["uuid-acme", "uuid-helios"]
-        # Input documents are not mutated.
-        assert KG_ENTITY_IDS_KEY not in (docs[0].metadata or {})
-
-    def test_chunk_with_no_facts_gets_empty_list(self):
-        docs = [Document(id="c1", content="nothing linked")]
-        out = KnowledgeGraphWriter._attach_entity_ids(docs, [])
-        assert out[0].metadata[KG_ENTITY_IDS_KEY] == []
 
 
 class StubDocumentEmbedder(DocumentEmbedder):
