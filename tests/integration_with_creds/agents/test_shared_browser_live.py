@@ -20,6 +20,7 @@ Expensive and LLM-nondeterministic; skipped without all three credentials.
 """
 
 import os
+import threading
 
 import pytest
 
@@ -167,6 +168,102 @@ def test_two_subagents_share_one_browserbase_session():
             # Owner closes the shared session at run end; close defensively in case the run raised
             # before teardown, so the live Browserbase session does not leak.
             for tool in (navigator_tool, reader_tool):
+                try:
+                    tool.close()
+                except Exception:
+                    pass
+
+
+@pytest.mark.integration
+def test_owner_drives_then_delegates_shares_session():
+    """The owner co-drives its OWN Stagehand tool AND delegates to a subagent, on one session.
+
+    This exercises the reentrant-down-the-ancestor-chain lease: the owner acquires the lease
+    when it navigates, still holds it while awaiting the subagent, and the subagent borrows it
+    (no deadlock). A generous timeout turns any re-introduced deadlock into a fast failure rather
+    than an infinite hang.
+    """
+    if not (os.getenv("OPENAI_API_KEY") and os.getenv("BROWSERBASE_API_KEY") and os.getenv("BROWSERBASE_PROJECT_ID")):
+        pytest.skip("OPENAI_API_KEY, BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID are required for this test.")
+
+    owner_tool = _stagehand_tool("owner-browser")
+    sub_tool = _stagehand_tool("reader-browser")
+
+    reader = Agent(
+        name="reader",
+        role=(
+            "Your ONLY job is to use your Stagehand browser tool to extract and report the CURRENT "
+            "page's URL and title. Do NOT navigate anywhere; just read the page you are already on."
+        ),
+        description="Reports the current page's URL/title using its Stagehand tool.",
+        llm=_openai_llm(),
+        tools=[sub_tool],
+        inference_mode=InferenceMode.XML,
+        parallel_tool_calls_enabled=False,
+        max_loops=4,
+        is_postponed_component_init=True,
+    )
+    reader_subagent = SubAgentTool(
+        name="reader",
+        description="Delegate reading the current page. Pass {'input': '<task>'}.",
+        agent=reader,
+    )
+
+    owner = Agent(
+        id="owner",
+        name="owner",
+        role=(
+            "You share ONE live browser session with your sub-agent. You have your OWN Stagehand "
+            "browser tool. Always invoke a tool as {'input': '<task>'}. FIRST use your OWN Stagehand "
+            "tool to navigate the browser to the exact URL you are given. THEN delegate to the "
+            "'reader' sub-agent to report the current page's URL and title. Then give a short answer."
+        ),
+        description="Owner agent that drives the browser itself and also delegates on one session.",
+        llm=_openai_llm(),
+        tools=[owner_tool, reader_subagent],
+        share_browser_session_with_subagents=True,
+        inference_mode=InferenceMode.XML,
+        parallel_tool_calls_enabled=False,
+        max_loops=8,
+        is_postponed_component_init=True,
+    )
+
+    box: dict = {}
+
+    def _run(cm):
+        wf = Workflow(flow=Flow(connection_manager=cm, init_components=True, nodes=[owner]))
+        box["result"] = wf.run(
+            input_data={
+                "input": (
+                    f"First navigate the browser to {TARGET_URL} using your own Stagehand tool. After it "
+                    "loads, delegate to the reader sub-agent to report the current page's URL and title."
+                )
+            },
+            config=RunnableConfig(),
+        )
+
+    with get_connection_manager() as cm:
+        worker = threading.Thread(target=_run, args=(cm,), daemon=True)
+        worker.start()
+        # Fail fast if a regression re-introduces the owner-co-drive deadlock, instead of hanging.
+        worker.join(timeout=240)
+        try:
+            assert not worker.is_alive(), "workflow did not finish in time — possible browser-lease deadlock"
+            result = box["result"]
+            assert result.status == RunnableStatus.SUCCESS
+
+            # HARD proof: the owner's OWN tool and the subagent's tool drove the SAME session.
+            assert owner_tool._session_id is not None, "owner tool never opened a session"
+            assert sub_tool._session_id is not None, "subagent tool never opened a session"
+            assert owner_tool._session_id == sub_tool._session_id, (
+                "owner and subagent did not share ONE browser session: "
+                f"{owner_tool._session_id!r} != {sub_tool._session_id!r}"
+            )
+
+            owner_output = result.output[owner.id]["output"]
+            assert owner_output.get("live_view_url"), "owner run result did not surface a shared live_view_url"
+        finally:
+            for tool in (owner_tool, sub_tool):
                 try:
                     tool.close()
                 except Exception:
