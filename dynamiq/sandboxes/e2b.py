@@ -96,6 +96,11 @@ class E2BSandbox(Sandbox):
         """E2B supports reconnecting multiple views to one sandbox id."""
         return True
 
+    @property
+    def supports_pause(self) -> bool:
+        """E2B supports pause() and resume via connect(sandbox_id)."""
+        return True
+
     def ensure_started(self) -> str | None:
         """Ensure the sandbox exists (create/reconnect) and return its id."""
         self._ensure_sandbox()
@@ -478,6 +483,27 @@ class E2BSandbox(Sandbox):
                 logger.warning(f"E2BSandbox close() failed: {e}")
             finally:
                 self._sandbox = None
+
+    def pause(self) -> str | None:
+        """Pause the E2B sandbox. Keeps ``sandbox_id`` for resume; drops the live handle.
+
+        Unlike ``close(kill=True)``, pausing preserves the sandbox (filesystem + memory)
+        and its id, so ``resume()`` / reconnecting by id restores it.
+        """
+        sandbox = self._ensure_sandbox()
+        try:
+            sandbox.pause()
+            logger.debug(f"E2B sandbox paused: {self.sandbox_id}")
+        except Exception as e:
+            logger.warning(f"E2BSandbox pause() failed: {e}")
+        finally:
+            # keep sandbox_id (resume target); only release the live connection object
+            self._sandbox = None
+        return self.sandbox_id
+
+    def resume(self) -> str | None:
+        """Resume a paused E2B sandbox by reconnecting to its sandbox_id."""
+        return self.ensure_started()
 
     def __enter__(self):
         """Context manager entry."""
