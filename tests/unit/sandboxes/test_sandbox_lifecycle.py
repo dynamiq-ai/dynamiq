@@ -1,6 +1,10 @@
+from unittest.mock import MagicMock
+
 import pytest
 
+from dynamiq.connections import E2B
 from dynamiq.sandboxes.base import Sandbox, SandboxLifecyclePolicy
+from dynamiq.sandboxes.e2b import E2BSandbox
 
 
 def test_lifecycle_policy_values():
@@ -25,12 +29,6 @@ def test_base_sandbox_does_not_support_pause():
         b.pause()
     with pytest.raises(NotImplementedError):
         b.resume()
-
-
-from unittest.mock import MagicMock
-
-from dynamiq.connections import E2B
-from dynamiq.sandboxes.e2b import E2BSandbox
 
 
 def _e2b(**kw):
@@ -63,3 +61,37 @@ def test_e2b_resume_reconnects_by_id(monkeypatch):
 
     assert returned == "sbx-1"
     assert sb._sandbox is reconnected
+
+
+def test_e2b_auto_pause_passes_lifecycle_on_create(monkeypatch):
+    sb = E2BSandbox(connection=E2B(api_key="t"), auto_pause=True)  # no sandbox_id → create path
+    captured = {}
+
+    class _FakeSDK:
+        @staticmethod
+        def create(**kwargs):
+            captured.update(kwargs)
+            m = MagicMock()
+            m.sandbox_id = "sbx-new"
+            return m
+
+    monkeypatch.setattr(E2BSandbox, "_sdk_class", property(lambda self: _FakeSDK))
+    sb._create_with_retry()
+    assert captured.get("lifecycle") == {"on_timeout": "pause"}
+
+
+def test_e2b_no_auto_pause_omits_lifecycle(monkeypatch):
+    sb = E2BSandbox(connection=E2B(api_key="t"))  # auto_pause defaults False
+    captured = {}
+
+    class _FakeSDK:
+        @staticmethod
+        def create(**kwargs):
+            captured.update(kwargs)
+            m = MagicMock()
+            m.sandbox_id = "sbx-new"
+            return m
+
+    monkeypatch.setattr(E2BSandbox, "_sdk_class", property(lambda self: _FakeSDK))
+    sb._create_with_retry()
+    assert "lifecycle" not in captured

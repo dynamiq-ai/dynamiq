@@ -33,6 +33,14 @@ class E2BSandbox(Sandbox):
     template: str | None = Field(
         default=None, description="Template to use for sandbox creation. " "If None, the default template is used."
     )
+    auto_pause: bool = Field(
+        default=False,
+        description=(
+            "When True, create the sandbox with lifecycle on_timeout=pause so an idle or "
+            "leaked sandbox is paused (resumable by sandbox_id) instead of killed at the "
+            "provider timeout. Pairs with Agent.sandbox_on_run_end=pause."
+        ),
+    )
     envs: dict[str, str] | None = Field(
         default=None,
         description="Custom environment variables passed to the sandbox on creation.",
@@ -287,7 +295,7 @@ class E2BSandbox(Sandbox):
                 # Drop metadata values that are None since E2B rejects those
                 metadata = {k: v for k, v in self.metadata.items() if v is not None} if self.metadata else {}
                 metadata.setdefault("created_at", datetime.now(timezone.utc).isoformat())
-                return self._sdk_class.create(
+                create_kwargs = dict(
                     template=self.template,
                     api_key=self.connection.api_key,
                     timeout=self.timeout,
@@ -295,6 +303,10 @@ class E2BSandbox(Sandbox):
                     envs=self.envs,
                     metadata=metadata,
                 )
+                if self.auto_pause:
+                    # SandboxLifecycle TypedDict: {"on_timeout": "pause"|"kill", "auto_resume"?: bool}
+                    create_kwargs["lifecycle"] = {"on_timeout": "pause"}
+                return self._sdk_class.create(**create_kwargs)
             except E2BRateLimitException:
                 logger.warning("E2B sandbox creation rate-limited. Retrying with exponential backoff.")
                 raise
