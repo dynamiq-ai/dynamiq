@@ -66,3 +66,53 @@ def test_non_owner_releases_lease_but_does_not_close(llm):
         _shared_session.reset(outer)
     ss.release_browser.assert_called_once_with("sub-key")
     ss.close_browser.assert_not_called()
+
+
+def test_stagehand_attaches_and_records_under_shared_session(monkeypatch, llm):
+    from dynamiq.nodes.agents.shared_session import SharedSession
+    from dynamiq.nodes.tools.stagehand import Stagehand
+
+    tool = Stagehand.__new__(Stagehand)  # bypass connection init for a pure-logic unit test
+    tool._session_id = None
+    tool._live_view_url = "https://lv/x"
+    monkeypatch.setattr(Stagehand, "_is_steel_browser_connection", lambda self: False)
+
+    ss = SharedSession(share_browser=True)
+    session_token = _shared_session.set(ss)
+    run_token = _current_agent_run.set("runA")
+    try:
+        # first tool: no shared id yet -> becomes the creator, attach is a no-op
+        shared = tool._attach_shared_browser_before_init()
+        assert shared is True
+        assert ss._lease_owner == "runA"       # lease acquired
+        assert tool._session_id is None         # nothing to attach to yet
+
+        # simulate _init_client having created the session
+        tool._session_id = "created-sid"
+        tool._record_shared_browser_after_init()
+        assert ss.browser_session_id() == "created-sid"
+        assert ss.browser_live_view_url() == "https://lv/x"
+
+        # second tool under the same session attaches to the recorded id
+        tool2 = Stagehand.__new__(Stagehand)
+        tool2._session_id = None
+        tool2._live_view_url = None
+        monkeypatch.setattr(Stagehand, "_is_steel_browser_connection", lambda self: False)
+        run_token2 = _current_agent_run.set("runA")  # same run -> reentrant lease
+        try:
+            assert tool2._attach_shared_browser_before_init() is True
+            assert tool2._session_id == "created-sid"  # attached
+        finally:
+            _current_agent_run.reset(run_token2)
+    finally:
+        _current_agent_run.reset(run_token)
+        _shared_session.reset(session_token)
+
+
+def test_stagehand_no_shared_session_is_passthrough(monkeypatch):
+    from dynamiq.nodes.tools.stagehand import Stagehand
+
+    tool = Stagehand.__new__(Stagehand)
+    tool._session_id = None
+    assert tool._attach_shared_browser_before_init() is False  # no session set
+    assert tool._session_id is None

@@ -17,6 +17,7 @@ from dynamiq.connections import Browserbase, StagehandEnvironment, SteelBrowser,
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
+from dynamiq.nodes.agents.shared_session import _current_agent_run, _shared_session
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.nodes.tools.utils import guess_mime_type_from_bytes, sanitize_filename
 from dynamiq.runnables import RunnableConfig
@@ -208,6 +209,37 @@ class Stagehand(ConnectionNode):
     def _is_steel_browser_connection(self) -> bool:
         """Check if the current connection is an instance of Steel Browser connection."""
         return isinstance(self.connection, SteelBrowser)
+
+    def _attach_shared_browser_before_init(self) -> bool:
+        """If a browser-sharing session is active, acquire the lease and attach to the
+        shared session_id (if one exists yet). Returns True when sharing is active.
+
+        Browserbase only in P3 (Steel keeps its own session object; see spec §10.4).
+        """
+        ss = _shared_session.get()
+        if ss is None or not getattr(ss, "share_browser", False):
+            return False
+        if self._is_steel_browser_connection():
+            return False  # Steel sharing is a fast-follow
+        run_key = _current_agent_run.get() or "agent"
+        ss.acquire_browser(run_key)  # held until the owning agent's execute() finally
+        shared_sid = ss.browser_session_id()
+        if shared_sid:
+            self._session_id = shared_sid  # attach via the existing reuse path (client.init)
+        return True
+
+    def _record_shared_browser_after_init(self) -> None:
+        """Record this tool's session_id as the shared one the first time (first writer wins)."""
+        ss = _shared_session.get()
+        if ss is None or not getattr(ss, "share_browser", False) or self._is_steel_browser_connection():
+            return
+        if ss.browser_session_id() is None and self._session_id:
+            ss.record_browser(
+                session_id=self._session_id,
+                provider="browserbase",
+                live_view_url=self._live_view_url,
+                close_callback=self.close,
+            )
 
     def _get_steel_browser_headers(self) -> dict[str, str]:
         """Get the headers for the Steel Browser API requests."""
@@ -530,7 +562,10 @@ class Stagehand(ConnectionNode):
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
         config = ensure_config(config)
         check_cancellation(config)
+        shared_browser = self._attach_shared_browser_before_init()
         await self._init_client(input_data.files)
+        if shared_browser:
+            self._record_shared_browser_after_init()
 
         tool_data = {"tool_session_id": self.client.session_id}
         self.run_on_node_execute_run(
