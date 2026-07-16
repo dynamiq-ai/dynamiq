@@ -724,6 +724,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         shared_session_token = None
         sandbox_overlay_token = None
         prev_shared_view = self._shared_sandbox_view
+        # Bound before the try so the finally can safely reference it even if an exception
+        # is raised before the result dict is built (e.g. during session setup).
+        execution_result = None
         try:
             shared_session_token = self._maybe_enter_shared_session(kwargs)
             # Always set the overlay (even to None, for non-borrowers) so a nested subagent does not
@@ -900,7 +903,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
             logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
-            self._maybe_surface_sandbox_id(execution_result, shared_session_token)
             return execution_result
         finally:
             if sandbox_overlay_token is not None:
@@ -908,7 +910,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             self._release_shared_sandbox_view(restore_to=prev_shared_view)
             _run_extra_tools.reset(ltm_token)
             if shared_session_token is not None:
-                self._apply_sandbox_on_run_end()
+                # Runs before `return execution_result` completes; on a confirmed pause it
+                # mutates the still-referenced result dict to carry the resume sandbox_id.
+                self._apply_sandbox_on_run_end(execution_result)
             self._exit_shared_session(shared_session_token)
 
     def retrieve_conversation_history(
@@ -2228,12 +2232,17 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         if token is not None:
             _shared_session.reset(token)
 
-    def _apply_sandbox_on_run_end(self) -> None:
+    def _apply_sandbox_on_run_end(self, execution_result: dict | None = None) -> None:
         """Owner-only: apply ``sandbox_on_run_end`` to the shared sandbox at run end.
 
         Called from ``execute()``'s finally only when this agent owns the shared session
         (``shared_session_token is not None``). Never invoked for inherited subagents or
         for non-sharing standalone agents, so their sandbox lifecycle is unchanged.
+
+        On a confirmed pause the resume ``sandbox_id`` is recorded on ``execution_result``
+        (when provided) so a caller can reconnect later. A failed pause falls back to an
+        explicit ``close(kill=True)`` and surfaces no id, so nothing is silently leaked and
+        the run result never advertises a sandbox that can't actually be resumed.
         """
         backend = self.sandbox_backend
         if backend is None:
@@ -2246,7 +2255,16 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 backend.close(kill=False)
             elif policy == SandboxLifecyclePolicy.PAUSE:
                 if backend.supports_pause:
-                    backend.pause()
+                    paused_id = backend.pause()
+                    if paused_id is not None:
+                        if execution_result is not None:
+                            execution_result["sandbox_id"] = paused_id
+                    else:
+                        logger.warning(
+                            f"Agent {self.name}: sandbox pause failed; falling back to explicit "
+                            f"close(kill=True) to avoid leaking the sandbox."
+                        )
+                        backend.close(kill=True)
                 else:
                     logger.info(
                         f"Agent {self.name}: sandbox backend {type(backend).__name__} does not "
@@ -2255,20 +2273,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     backend.close(kill=False)
         except Exception as e:
             logger.warning(f"Agent {self.name}: applying sandbox_on_run_end={policy} failed: {e}")
-
-    def _maybe_surface_sandbox_id(self, execution_result: dict, shared_session_token) -> None:
-        """Add ``sandbox_id`` to the run result when the owner is persisting the sandbox.
-
-        Only when this agent owns the shared session (token set), the policy is ``pause``,
-        and the backend can actually be resumed — so a caller can reconnect by id later.
-        """
-        if shared_session_token is None:
-            return
-        if self.sandbox_on_run_end != SandboxLifecyclePolicy.PAUSE:
-            return
-        backend = self.sandbox_backend
-        if backend is not None and backend.supports_pause:
-            execution_result["sandbox_id"] = backend.current_sandbox_id
 
     def _resolve_tools_sandbox(self):
         """The sandbox this agent builds its OWN tools from at construction — always its own

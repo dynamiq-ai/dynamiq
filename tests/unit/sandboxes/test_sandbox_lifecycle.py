@@ -42,6 +42,7 @@ def test_e2b_supports_pause():
 def test_e2b_pause_calls_sdk_and_keeps_id_but_drops_handle():
     sb = _e2b()
     raw = MagicMock()
+    raw.pause.return_value = True  # SDK pause() returns bool; True == success
     sb._sandbox = raw  # _ensure_sandbox() returns this without connecting
 
     returned = sb.pause()
@@ -50,6 +51,41 @@ def test_e2b_pause_calls_sdk_and_keeps_id_but_drops_handle():
     assert returned == "sbx-1"
     assert sb.sandbox_id == "sbx-1"   # id retained for resume
     assert sb._sandbox is None        # live handle dropped
+
+
+def test_e2b_pause_returns_none_on_sdk_exception():
+    sb = _e2b()
+    raw = MagicMock()
+    raw.pause.side_effect = RuntimeError("boom")
+    sb._sandbox = raw
+
+    returned = sb.pause()
+
+    raw.pause.assert_called_once()
+    assert returned is None  # failure signalled to caller
+    assert sb._sandbox is None  # live handle still dropped
+
+
+def test_e2b_pause_returns_none_on_sdk_false():
+    sb = _e2b()
+    raw = MagicMock()
+    raw.pause.return_value = False  # SDK reports pause did not take
+    sb._sandbox = raw
+
+    returned = sb.pause()
+
+    raw.pause.assert_called_once()
+    assert returned is None
+    assert sb._sandbox is None
+
+
+def test_e2b_pause_noop_when_nothing_to_pause(monkeypatch):
+    sb = E2BSandbox(connection=E2B(api_key="t"))  # no sandbox_id, no live handle
+    # Must not materialize a sandbox just to pause it.
+    monkeypatch.setattr(
+        E2BSandbox, "_ensure_sandbox", lambda self: (_ for _ in ()).throw(AssertionError("should not create"))
+    )
+    assert sb.pause() is None
 
 
 def test_e2b_resume_reconnects_by_id(monkeypatch):

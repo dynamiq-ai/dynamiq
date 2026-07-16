@@ -501,17 +501,31 @@ class E2BSandbox(Sandbox):
 
         Unlike ``close(kill=True)``, pausing preserves the sandbox (filesystem + memory)
         and its id, so ``resume()`` / reconnecting by id restores it.
+
+        Returns the ``sandbox_id`` only on a confirmed pause. Returns ``None`` when there
+        is nothing to pause, or when the SDK ``pause()`` raises or reports failure (its
+        return value is a bool) — so a caller can fall back to an explicit close instead
+        of assuming a leaked sandbox was safely persisted.
         """
+        # Nothing to pause and no id to reconnect to: mirror close()'s guard and never
+        # materialize a sandbox purely to pause it.
+        if self._sandbox is None and not self.sandbox_id:
+            return None
         sandbox = self._ensure_sandbox()
+        paused = False
         try:
-            sandbox.pause()
-            logger.debug(f"E2B sandbox paused: {self.sandbox_id}")
+            # E2B SDK pause() returns a bool; a falsy result means the pause did not take.
+            paused = bool(sandbox.pause())
+            if paused:
+                logger.debug(f"E2B sandbox paused: {self.sandbox_id}")
+            else:
+                logger.warning(f"E2BSandbox pause() reported failure for {self.sandbox_id}")
         except Exception as e:
             logger.warning(f"E2BSandbox pause() failed: {e}")
         finally:
             # keep sandbox_id (resume target); only release the live connection object
             self._sandbox = None
-        return self.sandbox_id
+        return self.sandbox_id if paused else None
 
     def resume(self) -> str | None:
         """Resume a paused E2B sandbox by reconnecting to its sandbox_id."""

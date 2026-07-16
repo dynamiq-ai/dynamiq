@@ -62,28 +62,40 @@ def test_disconnect_policy_disconnects(llm):
     a.sandbox.backend.close.assert_called_once_with(kill=False)
 
 
-def test_run_result_surfaces_sandbox_id_when_pausing(llm):
-    """When the owner persists (pause) an E2B sandbox, the run result carries sandbox_id
-    so a caller can resume it later."""
+def test_pause_policy_falls_back_to_close_kill_when_pause_fails(llm):
+    """A failed pause must not silently leak the sandbox: fall back to close(kill=True)."""
     a = _owner(llm, SandboxLifecyclePolicy.PAUSE)
-    # Simulate the owner branch: a live shared session token + a pausable backend with an id.
-    a.sandbox.backend = MagicMock(supports_pause=True, current_sandbox_id="sbx-resume-1")
+    a.sandbox.backend = MagicMock(supports_pause=True)
+    a.sandbox.backend.pause.return_value = None  # pause() signals failure
+    a._apply_sandbox_on_run_end()
+    a.sandbox.backend.pause.assert_called_once()
+    a.sandbox.backend.close.assert_called_once_with(kill=True)
+
+
+def test_run_result_surfaces_sandbox_id_when_pausing(llm):
+    """When the owner persists (pause) an E2B sandbox, the run result carries the ACTUAL
+    paused sandbox id so a caller can resume it later."""
+    a = _owner(llm, SandboxLifecyclePolicy.PAUSE)
+    a.sandbox.backend = MagicMock(supports_pause=True)
+    a.sandbox.backend.pause.return_value = "sbx-resume-1"
     result = {"content": "done"}
-    a._maybe_surface_sandbox_id(result, shared_session_token=object())
+    a._apply_sandbox_on_run_end(result)
     assert result["sandbox_id"] == "sbx-resume-1"
 
 
 def test_run_result_omits_sandbox_id_when_killing(llm):
     a = _owner(llm, SandboxLifecyclePolicy.KILL)
-    a.sandbox.backend = MagicMock(supports_pause=True, current_sandbox_id="sbx-x")
+    a.sandbox.backend = MagicMock(supports_pause=True)
     result = {"content": "done"}
-    a._maybe_surface_sandbox_id(result, shared_session_token=object())
+    a._apply_sandbox_on_run_end(result)
     assert "sandbox_id" not in result
 
 
-def test_run_result_omits_sandbox_id_when_not_owner(llm):
+def test_run_result_omits_sandbox_id_when_pause_fails(llm):
+    """A failed pause must NOT surface a resume id the sandbox can't honor."""
     a = _owner(llm, SandboxLifecyclePolicy.PAUSE)
-    a.sandbox.backend = MagicMock(supports_pause=True, current_sandbox_id="sbx-x")
+    a.sandbox.backend = MagicMock(supports_pause=True)
+    a.sandbox.backend.pause.return_value = None
     result = {"content": "done"}
-    a._maybe_surface_sandbox_id(result, shared_session_token=None)  # inherited/non-owner
+    a._apply_sandbox_on_run_end(result)
     assert "sandbox_id" not in result
