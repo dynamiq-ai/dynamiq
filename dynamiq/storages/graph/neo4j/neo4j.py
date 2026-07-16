@@ -295,16 +295,20 @@ class Neo4jGraphStore(BaseGraphStore):
         order: list[tuple[str, str]] = []
         for idx, node in enumerate(nodes):
             labels = node.get("labels") or []
-            identity_key = self._format_property_key(node.get("identity_key") or "id")
-            properties = node.get("properties") or {}
-            if identity_key not in properties:
-                raise ValueError(f"Node {idx} is missing identity key '{identity_key}' in properties.")
+            node_id = node.get("id")
+            if node_id is None:
+                raise ValueError(f"Node {idx} is missing 'id'.")
+            # Fold the explicit id/name back into the property bag persisted by ``SET n += props`` so the
+            # stored node keeps flat ``id``/``name`` properties (the shape retrievers read).
+            properties = {"id": node_id, **(node.get("properties") or {})}
+            if node.get("name") is not None:
+                properties["name"] = node["name"]
 
-            signature = (self._format_labels(labels), identity_key)
+            signature = (self._format_labels(labels), "id")
             if signature not in groups:
                 groups[signature] = []
                 order.append(signature)
-            groups[signature].append({"id": properties[identity_key], "props": properties})
+            groups[signature].append({"id": node_id, "props": properties})
 
         statements: list[tuple[str, dict[str, Any]]] = []
         for signature in order:
@@ -341,7 +345,13 @@ class Neo4jGraphStore(BaseGraphStore):
             end_identity_key = self._format_property_key(rel.get("end_identity_key") or "id")
             start_identity = rel.get("start_identity")
             end_identity = rel.get("end_identity")
-            properties = rel.get("properties") or {}
+            # Fold the explicit endpoint-name/description fields into the property bag persisted by
+            # ``SET r += props`` so the stored edge keeps flat ``src_name``/``dst_name``/``description``
+            # properties (the shape retrievers read).
+            properties = {
+                **{k: rel[k] for k in ("src_name", "dst_name", "description") if rel.get(k) is not None},
+                **(rel.get("properties") or {}),
+            }
 
             if start_identity is None or end_identity is None:
                 raise ValueError(f"Relationship {idx} missing start or end identity value.")

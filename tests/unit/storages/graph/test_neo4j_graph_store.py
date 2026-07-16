@@ -34,16 +34,14 @@ def _store(execute_query_side_effect):
 
 def test_write_graph_batches_nodes_and_writes_edges():
     nodes = [
-        {"labels": ["PERSON", "Entity"], "identity_key": "id", "properties": {"id": "jane", "name": "Jane"}},
-        {"labels": ["ORG", "Entity"], "identity_key": "id", "properties": {"id": "acme", "name": "Acme"}},
+        {"labels": ["PERSON", "Entity"], "id": "jane", "name": "Jane", "properties": {}},
+        {"labels": ["ORG", "Entity"], "id": "acme", "name": "Acme", "properties": {}},
     ]
     relationships = [
         {
             "type": "WORKS_AT",
             "start_label": "PERSON",
             "end_label": "ORG",
-            "start_identity_key": "id",
-            "end_identity_key": "id",
             "start_identity": "jane",
             "end_identity": "acme",
             "properties": {"source_doc_id": "doc-1", "role": "CFO"},
@@ -135,11 +133,11 @@ def test_write_graph_empty_payload_raises():
         store.write_graph(nodes=[], relationships=[])
 
 
-def test_write_graph_node_missing_identity_key_raises():
+def test_write_graph_node_missing_id_raises():
     store, _ = _store([])
     with pytest.raises(ValueError):
         store.write_graph(
-            nodes=[{"labels": ["PERSON"], "identity_key": "id", "properties": {"name": "no id here"}}],
+            nodes=[{"labels": ["PERSON"], "properties": {"name": "no id here"}}],
             relationships=[],
         )
 

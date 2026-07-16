@@ -241,9 +241,9 @@ class KnowledgeGraphWriter(Node):
         lookup (Tier 2 of resolution) and node storage. ``AttributeValue`` holders are doc-scoped values, not
         entities that get seeded/matched on, so they're skipped."""
         names = [
-            n["properties"]["name"]
+            n["name"]
             for n in nodes
-            if n["labels"][0] != ATTRIBUTE_VALUE_LABEL and (n["properties"].get("name") or "").strip()
+            if n["labels"][0] != ATTRIBUTE_VALUE_LABEL and (n.get("name") or "").strip()
         ]
         return self._embed_texts(names, config, **kwargs)
 
@@ -258,7 +258,7 @@ class KnowledgeGraphWriter(Node):
         for node in nodes:
             if node["labels"][0] == ATTRIBUTE_VALUE_LABEL:
                 continue
-            embedding = name_vectors.get(node["properties"].get("name"))
+            embedding = name_vectors.get(node.get("name"))
             if embedding is not None:
                 node["properties"]["embedding"] = embedding
         return nodes
@@ -272,11 +272,11 @@ class KnowledgeGraphWriter(Node):
         """
         props = rel.get("properties") or {}
         rel_type = rel.get("type") or ""
-        src_name, dst_name = props.get("src_name"), props.get("dst_name")
+        src_name, dst_name = rel.get("src_name"), rel.get("dst_name")
         if not (rel_type and src_name and dst_name):
             return None
         rel_label = props["key"] if rel_type == HAS_ATTRIBUTE_TYPE and props.get("key") else rel_type
-        return build_fact_text(src_name, rel_label, dst_name, props.get("description"))
+        return build_fact_text(src_name, rel_label, dst_name, rel.get("description"))
 
     def _maybe_embed_edges(self, relationships: list[dict], config: RunnableConfig, **kwargs) -> None:
         """Embed each relationship's triplet and store it on the EDGE (``properties['embedding']``), in place.
@@ -363,7 +363,7 @@ class KnowledgeGraphWriter(Node):
         # resolved -- it would get an ephemeral id that matches no graph node (no edge) and mis-tags chunks.
         # Reject such payloads instead of silently writing nothing useful.
         if relationships:
-            node_ids = {n["properties"]["id"] for n in nodes}
+            node_ids = {n["id"] for n in nodes}
             dangling = [
                 r for r in relationships if r["start_identity"] not in node_ids or r["end_identity"] not in node_ids
             ]
@@ -470,7 +470,7 @@ class KnowledgeGraphWriter(Node):
         if not nodes:
             return nodes
         referenced = {r["start_identity"] for r in relationships} | {r["end_identity"] for r in relationships}
-        kept = [node for node in nodes if node["properties"]["id"] in referenced]
+        kept = [node for node in nodes if node["id"] in referenced]
         if len(kept) != len(nodes):
             logger.info(
                 f"Node {self.name} - {self.id}: skipping {len(nodes) - len(kept)} bare node(s) "
@@ -642,7 +642,7 @@ class KnowledgeGraphWriter(Node):
         already saved, a bounded index-backed candidate lookup + trigram confirm may adopt an existing
         entity's id instead. ``AttributeValue`` ids are re-derived from their owner's resolved id.
 
-        Works on copies of the caller's dicts (rewrites ``properties["id"]``, strips the transient
+        Works on copies of the caller's dicts (rewrites the top-level ``id``, strips the transient
         ``attr_ref``), so the input stays writable a second time.
         """
         name_vectors = name_vectors or {}
@@ -658,10 +658,10 @@ class KnowledgeGraphWriter(Node):
         for node in nodes:
             if node["labels"][0] == ATTRIBUTE_VALUE_LABEL:
                 continue
-            old_id = node["properties"]["id"]
+            old_id = node["id"]
             if old_id in det_by_old:
                 continue  # wiring ids are doc-scoped, so a repeat means the same in-document entity
-            name = node["properties"].get("name")
+            name = node.get("name")
             # Gate on the NORMALIZED name: a name that is only whitespace/apostrophes normalizes to "" and
             # must stay nameless (fresh uuid), else every such entity would collide on the "{label}:" id.
             det_by_old[old_id] = (
@@ -680,10 +680,10 @@ class KnowledgeGraphWriter(Node):
             label = node["labels"][0]
             if label == ATTRIBUTE_VALUE_LABEL:
                 continue
-            old_id = node["properties"]["id"]
+            old_id = node["id"]
             if old_id in id_remap:
                 continue
-            name = node["properties"].get("name")
+            name = node.get("name")
             det_id = det_by_old[old_id]
             resolved = det_id
             if fuzzy and name and det_id not in already_saved:
@@ -703,14 +703,14 @@ class KnowledgeGraphWriter(Node):
             if node["labels"][0] != ATTRIBUTE_VALUE_LABEL:
                 continue
             ref = node.pop("attr_ref", None)
-            old_id = node["properties"]["id"]
+            old_id = node["id"]
             if ref and ref["owner"] in id_remap:
                 id_remap[old_id] = build_attribute_value_id(id_remap[ref["owner"]], ref["key"], ref["doc"])
 
         for node in nodes:
-            nid = node["properties"]["id"]
+            nid = node["id"]
             if nid in id_remap:
-                node["properties"]["id"] = id_remap[nid]
+                node["id"] = id_remap[nid]
         for rel in relationships:
             if rel["start_identity"] in id_remap:
                 rel["start_identity"] = id_remap[rel["start_identity"]]
@@ -721,7 +721,7 @@ class KnowledgeGraphWriter(Node):
         seen: set[tuple[str, str]] = set()
         deduped: list[dict] = []
         for node in nodes:
-            key = (node["labels"][0], node["properties"]["id"])
+            key = (node["labels"][0], node["id"])
             if key in seen:
                 continue
             seen.add(key)

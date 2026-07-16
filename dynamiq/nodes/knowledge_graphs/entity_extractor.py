@@ -107,23 +107,33 @@ class Ontology(BaseModel):
 
 
 class GraphNode(BaseModel):
-    """A provider-neutral ``BaseGraphStore.write_graph`` node payload.
+    """An entity extracted from a document, as a graph node.
 
-    ``identity_key`` names the property used to MERGE the node (always ``id`` here); ``properties`` must
-    contain that key. ``labels[0]`` is the entity type, ``labels[1]`` the shared ``Entity`` label.
+    Attributes:
+        labels: ``labels[0]`` is the entity type; ``labels[1]`` is the shared ``Entity`` label.
+        id: Unique node identifier; the key the graph store merges on.
+        name: Display name of the entity (absent for value-holder nodes like ``AttributeValue``).
+        properties: Any remaining stored attributes (e.g. an ``AttributeValue``'s ``value``).
     """
 
     labels: list[str]
-    properties: dict[str, Any]
-    identity_key: str = "id"
+    id: str
+    name: str | None = None
+    properties: dict[str, Any] = Field(default_factory=dict)
 
 
 class GraphRelationship(BaseModel):
-    """A provider-neutral ``BaseGraphStore.write_graph`` relationship payload.
+    """A relationship extracted from a document, as a directed graph edge.
 
-    Both endpoints are matched on their ``id`` property (``start_identity_key`` / ``end_identity_key``);
-    ``start_identity`` / ``end_identity`` are the id values to match. ``properties`` carries the edge's own
-    data plus per-document ACL/provenance attached later by ``_apply_document_metadata``.
+    Attributes:
+        type: Relationship type (e.g. ``WORKS_AT``).
+        start_label / end_label: Entity types of the endpoint nodes.
+        start_identity / end_identity: ``id`` values of the endpoint nodes to match.
+        src_name / dst_name: Display names of the endpoints, snapshotted onto the edge so retrieval
+            renders the fact from the ACL-bearing edge, never the shared entity node.
+        description: Optional one-line detail of the fact.
+        properties: Per-document provenance/ACL and any extra metadata (e.g. ``source_doc_id``,
+            ``allowed_principals``, the ``HAS_ATTRIBUTE`` ``key``).
     """
 
     type: str
@@ -131,9 +141,10 @@ class GraphRelationship(BaseModel):
     end_label: str
     start_identity: str
     end_identity: str
+    src_name: str | None = None
+    dst_name: str | None = None
+    description: str | None = None
     properties: dict[str, Any] = Field(default_factory=dict)
-    start_identity_key: str = "id"
-    end_identity_key: str = "id"
 
 
 DEFAULT_EXTRACTION_PROMPT = """You are a knowledge-graph extraction engine. Read the text below and extract \
@@ -297,11 +308,10 @@ class KnowledgeGraphEntityExtractor(Node):
         """Extract entities/relationships from the input documents.
 
         Returns:
-            dict: ``{"nodes": [...], "relationships": [...], "documents": [...], "entities": [...],
-            "raw_relationships": [...]}``. ``nodes``/``relationships`` are ready for
-            ``BaseGraphStore.write_graph`` and ``documents`` passes the source chunks through, so the whole
-            output feeds straight into ``KnowledgeGraphWriter``; ``entities``/``raw_relationships`` are the
-            un-transformed LLM output, kept for debugging.
+            dict: ``{"nodes": [...], "relationships": [...], "documents": [...]}``.
+            ``nodes``/``relationships`` are ready for ``BaseGraphStore.write_graph`` and ``documents``
+            passes the source chunks through, so the whole output feeds straight into
+            ``KnowledgeGraphWriter``.
         """
         config = ensure_config(config)
         self.reset_run_state()
@@ -309,8 +319,6 @@ class KnowledgeGraphEntityExtractor(Node):
 
         nodes: list[dict] = []
         relationships: list[dict] = []
-        entities_debug: list[dict] = []
-        raw_relationships_debug: list[dict] = []
 
         # Process each document independently, stamping its metadata onto everything it produces. One
         # document's LLM failure skips only that chunk; if EVERY document fails it's systemic (bad creds),
@@ -333,8 +341,6 @@ class KnowledgeGraphEntityExtractor(Node):
                 continue
             entities = extracted.get("entities", []) or []
             doc_relationships = extracted.get("relationships", []) or []
-            entities_debug.extend(entities)
-            raw_relationships_debug.extend(doc_relationships)
 
             doc_nodes, doc_rels = self._to_write_graph_payload(entities, doc_relationships, document=document)
             doc_nodes, doc_rels = self._enforce_ontology(doc_nodes, doc_rels)
@@ -356,8 +362,6 @@ class KnowledgeGraphEntityExtractor(Node):
             "nodes": nodes,
             "relationships": relationships,
             "documents": documents,
-            "entities": entities_debug,
-            "raw_relationships": raw_relationships_debug,
         }
 
     def _apply_document_metadata(self, relationships: list[dict], document: Document) -> None:
@@ -535,10 +539,10 @@ class KnowledgeGraphEntityExtractor(Node):
         for node in nodes:
             label = node["labels"][0]
             if label == ATTRIBUTE_VALUE_LABEL:
-                attribute_nodes[node["properties"]["id"]] = node
+                attribute_nodes[node["id"]] = node
             elif label in allowed_entities:
                 kept_nodes.append(node)
-                kept_ids.add(node["properties"]["id"])
+                kept_ids.add(node["id"])
             else:
                 logger.debug(f"KnowledgeGraphEntityExtractor: dropping off-ontology entity label={label!r}")
 
@@ -616,19 +620,37 @@ class KnowledgeGraphEntityExtractor(Node):
     def _to_write_graph_payload(
         self, entities: list[dict], relationships: list[dict], document: Document | None = None
     ) -> tuple[list[dict], list[dict]]:
-        """Convert LLM-friendly entities/relationships into the write_graph node/relationship shape.
+        """Convert one document's LLM-extracted entities/relationships into the provider-neutral
+        ``write_graph`` node/relationship shape (``GraphNode`` / ``GraphRelationship`` payloads).
 
-        Entity nodes carry ONLY identity (``id`` + ``name``), never the LLM's free-form properties: nodes
-        are merged by name and hold no ACL, so an inline property would leak to anyone who can reach the
-        shared node. Ontology-declared attributes (``Ontology.attributes``) are instead promoted to a
-        ``(entity)-[:HAS_ATTRIBUTE {key}]->(:AttributeValue {value})`` edge so their visibility is scoped
-        independently; any other emitted property is dropped. Value-node ids are doc-scoped
-        (``{wiring_id}::{key}::{document_id}``) so the same attribute from two documents yields two value
-        nodes, each on its own ACL-bearing edge, while re-ingesting a document updates the same node.
+        Args:
+            entities: The LLM's raw entities for this document (``{id, type, name, properties}``).
+            relationships: The LLM's raw relationships (``{source_id, target_id, type, description,
+                properties}``); endpoints reference the entities' LLM ids.
+            document: The source document, used to doc-scope ids and (for attributes) value-node ids.
+                ``None`` only in unit tests; in a real run every document has been assigned an id.
 
-        Entity ids are doc-scoped too (``{llm_id}@{document_id}``): LLM ids are unique only within one
-        response, so identical ids from different documents must not alias when pooled. The wiring id
-        carries no identity -- that is assigned by name resolution in ``KnowledgeGraphWriter``.
+        Returns:
+            ``(nodes, relationships)`` ready for ``BaseGraphStore.write_graph``. ``relationships`` is the
+            entity-to-entity edges followed by the generated ``HAS_ATTRIBUTE`` edges. Document metadata
+            and ACLs are NOT applied here -- ``_apply_document_metadata`` stamps those onto the edges after
+            ontology enforcement.
+
+        Three design decisions encoded in the output shape:
+
+        - **Nodes carry identity only** (``id`` + ``name``), never the LLM's free-form properties. Nodes
+          are merged by name and hold no ACL, so any inline property would leak to everyone who can reach
+          the shared node. Non-attribute properties are simply dropped.
+        - **Ontology-declared attributes become edges, not node properties.** Each attribute in
+          ``Ontology.attributes`` is reified as ``(entity)-[:HAS_ATTRIBUTE {key}]->(:AttributeValue
+          {value})`` so its visibility is scoped on the edge, independently of the shared entity node.
+          Value-node ids are doc-scoped (``{wiring_id}::{key}::{document_id}``): the same attribute from
+          two documents yields two value nodes on their own ACL-bearing edges, while re-ingesting a
+          document updates the same node.
+        - **Entity ids are doc-scoped** (``{llm_id}@{document_id}``). LLM ids are unique only within a
+          single response, so without the suffix identical ids from different documents would alias when
+          the payloads are pooled. This id is pure wiring -- it links edges to nodes within one
+          extraction; durable identity is assigned later by name resolution in ``KnowledgeGraphWriter``.
         """
         doc_suffix = f"@{document.id}" if document is not None and document.id is not None else ""
         id_to_label: dict[str, str] = {}
@@ -657,13 +679,11 @@ class KnowledgeGraphEntityExtractor(Node):
 
             # Node = identity only (id + name). Other emitted props are dropped: nodes are merged by name and
             # carry no ACL, so an inline prop would leak to anyone who can reach the shared node.
-            properties: dict[str, Any] = {"id": wiring_id}
-            if entity.get("name") is not None:
-                properties["name"] = entity["name"]
-
             # Type label first (ontology enforcement + resolution key on labels[0]); shared ENTITY_LABEL second
             # so one full-text index over names spans every type.
-            nodes.append(GraphNode(labels=[label, ENTITY_LABEL], properties=properties).model_dump())
+            nodes.append(
+                GraphNode(labels=[label, ENTITY_LABEL], id=wiring_id, name=entity.get("name")).model_dump(exclude_none=True)
+            )
 
             for attr_key, attr_value in attribute_values.items():
                 if attr_value is None:
@@ -671,8 +691,8 @@ class KnowledgeGraphEntityExtractor(Node):
                 doc_id = document.id if document is not None and document.id is not None else None
                 value_id = build_attribute_value_id(wiring_id, attr_key, doc_id)
                 value_node = GraphNode(
-                    labels=[ATTRIBUTE_VALUE_LABEL], properties={"id": value_id, "value": attr_value}
-                ).model_dump()
+                    labels=[ATTRIBUTE_VALUE_LABEL], id=value_id, properties={"value": attr_value}
+                ).model_dump(exclude_none=True)
                 # Structured parts for the writer to rebuild the resolved id without parsing the
                 # composite string. Sibling key (not in `properties`) so the store never persists it.
                 value_node["attr_ref"] = {"owner": wiring_id, "key": attr_key, "doc": doc_id}
@@ -687,8 +707,10 @@ class KnowledgeGraphEntityExtractor(Node):
                         end_label=ATTRIBUTE_VALUE_LABEL,
                         start_identity=wiring_id,
                         end_identity=value_id,
-                        properties={"key": attr_key, "src_name": entity.get("name"), "dst_name": attr_value},
-                    ).model_dump()
+                        src_name=entity.get("name"),
+                        dst_name=attr_value,
+                        properties={"key": attr_key},
+                    ).model_dump(exclude_none=True)
                 )
 
         graph_relationships: list[dict] = []
@@ -703,15 +725,6 @@ class KnowledgeGraphEntityExtractor(Node):
             if source_id not in id_to_label or target_id not in id_to_label:
                 logger.debug(f"KnowledgeGraphEntityExtractor: skipping relationship with unresolved endpoint: {rel}")
                 continue
-            # Edges carry per-document ACL, so the optional description rides safely on the edge.
-            rel_props = dict(rel.get("properties") or {})
-            if rel.get("description") is not None:
-                rel_props["description"] = rel["description"]
-            # Snapshot endpoint names onto the edge so rendering never reads them from the shared node.
-            if source_id in id_to_name:
-                rel_props["src_name"] = id_to_name[source_id]
-            if target_id in id_to_name:
-                rel_props["dst_name"] = id_to_name[target_id]
             graph_relationships.append(
                 GraphRelationship(
                     type=self._sanitize_identifier(str(rel_type)),
@@ -719,8 +732,13 @@ class KnowledgeGraphEntityExtractor(Node):
                     end_label=id_to_label[target_id],
                     start_identity=f"{source_id}{doc_suffix}",
                     end_identity=f"{target_id}{doc_suffix}",
-                    properties=rel_props,
-                ).model_dump()
+                    # Snapshot endpoint names onto the edge so rendering never reads them from the shared node.
+                    src_name=id_to_name.get(source_id),
+                    dst_name=id_to_name.get(target_id),
+                    description=rel.get("description"),
+                    # Edges carry per-document ACL; any remaining LLM-emitted props ride on the edge too.
+                    properties=dict(rel.get("properties") or {}),
+                ).model_dump(exclude_none=True)
             )
 
         return nodes, graph_relationships + attribute_relationships

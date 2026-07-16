@@ -111,19 +111,22 @@ def make_writer(existing: dict[str, list[tuple[str, str]]] | None = None, fuzzy:
 
 
 def entity(label: str, entity_id: str, name: str) -> dict:
-    return {"labels": [label], "identity_key": "id", "properties": {"id": entity_id, "name": name}}
+    return {"labels": [label], "id": entity_id, "name": name, "properties": {}}
 
 
 def edge(rel_type: str, start_label: str, end_label: str, start_id: str, end_id: str, props: dict = None) -> dict:
+    # src_name/dst_name/description are promoted to top-level edge fields (as the extractor emits them);
+    # anything else stays in the ``properties`` bag.
+    props = dict(props or {})
+    promoted = {k: props.pop(k) for k in ("src_name", "dst_name", "description") if k in props}
     return {
         "type": rel_type,
         "start_label": start_label,
         "end_label": end_label,
-        "start_identity_key": "id",
-        "end_identity_key": "id",
         "start_identity": start_id,
         "end_identity": end_id,
-        "properties": props or {},
+        **promoted,
+        "properties": props,
     }
 
 
@@ -133,8 +136,8 @@ def attr_value_node(owner_id: str, attr_key: str, doc_id: str | None, value: str
     value_id = f"{owner_id}::{attr_key}" + (f"::{doc_id}" if doc_id is not None else "")
     return {
         "labels": [ATTRIBUTE_VALUE_LABEL],
-        "identity_key": "id",
-        "properties": {"id": value_id, "value": value},
+        "id": value_id,
+        "properties": {"value": value},
         "attr_ref": {"owner": owner_id, "key": attr_key, "doc": doc_id},
     }
 
@@ -155,7 +158,7 @@ class TestResolveAgainstGraph:
 
         resolved_nodes, resolved_rels = writer._resolve_against_graph(nodes, rels)
 
-        new_id = resolved_nodes[0]["properties"]["id"]
+        new_id = resolved_nodes[0]["id"]
         assert new_id != "acme" and is_uuid(new_id)
         # the edge endpoint followed the entity onto its new id
         assert resolved_rels[0]["start_identity"] == new_id
@@ -167,7 +170,7 @@ class TestResolveAgainstGraph:
 
         resolved_nodes, resolved_rels = writer._resolve_against_graph(nodes, rels)
 
-        assert resolved_nodes[0]["properties"]["id"] == "uuid-existing"
+        assert resolved_nodes[0]["id"] == "uuid-existing"
         assert resolved_rels[0]["end_identity"] == "uuid-existing"
 
     def test_llm_id_never_participates_in_identity(self):
@@ -178,7 +181,7 @@ class TestResolveAgainstGraph:
 
         resolved_nodes, _ = writer._resolve_against_graph(nodes, [])
 
-        new_id = resolved_nodes[0]["properties"]["id"]
+        new_id = resolved_nodes[0]["id"]
         assert new_id != "acme" and is_uuid(new_id)
 
     def test_same_batch_entities_converge_by_name(self):
@@ -196,7 +199,7 @@ class TestResolveAgainstGraph:
         resolved_nodes, resolved_rels = writer._resolve_against_graph(nodes, rels)
 
         assert len(resolved_nodes) == 1
-        node_id = resolved_nodes[0]["properties"]["id"]
+        node_id = resolved_nodes[0]["id"]
         assert {r["start_identity"] for r in resolved_rels} == {node_id}
 
     def test_dissimilar_names_stay_separate(self):
@@ -205,7 +208,7 @@ class TestResolveAgainstGraph:
 
         resolved_nodes, _ = writer._resolve_against_graph(nodes, [])
 
-        ids = {n["properties"]["id"] for n in resolved_nodes}
+        ids = {n["id"] for n in resolved_nodes}
         assert len(ids) == 2
 
     def test_attribute_value_ids_rederived_from_owner(self):
@@ -226,7 +229,7 @@ class TestResolveAgainstGraph:
         resolved_nodes, resolved_rels = writer._resolve_against_graph(nodes, rels)
 
         value_node = next(n for n in resolved_nodes if n["labels"][0] == ATTRIBUTE_VALUE_LABEL)
-        assert value_node["properties"]["id"] == "uuid-jane::salary::d1"
+        assert value_node["id"] == "uuid-jane::salary::d1"
         assert resolved_rels[0]["start_identity"] == "uuid-jane"
         assert resolved_rels[0]["end_identity"] == "uuid-jane::salary::d1"
         # The transient ref never leaks to the store.
@@ -251,8 +254,8 @@ class TestResolveAgainstGraph:
         first_nodes, first_rels = writer._resolve_against_graph(nodes, rels)
 
         # Input is untouched: wiring ids and the transient attr_ref survive on the caller's objects.
-        assert nodes[0]["properties"]["id"] == "jane@d1"
-        assert nodes[1]["properties"]["id"] == "jane@d1::salary::d1"
+        assert nodes[0]["id"] == "jane@d1"
+        assert nodes[1]["id"] == "jane@d1::salary::d1"
         assert nodes[1]["attr_ref"] == {"owner": "jane@d1", "key": "salary", "doc": "d1"}
         assert rels[0]["end_identity"] == "jane@d1::salary::d1"
 
@@ -260,7 +263,7 @@ class TestResolveAgainstGraph:
         second_nodes, second_rels = writer._resolve_against_graph(nodes, rels)
         for resolved in (first_nodes, second_nodes):
             value_node = next(n for n in resolved if n["labels"][0] == ATTRIBUTE_VALUE_LABEL)
-            assert value_node["properties"]["id"] == "uuid-jane::salary::d1"
+            assert value_node["id"] == "uuid-jane::salary::d1"
         assert first_rels[0]["end_identity"] == second_rels[0]["end_identity"] == "uuid-jane::salary::d1"
 
     def test_attribute_value_id_rederived_when_llm_id_contains_delimiter(self):
@@ -282,7 +285,7 @@ class TestResolveAgainstGraph:
         resolved_nodes, resolved_rels = writer._resolve_against_graph(nodes, rels)
 
         value_node = next(n for n in resolved_nodes if n["labels"][0] == ATTRIBUTE_VALUE_LABEL)
-        assert value_node["properties"]["id"] == "uuid-jane::salary::d1"
+        assert value_node["id"] == "uuid-jane::salary::d1"
         assert resolved_rels[0]["end_identity"] == "uuid-jane::salary::d1"
 
     def test_same_llm_id_from_different_documents_does_not_alias(self):
@@ -296,7 +299,7 @@ class TestResolveAgainstGraph:
 
         resolved_nodes, _ = writer._resolve_against_graph(nodes, [])
 
-        assert len({n["properties"]["id"] for n in resolved_nodes}) == 2
+        assert len({n["id"] for n in resolved_nodes}) == 2
 
 
 class TestExecute:
@@ -317,7 +320,7 @@ class TestExecute:
 
         # The store was handed the RESOLVED payload (wiring ids replaced by UUIDs).
         assert result["nodes_created"] == 2 and result["relationships_created"] == 1
-        written_ids = {n["properties"]["id"] for n in store.written[0]}
+        written_ids = {n["id"] for n in store.written[0]}
         assert "jane@d1" not in written_ids and all(is_uuid(i) for i in written_ids)
 
         # The chunk is tagged with both resolved endpoint ids it mentions.
@@ -351,7 +354,7 @@ class TestExecute:
         result = writer.execute(KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=rels, documents=[]))
 
         assert result["nodes_created"] == 2
-        assert {n["properties"]["name"] for n in store.written[0]} == {"Jane", "Acme"}  # Steve skipped
+        assert {n["name"] for n in store.written[0]} == {"Jane", "Acme"}  # Steve skipped
 
     def test_execute_all_nodes_bare_writes_nothing(self):
         writer = make_writer({})
@@ -453,16 +456,14 @@ class TestEntityIdWorkflowFlow:
         workflow = Workflow(flow=Flow(nodes=[writer, embedder, retriever]))
 
         nodes = [
-            {"labels": ["PERSON", "Entity"], "identity_key": "id", "properties": {"id": "jane@d1", "name": "Jane"}},
-            {"labels": ["ORG", "Entity"], "identity_key": "id", "properties": {"id": "acme@d1", "name": "Acme"}},
+            {"labels": ["PERSON", "Entity"], "id": "jane@d1", "name": "Jane", "properties": {}},
+            {"labels": ["ORG", "Entity"], "id": "acme@d1", "name": "Acme", "properties": {}},
         ]
         relationships = [
             {
                 "type": "WORKS_AT",
                 "start_label": "PERSON",
                 "end_label": "ORG",
-                "start_identity_key": "id",
-                "end_identity_key": "id",
                 "start_identity": "jane@d1",
                 "end_identity": "acme@d1",
                 "properties": {"source_doc_id": "d1"},
@@ -575,7 +576,7 @@ def _recording_neo4j_store() -> tuple[Neo4jGraphStore, list[str]]:
 
 
 def _entity(label: str, node_id: str, name: str) -> dict:
-    return {"labels": [label, "Entity"], "identity_key": "id", "properties": {"id": node_id, "name": name}}
+    return {"labels": [label, "Entity"], "id": node_id, "name": name, "properties": {}}
 
 
 def _embedder_writer(**embedder_kwargs) -> KnowledgeGraphWriter:
@@ -592,7 +593,7 @@ class TestEmbedEntityNames:
         writer._graph_store, _ = _recording_neo4j_store()
         nodes = [
             _entity("PERSON", "u1", "Jane Doe"),  # len("Jane Doe") == 8
-            {"labels": [ATTRIBUTE_VALUE_LABEL], "identity_key": "id", "properties": {"id": "v1", "value": "CTO"}},
+            {"labels": [ATTRIBUTE_VALUE_LABEL], "id": "v1", "properties": {"value": "CTO"}},
         ]
 
         vectors = writer._embed_entity_names(nodes, config=None)
@@ -651,8 +652,8 @@ class TestResolutionInternals:
         w = make_writer(fuzzy=False)
         nodes = [entity("PERSON", "p@d1", "Jane Doe"), entity("PERSON", "p@d2", "Jane Doe")]
         resolved, _ = w._resolve_against_graph(nodes, [])
-        assert resolved[0]["properties"]["id"] == w._deterministic_id("PERSON", "Jane Doe")
-        assert len({n["properties"]["id"] for n in resolved}) == 1  # identical names collapse
+        assert resolved[0]["id"] == w._deterministic_id("PERSON", "Jane Doe")
+        assert len({n["id"] for n in resolved}) == 1  # identical names collapse
         assert w._graph_store._stub.queries == []  # pure hash: no existence lookup, no fuzzy
 
     def test_existing_det_id_skips_fuzzy_and_is_not_re_merged(self):
@@ -665,7 +666,7 @@ class TestResolutionInternals:
 
         resolved, _ = w._resolve_against_graph([entity("ORGANIZATION", "acme@d1", "Acme LLC")], [])
 
-        assert resolved[0]["properties"]["id"] == det  # kept, not merged into the near-dup
+        assert resolved[0]["id"] == det  # kept, not merged into the near-dup
         assert not any("queryNodes" in q for q in w._graph_store._stub.queries)  # fuzzy never ran
 
     def test_fuzzy_off_issues_no_query_even_with_candidates(self):
