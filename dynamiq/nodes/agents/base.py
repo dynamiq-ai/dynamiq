@@ -22,7 +22,7 @@ from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentIterati
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
-from dynamiq.nodes.agents.shared_session import SandboxSharingScope, SharedSession, _shared_session
+from dynamiq.nodes.agents.shared_session import SandboxSharingScope, SharedSession, _current_agent_run, _shared_session
 from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     ToolCacheEntry,
@@ -273,6 +273,14 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         default=False,
         description="When enabled, subagents (SubAgentTool) share this agent's sandbox "
         "instead of each provisioning their own. Each subagent gets an isolated working directory.",
+    )
+    share_browser_session_with_subagents: bool = Field(
+        default=False,
+        description=(
+            "When True, this agent and its subagents share ONE live browser (Browserbase) "
+            "session for the run, driven by one agent at a time (exclusive per-agent-run lease). "
+            "Independent of share_sandbox_with_subagents."
+        ),
     )
     sandbox_sharing_scope: SandboxSharingScope = Field(
         default=SandboxSharingScope.ALL,
@@ -708,6 +716,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         # Always set — a sub-agent without LTM would otherwise inherit the
         # parent's overlay via `ContextAwareThreadPoolExecutor`.
         ltm_token = _run_extra_tools.set(ltm_tools)
+        agent_run_token = _current_agent_run.set(f"{self.sanitize_tool_name(self.name) or 'agent'}-{uuid4().hex[:8]}")
         # Session/borrow setup lives INSIDE the try so the finally always resets the ContextVars and
         # releases any borrowed view, even if setup raises. Tokens stay None until each set succeeds.
         # Capture any view already active on this instance so a nested execute() restores it rather
@@ -896,7 +905,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if sandbox_overlay_token is not None:
                 _shared_sandbox_tools.reset(sandbox_overlay_token)
             self._release_shared_sandbox_view(restore_to=prev_shared_view)
+            self._teardown_shared_browser(shared_session_token)
             _run_extra_tools.reset(ltm_token)
+            _current_agent_run.reset(agent_run_token)
             self._exit_shared_session(shared_session_token)
 
     def retrieve_conversation_history(
@@ -2180,31 +2191,39 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             # open a separate sub-session, so its own sharing_scope is intentionally not re-applied to
             # its descendants (they keep borrowing the outer owner's sandbox).
             return None
-        if not self.share_sandbox_with_subagents:
-            return None
-        if self.sandbox_backend is None:
-            logger.warning(
-                "Agent %s - %s: share_sandbox_with_subagents is enabled but this agent has no sandbox "
-                "of its own to share; subagents will not share a sandbox. Configure a sandbox on this "
-                "agent to enable sharing.",
-                self.name,
-                self.id,
-            )
-            return None
-        if not getattr(self.sandbox_backend, "supports_views", False):
-            logger.warning(
-                "Agent %s - %s: share_sandbox_with_subagents is enabled but this agent's sandbox backend "
-                "(%s) does not support shared views; subagents will not share a sandbox. Use a "
-                "view-capable backend (e.g. E2B) to enable sharing.",
-                self.name,
-                self.id,
-                type(self.sandbox_backend).__name__,
-            )
+
+        # Sandbox sharing needs a view-capable backend; warn (but still consider browser sharing)
+        # when the flag is on yet the sandbox is missing or not view-capable.
+        wants_sandbox = False
+        if self.share_sandbox_with_subagents:
+            if self.sandbox_backend is None:
+                logger.warning(
+                    "Agent %s - %s: share_sandbox_with_subagents is enabled but this agent has no sandbox "
+                    "of its own to share; subagents will not share a sandbox. Configure a sandbox on this "
+                    "agent to enable sharing.",
+                    self.name,
+                    self.id,
+                )
+            elif not getattr(self.sandbox_backend, "supports_views", False):
+                logger.warning(
+                    "Agent %s - %s: share_sandbox_with_subagents is enabled but this agent's sandbox backend "
+                    "(%s) does not support shared views; subagents will not share a sandbox. Use a "
+                    "view-capable backend (e.g. E2B) to enable sharing.",
+                    self.name,
+                    self.id,
+                    type(self.sandbox_backend).__name__,
+                )
+            else:
+                wants_sandbox = True
+
+        wants_browser = self.share_browser_session_with_subagents
+        if not wants_sandbox and not wants_browser:
             return None
 
         session = SharedSession(
-            sandbox=self.sandbox_backend,
-            share_sandbox=True,
+            sandbox=self.sandbox_backend if wants_sandbox else None,
+            share_sandbox=wants_sandbox,
+            share_browser=wants_browser,
             owner_run_id=str(kwargs.get("run_id") or self.id),
             owner_agent_id=self.id,
             sharing_scope=self.sandbox_sharing_scope,
@@ -2215,6 +2234,22 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         """Reset the ContextVar set by `_maybe_enter_shared_session`."""
         if token is not None:
             _shared_session.reset(token)
+
+    def _teardown_shared_browser(self, shared_session_token) -> None:
+        """Release this run's browser lease; if this agent owns the session, close the browser.
+
+        Runs in execute()'s finally for every agent under a shared session (owner or
+        inherited): a subagent that acquired the lease must release it; only the owner
+        (token set) closes the shared session.
+        """
+        ss = _shared_session.get()
+        if ss is None or not getattr(ss, "share_browser", False):
+            return
+        run_key = _current_agent_run.get()
+        if run_key is not None:
+            ss.release_browser(run_key)
+        if shared_session_token is not None:
+            ss.close_browser()
 
     def _resolve_tools_sandbox(self):
         """The sandbox this agent builds its OWN tools from at construction — always its own
