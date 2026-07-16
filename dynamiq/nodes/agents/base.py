@@ -900,6 +900,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
             logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
+            self._maybe_surface_live_view(execution_result, shared_session_token)
             return execution_result
         finally:
             if sandbox_overlay_token is not None:
@@ -2250,6 +2251,17 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             ss.release_browser(run_key)
         if shared_session_token is not None:
             ss.close_browser()
+
+    def _maybe_surface_live_view(self, execution_result: dict, shared_session_token) -> None:
+        """Owner-only: add the shared browser's live-view URL to the run result."""
+        if shared_session_token is None:
+            return
+        ss = _shared_session.get()
+        if ss is None or not getattr(ss, "share_browser", False):
+            return
+        url = ss.browser_live_view_url()
+        if url:
+            execution_result["live_view_url"] = url
 
     def _resolve_tools_sandbox(self):
         """The sandbox this agent builds its OWN tools from at construction — always its own

@@ -116,3 +116,22 @@ def test_stagehand_no_shared_session_is_passthrough(monkeypatch):
     tool._session_id = None
     assert tool._attach_shared_browser_before_init() is False  # no session set
     assert tool._session_id is None
+
+
+def test_owner_run_result_surfaces_shared_live_view(llm):
+    from dynamiq.nodes.agents.shared_session import SharedSession
+
+    agent = Agent(name="Owner", llm=llm, role="r", tools=[], share_browser_session_with_subagents=True)
+    ss = SharedSession(share_browser=True)
+    ss.record_browser(session_id="s", provider="browserbase", live_view_url="https://lv/owner")
+    token = _shared_session.set(ss)
+    try:
+        result = {"content": "done"}
+        agent._maybe_surface_live_view(result, shared_session_token=object())
+        assert result["live_view_url"] == "https://lv/owner"
+
+        result2 = {"content": "done"}
+        agent._maybe_surface_live_view(result2, shared_session_token=None)  # non-owner
+        assert "live_view_url" not in result2
+    finally:
+        _shared_session.reset(token)
