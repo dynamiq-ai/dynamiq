@@ -44,6 +44,29 @@ def test_query_is_required():
         DynamiqKnowledgebaseVectorSearchInputSchema()
 
 
+def test_user_is_hidden_from_agent_tool_schema():
+    from dynamiq.nodes.agents.components.schema_generator import generate_function_calling_schemas
+
+    tool_name = "dynamiq-knowledgebase-vector-search"
+    tool = MagicMock()
+    tool.name = tool_name
+    tool.description = "test"
+    tool.input_schema = DynamiqKnowledgebaseVectorSearchInputSchema
+    tool.resolved_input_schema = DynamiqKnowledgebaseVectorSearchInputSchema
+
+    schema = next(
+        s
+        for s in generate_function_calling_schemas(
+            tools=[tool], delegation_allowed=False, sanitize_tool_name=lambda name: name
+        )
+        if s["function"]["name"] == tool_name
+    )
+    properties = schema["function"]["parameters"]["properties"]
+
+    assert "user" not in properties
+    assert "query" in properties
+
+
 def test_build_url(retriever):
     assert retriever._build_url() == "https://api.example.ai/v1/knowledgebases/kb-123/vector-search"
 
@@ -103,6 +126,29 @@ def test_execute_uses_node_defaults_for_limit(retriever):
 
     _, kwargs = retriever.client.request.call_args
     assert kwargs["json"] == {"query": "q", "limit": 5, "alpha": 0.5}  # node-level limit default, no empty filters
+
+
+def test_execute_uses_node_default_user(retriever):
+    retriever.user = "node-user"
+    retriever.client.request.return_value = _mock_response({"data": []})
+
+    retriever.execute(DynamiqKnowledgebaseVectorSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    _, kwargs = retriever.client.request.call_args
+    assert kwargs["json"]["user"] == "node-user"
+
+
+def test_execute_input_user_overrides_node_default(retriever):
+    retriever.user = "node-user"
+    retriever.client.request.return_value = _mock_response({"data": []})
+
+    retriever.execute(
+        DynamiqKnowledgebaseVectorSearchInputSchema(query="q", user="input-user"),
+        RunnableConfig(callbacks=[]),
+    )
+
+    _, kwargs = retriever.client.request.call_args
+    assert kwargs["json"]["user"] == "input-user"
 
 
 def test_execute_handles_empty_data(retriever):

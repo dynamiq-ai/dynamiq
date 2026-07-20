@@ -100,6 +100,29 @@ def test_execute_uses_node_defaults_for_limit(retriever):
     assert kwargs["json"] == {"query": "q", "limit": 5}  # node-level limit default, no empty filters
 
 
+def test_execute_uses_node_default_user(retriever):
+    retriever.user = "node-user"
+    retriever.client.request.return_value = _mock_response({"content": ""})
+
+    retriever.execute(DynamiqKnowledgebaseGraphSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    _, kwargs = retriever.client.request.call_args
+    assert kwargs["json"]["user"] == "node-user"
+
+
+def test_execute_input_user_overrides_node_default(retriever):
+    retriever.user = "node-user"
+    retriever.client.request.return_value = _mock_response({"content": ""})
+
+    retriever.execute(
+        DynamiqKnowledgebaseGraphSearchInputSchema(query="q", user="input-user"),
+        RunnableConfig(callbacks=[]),
+    )
+
+    _, kwargs = retriever.client.request.call_args
+    assert kwargs["json"]["user"] == "input-user"
+
+
 def test_execute_raises_on_error_status(retriever):
     retriever.client.request.return_value = _mock_response({"error": "forbidden"}, status_code=403)
 

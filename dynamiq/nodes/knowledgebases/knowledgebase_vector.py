@@ -35,6 +35,11 @@ class DynamiqKnowledgebaseVectorSearchInputSchema(BaseModel):
         le=1,
         description="Parameter to provide alpha for hybrid retrieval. 0 is keyword-only, 1 is semantic-only.",
     )
+    user: str | None = Field(
+        default=None,
+        description="Parameter to provide the user identity for ACL-enforced retrieval.",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
 
 
 class DynamiqKnowledgebaseVectorSearch(ConnectionNode):
@@ -88,7 +93,7 @@ class DynamiqKnowledgebaseVectorSearch(ConnectionNode):
             else self.similarity_threshold
         )
         alpha = input_data.alpha if input_data.alpha is not None else self.alpha
-        user = self.user
+        user = input_data.user if input_data.user is not None else self.user
 
         body: dict[str, Any] = {"query": input_data.query}
         if limit is not None:
