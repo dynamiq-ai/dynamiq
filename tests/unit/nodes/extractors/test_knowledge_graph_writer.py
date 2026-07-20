@@ -18,7 +18,6 @@ from dynamiq.nodes.knowledge_graphs.entity_extractor import (
     ENTITY_EMBEDDING_VECTOR_INDEX,
     HAS_ATTRIBUTE_TYPE,
 )
-from dynamiq.nodes.knowledge_graphs.writer import _entity_ids_by_doc
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
 
 
@@ -333,7 +332,7 @@ class TestExecute:
         ]
         rels = [edge("WORKS_AT", "PERSON", "ORGANIZATION", "jane@d1", "acme@d1", {"source_doc_id": "d1"})]
 
-        result = writer.execute(KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=rels, documents=[]))
+        result = writer.execute(KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=rels))
 
         assert result["nodes_created"] == 2
         assert {n["name"] for n in store.written[0]} == {"Jane", "Acme"}  # Steve skipped
@@ -345,7 +344,7 @@ class TestExecute:
 
         result = writer.execute(
             KnowledgeGraphWriter.input_schema(
-                nodes=[entity("PERSON", "steve@d1", "Steve")], relationships=[], documents=[]
+                nodes=[entity("PERSON", "steve@d1", "Steve")], relationships=[]
             )
         )
 
@@ -354,9 +353,9 @@ class TestExecute:
 
     def test_execute_rejects_relationship_endpoints_absent_from_nodes(self):
         # A relationship endpoint not present in `nodes` can never be resolved: it would write with an
-        # ephemeral wiring id that MATCHes no graph node (no edge created) and mis-tag chunks with that id.
-        # The writer rejects such payloads -- both the no-nodes case and a partially-dangling endpoint --
-        # rather than silently writing nothing useful.
+        # ephemeral wiring id that MATCHes no graph node, leaving a dangling edge. The writer rejects such
+        # payloads -- both the no-nodes case and a partially-dangling endpoint -- rather than silently
+        # writing nothing useful.
         writer = make_writer({})
         store = FakeGraphStore()
         writer._graph_store = store
@@ -365,38 +364,13 @@ class TestExecute:
         # Only "jane@d1" is provided as a node -> "acme@d1" is dangling.
         nodes = [entity("PERSON", "jane@d1", "Jane")]
         with pytest.raises(ValueError, match="endpoints absent from"):
-            writer.execute(KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=rels, documents=[]))
+            writer.execute(KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=rels))
 
         # And the no-nodes case (the reported scenario) is rejected too.
         with pytest.raises(ValueError, match="endpoints absent from"):
-            writer.execute(KnowledgeGraphWriter.input_schema(nodes=[], relationships=rels, documents=[]))
+            writer.execute(KnowledgeGraphWriter.input_schema(nodes=[], relationships=rels))
 
         assert store.written is None  # nothing written in either case
-
-
-class TestEntityIdsByDoc:
-    def test_groups_resolved_endpoint_ids_by_source_doc(self):
-        resolved = [
-            {"type": "WORKS_AT", "start_identity": "uuid-jane", "end_identity": "uuid-acme",
-             "properties": {"source_doc_id": "c1"}},
-            {"type": "USES", "start_identity": "uuid-acme", "end_identity": "uuid-helios",
-             "properties": {"source_doc_id": "c2"}},
-        ]
-        assert _entity_ids_by_doc(resolved) == {
-            "c1": ["uuid-acme", "uuid-jane"],   # sorted
-            "c2": ["uuid-acme", "uuid-helios"],
-        }
-
-    def test_excludes_attribute_value_endpoint_but_keeps_owner(self):
-        resolved = [
-            {"type": HAS_ATTRIBUTE_TYPE, "start_identity": "uuid-jane", "end_identity": "uuid-jane::salary",
-             "properties": {"source_doc_id": "c1"}},
-        ]
-        # The owner entity (start) is kept; the AttributeValue holder (end) is not.
-        assert _entity_ids_by_doc(resolved) == {"c1": ["uuid-jane"]}
-
-    def test_skips_relationships_without_source_doc(self):
-        assert _entity_ids_by_doc([{"type": "R", "start_identity": "a", "end_identity": "b", "properties": {}}]) == {}
 
 
 class StubDocumentEmbedder(DocumentEmbedder):

@@ -57,27 +57,6 @@ def _trigram_similarity(a: str, b: str) -> float:
     return len(ta & tb) / len(ta | tb)  # Jaccard
 
 
-def _entity_ids_by_doc(relationships: list[dict]) -> dict[str, list[str]]:
-    """Map each source document id -> the RESOLVED entity ids it mentions, recovered from relationships.
-
-    Relationships carry ``source_doc_id`` (stamped by EntityExtractor) and, after resolution, durable
-    endpoint ids. The entity ids a chunk mentions are therefore the endpoints of the relationships sourced
-    from that chunk. ``HAS_ATTRIBUTE`` edges point at an ``AttributeValue`` holder, not an entity, so their
-    end id is excluded (the owner entity on the start side is still kept).
-    """
-    by_doc: dict[str, set[str]] = {}
-    for rel in relationships:
-        doc_id = (rel.get("properties") or {}).get("source_doc_id")
-        if not doc_id:
-            continue
-        ids = by_doc.setdefault(str(doc_id), set())
-        if rel.get("start_identity"):
-            ids.add(rel["start_identity"])
-        if rel.get("type") != HAS_ATTRIBUTE_TYPE and rel.get("end_identity"):
-            ids.add(rel["end_identity"])
-    return {doc_id: sorted(ids) for doc_id, ids in by_doc.items()}
-
-
 class KnowledgeGraphWriterInputSchema(BaseModel):
     """Input for the writer: an ``EntityExtractor``'s output payload (the provider-neutral graph)."""
 
@@ -141,7 +120,7 @@ class KnowledgeGraphWriter(Node):
     graph_name: str | None = None
     create_graph_if_not_exists: bool = False
     similarity_threshold: float = 0.6
-    fuzzy_matching: bool = True  # deterministic id is always the base; this toggles the optional fuzzy tier
+    fuzzy_matching: bool = True
     resolution_top_k: int = 10
     entity_embedder: DocumentEmbedder | None = None
 
@@ -350,7 +329,7 @@ class KnowledgeGraphWriter(Node):
         nodes, relationships = input_data.nodes, input_data.relationships
 
         # Resolution only rewrites endpoints found among `nodes`. An endpoint absent from `nodes` can't be
-        # resolved -- it would get an ephemeral id that matches no graph node (no edge) and mis-tags chunks.
+        # resolved -- it would get an ephemeral id that matches no graph node, leaving a dangling edge.
         # Reject such payloads instead of silently writing nothing useful.
         if relationships:
             node_ids = {n["id"] for n in nodes}

@@ -33,12 +33,6 @@ ENTITY_ID_INDEX = "entity_id"
 # semantic similarity instead of surface-form overlap. Only present when a writer embeds entities.
 ENTITY_EMBEDDING_VECTOR_INDEX = "entity_embedding"
 
-# Metadata key under which the resolved, unique entity ids a chunk mentions are attached to that chunk —
-# done by KnowledgeGraphWriter (which alone has the post-resolution durable ids). Lets a hybrid retriever
-# seed graph traversal by id (unique, variant-proof), not by ambiguous entity name. ``kg_`` prefixed to
-# avoid colliding with a caller's own document metadata.
-KG_ENTITY_IDS_KEY = "kg_entity_ids"
-
 
 def normalize_name(name: str) -> str:
     """Canonical form of an entity name for identity & matching: whitespace collapsed, lower-cased,
@@ -674,10 +668,8 @@ class KnowledgeGraphEntityExtractor(Node):
             declared = set(self._attributes_for_type(str(entity_type)))
             attribute_values = {key: emitted[key] for key in emitted if key in declared}
 
-            # Node = identity only (id + name). Other emitted props are dropped: nodes are merged by name and
-            # carry no ACL, so an inline prop would leak to anyone who can reach the shared node.
-            # Type label first (ontology enforcement + resolution key on labels[0]); shared ENTITY_LABEL second
-            # so one full-text index over names spans every type.
+            # Type label first (ontology enforcement + resolution key on labels[0]); shared ENTITY_LABEL
+            # second so one full-text index over names spans every type.
             nodes.append(
                 GraphNode(labels=[label, ENTITY_LABEL], id=wiring_id, name=entity.get("name")).model_dump(
                     exclude_none=True
@@ -696,9 +688,8 @@ class KnowledgeGraphEntityExtractor(Node):
                 # composite string. Sibling key (not in `properties`) so the store never persists it.
                 value_node["attr_ref"] = {"owner": wiring_id, "key": attr_key, "doc": doc_id}
                 nodes.append(value_node)
-                # src_name/dst_name snapshot the rendered endpoints onto the edge: the owner entity's name
-                # and the value itself (the AttributeValue node carries the value, but rendering reads it
-                # from the ACL-bearing edge so it is never dereferenced from a shared node).
+                # Snapshot the endpoints onto the edge (owner name + the value itself), rendered from the
+                # ACL-bearing edge rather than the shared node.
                 attribute_relationships.append(
                     GraphRelationship(
                         type=HAS_ATTRIBUTE_TYPE,
