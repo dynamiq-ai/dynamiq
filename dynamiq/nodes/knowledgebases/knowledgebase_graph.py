@@ -25,6 +25,10 @@ class DynamiqKnowledgebaseGraphSearchInputSchema(BaseModel):
         description="Parameter to provide edge-property filters (e.g. ACL) to narrow results.",
     )
     limit: int | None = Field(default=None, description="Parameter to provide how many facts to retrieve.")
+    user: str | None = Field(
+        default=None,
+        description="Parameter to provide the user identity for ACL-enforced retrieval.",
+    )
 
 
 class DynamiqKnowledgebaseGraphSearch(ConnectionNode):
@@ -61,7 +65,7 @@ class DynamiqKnowledgebaseGraphSearch(ConnectionNode):
         """Build the kwargs for the graph-search request. Input overrides node-level defaults."""
         filters = input_data.filters or self.filters
         limit = input_data.limit if input_data.limit is not None else self.limit
-        user = self.user
+        user = input_data.user if input_data.user is not None else self.user
 
         body: dict[str, Any] = {"query": input_data.query}
         if limit is not None:
