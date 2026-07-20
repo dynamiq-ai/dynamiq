@@ -44,6 +44,29 @@ def test_query_is_required():
         DynamiqKnowledgebaseVectorSearchInputSchema()
 
 
+def test_user_is_hidden_from_agent_tool_schema():
+    from dynamiq.nodes.agents.components.schema_generator import generate_function_calling_schemas
+
+    tool_name = "dynamiq-knowledgebase-vector-search"
+    tool = MagicMock()
+    tool.name = tool_name
+    tool.description = "test"
+    tool.input_schema = DynamiqKnowledgebaseVectorSearchInputSchema
+    tool.resolved_input_schema = DynamiqKnowledgebaseVectorSearchInputSchema
+
+    schema = next(
+        s
+        for s in generate_function_calling_schemas(
+            tools=[tool], delegation_allowed=False, sanitize_tool_name=lambda name: name
+        )
+        if s["function"]["name"] == tool_name
+    )
+    properties = schema["function"]["parameters"]["properties"]
+
+    assert "user" not in properties
+    assert "query" in properties
+
+
 def test_build_url(retriever):
     assert retriever._build_url() == "https://api.example.ai/v1/knowledgebases/kb-123/vector-search"
 

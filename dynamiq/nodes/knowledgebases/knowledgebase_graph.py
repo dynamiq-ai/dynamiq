@@ -28,6 +28,7 @@ class DynamiqKnowledgebaseGraphSearchInputSchema(BaseModel):
     user: str | None = Field(
         default=None,
         description="Parameter to provide the user identity for ACL-enforced retrieval.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
 
 
