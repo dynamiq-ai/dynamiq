@@ -41,6 +41,11 @@ class DynamiqKnowledgebaseHybridSearchInputSchema(BaseModel):
         le=1,
         description="Parameter to provide alpha for hybrid vector retrieval. 0 is keyword-only, 1 is semantic-only.",
     )
+    user: str | None = Field(
+        default=None,
+        description="Parameter to provide the user identity for ACL-enforced retrieval.",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
 
 
 class DynamiqKnowledgebaseHybridSearch(Node):
@@ -104,6 +109,8 @@ class DynamiqKnowledgebaseHybridSearch(Node):
         limit = self._resolve_limit(input_data)
         if limit is not None:
             payload["limit"] = limit
+        if input_data.user is not None:
+            payload["user"] = input_data.user
         if not graph:
             if input_data.similarity_threshold is not None:
                 payload["similarity_threshold"] = input_data.similarity_threshold

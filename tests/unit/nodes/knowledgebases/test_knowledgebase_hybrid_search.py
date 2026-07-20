@@ -222,6 +222,39 @@ def test_execute_drops_vector_only_params_from_graph_request(vector_node, graph_
     assert graph_kwargs["json"]["limit"] == 4
 
 
+def test_execute_passes_input_user_to_sub_searches(vector_node, graph_node):
+    vector_node.user = "vector-node-user"
+    graph_node.user = "graph-node-user"
+    node = _hybrid(vector_node, graph_node)
+    vector_node.client.request.return_value = _vector_response([])
+    graph_node.client.request.return_value = _graph_response({"content": ""})
+
+    node.execute(
+        DynamiqKnowledgebaseHybridSearchInputSchema(query="q", user="input-user"),
+        RunnableConfig(callbacks=[]),
+    )
+
+    _, vector_kwargs = vector_node.client.request.call_args
+    _, graph_kwargs = graph_node.client.request.call_args
+    assert vector_kwargs["json"]["user"] == "input-user"
+    assert graph_kwargs["json"]["user"] == "input-user"
+
+
+def test_execute_falls_back_to_sub_node_user_when_input_user_missing(vector_node, graph_node):
+    vector_node.user = "vector-node-user"
+    graph_node.user = "graph-node-user"
+    node = _hybrid(vector_node, graph_node)
+    vector_node.client.request.return_value = _vector_response([])
+    graph_node.client.request.return_value = _graph_response({"content": ""})
+
+    node.execute(DynamiqKnowledgebaseHybridSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    _, vector_kwargs = vector_node.client.request.call_args
+    _, graph_kwargs = graph_node.client.request.call_args
+    assert vector_kwargs["json"]["user"] == "vector-node-user"
+    assert graph_kwargs["json"]["user"] == "graph-node-user"
+
+
 def test_execute_degrades_when_one_source_fails(vector_node, graph_node):
     """A single sub-search failure degrades to the surviving source instead of failing the whole call."""
     vector_node.client.request.return_value = _vector_response([], status_code=403)  # vector fails
