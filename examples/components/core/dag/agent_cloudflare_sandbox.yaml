@@ -1,0 +1,37 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+  cloudflare-conn:
+    type: dynamiq.connections.Cloudflare
+    url: ${oc.env:CLOUDFLARE_SANDBOX_API_URL}
+    api_key: ${oc.env:CLOUDFLARE_SANDBOX_API_KEY}
+
+nodes:
+  sandbox-agent:
+    type: dynamiq.nodes.agents.Agent
+    llm:
+      id: sandbox-agent-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o
+    role: "a helpful assistant that can execute shell commands in a sandbox environment."
+    sandbox:
+      enabled: true
+      backend:
+        type: dynamiq.sandboxes.CloudflareSandbox
+        connection: cloudflare-conn
+    max_loops: 15
+    inference_mode: XML
+    summarization_config:
+      enabled: true
+
+flows:
+  sandbox-agent-flow:
+    name: Sandbox Agent Flow
+    nodes:
+      - sandbox-agent
+
+workflows:
+  sandbox-agent-workflow:
+    flow: sandbox-agent-flow
+    version: 1
