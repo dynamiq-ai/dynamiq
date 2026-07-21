@@ -899,6 +899,32 @@ class Daytona(BaseApiKeyConnection):
         return self._client
 
 
+class Cloudflare(BaseApiKeyConnection):
+    """Connection to Cloudflare Sandboxes via a deployed sandbox bridge Worker.
+
+    Cloudflare Sandboxes are only reachable through a Worker in the user's
+    Cloudflare account; the official external HTTP surface is the bridge Worker
+    (https://developers.cloudflare.com/sandbox/bridge/). ``url`` is the deployed
+    bridge Worker URL and ``api_key`` is its ``SANDBOX_API_KEY`` secret.
+    """
+
+    api_key: str = Field(default_factory=partial(get_env_var, "CLOUDFLARE_SANDBOX_API_KEY"))
+    url: str = Field(default_factory=partial(get_env_var, "CLOUDFLARE_SANDBOX_API_URL"))
+
+    _client: Any = PrivateAttr(default=None)
+
+    def connect(self):
+        pass
+
+    def get_client(self):
+        """Get or create a cached Cloudflare sandbox bridge HTTP client."""
+        if self._client is None:
+            from dynamiq.connections.cloudflare_sandbox import CloudflareSandboxClient
+
+            self._client = CloudflareSandboxClient(url=self.url, api_key=self.api_key)
+        return self._client
+
+
 class HuggingFace(BaseApiKeyConnection):
     api_key: str = Field(default_factory=partial(get_env_var, "HUGGINGFACE_API_KEY"))
 
