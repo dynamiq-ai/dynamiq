@@ -283,12 +283,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     share_browser_session_with_subagents: bool = Field(
         default=False,
         description=(
-            "When True, this agent and its subagents share ONE live browser (Browserbase) "
-            "session for the run, driven by one agent at a time. Independent of "
-            "share_sandbox_with_subagents. The lease is reentrant down the ancestor chain: the "
-            "owner MAY drive the browser itself AND delegate to subagents — a nested subagent "
-            "borrows the lease its (blocked) ancestor holds, so handoffs do not deadlock — while "
-            "genuinely-parallel subagents are serialized (still one driver at a time)."
+            "When True, this agent and its subagents share ONE live browser (Browserbase) session "
+            "for the run, driven by one agent at a time. Independent of share_sandbox_with_subagents. "
+            "The owner may browse itself and delegate — handoffs do not deadlock — while parallel "
+            "subagents are serialized onto the one page."
         ),
     )
     sandbox_sharing_scope: SandboxSharingScope = Field(
@@ -1665,9 +1663,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 )
 
             check_cancellation(config)
-            # While parked in a delegate call this agent cannot drive the shared page, so hand it to
-            # the subagent rather than making it wait us out. Skipped for parallel batches: a
-            # sibling browser call of ours may be mid-command on that same page.
+            # Parked in a delegate call we can't drive the page — hand it to the subagent. Skipped
+            # for parallel batches: a sibling browser call of ours may be mid-command on that page.
             self._release_shared_browser_for_delegate(is_child_agent and not is_parallel)
             tool_result = tool_to_run.run(
                 input_data=merged_input,
@@ -2253,10 +2250,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     def _release_shared_browser_for_delegate(self, should_release: bool) -> None:
         """Hand the shared page to a subagent for the duration of a delegate call.
 
-        While parked in a delegate call this agent cannot drive the page, so holding control would
-        block a subagent that needs it. Releasing costs nothing here: agents share one live session,
-        so nothing is closed, no state is lost, and the page stays where it is. This agent simply
-        re-takes control at its next browser call — picking up wherever the subagent left off.
+        Holding control while parked would block a subagent that needs the page. Releasing costs
+        nothing (one live session, nothing closes); this agent re-takes control at its next call.
         """
         if not should_release:
             return
@@ -2268,10 +2263,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     def _teardown_shared_browser(self, shared_session_token) -> None:
         """Release the shared page, and — if this agent owns the session — end it.
 
-        Runs in execute()'s finally for every agent under a shared session. Releasing page control
-        closes nothing: agents share one live session, so state is already visible to each other.
-        The session itself is ended exactly once, by the owner, which is also what persists its
-        Context for the next run.
+        Runs in execute()'s finally for every agent. Releasing closes nothing; the session is ended
+        once, by the owner (which also persists its Context).
         """
         ss = active_browser_session()
         if ss is None:

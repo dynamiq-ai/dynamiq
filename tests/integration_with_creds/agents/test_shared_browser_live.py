@@ -1,36 +1,19 @@
 """Live integration tests for shared browser sessions between an agent and its subagents.
 
 Run against REAL Browserbase with REAL agents/subagents (requires OPENAI_API_KEY,
-BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID). Expensive, slow and LLM-nondeterministic;
-the whole module is skipped without all three credentials.
+BROWSERBASE_API_KEY, BROWSERBASE_PROJECT_ID). Expensive, slow, LLM-nondeterministic; skipped
+without all three credentials.
 
-The design under test (Model D + Context — see docs/design/shared-browser-lease-fix.md §5.2)
-has two deliberately separate axes:
+Design under test (Model D + Context), two separate axes:
+  * INTRA-RUN — every agent in one run drives ONE live session; cookies, logins and the current
+    page cross IMMEDIATELY, nothing closes.
+  * CROSS-RUN — that session loads a persistent Context and writes it back on end (owner teardown),
+    carrying state to a LATER run.
 
-  * INTRA-RUN — every agent in one run drives ONE live Browserbase session, so cookies,
-    logins and the current page are visible to each other IMMEDIATELY, with nothing closing.
-  * CROSS-RUN — that session loads a persistent Browserbase Context and writes it back when it
-    ENDS (owner teardown), carrying state to a LATER run (e.g. the next turn of a conversation).
-
-Each test states which property it proves. The deterministic signals are:
-  * SESSION LOG — ``RecordingStagehand`` records the session id each tool actually drove (the
-    tool clears ``_session_id`` on close). "Shared" == one session id across all agents.
-  * PAGE CONTENT — asserted on each browser tool's own returned text (via ``CONTENT_LOG``), NOT on
-    the owner agent's LLM-composed summary, whose wording is nondeterministic. Page-content tests
-    use example.com ("Example Domain"), which is far more reliable than httpbin under load.
-  * COOKIES — set on one agent, read back on another via httpbin; proves state crosses. httpbin is
-    the only external dependency that can flake here, so cookie tests SKIP (not fail) on a 5xx.
-  * SESSION STATUS — queried from Browserbase after the run; proves the session is ended exactly
-    once, at the owner's teardown, and (crucially) that a subagent finishing did NOT end it.
-
-Live page-position crossing is anchored by a deterministic, no-LLM test
-(``test_page_position_crosses_the_detach_boundary_deterministic``); the agent-driven page tests
-exercise the same property through real delegation but lean on that anchor for rigor.
-
-The one guarantee NOT covered here — that using the browser and delegating browser work in the
-same parallel batch fails with a clean error rather than hanging — is deterministic and lives in
-the unit tests (test_shared_browser_session.py::test_acquire_times_out_instead_of_hanging); an LLM
-cannot be reliably coerced into emitting that exact batch shape.
+Deterministic signals: SESSION_LOG (session id each tool drove; "shared" == one id), CONTENT_LOG
+(each tool's own returned text, not the owner's nondeterministic LLM summary), cookies (set on one
+agent, read on another via httpbin — SKIP on 5xx), session status (queried from Browserbase; ended
+once, at owner teardown). Page-content asserts use example.com (httpbin 5xx's under load).
 """
 
 import io
@@ -58,9 +41,8 @@ from dynamiq.runnables import RunnableConfig, RunnableStatus
 EXAMPLE_URL = "https://example.com/"
 COOKIE_READ_URL = "https://httpbin.org/cookies"
 
-# A deliberately rigid role for "read the current page" subagents. Left to their own devices, agents
-# spend loops on observe/act (which trip on shadow DOM) and hit the loop limit; a single forced
-# extract is what the mechanism actually needs and keeps the LLM out of its own way.
+# Rigid role for "read the current page" subagents: left free they burn loops on observe/act and
+# hit the limit, so force a single extract.
 SINGLE_EXTRACT_ROLE = (
     "You have ONE job, done in a SINGLE tool call. Call your Stagehand browser tool exactly once "
     "with action_type 'extract' and instruction 'Return all visible text on the page.'. Do NOT use "
@@ -70,19 +52,18 @@ SINGLE_EXTRACT_ROLE = (
 
 
 def _cookie_set_url(name: str, value: str, *, persistent: bool) -> str:
-    """A URL that sets a cookie. Persistent (Max-Age) cookies survive to a later run via the
-    Context; session cookies (no expiry) only live within a run, so cross-run tests need Max-Age."""
+    """A URL that sets a cookie. Only persistent (Max-Age) cookies survive cross-run via the Context;
+    session cookies live only within a run."""
     cookie = f"{name}={value}; Path=/"
     if persistent:
         cookie += "; Max-Age=86400"
     return f"https://httpbin.org/response-headers?Set-Cookie={quote(cookie)}"
 
 
-# tool name -> [{"session_id": ..., "context_id": ...}] for every session that tool drove
+# tool name -> [{"session_id", "context_id"}] for every session that tool drove
 SESSION_LOG: dict[str, list[dict]] = defaultdict(list)
-# tool name -> [content, ...] for every action a tool returned. State-crossing is asserted on THIS,
-# the raw page content the browser saw, not on the owner agent's LLM-composed summary (whose
-# phrasing is nondeterministic and may drop the exact word we look for).
+# tool name -> returned content per action. State-crossing is asserted on this raw page content,
+# not the owner's nondeterministic LLM summary.
 CONTENT_LOG: dict[str, list[str]] = defaultdict(list)
 
 
@@ -207,14 +188,12 @@ def _all_logged_session_ids() -> set[str]:
 
 
 def _tool_saw(tool_name: str, needle: str) -> bool:
-    """Did any action of this tool return content containing ``needle``? Asserted on the raw page
-    content the browser saw, so it does not depend on how the owner agent phrased its summary."""
+    """Did any of this tool's returned content contain ``needle``? (raw page content, not the LLM summary)"""
     return any(needle.lower() in content.lower() for content in CONTENT_LOG[tool_name])
 
 
 def _skip_if_httpbin_unavailable(*tool_names: str) -> None:
-    """Skip (not fail) when the cookie endpoint (httpbin.org) is 5xx-ing. Cookie tests depend on it;
-    its downtime is an external flake, not a sharing regression, and must not read as a real failure."""
+    """Skip (not fail) when httpbin.org is 5xx-ing — an external flake, not a sharing regression."""
     blob = " ".join(c for name in tool_names for c in CONTENT_LOG[name]).lower()
     for marker in ("503", "service temporarily unavailable", "502 bad gateway", "504 gateway"):
         if marker in blob:
@@ -265,12 +244,9 @@ def _owner_output(result, owner: Agent) -> dict:
 # ---------------------------------------------------------------------------------------------
 @pytest.mark.integration
 def test_two_subagents_share_session_and_state_crosses():
-    """The canonical shape. Owner only delegates; a setter subagent stores a cookie, then a
-    separate checker subagent reads it back — on the SAME live session, without either closing.
-
-    Proves at once: (a) one shared session, (b) cookies cross agents live, (c) the checker's
-    session was still alive after the setter's teardown (detach, not end — finding #6), and
-    (d) the session is ended after the owner's turn.
+    """Canonical shape: owner delegates to a setter (stores a cookie) then a checker (reads it back)
+    on the same live session. Proves one shared session, cookies cross live, the checker's session
+    survived the setter's teardown (detach not end), and the session is ended after the owner's turn.
     """
     _require_creds()
     setter_tool = _stagehand_tool("setter-browser")
@@ -322,9 +298,8 @@ def test_two_subagents_share_session_and_state_crosses():
 # ---------------------------------------------------------------------------------------------
 @pytest.mark.integration
 def test_live_page_position_crosses_between_subagents():
-    """A navigator subagent leaves the page on a distinctive URL; a reader subagent reports the
-    CURRENT page WITHOUT navigating. Under a shared live session it sees the navigator's page —
-    something close-based handoff (fresh blank session per agent) could never do.
+    """Navigator leaves the page on a distinctive URL; reader reports the current page without
+    navigating. It sees the navigator's page only because they share one live session.
     """
     _require_creds()
     navigator_tool = _stagehand_tool("navigator-browser")
@@ -365,14 +340,9 @@ def test_live_page_position_crosses_between_subagents():
 
 @pytest.mark.integration
 def test_page_position_crosses_the_detach_boundary_deterministic():
-    """The deterministic anchor for the live-page-position claim, with no LLM in the loop.
-
-    Two real Stagehand tools driven directly through ``SharedSession``: tool A opens a distinctive
-    page and then tears down exactly as a subagent would (``_shares_browser_session`` -> ``close``
-    -> detach, without ending the session); tool B attaches to the same session and extracts the
-    CURRENT page. B seeing A's page proves ``_detach_shared_browser`` leaves the remote page intact
-    across the handoff — the mechanism the two agent-driven page tests exercise, minus their LLM
-    nondeterminism.
+    """Deterministic anchor for the page-position claim, no LLM. Tool A opens a distinctive page and
+    tears down as a subagent would (detach, no end); tool B attaches and extracts the current page.
+    B seeing A's page proves ``_detach_shared_browser`` leaves the remote page intact across handoff.
     """
     _require_creds()
     from dynamiq.nodes.agents.shared_session import SharedSession, _current_agent_run, _shared_session
@@ -431,10 +401,8 @@ def test_page_position_crosses_the_detach_boundary_deterministic():
 # ---------------------------------------------------------------------------------------------
 @pytest.mark.integration
 def test_owner_browses_then_delegates_without_deadlock():
-    """Owner uses its OWN browser first, then delegates to a browsing subagent. Releasing page
-    control around the delegate call hands the live page over, so the subagent proceeds
-    immediately instead of blocking until the page-control timeout. The worker-thread timeout in
-    ``_run_workflow`` turns any regression into a fast failure rather than a hang.
+    """Owner browses first, then delegates to a browsing subagent. Releasing page control around the
+    delegate hands the page over, so the subagent proceeds immediately instead of blocking to timeout.
     """
     _require_creds()
     owner_tool = _stagehand_tool("owner-browser")
@@ -518,9 +486,8 @@ def test_subagent_hands_back_then_owner_browses():
 # ---------------------------------------------------------------------------------------------
 @pytest.mark.integration
 def test_non_browsing_delegate_preserves_the_page():
-    """Owner browses to a distinctive page, delegates to a pure-LLM subagent (no browser), then
-    reads the page again. The page must be exactly where it was — releasing page control around a
-    delegate closes nothing, so a non-browsing detour costs nothing.
+    """Owner browses, delegates to a pure-LLM subagent, then reads the page again. It is unchanged:
+    releasing page control around a delegate closes nothing.
     """
     _require_creds()
     owner_tool = _stagehand_tool("owner-browser")
@@ -572,10 +539,9 @@ def test_non_browsing_delegate_preserves_the_page():
 # ---------------------------------------------------------------------------------------------
 @pytest.mark.integration
 def test_parallel_browsing_subagents_share_one_session():
-    """Owner with parallel tool calls enabled dispatches two browsing subagents. Whether the LLM
-    runs them together or in sequence, page control serializes them onto ONE session with no
-    collision and no deadlock. (That they genuinely overlapped is not asserted — it is not
-    reliably forceable — but one-session-and-success is the invariant that must always hold.)
+    """Owner with parallel tool calls dispatches two browsing subagents. Page control serializes them
+    onto ONE session, no collision, no deadlock. (Genuine overlap isn't asserted — not reliably
+    forceable — but one-session-and-success always holds.)
     """
     _require_creds()
     a_tool = _stagehand_tool("browser-A")
@@ -617,9 +583,8 @@ def test_parallel_browsing_subagents_share_one_session():
 # ---------------------------------------------------------------------------------------------
 @pytest.mark.integration
 def test_factory_mode_subagents_share_one_session():
-    """Subagents spawned from a factory (a fresh Agent per call, which exercises the clone path)
-    must still attach to the run's one shared session — each clone gets its own run key, so page
-    control serializes them correctly.
+    """Factory subagents (fresh Agent per call, exercising the clone path) still attach to the run's
+    one shared session; each clone gets its own run key, so page control serializes them.
     """
     _require_creds()
     # Two named tools the factory hands out in turn, so the session log can distinguish the calls.
@@ -667,10 +632,9 @@ def test_factory_mode_subagents_share_one_session():
 # ---------------------------------------------------------------------------------------------
 @pytest.mark.integration
 def test_context_persists_state_across_separate_runs():
-    """Two independent workflow runs share a stable ``browser_context_id`` (the "one per end user"
-    pattern). Run 1 sets a PERSISTENT cookie and ends its session; run 2 — a brand-new session —
-    loads the same Context and sees the cookie. Different sessions, one Context: this is the axis
-    that mirrors carrying a user's login across conversation turns.
+    """Two independent runs share a stable ``browser_context_id`` ("one per end user"). Run 1 sets a
+    persistent cookie and ends its session; run 2 — a new session — loads the same Context and sees
+    it. Different sessions, one Context: the cross-run axis.
     """
     _require_creds()
     from browserbase import Browserbase
@@ -697,18 +661,16 @@ def test_context_persists_state_across_separate_runs():
 
     cookie_url = _cookie_set_url("dynamiq_ctx", "persisted", persistent=True)
     try:
-        # --- RUN 1: set the persistent cookie, then let the owner teardown end the session, which
-        # is what writes the cookie into the Context.
+        # RUN 1: set the persistent cookie; the owner teardown ends the session, writing it to the Context.
         owner1, _ = build_owner("run1-browser")
         result1 = _run_workflow(owner1, f"Have the navigator open {cookie_url} and confirm it loaded.")
         _owner_output(result1, owner1)
         run1_session = _assert_one_shared_session("run1-browser")
         _assert_session_ended(run1_session)
-        # If httpbin 5xx'd while SETTING the cookie, there is nothing to carry — skip before run 2
-        # even attempts it (the logs are keyed per tool name, so no clearing between runs is needed).
+        # If httpbin 5xx'd while setting the cookie there is nothing to carry — skip before run 2.
         _skip_if_httpbin_unavailable("run1-browser")
 
-        # --- RUN 2: a fresh session loading the same Context sees the cookie.
+        # RUN 2: a fresh session loading the same Context sees the cookie.
         owner2, _ = build_owner("run2-browser")
         result2 = _run_workflow(owner2, f"Have the navigator open {COOKIE_READ_URL} and report the cookies listed.")
         _owner_output(result2, owner2)
@@ -724,4 +686,4 @@ def test_context_persists_state_across_separate_runs():
         try:
             Browserbase(api_key=api_key).contexts.delete(context_id)
         except Exception:
-            pass  # best effort — a leaked test Context is harmless, a failing cleanup should not be
+            pass  # best effort

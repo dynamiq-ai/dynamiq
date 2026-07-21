@@ -674,10 +674,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
     def is_clone_safe_for_parallel(self) -> bool:
         """Whether this node may be cloned to run parallel tool calls in isolation.
 
-        Cloning is the default because it keeps concurrent calls from sharing mutable per-call
-        state. A node that owns an exclusive external resource (e.g. a browser session that other
-        agents are queued behind) overrides this to False so its calls share one instance instead,
-        and is then responsible for serializing them itself.
+        Default True (cloning isolates per-call state). A node owning an exclusive external resource
+        (e.g. a shared browser session) overrides to False and serializes its own calls instead.
         """
         return True
 

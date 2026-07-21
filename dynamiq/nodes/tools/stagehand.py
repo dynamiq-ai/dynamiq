@@ -121,9 +121,8 @@ d. Extract data from the results
 def end_browserbase_session(api_key: str, project_id: str, session_id: str) -> None:
     """End a Browserbase session by id, independent of any Stagehand client.
 
-    Used to end the run's shared session: the tool that created it may be long gone by then, and
-    Stagehand's own ``close()`` is unusable here because it is bound to a live client. Ending is
-    also what persists the session's Context for the next run.
+    Ends the run's shared session: the creating tool may be gone, and Stagehand's close() needs a
+    live client. Ending also persists the session's Context for the next run.
     """
     from browserbase import Browserbase as BrowserbaseSDK
 
@@ -208,18 +207,16 @@ class Stagehand(ConnectionNode):
     browser_context_id: str | None = Field(
         default=None,
         description=(
-            "Existing Browserbase Context to load, instead of creating a fresh one. This is how "
-            "state reaches a LATER run: pass a stable id (e.g. one per end user) and each run's "
-            "session loads it at start and writes it back when the run ends, so the user stays "
-            "logged in across conversations. Leave unset for per-run throwaway state."
+            "Existing Browserbase Context to load instead of creating a fresh one. Carries state to "
+            "a LATER run: pass a stable id (e.g. one per end user) so the user stays logged in across "
+            "runs. Leave unset for per-run throwaway state."
         ),
     )
     shared_browser_session_timeout: int = Field(
         default=3600,
         description=(
-            "Seconds before the shared browser session auto-ends, when this tool creates the "
-            "session shared by an agent and its subagents. It must outlast the whole run, so it "
-            "overrides the Browserbase project default rather than inheriting it."
+            "Seconds before the shared browser session auto-ends. Overrides the Browserbase project "
+            "default because the session must outlast the whole run."
         ),
     )
 
@@ -234,8 +231,7 @@ class Stagehand(ConnectionNode):
     _loop = PrivateAttr(default=None)
     _loop_thread = PrivateAttr(default=None)
     _call_lock = PrivateAttr(default_factory=threading.Lock)
-    # True while this tool is driving the run's SHARED session: close() must then detach rather
-    # than end the session, which other agents are still using.
+    # True while driving the run's shared session: close() must then detach, not end it.
     _shares_browser_session: bool = PrivateAttr(default=False)
 
     _clone_init_methods_names: ClassVar[list[str]] = ["init_loop", "init_call_lock"]
@@ -245,27 +241,18 @@ class Stagehand(ConnectionNode):
         return isinstance(self.connection, SteelBrowser)
 
     def is_clone_safe_for_parallel(self) -> bool:
-        """Don't clone this tool for parallel calls while it holds a shared browser.
-
-        Under browser sharing this instance's session is the agent's single session against the
-        shared Context. A clone would open a SECOND session on that same Context — the two would
-        load the same cookies, diverge, and clobber each other when they persist on close. Sharing
-        one instance keeps it at one session per agent turn; ``execute`` serializes the calls.
-        """
+        """Don't clone under browser sharing: a clone would open a SECOND session on the shared
+        Context, diverging and clobbering on persist. One instance keeps one session per turn;
+        ``execute`` serializes the calls."""
         if active_browser_session() is None or self._is_steel_browser_connection():
             return True
         return False
 
     async def _acquire_shared_browser(self) -> "SharedSession | None":
-        """Take control of the shared page for this agent's turn.
+        """Take control of the shared page for this agent's turn; return the session, else None.
 
-        All agents in the run drive ONE live Browserbase session, so their cookies and logins are
-        visible to each other immediately — nothing needs closing to hand state over. What does need
-        serializing is the page itself: every agent drives the same one, so control is held from this
-        agent's first Stagehand call until its turn ends (or it delegates). Returns the session when
-        sharing applies, else None.
-
-        Browserbase only in P3 (Steel keeps its own session object; see spec §10.4).
+        Control is held from the first Stagehand call until the turn ends (or it delegates).
+        Browserbase only in P3 (Steel is a fast-follow).
         """
         ss = active_browser_session()
         if ss is None:
@@ -274,9 +261,8 @@ class Stagehand(ConnectionNode):
             return None  # Steel sharing is a fast-follow
         run_key = _current_agent_run.get()
         if run_key is None:
-            # Control is released under the real per-run key by the owning agent's finally; a
-            # substituted key would never match, so the page would stay locked for the whole run
-            # and every other agent would block on it. Running unshared is the safe degradation.
+            # The agent's finally releases under the real run key; a substituted key would never
+            # match, locking the page for the whole run. Running unshared is the safe degradation.
             logger.warning(
                 "Tool %s - %s: no _current_agent_run set (tool is running outside Agent.execute); "
                 "skipping browser sharing and using an isolated session.",
@@ -284,22 +270,19 @@ class Stagehand(ConnectionNode):
                 self.id,
             )
             return None
-        # Blocking wait: run it off the tool's event loop so the loop stays free to serve the
-        # agent that currently holds the page.
+        # Off the event loop: the blocking wait must not stall the loop serving the current holder.
         try:
             await asyncio.to_thread(ss.acquire_page_control, run_key)
         except TimeoutError as exc:
-            # Surface as a tool error so the agent gets the explanation as an observation instead of
-            # an unhandled crash. Not recoverable: retrying would just block for another full
-            # timeout — the topology has to change (don't browse and delegate in one parallel batch).
+            # Surface as a tool observation, not a crash. Not recoverable: a retry just blocks again
+            # — the topology must change (don't browse and delegate in one parallel batch).
             raise ToolExecutionException(str(exc), recoverable=False) from exc
         return ss
 
     async def _join_shared_browser(self, ss: "SharedSession") -> None:
         """Attach to the run's shared session, or prepare to create it if we are first.
 
-        Sets ``_session_id`` so ``_init_client`` resumes the shared session instead of creating a
-        new one, and marks us as sharing so ``close()`` detaches rather than ending it for everyone.
+        Sets ``_session_id`` so ``_init_client`` resumes it; marks sharing so ``close()`` detaches.
         """
         self._shares_browser_session = True
         shared_sid = ss.browser_session_id()
@@ -307,8 +290,8 @@ class Stagehand(ConnectionNode):
             self._session_id = shared_sid
             return
 
-        # First to browse in this run: settle the persistent Context (cross-run state) so the
-        # session we are about to create loads it and writes it back when the run ends.
+        # First to browse: settle the persistent Context (cross-run state) so the session we create
+        # loads it and writes it back on end.
         if ss.browser_context_id() is None:
             if self.browser_context_id:
                 ss.adopt_browser_context_id(self.browser_context_id)
@@ -329,8 +312,7 @@ class Stagehand(ConnectionNode):
             return
         adopted = ss.adopt_browser_session_id(self._session_id)
         if adopted != self._session_id:
-            # Lost a race: another agent's session is the shared one, so ours would leak. End it and
-            # fall in behind theirs.
+            # Lost the race: another session is the shared one, so end ours and fall in behind it.
             logger.warning(
                 "Tool %s - %s: created session %s but %s is already shared; ending ours.",
                 self.name,
@@ -345,20 +327,18 @@ class Stagehand(ConnectionNode):
             )
             self._session_id = adopted
             return
-        # Ours is the run's session: register how to end it in a way that does NOT depend on this
-        # tool surviving — a subagent's tool may be collected long before the run finishes.
+        # Ours is the run's session: register an end that does not depend on this tool surviving.
         api_key = self.connection.browserbase_api_key
         project_id = self.connection.browserbase_project_id
         session_id = self._session_id
         ss.register_browser_end(lambda: end_browserbase_session(api_key, project_id, session_id))
 
     def _apply_shared_browser_config(self, config, context_id: str | None):
-        """Configure the session we are about to create as the run's SHARED session.
+        """Configure the session we create as the run's shared session.
 
-        ``persist`` writes the Context back when the session ends, carrying state to a later run.
-        ``keep_alive`` stops the session dying when the agent that created it finishes its turn and
-        disconnects, and an explicit timeout stops the project default cutting a long run short —
-        both matter now that one session spans the whole run rather than a single turn.
+        ``persist`` writes the Context back on end (cross-run state). ``keep_alive`` stops it dying
+        when the creating agent disconnects, and an explicit timeout stops the project default
+        cutting a run short — both because one session now spans the whole run.
         """
         params = dict(getattr(config, "browserbase_session_create_params", None) or {})
         browser_settings = dict(params.get("browser_settings") or {})
@@ -367,8 +347,8 @@ class Stagehand(ConnectionNode):
         params["browser_settings"] = browser_settings
         params.setdefault("project_id", self.connection.browserbase_project_id)
         params.setdefault("keep_alive", True)
-        # "timeout", not the SDK's "api_timeout": Stagehand camel-cases these keys naively before
-        # posting them, so api_timeout becomes "apiTimeout" and the API rejects it (400).
+        # "timeout", not "api_timeout": Stagehand camel-cases keys naively, so api_timeout becomes
+        # "apiTimeout" and the API rejects it (400).
         params.setdefault("timeout", self.shared_browser_session_timeout)
         config.browserbase_session_create_params = params
         return config
@@ -376,10 +356,9 @@ class Stagehand(ConnectionNode):
     def _detach_shared_browser(self) -> None:
         """Drop our connection to the shared session WITHOUT ending it.
 
-        Stagehand has no detach: ``client.close()`` always calls ``end`` on the session
-        (``stagehand/main.py``), which would kill the browser for every other agent. So clean up the
-        local browser/playwright resources directly and leave the session running. The owner's
-        teardown ends it exactly once, via ``SharedSession.end_browser_session``.
+        Stagehand has no detach — ``client.close()`` always ends the session, killing it for every
+        other agent — so clean up local browser/playwright resources directly and leave the session
+        running. The owner's teardown ends it once.
         """
         from stagehand.browser import cleanup_browser_resources
 
@@ -480,8 +459,8 @@ class Stagehand(ConnectionNode):
     def init_call_lock(self):
         """Give this instance its own call lock.
 
-        ``clone()`` copies private attrs shallowly, so without this a clone would share the
-        original's lock and independent parallel calls would needlessly serialize against each other.
+        ``clone()`` copies private attrs shallowly, so without this a clone shares the original's
+        lock and independent parallel calls needlessly serialize.
         """
         self._call_lock = threading.Lock()
 
@@ -544,9 +523,8 @@ class Stagehand(ConnectionNode):
     ):
         """Initialize Stagehand client and reinitialize with session reuse.
 
-        ``create_shared_session`` means we are the first agent to browse in a run that shares a
-        browser, so the session we create must be configured to outlive our own turn and to load
-        ``shared_context_id`` (state carried over from a previous run).
+        ``create_shared_session``: we are first to browse in a shared-browser run, so the session
+        we create is configured to outlive our turn and to load ``shared_context_id`` (prior-run state).
         """
 
         class StagehandNoSignal(StagehandClient):
@@ -671,11 +649,10 @@ class Stagehand(ConnectionNode):
         Returns:
             dict[str, Any]: A dictionary containing the tool's output.
         """
-        # Serialize calls on this instance: under browser sharing parallel calls are NOT cloned
-        # (see is_clone_safe_for_parallel), so they would otherwise race on one client/page.
+        # Serialize calls: under browser sharing parallel calls are not cloned, so they would race
+        # on one client/page.
         with self._call_lock:
-            # close() tears the loop down, and under browser sharing that now happens at the end of
-            # every agent turn — so a tool reused in a later turn has to bring its loop back up.
+            # close() tears the loop down at each turn's end under sharing; a later turn rebuilds it.
             if self._loop is None or self._loop.is_closed():
                 self.init_loop()
             return self._run_async(self.execute_async(input_data, config, **kwargs))
@@ -847,8 +824,7 @@ class Stagehand(ConnectionNode):
         """Best-effort cleanup when nodes are not explicitly shut down."""
         try:
             if self._shares_browser_session:
-                # Never end a session other agents are still driving — detach instead. This also
-                # guards __del__: collecting a subagent's tool must not kill the run's browser.
+                # Detach, never end — other agents are still driving it (also guards __del__).
                 self._detach_shared_browser()
             elif self.client and hasattr(self.client, "close"):
                 self._run_in_loop(self.client.close())
@@ -879,8 +855,7 @@ class Stagehand(ConnectionNode):
             self._steel_browser_session = None
             self._steel_client = None
             self._live_view_url = None
-            # Clear the (possibly shared, now-terminated) session id so a later run on this same
-            # tool instance starts a fresh session instead of reconnecting to a dead session id.
+            # Clear the (now-terminated) session id so a later run starts fresh, not on a dead id.
             self._session_id = None
             self.close_loop()
 
