@@ -1,9 +1,10 @@
 import copy
 import enum
+import re
 from collections import defaultdict
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 from pypdf import PdfReader
 
@@ -112,32 +113,45 @@ class PyPDFFileConverter(BaseConverter):
         """
         Create Documents from the elements returned by PyPDF.
         """
-        docs = []
+        document_metadata = copy.deepcopy(metadata)
+        document_metadata["file_path"] = filepath
+        document_metadata.update(self._normalize_pdf_metadata(elements.metadata))
+
         if document_creation_mode == DocumentCreationMode.ONE_DOC_PER_FILE:
-            element_texts = []
             text = "".join(page.extract_text(extraction_mode=self.extraction_mode) for page in elements.pages)
-            element_texts.append(text)
+            return [Document(content=text, metadata=document_metadata)]
 
-            metadata = copy.deepcopy(metadata)
-            metadata["file_path"] = filepath
-            docs = [Document(content=text, metadata=metadata)]
-
-        elif document_creation_mode == DocumentCreationMode.ONE_DOC_PER_PAGE:
+        if document_creation_mode == DocumentCreationMode.ONE_DOC_PER_PAGE:
             texts_per_page: defaultdict[int, str] = defaultdict(str)
             meta_per_page: defaultdict[int, dict] = defaultdict(dict)
             for page_number, el in enumerate(elements.pages, start=1):
                 text = str(el.extract_text(extraction_mode=self.extraction_mode))
-                metadata = copy.deepcopy(metadata)
-                metadata["file_path"] = filepath
-                metadata["page_number"] = page_number
-                element_medata = elements.metadata
-                if element_medata:
-                    metadata.update(element_medata)
+                page_metadata = copy.deepcopy(document_metadata)
+                page_metadata["page_number"] = page_number
 
                 texts_per_page[page_number] += text
-                meta_per_page[page_number].update(metadata)
+                meta_per_page[page_number].update(page_metadata)
 
-            docs = [
+            return [
                 Document(content=texts_per_page[page], metadata=meta_per_page[page]) for page in texts_per_page.keys()
             ]
-        return docs
+
+        return []
+
+    @staticmethod
+    def _normalize_pdf_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+        """Namespace PDF Info keys as safe, predictable document metadata keys."""
+        normalized: dict[str, Any] = {}
+        for raw_key, value in (metadata or {}).items():
+            key = str(raw_key).lstrip("/")
+            key = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", key)
+            key = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key)
+            key = re.sub(r"[^A-Za-z0-9]+", "_", key).strip("_").lower()
+            base_key = f"pdf_{key or 'metadata'}"
+            normalized_key = base_key
+            suffix = 2
+            while normalized_key in normalized:
+                normalized_key = f"{base_key}_{suffix}"
+                suffix += 1
+            normalized[normalized_key] = value
+        return normalized
