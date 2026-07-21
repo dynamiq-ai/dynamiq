@@ -31,6 +31,7 @@ from dynamiq.nodes.agents.utils import (
     first_xml_output_block,
 )
 from dynamiq.nodes.node import Node, NodeDependency
+from dynamiq.nodes.schema_utils import strip_inaccessible_fields
 from dynamiq.nodes.tools.agent_tool import SubAgentTool
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsInputSchema, ToolCallItem
@@ -1263,6 +1264,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 "Please correct the action field or state that you cannot answer the question."
             )
             return error_message, [], False, False, None
+
+        if isinstance(action_input, dict):
+            action_input, stripped_fields = strip_inaccessible_fields(tool.resolved_input_schema, action_input)
+            if stripped_fields:
+                logger.warning(
+                    f"Agent {self.name} - {self.id}: stripped {stripped_fields} from '{tool.name}' input; "
+                    "these fields are not accessible to the agent (is_accessible_to_agent=False)."
+                )
 
         tool_run_id = tool_run_id or self._streaming_tool_run_id or generate_uuid()
         self._streaming_tool_run_id = None
