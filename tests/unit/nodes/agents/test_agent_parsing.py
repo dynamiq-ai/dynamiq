@@ -710,6 +710,86 @@ def test_apply_param_modes_required_on_inaccessible_field_raises():
         apply_param_modes(Schema, {"internal_id": "required"})
 
 
+def test_strip_inaccessible_fields():
+    """Hidden fields are dropped from agent input; accessible and extra keys survive."""
+    from dynamiq.nodes.schema_utils import strip_inaccessible_fields
+
+    class Schema(BaseModel):
+        text: str = Field(..., description="Required.")
+        internal_id: str | None = Field(
+            default=None,
+            description="Not exposed to the agent.",
+            json_schema_extra={"is_accessible_to_agent": False},
+        )
+
+    data = {"text": "hi", "internal_id": "sneaky", "extra": 1}
+
+    cleaned, stripped = strip_inaccessible_fields(Schema, data)
+    assert cleaned == {"text": "hi", "extra": 1}
+    assert stripped == ["internal_id"]
+
+    # No schema: nothing to strip.
+    assert strip_inaccessible_fields(None, data) == (data, [])
+
+
+def test_agent_strips_inaccessible_fields_from_tool_input():
+    """LLM-supplied values for hidden fields never reach the tool: both statically
+    hidden fields (is_accessible_to_agent=False) and fields hidden via
+    input_param_modes fall back to their defaults."""
+    import uuid
+
+    from dynamiq import connections, prompts
+    from dynamiq.nodes.agents import Agent
+    from dynamiq.nodes.llms import OpenAI
+    from dynamiq.nodes.types import InputParamMode
+
+    received = {}
+
+    class SecretInput(BaseModel):
+        text: str = Field(..., description="Required text.")
+        api_key: str = Field(
+            default="real-key",
+            description="Not exposed to the agent.",
+            json_schema_extra={"is_accessible_to_agent": False},
+        )
+        suffix: str = Field(default="", description="Optional suffix.")
+
+    class SecretTool(Node):
+        group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+        name: str = "secret"
+        input_schema: ClassVar[type[SecretInput]] = SecretInput
+
+        def execute(self, input_data, config=None, **kwargs):
+            received.update(input_data.model_dump())
+            return {"content": "ok"}
+
+    conn = connections.OpenAI(id=str(uuid.uuid4()), api_key="fake-key")
+    llm = OpenAI(
+        name="LLM",
+        model="gpt-4o-mini",
+        connection=conn,
+        prompt=prompts.Prompt(messages=[prompts.Message(role="user", content="{{input}}")]),
+    )
+    agent = Agent(
+        name="secret-agent",
+        llm=llm,
+        tools=[SecretTool(input_param_modes={"suffix": InputParamMode.HIDDEN})],
+    )
+
+    _, _, _, success, _ = agent._execute_single_tool(
+        "secret",
+        {"text": "hi", "api_key": "attacker-key", "suffix": "smuggled"},
+        thought="t",
+        loop_num=1,
+        config=None,
+    )
+
+    assert success
+    assert received["text"] == "hi"
+    assert received["api_key"] == "real-key"
+    assert received["suffix"] == ""
+
+
 def test_normalize_fields_coerces_nested_model():
     """A stringified free-form dict nested inside a sub-model is coerced back to a dict.
 
