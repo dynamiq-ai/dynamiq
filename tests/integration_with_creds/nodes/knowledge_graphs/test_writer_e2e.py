@@ -22,11 +22,7 @@ import pytest
 from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
-from dynamiq.nodes.knowledge_graphs import (
-    KnowledgeGraphEntityExtractor,
-    KnowledgeGraphWriter,
-    Ontology,
-)
+from dynamiq.nodes.knowledge_graphs import KnowledgeGraphEntityExtractor, KnowledgeGraphWriter, Ontology
 from dynamiq.nodes.knowledge_graphs.entity_extractor import ENTITY_EMBEDDING_VECTOR_INDEX
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
@@ -75,8 +71,10 @@ def resolved_graph(graph_connection):
     writer.init_components()
     # Two SEPARATE ingestion events about the same org -> exercises cross-write resolution, not just
     # in-one-call dedup.
-    for text, principal in ((f"{ORG} uses a system called Helios.", "group:a"),
-                            (f"{ORG} uses a system called Borealis.", "group:b")):
+    for text, principal in (
+        (f"{ORG} uses a system called Helios.", "group:a"),
+        (f"{ORG} uses a system called Borealis.", "group:b"),
+    ):
         extraction = extractor.execute(
             KnowledgeGraphEntityExtractor.input_schema(
                 documents=[Document(content=text, metadata={"allowed_principals": [principal]})]
@@ -93,7 +91,10 @@ def test_same_entity_across_documents_resolves_to_one_node(resolved_graph, graph
     store = Neo4jGraphStore(connection=graph_connection, client=graph_connection.connect())
     try:
         count = _counter(store)
-        orgs = count("MATCH (n) WHERE toLower(n.name) CONTAINS toLower($x) RETURN count(n) AS c", x=ORG)
+        orgs = count(
+            "MATCH (n) WHERE toLower(n.name) CONTAINS toLower($x) RETURN count(n) AS c",
+            x=ORG,
+        )
         assert orgs == 1, f"'{ORG}' from two documents should resolve to ONE node, found {orgs}"
         # the two distinct systems are two nodes, and each document's claim is its own edge
         assert count("MATCH ()-[r:USES]->() RETURN count(r) AS c") == 2, "each document's fact should be its own edge"
@@ -108,17 +109,41 @@ FILTER_ORG = "org-w"
 
 def _org_uses(store, edges):
     """Write one Acme org + a System per edge spec (system_name, extra_props, doc_id) with USES edges."""
-    nodes = [{"labels": ["Organization", "Entity"], "identity_key": "id", "properties": {"id": FILTER_ORG, "name": "Acme"}}]
+    nodes = [
+        {
+            "labels": ["Organization", "Entity"],
+            "identity_key": "id",
+            "properties": {"id": FILTER_ORG, "name": "Acme"},
+        }
+    ]
     relationships = []
     for i, (sys_name, extra, doc_id) in enumerate(edges):
         sid = f"sys-{i}"
-        nodes.append({"labels": ["System", "Entity"], "identity_key": "id", "properties": {"id": sid, "name": sys_name}})
-        relationships.append({
-            "type": "USES", "start_label": "Organization", "end_label": "System",
-            "start_identity": FILTER_ORG, "end_identity": sid,
-            "start_identity_key": "id", "end_identity_key": "id", "identity_keys": ["source_doc_id"],
-            "properties": {"src_name": "Acme", "dst_name": sys_name, "source_doc_id": doc_id, **extra},
-        })
+        nodes.append(
+            {
+                "labels": ["System", "Entity"],
+                "identity_key": "id",
+                "properties": {"id": sid, "name": sys_name},
+            }
+        )
+        relationships.append(
+            {
+                "type": "USES",
+                "start_label": "Organization",
+                "end_label": "System",
+                "start_identity": FILTER_ORG,
+                "end_identity": sid,
+                "start_identity_key": "id",
+                "end_identity_key": "id",
+                "identity_keys": ["source_doc_id"],
+                "properties": {
+                    "src_name": "Acme",
+                    "dst_name": sys_name,
+                    "source_doc_id": doc_id,
+                    **extra,
+                },
+            }
+        )
     store.write_graph(nodes=nodes, relationships=relationships)
 
 
@@ -160,18 +185,38 @@ def embedded_graph(graph_connection):
     store.run_cypher("MATCH (n) DETACH DELETE n")  # clean slate
 
     nodes = [
-        {"labels": ["Organization", "Entity"], "identity_key": "id", "properties": {"id": "vec-org", "name": VEC_ORG_NAME}},
-        {"labels": ["System", "Entity"], "identity_key": "id", "properties": {"id": "vec-sys", "name": VEC_SYS_NAME}},
+        {
+            "labels": ["Organization", "Entity"],
+            "identity_key": "id",
+            "properties": {"id": "vec-org", "name": VEC_ORG_NAME},
+        },
+        {
+            "labels": ["System", "Entity"],
+            "identity_key": "id",
+            "properties": {"id": "vec-sys", "name": VEC_SYS_NAME},
+        },
     ]
-    relationships = [{
-        "type": "USES", "start_label": "Organization", "end_label": "System",
-        "start_identity": "vec-org", "end_identity": "vec-sys",
-        "start_identity_key": "id", "end_identity_key": "id", "identity_keys": ["source_doc_id"],
-        "properties": {"src_name": VEC_ORG_NAME, "dst_name": VEC_SYS_NAME,
-                       "allowed_principals": ["group:public"], "source_doc_id": "docV"},
-    }]
+    relationships = [
+        {
+            "type": "USES",
+            "start_label": "Organization",
+            "end_label": "System",
+            "start_identity": "vec-org",
+            "end_identity": "vec-sys",
+            "start_identity_key": "id",
+            "end_identity_key": "id",
+            "identity_keys": ["source_doc_id"],
+            "properties": {
+                "src_name": VEC_ORG_NAME,
+                "dst_name": VEC_SYS_NAME,
+                "allowed_principals": ["group:public"],
+                "source_doc_id": "docV",
+            },
+        }
+    ]
     writer = KnowledgeGraphWriter(
-        connection=graph_connection, entity_embedder=OpenAIDocumentEmbedder(connection=OpenAIConnection())
+        connection=graph_connection,
+        entity_embedder=OpenAIDocumentEmbedder(connection=OpenAIConnection()),
     )
     writer.init_components()
     try:

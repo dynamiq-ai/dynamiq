@@ -83,16 +83,30 @@ def ingested(graph_connection):
     writer = KnowledgeGraphWriter(connection=graph_connection, entity_embedder=_doc_embedder())
     writer.init_components()
     docs = [
-        Document(content=f"{ORG} uses a system called {SYS_A}.", metadata={"allowed_principals": [GROUP_A]}),
-        Document(content=f"{ORG} uses a system called {SYS_B}.", metadata={"allowed_principals": [GROUP_B]}),
+        Document(
+            content=f"{ORG} uses a system called {SYS_A}.",
+            metadata={"allowed_principals": [GROUP_A]},
+        ),
+        Document(
+            content=f"{ORG} uses a system called {SYS_B}.",
+            metadata={"allowed_principals": [GROUP_B]},
+        ),
         # The SAME fact asserted by two documents with DIFFERENT ACLs — must stay two edges, not merge.
-        Document(content=f"{ORG} uses a system called {SHARED}.", metadata={"allowed_principals": [GROUP_A]}),
-        Document(content=f"{ORG} uses a system called {SHARED}.", metadata={"allowed_principals": [GROUP_B]}),
+        Document(
+            content=f"{ORG} uses a system called {SHARED}.",
+            metadata={"allowed_principals": [GROUP_A]},
+        ),
+        Document(
+            content=f"{ORG} uses a system called {SHARED}.",
+            metadata={"allowed_principals": [GROUP_B]},
+        ),
     ]
     extraction = extractor.execute(KnowledgeGraphEntityExtractor.input_schema(documents=docs))
     result = writer.execute(
         KnowledgeGraphWriter.input_schema(
-            nodes=extraction["nodes"], relationships=extraction["relationships"], documents=extraction["documents"]
+            nodes=extraction["nodes"],
+            relationships=extraction["relationships"],
+            documents=extraction["documents"],
         )
     )
     assert result["relationships_created"] is not None
@@ -106,14 +120,18 @@ def _facts_by_name(graph_connection, principals, **kwargs):
     retriever = KnowledgeGraphRetriever(
         connection=graph_connection,
         text_embedder=_text_embedder(),
-        filters={"field": "allowed_principals", "operator": "contains_any", "value": principals},
+        filters={
+            "field": "allowed_principals",
+            "operator": "contains_any",
+            "value": principals,
+        },
         **kwargs,
     )
     retriever.init_components()
     try:
-        return retriever.execute(
-            GraphRetrieverInputSchema(query=f"What systems does {ORG} use?", entities=[ORG])
-        )["content"]
+        return retriever.execute(GraphRetrieverInputSchema(query=f"What systems does {ORG} use?", entities=[ORG]))[
+            "content"
+        ]
     finally:
         retriever._graph_store.close()
 
@@ -162,18 +180,39 @@ def shared_node_graph(graph_connection):
     store.run_cypher("MATCH (n) DETACH DELETE n")  # clean slate
 
     nodes = [
-        {"labels": ["Organization", "Entity"], "identity_key": "id", "properties": {"id": ORG_ID, "name": NODE_NAME}},
-        {"labels": ["System", "Entity"], "identity_key": "id", "properties": {"id": "sys-pub", "name": SYS_PUBLIC}},
-        {"labels": ["System", "Entity"], "identity_key": "id", "properties": {"id": "sys-sec", "name": SYS_SECRET}},
+        {
+            "labels": ["Organization", "Entity"],
+            "identity_key": "id",
+            "properties": {"id": ORG_ID, "name": NODE_NAME},
+        },
+        {
+            "labels": ["System", "Entity"],
+            "identity_key": "id",
+            "properties": {"id": "sys-pub", "name": SYS_PUBLIC},
+        },
+        {
+            "labels": ["System", "Entity"],
+            "identity_key": "id",
+            "properties": {"id": "sys-sec", "name": SYS_SECRET},
+        },
     ]
 
     def _edge(dst, src_name, dst_name, principal, doc_id):
         return {
-            "type": "USES", "start_label": "Organization", "end_label": "System",
-            "start_identity": ORG_ID, "end_identity": dst,
-            "start_identity_key": "id", "end_identity_key": "id", "identity_keys": ["source_doc_id"],
-            "properties": {"src_name": src_name, "dst_name": dst_name,
-                           "allowed_principals": [principal], "source_doc_id": doc_id},
+            "type": "USES",
+            "start_label": "Organization",
+            "end_label": "System",
+            "start_identity": ORG_ID,
+            "end_identity": dst,
+            "start_identity_key": "id",
+            "end_identity_key": "id",
+            "identity_keys": ["source_doc_id"],
+            "properties": {
+                "src_name": src_name,
+                "dst_name": dst_name,
+                "allowed_principals": [principal],
+                "source_doc_id": doc_id,
+            },
         }
 
     relationships = [
@@ -187,8 +226,13 @@ def shared_node_graph(graph_connection):
 
 def _facts_by_id(graph_connection, principals):
     retriever = KnowledgeGraphRetriever(
-        connection=graph_connection, text_embedder=_text_embedder(),
-        filters={"field": "allowed_principals", "operator": "contains_any", "value": principals},
+        connection=graph_connection,
+        text_embedder=_text_embedder(),
+        filters={
+            "field": "allowed_principals",
+            "operator": "contains_any",
+            "value": principals,
+        },
     )
     retriever.init_components()
     try:
@@ -226,17 +270,41 @@ FILTER_ORG = "org-acl"
 
 def _write_tiered(store, edges):
     """Write one Acme org + a System per edge spec (system_name, extra_props, doc_id) with USES edges."""
-    nodes = [{"labels": ["Organization", "Entity"], "identity_key": "id", "properties": {"id": FILTER_ORG, "name": "Acme"}}]
+    nodes = [
+        {
+            "labels": ["Organization", "Entity"],
+            "identity_key": "id",
+            "properties": {"id": FILTER_ORG, "name": "Acme"},
+        }
+    ]
     relationships = []
     for i, (sys_name, extra, doc_id) in enumerate(edges):
         sid = f"sys-{i}"
-        nodes.append({"labels": ["System", "Entity"], "identity_key": "id", "properties": {"id": sid, "name": sys_name}})
-        relationships.append({
-            "type": "USES", "start_label": "Organization", "end_label": "System",
-            "start_identity": FILTER_ORG, "end_identity": sid,
-            "start_identity_key": "id", "end_identity_key": "id", "identity_keys": ["source_doc_id"],
-            "properties": {"src_name": "Acme", "dst_name": sys_name, "source_doc_id": doc_id, **extra},
-        })
+        nodes.append(
+            {
+                "labels": ["System", "Entity"],
+                "identity_key": "id",
+                "properties": {"id": sid, "name": sys_name},
+            }
+        )
+        relationships.append(
+            {
+                "type": "USES",
+                "start_label": "Organization",
+                "end_label": "System",
+                "start_identity": FILTER_ORG,
+                "end_identity": sid,
+                "start_identity_key": "id",
+                "end_identity_key": "id",
+                "identity_keys": ["source_doc_id"],
+                "properties": {
+                    "src_name": "Acme",
+                    "dst_name": sys_name,
+                    "source_doc_id": doc_id,
+                    **extra,
+                },
+            }
+        )
     store.write_graph(nodes=nodes, relationships=relationships)
 
 
@@ -245,7 +313,11 @@ def _retrieve(graph_connection, *, locked, input_filters=None):
     retriever.init_components()
     try:
         return retriever.execute(
-            GraphRetrieverInputSchema(query="What does the org use?", entity_ids=[FILTER_ORG], filters=input_filters)
+            GraphRetrieverInputSchema(
+                query="What does the org use?",
+                entity_ids=[FILTER_ORG],
+                filters=input_filters,
+            )
         )["content"]
     finally:
         retriever._graph_store.close()
@@ -258,16 +330,31 @@ def test_input_filter_only_narrows_within_the_locked_acl(graph_connection):
     store = Neo4jGraphStore(connection=graph_connection, client=graph_connection.connect())
     store.run_cypher("MATCH (n) DETACH DELETE n")  # clean slate
     try:
-        _write_tiered(store, [
-            ("Helios", {"allowed_principals": ["group:x"], "tier": "low"}, "docL"),
-            ("Borealis", {"allowed_principals": ["group:x"], "tier": "high"}, "docH"),
-        ])
-        acl = {"field": "allowed_principals", "operator": "contains_any", "value": ["group:x"]}
+        _write_tiered(
+            store,
+            [
+                ("Helios", {"allowed_principals": ["group:x"], "tier": "low"}, "docL"),
+                (
+                    "Borealis",
+                    {"allowed_principals": ["group:x"], "tier": "high"},
+                    "docH",
+                ),
+            ],
+        )
+        acl = {
+            "field": "allowed_principals",
+            "operator": "contains_any",
+            "value": ["group:x"],
+        }
 
         both = _retrieve(graph_connection, locked=acl)
         assert "Helios" in both and "Borealis" in both, f"locked ACL alone should return both systems: {both}"
 
-        narrowed = _retrieve(graph_connection, locked=acl, input_filters={"field": "tier", "operator": "==", "value": "low"})
+        narrowed = _retrieve(
+            graph_connection,
+            locked=acl,
+            input_filters={"field": "tier", "operator": "==", "value": "low"},
+        )
         assert "Helios" in narrowed, f"input filter tier==low should keep the low-tier system: {narrowed}"
         assert "Borealis" not in narrowed, f"input filter should exclude the high-tier system: {narrowed}"
     finally:

@@ -62,8 +62,14 @@ def graph_connection():
 # the billing and search branches (reachable but lower-ranked against the query embedding).
 
 PLATFORM = "DataPlatform"
-RELEVANT_DB, RELEVANT_REGION = "Borealis", "Ireland"  # the analytics branch the query is about
-IRRELEVANT = [("Ledger", "Virginia"), ("Sphinx", "Singapore")]  # billing + search branches
+RELEVANT_DB, RELEVANT_REGION = (
+    "Borealis",
+    "Ireland",
+)  # the analytics branch the query is about
+IRRELEVANT = [
+    ("Ledger", "Virginia"),
+    ("Sphinx", "Singapore"),
+]  # billing + search branches
 
 MULTIHOP_CORPUS = [
     f"{PLATFORM} depends on {RELEVANT_DB}, its customer analytics database.",
@@ -75,7 +81,8 @@ MULTIHOP_CORPUS = [
 ]
 MULTIHOP_QUESTION = f"In which region is {PLATFORM}'s customer analytics data stored?"
 MULTIHOP_ONTOLOGY = Ontology(
-    entity_types=["Project", "Database", "Region"], relationship_types=["DEPENDS_ON", "HOSTED_IN"]
+    entity_types=["Project", "Database", "Region"],
+    relationship_types=["DEPENDS_ON", "HOSTED_IN"],
 )
 
 
@@ -96,7 +103,9 @@ def multihop_facts(graph_connection):
     )
     writer.execute(
         KnowledgeGraphWriter.input_schema(
-            nodes=extraction["nodes"], relationships=extraction["relationships"], documents=extraction["documents"]
+            nodes=extraction["nodes"],
+            relationships=extraction["relationships"],
+            documents=extraction["documents"],
         )
     )
 
@@ -133,7 +142,10 @@ def test_multihop_beam_picks_relevant_branch_and_ignores_the_rest(multihop_facts
 
 VEC_TARGET_ORG = "Car Manufacturer"
 VEC_TARGET_SYS = "Assembly Robotics"  # only the automaker uses this
-VEC_DISTRACTORS = [("Bakery", "Dough Mixer"), ("Law Firm", "Case Tracker")]  # reachable but semantically far
+VEC_DISTRACTORS = [
+    ("Bakery", "Dough Mixer"),
+    ("Law Firm", "Case Tracker"),
+]  # reachable but semantically far
 
 
 @pytest.fixture(scope="module")
@@ -146,14 +158,38 @@ def embedded_graph(graph_connection):
     nodes, relationships = [], []
     for i, (org, sys) in enumerate([(VEC_TARGET_ORG, VEC_TARGET_SYS), *VEC_DISTRACTORS]):
         oid, sid = f"org-{i}", f"sys-{i}"
-        nodes.append({"labels": ["Organization", "Entity"], "identity_key": "id", "properties": {"id": oid, "name": org}})
-        nodes.append({"labels": ["System", "Entity"], "identity_key": "id", "properties": {"id": sid, "name": sys}})
-        relationships.append({
-            "type": "USES", "start_label": "Organization", "end_label": "System",
-            "start_identity": oid, "end_identity": sid,
-            "start_identity_key": "id", "end_identity_key": "id", "identity_keys": ["source_doc_id"],
-            "properties": {"src_name": org, "dst_name": sys, "allowed_principals": [GROUP_PUBLIC], "source_doc_id": f"doc-{i}"},
-        })
+        nodes.append(
+            {
+                "labels": ["Organization", "Entity"],
+                "identity_key": "id",
+                "properties": {"id": oid, "name": org},
+            }
+        )
+        nodes.append(
+            {
+                "labels": ["System", "Entity"],
+                "identity_key": "id",
+                "properties": {"id": sid, "name": sys},
+            }
+        )
+        relationships.append(
+            {
+                "type": "USES",
+                "start_label": "Organization",
+                "end_label": "System",
+                "start_identity": oid,
+                "end_identity": sid,
+                "start_identity_key": "id",
+                "end_identity_key": "id",
+                "identity_keys": ["source_doc_id"],
+                "properties": {
+                    "src_name": org,
+                    "dst_name": sys,
+                    "allowed_principals": [GROUP_PUBLIC],
+                    "source_doc_id": f"doc-{i}",
+                },
+            }
+        )
     writer = KnowledgeGraphWriter(connection=graph_connection, entity_embedder=_doc_embedder())
     writer.init_components()
     try:
@@ -171,7 +207,11 @@ def test_paraphrased_query_seeds_the_right_entity_via_vector_similarity(embedded
         connection=graph_connection,
         text_embedder=_text_embedder(),
         vector_top_k=1,  # seed only the single nearest entity -> forces the semantic choice, not "seed them all"
-        filters={"field": "allowed_principals", "operator": "contains_any", "value": [GROUP_PUBLIC]},
+        filters={
+            "field": "allowed_principals",
+            "operator": "contains_any",
+            "value": [GROUP_PUBLIC],
+        },
     )
     retriever.init_components()
     assert retriever._use_vector, "vector seeding should be active (embedder set + vector index present)"
