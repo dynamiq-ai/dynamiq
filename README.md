@@ -96,6 +96,8 @@ print(result.output)
 
 ### Simple ReAct Agent with asynchronous execution
 An agent that has the access to E2B Code Interpreter and is capable of solving complex coding tasks.
+Code sandboxes are also available via Daytona (`DaytonaInterpreterTool`) and AWS Bedrock AgentCore
+Code Interpreter (`BedrockAgentCoreInterpreterTool`, using the standard AWS connection).
 
 ```python
 from dynamiq.nodes.llms.openai import OpenAI
