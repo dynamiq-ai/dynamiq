@@ -235,46 +235,64 @@ class KnowledgeGraphRetriever(ConnectionNode):
     entities reachable through a visible edge are surfaced.
 
     Why a node (not LLM-written Cypher): filters and result bounds are compiled server-side into a single
-    parameterized query. Filters use the SAME structured grammar as the vector-store retrievers — a
-    comparison ``{"field": <name>, "operator": <op>, "value": <v>}`` or a logical
-    ``{"operator": "AND"|"OR", "conditions": [...]}`` (nestable) — applied to edge properties. Two filter
-    tiers (mirroring how ``VectorStoreRetriever`` exposes filters, but with a locked layer added):
+    parameterized query, so an agent cannot inject Cypher or widen its own access. Access control is the
+    locked node ``filters`` (an input ``filters`` can only narrow further) — see the ``filters`` attribute
+    and the input schema for the shared vector-store grammar.
 
-      - ``filters`` (node config) are LOCKED — always AND-applied and NOT overridable from the input. This
-        is the access-control point: express ACL here, e.g.
-        ``filters={"field": "allowed_principals", "operator": "contains_any", "value": ["group:a"]}`` keeps
-        only edges whose ``allowed_principals`` list shares a principal with the caller's (default-deny — a
-        missing list is excluded). Because it is not on the input schema, an agent cannot drop or widen it.
-      - input ``filters`` (caller/agent-supplied) are AND-ed on top — they can only further narrow.
+    ACL model: all access metadata lives on EDGES — a node is visible exactly when reachable through a
+    visible edge, so a locked edge filter (e.g. ``allowed_principals`` via ``contains_any``, default-deny)
+    scopes the whole result. With no locked filters, all edges are visible.
 
-    ACL model: this graph keeps all access metadata on EDGES; a node is visible exactly when reachable
-    through a visible edge. With no locked filters, all edges are visible.
-
-    Output: ``{"content": <bullet list of facts>, "documents": [Document, ...]}``.
+    Output: ``{"content": <newline-separated facts>, "documents": [Document, ...]}``.
 
     Attributes:
-        connection (Neo4j | ApacheAGE | AWSNeptune): The graph backend connection.
-        llm (Node): LLM used to extract the query's entities before seeding the search (required).
-        ontology (Ontology): Schema whose entity types constrain query-entity extraction — pass the SAME
+        connection (Neo4j | ApacheAGE | AWSNeptune | None): The graph backend connection. Optional when
+            an already-initialized ``graph_store`` is provided instead.
+        graph_store (BaseGraphStore | None): An already-initialized graph store to use directly, as an
+            alternative to ``connection`` (mirrors how other nodes accept ``vector_store``).
+        llm (Node | None): Optional. Extracts the query's entities for the default seeding path and composes
+            the answer when ``summarize=True``. When omitted, seeding falls back to the raw query; required
+            only when ``summarize=True`` (enforced by a validator).
+        ontology (Ontology | None): Constrains query-entity extraction to these entity types — pass the SAME
             ontology used at ingestion so the question is parsed for the entity kinds the graph contains.
+            Only used alongside ``llm``; ignored when seeding by ``entities`` / ``entity_ids`` /
+            ``seed_by_query`` or with no ``llm``.
         database (str | None): Optional target database (Neo4j).
         graph_name (str | None): Graph name (Apache AGE).
-        filters (dict | None): LOCKED edge-property filters, always applied. Same structured
-            ``{"field","operator","value"}`` / ``{"operator","conditions"}`` grammar as the vector-store
-            retrievers. ACL lives here via the ``contains_any`` operator.
+        create_graph_if_not_exists (bool): Create the graph if missing (Apache AGE). Defaults to False.
+        filters (dict | None): LOCKED edge-property filters, always applied and NOT overridable from the
+            input schema. Same structured ``{"field","operator","value"}`` / ``{"operator","conditions"}``
+            grammar as the vector-store retrievers. ACL lives here via the ``contains_any`` operator.
         top_k (int): Maximum number of facts to fetch from the graph. With a ``document_reranker`` this is
             the CANDIDATE pool that gets reranked; the reranker's own ``top_k`` decides the final count.
         max_hops (int): Beam-search traversal depth (default 1 = single hop, the previous behavior).
             At 2+, chain questions ("what does X's employer use?") resolve in one call: hop 1 finds
-            ``X -WORKS_AT-> Acme``, hop 2 expands from Acme to ``Acme -USES-> ...``. Overridable per call.
-            Portable: hop queries read endpoint ids off the bound pattern nodes (``a.id``/``b.id``),
-            so multi-hop needs no dialect-specific functions on any backend.
-        beam_width (int | None): Edges kept per hop when ``max_hops > 1`` (default ``top_k // max_hops``).
+            ``X -WORKS_AT-> Acme``, hop 2 expands from Acme to ``Acme -USES-> ...``. Each hop keeps only the
+            ``beam_width`` most relevant edges and expands ONLY from their endpoints, so the frontier stays
+            bounded (no hub explosion) and every hop applies the same locked ACL filters. Reliable cross-hop
+            ranking needs edge embeddings (writer's ``entity_embedder``). Overridable per call. Portable: hop
+            queries read endpoint ids off the bound pattern nodes (``a.id``/``b.id``), so multi-hop needs no
+            dialect-specific functions on any backend.
+        beam_width (int | None): Edges kept per hop when ``max_hops > 1`` (default ``top_k // max_hops``, so
+            the total budget stays ~``top_k``).
         document_reranker (Node | None): Optional reranker (e.g. a cross-encoder ``CohereReranker``) applied
             to the rendered facts. A high-degree (hub) entity can expand to many edges that all match the
             seed equally; the reranker scores each fact against the query and keeps the most relevant, so
             precision on hubs comes from relevance, not the position-only fallback score. Off by default.
             Over-fetch by setting this node's ``top_k`` above the reranker's ``top_k``.
+        text_embedder (TextEmbedder | None): Optional semantic seeding. When set AND the entity vector index
+            exists, entry entities are found by embedding the query's entity names and vector-searching,
+            instead of the full-text / CONTAINS name match. Use the SAME embedding model as the writer's
+            ``entity_embedder`` so vector dimensions match.
+        vector_top_k (int): Candidate entities pulled from the vector index per seed name. Defaults to 5.
+        seed_by_query (bool): When True (and vector seeding is available), skip LLM entity extraction and
+            seed the top-k entities by the WHOLE question embedding — simpler, no LLM, context-preserving;
+            facts are then reranked by the same vector. Off by default (keeps entity-anchored extraction).
+            Requires a ``text_embedder`` and the entity vector index.
+        document_retriever (Any): Optional grounding source; any object exposing
+            ``get_documents_by_ids(ids) -> list[Document]``.
+        summarize (bool): When True, LLM-compose an answer from the retrieved context (requires ``llm``);
+            when False (default) return the raw facts / source documents.
     """
 
     group: Literal[NodeGroup.RETRIEVERS] = NodeGroup.RETRIEVERS
@@ -283,51 +301,43 @@ class KnowledgeGraphRetriever(ConnectionNode):
     description: str = (
         "Retrieves facts from a knowledge graph for a natural-language question. Input: a 'query' string "
         "(and optionally 'entities'/'entity_ids' to start from, 'top_k', or 'max_hops'). Returns related "
-        "facts as bullet points. Set 'max_hops': 2 for chain questions about a neighbor of the named "
+        "facts, one per line. Set 'max_hops': 2 for chain questions about a neighbor of the named "
         "entity (e.g. \"what does X's employer use\"); or call again with a fact's neighbor id."
     )
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
-    connection: Neo4j | ApacheAGE | AWSNeptune
+    connection: Neo4j | ApacheAGE | AWSNeptune | None = None
+    graph_store: BaseGraphStore | None = None
     # Optional: only used to extract the query's entities (default seeding path) and to `summarize`. When
     # omitted, seeding falls back to the raw query; `summarize=True` then requires an llm (see validator).
     llm: Node | None = None
-    # Optional: constrains query-entity extraction to these types. Only used alongside `llm`; unused when
-    # seeding by entities/entity_ids/seed_by_query or with no llm.
     ontology: Ontology | None = None
     database: str | None = None
     graph_name: str | None = None
     create_graph_if_not_exists: bool = False
-    filters: dict[str, Any] | None = None  # LOCKED: always applied; not overridable from the input schema
+    filters: dict[str, Any] | None = None
     top_k: int = 50
-    # Beam-search traversal depth. 1 (default) = today's single hop. At >1, each hop keeps only the
-    # `beam_width` most relevant edges and expands ONLY from their endpoints — so the frontier stays
-    # bounded (no hub explosion) and hop-N candidates compete against hop-N siblings, never against
-    # seed-adjacent facts that trivially sound more like the question. Every hop applies the same locked
-    # ACL filters. Reliable ranking across hops needs edge embeddings (writer's `entity_embedder`).
     max_hops: int = 1
-    # Edges kept per hop when max_hops > 1. None -> top_k // max_hops (total budget stays ~top_k).
     beam_width: int | None = None
-    document_reranker: Node | None = None  # optional rerank of rendered facts; top_k here = candidate pool
-    # Optional semantic seeding: when set AND the entity vector index exists, entry entities are found by
-    # embedding the query's entity names and vector-searching, instead of the full-text/CONTAINS name match.
-    # Use the SAME embedding model as the writer's `entity_embedder` so vector dimensions match.
+    document_reranker: Node | None = None
     text_embedder: TextEmbedder | None = None
-    vector_top_k: int = 5  # candidate entities pulled from the vector index per seed name
-    # When True (and vector seeding is available), skip LLM entity extraction and seed the top-k entities by
-    # the WHOLE question embedding — simpler, no LLM, context-preserving. Facts are then reranked by the same
-    # vector. Off by default (keeps entity-anchored extraction). Requires a text_embedder + entity index.
+    vector_top_k: int = 5
     seed_by_query: bool = False
-    # optional grounding source: any object with get_documents_by_ids(ids) -> list[Document]
     document_retriever: Any = None
-    # when True, LLM-compose an answer from the retrieved context; when False (default) return raw facts/source
     summarize: bool = False
 
     input_schema: ClassVar[type[GraphRetrieverInputSchema]] = GraphRetrieverInputSchema
 
-    _graph_store: BaseGraphStore | None = PrivateAttr(default=None)
     _use_fulltext: bool = PrivateAttr(default=False)
     _use_vector: bool = PrivateAttr(default=False)
     _run_depends: list = PrivateAttr(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_connection_client(self):
+        # A bare `client` is not enough here: the concrete store class is dispatched from the
+        # connection type (see `_build_graph_store`), so require a connection or a ready store.
+        if not self.graph_store and not self.connection:
+            raise ValueError("'connection' or 'graph_store' should be specified")
+        return self
 
     @model_validator(mode="after")
     def _validate_llm_requirements(self):
@@ -348,6 +358,7 @@ class KnowledgeGraphRetriever(ConnectionNode):
             "document_reranker": True,
             "document_retriever": True,
             "text_embedder": True,
+            "graph_store": True,
         }
 
     def to_dict(self, **kwargs) -> dict:
@@ -365,6 +376,9 @@ class KnowledgeGraphRetriever(ConnectionNode):
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """Select the concrete graph store from the connection type (same dispatch as CypherExecutor)."""
         connection_manager = connection_manager or ConnectionManager()
+        # Use the passed graph store's client if it is already initialized (mirrors VectorStoreNode).
+        if self.graph_store and self.client is None:
+            self.client = self.graph_store.client
         super().init_components(connection_manager)
         if self.llm and self.llm.is_postponed_component_init:
             self.llm.init_components(connection_manager)
@@ -376,8 +390,8 @@ class KnowledgeGraphRetriever(ConnectionNode):
             self.document_retriever.init_components(connection_manager)
         if self.text_embedder and self.text_embedder.is_postponed_component_init:
             self.text_embedder.init_components(connection_manager)
-        if self._graph_store is None:
-            self._graph_store = self._build_graph_store()
+        if self.graph_store is None:
+            self.graph_store = self._build_graph_store()
         self._use_fulltext = self._probe_fulltext()
         self._use_vector = self._probe_vector()
 
@@ -387,15 +401,15 @@ class KnowledgeGraphRetriever(ConnectionNode):
         Backend-agnostic: non-Neo4j stores (and a Neo4j without the index yet, e.g. retrieve-before-write)
         return ``False``, so the retriever transparently uses the portable ``CONTAINS`` scan instead.
         """
-        if not isinstance(self._graph_store, Neo4jGraphStore):
+        if not isinstance(self.graph_store, Neo4jGraphStore):
             return False
         try:
-            records, _, _ = self._graph_store.run_cypher(
+            records, _, _ = self.graph_store.run_cypher(
                 "SHOW INDEXES YIELD name, type WHERE name = $n AND type = 'FULLTEXT' RETURN count(*) AS c",
                 parameters={"n": ENTITY_NAME_FULLTEXT_INDEX},
                 database=self.database,
             )
-            rows = self._graph_store.format_records(records)
+            rows = self.graph_store.format_records(records)
             return bool(rows and (rows[0].get("c") or 0) > 0)
         except Exception as e:
             logger.warning(f"Node {self.name} - {self.id}: full-text index probe failed, using scan: {e}")
@@ -408,15 +422,15 @@ class KnowledgeGraphRetriever(ConnectionNode):
         Backend-agnostic: without an embedder, or on a non-Neo4j store, or before the writer has embedded any
         entity (so no vector index), this returns ``False`` and the existing name-match path is used.
         """
-        if not self.text_embedder or not isinstance(self._graph_store, Neo4jGraphStore):
+        if not self.text_embedder or not isinstance(self.graph_store, Neo4jGraphStore):
             return False
         try:
-            records, _, _ = self._graph_store.run_cypher(
+            records, _, _ = self.graph_store.run_cypher(
                 "SHOW INDEXES YIELD name, type WHERE name = $n AND type = 'VECTOR' RETURN count(*) AS c",
                 parameters={"n": ENTITY_EMBEDDING_VECTOR_INDEX},
                 database=self.database,
             )
-            rows = self._graph_store.format_records(records)
+            rows = self.graph_store.format_records(records)
             return bool(rows and (rows[0].get("c") or 0) > 0)
         except Exception as e:
             logger.warning(f"Node {self.name} - {self.id}: vector index probe failed, using name match: {e}")
@@ -444,10 +458,10 @@ class KnowledgeGraphRetriever(ConnectionNode):
         """Keep the graph store's client in sync if the connection node reconnects."""
         previous_client = self.client
         super().ensure_client()
-        if self.client is previous_client or not self._graph_store:
+        if self.client is previous_client or not self.graph_store:
             return
-        if getattr(self._graph_store, "client", None) is not self.client:
-            self._graph_store.update_client(self.client)
+        if getattr(self.graph_store, "client", None) is not self.client:
+            self.graph_store.update_client(self.client)
 
     def _extract_entity_names(self, query: str, config: RunnableConfig, **kwargs) -> list[str]:
         """Extract the entity names a question is about via the LLM, constrained to the ontology's types.
@@ -750,7 +764,7 @@ class KnowledgeGraphRetriever(ConnectionNode):
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        if not self._graph_store:
+        if not self.graph_store:
             raise ToolExecutionException("KnowledgeGraphRetriever: graph store is not initialized.", recoverable=True)
 
         limit = input_data.top_k or self.top_k
@@ -767,8 +781,8 @@ class KnowledgeGraphRetriever(ConnectionNode):
             query, params = self._build_query(
                 input_data, hop_limit, seed_names, seed_vectors, query_vector, include_endpoint_ids=max_hops > 1
             )
-            records, _, _ = self._graph_store.run_cypher(query, parameters=params, database=self.database)
-            rows = self._graph_store.format_records(records)
+            records, _, _ = self.graph_store.run_cypher(query, parameters=params, database=self.database)
+            rows = self.graph_store.format_records(records)
             # Beam expansion: hop N+1 expands ONLY from the NEW nodes the previous hop reached, excluding
             # edges already inside the visited set. The seeds (anchors) are excluded from the first
             # frontier — hop 1 already expanded them, and re-expanding would let their leftover 1-hop
@@ -784,8 +798,8 @@ class KnowledgeGraphRetriever(ConnectionNode):
                 hop_query, hop_params = self._hop_query(
                     sorted(frontier), sorted(visited), hop_limit, input_data.filters, query_vector
                 )
-                records, _, _ = self._graph_store.run_cypher(hop_query, parameters=hop_params, database=self.database)
-                hop_rows = self._graph_store.format_records(records)
+                records, _, _ = self.graph_store.run_cypher(hop_query, parameters=hop_params, database=self.database)
+                hop_rows = self.graph_store.format_records(records)
                 if not hop_rows:
                     break
                 rows.extend(hop_rows)
@@ -801,7 +815,7 @@ class KnowledgeGraphRetriever(ConnectionNode):
             documents = self._maybe_rerank(documents, input_data.query, config, **kwargs)
             if len(documents) > limit:
                 documents = documents[:limit]
-            facts = "\n".join(f"- {d.content}" for d in documents) or "No matching facts found."
+            facts = "\n".join(d.content for d in documents) or "No matching facts found."
             source_documents = self._fetch_source_documents(documents)
             # `facts` (triples) and `source_documents` (passages) are ALWAYS present so consumers never infer.
             output = {"content": facts, "facts": facts, "documents": documents, "source_documents": source_documents}
