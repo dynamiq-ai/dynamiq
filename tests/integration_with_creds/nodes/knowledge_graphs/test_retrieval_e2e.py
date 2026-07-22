@@ -87,8 +87,8 @@ MULTIHOP_ONTOLOGY = Ontology(
 
 
 @pytest.fixture(scope="module")
-def multihop_facts(graph_connection):
-    """Wipe, extract, write WITH an entity_embedder, then retrieve WITH a text_embedder and a tight beam."""
+def multihop_graph(graph_connection):
+    """Wipe, extract, and write the DataPlatform corpus WITH an entity_embedder — once, shared by depth cases."""
     driver = graph_connection.connect()
     with driver.session() as session:
         session.run("MATCH (n) DETACH DELETE n").consume()  # clean slate -> deterministic isolation
@@ -107,11 +107,16 @@ def multihop_facts(graph_connection):
             relationships=extraction["relationships"],
         )
     )
+    yield
+    writer._graph_store.close()
 
+
+def _multihop_retrieve(graph_connection, max_hops):
+    """Retrieve the analytics facts at a given traversal depth (query-seeded, tight beam)."""
     retriever = KnowledgeGraphRetriever(
         connection=graph_connection,
         text_embedder=_text_embedder(),
-        max_hops=2,  # DataPlatform -> Borealis -> Ireland
+        max_hops=max_hops,
         beam_width=1,  # keep only the most query-relevant edge per hop -> forces the branch choice
         top_k=6,
     )
@@ -119,10 +124,21 @@ def multihop_facts(graph_connection):
     try:
         # No llm, no entities -> the whole question is embedded and seeds the entry entities (and ranks
         # each hop's edges). The beam then keeps only the analytics branch.
-        yield retriever.execute(GraphRetrieverInputSchema(query=MULTIHOP_QUESTION))["content"].lower()
+        return retriever.execute(GraphRetrieverInputSchema(query=MULTIHOP_QUESTION))["content"].lower()
     finally:
         retriever._graph_store.close()
-        writer._graph_store.close()
+
+
+@pytest.fixture(scope="module")
+def multihop_facts(multihop_graph, graph_connection):
+    """Facts at max_hops=2 — the full chain DataPlatform -> Borealis -> Ireland."""
+    return _multihop_retrieve(graph_connection, max_hops=2)
+
+
+@pytest.fixture(scope="module")
+def multihop_facts_single_hop(multihop_graph, graph_connection):
+    """Facts at max_hops=1 — a single hop can't cross the DB -> Region edge."""
+    return _multihop_retrieve(graph_connection, max_hops=1)
 
 
 def test_multihop_beam_picks_relevant_branch_and_ignores_the_rest(multihop_facts):
@@ -132,6 +148,14 @@ def test_multihop_beam_picks_relevant_branch_and_ignores_the_rest(multihop_facts
     # ...and the billing + search branches — reachable but off-topic — are cut by the embedding-ranked beam
     leaked = [name for pair in IRRELEVANT for name in pair if name.lower() in multihop_facts]
     assert not leaked, f"irrelevant branches leaked past the beam: {leaked}\n{multihop_facts}"
+
+
+def test_single_hop_cannot_reach_the_region_two_hops_away(multihop_facts_single_hop):
+    # One hop from the DataPlatform hub reaches its analytics database...
+    assert RELEVANT_DB.lower() in multihop_facts_single_hop, multihop_facts_single_hop
+    # ...but the region is a SECOND hop away (Borealis -[HOSTED_IN]-> Ireland), so max_hops=1 never reaches
+    # it — this is the gap the multi-hop beam closes (asserted by the max_hops=2 test above).
+    assert RELEVANT_REGION.lower() not in multihop_facts_single_hop, multihop_facts_single_hop
 
 
 # --- 2. Semantic seeding -----------------------------------------------------------------------------
