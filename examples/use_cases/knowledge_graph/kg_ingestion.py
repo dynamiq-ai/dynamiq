@@ -10,7 +10,8 @@ An KnowledgeGraphEntityExtractor node does LLM extraction + ontology enforcement
 write-time entity resolution + Neo4j upsert. They are split so extraction can be parallelized (see
 parallel_kg_extraction.py); the writer is the single, serial write path for extracted knowledge graphs.
 
-Run this first, then run ``kg_question_answering.py`` to query both stores.
+After writing, it runs a quick ``KnowledgeGraphRetriever`` query to prove the ingested facts are
+retrievable. For the full GraphRAG agent (vector + graph + Cypher tools), see ``kg_question_answering.py``.
 
 Requirements:
   - OPENAI_API_KEY (used for embeddings + entity extraction).
@@ -27,9 +28,17 @@ from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
-from dynamiq.nodes.knowledge_graph import KnowledgeGraphEntityExtractor, KnowledgeGraphWriter, Ontology, Triple
+from dynamiq.nodes.knowledge_graphs import (
+    KnowledgeGraphEntityExtractor,
+    KnowledgeGraphRetriever,
+    KnowledgeGraphWriter,
+    Ontology,
+    Triple,
+)
+from dynamiq.nodes.knowledge_graphs.retriever import GraphRetrieverInputSchema
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.node import InputTransformer, NodeDependency
+from dynamiq.nodes.retrievers import QdrantDocumentRetriever
 from dynamiq.nodes.writers import QdrantDocumentWriter
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.storages.vector.qdrant.qdrant import QdrantVectorStore
@@ -70,21 +79,20 @@ DOCS = [
             "Jane Doe presented Helios at the 2025 Quant Summit in London."
         )
     ),
+    Document(
+        content=(
+            "Globex Corporation is a fintech firm in San Francisco. John Roe is the CTO of Globex "
+            "Corporation, which uses a risk-analytics system called Borealis."
+        )
+    ),
 ]
 
 
 def build_workflow() -> Workflow:
     openai_connection = OpenAIConnection()
 
-    # A single Qdrant store instance, reused by the writer (and later by the retriever).
-    # NOTE: pass an explicit on-disk client. QdrantVectorStore eagerly builds a *server*
-    # connection (localhost:6333) whenever no client is supplied, which ignores `path` and
-    # fails with "Connection refused" when no Qdrant server is running. Handing it a local
-    # QdrantClient(path=...) keeps everything on disk, no server needed.
-    #
-    # force_disable_check_same_thread=True: on-disk Qdrant is backed by SQLite, but the Flow
-    # executes nodes on a worker-thread pool. Without this flag the writer intermittently hits
-    # "SQLite objects created in a thread can only be used in that same thread".
+    # Explicit on-disk client: without one QdrantVectorStore connects to a *server* and ignores `path`.
+    # force_disable_check_same_thread lets the Flow's worker threads share the SQLite-backed local store.
     vector_store = QdrantVectorStore(
         client=QdrantClient(path=QDRANT_PATH, force_disable_check_same_thread=True),
         index_name=INDEX_NAME,
@@ -132,6 +140,47 @@ def build_workflow() -> Workflow:
     return Workflow(flow=Flow(nodes=[document_embedder, vector_writer, entity_extractor, knowledge_graph]))
 
 
+def demonstrate_retrieval() -> None:
+    """Query the graph we just wrote — proof the ingested facts are retrievable end to end.
+
+    The KnowledgeGraphRetriever RECEIVES the vector retriever as its ``document_retriever``: after it
+    traverses the graph for query-relevant facts, it grounds them by pulling the verbatim source documents
+    (matched by each fact's ``source_doc_id``) back out of Qdrant. So one call returns both the graph facts
+    and the passages behind them. ``llm`` + ``ontology`` seed traversal from the question's entities; no ACL
+    ``filters`` since these demo docs carry no ``allowed_principals``.
+    """
+    openai_connection = OpenAIConnection()
+    question = "Who is the CIO of Acme Capital and what AI system does the firm use?"
+
+    # Reopen the on-disk Qdrant we just wrote (ingestion flushed + released it on close).
+    vector_store = QdrantVectorStore(
+        client=QdrantClient(path=QDRANT_PATH, force_disable_check_same_thread=True),
+        index_name=INDEX_NAME,
+        create_if_not_exist=False,
+        dimension=1536,
+    )
+    graph_retriever = KnowledgeGraphRetriever(
+        connection=Neo4jConnection(),
+        llm=OpenAI(connection=openai_connection, model="gpt-4o-mini", temperature=0),
+        ontology=ONTOLOGY,
+        document_retriever=QdrantDocumentRetriever(vector_store=vector_store),  # grounds facts with source docs
+        top_k=20,
+    )
+    graph_retriever.init_components()
+    try:
+        out = graph_retriever.execute(GraphRetrieverInputSchema(query=question))
+    finally:
+        graph_retriever.graph_store.close()
+        if getattr(vector_store, "_client", None) is not None:
+            vector_store._client.close()
+
+    logger.info(f"\n--- Retrieval check ---\nQ: {question}")
+    logger.info(f"\nGraph facts:\n{out.get('facts') or '(no facts found)'}")
+    logger.info("\nGrounding source documents (fetched from Qdrant via the graph facts):")
+    for i, doc in enumerate(out.get("source_documents") or []):
+        logger.info(f"[{i}] {doc.content}")
+
+
 if __name__ == "__main__":
     workflow = build_workflow()
 
@@ -151,12 +200,12 @@ if __name__ == "__main__":
             f"Knowledge graph: created {graph_out.get('nodes_created')} nodes and "
             f"{graph_out.get('relationships_created')} relationships in Neo4j."
         )
-        logger.info("--- Ingestion complete. Run kg_question_answering.py next. ---")
+        logger.info("--- Ingestion complete. ---")
     finally:
         # Explicitly close stores so resources are released cleanly:
         #  - Neo4j: avoids the "unclosed BoltDriver" ResourceWarning.
         #  - Qdrant: local on-disk mode only FLUSHES to disk on close(), so without this the
-        #    upserted vectors are lost when the process exits and the QA script finds nothing.
+        #    upserted vectors are lost when the process exits and the retrieval below finds nothing.
         for node in workflow.flow.nodes:
             graph_store = getattr(node, "graph_store", None)
             if graph_store is not None:
@@ -164,3 +213,6 @@ if __name__ == "__main__":
             vector_store = getattr(node, "vector_store", None)
             if vector_store is not None and getattr(vector_store, "_client", None) is not None:
                 vector_store._client.close()
+
+    # Ingestion succeeded (a failure raised above and skips this): query both stores to prove it worked.
+    demonstrate_retrieval()
