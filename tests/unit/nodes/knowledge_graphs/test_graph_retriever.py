@@ -325,7 +325,7 @@ class TestExecuteRendering:
             "rel": "WORKS_AT",
             "source_url": "u",
         }
-        assert out["content"] == "- Jane Doe -[WORKS_AT]-> Acme\n- Jane Doe -[salary]-> $250,000"
+        assert out["content"] == "Jane Doe -[WORKS_AT]-> Acme\nJane Doe -[salary]-> $250,000"
         assert out["documents"][0].score > out["documents"][1].score  # rank-derived ordering
 
     def test_single_hop_does_not_expose_endpoint_node_ids(self):
@@ -473,8 +473,8 @@ class TestReranking:
             "Eve -[WORKS_AT]-> Initech",
             "Bob -[WORKS_AT]-> Globex",
         ]
-        # The bullet content reflects the reranked, capped set -- not the original 3.
-        assert out["content"] == "- Eve -[WORKS_AT]-> Initech\n- Bob -[WORKS_AT]-> Globex"
+        # The content reflects the reranked, capped set -- not the original 3.
+        assert out["content"] == "Eve -[WORKS_AT]-> Initech\nBob -[WORKS_AT]-> Globex"
 
     def test_reranker_failure_degrades_to_unranked_facts(self):
         # A reranker failure must not fail the read -- it degrades to the unranked facts (like the LLM path).

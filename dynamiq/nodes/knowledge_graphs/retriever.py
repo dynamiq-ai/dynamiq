@@ -243,7 +243,7 @@ class KnowledgeGraphRetriever(ConnectionNode):
     visible edge, so a locked edge filter (e.g. ``allowed_principals`` via ``contains_any``, default-deny)
     scopes the whole result. With no locked filters, all edges are visible.
 
-    Output: ``{"content": <bullet list of facts>, "documents": [Document, ...]}``.
+    Output: ``{"content": <newline-separated facts>, "documents": [Document, ...]}``.
 
     Attributes:
         connection (Neo4j | ApacheAGE | AWSNeptune | None): The graph backend connection. Optional when
@@ -301,7 +301,7 @@ class KnowledgeGraphRetriever(ConnectionNode):
     description: str = (
         "Retrieves facts from a knowledge graph for a natural-language question. Input: a 'query' string "
         "(and optionally 'entities'/'entity_ids' to start from, 'top_k', or 'max_hops'). Returns related "
-        "facts as bullet points. Set 'max_hops': 2 for chain questions about a neighbor of the named "
+        "facts, one per line. Set 'max_hops': 2 for chain questions about a neighbor of the named "
         "entity (e.g. \"what does X's employer use\"); or call again with a fact's neighbor id."
     )
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
@@ -815,7 +815,7 @@ class KnowledgeGraphRetriever(ConnectionNode):
             documents = self._maybe_rerank(documents, input_data.query, config, **kwargs)
             if len(documents) > limit:
                 documents = documents[:limit]
-            facts = "\n".join(f"- {d.content}" for d in documents) or "No matching facts found."
+            facts = "\n".join(d.content for d in documents) or "No matching facts found."
             source_documents = self._fetch_source_documents(documents)
             # `facts` (triples) and `source_documents` (passages) are ALWAYS present so consumers never infer.
             output = {"content": facts, "facts": facts, "documents": documents, "source_documents": source_documents}
