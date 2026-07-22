@@ -237,11 +237,12 @@ class KnowledgeGraphWriter(Node):
         """The triplet text to embed for an edge, or ``None`` when it can't be rendered (missing names).
 
         Mirrors ``GraphRetriever``'s render: the attribute KEY is the relation for ``HAS_ATTRIBUTE`` edges,
-        else the relationship type; the edge's own ``src_name``/``dst_name`` snapshots are the endpoints.
+        else the relationship type; the endpoint nodes' ``name`` snapshots are the fact's endpoints.
         """
         props = rel.get("properties") or {}
         rel_type = rel.get("type") or ""
-        src_name, dst_name = rel.get("src_name"), rel.get("dst_name")
+        src_name = (rel.get("start_node") or {}).get("name")
+        dst_name = (rel.get("end_node") or {}).get("name")
         if not (rel_type and src_name and dst_name):
             return None
         rel_label = props["key"] if rel_type == HAS_ATTRIBUTE_TYPE and props.get("key") else rel_type
@@ -334,7 +335,7 @@ class KnowledgeGraphWriter(Node):
         if relationships:
             node_ids = {n["id"] for n in nodes}
             dangling = [
-                r for r in relationships if r["start_identity"] not in node_ids or r["end_identity"] not in node_ids
+                r for r in relationships if r["start_node"]["id"] not in node_ids or r["end_node"]["id"] not in node_ids
             ]
             if dangling:
                 raise ValueError(
@@ -429,7 +430,7 @@ class KnowledgeGraphWriter(Node):
         """
         if not nodes:
             return nodes
-        referenced = {r["start_identity"] for r in relationships} | {r["end_identity"] for r in relationships}
+        referenced = {r["start_node"]["id"] for r in relationships} | {r["end_node"]["id"] for r in relationships}
         kept = [node for node in nodes if node["id"] in referenced]
         if len(kept) != len(nodes):
             logger.info(
@@ -591,7 +592,11 @@ class KnowledgeGraphWriter(Node):
         """
         name_vectors = name_vectors or {}
         nodes = [{**node, "properties": {**node["properties"]}} for node in nodes]
-        relationships = [{**rel} for rel in relationships]
+        # Copy the endpoint nodes too: their `id` is rewritten below, and a bare `{**rel}` would share the
+        # nested start_node/end_node dicts with the caller's input (which must stay writable a second time).
+        relationships = [
+            {**rel, "start_node": {**rel["start_node"]}, "end_node": {**rel["end_node"]}} for rel in relationships
+        ]
 
         fuzzy = self.fuzzy_matching
         use_db = fuzzy and isinstance(self._graph_store, Neo4jGraphStore)
@@ -656,10 +661,10 @@ class KnowledgeGraphWriter(Node):
             if nid in id_remap:
                 node["id"] = id_remap[nid]
         for rel in relationships:
-            if rel["start_identity"] in id_remap:
-                rel["start_identity"] = id_remap[rel["start_identity"]]
-            if rel["end_identity"] in id_remap:
-                rel["end_identity"] = id_remap[rel["end_identity"]]
+            if rel["start_node"]["id"] in id_remap:
+                rel["start_node"]["id"] = id_remap[rel["start_node"]["id"]]
+            if rel["end_node"]["id"] in id_remap:
+                rel["end_node"]["id"] = id_remap[rel["end_node"]["id"]]
 
         # Two extracted entities can resolve to the same node -> dedupe by (label, id).
         seen: set[tuple[str, str]] = set()

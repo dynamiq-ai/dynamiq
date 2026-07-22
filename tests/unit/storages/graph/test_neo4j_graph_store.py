@@ -40,10 +40,8 @@ def test_write_graph_batches_nodes_and_writes_edges():
     relationships = [
         {
             "type": "WORKS_AT",
-            "start_label": "PERSON",
-            "end_label": "ORG",
-            "start_identity": "jane",
-            "end_identity": "acme",
+            "start_node": {"label": "PERSON", "id": "jane"},
+            "end_node": {"label": "ORG", "id": "acme"},
             "properties": {"source_doc_id": "doc-1", "role": "CFO"},
             "identity_keys": ["source_doc_id"],
         }
@@ -112,10 +110,8 @@ def test_write_graph_edge_without_identity_keys_omits_merge_props():
     relationships = [
         {
             "type": "KNOWS",
-            "start_label": "PERSON",
-            "end_label": "PERSON",
-            "start_identity": "a",
-            "end_identity": "b",
+            "start_node": {"label": "PERSON", "id": "a"},
+            "end_node": {"label": "PERSON", "id": "b"},
             "properties": {},
         }
     ]

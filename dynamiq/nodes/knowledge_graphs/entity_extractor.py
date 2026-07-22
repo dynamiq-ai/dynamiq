@@ -116,27 +116,37 @@ class GraphNode(BaseModel):
     properties: dict[str, Any] = Field(default_factory=dict)
 
 
+class GraphNodeRel(BaseModel):
+    """A relationship endpoint: a lean reference to a node, not a node definition.
+
+    Attributes:
+        label: The endpoint's entity type (a single label; the endpoint is matched on ``id``).
+        id: ``id`` of the node to match.
+        name: Display name of the endpoint, snapshotted onto the edge so retrieval renders the fact from
+            the ACL-bearing edge, never the shared entity node.
+    """
+
+    label: str
+    id: str
+    name: str | None = None
+
+
 class GraphRelationship(BaseModel):
     """A relationship extracted from a document, as a directed graph edge.
 
     Attributes:
         type: Relationship type (e.g. ``WORKS_AT``).
-        start_label / end_label: Entity types of the endpoint nodes.
-        start_identity / end_identity: ``id`` values of the endpoint nodes to match.
-        src_name / dst_name: Display names of the endpoints, snapshotted onto the edge so retrieval
-            renders the fact from the ACL-bearing edge, never the shared entity node.
+        start_node / end_node: The endpoint nodes as ``GraphNodeRel`` references — ``label`` is the
+            endpoint's entity type, ``id`` is the node to match, ``name`` is the display name snapshotted
+            onto the edge so retrieval renders the fact from the ACL-bearing edge, never the shared node.
         description: Optional one-line detail of the fact.
         properties: Per-document provenance/ACL and any extra metadata (e.g. ``source_doc_id``,
             ``allowed_principals``, the ``HAS_ATTRIBUTE`` ``key``).
     """
 
     type: str
-    start_label: str
-    end_label: str
-    start_identity: str
-    end_identity: str
-    src_name: str | None = None
-    dst_name: str | None = None
+    start_node: GraphNodeRel
+    end_node: GraphNodeRel
     description: str | None = None
     properties: dict[str, Any] = Field(default_factory=dict)
 
@@ -546,8 +556,9 @@ class KnowledgeGraphEntityExtractor(Node):
         #    their endpoints survive.
         kept_rels: list[dict] = []
         for rel in relationships:
-            rel_type, start_label, end_label = rel["type"], rel["start_label"], rel["end_label"]
-            if rel["start_identity"] not in valid_endpoint_ids or rel["end_identity"] not in valid_endpoint_ids:
+            rel_type = rel["type"]
+            start_label, end_label = rel["start_node"]["label"], rel["end_node"]["label"]
+            if rel["start_node"]["id"] not in valid_endpoint_ids or rel["end_node"]["id"] not in valid_endpoint_ids:
                 reason = "endpoint dropped"
             elif rel_type == HAS_ATTRIBUTE_TYPE:
                 kept_rels.append(rel)
@@ -566,7 +577,7 @@ class KnowledgeGraphEntityExtractor(Node):
 
         # 3) Commit only AttributeValue nodes still reached by a surviving HAS_ATTRIBUTE edge -- one whose
         #    owner was dropped lost its edge in step 2, so it is dropped here too, never orphaned with no ACL.
-        referenced_attr_ids = {r["end_identity"] for r in kept_rels if r["type"] == HAS_ATTRIBUTE_TYPE}
+        referenced_attr_ids = {r["end_node"]["id"] for r in kept_rels if r["type"] == HAS_ATTRIBUTE_TYPE}
         for attr_id in attribute_nodes.keys() - referenced_attr_ids:
             logger.debug(
                 f"KnowledgeGraphEntityExtractor: dropping orphaned AttributeValue " f"id={attr_id!r} (owner removed)"
@@ -693,12 +704,8 @@ class KnowledgeGraphEntityExtractor(Node):
                 attribute_relationships.append(
                     GraphRelationship(
                         type=HAS_ATTRIBUTE_TYPE,
-                        start_label=label,
-                        end_label=ATTRIBUTE_VALUE_LABEL,
-                        start_identity=wiring_id,
-                        end_identity=value_id,
-                        src_name=entity.get("name"),
-                        dst_name=attr_value,
+                        start_node=GraphNodeRel(label=label, id=wiring_id, name=entity.get("name")),
+                        end_node=GraphNodeRel(label=ATTRIBUTE_VALUE_LABEL, id=value_id, name=attr_value),
                         properties={"key": attr_key},
                     ).model_dump(exclude_none=True)
                 )
@@ -718,13 +725,13 @@ class KnowledgeGraphEntityExtractor(Node):
             graph_relationships.append(
                 GraphRelationship(
                     type=self._sanitize_identifier(str(rel_type)),
-                    start_label=id_to_label[source_id],
-                    end_label=id_to_label[target_id],
-                    start_identity=f"{source_id}{doc_suffix}",
-                    end_identity=f"{target_id}{doc_suffix}",
                     # Snapshot endpoint names onto the edge so rendering never reads them from the shared node.
-                    src_name=id_to_name.get(source_id),
-                    dst_name=id_to_name.get(target_id),
+                    start_node=GraphNodeRel(
+                        label=id_to_label[source_id], id=f"{source_id}{doc_suffix}", name=id_to_name.get(source_id)
+                    ),
+                    end_node=GraphNodeRel(
+                        label=id_to_label[target_id], id=f"{target_id}{doc_suffix}", name=id_to_name.get(target_id)
+                    ),
                     description=rel.get("description"),
                     # Edges carry per-document ACL; any remaining LLM-emitted props ride on the edge too.
                     properties=dict(rel.get("properties") or {}),

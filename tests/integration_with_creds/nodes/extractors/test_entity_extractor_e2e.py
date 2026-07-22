@@ -75,7 +75,7 @@ def test_extracts_entities_attributes_and_relationships(extractor):
     org_ids = {n["id"] for n in by_label.get("ORGANIZATION", [])}
     works_at = [r for r in relationships if r["type"] == "WORKS_AT"]
     assert any(
-        r["start_identity"] in person_ids and r["end_identity"] in org_ids for r in works_at
+        r["start_node"]["id"] in person_ids and r["end_node"]["id"] in org_ids for r in works_at
     ), f"no WORKS_AT edge from a PERSON to an ORGANIZATION: {works_at}"
 
     rel_types = {r["type"] for r in relationships}
@@ -88,8 +88,8 @@ def test_extracts_entities_attributes_and_relationships(extractor):
 
     attr_value_ids = {n["id"] for n in by_label.get(ATTRIBUTE_VALUE_LABEL, [])}
     for edge in attr_edges:
-        assert edge["start_identity"] in person_ids  # attributes are declared for Person only
-        assert edge["end_identity"] in attr_value_ids  # every attribute edge points at its value node
+        assert edge["start_node"]["id"] in person_ids  # attributes are declared for Person only
+        assert edge["end_node"]["id"] in attr_value_ids  # every attribute edge points at its value node
 
     # ...and were NOT left as entity-node properties (they must live on edges only)
     for node in by_label.get("PERSON", []):

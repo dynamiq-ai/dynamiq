@@ -104,19 +104,21 @@ def entity(label: str, entity_id: str, name: str) -> dict:
 
 
 def edge(rel_type: str, start_label: str, end_label: str, start_id: str, end_id: str, props: dict = None) -> dict:
-    # src_name/dst_name/description are promoted to top-level edge fields (as the extractor emits them);
-    # anything else stays in the ``properties`` bag.
+    # src_name/dst_name become the endpoint nodes' names; description stays top-level; the rest stays in props.
     props = dict(props or {})
-    promoted = {k: props.pop(k) for k in ("src_name", "dst_name", "description") if k in props}
-    return {
-        "type": rel_type,
-        "start_label": start_label,
-        "end_label": end_label,
-        "start_identity": start_id,
-        "end_identity": end_id,
-        **promoted,
-        "properties": props,
-    }
+    src_name = props.pop("src_name", None)
+    dst_name = props.pop("dst_name", None)
+    description = props.pop("description", None)
+    start_node = {"label": start_label, "id": start_id}
+    end_node = {"label": end_label, "id": end_id}
+    if src_name is not None:
+        start_node["name"] = src_name
+    if dst_name is not None:
+        end_node["name"] = dst_name
+    rel = {"type": rel_type, "start_node": start_node, "end_node": end_node, "properties": props}
+    if description is not None:
+        rel["description"] = description
+    return rel
 
 
 def attr_value_node(owner_id: str, attr_key: str, doc_id: str | None, value: str) -> dict:
@@ -150,7 +152,7 @@ class TestResolveAgainstGraph:
         new_id = resolved_nodes[0]["id"]
         assert new_id != "acme" and is_uuid(new_id)
         # the edge endpoint followed the entity onto its new id
-        assert resolved_rels[0]["start_identity"] == new_id
+        assert resolved_rels[0]["start_node"]["id"] == new_id
 
     def test_matches_existing_by_name_despite_different_id(self):
         writer = make_writer({"ORGANIZATION": [("uuid-existing", "Acme Capital")]})
@@ -160,7 +162,7 @@ class TestResolveAgainstGraph:
         resolved_nodes, resolved_rels = writer._resolve_against_graph(nodes, rels)
 
         assert resolved_nodes[0]["id"] == "uuid-existing"
-        assert resolved_rels[0]["end_identity"] == "uuid-existing"
+        assert resolved_rels[0]["end_node"]["id"] == "uuid-existing"
 
     def test_llm_id_never_participates_in_identity(self):
         # An existing node whose ID equals the LLM id but whose NAME is dissimilar must NOT capture
@@ -189,7 +191,7 @@ class TestResolveAgainstGraph:
 
         assert len(resolved_nodes) == 1
         node_id = resolved_nodes[0]["id"]
-        assert {r["start_identity"] for r in resolved_rels} == {node_id}
+        assert {r["start_node"]["id"] for r in resolved_rels} == {node_id}
 
     def test_dissimilar_names_stay_separate(self):
         writer = make_writer({"PERSON": []})
@@ -219,8 +221,8 @@ class TestResolveAgainstGraph:
 
         value_node = next(n for n in resolved_nodes if n["labels"][0] == ATTRIBUTE_VALUE_LABEL)
         assert value_node["id"] == "uuid-jane::salary::d1"
-        assert resolved_rels[0]["start_identity"] == "uuid-jane"
-        assert resolved_rels[0]["end_identity"] == "uuid-jane::salary::d1"
+        assert resolved_rels[0]["start_node"]["id"] == "uuid-jane"
+        assert resolved_rels[0]["end_node"]["id"] == "uuid-jane::salary::d1"
         # The transient ref never leaks to the store.
         assert "attr_ref" not in value_node
 
@@ -246,14 +248,14 @@ class TestResolveAgainstGraph:
         assert nodes[0]["id"] == "jane@d1"
         assert nodes[1]["id"] == "jane@d1::salary::d1"
         assert nodes[1]["attr_ref"] == {"owner": "jane@d1", "key": "salary", "doc": "d1"}
-        assert rels[0]["end_identity"] == "jane@d1::salary::d1"
+        assert rels[0]["end_node"]["id"] == "jane@d1::salary::d1"
 
         # Re-resolving the same payload yields the same resolved ids (repeatable, not corrupted).
         second_nodes, second_rels = writer._resolve_against_graph(nodes, rels)
         for resolved in (first_nodes, second_nodes):
             value_node = next(n for n in resolved if n["labels"][0] == ATTRIBUTE_VALUE_LABEL)
             assert value_node["id"] == "uuid-jane::salary::d1"
-        assert first_rels[0]["end_identity"] == second_rels[0]["end_identity"] == "uuid-jane::salary::d1"
+        assert first_rels[0]["end_node"]["id"] == second_rels[0]["end_node"]["id"] == "uuid-jane::salary::d1"
 
     def test_attribute_value_id_rederived_when_llm_id_contains_delimiter(self):
         # An LLM id can itself contain "::"; the value id is rebuilt from the carried (owner, key, doc)
@@ -275,7 +277,7 @@ class TestResolveAgainstGraph:
 
         value_node = next(n for n in resolved_nodes if n["labels"][0] == ATTRIBUTE_VALUE_LABEL)
         assert value_node["id"] == "uuid-jane::salary::d1"
-        assert resolved_rels[0]["end_identity"] == "uuid-jane::salary::d1"
+        assert resolved_rels[0]["end_node"]["id"] == "uuid-jane::salary::d1"
 
     def test_same_llm_id_from_different_documents_does_not_alias(self):
         # Two documents used the same LLM slug for DIFFERENT people: doc-scoped wiring ids keep them

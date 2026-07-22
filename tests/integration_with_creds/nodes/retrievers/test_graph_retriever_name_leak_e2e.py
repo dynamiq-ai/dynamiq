@@ -63,12 +63,8 @@ def shared_node_graph(graph_connection):
     def _edge(dst, src_name, dst_name, principal, doc_id):
         return {
             "type": "USES",
-            "start_label": "Organization",
-            "end_label": "System",
-            "start_identity": ORG_ID,
-            "end_identity": dst,
-            "src_name": src_name,
-            "dst_name": dst_name,
+            "start_node": {"label": "Organization", "id": ORG_ID, "name": src_name},
+            "end_node": {"label": "System", "id": dst, "name": dst_name},
             "identity_keys": ["source_doc_id"],
             "properties": {
                 "allowed_principals": [principal], "source_doc_id": doc_id,
@@ -152,12 +148,8 @@ def embedded_graph(graph_connection):
     relationships = [
         {
             "type": "USES",
-            "start_label": "Organization",
-            "end_label": "System",
-            "start_identity": "vec-org",
-            "end_identity": "vec-sys",
-            "src_name": VEC_ORG_NAME,
-            "dst_name": VEC_SYS_NAME,
+            "start_node": {"label": "Organization", "id": "vec-org", "name": VEC_ORG_NAME},
+            "end_node": {"label": "System", "id": "vec-sys", "name": VEC_SYS_NAME},
             "identity_keys": ["source_doc_id"],
             "properties": {
                 "allowed_principals": [GROUP_PUBLIC],

@@ -74,8 +74,8 @@ def _assert_valid_for_neo4j(nodes, relationships):
         Neo4jGraphStore._format_labels(node["labels"])
     for rel in relationships:
         Neo4jGraphStore._format_relationship_type(rel["type"])
-        Neo4jGraphStore._format_single_label(rel["start_label"])
-        Neo4jGraphStore._format_single_label(rel["end_label"])
+        Neo4jGraphStore._format_single_label(rel["start_node"]["label"])
+        Neo4jGraphStore._format_single_label(rel["end_node"]["label"])
 
 
 class TestSanitizeIdentifier:
@@ -131,12 +131,8 @@ class TestToWriteGraphPayload:
         assert graph_rels == [
             {
                 "type": "WORKS_AT",
-                "start_label": "PERSON",
-                "end_label": "HEDGE_FUND",
-                "start_identity": "jane",
-                "end_identity": "acme",
-                "src_name": "Jane Doe",
-                "dst_name": "Acme Capital",
+                "start_node": {"label": "PERSON", "id": "jane", "name": "Jane Doe"},
+                "end_node": {"label": "HEDGE_FUND", "id": "acme", "name": "Acme Capital"},
                 "properties": {"since": 2020},
             }
         ]
@@ -272,13 +268,13 @@ class TestExecuteEndToEndWithStubLLM:
         assert value_node["properties"] == {"value": "$250,000"}
 
         attr_edge = next(r for r in result["relationships"] if r["type"] == HAS_ATTRIBUTE_TYPE)
-        assert attr_edge["start_identity"] == "jane@doc-1"
-        assert attr_edge["end_identity"] == "jane@doc-1::salary::doc-1"
+        assert attr_edge["start_node"]["id"] == "jane@doc-1"
+        assert attr_edge["end_node"]["id"] == "jane@doc-1::salary::doc-1"
         assert attr_edge["properties"]["key"] == "salary"
         # Endpoint-name snapshot rides on the ACL-bearing edge: owner name + the value itself, so retrieval
         # renders "Jane Doe -[salary]-> $250,000" without dereferencing the shared node or the value node.
-        assert attr_edge["src_name"] == "Jane Doe"
-        assert attr_edge["dst_name"] == "$250,000"
+        assert attr_edge["start_node"]["name"] == "Jane Doe"
+        assert attr_edge["end_node"]["name"] == "$250,000"
 
     def test_execute_stamps_doc_discriminator_on_relationships(self):
         # Each relationship carries a scalar source_doc_id + identity_keys so the store keeps the SAME
@@ -391,12 +387,8 @@ class TestEnforceOntology:
         rels = [
             {
                 "type": HAS_ATTRIBUTE_TYPE,
-                "start_label": owner_label,
-                "end_label": ATTRIBUTE_VALUE_LABEL,
-                "start_identity": "p1",
-                "end_identity": "p1::salary",
-                "src_name": "Jane",
-                "dst_name": "$250,000",
+                "start_node": {"label": owner_label, "id": "p1", "name": "Jane"},
+                "end_node": {"label": ATTRIBUTE_VALUE_LABEL, "id": "p1::salary", "name": "$250,000"},
                 "properties": {"key": "salary"},
             }
         ]

@@ -338,15 +338,22 @@ class Neo4jGraphStore(BaseGraphStore):
         order: list[tuple] = []
         for idx, rel in enumerate(relationships):
             rel_type = self._format_relationship_type(rel.get("type") or "")
-            start_label = self._format_single_label(rel.get("start_label") or "")
-            end_label = self._format_single_label(rel.get("end_label") or "")
-            start_identity = rel.get("start_identity")
-            end_identity = rel.get("end_identity")
-            # Fold the explicit endpoint-name/description fields into the property bag persisted by
+            start_node = rel.get("start_node") or {}
+            end_node = rel.get("end_node") or {}
+            start_label = self._format_single_label(start_node.get("label") or "")
+            end_label = self._format_single_label(end_node.get("label") or "")
+            start_identity = start_node.get("id")
+            end_identity = end_node.get("id")
+            # Fold the endpoint nodes' names + the edge description into the property bag persisted by
             # ``SET r += props`` so the stored edge keeps flat ``src_name``/``dst_name``/``description``
             # properties (the shape retrievers read).
+            endpoint_props = {
+                "src_name": start_node.get("name"),
+                "dst_name": end_node.get("name"),
+                "description": rel.get("description"),
+            }
             properties = {
-                **{k: rel[k] for k in ("src_name", "dst_name", "description") if rel.get(k) is not None},
+                **{k: v for k, v in endpoint_props.items() if v is not None},
                 **(rel.get("properties") or {}),
             }
 

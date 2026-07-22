@@ -157,12 +157,8 @@ def _seed_acl_demo_edges(store: Neo4jGraphStore) -> None:
         # ACL lives on the EDGE (allowed_principals); src/dst names are per-edge snapshots.
         return {
             "type": "USES",
-            "start_label": "Organization",
-            "end_label": "System",
-            "start_identity": _ACL_DEMO_ORG,
-            "end_identity": dst,
-            "src_name": "AcmeDemo",
-            "dst_name": dst_name,
+            "start_node": {"label": "Organization", "id": _ACL_DEMO_ORG, "name": "AcmeDemo"},
+            "end_node": {"label": "System", "id": dst, "name": dst_name},
             "identity_keys": ["source_doc_id"],
             "properties": {
                 "allowed_principals": [principal],
