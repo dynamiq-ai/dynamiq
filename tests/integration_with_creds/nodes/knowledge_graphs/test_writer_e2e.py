@@ -110,35 +110,21 @@ FILTER_ORG = "org-w"
 def _org_uses(store, edges):
     """Write one Acme org + a System per edge spec (system_name, extra_props, doc_id) with USES edges."""
     nodes = [
-        {
-            "labels": ["Organization", "Entity"],
-            "identity_key": "id",
-            "properties": {"id": FILTER_ORG, "name": "Acme"},
-        }
+        {"labels": ["Organization", "Entity"], "id": FILTER_ORG, "name": "Acme"}
     ]
     relationships = []
     for i, (sys_name, extra, doc_id) in enumerate(edges):
         sid = f"sys-{i}"
         nodes.append(
-            {
-                "labels": ["System", "Entity"],
-                "identity_key": "id",
-                "properties": {"id": sid, "name": sys_name},
-            }
+            {"labels": ["System", "Entity"], "id": sid, "name": sys_name}
         )
         relationships.append(
             {
                 "type": "USES",
-                "start_label": "Organization",
-                "end_label": "System",
-                "start_identity": FILTER_ORG,
-                "end_identity": sid,
-                "start_identity_key": "id",
-                "end_identity_key": "id",
+                "start_node": {"label": "Organization", "id": FILTER_ORG, "name": "Acme"},
+                "end_node": {"label": "System", "id": sid, "name": sys_name},
                 "identity_keys": ["source_doc_id"],
                 "properties": {
-                    "src_name": "Acme",
-                    "dst_name": sys_name,
                     "source_doc_id": doc_id,
                     **extra,
                 },
@@ -185,30 +171,16 @@ def embedded_graph(graph_connection):
     store.run_cypher("MATCH (n) DETACH DELETE n")  # clean slate
 
     nodes = [
-        {
-            "labels": ["Organization", "Entity"],
-            "identity_key": "id",
-            "properties": {"id": "vec-org", "name": VEC_ORG_NAME},
-        },
-        {
-            "labels": ["System", "Entity"],
-            "identity_key": "id",
-            "properties": {"id": "vec-sys", "name": VEC_SYS_NAME},
-        },
+        {"labels": ["Organization", "Entity"], "id": "vec-org", "name": VEC_ORG_NAME},
+        {"labels": ["System", "Entity"], "id": "vec-sys", "name": VEC_SYS_NAME},
     ]
     relationships = [
         {
             "type": "USES",
-            "start_label": "Organization",
-            "end_label": "System",
-            "start_identity": "vec-org",
-            "end_identity": "vec-sys",
-            "start_identity_key": "id",
-            "end_identity_key": "id",
+            "start_node": {"label": "Organization", "id": "vec-org", "name": VEC_ORG_NAME},
+            "end_node": {"label": "System", "id": "vec-sys", "name": VEC_SYS_NAME},
             "identity_keys": ["source_doc_id"],
             "properties": {
-                "src_name": VEC_ORG_NAME,
-                "dst_name": VEC_SYS_NAME,
                 "allowed_principals": ["group:public"],
                 "source_doc_id": "docV",
             },

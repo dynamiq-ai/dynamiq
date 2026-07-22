@@ -591,7 +591,7 @@ class KnowledgeGraphWriter(Node):
         ``attr_ref``), so the input stays writable a second time.
         """
         name_vectors = name_vectors or {}
-        nodes = [{**node, "properties": {**node["properties"]}} for node in nodes]
+        nodes = [{**node, "properties": {**(node.get("properties") or {})}} for node in nodes]
         # Copy the endpoint nodes too: their `id` is rewritten below, and a bare `{**rel}` would share the
         # nested start_node/end_node dicts with the caller's input (which must stay writable a second time).
         relationships = [

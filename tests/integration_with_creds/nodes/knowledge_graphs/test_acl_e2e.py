@@ -106,7 +106,6 @@ def ingested(graph_connection):
         KnowledgeGraphWriter.input_schema(
             nodes=extraction["nodes"],
             relationships=extraction["relationships"],
-            documents=extraction["documents"],
         )
     )
     assert result["relationships_created"] is not None
@@ -180,36 +179,18 @@ def shared_node_graph(graph_connection):
     store.run_cypher("MATCH (n) DETACH DELETE n")  # clean slate
 
     nodes = [
-        {
-            "labels": ["Organization", "Entity"],
-            "identity_key": "id",
-            "properties": {"id": ORG_ID, "name": NODE_NAME},
-        },
-        {
-            "labels": ["System", "Entity"],
-            "identity_key": "id",
-            "properties": {"id": "sys-pub", "name": SYS_PUBLIC},
-        },
-        {
-            "labels": ["System", "Entity"],
-            "identity_key": "id",
-            "properties": {"id": "sys-sec", "name": SYS_SECRET},
-        },
+        {"labels": ["Organization", "Entity"], "id": ORG_ID, "name": NODE_NAME},
+        {"labels": ["System", "Entity"], "id": "sys-pub", "name": SYS_PUBLIC},
+        {"labels": ["System", "Entity"], "id": "sys-sec", "name": SYS_SECRET},
     ]
 
     def _edge(dst, src_name, dst_name, principal, doc_id):
         return {
             "type": "USES",
-            "start_label": "Organization",
-            "end_label": "System",
-            "start_identity": ORG_ID,
-            "end_identity": dst,
-            "start_identity_key": "id",
-            "end_identity_key": "id",
+            "start_node": {"label": "Organization", "id": ORG_ID, "name": src_name},
+            "end_node": {"label": "System", "id": dst, "name": dst_name},
             "identity_keys": ["source_doc_id"],
             "properties": {
-                "src_name": src_name,
-                "dst_name": dst_name,
                 "allowed_principals": [principal],
                 "source_doc_id": doc_id,
             },
@@ -271,35 +252,21 @@ FILTER_ORG = "org-acl"
 def _write_tiered(store, edges):
     """Write one Acme org + a System per edge spec (system_name, extra_props, doc_id) with USES edges."""
     nodes = [
-        {
-            "labels": ["Organization", "Entity"],
-            "identity_key": "id",
-            "properties": {"id": FILTER_ORG, "name": "Acme"},
-        }
+        {"labels": ["Organization", "Entity"], "id": FILTER_ORG, "name": "Acme"}
     ]
     relationships = []
     for i, (sys_name, extra, doc_id) in enumerate(edges):
         sid = f"sys-{i}"
         nodes.append(
-            {
-                "labels": ["System", "Entity"],
-                "identity_key": "id",
-                "properties": {"id": sid, "name": sys_name},
-            }
+            {"labels": ["System", "Entity"], "id": sid, "name": sys_name}
         )
         relationships.append(
             {
                 "type": "USES",
-                "start_label": "Organization",
-                "end_label": "System",
-                "start_identity": FILTER_ORG,
-                "end_identity": sid,
-                "start_identity_key": "id",
-                "end_identity_key": "id",
+                "start_node": {"label": "Organization", "id": FILTER_ORG, "name": "Acme"},
+                "end_node": {"label": "System", "id": sid, "name": sys_name},
                 "identity_keys": ["source_doc_id"],
                 "properties": {
-                    "src_name": "Acme",
-                    "dst_name": sys_name,
                     "source_doc_id": doc_id,
                     **extra,
                 },

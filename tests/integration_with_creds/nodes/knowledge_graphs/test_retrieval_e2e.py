@@ -105,7 +105,6 @@ def multihop_facts(graph_connection):
         KnowledgeGraphWriter.input_schema(
             nodes=extraction["nodes"],
             relationships=extraction["relationships"],
-            documents=extraction["documents"],
         )
     )
 
@@ -159,32 +158,18 @@ def embedded_graph(graph_connection):
     for i, (org, sys) in enumerate([(VEC_TARGET_ORG, VEC_TARGET_SYS), *VEC_DISTRACTORS]):
         oid, sid = f"org-{i}", f"sys-{i}"
         nodes.append(
-            {
-                "labels": ["Organization", "Entity"],
-                "identity_key": "id",
-                "properties": {"id": oid, "name": org},
-            }
+            {"labels": ["Organization", "Entity"], "id": oid, "name": org}
         )
         nodes.append(
-            {
-                "labels": ["System", "Entity"],
-                "identity_key": "id",
-                "properties": {"id": sid, "name": sys},
-            }
+            {"labels": ["System", "Entity"], "id": sid, "name": sys}
         )
         relationships.append(
             {
                 "type": "USES",
-                "start_label": "Organization",
-                "end_label": "System",
-                "start_identity": oid,
-                "end_identity": sid,
-                "start_identity_key": "id",
-                "end_identity_key": "id",
+                "start_node": {"label": "Organization", "id": oid, "name": org},
+                "end_node": {"label": "System", "id": sid, "name": sys},
                 "identity_keys": ["source_doc_id"],
                 "properties": {
-                    "src_name": org,
-                    "dst_name": sys,
                     "allowed_principals": [GROUP_PUBLIC],
                     "source_doc_id": f"doc-{i}",
                 },
