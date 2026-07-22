@@ -122,7 +122,6 @@ def build_workflow() -> Workflow:
             selector={
                 "nodes": f"$.{entity_extractor.id}.output.nodes",
                 "relationships": f"$.{entity_extractor.id}.output.relationships",
-                "documents": f"$.{entity_extractor.id}.output.documents",
             }
         ),
     )
@@ -159,7 +158,7 @@ if __name__ == "__main__":
         #  - Qdrant: local on-disk mode only FLUSHES to disk on close(), so without this the
         #    upserted vectors are lost when the process exits and the QA script finds nothing.
         for node in workflow.flow.nodes:
-            graph_store = getattr(node, "_graph_store", None)
+            graph_store = getattr(node, "graph_store", None)
             if graph_store is not None:
                 graph_store.close()
             vector_store = getattr(node, "vector_store", None)

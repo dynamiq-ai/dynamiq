@@ -59,23 +59,23 @@ def test_extracts_entities_attributes_and_relationships(extractor):
         by_label.setdefault(node["labels"][0], []).append(node)
 
     # --- entities: the people/organizations stated in the text were extracted ---
-    person_names = [(n["properties"].get("name") or "").lower() for n in by_label.get("PERSON", [])]
-    org_names = [(n["properties"].get("name") or "").lower() for n in by_label.get("ORGANIZATION", [])]
+    person_names = [(n.get("name") or "").lower() for n in by_label.get("PERSON", [])]
+    org_names = [(n.get("name") or "").lower() for n in by_label.get("ORGANIZATION", [])]
     assert any("jane" in name for name in person_names), f"no Jane among PERSON nodes: {person_names}"
     assert any("acme" in name for name in org_names), f"no Acme among ORGANIZATION nodes: {org_names}"
 
     # --- ontology enforcement: the off-ontology location fact must not survive ---
     allowed_labels = {"PERSON", "ORGANIZATION", "SYSTEM", ATTRIBUTE_VALUE_LABEL}
     assert set(by_label) <= allowed_labels, f"off-ontology labels survived: {set(by_label) - allowed_labels}"
-    all_names = [(n["properties"].get("name") or "").lower() for n in nodes]
+    all_names = [(n.get("name") or "").lower() for n in nodes]
     assert not any("new york" in name for name in all_names), "off-ontology entity 'New York' survived"
 
     # --- relationships: Jane works at Acme; only legal types/triples survived ---
-    person_ids = {n["properties"]["id"] for n in by_label.get("PERSON", [])}
-    org_ids = {n["properties"]["id"] for n in by_label.get("ORGANIZATION", [])}
+    person_ids = {n["id"] for n in by_label.get("PERSON", [])}
+    org_ids = {n["id"] for n in by_label.get("ORGANIZATION", [])}
     works_at = [r for r in relationships if r["type"] == "WORKS_AT"]
     assert any(
-        r["start_identity"] in person_ids and r["end_identity"] in org_ids for r in works_at
+        r["start_node"]["id"] in person_ids and r["end_node"]["id"] in org_ids for r in works_at
     ), f"no WORKS_AT edge from a PERSON to an ORGANIZATION: {works_at}"
 
     rel_types = {r["type"] for r in relationships}
@@ -86,10 +86,10 @@ def test_extracts_entities_attributes_and_relationships(extractor):
     attr_keys = {r["properties"].get("key") for r in attr_edges}
     assert attr_keys & {"title", "salary"}, f"expected title/salary attribute edges, got keys: {attr_keys}"
 
-    attr_value_ids = {n["properties"]["id"] for n in by_label.get(ATTRIBUTE_VALUE_LABEL, [])}
+    attr_value_ids = {n["id"] for n in by_label.get(ATTRIBUTE_VALUE_LABEL, [])}
     for edge in attr_edges:
-        assert edge["start_identity"] in person_ids  # attributes are declared for Person only
-        assert edge["end_identity"] in attr_value_ids  # every attribute edge points at its value node
+        assert edge["start_node"]["id"] in person_ids  # attributes are declared for Person only
+        assert edge["end_node"]["id"] in attr_value_ids  # every attribute edge points at its value node
 
     # ...and were NOT left as entity-node properties (they must live on edges only)
     for node in by_label.get("PERSON", []):

@@ -138,20 +138,18 @@ _ACL_DEMO_RESTRICTED_SYSTEM = "BorealisDemo"  # reachable only via the group:res
 def _seed_acl_demo_edges(store: Neo4jGraphStore) -> None:
     """Write one org node and two USES edges to it, each carrying its own single-principal ACL."""
     nodes = [
+        {"labels": ["Organization", "Entity"], "id": _ACL_DEMO_ORG, "name": "AcmeDemo", "properties": {}},
         {
-            "labels": ["Organization", "Entity"],
-            "identity_key": "id",
-            "properties": {"id": _ACL_DEMO_ORG, "name": "AcmeDemo"},
+            "labels": ["System", "Entity"],
+            "id": _ACL_DEMO_SYS_PUBLIC,
+            "name": _ACL_DEMO_PUBLIC_SYSTEM,
+            "properties": {},
         },
         {
             "labels": ["System", "Entity"],
-            "identity_key": "id",
-            "properties": {"id": _ACL_DEMO_SYS_PUBLIC, "name": _ACL_DEMO_PUBLIC_SYSTEM},
-        },
-        {
-            "labels": ["System", "Entity"],
-            "identity_key": "id",
-            "properties": {"id": _ACL_DEMO_SYS_RESTRICTED, "name": _ACL_DEMO_RESTRICTED_SYSTEM},
+            "id": _ACL_DEMO_SYS_RESTRICTED,
+            "name": _ACL_DEMO_RESTRICTED_SYSTEM,
+            "properties": {},
         },
     ]
 
@@ -159,16 +157,10 @@ def _seed_acl_demo_edges(store: Neo4jGraphStore) -> None:
         # ACL lives on the EDGE (allowed_principals); src/dst names are per-edge snapshots.
         return {
             "type": "USES",
-            "start_label": "Organization",
-            "end_label": "System",
-            "start_identity": _ACL_DEMO_ORG,
-            "end_identity": dst,
-            "start_identity_key": "id",
-            "end_identity_key": "id",
+            "start_node": {"label": "Organization", "id": _ACL_DEMO_ORG, "name": "AcmeDemo"},
+            "end_node": {"label": "System", "id": dst, "name": dst_name},
             "identity_keys": ["source_doc_id"],
             "properties": {
-                "src_name": "AcmeDemo",
-                "dst_name": dst_name,
                 "allowed_principals": [principal],
                 "source_doc_id": doc_id,
             },
@@ -206,7 +198,7 @@ def _graph_facts_for(openai_connection: OpenAIConnection, principals: list[str])
         out = retriever.execute(GraphRetrieverInputSchema(query="What does the org use?", entity_ids=[_ACL_DEMO_ORG]))
         return out["content"]
     finally:
-        retriever._graph_store.close()
+        retriever.graph_store.close()
 
 
 def _require(condition: bool, message: str) -> None:

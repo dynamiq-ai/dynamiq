@@ -10,7 +10,7 @@ extraction out and funnel it into one serial writer:
 
 The ``Map`` operator runs the extractor over a list of inputs on a thread pool — ideal here because LLM
 extraction is I/O-bound (the GIL is released during the network wait). The merge concatenates the per-shard
-payloads into one ``{nodes, relationships, documents}`` for the writer, which resolves duplicates ACROSS all
+payloads into one ``{nodes, relationships}`` for the writer, which resolves duplicates ACROSS all
 shards in a single pass (its per-call cache converges same-name entities from different shards).
 
 Requires NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD and OPENAI_API_KEY (skips otherwise).
@@ -81,22 +81,19 @@ def main() -> None:
     per_shard = map_result.output["output"]  # list of KnowledgeGraphEntityExtractor outputs, one per shard
     nodes = [n for shard_out in per_shard for n in shard_out["nodes"]]
     relationships = [r for shard_out in per_shard for r in shard_out["relationships"]]
-    documents = [d for shard_out in per_shard for d in shard_out["documents"]]
     logger.info(f"Extracted {len(nodes)} nodes / {len(relationships)} relationships; writing to Neo4j...")
 
     # 3) Single writer: resolves duplicates across ALL shards and upserts. Never parallelize this.
     writer = KnowledgeGraphWriter(connection=Neo4jConnection())
     writer.init_components()
     try:
-        result = writer.execute(
-            KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=relationships, documents=documents)
-        )
+        result = writer.execute(KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=relationships))
         logger.info(
             f"Wrote {result['nodes_created']} new node(s) and {result['relationships_created']} new "
             f"relationship(s) to Neo4j."
         )
     finally:
-        writer._graph_store.close()
+        writer.graph_store.close()
 
 
 if __name__ == "__main__":
