@@ -36,6 +36,7 @@ from dynamiq.nodes.agents.utils import (
 )
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
+from dynamiq.nodes.schema_utils import strip_inaccessible_fields
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileSearchTool, FileWriteTool
 from dynamiq.nodes.tools.mcp import MCPServer
@@ -168,7 +169,7 @@ class AgentInputSchema(BaseModel):
     files: list[io.BytesIO | bytes] | None = Field(
         default=None,
         description="List of file paths to pass to the agent.",
-        json_schema_extra={"map_from_storage": True, "is_accessible_to_agent": False},
+        json_schema_extra={"map_from_storage": True},
     )
 
     user_id: str | None = Field(default=None, description="Parameter to provide user ID.")
@@ -1552,6 +1553,17 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         resolved_agent = None
         try:
             resolved_agent = tool.get_or_create_agent() if is_child_agent else None
+
+            if resolved_agent is not None:
+                merged_input, stripped_fields = strip_inaccessible_fields(
+                    resolved_agent.resolved_input_schema, merged_input
+                )
+                if stripped_fields:
+                    logger.warning(
+                        f"Agent {self.name} - {self.id}: stripped {stripped_fields} from sub-agent "
+                        f"'{tool.name}' input; these fields are not accessible to the agent "
+                        "(is_accessible_to_agent=False)."
+                    )
 
             self._inject_files_into_tool(resolved_agent or tool, merged_input)
 

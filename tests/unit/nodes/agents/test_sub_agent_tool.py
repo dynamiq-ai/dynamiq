@@ -1085,6 +1085,39 @@ class TestToolParamsResolution:
         assert passed_tp is not None, "Nested ToolParams should be propagated"
         assert passed_tp.global_params.get("nested_global") == "yes"
 
+    def test_hidden_child_fields_stripped_from_llm_input(self, test_llm):
+        """Fields hidden on the child agent's schema (e.g. tool_params) cannot be
+        smuggled through the wrapper's extra="allow" input; accessible fields like
+        `files` still pass through."""
+        child = Agent(
+            name="Coder",
+            llm=test_llm,
+            role="code",
+            tools=[],
+            max_loops=3,
+        )
+        parent = Agent(
+            name="Boss",
+            llm=test_llm,
+            role="manage",
+            tools=[child],
+            max_loops=3,
+        )
+        wrapper = next(t for t in parent.tools if isinstance(t, SubAgentTool))
+
+        tool_input = {
+            "input": "x",
+            "files": ["report.pdf"],
+            "tool_params": {"global": {"api_key": "hack"}},
+        }
+        with patch.object(type(child), "run", return_value=_make_successful_run_result()) as mock_run:
+            parent._run_tool(tool=wrapper, tool_input=tool_input, config=None)
+            data = mock_run.call_args[1]["input_data"]
+
+        assert "tool_params" not in data, "child-hidden field must be stripped from LLM-supplied input"
+        assert data["input"] == "x"
+        assert data["files"] == ["report.pdf"], "accessible field must pass through"
+
 
 class TestSubAgentStreaming:
     def test_streaming_propagated_and_delivered(self, test_llm, child_agent):
