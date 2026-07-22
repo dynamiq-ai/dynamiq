@@ -13,6 +13,32 @@ from pydantic_core import PydanticUndefined
 from dynamiq.nodes.types import InputParamMode
 
 
+def strip_inaccessible_fields(
+    schema: type[BaseModel] | None, input_data: dict[str, Any]
+) -> tuple[dict[str, Any], list[str]]:
+    """Drop LLM-supplied values for fields marked ``is_accessible_to_agent=False``.
+
+    Such fields are omitted from the agent-facing tool schema, but the LLM can still
+    emit them; stripping ensures they are only settable by trusted code paths (field
+    defaults, ``tool_params``, agent-side injection).
+
+    Returns:
+        Tuple of (input without hidden keys, names of the stripped keys).
+    """
+    if schema is None:
+        return input_data, []
+
+    hidden = {
+        name
+        for name, field in schema.model_fields.items()
+        if field.json_schema_extra and field.json_schema_extra.get("is_accessible_to_agent", True) is False
+    }
+    stripped = [key for key in input_data if key in hidden]
+    if not stripped:
+        return input_data, []
+    return {key: value for key, value in input_data.items() if key not in hidden}, stripped
+
+
 def apply_param_modes(schema: type[BaseModel], param_modes: dict[str, InputParamMode]) -> type[BaseModel]:
     """Return a copy of ``schema`` with per-field agent exposure tuned.
 
