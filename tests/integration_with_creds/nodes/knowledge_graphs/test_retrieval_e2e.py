@@ -108,7 +108,7 @@ def multihop_graph(graph_connection):
         )
     )
     yield
-    writer._graph_store.close()
+    writer.graph_store.close()
 
 
 def _multihop_retrieve(graph_connection, max_hops):
@@ -126,7 +126,7 @@ def _multihop_retrieve(graph_connection, max_hops):
         # each hop's edges). The beam then keeps only the analytics branch.
         return retriever.execute(GraphRetrieverInputSchema(query=MULTIHOP_QUESTION))["content"].lower()
     finally:
-        retriever._graph_store.close()
+        retriever.graph_store.close()
 
 
 @pytest.fixture(scope="module")
@@ -204,7 +204,7 @@ def embedded_graph(graph_connection):
     try:
         writer.execute(KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=relationships))
     finally:
-        writer._graph_store.close()
+        writer.graph_store.close()
     yield
     store.close()
 
@@ -232,4 +232,4 @@ def test_paraphrased_query_seeds_the_right_entity_via_vector_similarity(embedded
         leaked = [sys for _, sys in VEC_DISTRACTORS if sys in content]
         assert not leaked, f"vector seed picked unrelated entities instead of the automaker: {leaked}\n{content}"
     finally:
-        retriever._graph_store.close()
+        retriever.graph_store.close()

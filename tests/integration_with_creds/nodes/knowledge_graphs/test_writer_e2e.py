@@ -84,7 +84,7 @@ def resolved_graph(graph_connection):
             KnowledgeGraphWriter.input_schema(nodes=extraction["nodes"], relationships=extraction["relationships"])
         )
     yield
-    writer._graph_store.close()
+    writer.graph_store.close()
 
 
 def test_same_entity_across_documents_resolves_to_one_node(resolved_graph, graph_connection):
@@ -146,7 +146,7 @@ def test_delete_documents_removes_only_that_documents_edges(graph_connection):
         try:
             deleted = writer.delete_documents(["docA"])
         finally:
-            writer._graph_store.close()
+            writer.graph_store.close()
         assert deleted["relationships_deleted"] == 1, deleted
 
         count = _counter(store)
@@ -194,7 +194,7 @@ def embedded_graph(graph_connection):
     try:
         writer.execute(KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=relationships))
     finally:
-        writer._graph_store.close()
+        writer.graph_store.close()
     yield
     store.close()
 

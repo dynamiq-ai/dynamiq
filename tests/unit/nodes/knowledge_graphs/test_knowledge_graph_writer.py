@@ -95,7 +95,7 @@ def make_writer(existing: dict[str, list[tuple[str, str]]] | None = None, fuzzy:
         is_postponed_component_init=True,
         fuzzy_matching=fuzzy,
     )
-    writer._graph_store = _neo4j_typed_store(existing, saved_ids)
+    writer.graph_store = _neo4j_typed_store(existing, saved_ids)
     return writer
 
 
@@ -298,7 +298,7 @@ class TestExecute:
         # Full write path on a fake store: nodes get resolved ids and the store receives the resolved payload.
         writer = make_writer({})
         store = FakeGraphStore()
-        writer._graph_store = store
+        writer.graph_store = store
 
         nodes = [entity("PERSON", "jane@d1", "Jane"), entity("ORGANIZATION", "acme@d1", "Acme")]
         rels = [edge("WORKS_AT", "PERSON", "ORGANIZATION", "jane@d1", "acme@d1", {"source_doc_id": "d1"})]
@@ -312,12 +312,12 @@ class TestExecute:
 
     def test_execute_empty_payload_writes_nothing(self):
         writer = make_writer({})
-        writer._graph_store = FakeGraphStore()
+        writer.graph_store = FakeGraphStore()
 
         result = writer.execute(KnowledgeGraphWriter.input_schema(nodes=[], relationships=[]))
 
         assert result["nodes_created"] == 0 and result["relationships_created"] == 0
-        assert writer._graph_store.written is None  # write_graph never called
+        assert writer.graph_store.written is None  # write_graph never called
 
     def test_execute_skips_bare_nodes_with_no_relationship(self):
         # A bare mention (an entity with no relationship and no attribute edge) is never persisted:
@@ -325,7 +325,7 @@ class TestExecute:
         # retrieval, or removed by delete_documents. Its content-addressed id makes recreation free.
         writer = make_writer({})
         store = FakeGraphStore()
-        writer._graph_store = store
+        writer.graph_store = store
 
         nodes = [
             entity("PERSON", "jane@d1", "Jane"),
@@ -342,12 +342,10 @@ class TestExecute:
     def test_execute_all_nodes_bare_writes_nothing(self):
         writer = make_writer({})
         store = FakeGraphStore()
-        writer._graph_store = store
+        writer.graph_store = store
 
         result = writer.execute(
-            KnowledgeGraphWriter.input_schema(
-                nodes=[entity("PERSON", "steve@d1", "Steve")], relationships=[]
-            )
+            KnowledgeGraphWriter.input_schema(nodes=[entity("PERSON", "steve@d1", "Steve")], relationships=[])
         )
 
         assert result["nodes_created"] == 0
@@ -360,7 +358,7 @@ class TestExecute:
         # writing nothing useful.
         writer = make_writer({})
         store = FakeGraphStore()
-        writer._graph_store = store
+        writer.graph_store = store
         rels = [edge("WORKS_AT", "PERSON", "ORGANIZATION", "jane@d1", "acme@d1", {"source_doc_id": "d1"})]
 
         # Only "jane@d1" is provided as a node -> "acme@d1" is dangling.
@@ -427,7 +425,7 @@ def _embedder_writer(**embedder_kwargs) -> KnowledgeGraphWriter:
 class TestEmbedEntityNames:
     def test_embeds_names_and_attaches_to_entities_not_attribute_values(self):
         writer = _embedder_writer(dim=3)
-        writer._graph_store, _ = _recording_neo4j_store()
+        writer.graph_store, _ = _recording_neo4j_store()
         nodes = [
             _entity("PERSON", "u1", "Jane Doe"),  # len("Jane Doe") == 8
             {"labels": [ATTRIBUTE_VALUE_LABEL], "id": "v1", "properties": {"value": "CTO"}},
@@ -448,12 +446,12 @@ class TestEmbedEntityNames:
         # Node embeddings are a Neo4j-only feature; on any other backend embedding is skipped so a raw
         # vector never lands as unqueryable dead weight (e.g. Postgres JSONB).
         writer = _embedder_writer()
-        writer._graph_store = FakeGraphStore()  # not a Neo4jGraphStore
+        writer.graph_store = FakeGraphStore()  # not a Neo4jGraphStore
         assert writer._embed_entity_names([_entity("PERSON", "u1", "Jane")], config=None) == {}
 
     def test_degrades_without_raising_on_embedder_failure(self):
         writer = _embedder_writer(fail=True)
-        writer._graph_store, _ = _recording_neo4j_store()
+        writer.graph_store, _ = _recording_neo4j_store()
         assert writer._embed_entity_names([_entity("PERSON", "u1", "Jane")], config=None) == {}  # no raise
 
     def test_attach_embeddings_noop_without_vectors(self):
@@ -464,7 +462,7 @@ class TestEmbedEntityNames:
     def test_ensure_vector_index_uses_embedding_dimension(self):
         writer = KnowledgeGraphWriter(connection=_neo4j_conn(), is_postponed_component_init=True)
         store, recorded = _recording_neo4j_store()
-        writer._graph_store = store
+        writer.graph_store = store
 
         writer._ensure_entity_vector_index(4)
 
@@ -491,31 +489,31 @@ class TestResolutionInternals:
         resolved, _ = w._resolve_against_graph(nodes, [])
         assert resolved[0]["id"] == w._deterministic_id("PERSON", "Jane Doe")
         assert len({n["id"] for n in resolved}) == 1  # identical names collapse
-        assert w._graph_store._stub.queries == []  # pure hash: no existence lookup, no fuzzy
+        assert w.graph_store._stub.queries == []  # pure hash: no existence lookup, no fuzzy
 
     def test_existing_det_id_skips_fuzzy_and_is_not_re_merged(self):
         # Over-merge guard: an entity whose OWN deterministic node already exists is kept — a similar but
         # different candidate ("Acme Capital LLC") must not hijack an established node ("Acme LLC").
         w = make_writer()
         det = w._deterministic_id("ORGANIZATION", "Acme LLC")
-        w._graph_store._stub.saved = {det}
-        w._graph_store._stub.existing = {"ORGANIZATION": [("other-uuid", "Acme Capital LLC")]}
+        w.graph_store._stub.saved = {det}
+        w.graph_store._stub.existing = {"ORGANIZATION": [("other-uuid", "Acme Capital LLC")]}
 
         resolved, _ = w._resolve_against_graph([entity("ORGANIZATION", "acme@d1", "Acme LLC")], [])
 
         assert resolved[0]["id"] == det  # kept, not merged into the near-dup
-        assert not any("queryNodes" in q for q in w._graph_store._stub.queries)  # fuzzy never ran
+        assert not any("queryNodes" in q for q in w.graph_store._stub.queries)  # fuzzy never ran
 
     def test_fuzzy_off_issues_no_query_even_with_candidates(self):
         w = make_writer(fuzzy=False, existing={"ORGANIZATION": [("x", "Acme Capital")]})
         w._resolve_against_graph([entity("ORGANIZATION", "a@d1", "Acme Capital LLC")], [])
-        assert w._graph_store._stub.queries == []  # no existence check, no blocking
+        assert w.graph_store._stub.queries == []  # no existence check, no blocking
 
 
 class TestEmbedEdges:
     def test_attaches_triplet_embedding_to_edge_properties(self):
         writer = _embedder_writer(dim=3)
-        writer._graph_store, _ = _recording_neo4j_store()
+        writer.graph_store, _ = _recording_neo4j_store()
         rels = [edge("USES", "ORG", "SYS", "a", "b", {"src_name": "Acme", "dst_name": "Helios"})]
 
         writer._maybe_embed_edges(rels, config=None)
@@ -586,7 +584,7 @@ class TestDeleteDocuments:
             connection=Neo4j(uri="bolt://localhost:7687", username="neo4j", password="password"),
             is_postponed_component_init=True,
         )
-        writer._graph_store = store
+        writer.graph_store = store
         return writer
 
     def test_delegates_to_the_store_with_attribute_value_scope(self):

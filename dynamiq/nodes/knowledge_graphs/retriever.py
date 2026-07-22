@@ -246,7 +246,10 @@ class KnowledgeGraphRetriever(ConnectionNode):
     Output: ``{"content": <newline-separated facts>, "documents": [Document, ...]}``.
 
     Attributes:
-        connection (Neo4j | ApacheAGE | AWSNeptune): The graph backend connection.
+        connection (Neo4j | ApacheAGE | AWSNeptune | None): The graph backend connection. Optional when
+            an already-initialized ``graph_store`` is provided instead.
+        graph_store (BaseGraphStore | None): An already-initialized graph store to use directly, as an
+            alternative to ``connection`` (mirrors how other nodes accept ``vector_store``).
         llm (Node | None): Optional. Extracts the query's entities for the default seeding path and composes
             the answer when ``summarize=True``. When omitted, seeding falls back to the raw query; required
             only when ``summarize=True`` (enforced by a validator).
@@ -302,7 +305,10 @@ class KnowledgeGraphRetriever(ConnectionNode):
         "entity (e.g. \"what does X's employer use\"); or call again with a fact's neighbor id."
     )
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
-    connection: Neo4j | ApacheAGE | AWSNeptune
+    connection: Neo4j | ApacheAGE | AWSNeptune | None = None
+    graph_store: BaseGraphStore | None = None
+    # Optional: only used to extract the query's entities (default seeding path) and to `summarize`. When
+    # omitted, seeding falls back to the raw query; `summarize=True` then requires an llm (see validator).
     llm: Node | None = None
     ontology: Ontology | None = None
     database: str | None = None
@@ -321,10 +327,17 @@ class KnowledgeGraphRetriever(ConnectionNode):
 
     input_schema: ClassVar[type[GraphRetrieverInputSchema]] = GraphRetrieverInputSchema
 
-    _graph_store: BaseGraphStore | None = PrivateAttr(default=None)
     _use_fulltext: bool = PrivateAttr(default=False)
     _use_vector: bool = PrivateAttr(default=False)
     _run_depends: list = PrivateAttr(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_connection_client(self):
+        # A bare `client` is not enough here: the concrete store class is dispatched from the
+        # connection type (see `_build_graph_store`), so require a connection or a ready store.
+        if not self.graph_store and not self.connection:
+            raise ValueError("'connection' or 'graph_store' should be specified")
+        return self
 
     @model_validator(mode="after")
     def _validate_llm_requirements(self):
@@ -345,6 +358,7 @@ class KnowledgeGraphRetriever(ConnectionNode):
             "document_reranker": True,
             "document_retriever": True,
             "text_embedder": True,
+            "graph_store": True,
         }
 
     def to_dict(self, **kwargs) -> dict:
@@ -362,6 +376,9 @@ class KnowledgeGraphRetriever(ConnectionNode):
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """Select the concrete graph store from the connection type (same dispatch as CypherExecutor)."""
         connection_manager = connection_manager or ConnectionManager()
+        # Use the passed graph store's client if it is already initialized (mirrors VectorStoreNode).
+        if self.graph_store and self.client is None:
+            self.client = self.graph_store.client
         super().init_components(connection_manager)
         if self.llm and self.llm.is_postponed_component_init:
             self.llm.init_components(connection_manager)
@@ -373,8 +390,8 @@ class KnowledgeGraphRetriever(ConnectionNode):
             self.document_retriever.init_components(connection_manager)
         if self.text_embedder and self.text_embedder.is_postponed_component_init:
             self.text_embedder.init_components(connection_manager)
-        if self._graph_store is None:
-            self._graph_store = self._build_graph_store()
+        if self.graph_store is None:
+            self.graph_store = self._build_graph_store()
         self._use_fulltext = self._probe_fulltext()
         self._use_vector = self._probe_vector()
 
@@ -384,15 +401,15 @@ class KnowledgeGraphRetriever(ConnectionNode):
         Backend-agnostic: non-Neo4j stores (and a Neo4j without the index yet, e.g. retrieve-before-write)
         return ``False``, so the retriever transparently uses the portable ``CONTAINS`` scan instead.
         """
-        if not isinstance(self._graph_store, Neo4jGraphStore):
+        if not isinstance(self.graph_store, Neo4jGraphStore):
             return False
         try:
-            records, _, _ = self._graph_store.run_cypher(
+            records, _, _ = self.graph_store.run_cypher(
                 "SHOW INDEXES YIELD name, type WHERE name = $n AND type = 'FULLTEXT' RETURN count(*) AS c",
                 parameters={"n": ENTITY_NAME_FULLTEXT_INDEX},
                 database=self.database,
             )
-            rows = self._graph_store.format_records(records)
+            rows = self.graph_store.format_records(records)
             return bool(rows and (rows[0].get("c") or 0) > 0)
         except Exception as e:
             logger.warning(f"Node {self.name} - {self.id}: full-text index probe failed, using scan: {e}")
@@ -405,15 +422,15 @@ class KnowledgeGraphRetriever(ConnectionNode):
         Backend-agnostic: without an embedder, or on a non-Neo4j store, or before the writer has embedded any
         entity (so no vector index), this returns ``False`` and the existing name-match path is used.
         """
-        if not self.text_embedder or not isinstance(self._graph_store, Neo4jGraphStore):
+        if not self.text_embedder or not isinstance(self.graph_store, Neo4jGraphStore):
             return False
         try:
-            records, _, _ = self._graph_store.run_cypher(
+            records, _, _ = self.graph_store.run_cypher(
                 "SHOW INDEXES YIELD name, type WHERE name = $n AND type = 'VECTOR' RETURN count(*) AS c",
                 parameters={"n": ENTITY_EMBEDDING_VECTOR_INDEX},
                 database=self.database,
             )
-            rows = self._graph_store.format_records(records)
+            rows = self.graph_store.format_records(records)
             return bool(rows and (rows[0].get("c") or 0) > 0)
         except Exception as e:
             logger.warning(f"Node {self.name} - {self.id}: vector index probe failed, using name match: {e}")
@@ -441,10 +458,10 @@ class KnowledgeGraphRetriever(ConnectionNode):
         """Keep the graph store's client in sync if the connection node reconnects."""
         previous_client = self.client
         super().ensure_client()
-        if self.client is previous_client or not self._graph_store:
+        if self.client is previous_client or not self.graph_store:
             return
-        if getattr(self._graph_store, "client", None) is not self.client:
-            self._graph_store.update_client(self.client)
+        if getattr(self.graph_store, "client", None) is not self.client:
+            self.graph_store.update_client(self.client)
 
     def _extract_entity_names(self, query: str, config: RunnableConfig, **kwargs) -> list[str]:
         """Extract the entity names a question is about via the LLM, constrained to the ontology's types.
@@ -747,7 +764,7 @@ class KnowledgeGraphRetriever(ConnectionNode):
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        if not self._graph_store:
+        if not self.graph_store:
             raise ToolExecutionException("KnowledgeGraphRetriever: graph store is not initialized.", recoverable=True)
 
         limit = input_data.top_k or self.top_k
@@ -764,8 +781,8 @@ class KnowledgeGraphRetriever(ConnectionNode):
             query, params = self._build_query(
                 input_data, hop_limit, seed_names, seed_vectors, query_vector, include_endpoint_ids=max_hops > 1
             )
-            records, _, _ = self._graph_store.run_cypher(query, parameters=params, database=self.database)
-            rows = self._graph_store.format_records(records)
+            records, _, _ = self.graph_store.run_cypher(query, parameters=params, database=self.database)
+            rows = self.graph_store.format_records(records)
             # Beam expansion: hop N+1 expands ONLY from the NEW nodes the previous hop reached, excluding
             # edges already inside the visited set. The seeds (anchors) are excluded from the first
             # frontier — hop 1 already expanded them, and re-expanding would let their leftover 1-hop
@@ -781,8 +798,8 @@ class KnowledgeGraphRetriever(ConnectionNode):
                 hop_query, hop_params = self._hop_query(
                     sorted(frontier), sorted(visited), hop_limit, input_data.filters, query_vector
                 )
-                records, _, _ = self._graph_store.run_cypher(hop_query, parameters=hop_params, database=self.database)
-                hop_rows = self._graph_store.format_records(records)
+                records, _, _ = self.graph_store.run_cypher(hop_query, parameters=hop_params, database=self.database)
+                hop_rows = self.graph_store.format_records(records)
                 if not hop_rows:
                     break
                 rows.extend(hop_rows)

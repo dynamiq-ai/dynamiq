@@ -110,7 +110,7 @@ def ingested(graph_connection):
     )
     assert result["relationships_created"] is not None
     yield
-    writer._graph_store.close()
+    writer.graph_store.close()
 
 
 def _facts_by_name(graph_connection, principals, **kwargs):
@@ -132,7 +132,7 @@ def _facts_by_name(graph_connection, principals, **kwargs):
             "content"
         ]
     finally:
-        retriever._graph_store.close()
+        retriever.graph_store.close()
 
 
 def test_principal_a_sees_only_a(ingested, graph_connection):
@@ -221,7 +221,7 @@ def _facts_by_id(graph_connection, principals):
         out = retriever.execute(GraphRetrieverInputSchema(query="What does the org use?", entity_ids=[ORG_ID]))
         return out["content"]
     finally:
-        retriever._graph_store.close()
+        retriever.graph_store.close()
 
 
 def test_public_caller_sees_edge_snapshot_not_shared_node_name(shared_node_graph, graph_connection):
@@ -287,7 +287,7 @@ def _retrieve(graph_connection, *, locked, input_filters=None):
             )
         )["content"]
     finally:
-        retriever._graph_store.close()
+        retriever.graph_store.close()
 
 
 def test_input_filter_only_narrows_within_the_locked_acl(graph_connection):
