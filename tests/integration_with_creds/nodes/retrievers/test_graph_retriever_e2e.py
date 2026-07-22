@@ -73,7 +73,6 @@ def ingested(graph_connection):
         KnowledgeGraphWriter.input_schema(
             nodes=extraction["nodes"],
             relationships=extraction["relationships"],
-            documents=extraction["documents"],
         )
     )
     assert result["relationships_created"] is not None

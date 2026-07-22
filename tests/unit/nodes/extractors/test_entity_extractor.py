@@ -72,11 +72,10 @@ def _assert_valid_for_neo4j(nodes, relationships):
     """Every label/type/key produced must pass Neo4jGraphStore's validators."""
     for node in nodes:
         Neo4jGraphStore._format_labels(node["labels"])
-        Neo4jGraphStore._format_property_key(node["identity_key"])
     for rel in relationships:
         Neo4jGraphStore._format_relationship_type(rel["type"])
-        Neo4jGraphStore._format_single_label(rel["start_label"])
-        Neo4jGraphStore._format_single_label(rel["end_label"])
+        Neo4jGraphStore._format_single_label(rel["start_node"]["label"])
+        Neo4jGraphStore._format_single_label(rel["end_node"]["label"])
 
 
 class TestSanitizeIdentifier:
@@ -122,27 +121,19 @@ class TestToWriteGraphPayload:
         nodes, graph_rels = extractor._to_write_graph_payload(entities, relationships)
 
         # Every entity carries its type label first plus the shared "Entity" label (the full-text index hook),
-        # and ONLY identity properties (id + name) -- the emitted ``aum`` is dropped, never inlined on the node.
+        # and ONLY identity (id + name) -- the emitted ``aum`` is dropped, never inlined on the node.
         assert nodes == [
-            {
-                "labels": ["HEDGE_FUND", "Entity"],
-                "identity_key": "id",
-                "properties": {"id": "acme", "name": "Acme Capital"},
-            },
-            {"labels": ["PERSON", "Entity"], "identity_key": "id", "properties": {"id": "jane", "name": "Jane Doe"}},
+            {"labels": ["HEDGE_FUND", "Entity"], "id": "acme", "name": "Acme Capital", "properties": {}},
+            {"labels": ["PERSON", "Entity"], "id": "jane", "name": "Jane Doe", "properties": {}},
         ]
         # Endpoint names are snapshotted onto the edge (src_name/dst_name) so retrieval renders from the
-        # ACL-bearing edge, never the shared/merged entity node.
+        # ACL-bearing edge, never the shared/merged entity node. The LLM's own props stay in ``properties``.
         assert graph_rels == [
             {
                 "type": "WORKS_AT",
-                "start_label": "PERSON",
-                "end_label": "HEDGE_FUND",
-                "start_identity_key": "id",
-                "end_identity_key": "id",
-                "start_identity": "jane",
-                "end_identity": "acme",
-                "properties": {"since": 2020, "src_name": "Jane Doe", "dst_name": "Acme Capital"},
+                "start_node": {"label": "PERSON", "id": "jane", "name": "Jane Doe"},
+                "end_node": {"label": "HEDGE_FUND", "id": "acme", "name": "Acme Capital"},
+                "properties": {"since": 2020},
             }
         ]
         _assert_valid_for_neo4j(nodes, graph_rels)
@@ -151,23 +142,23 @@ class TestToWriteGraphPayload:
         entities = [{"id": "x"}, {"type": "Person"}, {"id": "y", "type": "Person"}]
         extractor = KnowledgeGraphEntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)
         nodes, _ = extractor._to_write_graph_payload(entities, [])
-        assert [n["properties"]["id"] for n in nodes] == ["y"]
+        assert [n["id"] for n in nodes] == ["y"]
 
-    def test_relationship_description_rides_on_edge_properties(self):
+    def test_relationship_description_rides_on_the_edge(self):
         entities = [{"id": "jane", "type": "Person", "name": "Jane"}, {"id": "acme", "type": "Org", "name": "Acme"}]
         relationships = [
             {"source_id": "jane", "target_id": "acme", "type": "WORKS_AT", "description": "CFO since 2020"}
         ]
         extractor = KnowledgeGraphEntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)
         _, graph_rels = extractor._to_write_graph_payload(entities, relationships)
-        assert graph_rels[0]["properties"]["description"] == "CFO since 2020"
+        assert graph_rels[0]["description"] == "CFO since 2020"
 
     def test_entity_description_is_not_written_to_the_node(self):
         # Descriptions are edge-only: an entity-level description must never land on the (shared) node.
         entities = [{"id": "jane", "type": "Person", "name": "Jane", "description": "the CFO"}]
         extractor = KnowledgeGraphEntityExtractor(llm=StubLLM(), ontology=_ONTOLOGY)
         nodes, _ = extractor._to_write_graph_payload(entities, [])
-        assert nodes[0]["properties"] == {"id": "jane", "name": "Jane"}
+        assert nodes[0] == {"labels": ["PERSON", "Entity"], "id": "jane", "name": "Jane", "properties": {}}
 
 
 class TestTypeGuidance:
@@ -242,7 +233,7 @@ class TestExecuteEndToEndWithStubLLM:
         result = extractor.execute(KnowledgeGraphEntityExtractor.input_schema(documents=[Document(content="Acme.")]))
 
         assert llm.calls == 2  # initial call + one repair round-trip
-        assert [n["properties"]["name"] for n in result["nodes"]] == ["Acme"]
+        assert [n["name"] for n in result["nodes"]] == ["Acme"]
 
     def test_execute_skips_document_when_recovery_fails(self):
         llm = SequenceStubLLM(responses=["garbage", "still garbage"])
@@ -269,20 +260,21 @@ class TestExecuteEndToEndWithStubLLM:
         result = extractor.execute(KnowledgeGraphEntityExtractor.input_schema(documents=[document]))
 
         person = next(n for n in result["nodes"] if n["labels"][0] == "PERSON")
-        assert person["properties"]["id"] == "jane@doc-1"  # wiring id is doc-scoped
+        assert person["id"] == "jane@doc-1"  # wiring id is doc-scoped
         assert "salary" not in person["properties"]  # promoted to an edge, not a node property
 
         value_node = next(n for n in result["nodes"] if n["labels"][0] == ATTRIBUTE_VALUE_LABEL)
-        assert value_node["properties"] == {"id": "jane@doc-1::salary::doc-1", "value": "$250,000"}
+        assert value_node["id"] == "jane@doc-1::salary::doc-1"
+        assert value_node["properties"] == {"value": "$250,000"}
 
         attr_edge = next(r for r in result["relationships"] if r["type"] == HAS_ATTRIBUTE_TYPE)
-        assert attr_edge["start_identity"] == "jane@doc-1"
-        assert attr_edge["end_identity"] == "jane@doc-1::salary::doc-1"
+        assert attr_edge["start_node"]["id"] == "jane@doc-1"
+        assert attr_edge["end_node"]["id"] == "jane@doc-1::salary::doc-1"
         assert attr_edge["properties"]["key"] == "salary"
         # Endpoint-name snapshot rides on the ACL-bearing edge: owner name + the value itself, so retrieval
         # renders "Jane Doe -[salary]-> $250,000" without dereferencing the shared node or the value node.
-        assert attr_edge["properties"]["src_name"] == "Jane Doe"
-        assert attr_edge["properties"]["dst_name"] == "$250,000"
+        assert attr_edge["start_node"]["name"] == "Jane Doe"
+        assert attr_edge["end_node"]["name"] == "$250,000"
 
     def test_execute_stamps_doc_discriminator_on_relationships(self):
         # Each relationship carries a scalar source_doc_id + identity_keys so the store keeps the SAME
@@ -317,11 +309,11 @@ class TestExecuteEndToEndWithStubLLM:
 
         # The same LLM id from two documents must NOT alias: wiring ids are doc-scoped, and identity
         # is assigned later by KnowledgeGraphWriter name resolution (which converges them by name).
-        assert {(n["labels"][0], n["properties"]["id"]) for n in result["nodes"]} == {
+        assert {(n["labels"][0], n["id"]) for n in result["nodes"]} == {
             ("ORG", "acme@d1"),
             ("ORG", "acme@d2"),
         }
-        assert {n["properties"]["name"] for n in result["nodes"]} == {"Acme"}
+        assert {n["name"] for n in result["nodes"]} == {"Acme"}
 
     def test_single_llm_failure_skips_only_that_document(self):
         # A transient LLM failure on one document must NOT abort the batch; remaining documents still process.
@@ -333,7 +325,7 @@ class TestExecuteEndToEndWithStubLLM:
         result = extractor.execute(KnowledgeGraphEntityExtractor.input_schema(documents=docs))
 
         # Only doc 2's entity survives; doc 1 was skipped, not fatal.
-        assert [n["properties"]["name"] for n in result["nodes"]] == ["Acme"]
+        assert [n["name"] for n in result["nodes"]] == ["Acme"]
 
     def test_all_documents_failing_raises_systemic_error(self):
         # When EVERY document fails, that's systemic (e.g. bad credentials) — raise instead of an empty graph.
@@ -363,15 +355,14 @@ class TestExecuteEndToEndWithStubLLM:
 
         # Ids are assigned on copies, so the caller's input objects are left untouched.
         assert doc_a.id is None and doc_b.id is None
-        # Each id-less document was assigned a distinct, non-null id on the returned copies.
-        out_a, out_b = result["documents"]
-        assert out_a.id is not None and out_b.id is not None and out_a.id != out_b.id
 
         rels = [r for r in result["relationships"] if r["type"] == "WORKS_AT"]
         assert len(rels) == 2  # two separate edges, not one merged edge
         assert all(r["identity_keys"] == ["source_doc_id"] for r in rels)
-        # Each edge carries its OWN document discriminator and its OWN ACL -- neither overwrites the other.
-        assert {r["properties"]["source_doc_id"] for r in rels} == {out_a.id, out_b.id}
+        # Each id-less document was assigned its OWN distinct, non-null discriminator, and each edge keeps
+        # its OWN ACL -- neither overwrites the other.
+        doc_ids = {r["properties"]["source_doc_id"] for r in rels}
+        assert len(doc_ids) == 2 and all(doc_ids)  # two distinct, non-empty assigned ids
         assert {tuple(r["properties"]["allowed_principals"]) for r in rels} == {("group:a",), ("group:b",)}
 
 
@@ -390,16 +381,14 @@ class TestEnforceOntology:
     def _attribute_graph(self, owner_label):
         # (owner)-[:HAS_ATTRIBUTE {key}]->(:AttributeValue {value}); owner_label decides if the owner survives.
         nodes = [
-            {"labels": [owner_label, ENTITY_LABEL], "properties": {"id": "p1", "name": "Jane"}},
-            {"labels": [ATTRIBUTE_VALUE_LABEL], "properties": {"id": "p1::salary", "value": "$250,000"}},
+            {"labels": [owner_label, ENTITY_LABEL], "id": "p1", "name": "Jane", "properties": {}},
+            {"labels": [ATTRIBUTE_VALUE_LABEL], "id": "p1::salary", "properties": {"value": "$250,000"}},
         ]
         rels = [
             {
                 "type": HAS_ATTRIBUTE_TYPE,
-                "start_label": owner_label,
-                "end_label": ATTRIBUTE_VALUE_LABEL,
-                "start_identity": "p1",
-                "end_identity": "p1::salary",
+                "start_node": {"label": owner_label, "id": "p1", "name": "Jane"},
+                "end_node": {"label": ATTRIBUTE_VALUE_LABEL, "id": "p1::salary", "name": "$250,000"},
                 "properties": {"key": "salary"},
             }
         ]

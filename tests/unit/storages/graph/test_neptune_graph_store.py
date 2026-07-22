@@ -14,7 +14,7 @@ def test_neptune_write_graph_not_implemented():
 
     with pytest.raises(NotImplementedError):
         store.write_graph(
-            nodes=[{"labels": ["PERSON", "Entity"], "identity_key": "id", "properties": {"id": "jane"}}],
+            nodes=[{"labels": ["PERSON", "Entity"], "id": "jane", "properties": {}}],
             relationships=[],
         )
 
