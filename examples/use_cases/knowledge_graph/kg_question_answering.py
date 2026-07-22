@@ -198,7 +198,7 @@ def _graph_facts_for(openai_connection: OpenAIConnection, principals: list[str])
         out = retriever.execute(GraphRetrieverInputSchema(query="What does the org use?", entity_ids=[_ACL_DEMO_ORG]))
         return out["content"]
     finally:
-        retriever._graph_store.close()
+        retriever.graph_store.close()
 
 
 def _require(condition: bool, message: str) -> None:

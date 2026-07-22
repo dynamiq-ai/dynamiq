@@ -93,7 +93,7 @@ def _facts_for(graph_connection, principals):
         out = retriever.execute(GraphRetrieverInputSchema(query="What does the org use?", entity_ids=[ORG_ID]))
         return out["content"]
     finally:
-        retriever._graph_store.close()
+        retriever.graph_store.close()
 
 
 def test_public_caller_sees_edge_snapshot_not_shared_node_name(shared_node_graph, graph_connection):
@@ -166,7 +166,7 @@ def embedded_graph(graph_connection):
     try:
         writer.execute(KnowledgeGraphWriter.input_schema(nodes=nodes, relationships=relationships))
     finally:
-        writer._graph_store.close()
+        writer.graph_store.close()
     yield
     store.close()
 
@@ -201,4 +201,4 @@ def test_paraphrased_query_seeds_via_vector_similarity(embedded_graph, graph_con
         out = retriever.execute(GraphRetrieverInputSchema(query="What does the automaker use?", entities=["automaker"]))
         assert VEC_SYS_NAME in out["content"], f"paraphrased vector seed should reach the fact: {out['content']}"
     finally:
-        retriever._graph_store.close()
+        retriever.graph_store.close()

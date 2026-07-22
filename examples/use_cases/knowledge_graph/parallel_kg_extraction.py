@@ -93,7 +93,7 @@ def main() -> None:
             f"relationship(s) to Neo4j."
         )
     finally:
-        writer._graph_store.close()
+        writer.graph_store.close()
 
 
 if __name__ == "__main__":
