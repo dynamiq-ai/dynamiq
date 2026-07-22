@@ -78,7 +78,7 @@ def ingested(graph_connection):
     )
     assert result["relationships_created"] is not None
     yield
-    writer._graph_store.close()
+    writer.graph_store.close()
 
 
 def _facts_for(graph_connection, principals, **kwargs):
@@ -95,7 +95,7 @@ def _facts_for(graph_connection, principals, **kwargs):
         out = retriever.execute(GraphRetrieverInputSchema(query=f"What systems does {ORG} use?"))
         return out["content"]
     finally:
-        retriever._graph_store.close()
+        retriever.graph_store.close()
 
 
 def test_principal_a_sees_only_a(ingested, graph_connection):

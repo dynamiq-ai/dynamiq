@@ -2,7 +2,7 @@ import re
 from typing import Any, ClassVar, Literal
 from uuid import NAMESPACE_DNS, uuid5
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from dynamiq.connections import ApacheAGE, AWSNeptune, Neo4j
 from dynamiq.connections.managers import ConnectionManager
@@ -123,7 +123,10 @@ class KnowledgeGraphWriter(Node):
     Output: the resolved payload plus ``write_stats`` and ``nodes_created`` / ``relationships_created``.
 
     Attributes:
-        connection (Neo4j | ApacheAGE | AWSNeptune): The graph backend connection.
+        connection (Neo4j | ApacheAGE | AWSNeptune | None): The graph backend connection. Optional when
+            an already-initialized ``graph_store`` is provided instead.
+        graph_store (BaseGraphStore | None): An already-initialized graph store to use directly, as an
+            alternative to ``connection`` (mirrors how other nodes accept ``vector_store``).
         database (str | None): Optional target database (Neo4j).
         graph_name (str | None): Graph name (Apache AGE).
         create_graph_if_not_exists (bool): Create the AGE graph if missing.
@@ -146,7 +149,8 @@ class KnowledgeGraphWriter(Node):
 
     group: Literal[NodeGroup.EXTRACTORS] = NodeGroup.EXTRACTORS
     name: str = "knowledge-graph-writer"
-    connection: Neo4j | ApacheAGE | AWSNeptune
+    connection: Neo4j | ApacheAGE | AWSNeptune | None = None
+    graph_store: BaseGraphStore | None = None
     database: str | None = None
     graph_name: str | None = None
     create_graph_if_not_exists: bool = False
@@ -156,14 +160,19 @@ class KnowledgeGraphWriter(Node):
     entity_embedder: DocumentEmbedder | None = None
 
     input_schema: ClassVar[type[KnowledgeGraphWriterInputSchema]] = KnowledgeGraphWriterInputSchema
-    _graph_store: BaseGraphStore | None = PrivateAttr(default=None)
     # Vector indexes ensured this process (by name) — created lazily on first embed from the real embedding
     # length so a dimension can never mismatch the embedder's model.
     _vector_indexes_ready: set[str] = PrivateAttr(default_factory=set)
 
+    @model_validator(mode="after")
+    def validate_connection_store(self):
+        if not self.graph_store and not self.connection:
+            raise ValueError("'connection' or 'graph_store' should be specified")
+        return self
+
     @property
     def to_dict_exclude_params(self) -> dict:
-        return super().to_dict_exclude_params | {"entity_embedder": True}
+        return super().to_dict_exclude_params | {"entity_embedder": True, "graph_store": True}
 
     def to_dict(self, **kwargs) -> dict:
         data = super().to_dict(**kwargs)
@@ -177,8 +186,8 @@ class KnowledgeGraphWriter(Node):
         super().init_components(connection_manager)
         if self.entity_embedder and self.entity_embedder.is_postponed_component_init:
             self.entity_embedder.init_components(connection_manager)
-        if self._graph_store is None:
-            self._graph_store = self._build_graph_store()
+        if self.graph_store is None:
+            self.graph_store = self._build_graph_store()
         self._ensure_entity_index()
 
     def _ensure_entity_index(self) -> None:
@@ -188,7 +197,7 @@ class KnowledgeGraphWriter(Node):
         Idempotent (``IF NOT EXISTS``) and best-effort — a failure (e.g. missing privileges) only means
         retrieval falls back to a scan, so it is logged, not raised. Neo4j-only; other backends skip it.
         """
-        if not isinstance(self._graph_store, Neo4jGraphStore):
+        if not isinstance(self.graph_store, Neo4jGraphStore):
             return
         for statement, what in (
             (
@@ -202,7 +211,7 @@ class KnowledgeGraphWriter(Node):
             ),
         ):
             try:
-                self._graph_store.run_cypher(statement, database=self.database)
+                self.graph_store.run_cypher(statement, database=self.database)
             except Exception as e:
                 logger.warning(f"Node {self.name} - {self.id}: could not create entity {what} index: {e}")
 
@@ -213,7 +222,7 @@ class KnowledgeGraphWriter(Node):
         backend is unqueryable dead weight). Best-effort: any embedder failure is logged and returns ``{}`` so
         the write proceeds without embeddings.
         """
-        if not self.entity_embedder or not isinstance(self._graph_store, Neo4jGraphStore):
+        if not self.entity_embedder or not isinstance(self.graph_store, Neo4jGraphStore):
             return {}
         texts = [t for t in dict.fromkeys(texts) if (t or "").strip()]
         if not texts:
@@ -305,7 +314,7 @@ class KnowledgeGraphWriter(Node):
         Lazy from the REAL embedding length so the dimension can never mismatch the model. Idempotent
         (``IF NOT EXISTS``), best-effort (logged not raised), Neo4j-only.
         """
-        if index_name in self._vector_indexes_ready or not isinstance(self._graph_store, Neo4jGraphStore):
+        if index_name in self._vector_indexes_ready or not isinstance(self.graph_store, Neo4jGraphStore):
             return
         statement = (
             f"CREATE VECTOR INDEX {index_name} IF NOT EXISTS "
@@ -314,7 +323,7 @@ class KnowledgeGraphWriter(Node):
             "`vector.similarity_function`: 'cosine'}}"
         )
         try:
-            self._graph_store.run_cypher(statement, database=self.database)
+            self.graph_store.run_cypher(statement, database=self.database)
             self._vector_indexes_ready.add(index_name)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Node {self.name} - {self.id}: could not create vector index {index_name!r}: {e}")
@@ -351,10 +360,10 @@ class KnowledgeGraphWriter(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         check_cancellation(config)
 
-        if not self._graph_store.supports_write_graph():
+        if not self.graph_store.supports_write_graph():
             raise NotImplementedError(
                 f"{type(self).__name__}: write is not supported for backend "
-                f"{type(self._graph_store).__name__}. Only Neo4j currently implements write_graph."
+                f"{type(self.graph_store).__name__}. Only Neo4j currently implements write_graph."
             )
 
         nodes, relationships = input_data.nodes, input_data.relationships
@@ -389,7 +398,7 @@ class KnowledgeGraphWriter(Node):
             self._maybe_embed_edges(relationships, config, **kwargs)
 
         if nodes or relationships:
-            write_result = self._graph_store.write_graph(
+            write_result = self.graph_store.write_graph(
                 nodes=nodes, relationships=relationships, database=self.database
             )
         else:
@@ -441,7 +450,7 @@ class KnowledgeGraphWriter(Node):
         """
         if not document_ids:
             return {"relationships_deleted": 0, "nodes_deleted": 0}
-        totals = self._graph_store.delete_documents(
+        totals = self.graph_store.delete_documents(
             [str(document_id) for document_id in document_ids],
             doc_scoped_labels=[ATTRIBUTE_VALUE_LABEL],
             orphan_labels=[ENTITY_LABEL],
@@ -512,15 +521,15 @@ class KnowledgeGraphWriter(Node):
         on any other backend or any failure it returns an empty set, so fuzzy simply runs (never blocks
         the write).
         """
-        if not ids or not isinstance(self._graph_store, Neo4jGraphStore):
+        if not ids or not isinstance(self.graph_store, Neo4jGraphStore):
             return set()
         try:
-            records, _, _ = self._graph_store.run_cypher(
+            records, _, _ = self.graph_store.run_cypher(
                 f"UNWIND $ids AS id MATCH (n:{ENTITY_LABEL} {{id: id}}) RETURN n.id AS id",
                 parameters={"ids": list(dict.fromkeys(ids))},
                 database=self.database,
             )
-            return {r.get("id") for r in self._graph_store.format_records(records)}
+            return {r.get("id") for r in self.graph_store.format_records(records)}
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Node {self.name} - {self.id}: existing-id lookup failed ({e}); running fuzzy.")
             return set()
@@ -549,7 +558,7 @@ class KnowledgeGraphWriter(Node):
         """
         try:
             # Over-fetch (queryNodes returns nearest across ALL types) then keep this label's.
-            records, _, _ = self._graph_store.run_cypher(
+            records, _, _ = self.graph_store.run_cypher(
                 "CALL db.index.vector.queryNodes($index, $k, $vec) YIELD node "
                 "WHERE $label IN labels(node) AND node.name IS NOT NULL "
                 "RETURN node.id AS id, node.name AS name",
@@ -561,7 +570,7 @@ class KnowledgeGraphWriter(Node):
                 },
                 database=self.database,
             )
-            return [(r.get("id"), r.get("name")) for r in self._graph_store.format_records(records)]
+            return [(r.get("id"), r.get("name")) for r in self.graph_store.format_records(records)]
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 f"Node {self.name} - {self.id}: vector candidate lookup failed ({e}); " "falling back to full-text."
@@ -577,7 +586,7 @@ class KnowledgeGraphWriter(Node):
         if not lucene:
             return []
         try:
-            records, _, _ = self._graph_store.run_cypher(
+            records, _, _ = self.graph_store.run_cypher(
                 "CALL db.index.fulltext.queryNodes($index, $q) YIELD node "
                 "WHERE $label IN labels(node) AND node.name IS NOT NULL "
                 "RETURN node.id AS id, node.name AS name LIMIT $k",
@@ -589,7 +598,7 @@ class KnowledgeGraphWriter(Node):
                 },
                 database=self.database,
             )
-            return [(r.get("id"), r.get("name")) for r in self._graph_store.format_records(records)]
+            return [(r.get("id"), r.get("name")) for r in self.graph_store.format_records(records)]
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 f"Node {self.name} - {self.id}: full-text candidate lookup failed ({e}); " "using deterministic id."
@@ -650,7 +659,7 @@ class KnowledgeGraphWriter(Node):
         relationships = [{**rel} for rel in relationships]
 
         fuzzy = self.fuzzy_matching
-        use_db = fuzzy and isinstance(self._graph_store, Neo4jGraphStore)
+        use_db = fuzzy and isinstance(self.graph_store, Neo4jGraphStore)
 
         # Tier 1: deterministic id per named entity (nameless ones get a fresh uuid). One pass, so the
         # existence check below can be batched over the whole set.
