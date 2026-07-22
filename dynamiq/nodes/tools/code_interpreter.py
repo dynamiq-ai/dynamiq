@@ -403,10 +403,14 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
         super().__init__(**kwargs)
         if self.base_path != "/home/user" and self.description == DESCRIPTION_SANDBOX_INTERPRETER:
             self.description = _DESCRIPTION_TEMPLATE.replace("{home_dir}", self.base_path)
-        if self.persistent_sandbox and self.connection.api_key:
+        if self.persistent_sandbox and self._has_connection_credentials():
             self._initialize_persistent_sandbox()
         else:
             logger.debug(f"Tool {self.name} - {self.id}: Will initialize sandbox on each execute")
+
+    def _has_connection_credentials(self) -> bool:
+        """Whether the connection has credentials to eagerly initialize a persistent sandbox."""
+        return bool(getattr(self.connection, "api_key", None))
 
     @property
     def to_dict_exclude_params(self) -> set:

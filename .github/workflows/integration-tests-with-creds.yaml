@@ -37,6 +37,8 @@ jobs:
           envkey_AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           envkey_AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           envkey_AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          # Opt-in for the live Bedrock AgentCore tests; empty (unset secret) keeps them skipped.
+          envkey_BEDROCK_AGENTCORE_TESTS: ${{ secrets.BEDROCK_AGENTCORE_TESTS }}
 
       - name: Load Test Image
         uses: docker/bake-action@v5
