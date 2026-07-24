@@ -126,6 +126,11 @@ class RunnableResult(BaseModel):
         error (RunnableResultError | None): The error of the execution.
     """
 
+    # Opts into format_value()'s to_dict(skip_format_types=..., force_format_types=...)
+    # branch without format_value needing to import this class. See
+    # dynamiq.utils.utils.FORMAT_VALUE_PASSTHROUGH_ATTR.
+    __format_value_passthrough__ = True
+
     status: RunnableStatus
     input: Any = None
     output: Any = None

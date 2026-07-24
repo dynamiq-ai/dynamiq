@@ -16,6 +16,22 @@ TRUNCATE_LIST_LIMIT = 50
 
 CHARS_PER_TOKEN = 4
 
+# Dunder marker opting a class into `format_value`'s "call to_dict() with the
+# skip/force format-type sets" branch. Pydantic ignores dunder class attributes, so
+# models can set it without it becoming a field.
+#
+# This is a *structural* check on purpose. It used to be an isinstance() against
+# RunnableResult and PythonInputSchema, which required importing
+# `dynamiq.nodes.tools.python` from inside format_value. That import pulls in the whole
+# tools/provider dependency tree (litellm, openai, anthropic, playwright, stagehand,
+# daytona, e2b, neo4j, boto3, tiktoken, ... ~4.3k modules) and it fired on the first
+# traced value of any run - which is every run, via Flow._get_output -> RunnableResult
+# .to_dict -> format_value. Cost was ~5.4s on the first flow execution in a process.
+FORMAT_VALUE_PASSTHROUGH_ATTR = "__format_value_passthrough__"
+
+# Exact types (not subclasses) that format_value can return untouched.
+_PASSTHROUGH_SCALARS = frozenset({str, int, float, bool, NoneType})
+
 
 class TruncationMethod(str, Enum):
     """Enum for text truncation methods."""
@@ -314,21 +330,18 @@ def format_value(
     Returns:
         Any: Formatted value.
     """
-    from dynamiq.runnables import RunnableResult
-
-    try:
-        from dynamiq.nodes.tools.python import PythonInputSchema
-    except ImportError:
-        python_input_schema_types = ()
-    else:
-        python_input_schema_types = (PythonInputSchema,)
-
     if skip_format_types is None:
         skip_format_types = set()
     if force_format_types is None:
         force_format_types = set()
 
-    truncate_metadata = {}
+    # Scalars are returned as-is. Without this the fallback at the bottom would run a
+    # full RootModel validate+dump per leaf (~2.4us each) to hand back the same object.
+    # Guarded on force_format_types so an explicit request to format a scalar type
+    # still falls through to the slow path.
+    if not force_format_types and type(value) in _PASSTHROUGH_SCALARS:
+        return value
+
     if not isinstance(value, tuple(force_format_types)) and isinstance(
         value, tuple(skip_format_types)
     ):
@@ -374,7 +387,7 @@ def format_value(
 
         return type(value)(formatted_list)
 
-    if isinstance(value, (RunnableResult, *python_input_schema_types)):
+    if getattr(type(value), FORMAT_VALUE_PASSTHROUGH_ATTR, False):
         return value.to_dict(skip_format_types=skip_format_types, force_format_types=force_format_types)
     if isinstance(value, BaseModel):
         dict_kwargs = {"for_tracing": for_tracing} if for_tracing else {}
@@ -393,7 +406,7 @@ def format_value(
             "message": f"{str(value)}",
             "type": type(value).__name__,
             "recoverable": recoverable,
-        }, truncate_metadata
+        }
     if callable(value):
         return f"func: {getattr(value, '__name__', str(value))}"
 
