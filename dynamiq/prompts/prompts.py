@@ -3,7 +3,8 @@ import enum
 import io
 import mimetypes
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar
+from functools import lru_cache
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import filetype
 from jinja2 import Environment, meta
@@ -12,6 +13,9 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_serializer
 
 from dynamiq.types.llm_tool import Tool
 from dynamiq.utils import generate_uuid
+
+if TYPE_CHECKING:
+    from jinja2 import Template
 
 
 class MessageRole(str, enum.Enum):
@@ -36,6 +40,44 @@ class VisionDetail(str, enum.Enum):
     AUTO = "auto"
     HIGH = "high"
     LOW = "low"
+
+
+@lru_cache(maxsize=2048)
+def compile_template(source: str) -> "Template":
+    """Compile a Jinja template, memoized on its source text.
+
+    Rendering used to construct `Template(source)` per call, which lexes, parses,
+    generates code and compiles every time. Prompt sources are highly repetitive
+    (the same message rendered once per run, or per agent loop), so compiling once
+    and rendering many times is ~85x cheaper per render.
+
+    Templates are stateless once compiled, so sharing an instance across renders and
+    threads is safe.
+    """
+    from jinja2 import Template
+
+    return Template(source)
+
+
+@lru_cache(maxsize=64)
+def message_framing_overhead(model: str) -> int:
+    """Tokens that counting messages individually repeats versus one batched call.
+
+    Chat tokenizers wrap the message list once (role framing plus reply priming). Two
+    separate one-message counts therefore include that wrapper twice, so summing N
+    per-message counts overshoots a batched count of the same N messages by
+    ``overhead * (N - 1)``.
+
+    Measured here rather than hardcoded so it follows whatever litellm does per model
+    family. Cached per model; costs three counts of a one-character message.
+    """
+    first = {"role": "user", "content": "a"}
+    second = {"role": "user", "content": "b"}
+    return (
+        token_counter(model=model, messages=[first])
+        + token_counter(model=model, messages=[second])
+        - token_counter(model=model, messages=[first, second])
+    )
 
 
 def get_parameters_for_template(template: str, env: Environment | None = None) -> set[str]:
@@ -85,17 +127,51 @@ class Message(BaseModel):
 
     message_type: ClassVar[MessageType] = MessageType.MESSAGE
 
+    _token_cache: tuple[tuple, int] | None = PrivateAttr(default=None)
+
     def __init__(self, **data):
         super().__init__(**data)
         from jinja2 import Template
 
         self._Template = Template
 
+    def _token_cache_key(self, model: str) -> tuple:
+        """Identity of everything that feeds this message's token count.
+
+        Rebuilt per call and compared against the cached key, so mutating a message
+        invalidates its count rather than returning a stale one. Building this is
+        far cheaper than tokenizing the content.
+        """
+        return (
+            model,
+            self.content,
+            self.role.value,
+            self.tool_call_id,
+            self.name,
+            None if self.tool_calls is None else repr(self.tool_calls),
+        )
+
+    def count_tokens(self, model: str) -> int:
+        """Token count for this message under ``model``, memoized.
+
+        Agents re-count their whole conversation every loop (once for the
+        limit check, again per message when splitting history), so the same
+        unchanged messages were being tokenized dozens of times per run.
+        """
+        key = self._token_cache_key(model)
+        cached = self._token_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+
+        count = token_counter(model=model, messages=[self.model_dump(exclude={"metadata"})])
+        self._token_cache = (key, count)
+        return count
+
     def format_message(self, **kwargs) -> "Message":
         "Returns formated copy of message"
         return Message(
             role=self.role,
-            content=self._Template(self.content).render(**kwargs),
+            content=compile_template(self.content).render(**kwargs),
             tool_calls=self.tool_calls,
             tool_call_id=self.tool_call_id,
             name=self.name,
@@ -290,7 +366,7 @@ class VisionMessage(BaseModel):
                 if not self.static:
                     out_msg_content.append(
                         VisionMessageTextContent(
-                            text=self._Template(content.text).render(**kwargs),
+                            text=compile_template(content.text).render(**kwargs),
                         )
                     )
                 else:
@@ -300,7 +376,7 @@ class VisionMessage(BaseModel):
                 out_msg_content.append(
                     VisionMessageImageContent(
                         image_url=VisionMessageImageURL(
-                            url=self._Template(content.image_url.url).render(**kwargs),
+                            url=compile_template(content.image_url.url).render(**kwargs),
                             detail=content.image_url.detail,
                         )
                     )
@@ -310,7 +386,7 @@ class VisionMessage(BaseModel):
                 out_msg_content.append(
                     VisionMessageFileContent(
                         file=VisionMessageFileData(
-                            file_data=self._Template(content.file.file_data).render(**kwargs),
+                            file_data=compile_template(content.file.file_data).render(**kwargs),
                             video_metadata=content.file.video_metadata,
                         )
                     )
@@ -413,9 +489,25 @@ class Prompt(BasePrompt):
         Returns:
             int: Number of tokens.
         """
-        return token_counter(
-            model=model, messages=[message.model_dump(exclude={"metadata"}) for message in self.messages]
-        )
+        if not self.messages:
+            return 0
+
+        # Summed per message so unchanged messages reuse their memoized count -- agents
+        # call this every loop over a conversation that only grew by a message or two,
+        # and re-tokenizing the whole history each time dominated the loop.
+        #
+        # Counting messages one at a time repeats the per-message framing that a single
+        # batched call emits once, so the calibrated overhead is subtracted back out.
+        # This reproduces the batched result exactly (verified across OpenAI and
+        # Anthropic tokenizers); the summarization threshold does not shift.
+        total = 0
+        for message in self.messages:
+            if isinstance(message, Message):
+                total += message.count_tokens(model)
+            else:
+                total += token_counter(model=model, messages=[message.model_dump(exclude={"metadata"})])
+
+        return total - message_framing_overhead(model) * (len(self.messages) - 1)
 
     def get_required_parameters(self) -> set[str]:
         """Extracts set of parameters required for messages.

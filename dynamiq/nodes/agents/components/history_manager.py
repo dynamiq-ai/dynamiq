@@ -49,10 +49,15 @@ class HistoryManagerMixin:
 
         n_tokens, preserve_count = 0, 0
         for msg in reversed(conversation_history):
-            msg_tokens = token_counter(
-                model=self.llm.model,
-                messages=[msg.model_dump(exclude={"metadata"})],
-            )
+            # Message.count_tokens memoizes on the fields that feed the count, so
+            # re-walking an unchanged history across loops no longer re-tokenizes it.
+            if isinstance(msg, Message):
+                msg_tokens = msg.count_tokens(self.llm.model)
+            else:
+                msg_tokens = token_counter(
+                    model=self.llm.model,
+                    messages=[msg.model_dump(exclude={"metadata"})],
+                )
             if n_tokens + msg_tokens > self.summarization_config.max_preserved_tokens:
                 break
             n_tokens += msg_tokens
