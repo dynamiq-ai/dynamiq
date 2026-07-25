@@ -33,6 +33,14 @@ class FlowNodeFailureException(Exception):
         self.failed_nodes = failed_nodes or []
 
 
+class FlowStalledException(Exception):
+    """Raised when the graph reports pending work but nothing can run and nothing is pending.
+
+    Previously this state was an infinite loop: run_async spun silently and run_sync
+    spun while emitting a "not ready to run" error per iteration at ~1000/sec.
+    """
+
+
 class Flow(CheckpointFlowMixin, BaseFlow):
     """
     A class for managing and executing a graph-like structure of nodes.
@@ -659,53 +667,76 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         self.run_on_flow_start(input_data, config, **merged_kwargs)
         time_start = datetime.now()
 
+        # node_id -> in-flight task. Nodes are dispatched the moment their dependencies
+        # resolve and harvested as each one finishes, rather than gathering a whole
+        # batch and waiting for its slowest member. The old barrier meant an unrelated
+        # slow peer blocked every other branch of the DAG, making run_async slower than
+        # run_sync (whose ThreadExecutor already used FIRST_COMPLETED) on the same graph.
+        # Declared out here so the finally block can drain it on every exit path.
+        in_flight: dict[str, asyncio.Future] = {}
+
         try:
             if self.nodes:
                 node_run_kwargs = merged_kwargs | {"parent_run_id": run_id}
 
-                while self._ts.is_active():
+                while self._ts.is_active() or in_flight:
                     check_cancellation(config)
-                    ready_nodes = self._get_nodes_ready_to_run(input_data=input_data)
 
-                    if self._checkpoint:
-                        already_completed = [
-                            n.node.id for n in ready_nodes if n.node.id in self._checkpoint.completed_node_ids
-                        ]
-                        if already_completed:
-                            self._ts.done(*already_completed)
-                        ready_nodes = [n for n in ready_nodes if n.node.id not in self._checkpoint.completed_node_ids]
+                    if self._ts.is_active():
+                        ready_nodes = self._get_nodes_ready_to_run(input_data=input_data)
 
-                    nodes_to_run = [node for node in ready_nodes if node.is_ready]
+                        if self._checkpoint:
+                            already_completed = [
+                                n.node.id for n in ready_nodes if n.node.id in self._checkpoint.completed_node_ids
+                            ]
+                            if already_completed:
+                                self._ts.done(*already_completed)
+                            ready_nodes = [
+                                n for n in ready_nodes if n.node.id not in self._checkpoint.completed_node_ids
+                            ]
 
-                    if nodes_to_run:
-                        tasks = [
-                            node.node.run_async(
-                                input_data=node.input_data,
-                                depends_result=node.depends_result,
-                                config=config,
-                                executor=executor,
-                                **node_run_kwargs,
+                        for ready_node in ready_nodes:
+                            if not ready_node.is_ready or ready_node.node.id in in_flight:
+                                continue
+                            in_flight[ready_node.node.id] = asyncio.ensure_future(
+                                ready_node.node.run_async(
+                                    input_data=ready_node.input_data,
+                                    depends_result=ready_node.depends_result,
+                                    config=config,
+                                    executor=executor,
+                                    **node_run_kwargs,
+                                )
                             )
-                            for node in nodes_to_run
-                        ]
 
-                        results_list = await asyncio.gather(*tasks)
+                    if not in_flight:
+                        # The sorter still reports work but nothing can run and nothing
+                        # is pending, so no future iteration can make progress. Without
+                        # this the loop spins forever (silently here; at ~1000 error
+                        # logs/sec in run_sync).
+                        blocked = list(self._ts.get_ready())
+                        raise FlowStalledException(
+                            f"Flow {self.id}: execution stalled - no node can run and none are pending. "
+                            f"Nodes reported ready but not runnable: {blocked or 'none'}."
+                        )
 
-                        results = {node.node.id: result for node, result in zip(nodes_to_run, results_list)}
+                    done, _ = await asyncio.wait(in_flight.values(), return_when=asyncio.FIRST_COMPLETED)
 
-                        self._results.update(results)
-                        self._ts.done(*results.keys())
+                    results = {}
+                    for node_id, task in list(in_flight.items()):
+                        if task in done:
+                            del in_flight[node_id]
+                            results[node_id] = task.result()
 
-                        # If any node was canceled, propagate cancellation to the flow
-                        for node_id, result in results.items():
-                            if result.status == RunnableStatus.CANCELED:
-                                raise CanceledException()
+                    self._results.update(results)
+                    self._ts.done(*results.keys())
 
-                        if self._is_checkpoint_after_node_enabled():
-                            await self._update_checkpoint_async(results, CheckpointStatus.ACTIVE)
+                    # If any node was canceled, propagate cancellation to the flow
+                    for node_id, result in results.items():
+                        if result.status == RunnableStatus.CANCELED:
+                            raise CanceledException()
 
-                    # Wait for ready nodes to be processed and reduce CPU usage by yielding control to the event loop
-                    await asyncio.sleep(0.001)
+                    if self._is_checkpoint_after_node_enabled():
+                        await self._update_checkpoint_async(results, CheckpointStatus.ACTIVE)
 
             output = self._get_output()
             failed_nodes = self._get_failed_nodes_with_raise_behavior()
@@ -779,7 +810,17 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 error=RunnableResultError.from_exception(e, failed_nodes=failed_nodes),
             )
         finally:
-            # wait=False is safe: all node tasks have been awaited via asyncio.gather()
+            # Nodes are now dispatched individually rather than gathered, so an early
+            # exit (cancel, node failure, stall) can leave tasks running. Cancel and
+            # drain them before shutting the executor down.
+            if in_flight:
+                logger.debug(f"Flow {self.id}: draining {len(in_flight)} in-flight node task(s).")
+                for task in in_flight.values():
+                    task.cancel()
+                await asyncio.gather(*in_flight.values(), return_exceptions=True)
+                in_flight.clear()
+
+            # wait=False is safe: every node task has been awaited or drained above.
             executor.shutdown(wait=False)
             try:
                 await self._cleanup_dry_run_async(config)
@@ -823,13 +864,16 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         if not nodes_types_to_skip:
             nodes_types_to_skip = set()
 
-        dependant_nodes = self.get_dependant_nodes(
-            nodes_types_to_skip=nodes_types_to_skip
-        )
+        # Compare by id, not by `node not in dependant_nodes`: that was a list scan per
+        # node using pydantic's deep __eq__, i.e. quadratic in node count and expensive
+        # per comparison for agent/LLM nodes. This runs on a request path in callers.
+        dependant_node_ids = {
+            node.id for node in self.get_dependant_nodes(nodes_types_to_skip=nodes_types_to_skip)
+        }
         return [
             node
             for node in self.nodes
-            if node.type not in nodes_types_to_skip and node not in dependant_nodes
+            if node.type not in nodes_types_to_skip and node.id not in dependant_node_ids
         ]
 
     def add_nodes(self, nodes: Node | list[Node]):
