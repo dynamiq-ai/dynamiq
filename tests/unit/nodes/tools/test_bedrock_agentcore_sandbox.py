@@ -279,17 +279,25 @@ def test_persistent_initialization_without_connection_fields(mock_agentcore):
 
 
 def test_persistent_init_falls_back_to_lazy_on_config_error(mock_agentcore):
-    """A botocore config error during eager persistent init degrades to lazy per-execute init."""
+    """A botocore config error during eager persistent init degrades to non-persistent mode."""
     from botocore.exceptions import NoRegionError
 
     from dynamiq.nodes.tools.bedrock_agentcore_sandbox import BedrockAgentCoreInterpreterTool
+    from dynamiq.nodes.tools.code_interpreter import CodeInterpreterInputSchema
 
     mock_agentcore["client"].start_code_interpreter_session.side_effect = NoRegionError()
 
     tool = BedrockAgentCoreInterpreterTool(persistent_sandbox=True)
 
-    # Construction must not raise; sandbox stays uninitialized until first execute.
+    # Construction must not raise; degrades to non-persistent so no session is leaked.
     assert tool._sandbox is None
+    assert tool.persistent_sandbox is False
+
+    # A subsequent execute (creds now resolvable) creates AND stops its own session (no leak).
+    mock_agentcore["client"].start_code_interpreter_session.side_effect = None
+    mock_agentcore["handlers"]["executeCode"] = lambda kwargs: make_stream(make_result(stdout="ok"))
+    tool.execute(CodeInterpreterInputSchema(python="print('ok')"))
+    mock_agentcore["client"].stop_code_interpreter_session.assert_called_once()
 
 
 def test_session_timeout_clamped(mock_agentcore):

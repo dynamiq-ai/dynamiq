@@ -173,8 +173,10 @@ class AgentCoreCodeInterpreterClient:
         if not structured:
             return
         for key, value in structured.items():
-            if key in ("stdout", "stderr") and value:
-                target[key] = (target.get(key) or "") + value
+            if key in ("stdout", "stderr"):
+                # Concatenate; an empty string in a later event must not wipe accumulated output.
+                if value:
+                    target[key] = (target.get(key) or "") + value
             elif value is not None:
                 target[key] = value
 

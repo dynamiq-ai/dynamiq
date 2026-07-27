@@ -127,6 +127,17 @@ def test_invoke_merges_multiple_result_events():
     assert len(result.content) == 2
 
 
+def test_invoke_empty_stdout_does_not_wipe_accumulated_output():
+    """An empty stdout in a later event must not overwrite previously accumulated stdout."""
+    client, boto_client = make_client()
+    boto_client.invoke_code_interpreter.return_value = _stream(
+        {"content": [], "structuredContent": {"stdout": "important", "exitCode": 0}},
+        {"content": [], "structuredContent": {"stdout": "", "exitCode": 0}},
+    )
+    result = client.invoke(MagicMock(identifier="id", session_id="s"), "executeCode", {"code": "x"})
+    assert result.stdout == "important"
+
+
 def test_invoke_empty_stream():
     client, boto_client = make_client()
     boto_client.invoke_code_interpreter.return_value = _stream()

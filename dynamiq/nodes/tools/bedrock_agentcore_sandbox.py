@@ -58,11 +58,14 @@ class BedrockAgentCoreInterpreterTool(BaseCodeInterpreterTool):
         return True
 
     def _initialize_persistent_sandbox(self) -> None:
-        """Eagerly start the persistent session, degrading to lazy init on config errors.
+        """Eagerly start the persistent session, degrading gracefully on config errors.
 
         Unlike E2B/Daytona (which gate eager init on an ``api_key``), AWS credentials are
         resolved lazily by boto3, so a missing region/credentials would otherwise surface
-        as a raw botocore error inside the constructor. Fall back to per-execute creation.
+        as a raw botocore error inside the constructor. On such a failure, disable persistent
+        mode so each ``execute`` transparently creates and stops its own session — this avoids
+        both crashing construction and leaking sessions (the base ``execute`` would otherwise
+        keep creating unstored, never-stopped sessions while ``persistent_sandbox`` stays True).
         """
         from botocore.exceptions import BotoCoreError, ClientError
 
@@ -71,9 +74,10 @@ class BedrockAgentCoreInterpreterTool(BaseCodeInterpreterTool):
         except (BotoCoreError, ClientError, AgentCoreThrottlingError) as e:
             logger.warning(
                 f"Tool {self.name} - {self.id}: Could not eagerly initialize persistent AgentCore "
-                f"session ({e}); will initialize on first execute."
+                f"session ({e}); falling back to a fresh session per execution (non-persistent)."
             )
             self._sandbox = None
+            self.persistent_sandbox = False
 
     def _get_client(self) -> AgentCoreCodeInterpreterClient:
         if self._client is None:
