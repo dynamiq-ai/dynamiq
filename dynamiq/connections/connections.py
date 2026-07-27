@@ -433,35 +433,85 @@ class VertexAI(GoogleCloud):
     Represents a connection to the Vertex AI service.
 
     This connection requires additional GCP application credentials. The credentials should be provided in the
-    connection fields (related to Google Cloud) or set in the environment variables.
+    connection fields (related to Google Cloud) or set in the environment variables. If no service account
+    fields are supplied, Application Default Credentials (ADC) are used instead.
+
+    To target a self-deployed model (Model Garden / custom vLLM endpoint) rather than a managed
+    publisher model, supply either `vertex_api_base` directly, or `vertex_endpoint_id` together with
+    `vertex_endpoint_dns`.
+
+    Model Garden deployments enable a dedicated endpoint, which refuses traffic on the shared
+    `{location}-aiplatform.googleapis.com` host. The dedicated DNS is not derivable from the project
+    id or number - read it from the API:
+
+        gcloud ai endpoints describe {ENDPOINT_ID} --region={LOCATION} \
+            --format='value(dedicatedEndpointDns)'
 
     Attributes:
         vertex_project_id (str): The GCP project ID.
         vertex_project_location (str): The location of the GCP project.
+        vertex_endpoint_id (str): Optional id of a self-deployed Vertex endpoint.
+        vertex_endpoint_dns (str): Optional dedicated endpoint DNS for that endpoint.
+        vertex_api_base (str): Optional fully-built API base, overriding the two fields above.
     """
 
     vertex_project_id: str = Field(default_factory=partial(get_env_var, "VERTEXAI_PROJECT_ID"))
     vertex_project_location: str = Field(default_factory=partial(get_env_var, "VERTEXAI_PROJECT_LOCATION"))
+    vertex_endpoint_id: str | None = Field(default_factory=partial(get_env_var, "VERTEXAI_ENDPOINT_ID", None))
+    vertex_endpoint_dns: str | None = Field(default_factory=partial(get_env_var, "VERTEXAI_ENDPOINT_DNS", None))
+    vertex_api_base: str | None = Field(default_factory=partial(get_env_var, "VERTEXAI_API_BASE", None))
 
     def connect(self):
         pass
+
+    @property
+    def api_base(self) -> str | None:
+        """Build the API base for a self-deployed Vertex endpoint, if one is configured.
+
+        LiteLLM only ever builds the shared `{location}-aiplatform.googleapis.com` host for
+        `vertex_ai/openai/*` models, so a dedicated endpoint has to be addressed explicitly.
+
+        Returns:
+            str | None: The api base, or None when no self-deployed endpoint is configured.
+        """
+        if self.vertex_api_base:
+            return self.vertex_api_base.rstrip("/")
+
+        if not (self.vertex_endpoint_id and self.vertex_endpoint_dns):
+            return None
+
+        host = self.vertex_endpoint_dns.rstrip("/").removeprefix("https://").removeprefix("http://")
+        return (
+            f"https://{host}/v1/projects/{self.vertex_project_id}"
+            f"/locations/{self.vertex_project_location}/endpoints/{self.vertex_endpoint_id}"
+        )
 
     @property
     def conn_params(self):
         """
         Returns the parameters required for the connection.
 
-        This property returns a dictionary containing the project ID and project location.
+        Includes `vertex_credentials` only when service account fields are actually populated,
+        so that LiteLLM falls back to Application Default Credentials otherwise. Includes
+        `api_base` only when a self-deployed endpoint is configured.
 
         Returns:
-            dict: A dictionary with the keys 'vertex_project' and 'vertex_location'.
+            dict: A dictionary with the keys 'vertex_project' and 'vertex_location', plus
+                'vertex_credentials' and 'api_base' when available.
         """
-        vertex_credentials = json.dumps(super().conn_params.copy())
-        return {
+        params = {
             "vertex_project": self.vertex_project_id,
             "vertex_location": self.vertex_project_location,
-            "vertex_credentials": vertex_credentials,
         }
+
+        service_account = super().conn_params.copy()
+        if any(value for value in service_account.values()):
+            params["vertex_credentials"] = json.dumps(service_account)
+
+        if api_base := self.api_base:
+            params["api_base"] = api_base
+
+        return params
 
 
 class Cohere(BaseApiKeyConnection):
