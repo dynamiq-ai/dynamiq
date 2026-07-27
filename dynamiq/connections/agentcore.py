@@ -1,6 +1,7 @@
 import posixpath
 import uuid
-from dataclasses import dataclass, field
+
+from pydantic import BaseModel, Field
 
 from dynamiq.connections import AWS as AWSConnection
 from dynamiq.utils.logger import logger
@@ -38,20 +39,18 @@ def _error_code(error: Exception) -> str:
     return (response.get("Error") or {}).get("Code", "") or ""
 
 
-@dataclass
-class AgentCoreSession:
+class AgentCoreSession(BaseModel):
     """Handle for a running AgentCore code interpreter session."""
 
     identifier: str
     session_id: str
 
 
-@dataclass
-class AgentCoreInvocationResult:
+class AgentCoreInvocationResult(BaseModel):
     """Normalized result of an AgentCore code interpreter invocation."""
 
-    content: list[dict] = field(default_factory=list)
-    structured: dict = field(default_factory=dict)
+    content: list[dict] = Field(default_factory=list)
+    structured: dict = Field(default_factory=dict)
     is_error: bool = False
 
     @property

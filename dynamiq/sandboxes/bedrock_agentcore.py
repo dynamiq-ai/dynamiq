@@ -63,8 +63,17 @@ class BedrockAgentCoreSandbox(Sandbox):
         return self._client
 
     def _resolve_path(self, file_path: str) -> str:
-        """Resolve relative file paths against the workspace-relative base path."""
-        return normalize_sandbox_path(super()._resolve_path(file_path))
+        """Resolve a path against the workspace-relative base path, applying the prefix at most once.
+
+        Idempotent: a path that is already absolute or already under ``base_path`` is returned
+        unchanged, so callers that pre-resolve (e.g. ``collect_files``/``delete_file`` in the base
+        class) do not double the prefix into ``base/base/...``.
+        """
+        normalized = normalize_sandbox_path(file_path)
+        base = normalize_sandbox_path(self.base_path)
+        if base in (".", "") or normalized.startswith("/") or normalized == base or normalized.startswith(f"{base}/"):
+            return normalized
+        return normalize_sandbox_path(f"{base}/{normalized}")
 
     def _ensure_sandbox(self) -> AgentCoreSession:
         """Lazily start or reconnect to an AgentCore session, with retries on throttling.
@@ -107,12 +116,6 @@ class BedrockAgentCoreSandbox(Sandbox):
                 logger.debug(f"BedrockAgentCoreSandbox ensured directory exists: {self.base_path}")
         except Exception as e:
             logger.warning(f"BedrockAgentCoreSandbox failed to create directory: {e}")
-
-    def _with_base_path(self, command: str) -> str:
-        """Prefix a ``cd`` into base_path so agent-relative commands resolve like uploaded files."""
-        if self.base_path in (".", ""):
-            return command
-        return f"cd {shlex.quote(self.base_path)} && {command}"
 
     def _reconnect_with_retry(self) -> AgentCoreSession:
         """Reconnect to an existing session with exponential backoff on throttling."""
@@ -178,26 +181,28 @@ class BedrockAgentCoreSandbox(Sandbox):
     ) -> ShellCommandResult:
         """Execute a shell command in the AgentCore session.
 
-        The command runs from ``base_path`` and, when ``timeout`` is positive, is wrapped
-        with the ``timeout`` coreutils command (a non-zero exit, e.g. 124, surfaces as a
-        failed result) since AgentCore has no per-invocation timeout parameter.
+        Commands run from the session workspace root; ``base_path`` is applied to file
+        operations via :meth:`_resolve_path` (not via ``cd``), so callers passing already
+        resolved paths are not double-prefixed. When ``timeout`` is positive the command is
+        wrapped with the ``timeout`` coreutils command (a non-zero exit, e.g. 124, surfaces
+        as a failed result) since AgentCore has no per-invocation timeout parameter.
         """
         session = self._ensure_sandbox()
         logger.debug(f"BedrockAgentCoreSandbox running command: {command[:100]}...")
 
         try:
             if run_in_background_enabled:
-                result = self._get_client().invoke(
-                    session, "startCommandExecution", {"command": self._with_base_path(command)}
-                )
+                result = self._get_client().invoke(session, "startCommandExecution", {"command": command})
+                if result.is_error:
+                    return ShellCommandResult(error=result.error_text)
                 task_id = (result.structured or {}).get("taskId")
                 if task_id:
                     logger.debug(f"BedrockAgentCoreSandbox started background task: {task_id}")
                 return ShellCommandResult(background=True)
 
-            executed = self._with_base_path(command)
+            executed = command
             if timeout and timeout > 0:
-                executed = f"timeout {int(timeout)}s sh -c {shlex.quote(executed)}"
+                executed = f"timeout {int(timeout)}s sh -c {shlex.quote(command)}"
             result = self._get_client().invoke(session, "executeCommand", {"command": executed})
             return ShellCommandResult(
                 stdout=result.stdout,

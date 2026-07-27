@@ -77,8 +77,23 @@ def test_run_command_shell(agentcore_sandbox, mock_agentcore_env):
     assert commands == ["timeout 30s sh -c 'echo hello world'"]
 
 
-def test_run_command_shell_cd_into_base_path(mock_agentcore_env):
-    """With a non-default base_path, commands run from that directory."""
+def test_custom_base_path_resolves_once(mock_agentcore_env):
+    """A custom relative base_path is applied exactly once (idempotent), never doubled."""
+    from dynamiq.sandboxes.bedrock_agentcore import BedrockAgentCoreSandbox
+
+    sandbox = BedrockAgentCoreSandbox(
+        connection=AWSConnection(access_key_id="k", secret_access_key="s", region="us-west-2"),
+        base_path="workspace/agent1",
+    )
+
+    assert sandbox._resolve_path("x") == "workspace/agent1/x"
+    # Already-prefixed and absolute paths pass through unchanged (no base/base/... doubling).
+    assert sandbox._resolve_path("workspace/agent1/x") == "workspace/agent1/x"
+    assert sandbox._resolve_path("/abs/x") == "/abs/x"
+
+
+def test_delete_file_targets_single_prefixed_path(mock_agentcore_env):
+    """delete_file (base class) resolves once and the shell command is not double-prefixed."""
     from dynamiq.sandboxes.bedrock_agentcore import BedrockAgentCoreSandbox
 
     sandbox = BedrockAgentCoreSandbox(
@@ -89,13 +104,14 @@ def test_run_command_shell_cd_into_base_path(mock_agentcore_env):
 
     def handler(kwargs):
         commands.append(kwargs["arguments"]["command"])
-        return make_stream(make_result(stdout="ok"))
+        return make_stream(make_result(exit_code=0))
 
     mock_agentcore_env["handlers"]["executeCommand"] = handler
 
-    sandbox.run_command_shell("ls", timeout=0)
+    sandbox.delete_file("x")
 
-    assert commands[-1] == "cd workspace/agent1 && ls"
+    assert any("workspace/agent1/x" in c for c in commands)
+    assert not any("workspace/agent1/workspace/agent1" in c for c in commands)
 
 
 def test_run_command_shell_background(agentcore_sandbox, mock_agentcore_env):
@@ -105,6 +121,19 @@ def test_run_command_shell_background(agentcore_sandbox, mock_agentcore_env):
     assert result.background is True
     calls = mock_agentcore_env["client"].invoke_code_interpreter.call_args_list
     assert any(c.kwargs["name"] == "startCommandExecution" for c in calls)
+
+
+def test_run_command_shell_background_failure(agentcore_sandbox, mock_agentcore_env):
+    """A failed background start (isError) surfaces as an error, not a success."""
+    mock_agentcore_env["handlers"]["startCommandExecution"] = lambda kwargs: make_stream(
+        make_result(stderr="could not start", is_error=True)
+    )
+
+    result = agentcore_sandbox.run_command_shell("bad-cmd", run_in_background_enabled=True)
+
+    assert not result.is_success
+    assert result.background is False
+    assert "could not start" in result.error
 
 
 def test_run_command_shell_error(agentcore_sandbox, mock_agentcore_env):
