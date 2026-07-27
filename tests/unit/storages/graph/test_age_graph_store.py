@@ -18,7 +18,7 @@ def test_age_write_graph_is_gated_off():
     assert store.supports_write_graph() is False
     with pytest.raises(NotImplementedError):
         store.write_graph(
-            nodes=[{"labels": ["PERSON"], "identity_key": "id", "properties": {"id": "jane"}}],
+            nodes=[{"labels": ["PERSON"], "id": "jane", "properties": {}}],
             relationships=[],
         )
 

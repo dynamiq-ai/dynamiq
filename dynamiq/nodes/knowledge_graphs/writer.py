@@ -2,7 +2,7 @@ import re
 from typing import Any, ClassVar, Literal
 from uuid import NAMESPACE_DNS, uuid5
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from dynamiq.connections import ApacheAGE, AWSNeptune, Neo4j
 from dynamiq.connections.managers import ConnectionManager
@@ -14,7 +14,6 @@ from dynamiq.nodes.knowledge_graphs.entity_extractor import (
     ENTITY_LABEL,
     ENTITY_NAME_FULLTEXT_INDEX,
     HAS_ATTRIBUTE_TYPE,
-    KG_ENTITY_IDS_KEY,
     build_attribute_value_id,
     build_fact_text,
     normalize_name,
@@ -58,46 +57,18 @@ def _trigram_similarity(a: str, b: str) -> float:
     return len(ta & tb) / len(ta | tb)  # Jaccard
 
 
-def _entity_ids_by_doc(relationships: list[dict]) -> dict[str, list[str]]:
-    """Map each source document id -> the RESOLVED entity ids it mentions, recovered from relationships.
-
-    Relationships carry ``source_doc_id`` (stamped by EntityExtractor) and, after resolution, durable
-    endpoint ids. The entity ids a chunk mentions are therefore the endpoints of the relationships sourced
-    from that chunk. ``HAS_ATTRIBUTE`` edges point at an ``AttributeValue`` holder, not an entity, so their
-    end id is excluded (the owner entity on the start side is still kept).
-    """
-    by_doc: dict[str, set[str]] = {}
-    for rel in relationships:
-        doc_id = (rel.get("properties") or {}).get("source_doc_id")
-        if not doc_id:
-            continue
-        ids = by_doc.setdefault(str(doc_id), set())
-        if rel.get("start_identity"):
-            ids.add(rel["start_identity"])
-        if rel.get("type") != HAS_ATTRIBUTE_TYPE and rel.get("end_identity"):
-            ids.add(rel["end_identity"])
-    return {doc_id: sorted(ids) for doc_id, ids in by_doc.items()}
-
-
 class KnowledgeGraphWriterInputSchema(BaseModel):
-    """Input for the writer: an ``EntityExtractor``'s output payload.
-
-    ``nodes`` / ``relationships`` are the provider-neutral graph payload; ``documents`` are the source
-    chunks the payload was extracted from, tagged on output with the resolved entity ids they mention.
-    """
+    """Input for the writer: an ``EntityExtractor``'s output payload (the provider-neutral graph)."""
 
     nodes: list[dict] = Field(default_factory=list, description="Extracted graph nodes (EntityExtractor output).")
     relationships: list[dict] = Field(default_factory=list, description="Extracted graph relationships.")
-    documents: list[Document] = Field(
-        default_factory=list, description="Source chunks to tag with the resolved entity ids each mentions."
-    )
 
 
 class KnowledgeGraphWriter(Node):
     """Writes an extracted knowledge graph to a graph store, assigning durable entity identity first.
 
     Consumes an :class:`~dynamiq.nodes.extractors.entity_extractor.EntityExtractor`'s output
-    (``{nodes, relationships, documents}``) and:
+    (``{nodes, relationships}``) and:
 
       1. Write-time entity resolution: node identity is decided by NAME similarity only — the
          LLM-produced ids are just wiring that links edges to entities within one extraction and
@@ -106,8 +77,6 @@ class KnowledgeGraphWriter(Node):
          otherwise it is written as a new node under a fresh UUID. Re-running ingestion therefore
          converges onto existing entities instead of duplicating them.
       2. Upsert into the graph backend via ``BaseGraphStore.write_graph``.
-      3. Tag each source chunk with the resolved entity ids it mentions (``kg_entity_ids``) so the
-         chunk can go to a vector store and a hybrid retriever can seed graph traversal by unique id.
 
     Split from extraction so extraction can be parallelized in a flow: many ``EntityExtractor`` nodes
     (each on a shard of documents) can fan into a SINGLE ``KnowledgeGraphWriter``. The writer must stay
@@ -119,11 +88,14 @@ class KnowledgeGraphWriter(Node):
     requires a store that implements ``write_graph`` — currently Neo4j; other backends raise a
     clear error until their stores add it.
 
-    Input: ``{"nodes": [...], "relationships": [...], "documents": [Document, ...]}``.
-    Output: the resolved payload plus ``write_stats`` and ``nodes_created`` / ``relationships_created``.
+    Input: ``{"nodes": [...], "relationships": [...]}``.
+    Output: ``{"nodes_created": int, "relationships_created": int}`` — the write counts.
 
     Attributes:
-        connection (Neo4j | ApacheAGE | AWSNeptune): The graph backend connection.
+        connection (Neo4j | ApacheAGE | AWSNeptune | None): The graph backend connection. Optional when
+            an already-initialized ``graph_store`` is provided instead.
+        graph_store (BaseGraphStore | None): An already-initialized graph store to use directly, as an
+            alternative to ``connection`` (mirrors how other nodes accept ``vector_store``).
         database (str | None): Optional target database (Neo4j).
         graph_name (str | None): Graph name (Apache AGE).
         create_graph_if_not_exists (bool): Create the AGE graph if missing.
@@ -146,24 +118,30 @@ class KnowledgeGraphWriter(Node):
 
     group: Literal[NodeGroup.EXTRACTORS] = NodeGroup.EXTRACTORS
     name: str = "knowledge-graph-writer"
-    connection: Neo4j | ApacheAGE | AWSNeptune
+    connection: Neo4j | ApacheAGE | AWSNeptune | None = None
+    graph_store: BaseGraphStore | None = None
     database: str | None = None
     graph_name: str | None = None
     create_graph_if_not_exists: bool = False
     similarity_threshold: float = 0.6
-    fuzzy_matching: bool = True  # deterministic id is always the base; this toggles the optional fuzzy tier
+    fuzzy_matching: bool = True
     resolution_top_k: int = 10
     entity_embedder: DocumentEmbedder | None = None
 
     input_schema: ClassVar[type[KnowledgeGraphWriterInputSchema]] = KnowledgeGraphWriterInputSchema
-    _graph_store: BaseGraphStore | None = PrivateAttr(default=None)
     # Vector indexes ensured this process (by name) — created lazily on first embed from the real embedding
     # length so a dimension can never mismatch the embedder's model.
     _vector_indexes_ready: set[str] = PrivateAttr(default_factory=set)
 
+    @model_validator(mode="after")
+    def validate_connection_store(self):
+        if not self.graph_store and not self.connection:
+            raise ValueError("'connection' or 'graph_store' should be specified")
+        return self
+
     @property
     def to_dict_exclude_params(self) -> dict:
-        return super().to_dict_exclude_params | {"entity_embedder": True}
+        return super().to_dict_exclude_params | {"entity_embedder": True, "graph_store": True}
 
     def to_dict(self, **kwargs) -> dict:
         data = super().to_dict(**kwargs)
@@ -177,8 +155,8 @@ class KnowledgeGraphWriter(Node):
         super().init_components(connection_manager)
         if self.entity_embedder and self.entity_embedder.is_postponed_component_init:
             self.entity_embedder.init_components(connection_manager)
-        if self._graph_store is None:
-            self._graph_store = self._build_graph_store()
+        if self.graph_store is None:
+            self.graph_store = self._build_graph_store()
         self._ensure_entity_index()
 
     def _ensure_entity_index(self) -> None:
@@ -188,7 +166,7 @@ class KnowledgeGraphWriter(Node):
         Idempotent (``IF NOT EXISTS``) and best-effort — a failure (e.g. missing privileges) only means
         retrieval falls back to a scan, so it is logged, not raised. Neo4j-only; other backends skip it.
         """
-        if not isinstance(self._graph_store, Neo4jGraphStore):
+        if not isinstance(self.graph_store, Neo4jGraphStore):
             return
         for statement, what in (
             (
@@ -202,7 +180,7 @@ class KnowledgeGraphWriter(Node):
             ),
         ):
             try:
-                self._graph_store.run_cypher(statement, database=self.database)
+                self.graph_store.run_cypher(statement, database=self.database)
             except Exception as e:
                 logger.warning(f"Node {self.name} - {self.id}: could not create entity {what} index: {e}")
 
@@ -213,7 +191,7 @@ class KnowledgeGraphWriter(Node):
         backend is unqueryable dead weight). Best-effort: any embedder failure is logged and returns ``{}`` so
         the write proceeds without embeddings.
         """
-        if not self.entity_embedder or not isinstance(self._graph_store, Neo4jGraphStore):
+        if not self.entity_embedder or not isinstance(self.graph_store, Neo4jGraphStore):
             return {}
         texts = [t for t in dict.fromkeys(texts) if (t or "").strip()]
         if not texts:
@@ -240,11 +218,7 @@ class KnowledgeGraphWriter(Node):
         """Embed every entity node's NAME (one call) → ``{name: vector}``. Reused for the fuzzy candidate
         lookup (Tier 2 of resolution) and node storage. ``AttributeValue`` holders are doc-scoped values, not
         entities that get seeded/matched on, so they're skipped."""
-        names = [
-            n["properties"]["name"]
-            for n in nodes
-            if n["labels"][0] != ATTRIBUTE_VALUE_LABEL and (n["properties"].get("name") or "").strip()
-        ]
+        names = [n["name"] for n in nodes if n["labels"][0] != ATTRIBUTE_VALUE_LABEL and (n.get("name") or "").strip()]
         return self._embed_texts(names, config, **kwargs)
 
     @staticmethod
@@ -258,7 +232,7 @@ class KnowledgeGraphWriter(Node):
         for node in nodes:
             if node["labels"][0] == ATTRIBUTE_VALUE_LABEL:
                 continue
-            embedding = name_vectors.get(node["properties"].get("name"))
+            embedding = name_vectors.get(node.get("name"))
             if embedding is not None:
                 node["properties"]["embedding"] = embedding
         return nodes
@@ -268,15 +242,16 @@ class KnowledgeGraphWriter(Node):
         """The triplet text to embed for an edge, or ``None`` when it can't be rendered (missing names).
 
         Mirrors ``GraphRetriever``'s render: the attribute KEY is the relation for ``HAS_ATTRIBUTE`` edges,
-        else the relationship type; the edge's own ``src_name``/``dst_name`` snapshots are the endpoints.
+        else the relationship type; the endpoint nodes' ``name`` snapshots are the fact's endpoints.
         """
         props = rel.get("properties") or {}
         rel_type = rel.get("type") or ""
-        src_name, dst_name = props.get("src_name"), props.get("dst_name")
+        src_name = (rel.get("start_node") or {}).get("name")
+        dst_name = (rel.get("end_node") or {}).get("name")
         if not (rel_type and src_name and dst_name):
             return None
         rel_label = props["key"] if rel_type == HAS_ATTRIBUTE_TYPE and props.get("key") else rel_type
-        return build_fact_text(src_name, rel_label, dst_name, props.get("description"))
+        return build_fact_text(src_name, rel_label, dst_name, rel.get("description"))
 
     def _maybe_embed_edges(self, relationships: list[dict], config: RunnableConfig, **kwargs) -> None:
         """Embed each relationship's triplet and store it on the EDGE (``properties['embedding']``), in place.
@@ -305,7 +280,7 @@ class KnowledgeGraphWriter(Node):
         Lazy from the REAL embedding length so the dimension can never mismatch the model. Idempotent
         (``IF NOT EXISTS``), best-effort (logged not raised), Neo4j-only.
         """
-        if index_name in self._vector_indexes_ready or not isinstance(self._graph_store, Neo4jGraphStore):
+        if index_name in self._vector_indexes_ready or not isinstance(self.graph_store, Neo4jGraphStore):
             return
         statement = (
             f"CREATE VECTOR INDEX {index_name} IF NOT EXISTS "
@@ -314,7 +289,7 @@ class KnowledgeGraphWriter(Node):
             "`vector.similarity_function`: 'cosine'}}"
         )
         try:
-            self._graph_store.run_cypher(statement, database=self.database)
+            self.graph_store.run_cypher(statement, database=self.database)
             self._vector_indexes_ready.add(index_name)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Node {self.name} - {self.id}: could not create vector index {index_name!r}: {e}")
@@ -351,21 +326,21 @@ class KnowledgeGraphWriter(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         check_cancellation(config)
 
-        if not self._graph_store.supports_write_graph():
+        if not self.graph_store.supports_write_graph():
             raise NotImplementedError(
                 f"{type(self).__name__}: write is not supported for backend "
-                f"{type(self._graph_store).__name__}. Only Neo4j currently implements write_graph."
+                f"{type(self.graph_store).__name__}. Only Neo4j currently implements write_graph."
             )
 
         nodes, relationships = input_data.nodes, input_data.relationships
 
         # Resolution only rewrites endpoints found among `nodes`. An endpoint absent from `nodes` can't be
-        # resolved -- it would get an ephemeral id that matches no graph node (no edge) and mis-tags chunks.
+        # resolved -- it would get an ephemeral id that matches no graph node, leaving a dangling edge.
         # Reject such payloads instead of silently writing nothing useful.
         if relationships:
-            node_ids = {n["properties"]["id"] for n in nodes}
+            node_ids = {n["id"] for n in nodes}
             dangling = [
-                r for r in relationships if r["start_identity"] not in node_ids or r["end_identity"] not in node_ids
+                r for r in relationships if r["start_node"]["id"] not in node_ids or r["end_node"]["id"] not in node_ids
             ]
             if dangling:
                 raise ValueError(
@@ -389,7 +364,7 @@ class KnowledgeGraphWriter(Node):
             self._maybe_embed_edges(relationships, config, **kwargs)
 
         if nodes or relationships:
-            write_result = self._graph_store.write_graph(
+            write_result = self.graph_store.write_graph(
                 nodes=nodes, relationships=relationships, database=self.database
             )
         else:
@@ -406,15 +381,7 @@ class KnowledgeGraphWriter(Node):
             f"{write_result.get('relationships_created')} new relationship(s)."
         )
 
-        # Return the input chunks tagged with the RESOLVED entity ids each mentions, so they can go to a
-        # vector store and a hybrid retriever can seed graph traversal by unique id (not by ambiguous name).
-        documents = self._attach_entity_ids(input_data.documents, relationships)
-
         return {
-            "nodes": nodes,
-            "relationships": relationships,
-            "documents": documents,
-            "write_stats": write_result,
             "nodes_created": write_result.get("nodes_created"),
             "relationships_created": write_result.get("relationships_created"),
         }
@@ -441,7 +408,7 @@ class KnowledgeGraphWriter(Node):
         """
         if not document_ids:
             return {"relationships_deleted": 0, "nodes_deleted": 0}
-        totals = self._graph_store.delete_documents(
+        totals = self.graph_store.delete_documents(
             [str(document_id) for document_id in document_ids],
             doc_scoped_labels=[ATTRIBUTE_VALUE_LABEL],
             orphan_labels=[ENTITY_LABEL],
@@ -459,9 +426,8 @@ class KnowledgeGraphWriter(Node):
         """Drop nodes referenced by NO relationship (bare mentions) instead of writing them.
 
         All provenance and ACL live on edges, so a bare node could never be attributed to any document:
-        retrieval (edge-driven) cannot reach it, no chunk references it (``kg_entity_ids`` come from
-        relationship endpoints), and ``delete_documents`` could never remove it — the orphan sweep only
-        examines endpoints of removed edges. Skipping the write keeps the invariant that everything
+        retrieval (edge-driven) cannot reach it, and ``delete_documents`` could never remove it — the
+        orphan sweep only examines endpoints of removed edges. Skipping the write keeps the invariant that everything
         persisted is reachable through at least one provenance-stamped edge, so deleting a document
         provably removes all it contributed. Nothing is lost: entity ids are content-addressed
         (``uuid5`` of label + normalized name), so a future document asserting a fact about the same
@@ -469,30 +435,14 @@ class KnowledgeGraphWriter(Node):
         """
         if not nodes:
             return nodes
-        referenced = {r["start_identity"] for r in relationships} | {r["end_identity"] for r in relationships}
-        kept = [node for node in nodes if node["properties"]["id"] in referenced]
+        referenced = {r["start_node"]["id"] for r in relationships} | {r["end_node"]["id"] for r in relationships}
+        kept = [node for node in nodes if node["id"] in referenced]
         if len(kept) != len(nodes):
             logger.info(
                 f"Node {self.name} - {self.id}: skipping {len(nodes) - len(kept)} bare node(s) "
                 "referenced by no relationship."
             )
         return kept
-
-    @staticmethod
-    def _attach_entity_ids(documents: list, relationships: list[dict]) -> list:
-        """Return COPIES of the chunks, each with ``kg_entity_ids`` = the resolved entity ids it mentions.
-
-        Recovered from the resolved relationships by ``source_doc_id`` (see :func:`_entity_ids_by_doc`).
-        The caller's documents are not mutated. A chunk whose entities appear in no relationship gets an
-        empty list — it still flows to the vector store, just with no graph seeds.
-        """
-        by_doc = _entity_ids_by_doc(relationships)
-        enriched = []
-        for document in documents:
-            ids = by_doc.get(str(document.id), [])
-            metadata = {**(document.metadata or {}), KG_ENTITY_IDS_KEY: ids}
-            enriched.append(document.model_copy(update={"metadata": metadata}))
-        return enriched
 
     @staticmethod
     def _deterministic_id(label: str, name: str) -> str:
@@ -512,15 +462,15 @@ class KnowledgeGraphWriter(Node):
         on any other backend or any failure it returns an empty set, so fuzzy simply runs (never blocks
         the write).
         """
-        if not ids or not isinstance(self._graph_store, Neo4jGraphStore):
+        if not ids or not isinstance(self.graph_store, Neo4jGraphStore):
             return set()
         try:
-            records, _, _ = self._graph_store.run_cypher(
+            records, _, _ = self.graph_store.run_cypher(
                 f"UNWIND $ids AS id MATCH (n:{ENTITY_LABEL} {{id: id}}) RETURN n.id AS id",
                 parameters={"ids": list(dict.fromkeys(ids))},
                 database=self.database,
             )
-            return {r.get("id") for r in self._graph_store.format_records(records)}
+            return {r.get("id") for r in self.graph_store.format_records(records)}
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Node {self.name} - {self.id}: existing-id lookup failed ({e}); running fuzzy.")
             return set()
@@ -549,7 +499,7 @@ class KnowledgeGraphWriter(Node):
         """
         try:
             # Over-fetch (queryNodes returns nearest across ALL types) then keep this label's.
-            records, _, _ = self._graph_store.run_cypher(
+            records, _, _ = self.graph_store.run_cypher(
                 "CALL db.index.vector.queryNodes($index, $k, $vec) YIELD node "
                 "WHERE $label IN labels(node) AND node.name IS NOT NULL "
                 "RETURN node.id AS id, node.name AS name",
@@ -561,7 +511,7 @@ class KnowledgeGraphWriter(Node):
                 },
                 database=self.database,
             )
-            return [(r.get("id"), r.get("name")) for r in self._graph_store.format_records(records)]
+            return [(r.get("id"), r.get("name")) for r in self.graph_store.format_records(records)]
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 f"Node {self.name} - {self.id}: vector candidate lookup failed ({e}); " "falling back to full-text."
@@ -577,7 +527,7 @@ class KnowledgeGraphWriter(Node):
         if not lucene:
             return []
         try:
-            records, _, _ = self._graph_store.run_cypher(
+            records, _, _ = self.graph_store.run_cypher(
                 "CALL db.index.fulltext.queryNodes($index, $q) YIELD node "
                 "WHERE $label IN labels(node) AND node.name IS NOT NULL "
                 "RETURN node.id AS id, node.name AS name LIMIT $k",
@@ -589,7 +539,7 @@ class KnowledgeGraphWriter(Node):
                 },
                 database=self.database,
             )
-            return [(r.get("id"), r.get("name")) for r in self._graph_store.format_records(records)]
+            return [(r.get("id"), r.get("name")) for r in self.graph_store.format_records(records)]
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 f"Node {self.name} - {self.id}: full-text candidate lookup failed ({e}); " "using deterministic id."
@@ -642,15 +592,19 @@ class KnowledgeGraphWriter(Node):
         already saved, a bounded index-backed candidate lookup + trigram confirm may adopt an existing
         entity's id instead. ``AttributeValue`` ids are re-derived from their owner's resolved id.
 
-        Works on copies of the caller's dicts (rewrites ``properties["id"]``, strips the transient
+        Works on copies of the caller's dicts (rewrites the top-level ``id``, strips the transient
         ``attr_ref``), so the input stays writable a second time.
         """
         name_vectors = name_vectors or {}
-        nodes = [{**node, "properties": {**node["properties"]}} for node in nodes]
-        relationships = [{**rel} for rel in relationships]
+        nodes = [{**node, "properties": {**(node.get("properties") or {})}} for node in nodes]
+        # Copy the endpoint nodes too: their `id` is rewritten below, and a bare `{**rel}` would share the
+        # nested start_node/end_node dicts with the caller's input (which must stay writable a second time).
+        relationships = [
+            {**rel, "start_node": {**rel["start_node"]}, "end_node": {**rel["end_node"]}} for rel in relationships
+        ]
 
         fuzzy = self.fuzzy_matching
-        use_db = fuzzy and isinstance(self._graph_store, Neo4jGraphStore)
+        use_db = fuzzy and isinstance(self.graph_store, Neo4jGraphStore)
 
         # Tier 1: deterministic id per named entity (nameless ones get a fresh uuid). One pass, so the
         # existence check below can be batched over the whole set.
@@ -658,10 +612,10 @@ class KnowledgeGraphWriter(Node):
         for node in nodes:
             if node["labels"][0] == ATTRIBUTE_VALUE_LABEL:
                 continue
-            old_id = node["properties"]["id"]
+            old_id = node["id"]
             if old_id in det_by_old:
                 continue  # wiring ids are doc-scoped, so a repeat means the same in-document entity
-            name = node["properties"].get("name")
+            name = node.get("name")
             # Gate on the NORMALIZED name: a name that is only whitespace/apostrophes normalizes to "" and
             # must stay nameless (fresh uuid), else every such entity would collide on the "{label}:" id.
             det_by_old[old_id] = (
@@ -680,10 +634,10 @@ class KnowledgeGraphWriter(Node):
             label = node["labels"][0]
             if label == ATTRIBUTE_VALUE_LABEL:
                 continue
-            old_id = node["properties"]["id"]
+            old_id = node["id"]
             if old_id in id_remap:
                 continue
-            name = node["properties"].get("name")
+            name = node.get("name")
             det_id = det_by_old[old_id]
             resolved = det_id
             if fuzzy and name and det_id not in already_saved:
@@ -703,25 +657,25 @@ class KnowledgeGraphWriter(Node):
             if node["labels"][0] != ATTRIBUTE_VALUE_LABEL:
                 continue
             ref = node.pop("attr_ref", None)
-            old_id = node["properties"]["id"]
+            old_id = node["id"]
             if ref and ref["owner"] in id_remap:
                 id_remap[old_id] = build_attribute_value_id(id_remap[ref["owner"]], ref["key"], ref["doc"])
 
         for node in nodes:
-            nid = node["properties"]["id"]
+            nid = node["id"]
             if nid in id_remap:
-                node["properties"]["id"] = id_remap[nid]
+                node["id"] = id_remap[nid]
         for rel in relationships:
-            if rel["start_identity"] in id_remap:
-                rel["start_identity"] = id_remap[rel["start_identity"]]
-            if rel["end_identity"] in id_remap:
-                rel["end_identity"] = id_remap[rel["end_identity"]]
+            if rel["start_node"]["id"] in id_remap:
+                rel["start_node"]["id"] = id_remap[rel["start_node"]["id"]]
+            if rel["end_node"]["id"] in id_remap:
+                rel["end_node"]["id"] = id_remap[rel["end_node"]["id"]]
 
         # Two extracted entities can resolve to the same node -> dedupe by (label, id).
         seen: set[tuple[str, str]] = set()
         deduped: list[dict] = []
         for node in nodes:
-            key = (node["labels"][0], node["properties"]["id"])
+            key = (node["labels"][0], node["id"])
             if key in seen:
                 continue
             seen.add(key)

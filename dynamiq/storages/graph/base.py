@@ -52,13 +52,17 @@ class BaseGraphStore(ABC):
         Backends that do not support writing (e.g. AGE, ``_writes_graph = False``) inherit this and raise.
 
         Implementations accept these payloads and return a stats dict (``nodes_created``,
-        ``relationships_created``, ``properties_set``, ``records``, ``keys``):
-            Nodes — ``labels: list[str]``, ``properties: dict`` (must contain the identity key),
-                ``identity_key: str`` (defaults to 'id'). Written ``MERGE ... ON CREATE SET`` (write-once).
-            Relationships — ``start_label/end_label``, ``start_identity_key/end_identity_key``,
-                ``start_identity/end_identity``, ``type``, optional ``properties`` and ``identity_keys``
-                (folded into the MERGE pattern so edges differing only on those keys stay distinct).
-                Written ``MERGE ... SET`` (props refreshed each write).
+        ``relationships_created``, ``properties_set``, ``records``, ``keys``). The explicit id/name and
+        endpoint-name/description fields below are stored as ordinary node/edge properties (folded into the
+        persisted property bag), so the on-disk shape stays flat; only the payload is structured.
+            Nodes — ``labels: list[str]``, ``id: str`` (the merge key), optional ``name: str``, optional
+                ``properties: dict`` (any remaining attributes). Written ``MERGE (n {id}) ON CREATE SET``.
+            Relationships — ``type``, ``start_node``/``end_node`` (each an endpoint ref: ``label`` is the
+                endpoint type, ``id`` the endpoint to match, ``name`` its display name), optional
+                ``description``, optional ``properties`` (provenance/ACL/metadata) and ``identity_keys``
+                (property keys folded into the MERGE pattern so edges differing only on those stay
+                distinct). The endpoint ``name``s and ``description`` are folded into the persisted edge
+                property bag as flat ``src_name``/``dst_name``/``description``. Written ``MERGE ... SET``.
         """
         raise NotImplementedError(
             f"{type(self).__name__}: write_graph is not implemented for this backend."

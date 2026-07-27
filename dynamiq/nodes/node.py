@@ -671,6 +671,14 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         """
         return {}
 
+    def is_clone_safe_for_parallel(self) -> bool:
+        """Whether this node may be cloned to run parallel tool calls in isolation.
+
+        Default True (cloning isolates per-call state). A node owning an exclusive external resource
+        (e.g. a shared browser session) overrides to False and serializes its own calls instead.
+        """
+        return True
+
     def clone(self) -> "Node":
         """Create a safe clone of the node."""
         cloned_node = self.model_copy(deep=False)
