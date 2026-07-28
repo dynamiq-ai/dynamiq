@@ -172,6 +172,30 @@ def test_client_only_node_with_full_resource_name_executes():
     assert result["documents"][0].content == "Doc"
 
 
+def test_endpoint_follows_corpus_region(connection):
+    node = VertexAIRagSearch(
+        connection=connection,
+        rag_corpus_id="projects/other-project/locations/europe-west3/ragCorpora/999",
+        client=MagicMock(),
+    )
+    assert node._client_options().api_endpoint == "europe-west3-aiplatform.googleapis.com"
+
+    bare_id_node = VertexAIRagSearch(connection=connection, rag_corpus_id="123", client=MagicMock())
+    assert bare_id_node._client_options().api_endpoint == "us-central1-aiplatform.googleapis.com"
+
+
+@pytest.mark.asyncio
+async def test_client_only_node_executes_async_via_sync_client():
+    node = VertexAIRagSearch(rag_corpus_id=CORPUS_NAME, client=MagicMock())
+    node.client.retrieve_contexts.return_value = _proto_response([{"text": "Doc", "score": 0.5}])
+
+    result = await node.execute_async(VertexAIRagSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    assert result["documents"][0].content == "Doc"
+    call_kwargs = node.client.retrieve_contexts.call_args.kwargs
+    assert call_kwargs["timeout"] == 30
+
+
 def test_client_only_node_with_bare_corpus_id_raises_recoverable_error():
     node = VertexAIRagSearch(rag_corpus_id="123", client=MagicMock())
 

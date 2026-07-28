@@ -155,10 +155,22 @@ class VertexAIRagSearch(ConnectionNode):
         info = {key: value for key, value in info.items() if value}
         return service_account.Credentials.from_service_account_info(info, scopes=[CLOUD_PLATFORM_SCOPE])
 
+    def _endpoint_location(self) -> str:
+        """Region for the API endpoint — RetrieveContexts is regional and must target the corpus's region."""
+        if self.rag_corpus_id.startswith("projects/"):
+            parts = self.rag_corpus_id.split("/")
+            if len(parts) < 4 or parts[2] != "locations" or not parts[3]:
+                raise ValueError(
+                    f"Invalid rag_corpus_id resource name '{self.rag_corpus_id}'; expected "
+                    "'projects/{project}/locations/{location}/ragCorpora/{id}'."
+                )
+            return parts[3]
+        return self.location
+
     def _client_options(self) -> Any:
         from google.api_core.client_options import ClientOptions
 
-        return ClientOptions(api_endpoint=f"{self.location}-aiplatform.googleapis.com")
+        return ClientOptions(api_endpoint=f"{self._endpoint_location()}-aiplatform.googleapis.com")
 
     def _build_client(self) -> Any:
         from google.cloud import aiplatform_v1
@@ -175,6 +187,9 @@ class VertexAIRagSearch(ConnectionNode):
         async client guard); otherwise clients bound to closed loops would leak and be reused.
         """
         from google.cloud import aiplatform_v1
+
+        if self.connection is None:
+            raise ValueError("A VertexAI connection is required to build the async client.")
 
         loop = asyncio.get_running_loop()
         stale_keys = []
@@ -396,18 +411,15 @@ class VertexAIRagSearch(ConnectionNode):
         logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
 
         request = self._prepare_request(input_data)
-        try:
-            client = await self.get_async_client()
-        except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: failed to build the async client. Error: {str(e)}")
-            raise ToolExecutionException(
-                f"Failed to build the Vertex AI RAG client: {str(e)}. "
-                f"Please analyze the error and take appropriate action.",
-                recoverable=True,
-            )
 
         try:
-            response = await client.retrieve_contexts(request=request, timeout=self.timeout)
+            if self.connection is None:
+                # A client-only node has no credentials to build a loop-bound async client;
+                # run the injected sync client in a worker thread instead.
+                response = await asyncio.to_thread(self.client.retrieve_contexts, request=request, timeout=self.timeout)
+            else:
+                client = await self.get_async_client()
+                response = await client.retrieve_contexts(request=request, timeout=self.timeout)
         except ToolExecutionException:
             raise
         except Exception as e:
