@@ -1,3 +1,4 @@
 from .knowledgebase_vector import DynamiqKnowledgebaseVectorSearch
 from .knowledgebase_graph import DynamiqKnowledgebaseGraphSearch
 from .knowledgebase_hybrid import DynamiqKnowledgebaseHybridSearch
+from .vertex import VertexAIRagSearch
