@@ -1,0 +1,170 @@
+import os
+import time
+import uuid
+
+import pytest
+
+from dynamiq.connections import AWS
+from dynamiq.nodes.knowledgebases.bedrock import BedrockKnowledgeBaseSearch, BedrockManagedSearchConfig
+from dynamiq.runnables import RunnableStatus
+
+pytestmark = pytest.mark.integration
+
+AWS_ENV_VARS = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION")
+
+SAMPLE_DOCUMENT = (
+    "Dynamiq refund policy: customers can request a full refund within 30 days of purchase. "
+    "Refunds are processed by the support department within 5 business days. "
+    "After 30 days, purchases are only eligible for account credit."
+)
+QUERY = "How many days do customers have to request a full refund?"
+
+CREATE_TIMEOUT_SECONDS = 600
+INDEX_TIMEOUT_SECONDS = 600
+POLL_INTERVAL_SECONDS = 10
+
+
+def _aws_env_available() -> bool:
+    return all(os.getenv(variable) for variable in AWS_ENV_VARS)
+
+
+def _wait_for(describe, is_ready, is_failed, timeout, step_name):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        state = describe()
+        if is_ready(state):
+            return state
+        if is_failed(state):
+            raise AssertionError(f"{step_name} failed with state: {state}")
+        time.sleep(POLL_INTERVAL_SECONDS)
+    raise AssertionError(f"{step_name} did not complete within {timeout}s")
+
+
+@pytest.fixture(scope="module")
+def knowledge_base():
+    """Provide (kb_id, is_managed): an existing KB from the env, or a bootstrapped managed KB.
+
+    Bootstrap mode creates a fully managed knowledge base with a CUSTOM data source, ingests a
+    small inline document, yields the KB id, and tears everything down afterwards. It requires
+    BEDROCK_KB_ROLE_ARN (an IAM role Bedrock can assume for the knowledge base). For an existing
+    KB, set BEDROCK_KNOWLEDGE_BASE_ID and, if it is a MANAGED-type KB, BEDROCK_KNOWLEDGE_BASE_MANAGED=true.
+    """
+    if not _aws_env_available():
+        pytest.skip("AWS credentials are not set")
+
+    existing_kb_id = os.getenv("BEDROCK_KNOWLEDGE_BASE_ID")
+    if existing_kb_id:
+        is_managed = os.getenv("BEDROCK_KNOWLEDGE_BASE_MANAGED", "").lower() in ("1", "true", "yes")
+        yield existing_kb_id, is_managed
+        return
+
+    role_arn = os.getenv("BEDROCK_KB_ROLE_ARN")
+    if not role_arn:
+        pytest.skip("Set BEDROCK_KNOWLEDGE_BASE_ID (existing KB) or BEDROCK_KB_ROLE_ARN (bootstrap mode)")
+
+    session = AWS().get_boto3_session()
+    agent_client = session.client("bedrock-agent")
+    suffix = uuid.uuid4().hex[:8]
+
+    kb_response = agent_client.create_knowledge_base(
+        name=f"dynamiq-e2e-{suffix}",
+        description="Temporary KB created by dynamiq integration tests; safe to delete.",
+        roleArn=role_arn,
+        knowledgeBaseConfiguration={
+            "type": "MANAGED",
+            "managedKnowledgeBaseConfiguration": {"embeddingModelType": "MANAGED"},
+        },
+    )
+    kb_id = kb_response["knowledgeBase"]["knowledgeBaseId"]
+    data_source_id = None
+
+    try:
+        _wait_for(
+            describe=lambda: agent_client.get_knowledge_base(knowledgeBaseId=kb_id)["knowledgeBase"]["status"],
+            is_ready=lambda status: status == "ACTIVE",
+            is_failed=lambda status: status in ("FAILED", "DELETE_UNSUCCESSFUL"),
+            timeout=CREATE_TIMEOUT_SECONDS,
+            step_name="Knowledge base creation",
+        )
+
+        data_source_response = agent_client.create_data_source(
+            knowledgeBaseId=kb_id,
+            name=f"dynamiq-e2e-docs-{suffix}",
+            dataSourceConfiguration={"type": "CUSTOM"},
+        )
+        data_source_id = data_source_response["dataSource"]["dataSourceId"]
+
+        document_id = f"dynamiq-e2e-doc-{suffix}"
+        agent_client.ingest_knowledge_base_documents(
+            knowledgeBaseId=kb_id,
+            dataSourceId=data_source_id,
+            documents=[
+                {
+                    "content": {
+                        "dataSourceType": "CUSTOM",
+                        "custom": {
+                            "customDocumentIdentifier": {"id": document_id},
+                            "sourceType": "IN_LINE",
+                            "inlineContent": {"type": "TEXT", "textContent": {"data": SAMPLE_DOCUMENT}},
+                        },
+                    }
+                }
+            ],
+        )
+
+        def describe_document_status():
+            response = agent_client.get_knowledge_base_documents(
+                knowledgeBaseId=kb_id,
+                dataSourceId=data_source_id,
+                documentIdentifiers=[
+                    {"dataSourceType": "CUSTOM", "custom": {"id": document_id}},
+                ],
+            )
+            details = response.get("documentDetails") or []
+            return details[0]["status"] if details else "NOT_FOUND"
+
+        _wait_for(
+            describe=describe_document_status,
+            is_ready=lambda status: status == "INDEXED",
+            is_failed=lambda status: status in ("FAILED", "IGNORED", "METADATA_UPDATE_FAILED"),
+            timeout=INDEX_TIMEOUT_SECONDS,
+            step_name="Document indexing",
+        )
+
+        yield kb_id, True
+    finally:
+        if data_source_id:
+            try:
+                agent_client.delete_data_source(knowledgeBaseId=kb_id, dataSourceId=data_source_id)
+            except Exception as e:  # noqa: BLE001 - best-effort teardown
+                print(f"Failed to delete data source {data_source_id}: {e}")
+        try:
+            agent_client.delete_knowledge_base(knowledgeBaseId=kb_id)
+        except Exception as e:  # noqa: BLE001 - best-effort teardown
+            print(f"Failed to delete knowledge base {kb_id}: {e}")
+
+
+@pytest.fixture
+def tool(knowledge_base):
+    kb_id, is_managed = knowledge_base
+    managed_kwargs = {"managed_search": BedrockManagedSearchConfig()} if is_managed else {}
+    return BedrockKnowledgeBaseSearch(connection=AWS(), knowledge_base_id=kb_id, top_k=5, **managed_kwargs)
+
+
+def test_retrieve_returns_relevant_documents(tool):
+    result = tool.run(input_data={"query": QUERY})
+
+    assert result.status == RunnableStatus.SUCCESS
+    documents = result.output["documents"]
+    assert documents, "expected at least one retrieved document"
+    assert "30 days" in result.output["content"]
+    top_document = documents[0]
+    assert top_document.content
+    assert top_document.metadata is not None
+
+
+def test_retrieve_respects_top_k(tool):
+    result = tool.run(input_data={"query": QUERY, "top_k": 1})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert len(result.output["documents"]) <= 1
