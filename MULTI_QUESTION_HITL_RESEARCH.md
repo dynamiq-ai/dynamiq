@@ -108,16 +108,16 @@ sequenceDiagram
 
     UI->>NX: POST /v3/conversations/{id}/messages
     NX->>NX: insert user message (status completed)
-    NX->>CT: POST /v2/conversations/{id}/messages (model, skills, KBs, runtime_id)
-    CT->>CT: build super-agent Workflow, serialize YAML
-    CT->>CT: insert assistant message (status created)
-    CT->>N: publish ChatYamlRunRequest → …runtimes.v{ver}.queue
+    NX->>CT: POST /v2/conversations/{id}/messages<br/>(model, skills, KBs, runtime_id)
+    CT->>CT: build super-agent Workflow,<br/>serialize YAML
+    CT->>CT: insert assistant message<br/>(status created)
+    CT->>N: publish ChatYamlRunRequest<br/>→ …runtimes.v{ver}.queue
     CT-->>NX: 200 {message_id}
-    NX-->>UI: SSE stream opens (…messages.{msg}.events)
-    N->>RT: pull; KV dedup lock processing.{msg}; ACK IMMEDIATELY
+    NX-->>UI: SSE stream opens<br/>(…messages.{msg}.events)
+    N->>RT: pull, KV dedup lock processing.{msg},<br/>ack immediately
     RT->>RT: workflow.run_async() in-process
     RT->>N: run.started, run.data…, run.completed
-    N->>NX: durable consumer persists EVERY event → conversation_event
+    N->>NX: durable consumer persists<br/>EVERY event → conversation_event
     NX-->>UI: SSE relay
 ```
 
@@ -158,18 +158,18 @@ sequenceDiagram
     participant NX as nexus
     participant UI
 
-    A->>HF: {"action":"ask","input":"Q1 only or full year?"}
-    HF->>RT: HF output event {prompt, action:"ask", is_browser_takeover}
-    RT->>N: publish run.data on …messages.{msg}.events
-    Note over RT: first ask-shaped event lazily starts the HITL listener<br/>(subscribes …messages.{msg}.inputs, DeliverPolicy.ALL)
+    A->>HF: {"action":"ask",<br/>"input":"Q1 only or full year?"}
+    HF->>RT: HF output event<br/>{prompt, action:"ask",<br/>is_browser_takeover}
+    RT->>N: publish run.data on<br/>…messages.{msg}.events
+    Note over RT: first ask-shaped event lazily<br/>starts the HITL listener<br/>(subscribes …messages.{msg}.inputs,<br/>DeliverPolicy.ALL)
     N->>NX: persist + SSE
-    NX->>UI: event; UI injects <human-feedback> tag, sets pending slot
-    HF->>HF: block on per-node queue.Queue (poll 0.5s, timeout 600s)
-    UI->>NX: POST /v1/conversation-messages/{msg}/input<br/>{type:"human_feedback", data:{content, entity_id, wf_run_id, event}}
-    NX->>N: blind publish to …messages.{msg}.inputs (authz only, no validation)
-    N->>RT: HITL listener: route by data.entity_id → that node's queue
-    RT->>N: publish run.human_feedback.received
-    HF-->>A: returns {"content": "<user text>"}
+    NX->>UI: event — UI injects<br/>#lt;human-feedback#gt; tag,<br/>sets pending slot
+    HF->>HF: block on per-node queue.Queue<br/>(poll 0.5s, timeout 600s)
+    UI->>NX: POST /v1/conversation-<br/>messages/{msg}/input<br/>{type:"human_feedback",<br/>data:{content, entity_id,<br/>wf_run_id, event}}
+    NX->>N: blind publish to<br/>…messages.{msg}.inputs<br/>(authz only, no validation)
+    N->>RT: HITL listener:<br/>route by data.entity_id<br/>→ that node's queue
+    RT->>N: publish<br/>run.human_feedback.received
+    HF-->>A: returns {"content": "…user text…"}
 ```
 
 Wire formats (`dynamiq/nodes/tools/human_feedback.py:24-39`):
@@ -407,14 +407,14 @@ sequenceDiagram
     participant NX as nexus
     participant UI
 
-    A->>RT: ask-user {questions:[{q1, options…},{q2, options…}]}
-    RT->>NX: run.data {prompt, questions, request_id, action:"ask"}
+    A->>RT: ask-user {questions:<br/>[{q1, options…},{q2, options…}]}
+    RT->>NX: run.data {prompt, questions,<br/>request_id, action:"ask"}
     NX->>UI: SSE (+ persisted to conversation_event)
-    UI->>UI: render form: chip rows per question, Other fields, one Submit
-    UI->>NX: POST …/input {type:"human_feedback", data:{request_id, entity_id, wf_run_id, event, content, answers}}
-    NX->>RT: publish .inputs → entity queue → request_id matches → unblock
-    RT->>NX: run.human_feedback.received {request_id, answers}
-    A->>A: observation: "Q1 → Full year; Q2 → PDF (other: …)"
+    UI->>UI: render form: chip rows per question,<br/>Other fields, one Submit
+    UI->>NX: POST …/input {type:"human_feedback",<br/>data:{request_id, entity_id, wf_run_id,<br/>event, content, answers}}
+    NX->>RT: publish .inputs → entity queue<br/>→ request_id matches → unblock
+    RT->>NX: run.human_feedback.received<br/>{request_id, answers}
+    A->>A: observation "Q1 → Full year,<br/>Q2 → PDF (other: …)"
 ```
 
 ### 5.3 Target flow — long pause (the 24-hour story)
@@ -427,17 +427,17 @@ sequenceDiagram
     participant UI
 
     Note over RT: 600 s pass with no answer
-    RT->>RT: framework saves PENDING_INPUT checkpoint<br/>(conversation + pending ask, via nexus /v1/checkpoints)
-    RT->>NX: run.paused {checkpoint_id}; KV lock processing.{msg} released
-    NX->>NX: message status → paused (new enum value)
-    Note over RT: thread, semaphore slot, sandbox, memory all released
-    Note over UI: user returns hours later; history parser finds the ask event,<br/>sees status paused + unanswered request_id → renders the same form
+    RT->>RT: framework saves<br/>PENDING_INPUT checkpoint<br/>(conversation + pending ask,<br/>via nexus /v1/checkpoints)
+    RT->>NX: run.paused {checkpoint_id} —<br/>KV lock processing.{msg} released
+    NX->>NX: message status → paused<br/>(new enum value)
+    Note over RT: thread, semaphore slot,<br/>sandbox, memory all released
+    Note over UI: user returns hours later —<br/>history parser finds the ask event,<br/>sees status paused + unanswered<br/>request_id → renders the same form
     UI->>NX: POST …/input {…, request_id, answers}
-    NX->>CT: POST /v2/conversations/{id}/messages/{msg}/resume {checkpoint_id, sequence}
-    CT->>CT: load persisted workflow YAML for {msg}
-    CT->>RT: publish ChatYamlRunRequest{resume_from} → queue
-    NX->>RT: publish answer to .inputs (order-safe: DeliverPolicy.ALL replays it)
-    RT->>RT: restore checkpoint → replay ask (same request_id, no LLM call)<br/>→ listener replays answer → request_id matches → continue
+    NX->>CT: POST /v2/…/messages/{msg}/resume<br/>{checkpoint_id, sequence}
+    CT->>CT: load persisted<br/>workflow YAML for {msg}
+    CT->>RT: publish ChatYamlRunRequest<br/>{resume_from} → queue
+    NX->>RT: publish answer to .inputs<br/>(order-safe: DeliverPolicy.ALL<br/>replays it)
+    RT->>RT: restore checkpoint → replay ask<br/>(same request_id, no LLM call)<br/>→ listener replays answer<br/>→ request_id matches → continue
     RT->>NX: run.resumed → … → run.completed
 ```
 
