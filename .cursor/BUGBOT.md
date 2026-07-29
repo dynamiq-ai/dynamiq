@@ -85,6 +85,25 @@ If a PR adds or modifies nodes without defining an `input_schema` for input vali
 
   For nodes accepting user input, validation is especially critical for security."
 
+### Describe input_schema fields and tool descriptions for the agent
+
+If a PR adds/changes a tool or agent-facing node `input_schema` where fields lack a clear `description`, or expose many under-documented parameters:
+- Add a Bug titled "Improve agent-facing field/tool descriptions"
+- Body: "For tools and nodes an agent can call, the LLM only sees the tool `description` and each field's `Field(description=...)`. Vague or missing descriptions cause the agent to guess and retry.
+
+  - Every `input_schema` field an agent must fill needs a concrete, self-explanatory `description` (what it is, allowed values, when to set it) — not `'Summary configuration'`.
+  - Keep the agent-facing parameter surface minimal; do not expose deeply nested config objects the model cannot reason about.
+  - Put behavioural guidance in the **tool description**, not in the user prompt/example.
+
+  ```python
+  # Bad - agent cannot tell what to pass
+  extras: ContentsExtrasOptions | None = Field(default=None, description='Extras configuration')
+
+  # Good
+  max_results: int = Field(default=10, ge=1, le=25,
+      description='Number of search results to return (1-25). Use 3-5 for quick lookups.')
+  ```"
+
 ---
 
 ## Pydantic & Data Modeling
@@ -137,6 +156,21 @@ If new classes don't follow the standard organization:
 - Add a Bug titled "Consider reorganizing class structure"
 - Body: "Organize class members: 1) ClassVars/constants, 2) model_config, 3) public fields, 4) private attrs, 5) validators, 6) computed fields, 7) magic methods, 8) public methods, 9) private methods"
 
+### Reset per-run mutable state; use default_factory for mutable defaults
+
+If a node/agent keeps mutable per-run state (accumulators, prompt managers, call context) or declares a mutable Pydantic default:
+- Add a Bug titled "Reset per-run state / use default_factory"
+- Body: "Mutable state must not leak between runs of the same node instance.
+  - Clear per-run containers in `reset_run_state()` (called each execution), not only in `__init__`. Wrap run bodies so state is cleared even when execution raises (`try/finally`), to avoid leaking state between runs.
+  - Never use a shared mutable default in a Pydantic field. Use `default_factory`:
+    ```python
+    # Bad - one shared instance across all objects
+    tool_output: ToolOutputConfig = ToolOutputConfig()
+
+    # Good
+    tool_output: ToolOutputConfig = Field(default_factory=ToolOutputConfig)
+    ```"
+
 ---
 
 ## Code Style & Naming
@@ -175,6 +209,16 @@ If a PR adds new nodes, connections, or components that don't follow existing pa
 
   Review similar existing implementations before adding new components."
 
+### Follow module/file naming conventions
+
+If a PR adds files that break the project's module-naming conventions:
+- Add a Bug titled "Use conventional module naming"
+- Body: "Match existing conventions:
+  - Data/model classes go in `types.py`, **not** `models.py` (the codebase uses `types.py` throughout).
+  - Manager classes go in `managers.py` (plural), matching existing modules.
+  - `utils.py` is for stateless helpers only — do **not** put config classes or feature logic in a generic `utils.py`; place them next to the feature (e.g. `nodes/agents/utils.py`, `node.py`, or a base class).
+  - Match sibling names for consistency (`file_store` to mirror `vector_store`; a converter that handles more than `.txt` should be `text.py`, not `txt.py`)."
+
 ### Use enums, constants, and class variables instead of hardcoded strings
 
 If a PR uses hardcoded strings for statuses, types, or repeated values:
@@ -203,7 +247,20 @@ If a PR uses hardcoded strings for statuses, types, or repeated values:
   - `RunnableStatus` for execution status
   - `NodeGroup` for node categorization
   - `MessageRole` for prompt messages
-  - `InferenceMode` for agent modes"
+  - `InferenceMode` for agent modes
+
+  **Magic numbers count too.** Replace unexplained numeric literals (e.g. `* 4`, `// 3`, `max_files = 8`) with named module- or class-level constants that reveal intent (`CHARS_PER_TOKEN = 4`, `MAX_SANDBOX_FILES = 8`).
+
+  **Hoist constant collections/helpers out of hot paths.** Do not rebuild the same set/dict/mapping or define helper functions inside a method that runs per call. Define them once at module or class level:
+  ```python
+  # Bad - recreated on every call
+  def to_dict(self):
+      excluded_fields = {'client', 'vector_store'}
+      ...
+
+  # Good - defined once
+  _EXCLUDED_FIELDS: ClassVar[set[str]] = {'client', 'vector_store'}
+  ```"
 
 ### Require type annotations
 
@@ -216,6 +273,47 @@ If any new Python function or method lacks type annotations for parameters or re
 If any changed Python file contains lines exceeding 120 characters (excluding URLs and long strings):
 - Add a Bug titled "Line exceeds 120 characters"
 - Body: "Maximum line length is 120 characters as configured in setup.cfg. Break long lines appropriately."
+
+### Imports at module top
+
+If a PR adds `import` or `from ... import` statements inside a function, method, or `execute()` body:
+- Add a Bug titled "Move import to module top"
+- Body: "Imports must live at the top of the file, not inside functions or methods. Inline imports hide dependencies, run on every call, and are a frequent review rejection in this codebase.
+
+  ```python
+  # Bad - import inside a method
+  def execute(self, input_data, **kwargs):
+      import json
+      from dynamiq.utils import format_value
+      ...
+
+  # Good - all imports at the top of the file
+  import json
+  from dynamiq.utils import format_value
+
+  def execute(self, input_data, **kwargs):
+      ...
+  ```
+
+  Only exception: a **lazy import deliberately used to break a circular import**. In that case keep it local and add a short comment explaining the cycle (e.g. `# local import to avoid circular import with nodes.agents`). If a package (e.g. `requests`) is already a hard dependency, import it at the top — do not guard it behind an inline import + availability check."
+
+### No leftover debugging artifacts
+
+If a changed file in `dynamiq/**` contains `print(` statements, commented-out code blocks, or scaffolding left over from local testing:
+- Add a Bug titled "Remove debugging leftovers"
+- Body: "Production code must not contain `print()` calls, commented-out code, or test scaffolding. Use the project logger for diagnostics and choose the right level:
+
+  ```python
+  from dynamiq.utils.logger import logger
+
+  # Bad
+  print(f'value = {value}')
+
+  # Good - verbose diagnostics at debug level
+  logger.debug(f'value = {value}')
+  ```
+
+  Reserve `logger.info` for genuinely important lifecycle events; route verbose or developer-facing output to `logger.debug`. Remove any import that was only added for local debugging."
 
 ### Use descriptive names
 
@@ -309,13 +407,26 @@ If a PR adds obvious comments that restate what code does instead of using clear
   ```python
   # Use exponential backoff to avoid overwhelming the API during rate limits
   wait_time = base_delay * (backoff_rate ** attempt)
-  ```"
+  ```
+
+  **AI/LLM-generated comment cleanup (very common rejection):** Code produced with AI assistance often ships with verbose narration and marketing-style docstring lines. Flag and remove:
+  - One-line comments that restate the next statement (`# copy kwargs` above `tool_kwargs = kwargs.copy()`).
+  - Block comments that narrate obvious control flow.
+  - Fluffy docstring/`description=` lines that add no operational information (e.g. 'using AI', 'Integrate seamlessly with agent workflows', 'Agent-optimized formatted outputs', 'Preserves original filenames').
+
+  A description should tell a developer or the agent something they cannot infer from the signature. Delete the rest before submitting."
 
 ### Docstrings for public APIs
 
 If new public classes or methods in `dynamiq/**` lack docstrings:
 - Add a Bug titled "Missing docstring"
 - Body: "Public APIs should have Google-style docstrings with Args, Returns, and Raises sections where applicable."
+
+### Keep functions small and flat
+
+If a PR adds very long methods (hundreds of lines) or deeply nested inner functions/closures ("matreshka" style):
+- Add a Bug titled "Extract into smaller, flatter functions"
+- Body: "Long methods and nested inner functions are hard to read, test, and trace. Extract cohesive blocks into named helper methods on the class (or module-level functions) and keep the top-level method a readable sequence of calls. Prefer defining helpers at class/module level over nesting them inside the method body. This also makes the extracted logic unit-testable on its own."
 
 ### Conventional commits
 
@@ -453,6 +564,17 @@ If the PR adds new node classes in `dynamiq/nodes/**` or adds new parameters to 
   wf.to_yaml_file('output.yaml')
   wf_reloaded = Workflow.from_yaml_file(file_path='output.yaml', connection_manager=cm, init_components=True)
   ```"
+
+### Preserve backwards compatibility of node schemas
+
+If a PR renames/removes an existing node field, or adds a new **required** field to an existing node, connection, or `input_schema`:
+- Add a blocking Bug titled "Potential breaking change to node schema"
+- Body: "Node fields are serialized to YAML and consumed by the UI, workflow generation (catalyst), and runtimes. Existing workflows must keep loading. Therefore:
+  - **New fields must be optional with a default** (`field: X | None = None` or a concrete default) so older/UI-generated YAML still deserializes.
+  - **Do not rename or remove existing fields** without a migration path; prefer additive changes. If a rename is unavoidable, keep the old name working (alias / resolve-both) and call out the break in the PR description.
+  - Resolve values in a backwards-compatible order, e.g. `output_file_name = input_data.output_file_name or self.output_file_name or 'audio.mp3'`.
+
+  If the change is intentionally breaking, state explicitly in the PR description whether the UI / runtimes need coordinated changes."
 
 ### Node parameters must be serializable
 
@@ -746,6 +868,16 @@ If a PR creates unnecessary lists or dicts that could be avoided:
 If a PR introduces generic `Exception` raises instead of project-specific exceptions:
 - Add a Bug titled "Use project-specific exceptions"
 - Body: "Use exceptions from `dynamiq/nodes/exceptions.py` (NodeException, NodeFailedException, etc.) for better error categorization and handling."
+
+### Fail loudly, not silently
+
+If a PR swallows errors, returns empty/sentinel values on failure, or silently mutates user-provided values:
+- Add a Bug titled "Avoid silent failure"
+- Body: "Do not hide failures behind empty strings, `None`, or silent value changes that the caller cannot detect.
+  - Prefer raising a project exception (`NodeException`, `NodeFailedException`, …) over returning `''`/`None` when something genuinely went wrong.
+  - Do not use masking defaults like `api_key: str = ''` — they turn a missing credential into a confusing downstream error. Omit the default or read from the connection/env.
+  - If the framework auto-corrects user input (e.g. fixing an invalid index/collection name), either raise or emit a `logger.warning` so the user knows — never change it silently.
+  - When behaviour is debatable, expose a flag with a sensible default so the user can opt out, rather than hard-coding the silent path."
 
 ### Retry logic with tenacity
 
