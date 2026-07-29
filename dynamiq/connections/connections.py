@@ -1762,6 +1762,11 @@ class SteelBrowserEnvironment(str, enum.Enum):
 class SteelBrowser(BaseConnection):
     """
     Steel.dev connection configuration for Stagehand.
+
+    Steel sessions are driven by Stagehand's bundled local server. When using an ``anthropic/*``
+    model, the deployment must set ``ANTHROPIC_BASE_URL=https://api.anthropic.com/v1`` — the
+    bundled server (3.22.x) otherwise resolves the Anthropic endpoint without the ``/v1`` prefix
+    and model calls fail with 404.
     """
 
     environment: SteelBrowserEnvironment = Field(

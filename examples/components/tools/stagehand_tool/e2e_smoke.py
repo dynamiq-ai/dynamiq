@@ -11,6 +11,9 @@ Run all paths, or a subset:
     python e2e_smoke.py bb-provider     # Browserbase + provider model key
     python e2e_smoke.py bb-gateway      # Browserbase Model Gateway (no model key)
     python e2e_smoke.py steel           # Steel cloud via the bundled local Stagehand server
+
+The Steel path with an anthropic/* model requires ANTHROPIC_BASE_URL=https://api.anthropic.com/v1
+in the environment (Stagehand local server 3.22.x otherwise omits the /v1 prefix and 404s).
 """
 
 import os
@@ -21,7 +24,7 @@ from dynamiq.connections import Browserbase as BrowserbaseConnection
 from dynamiq.connections import SteelBrowser
 from dynamiq.nodes.tools.stagehand import Stagehand, StagehandInputSchema
 
-MODEL = "anthropic/claude-sonnet-4-6"
+MODEL = "anthropic/claude-sonnet-5"
 RESULTS = {}
 
 ACTIONS = [
