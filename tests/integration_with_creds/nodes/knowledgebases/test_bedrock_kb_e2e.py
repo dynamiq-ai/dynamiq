@@ -1,6 +1,7 @@
 import os
 import time
 import uuid
+from typing import NamedTuple
 
 import pytest
 
@@ -17,9 +18,22 @@ SAMPLE_DOCUMENT = (
 )
 QUERY = "How many days do customers have to request a full refund?"
 
+# Identities used by bootstrap mode, which ingests the sample document with a per-document ACL.
+ALLOWED_USER = "dynamiq-e2e-allowed@example.com"
+DENIED_USER = "dynamiq-e2e-denied@example.com"
+
 CREATE_TIMEOUT_SECONDS = 600
 INDEX_TIMEOUT_SECONDS = 600
 POLL_INTERVAL_SECONDS = 10
+
+
+class KnowledgeBaseUnderTest(NamedTuple):
+    """The knowledge base being exercised, plus what the tests may assume about its contents."""
+
+    id: str
+    is_managed: bool
+    allowed_user: str | None  # identity permitted to read the corpus, when ACLs are in play
+    denied_user: str | None  # identity that must not; only known for a bootstrapped corpus
 
 
 def _aws_available() -> bool:
@@ -50,12 +64,14 @@ def _wait_for(describe, is_ready, is_failed, timeout, step_name):
 
 @pytest.fixture(scope="module")
 def knowledge_base():
-    """Provide (kb_id, is_managed): an existing KB from the env, or a bootstrapped managed KB.
+    """Provide the KB under test: an existing one from the env, or a bootstrapped managed KB.
 
-    Bootstrap mode creates a fully managed knowledge base with a CUSTOM data source, ingests a
-    small inline document, yields the KB id, and tears everything down afterwards. It requires
-    BEDROCK_KB_ROLE_ARN (an IAM role Bedrock can assume for the knowledge base). For an existing
-    KB, set BEDROCK_KNOWLEDGE_BASE_ID and, if it is a MANAGED-type KB, BEDROCK_KNOWLEDGE_BASE_MANAGED=true.
+    Bootstrap mode creates a fully managed knowledge base with an ACL-enabled custom connector data
+    source, ingests a small inline document scoped to ALLOWED_USER, and tears everything down
+    afterwards. It requires BEDROCK_KB_ROLE_ARN (an IAM role Bedrock can assume for the knowledge
+    base). For an existing KB, set BEDROCK_KNOWLEDGE_BASE_ID and, if it is a MANAGED-type KB,
+    BEDROCK_KNOWLEDGE_BASE_MANAGED=true; if that KB enforces ACLs, also set
+    BEDROCK_KNOWLEDGE_BASE_USER_ID to an identity allowed to read it.
     """
     if not _aws_available():
         pytest.skip("AWS credentials/region could not be resolved")
@@ -63,7 +79,12 @@ def knowledge_base():
     existing_kb_id = os.getenv("BEDROCK_KNOWLEDGE_BASE_ID")
     if existing_kb_id:
         is_managed = os.getenv("BEDROCK_KNOWLEDGE_BASE_MANAGED", "").lower() in ("1", "true", "yes")
-        yield existing_kb_id, is_managed
+        yield KnowledgeBaseUnderTest(
+            id=existing_kb_id,
+            is_managed=is_managed,
+            allowed_user=os.getenv("BEDROCK_KNOWLEDGE_BASE_USER_ID"),
+            denied_user=None,
+        )
         return
 
     role_arn = os.getenv("BEDROCK_KB_ROLE_ARN")
@@ -103,7 +124,7 @@ def knowledge_base():
             dataSourceConfiguration={
                 "type": "MANAGED_KNOWLEDGE_BASE_CONNECTOR",
                 "managedKnowledgeBaseConnectorConfiguration": {
-                    "connectorParameters": {"type": "CUSTOM", "version": "1", "aclEnabled": False}
+                    "connectorParameters": {"type": "CUSTOM", "version": "1", "aclEnabled": True}
                 },
             },
         )
@@ -133,7 +154,17 @@ def knowledge_base():
                             "sourceType": "IN_LINE",
                             "inlineContent": {"type": "TEXT", "textContent": {"data": SAMPLE_DOCUMENT}},
                         },
-                    }
+                    },
+                    "metadata": {
+                        "type": "IN_LINE_ATTRIBUTE",
+                        "inlineAttributes": [
+                            {"key": "department", "value": {"stringValue": "support", "type": "STRING"}}
+                        ],
+                        "accessControlList": [
+                            {"name": ALLOWED_USER, "type": "USER", "access": "ALLOW"},
+                            {"name": DENIED_USER, "type": "USER", "access": "DENY"},
+                        ],
+                    },
                 }
             ],
         )
@@ -157,7 +188,7 @@ def knowledge_base():
             step_name="Document indexing",
         )
 
-        yield kb_id, True
+        yield KnowledgeBaseUnderTest(id=kb_id, is_managed=True, allowed_user=ALLOWED_USER, denied_user=DENIED_USER)
     finally:
         if data_source_id:
             try:
@@ -172,9 +203,13 @@ def knowledge_base():
 
 @pytest.fixture
 def tool(knowledge_base):
-    kb_id, is_managed = knowledge_base
-    managed_kwargs = {"managed_search": BedrockManagedSearchConfig()} if is_managed else {}
-    return BedrockKnowledgeBaseSearch(connection=AWS(), knowledge_base_id=kb_id, top_k=5, **managed_kwargs)
+    kwargs = {}
+    if knowledge_base.is_managed:
+        kwargs["managed_search"] = BedrockManagedSearchConfig()
+    if knowledge_base.allowed_user:
+        # ACL-enforced retrieval fails closed: without an identity the KB returns nothing at all.
+        kwargs["user_id"] = knowledge_base.allowed_user
+    return BedrockKnowledgeBaseSearch(connection=AWS(), knowledge_base_id=knowledge_base.id, top_k=5, **kwargs)
 
 
 def test_retrieve_returns_relevant_documents(tool):
@@ -194,3 +229,18 @@ def test_retrieve_respects_top_k(tool):
 
     assert result.status == RunnableStatus.SUCCESS
     assert len(result.output["documents"]) <= 1
+
+
+def test_retrieve_enforces_document_acl(tool, knowledge_base):
+    """A denied identity must retrieve nothing, and the node-level default must be overridable."""
+    if not knowledge_base.denied_user:
+        pytest.skip("ACL assertions need a bootstrapped corpus with known allowed/denied identities")
+
+    allowed = tool.run(input_data={"query": QUERY, "user_id": knowledge_base.allowed_user})
+    assert allowed.status == RunnableStatus.SUCCESS
+    assert allowed.output["documents"], "the allowed identity should retrieve the document"
+
+    denied = tool.run(input_data={"query": QUERY, "user_id": knowledge_base.denied_user})
+    assert denied.status == RunnableStatus.SUCCESS
+    assert denied.output["documents"] == [], "the denied identity must not retrieve the document"
+    assert denied.output["content"] == "No results found for the given query."
