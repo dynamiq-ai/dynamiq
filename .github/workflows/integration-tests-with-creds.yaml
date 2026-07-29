@@ -39,6 +39,9 @@ jobs:
           envkey_AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
           # Opt-in for the live Bedrock AgentCore tests; empty (unset secret) keeps them skipped.
           envkey_BEDROCK_AGENTCORE_TESTS: ${{ secrets.BEDROCK_AGENTCORE_TESTS }}
+          # A networkMode=PUBLIC interpreter id; only needed for the package-installation test,
+          # which skips when unset because the built-in interpreter has no network egress.
+          envkey_BEDROCK_AGENTCORE_INTERPRETER_ID: ${{ secrets.BEDROCK_AGENTCORE_INTERPRETER_ID }}
 
       - name: Load Test Image
         uses: docker/bake-action@v5
