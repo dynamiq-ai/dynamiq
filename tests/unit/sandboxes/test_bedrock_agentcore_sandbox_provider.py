@@ -339,6 +339,19 @@ def test_get_tools(agentcore_sandbox):
     assert "sandbox-info" in tool_names
 
 
+def test_get_tools_file_tools_reject_absolute_paths(agentcore_sandbox):
+    """AgentCore file APIs are workspace-relative, so file tools must not allow absolute paths."""
+    from dynamiq.connections import OpenAI as OpenAIConnection
+    from dynamiq.nodes.llms import OpenAI
+
+    llm = OpenAI(name="llm", model="gpt-4o-mini", connection=OpenAIConnection(api_key="test-key"))
+    tools = agentcore_sandbox.get_tools(llm=llm)
+
+    file_tools = [t for t in tools if hasattr(t, "absolute_file_paths_allowed")]
+    assert len(file_tools) == 2
+    assert all(t.absolute_file_paths_allowed is False for t in file_tools)
+
+
 def test_supports_views_false(agentcore_sandbox):
     """AgentCore sandboxes do not support shared views."""
     assert agentcore_sandbox.supports_views is False

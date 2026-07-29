@@ -300,6 +300,47 @@ def test_persistent_init_falls_back_to_lazy_on_config_error(mock_agentcore):
     mock_agentcore["client"].stop_code_interpreter_session.assert_called_once()
 
 
+def test_persistent_init_stops_session_when_post_create_step_fails(mock_agentcore):
+    """A failure after session creation (e.g. package install) stops the session before falling back."""
+    from dynamiq.nodes.tools.bedrock_agentcore_sandbox import BedrockAgentCoreInterpreterTool
+
+    mock_agentcore["handlers"]["executeCommand"] = lambda kwargs: make_stream(
+        make_result(stderr="pip failed", exit_code=1, is_error=True)
+    )
+
+    tool = BedrockAgentCoreInterpreterTool(persistent_sandbox=True, installed_packages=["numpy"])
+
+    # Construction must not raise; the partially initialized session is stopped, not leaked.
+    assert tool._sandbox is None
+    assert tool.persistent_sandbox is False
+    mock_agentcore["client"].start_code_interpreter_session.assert_called_once()
+    mock_agentcore["client"].stop_code_interpreter_session.assert_called_once()
+    stop_call = mock_agentcore["client"].stop_code_interpreter_session.call_args
+    assert stop_call.kwargs["sessionId"] == "test-session-id"
+
+
+def test_upload_creates_parent_directory(agentcore_tool, mock_agentcore):
+    """Uploads mkdir -p the parent directory first (writeFiles does not create parents)."""
+    uploaded_path = agentcore_tool._upload_file_to_sandbox(
+        io.BytesIO(b"col1,col2"), "input/data.csv", agentcore_tool._sandbox
+    )
+
+    assert uploaded_path == "input/data.csv"
+    calls = mock_agentcore["client"].invoke_code_interpreter.call_args_list
+    mkdir_calls = [c for c in calls if c.kwargs["name"] == "executeCommand"]
+    write_calls = [c for c in calls if c.kwargs["name"] == "writeFiles"]
+    assert mkdir_calls and mkdir_calls[0].kwargs["arguments"] == {"command": "mkdir -p input"}
+    assert write_calls and write_calls[0].kwargs["arguments"]["content"][0]["path"] == "input/data.csv"
+
+
+def test_upload_without_parent_directory_skips_mkdir(agentcore_tool, mock_agentcore):
+    """Bare-filename uploads go straight to writeFiles without a mkdir round-trip."""
+    agentcore_tool._upload_file_to_sandbox(io.BytesIO(b"x"), "report.txt", agentcore_tool._sandbox)
+
+    calls = mock_agentcore["client"].invoke_code_interpreter.call_args_list
+    assert [c.kwargs["name"] for c in calls] == ["writeFiles"]
+
+
 def test_session_timeout_clamped(mock_agentcore):
     """Session timeout is clamped to the AgentCore maximum of 28800 seconds."""
     from dynamiq.nodes.tools.bedrock_agentcore_sandbox import BedrockAgentCoreInterpreterTool

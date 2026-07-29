@@ -1,6 +1,7 @@
 import posixpath
 import uuid
 
+from botocore.config import Config
 from pydantic import BaseModel, Field
 
 from dynamiq.connections import AWS as AWSConnection
@@ -87,8 +88,6 @@ class AgentCoreCodeInterpreterClient:
     """
 
     def __init__(self, connection: AWSConnection, read_timeout: int = 910):
-        from botocore.config import Config
-
         session = connection.get_boto3_session()
         # Disable botocore's built-in retries: the default legacy mode silently re-sends
         # failed requests up to 5 times, which for the non-idempotent InvokeCodeInterpreter

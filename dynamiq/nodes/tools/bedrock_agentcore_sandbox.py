@@ -1,7 +1,9 @@
 import io
+import posixpath
 import shlex
 from typing import ClassVar
 
+from botocore.exceptions import BotoCoreError, ClientError
 from pydantic import Field, PrivateAttr
 
 from dynamiq.connections import AWS as AWSConnection
@@ -58,24 +60,32 @@ class BedrockAgentCoreInterpreterTool(BaseCodeInterpreterTool):
         return True
 
     def _initialize_persistent_sandbox(self) -> None:
-        """Eagerly start the persistent session, degrading gracefully on config errors.
+        """Eagerly start the persistent session, degrading gracefully on init errors.
 
         Unlike E2B/Daytona (which gate eager init on an ``api_key``), AWS credentials are
         resolved lazily by boto3, so a missing region/credentials would otherwise surface
-        as a raw botocore error inside the constructor. On such a failure, disable persistent
-        mode so each ``execute`` transparently creates and stops its own session — this avoids
-        both crashing construction and leaking sessions (the base ``execute`` would otherwise
-        keep creating unstored, never-stopped sessions while ``persistent_sandbox`` stays True).
+        as a raw botocore error inside the constructor. Failures after the session was
+        created (package install, file upload — raised as ``ToolExecutionException``) stop
+        the partially initialized session so it does not linger until its AWS TTL. In both
+        cases persistent mode is disabled so each ``execute`` transparently creates and
+        stops its own session — this avoids both crashing construction and leaking sessions
+        (the base ``execute`` would otherwise keep creating unstored, never-stopped sessions
+        while ``persistent_sandbox`` stays True).
         """
-        from botocore.exceptions import BotoCoreError, ClientError
-
         try:
             super()._initialize_persistent_sandbox()
-        except (BotoCoreError, ClientError, AgentCoreThrottlingError) as e:
+        except (BotoCoreError, ClientError, AgentCoreThrottlingError, ToolExecutionException) as e:
             logger.warning(
                 f"Tool {self.name} - {self.id}: Could not eagerly initialize persistent AgentCore "
                 f"session ({e}); falling back to a fresh session per execution (non-persistent)."
             )
+            if self._sandbox is not None:
+                try:
+                    self._get_client().stop_session(self._sandbox)
+                except Exception as stop_error:
+                    logger.warning(
+                        f"Tool {self.name} - {self.id}: Failed to stop partially initialized " f"session: {stop_error}"
+                    )
             self._sandbox = None
             self.persistent_sandbox = False
 
@@ -183,6 +193,10 @@ class BedrockAgentCoreInterpreterTool(BaseCodeInterpreterTool):
 
     def _upload_file_to_sandbox(self, file: io.BytesIO, target_path: str, sandbox: AgentCoreSession) -> str:
         normalized = normalize_sandbox_path(target_path)
+        parent = posixpath.dirname(normalized)
+        if parent and parent != ".":
+            # AgentCore writeFiles does not create parent directories; mkdir -p is idempotent.
+            self._get_client().invoke(sandbox, "executeCommand", {"command": f"mkdir -p {shlex.quote(parent)}"})
         content = {"path": normalized, "blob": file.read()}
         result = self._get_client().invoke(sandbox, "writeFiles", {"content": [content]})
         if result.is_error:

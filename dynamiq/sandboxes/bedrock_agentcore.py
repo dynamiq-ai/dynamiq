@@ -293,14 +293,17 @@ class BedrockAgentCoreSandbox(Sandbox):
         from dynamiq.sandboxes.tools.sandbox_info import SandboxInfoTool
         from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
+        # AgentCore file APIs resolve paths against the session workspace, not the filesystem
+        # root, so absolute paths are rejected at validation to steer the agent to relative ones
+        # (unlike the VM-backed E2B/Daytona sandboxes, where absolute paths are meaningful).
         tools = [
             SandboxShellTool(sandbox=self),
-            FileWriteTool(file_store=self, absolute_file_paths_allowed=True),
+            FileWriteTool(file_store=self),
             TodoWriteTool(file_store=self),
             SandboxInfoTool(sandbox=self),
         ]
         if llm is not None:
-            tools.append(FileReadTool(file_store=self, llm=llm, absolute_file_paths_allowed=True))
+            tools.append(FileReadTool(file_store=self, llm=llm))
 
         return tools
 
