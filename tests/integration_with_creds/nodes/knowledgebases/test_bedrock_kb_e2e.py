@@ -10,8 +10,6 @@ from dynamiq.runnables import RunnableStatus
 
 pytestmark = pytest.mark.integration
 
-AWS_ENV_VARS = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION")
-
 SAMPLE_DOCUMENT = (
     "Dynamiq refund policy: customers can request a full refund within 30 days of purchase. "
     "Refunds are processed by the support department within 5 business days. "
@@ -24,8 +22,18 @@ INDEX_TIMEOUT_SECONDS = 600
 POLL_INTERVAL_SECONDS = 10
 
 
-def _aws_env_available() -> bool:
-    return all(os.getenv(variable) for variable in AWS_ENV_VARS)
+def _aws_available() -> bool:
+    """Whether boto3 can resolve credentials and a region by any supported means.
+
+    Deliberately not a check for AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY: those are unset when
+    authenticating through an SSO or named profile (AWS_DEFAULT_PROFILE), which the AWS connection
+    supports, and requiring them made this whole module skip silently for profile-based callers.
+    """
+    try:
+        session = AWS().get_boto3_session()
+        return session.get_credentials() is not None and session.region_name is not None
+    except Exception:
+        return False
 
 
 def _wait_for(describe, is_ready, is_failed, timeout, step_name):
@@ -49,8 +57,8 @@ def knowledge_base():
     BEDROCK_KB_ROLE_ARN (an IAM role Bedrock can assume for the knowledge base). For an existing
     KB, set BEDROCK_KNOWLEDGE_BASE_ID and, if it is a MANAGED-type KB, BEDROCK_KNOWLEDGE_BASE_MANAGED=true.
     """
-    if not _aws_env_available():
-        pytest.skip("AWS credentials are not set")
+    if not _aws_available():
+        pytest.skip("AWS credentials/region could not be resolved")
 
     existing_kb_id = os.getenv("BEDROCK_KNOWLEDGE_BASE_ID")
     if existing_kb_id:
