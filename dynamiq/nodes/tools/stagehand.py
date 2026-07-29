@@ -1,5 +1,6 @@
 import asyncio
 import io
+import os
 import threading
 import time
 import zipfile
@@ -9,11 +10,12 @@ from urllib.parse import urlparse
 
 import requests
 from browserbase import AsyncBrowserbase
+from playwright.async_api import async_playwright
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
-from stagehand import Stagehand as StagehandClient
+from stagehand import AsyncStagehand
 from steel import AsyncSteel
 
-from dynamiq.connections import Browserbase, StagehandEnvironment, SteelBrowser, SteelBrowserEnvironment
+from dynamiq.connections import Browserbase, SteelBrowser, SteelBrowserEnvironment
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -41,10 +43,11 @@ and extract structured data from web pages using natural language instructions.
 - `brief`: A short summary of what this tool call is doing. Required for all actions.
 - `url`: The web address to navigate to. Required only when `action_type` is `goto`.
 
-Additional fields passed in the input (beyond the ones above) are forwarded unchanged
-to the underlying Stagehand call. Provide them in the exact format expected by Stagehand.
-If you need to interact with iframe content, make sure to set 'iframes': True as one of the input fields. For best
-performance, use this option only when necessary, such as when encountering an iframe-related error.
+Optional fields passed in the input (beyond the ones above) are forwarded to Stagehand:
+- `schema`: (extract only) JSON Schema describing the structure of the data to extract.
+- `variables`: A mapping of variables to substitute in the instruction, e.g.
+  {"username": "jdoe"} with instruction "type %username% into the login field".
+- `frame_id`: Target a specific frame by id. Iframes are otherwise handled automatically.
 
 ### Usage Examples
 1. Navigate to a web page:
@@ -62,8 +65,7 @@ performance, use this option only when necessary, such as when encountering an i
    {
      "action_type": "observe",
      "instruction": "Find all clickable links on the homepage",
-     "brief": "Identify clickable links on the homepage",
-     "iframes": true
+     "brief": "Identify clickable links on the homepage"
    }
    ```
 
@@ -117,12 +119,15 @@ d. Extract data from the results
 - Make sure you use 'upload' action instead of 'act' when you expect that file chooser will be opened.
 """
 
+# Input fields that map to per-call Stagehand options rather than top-level params.
+_OPTION_FIELDS = ("model", "timeout", "variables")
+
 
 def end_browserbase_session(api_key: str, project_id: str, session_id: str) -> None:
     """End a Browserbase session by id, independent of any Stagehand client.
 
-    Ends the run's shared session: the creating tool may be gone, and Stagehand's close() needs a
-    live client. Ending also persists the session's Context for the next run.
+    Ends the run's shared session: the creating tool may be gone. Ending also persists the
+    session's Context for the next run.
     """
     from browserbase import Browserbase as BrowserbaseSDK
 
@@ -228,6 +233,14 @@ class Stagehand(ConnectionNode):
     is_files_allowed: bool = True
     _session_id: str | None = PrivateAttr(default=None)
     _live_view_url: str | None = PrivateAttr(default=None)
+    # Stagehand v3 is a pure API client: AI operations run server-side against the browser
+    # session, while direct page control (screenshots, history navigation, file choosers) goes
+    # through our own Playwright connection to the same browser over CDP.
+    _stagehand_session: Any | None = PrivateAttr(default=None)
+    _cdp_url: str | None = PrivateAttr(default=None)
+    _playwright: Any | None = PrivateAttr(default=None)
+    _pw_browser: Any | None = PrivateAttr(default=None)
+    _pw_page: Any | None = PrivateAttr(default=None)
     _loop = PrivateAttr(default=None)
     _loop_thread = PrivateAttr(default=None)
     _call_lock = PrivateAttr(default_factory=threading.Lock)
@@ -326,6 +339,11 @@ class Stagehand(ConnectionNode):
                 self._session_id,
             )
             self._session_id = adopted
+            # Our Stagehand session wraps the session we just ended — a later call re-attaches.
+            self._stagehand_session = None
+            # The live view URL points at the ended session; clear it so re-attach fetches the
+            # winner's URL instead of publishing a dead debugger link.
+            self._live_view_url = None
             return
         # Ours is the run's session: register an end that does not depend on this tool surviving.
         api_key = self.connection.browserbase_api_key
@@ -333,48 +351,37 @@ class Stagehand(ConnectionNode):
         session_id = self._session_id
         ss.register_browser_end(lambda: end_browserbase_session(api_key, project_id, session_id))
 
-    def _apply_shared_browser_config(self, config, context_id: str | None):
-        """Configure the session we create as the run's shared session.
+    def _apply_shared_browser_config(self, params: dict | None, context_id: str | None) -> dict:
+        """Configure the Browserbase session we create as the run's shared session.
 
         ``persist`` writes the Context back on end (cross-run state). ``keep_alive`` stops it dying
         when the creating agent disconnects, and an explicit timeout stops the project default
         cutting a run short — both because one session now spans the whole run.
         """
-        params = dict(getattr(config, "browserbase_session_create_params", None) or {})
+        params = dict(params or {})
         browser_settings = dict(params.get("browser_settings") or {})
         if context_id:
             browser_settings["context"] = {"id": context_id, "persist": True}
         params["browser_settings"] = browser_settings
         params.setdefault("project_id", self.connection.browserbase_project_id)
         params.setdefault("keep_alive", True)
-        # "timeout", not "api_timeout": Stagehand camel-cases keys naively, so api_timeout becomes
-        # "apiTimeout" and the API rejects it (400).
         params.setdefault("timeout", self.shared_browser_session_timeout)
-        config.browserbase_session_create_params = params
-        return config
+        return params
+
+    def _loop_alive(self) -> bool:
+        return self._loop is not None and not self._loop.is_closed()
 
     def _detach_shared_browser(self) -> None:
         """Drop our connection to the shared session WITHOUT ending it.
 
-        Stagehand has no detach — ``client.close()`` always ends the session, killing it for every
-        other agent — so clean up local browser/playwright resources directly and leave the session
-        running. The owner's teardown ends it once.
+        The Stagehand v3 client holds no browser resources of its own, so detaching means closing
+        only our Playwright CDP connection and leaving the Browserbase session running. The
+        owner's teardown ends it once.
         """
-        from stagehand.browser import cleanup_browser_resources
-
-        client = self.client
-        if client is None:
+        if not self._loop_alive() or (self._pw_browser is None and self._playwright is None):
             return
         try:
-            self._run_in_loop(
-                cleanup_browser_resources(
-                    getattr(client, "_browser", None),
-                    getattr(client, "_context", None),
-                    getattr(client, "_playwright", None),
-                    None,
-                    client.logger,
-                )
-            )
+            self._run_in_loop(self._close_playwright())
         except Exception as exc:
             logger.warning(f"Stagehand detach from shared session failed: {exc}")
 
@@ -392,22 +399,13 @@ class Stagehand(ConnectionNode):
             return "https://api.steel.dev/v1"
         return (self.connection.base_url or "http://localhost:3000").rstrip("/")
 
-    def _create_steel_browser_stagehand_config(self, cdp_url: str):
-        """Create a Stagehand config for the Steel Browser session."""
-        from stagehand import StagehandConfig
-
-        connection_cdp_url = cdp_url
+    def _get_steel_browser_cdp_url(self) -> str:
+        """CDP URL of the Steel session, with the API key appended for cloud sessions."""
+        cdp_url = self._steel_browser_session.websocket_url
         if self.connection.environment == SteelBrowserEnvironment.CLOUD and self.connection.api_key:
             separator = "&" if "?" in cdp_url else "?"
-            connection_cdp_url = f"{cdp_url}{separator}apiKey={self.connection.api_key}"
-
-        return StagehandConfig(
-            env=StagehandEnvironment.LOCAL,
-            model_name=self.model_name,
-            model_api_key=self.connection.model_api_key,
-            local_browser_launch_options={"cdp_url": connection_cdp_url},
-            **self.connection.extra_config,
-        )
+            cdp_url = f"{cdp_url}{separator}apiKey={self.connection.api_key}"
+        return cdp_url
 
     async def _ensure_steel_browser_session(self):
         """Check if the Steel Browser session exists and create it if it doesn't."""
@@ -515,24 +513,27 @@ class Stagehand(ConnectionNode):
             result = await self._browserbase_client.sessions.uploads.create(self._session_id, file=file_obj)
             logger.info(f"Uploaded {file_obj.name}: {result}")
 
+    def _session_start_options(self) -> dict[str, Any]:
+        """Session start parameters supplied via the connection (self_heal, system_prompt, ...)."""
+        return dict(self.connection.extra_config or {})
+
     async def _init_client(
         self,
-        files: list[io.BytesIO],
         shared_context_id: str | None = None,
         create_shared_session: bool = False,
     ):
-        """Initialize Stagehand client and reinitialize with session reuse.
+        """Initialize the Stagehand API client and start (or resume) its browser session.
 
         ``create_shared_session``: we are first to browse in a shared-browser run, so the session
         we create is configured to outlive our turn and to load ``shared_context_id`` (prior-run state).
         """
-
-        class StagehandNoSignal(StagehandClient):
-            # Suppress signal handlers to avoid "signal only works in main thread" error
-            def _register_signal_handlers(self):
-                pass
-
         if self._is_steel_browser_connection():
+            if self._steel_client is None:
+                # Recreate Steel client if it was cleaned up during close()
+                if self.connection.environment == SteelBrowserEnvironment.CLOUD:
+                    self._steel_client = AsyncSteel(steel_api_key=self.connection.api_key)
+                elif self.connection.environment == SteelBrowserEnvironment.SELF_HOSTED:
+                    self._steel_client = AsyncSteel(base_url=self.connection.base_url)
             await self._ensure_steel_browser_session()
             if (
                 not hasattr(self._steel_browser_session, "websocket_url")
@@ -541,46 +542,120 @@ class Stagehand(ConnectionNode):
                 raise ToolExecutionException(
                     "Steel session missing required 'websocket_url' attribute or has invalid value", recoverable=False
                 )
-            config = self._create_steel_browser_stagehand_config(self._steel_browser_session.websocket_url)
+            if self.client is None:
+                if self.model_name.startswith("anthropic/") and not os.environ.get("ANTHROPIC_BASE_URL"):
+                    # Stagehand's bundled local server (3.22.x) resolves the Anthropic endpoint
+                    # without the /v1 prefix and 404s unless the base URL is pinned via env.
+                    logger.warning(
+                        "Tool %s - %s: using an anthropic/* model on the local Stagehand server requires "
+                        "ANTHROPIC_BASE_URL=https://api.anthropic.com/v1 in the environment; model calls "
+                        "will fail with 404 'Not Found' without it.",
+                        self.name,
+                        self.id,
+                    )
+                # The bundled local Stagehand server drives the Steel browser over CDP.
+                self.client = AsyncStagehand(
+                    server="local",
+                    model_api_key=self.connection.model_api_key,
+                    timeout=self.timeout,
+                )
+            if self._stagehand_session is None:
+                self._cdp_url = self._get_steel_browser_cdp_url()
+                self._stagehand_session = await self.client.sessions.start(
+                    model_name=self.model_name,
+                    browser={"type": "local", "cdp_url": self._cdp_url},
+                    **self._session_start_options(),
+                )
+                self._session_id = getattr(self._steel_browser_session, "id", None)
         else:
-            config = self.connection.config or {}
-            if create_shared_session:
-                config = self._apply_shared_browser_config(config, shared_context_id)
-
-        if self.client is None:
-            self.client = StagehandNoSignal(config=config, model_api_key=self.connection.model_api_key)
-            self.client.model_name = self.model_name
-            if self._is_steel_browser_connection():
-                # Recreate Steel client if it was cleaned up during close()
-                if self._steel_client is None:
-                    if self.connection.environment == SteelBrowserEnvironment.CLOUD:
-                        self._steel_client = AsyncSteel(steel_api_key=self.connection.api_key)
-                    elif self.connection.environment == SteelBrowserEnvironment.SELF_HOSTED:
-                        self._steel_client = AsyncSteel(base_url=self.connection.base_url)
-            else:
+            if self.client is None:
+                self.client = AsyncStagehand(
+                    browserbase_api_key=self.connection.browserbase_api_key,
+                    # None routes model calls through the Browserbase Model Gateway.
+                    model_api_key=self.connection.model_api_key or None,
+                    timeout=self.timeout,
+                )
                 self._browserbase_client = self._browserbase_client or AsyncBrowserbase(
                     api_key=self.connection.browserbase_api_key
                 )
-        else:
-            self.client.config = config
-            self.client.model_name = self.model_name
-
-        self.client.initialized = False
-
-        if self._session_id:
-            self.client.session_id = self._session_id
-
-        await self.client.init()
-        if self._is_steel_browser_connection():
-            self._session_id = getattr(self._steel_browser_session, "id", self._session_id)
-            if self._session_id:
-                self.client.session_id = self._session_id
-        else:
-            self._session_id = self.client.session_id
+            # (Re)start when there is no live session, or when the run's shared session was
+            # published by another agent and ours must attach to it instead.
+            needs_start = self._stagehand_session is None or (
+                self._session_id is not None and self._stagehand_session.data.session_id != self._session_id
+            )
+            if needs_start:
+                start_kwargs = self._session_start_options()
+                if create_shared_session:
+                    start_kwargs["browserbase_session_create_params"] = self._apply_shared_browser_config(
+                        start_kwargs.get("browserbase_session_create_params"), shared_context_id
+                    )
+                if self._session_id:
+                    start_kwargs["browserbase_session_id"] = self._session_id
+                else:
+                    # Creating a fresh session: honor the connection's explicit project id (v3 keys
+                    # are project-scoped, but an explicitly configured project must win).
+                    create_params = dict(start_kwargs.get("browserbase_session_create_params") or {})
+                    create_params.setdefault("project_id", self.connection.browserbase_project_id)
+                    start_kwargs["browserbase_session_create_params"] = create_params
+                self._stagehand_session = await self.client.sessions.start(
+                    model_name=self.model_name,
+                    **start_kwargs,
+                )
+                self._session_id = self._stagehand_session.data.session_id
+                self._cdp_url = self._stagehand_session.data.cdp_url
+                # A new session means any previous CDP page handle is stale.
+                await self._close_playwright()
 
         # Fetch live view URL only when enabled (once per session)
         if self.is_return_live_view_url_enabled and not self._live_view_url:
             await self._fetch_live_view_url()
+
+    async def _get_connect_cdp_url(self) -> str:
+        """CDP endpoint of the live browser session, for our own Playwright connection."""
+        if self._is_steel_browser_connection():
+            return self._get_steel_browser_cdp_url()
+        if self._cdp_url:
+            return self._cdp_url
+        # Resumed sessions may not carry a cdp_url in the start response; ask Browserbase.
+        session = await self._browserbase_client.sessions.retrieve(self._session_id)
+        return session.connect_url
+
+    async def _ensure_page(self):
+        """Playwright page attached over CDP to the same browser Stagehand drives.
+
+        Needed only for operations the Stagehand API does not cover: file choosers, history
+        navigation and screenshots.
+        """
+        if self._pw_page is not None:
+            try:
+                if not self._pw_page.is_closed():
+                    return self._pw_page
+            except Exception as exc:
+                logger.debug(f"Stale playwright page handle, reconnecting: {exc}")
+        if self._playwright is None:
+            self._playwright = await async_playwright().start()
+        if self._pw_browser is None or not self._pw_browser.is_connected():
+            self._pw_browser = await self._playwright.chromium.connect_over_cdp(await self._get_connect_cdp_url())
+        context = self._pw_browser.contexts[0] if self._pw_browser.contexts else await self._pw_browser.new_context()
+        self._pw_page = context.pages[-1] if context.pages else await context.new_page()
+        return self._pw_page
+
+    async def _close_playwright(self) -> None:
+        """Tear down our CDP connection without touching the remote browser session."""
+        for attr in ("_pw_browser", "_playwright"):
+            resource = getattr(self, attr)
+            if resource is None:
+                continue
+            try:
+                if attr == "_pw_browser":
+                    await resource.close()
+                else:
+                    await resource.stop()
+            except Exception as exc:
+                logger.debug(f"Stagehand playwright cleanup ({attr}) failed: {exc}")
+        self._pw_page = None
+        self._pw_browser = None
+        self._playwright = None
 
     async def _fetch_live_view_url(self) -> None:
         """Fetch and store the live view URL for the current session."""
@@ -614,11 +689,12 @@ class Stagehand(ConnectionNode):
             BytesIO object containing the screenshot PNG, or None if capture fails.
         """
         try:
-            screenshot_bytes = await self.client.page.screenshot()
+            page = await self._ensure_page()
+            screenshot_bytes = await page.screenshot()
 
             page_host = ""
             try:
-                page_url = self.client.page.url
+                page_url = page.url
                 page_host = urlparse(page_url).hostname or "unknown"
                 page_host = page_host.replace(".", "_")
             except Exception:
@@ -706,6 +782,32 @@ class Stagehand(ConnectionNode):
 
         return files
 
+    def _build_call_kwargs(self, payload: dict[str, Any], action_type: StagehandActionType) -> dict[str, Any]:
+        """Map extra input fields onto Stagehand v3 call parameters.
+
+        Top-level `model`/`timeout`/`variables` fold into `options`; `schema` is passed through for
+        extract; unknown fields are dropped with a warning instead of failing the whole call.
+        """
+        payload = dict(payload)
+        call_kwargs: dict[str, Any] = {}
+        options = dict(payload.pop("options", None) or {})
+        for key in _OPTION_FIELDS:
+            if key in payload:
+                options[key] = payload.pop(key)
+        if "frame_id" in payload:
+            call_kwargs["frame_id"] = payload.pop("frame_id")
+        if action_type == StagehandActionType.EXTRACT and "schema" in payload:
+            call_kwargs["schema"] = payload.pop("schema")
+        if payload.pop("iframes", None):
+            logger.info(f"Tool {self.name} - {self.id}: 'iframes' is handled automatically by Stagehand; ignoring.")
+        if payload:
+            logger.warning(
+                f"Tool {self.name} - {self.id}: ignoring input fields not supported by Stagehand: {sorted(payload)}"
+            )
+        if options:
+            call_kwargs["options"] = options
+        return call_kwargs
+
     async def execute_async(
         self, input_data: StagehandInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
@@ -731,42 +833,47 @@ class Stagehand(ConnectionNode):
             await self._join_shared_browser(shared_browser)
             create_shared_session = self._session_id is None  # nobody has created it yet: we do
             shared_context_id = shared_browser.browser_context_id()
-        await self._init_client(input_data.files, shared_context_id, create_shared_session)
+        await self._init_client(shared_context_id, create_shared_session)
         if shared_browser:
             if create_shared_session:
                 self._record_shared_browser_session(shared_browser)
+                if self._stagehand_session is None:
+                    # Lost the creation race: our session was ended, attach to the winner's.
+                    await self._init_client(shared_context_id, create_shared_session=False)
             shared_browser.set_browser_live_view_url(self._live_view_url)
 
-        tool_data = {"tool_session_id": self.client.session_id}
+        tool_data = {"tool_session_id": self._session_id}
         self.run_on_node_execute_run(
             config.callbacks,
             tool_data=tool_data,
             **kwargs,
         )
 
+        session = self._stagehand_session
         files = []
         try:
-            payload: dict[str, Any] = getattr(input_data, "model_extra", {}) or {}
+            payload = self._build_call_kwargs(getattr(input_data, "model_extra", {}) or {}, input_data.action_type)
             if input_data.action_type == StagehandActionType.EXTRACT:
-                result = await self.client.page.extract(input_data.instruction, **payload)
-                result = result.model_dump()
+                response_obj = await session.extract(instruction=input_data.instruction, **payload)
+                result = response_obj.data.result
             elif input_data.action_type == StagehandActionType.OBSERVE:
-                result = await self.client.page.observe(input_data.instruction, **payload)
-                result = [el.model_dump() for el in result]
+                response_obj = await session.observe(instruction=input_data.instruction, **payload)
+                result = [el.model_dump() for el in response_obj.data.result]
             elif input_data.action_type == StagehandActionType.ACT:
-                result = await self.client.page.act(input_data.instruction, **payload)
-                result = result.model_dump()
-                zip_data = await self.get_downloads_via_sdk(self.client.session_id, config=config)
+                response_obj = await session.act(input=input_data.instruction, **payload)
+                result = response_obj.data.result.model_dump()
+                zip_data = await self.get_downloads_via_sdk(self._session_id, config=config)
                 files = self.extract_files_from_zip(zip_data) if zip_data else []
             elif input_data.action_type == StagehandActionType.GOTO:
                 if input_data.url is None:
                     raise ToolExecutionException(
                         "Missing required URL for 'navigate' action. Please provide a valid URL.", recoverable=True
                     )
-                await self.client.page.goto(input_data.url)
+                await session.navigate(url=input_data.url, **payload)
                 result = "Navigated to " + input_data.url
             elif input_data.action_type == StagehandActionType.GOBACK:
-                await self.client.page.go_back()
+                page = await self._ensure_page()
+                await page.go_back()
                 result = "Navigated to previous page"
             elif input_data.action_type == StagehandActionType.UPLOAD:
                 if input_data.files is None:
@@ -774,8 +881,11 @@ class Stagehand(ConnectionNode):
                         "No file provided for upload action. Please provide a file to upload.", recoverable=True
                     )
 
-                async with self.client.page.expect_file_chooser() as fc_info:
-                    result = await self.client.page.act(input_data.instruction)
+                page = await self._ensure_page()
+                # The chooser only opens after act's server-side LLM round-trip and click, which
+                # can outlast Playwright's stock 30s waiter — wait as long as the tool itself would.
+                async with page.expect_file_chooser(timeout=self.timeout * 1000) as fc_info:
+                    response_obj = await session.act(input=input_data.instruction, **payload)
 
                 file_chooser = await fc_info.value
                 if file_chooser:
@@ -791,7 +901,7 @@ class Stagehand(ConnectionNode):
                         [{"name": input_data.files.name, "mimeType": mime_type, "buffer": file_content}]
                     )
 
-                result = result.model_dump()
+                result = response_obj.data.result.model_dump()
             else:
                 raise ToolExecutionException(f"Invalid action type: {input_data.action_type}", recoverable=True)
 
@@ -826,10 +936,26 @@ class Stagehand(ConnectionNode):
             if self._shares_browser_session:
                 # Detach, never end — other agents are still driving it (also guards __del__).
                 self._detach_shared_browser()
-            elif self.client and hasattr(self.client, "close"):
-                self._run_in_loop(self.client.close())
+            elif self._loop_alive():
+                if self._stagehand_session is not None:
+                    try:
+                        self._run_in_loop(self._stagehand_session.end())
+                    except Exception as exc:
+                        logger.warning(f"Stagehand session end failed: {exc}")
+                if self._pw_browser is not None or self._playwright is not None:
+                    try:
+                        self._run_in_loop(self._close_playwright())
+                    except Exception as exc:
+                        logger.warning(f"Stagehand playwright close failed: {exc}")
+                if self.client is not None and hasattr(self.client, "close"):
+                    try:
+                        self._run_in_loop(self.client.close())
+                    except Exception as exc:
+                        logger.warning(f"Stagehand client close failed: {exc}")
 
-            if self._is_steel_browser_connection():
+            if not self._loop_alive():
+                pass
+            elif self._is_steel_browser_connection():
                 if self._steel_browser_session and self._steel_client:
                     try:
                         session_id = getattr(self._steel_browser_session, "id", self._session_id)
@@ -851,10 +977,17 @@ class Stagehand(ConnectionNode):
             logger.warning(f"Stagehand close() failed: {e}")
         finally:
             self.client = None
+            self._stagehand_session = None
+            self._cdp_url = None
             self._browserbase_client = None
             self._steel_browser_session = None
             self._steel_client = None
             self._live_view_url = None
+            # Drop CDP handles even if teardown failed, so a later run reconnects instead of
+            # reusing a stale page.
+            self._pw_page = None
+            self._pw_browser = None
+            self._playwright = None
             # Clear the (now-terminated) session id so a later run starts fresh, not on a dead id.
             self._session_id = None
             self.close_loop()
@@ -877,4 +1010,8 @@ class Stagehand(ConnectionNode):
             "_browserbase_client": True,
             "_steel_browser_session": True,
             "_steel_client": True,
+            "_stagehand_session": True,
+            "_playwright": True,
+            "_pw_browser": True,
+            "_pw_page": True,
         }

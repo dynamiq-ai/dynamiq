@@ -1,5 +1,6 @@
 import enum
 import json
+import os
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from enum import Enum
@@ -1726,24 +1727,23 @@ class Browserbase(BaseConnection):
 
     browserbase_api_key: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_API_KEY"))
     browserbase_project_id: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_PROJECT_ID"))
-    model_api_key: str = Field(..., description="API key for the LLM model.")
+    model_api_key: str | None = Field(
+        default_factory=lambda: os.environ.get("MODEL_API_KEY") or None,
+        description=(
+            "API key for the LLM model provider. Optional: when unset, model calls route through "
+            "the Browserbase Model Gateway using the Browserbase API key."
+        ),
+    )
     extra_config: dict[str, Any] = Field(
-        default_factory=dict, description="Additional options to pass into StagehandConfig"
+        default_factory=dict,
+        description=(
+            "Additional Stagehand session start options (e.g. self_heal, system_prompt, "
+            "dom_settle_timeout_ms, verbose, browserbase_session_create_params)."
+        ),
     )
 
     def connect(self):
         pass
-
-    @property
-    def config(self):
-        from stagehand import StagehandConfig
-
-        return StagehandConfig(
-            env=StagehandEnvironment.BROWSERBASE,
-            api_key=self.browserbase_api_key,
-            project_id=self.browserbase_project_id,
-            **self.extra_config,
-        )
 
 
 class Stagehand(Browserbase):
@@ -1762,6 +1762,11 @@ class SteelBrowserEnvironment(str, enum.Enum):
 class SteelBrowser(BaseConnection):
     """
     Steel.dev connection configuration for Stagehand.
+
+    Steel sessions are driven by Stagehand's bundled local server. When using an ``anthropic/*``
+    model, the deployment must set ``ANTHROPIC_BASE_URL=https://api.anthropic.com/v1`` — the
+    bundled server (3.22.x) otherwise resolves the Anthropic endpoint without the ``/v1`` prefix
+    and model calls fail with 404.
     """
 
     environment: SteelBrowserEnvironment = Field(
@@ -1783,7 +1788,11 @@ class SteelBrowser(BaseConnection):
         description="Configuration options for Steel session creation",
     )
     extra_config: dict[str, Any] = Field(
-        default_factory=dict, description="Additional options to pass into StagehandConfig"
+        default_factory=dict,
+        description=(
+            "Additional Stagehand session start options (e.g. self_heal, system_prompt, "
+            "dom_settle_timeout_ms, verbose)."
+        ),
     )
 
     @model_validator(mode="after")
