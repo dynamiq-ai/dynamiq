@@ -299,6 +299,10 @@ class Anthropic(BaseApiKeyConnection):
 class AWS(BaseConnection):
     access_key_id: str | None = Field(default_factory=partial(get_env_var, "AWS_ACCESS_KEY_ID"))
     secret_access_key: str | None = Field(default_factory=partial(get_env_var, "AWS_SECRET_ACCESS_KEY"))
+    # Required alongside the key pair for any temporary credential (STS AssumeRole, IAM
+    # Identity Center / SSO export, CI OIDC). Without it SigV4 signing is rejected with
+    # InvalidClientTokenId, so credentials that work in the AWS CLI would fail here.
+    session_token: str | None = Field(default_factory=partial(get_env_var, "AWS_SESSION_TOKEN"))
     region: str = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_REGION"))
     profile: str | None = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_PROFILE"))
 
@@ -316,6 +320,8 @@ class AWS(BaseConnection):
             params["aws_access_key_id"] = self.access_key_id
             params["aws_secret_access_key"] = self.secret_access_key
             params["aws_region_name"] = self.region
+            if self.session_token:
+                params["aws_session_token"] = self.session_token
         return params
 
     def get_boto3_session(self):
@@ -328,6 +334,8 @@ class AWS(BaseConnection):
         elif self.access_key_id and self.secret_access_key:
             params["aws_access_key_id"] = self.access_key_id
             params["aws_secret_access_key"] = self.secret_access_key
+            if self.session_token:
+                params["aws_session_token"] = self.session_token
         if self.region:
             params["region_name"] = self.region
         return boto3.Session(**params)
