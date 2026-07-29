@@ -95,12 +95,30 @@ def knowledge_base():
             step_name="Knowledge base creation",
         )
 
+        # A MANAGED knowledge base rejects a bare "CUSTOM" data source type; the custom connector is
+        # selected through connectorParameters on MANAGED_KNOWLEDGE_BASE_CONNECTOR instead.
         data_source_response = agent_client.create_data_source(
             knowledgeBaseId=kb_id,
             name=f"dynamiq-e2e-docs-{suffix}",
-            dataSourceConfiguration={"type": "CUSTOM"},
+            dataSourceConfiguration={
+                "type": "MANAGED_KNOWLEDGE_BASE_CONNECTOR",
+                "managedKnowledgeBaseConnectorConfiguration": {
+                    "connectorParameters": {"type": "CUSTOM", "version": "1", "aclEnabled": False}
+                },
+            },
         )
         data_source_id = data_source_response["dataSource"]["dataSourceId"]
+
+        # CreateDataSource is asynchronous for managed KBs: CREATING -> AVAILABLE.
+        _wait_for(
+            describe=lambda: agent_client.get_data_source(knowledgeBaseId=kb_id, dataSourceId=data_source_id)[
+                "dataSource"
+            ]["status"],
+            is_ready=lambda status: status in ("AVAILABLE", "ACTIVE"),
+            is_failed=lambda status: status in ("FAILED", "DELETE_UNSUCCESSFUL"),
+            timeout=CREATE_TIMEOUT_SECONDS,
+            step_name="Data source creation",
+        )
 
         document_id = f"dynamiq-e2e-doc-{suffix}"
         agent_client.ingest_knowledge_base_documents(
