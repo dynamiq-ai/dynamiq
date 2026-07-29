@@ -896,7 +896,9 @@ class Stagehand(ConnectionNode):
                     )
 
                 page = await self._ensure_page()
-                async with page.expect_file_chooser() as fc_info:
+                # The chooser only opens after act's server-side LLM round-trip and click, which
+                # can outlast Playwright's stock 30s waiter — wait as long as the tool itself would.
+                async with page.expect_file_chooser(timeout=self.timeout * 1000) as fc_info:
                     response_obj = await session.act(input=input_data.instruction, **payload)
 
                 file_chooser = await fc_info.value
