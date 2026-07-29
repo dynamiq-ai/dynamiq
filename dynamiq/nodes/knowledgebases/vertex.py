@@ -3,6 +3,10 @@ import hashlib
 import weakref
 from typing import Any, ClassVar, Literal
 
+from google.api_core.client_options import ClientOptions
+from google.cloud import aiplatform_v1
+from google.oauth2 import service_account
+
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from dynamiq.connections import VertexAI as VertexAIConnection
@@ -136,8 +140,6 @@ class VertexAIRagSearch(ConnectionNode):
         return location
 
     def _build_credentials(self) -> Any:
-        from google.oauth2 import service_account
-
         connection = self.connection
         info = {
             "type": "service_account",
@@ -168,13 +170,9 @@ class VertexAIRagSearch(ConnectionNode):
         return self.location
 
     def _client_options(self) -> Any:
-        from google.api_core.client_options import ClientOptions
-
         return ClientOptions(api_endpoint=f"{self._endpoint_location()}-aiplatform.googleapis.com")
 
     def _build_client(self) -> Any:
-        from google.cloud import aiplatform_v1
-
         return aiplatform_v1.VertexRagServiceClient(
             credentials=self._build_credentials(), client_options=self._client_options()
         )
@@ -186,8 +184,6 @@ class VertexAIRagSearch(ConnectionNode):
         origin loop and dead entries are pruned on access (mirrors ConnectionManager's per-loop
         async client guard); otherwise clients bound to closed loops would leak and be reused.
         """
-        from google.cloud import aiplatform_v1
-
         if self.connection is None:
             raise ValueError("A VertexAI connection is required to build the async client.")
 
@@ -228,8 +224,6 @@ class VertexAIRagSearch(ConnectionNode):
         return "/".join(self.corpus_resource_name.split("/")[:4])
 
     def _build_request(self, input_data: VertexAIRagSearchInputSchema) -> Any:
-        from google.cloud import aiplatform_v1
-
         query = input_data.query.strip()
         if not query:
             raise ToolExecutionException(
