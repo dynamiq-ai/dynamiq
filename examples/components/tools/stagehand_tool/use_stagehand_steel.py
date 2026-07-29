@@ -1,6 +1,6 @@
-# Steel runs on Stagehand's bundled local server: anthropic/* models require
-# ANTHROPIC_BASE_URL=https://api.anthropic.com/v1 in the environment (server 3.22.x
-# otherwise omits the /v1 prefix and model calls 404).
+# Steel runs on Stagehand's bundled local server, which inherits this process's env.
+# For anthropic/* models leave ANTHROPIC_BASE_URL unset (defaults to the correct
+# https://api.anthropic.com/v1); if set, the value must include the /v1 suffix.
 import os
 
 from dynamiq import Workflow
@@ -44,6 +44,7 @@ def set_wf_with_steeldev_agent(cm, use_cloud: bool = True):
     stagehand_tool = Stagehand(
         connection=connection,
         model_name="anthropic/claude-sonnet-5",
+        fallback_model_name="anthropic/claude-sonnet-4-6",
         is_postponed_component_init=True,
     )
 

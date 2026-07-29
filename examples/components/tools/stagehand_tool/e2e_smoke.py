@@ -12,8 +12,9 @@ Run all paths, or a subset:
     python e2e_smoke.py bb-gateway      # Browserbase Model Gateway (no model key)
     python e2e_smoke.py steel           # Steel cloud via the bundled local Stagehand server
 
-The Steel path with an anthropic/* model requires ANTHROPIC_BASE_URL=https://api.anthropic.com/v1
-in the environment (Stagehand local server 3.22.x otherwise omits the /v1 prefix and 404s).
+Steel path note: leave ANTHROPIC_BASE_URL unset (the bundled Stagehand server then defaults to
+https://api.anthropic.com/v1); if your environment sets it, the value must include the /v1 suffix
+or anthropic/* model calls 404.
 """
 
 import os
@@ -25,6 +26,7 @@ from dynamiq.connections import SteelBrowser
 from dynamiq.nodes.tools.stagehand import Stagehand, StagehandInputSchema
 
 MODEL = "anthropic/claude-sonnet-5"
+FALLBACK_MODEL = "anthropic/claude-sonnet-4-6"
 RESULTS = {}
 
 ACTIONS = [
@@ -64,6 +66,7 @@ if "bb-provider" in targets:
         Stagehand(
             connection=BrowserbaseConnection(model_api_key=os.environ["ANTHROPIC_API_KEY"]),
             model_name=MODEL,
+            fallback_model_name=FALLBACK_MODEL,
             is_return_screenshot_bytes_enabled=True,
             is_return_live_view_url_enabled=True,
         ),
@@ -74,7 +77,11 @@ if "bb-provider" in targets:
 if "bb-gateway" in targets:
     print("== Browserbase Model Gateway (no model key) ==")
     run(
-        Stagehand(connection=BrowserbaseConnection(model_api_key=None), model_name=MODEL),
+        Stagehand(
+            connection=BrowserbaseConnection(model_api_key=None),
+            model_name=MODEL,
+            fallback_model_name=FALLBACK_MODEL,
+        ),
         "bb-gateway",
         ACTIONS[:2],
     )
@@ -85,6 +92,7 @@ if "steel" in targets:
         Stagehand(
             connection=SteelBrowser(model_api_key=os.environ["ANTHROPIC_API_KEY"]),
             model_name=MODEL,
+            fallback_model_name=FALLBACK_MODEL,
         ),
         "steel",
         ACTIONS[:2],

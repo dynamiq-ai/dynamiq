@@ -1763,10 +1763,10 @@ class SteelBrowser(BaseConnection):
     """
     Steel.dev connection configuration for Stagehand.
 
-    Steel sessions are driven by Stagehand's bundled local server. When using an ``anthropic/*``
-    model, the deployment must set ``ANTHROPIC_BASE_URL=https://api.anthropic.com/v1`` — the
-    bundled server (3.22.x) otherwise resolves the Anthropic endpoint without the ``/v1`` prefix
-    and model calls fail with 404.
+    Steel sessions are driven by Stagehand's bundled local server, which inherits the process
+    environment. With ``anthropic/*`` models, leave ``ANTHROPIC_BASE_URL`` unset (the server then
+    defaults to ``https://api.anthropic.com/v1``); if the deployment does set it, the value must
+    include the ``/v1`` suffix or model calls fail with 404.
     """
 
     environment: SteelBrowserEnvironment = Field(
@@ -1784,8 +1784,11 @@ class SteelBrowser(BaseConnection):
     )
     model_api_key: str = Field(..., description="API key for the LLM model.")
     session_config: dict[str, Any] = Field(
-        default_factory=lambda: {"block_ads": True},
-        description="Configuration options for Steel session creation",
+        default_factory=lambda: {"block_ads": True, "timeout": 3600000},
+        description=(
+            "Configuration options for Steel session creation. The timeout (ms) overrides Steel's "
+            "short default session lifetime so the session outlasts a full agent run."
+        ),
     )
     extra_config: dict[str, Any] = Field(
         default_factory=dict,

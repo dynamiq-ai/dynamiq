@@ -8,11 +8,16 @@ from enum import Enum
 from typing import Any, ClassVar, Coroutine, Literal
 from urllib.parse import urlparse
 
-import requests
 from browserbase import AsyncBrowserbase
 from playwright.async_api import async_playwright
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
-from stagehand import AsyncStagehand
+from stagehand import (
+    AsyncStagehand,
+    AuthenticationError,
+    InternalServerError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from steel import AsyncSteel
 
 from dynamiq.connections import Browserbase, SteelBrowser, SteelBrowserEnvironment
@@ -23,7 +28,7 @@ from dynamiq.nodes.agents.shared_session import SharedSession, _current_agent_ru
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.nodes.tools.utils import guess_mime_type_from_bytes, sanitize_filename
 from dynamiq.runnables import RunnableConfig
-from dynamiq.types.cancellation import check_cancellation
+from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.utils.logger import logger
 
 DESCRIPTION_STAGEHAND = """## Stagehand Tool
@@ -119,8 +124,42 @@ d. Extract data from the results
 - Make sure you use 'upload' action instead of 'act' when you expect that file chooser will be opened.
 """
 
-# Input fields that map to per-call Stagehand options rather than top-level params.
-_OPTION_FIELDS = ("model", "timeout", "variables")
+# Input fields that map to per-call Stagehand options rather than top-level params, per action:
+# variables only exist for act (and upload, which acts under the hood); navigate options carry
+# no model/variables.
+_OPTION_FIELDS_BY_ACTION = {
+    "act": ("model", "timeout", "variables"),
+    "upload": ("model", "timeout", "variables"),
+    "observe": ("model", "timeout"),
+    "extract": ("model", "timeout"),
+    "goto": ("timeout",),
+    "go_back": (),
+}
+
+# Seconds any single teardown step may take. Cleanup runs from close()/__del__, where an unbounded
+# wait can hang interpreter shutdown on a loop thread that is already frozen.
+_CLEANUP_TIMEOUT = 30.0
+
+# Milliseconds to wait for a history navigation to settle.
+_HISTORY_NAV_TIMEOUT_MS = 30_000
+
+# Marker of a server-side failure to turn the model's answer into the shape act/observe/extract
+# require. Retrying the same model is pointless (the server decodes deterministically: the retry
+# reproduces the same invalid answer) — only a different model recovers it.
+_SCHEMA_MISMATCH_MARKER = "did not match schema"
+
+# Keyword params accepted by stagehand 3.22.x sessions.start; anything else in extra_config would
+# raise a TypeError outside the tool's error handling.
+_SESSION_START_OPTIONS = (
+    "browser",
+    "browserbase_session_create_params",
+    "browserbase_session_id",
+    "dom_settle_timeout_ms",
+    "experimental",
+    "self_heal",
+    "system_prompt",
+    "verbose",
+)
 
 
 def end_browserbase_session(api_key: str, project_id: str, session_id: str) -> None:
@@ -203,6 +242,15 @@ class Stagehand(ConnectionNode):
     description: str = DESCRIPTION_STAGEHAND
     connection: Browserbase | SteelBrowser
     model_name: str
+    fallback_model_name: str | None = Field(
+        default=None,
+        description=(
+            "Model used to retry a single act/observe/extract call when the primary model's answer "
+            "is rejected by Stagehand's structured-output validation. Recommended whenever the "
+            "primary model is newer than the Stagehand server: retrying the same model cannot "
+            "recover (the server decodes deterministically), a different one does."
+        ),
+    )
     is_return_screenshot_bytes_enabled: bool = Field(
         default=False, description="Whether to capture and return a screenshot as bytes after act/goto actions."
     )
@@ -247,7 +295,32 @@ class Stagehand(ConnectionNode):
     # True while driving the run's shared session: close() must then detach, not end it.
     _shares_browser_session: bool = PrivateAttr(default=False)
 
-    _clone_init_methods_names: ClassVar[list[str]] = ["init_loop", "init_call_lock"]
+    # reset_clone_resources MUST run first: it clears the shallow-copied loop reference so the
+    # clone's init_loop does not stop the ORIGINAL instance's running loop.
+    _clone_init_methods_names: ClassVar[list[str]] = ["reset_clone_resources", "init_loop", "init_call_lock"]
+
+    def reset_clone_resources(self):
+        """Detach a clone from the original's live resources.
+
+        ``clone()`` copies private attrs shallowly, so without this a clone would share the
+        original's event loop (and stop it via ``init_loop``), drive the original's browser
+        session, and end it from ``close()``/``__del__``. A clone starts with no live handles
+        and builds its own on first use.
+        """
+        self._loop = None
+        self._loop_thread = None
+        self.client = None
+        self._stagehand_session = None
+        self._session_id = None
+        self._cdp_url = None
+        self._live_view_url = None
+        self._browserbase_client = None
+        self._steel_client = None
+        self._steel_browser_session = None
+        self._playwright = None
+        self._pw_browser = None
+        self._pw_page = None
+        self._shares_browser_session = False
 
     def _is_steel_browser_connection(self) -> bool:
         """Check if the current connection is an instance of Steel Browser connection."""
@@ -302,6 +375,14 @@ class Stagehand(ConnectionNode):
         if shared_sid:
             self._session_id = shared_sid
             return
+
+        # Fresh shared run with no published session: anything we still hold belongs to a PREVIOUS
+        # run and was ended at its teardown — drop it, or needs_start would resume a dead session.
+        if self._session_id is not None:
+            self._session_id = None
+            self._stagehand_session = None
+            self._live_view_url = None
+            self._cdp_url = None
 
         # First to browse: settle the persistent Context (cross-run state) so the session we create
         # loads it and writes it back on end.
@@ -374,30 +455,23 @@ class Stagehand(ConnectionNode):
     def _detach_shared_browser(self) -> None:
         """Drop our connection to the shared session WITHOUT ending it.
 
-        The Stagehand v3 client holds no browser resources of its own, so detaching means closing
-        only our Playwright CDP connection and leaving the Browserbase session running. The
-        owner's teardown ends it once.
+        The Stagehand v3 client holds no browser resources of its own — ``client.close()`` only
+        closes its HTTP client and never ends browser sessions — so a full detach is closing our
+        Playwright CDP connection plus the API client, leaving the Browserbase session running.
+        The owner's teardown ends it once.
         """
-        if not self._loop_alive() or (self._pw_browser is None and self._playwright is None):
+        if not self._loop_alive():
             return
-        try:
-            self._run_in_loop(self._close_playwright())
-        except Exception as exc:
-            logger.warning(f"Stagehand detach from shared session failed: {exc}")
-
-    def _get_steel_browser_headers(self) -> dict[str, str]:
-        """Get the headers for the Steel Browser API requests."""
-        if not self._is_steel_browser_connection():
-            return {}
-        if self.connection.environment == SteelBrowserEnvironment.CLOUD and self.connection.api_key:
-            return {"steel-api-key": self.connection.api_key}
-        return {}
-
-    def _get_steel_browser_base_url(self) -> str:
-        """Get the base URL for the Steel Browser API requests."""
-        if self.connection.environment == SteelBrowserEnvironment.CLOUD:
-            return "https://api.steel.dev/v1"
-        return (self.connection.base_url or "http://localhost:3000").rstrip("/")
+        if self._pw_browser is not None or self._playwright is not None:
+            try:
+                self._run_in_loop(self._close_playwright(), timeout=_CLEANUP_TIMEOUT)
+            except Exception as exc:
+                logger.warning(f"Stagehand detach from shared session failed: {exc}")
+        if self.client is not None and hasattr(self.client, "close"):
+            try:
+                self._run_in_loop(self.client.close(), timeout=_CLEANUP_TIMEOUT)
+            except Exception as exc:
+                logger.warning(f"Stagehand client close on detach failed: {exc}")
 
     def _get_steel_browser_cdp_url(self) -> str:
         """CDP URL of the Steel session, with the API key appended for cloud sessions."""
@@ -417,31 +491,17 @@ class Stagehand(ConnectionNode):
                 logger.info(f"Steel session viewer: {self._steel_browser_session.session_viewer_url}")
         return self._steel_browser_session
 
-    def _upload_file_bytes_to_steel_browser_session(self, session_id: str, file_bytes: bytes, file_name: str) -> dict:
-        """Upload a file to the Steel Browser session."""
-        url = f"{self._get_steel_browser_base_url()}/sessions/{session_id}/files/upload"
-        files = {"file": (file_name, io.BytesIO(file_bytes))}
-        response = requests.post(url, headers=self._get_steel_browser_headers(), files=files, timeout=self.timeout)
-        response.raise_for_status()
-        return response.json()
+    async def _list_steel_browser_session_files(self, session_id: str) -> list:
+        """List all files in the Steel session's filesystem."""
+        listing = await self._steel_client.sessions.files.list(session_id)
+        files = getattr(listing, "data", None) or []
+        logger.info(f"Steel session files: {files}")
+        return list(files)
 
-    def _list_steel_browser_session_files(self, session_id: str) -> list[dict]:
-        """List all files in the Steel Browser session's filesystem."""
-        url = f"{self._get_steel_browser_base_url()}/sessions/{session_id}/files"
-        response = requests.get(url, headers=self._get_steel_browser_headers(), timeout=self.timeout)
-        response.raise_for_status()
-        payload = response.json()
-        if isinstance(payload, dict):
-            logger.info(f"Steel session files: {payload.get('data') or []}")
-            return payload.get("data") or []
-        return []
-
-    def _download_steel_browser_session_files_archive(self, session_id: str) -> bytes:
+    async def _download_steel_browser_session_files_archive(self, session_id: str) -> bytes:
         """Download the archive of the files in the Steel session."""
-        url = f"{self._get_steel_browser_base_url()}/sessions/{session_id}/files/archive"
-        response = requests.get(url, headers=self._get_steel_browser_headers(), timeout=self.timeout)
-        response.raise_for_status()
-        return response.content
+        response = await self._steel_client.sessions.files.download_archive(session_id)
+        return await response.read()
 
     def init_components(self, connection_manager: ConnectionManager | None = None):
         super().init_components(connection_manager)
@@ -484,10 +544,18 @@ class Stagehand(ConnectionNode):
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
 
-    def _run_in_loop(self, coro: Coroutine):
-        """Run a coroutine in the persistent event loop."""
+    def _run_in_loop(self, coro: Coroutine, timeout: float | None = None):
+        """Run a coroutine in the persistent event loop.
+
+        ``timeout`` (seconds) bounds the wait — cleanup paths pass one so ``close()``/``__del__``
+        cannot hang forever on a frozen loop (e.g. during interpreter shutdown).
+        """
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return future.result()
+        try:
+            return future.result(timeout)
+        except TimeoutError:
+            future.cancel()
+            raise
 
     async def upload_files(self, files: list[io.BytesIO]):
         if self._is_steel_browser_connection():
@@ -497,15 +565,15 @@ class Stagehand(ConnectionNode):
             for file_obj in files:
                 if not hasattr(file_obj, "name"):
                     file_obj.name = "uploaded_file"
-                result = await asyncio.to_thread(
-                    self._upload_file_bytes_to_steel_browser_session,
-                    session.id,
-                    file_obj.getvalue(),
-                    file_obj.name,
+                result = await self._steel_client.sessions.files.upload(
+                    session.id, file=(file_obj.name, file_obj.getvalue())
                 )
                 logger.info(f"Uploaded {file_obj.name} to Steel session: {result}")
             return
 
+        self._browserbase_client = self._browserbase_client or AsyncBrowserbase(
+            api_key=self.connection.browserbase_api_key
+        )
         for file_obj in files:
             if not hasattr(file_obj, "name"):
                 file_obj.name = "uploaded_file"
@@ -514,8 +582,20 @@ class Stagehand(ConnectionNode):
             logger.info(f"Uploaded {file_obj.name}: {result}")
 
     def _session_start_options(self) -> dict[str, Any]:
-        """Session start parameters supplied via the connection (self_heal, system_prompt, ...)."""
-        return dict(self.connection.extra_config or {})
+        """Session start parameters supplied via the connection (self_heal, system_prompt, ...).
+
+        Filtered to the keywords sessions.start actually accepts: a stray or 0.4-era key would
+        otherwise raise a TypeError outside the tool's error handling.
+        """
+        supplied = dict(self.connection.extra_config or {})
+        options = {k: v for k, v in supplied.items() if k in _SESSION_START_OPTIONS}
+        dropped = sorted(set(supplied) - set(options))
+        if dropped:
+            logger.warning(
+                f"Tool {self.name} - {self.id}: ignoring extra_config keys not supported by "
+                f"Stagehand session start: {dropped}"
+            )
+        return options
 
     async def _init_client(
         self,
@@ -543,21 +623,29 @@ class Stagehand(ConnectionNode):
                     "Steel session missing required 'websocket_url' attribute or has invalid value", recoverable=False
                 )
             if self.client is None:
-                if self.model_name.startswith("anthropic/") and not os.environ.get("ANTHROPIC_BASE_URL"):
-                    # Stagehand's bundled local server (3.22.x) resolves the Anthropic endpoint
-                    # without the /v1 prefix and 404s unless the base URL is pinned via env.
+                anthropic_base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
+                if (
+                    self.model_name.startswith("anthropic/")
+                    and anthropic_base_url
+                    and not anthropic_base_url.rstrip("/").endswith("/v1")
+                ):
+                    # The bundled server inherits this env var and hands it verbatim to the AI SDK,
+                    # whose Anthropic provider expects the base URL to INCLUDE /v1 (unset works —
+                    # the provider then defaults to https://api.anthropic.com/v1).
                     logger.warning(
-                        "Tool %s - %s: using an anthropic/* model on the local Stagehand server requires "
-                        "ANTHROPIC_BASE_URL=https://api.anthropic.com/v1 in the environment; model calls "
-                        "will fail with 404 'Not Found' without it.",
+                        "Tool %s - %s: ANTHROPIC_BASE_URL=%s lacks the /v1 suffix; the local Stagehand "
+                        "server will call the Anthropic API at the wrong path and model calls will fail "
+                        "with 404. Set ANTHROPIC_BASE_URL=https://api.anthropic.com/v1 or unset it.",
                         self.name,
                         self.id,
+                        anthropic_base_url,
                     )
                 # The bundled local Stagehand server drives the Steel browser over CDP.
                 self.client = AsyncStagehand(
                     server="local",
                     model_api_key=self.connection.model_api_key,
                     timeout=self.timeout,
+                    local_ready_timeout_s=30.0,
                 )
             if self._stagehand_session is None:
                 self._cdp_url = self._get_steel_browser_cdp_url()
@@ -661,9 +749,12 @@ class Stagehand(ConnectionNode):
         """Fetch and store the live view URL for the current session."""
         try:
             if self._is_steel_browser_connection():
-                # Steel Browser: get from session object
-                if self._steel_browser_session and hasattr(self._steel_browser_session, "session_viewer_url"):
-                    self._live_view_url = self._steel_browser_session.session_viewer_url
+                # Steel Browser: debug_url is the embeddable live view (session_viewer_url is the
+                # auth-gated dashboard page, kept only as a fallback).
+                if self._steel_browser_session:
+                    self._live_view_url = getattr(self._steel_browser_session, "debug_url", None) or getattr(
+                        self._steel_browser_session, "session_viewer_url", None
+                    )
             else:
                 # Browserbase: fetch from debug API
                 if self._session_id and self._browserbase_client:
@@ -744,9 +835,9 @@ class Stagehand(ConnectionNode):
         Retries until content is non-empty or timeout.
         """
         if self._is_steel_browser_connection():
-            files = await asyncio.to_thread(self._list_steel_browser_session_files, session_id)
+            files = await self._list_steel_browser_session_files(session_id)
             if files:
-                return await asyncio.to_thread(self._download_steel_browser_session_files_archive, session_id)
+                return await self._download_steel_browser_session_files_archive(session_id)
             else:
                 return b""
 
@@ -791,9 +882,17 @@ class Stagehand(ConnectionNode):
         payload = dict(payload)
         call_kwargs: dict[str, Any] = {}
         options = dict(payload.pop("options", None) or {})
-        for key in _OPTION_FIELDS:
+        allowed_options = _OPTION_FIELDS_BY_ACTION.get(action_type.value, ())
+        for key in ("model", "timeout", "variables"):
             if key in payload:
-                options[key] = payload.pop(key)
+                if key in allowed_options:
+                    options[key] = payload.pop(key)
+                else:
+                    payload.pop(key)
+                    logger.warning(
+                        f"Tool {self.name} - {self.id}: '{key}' is not supported by the "
+                        f"'{action_type.value}' action; ignoring."
+                    )
         if "frame_id" in payload:
             call_kwargs["frame_id"] = payload.pop("frame_id")
         if action_type == StagehandActionType.EXTRACT and "schema" in payload:
@@ -807,6 +906,31 @@ class Stagehand(ConnectionNode):
         if options:
             call_kwargs["options"] = options
         return call_kwargs
+
+    async def _call_with_model_fallback(self, call, action_label: str, payload: dict[str, Any]):
+        """Run a Stagehand call, retrying on ``fallback_model_name`` if the model's answer is
+        rejected by the server's structured-output validation.
+
+        Some models produce answers the server cannot coerce into the shape act/observe/extract
+        require. It is deterministic per request — measured on claude-sonnet-5, whose observe fails
+        this way for a sizeable share of pages and fails identically on every same-model retry —
+        so the only recovery is a different model for that one call.
+        """
+        try:
+            return await call(payload)
+        except InternalServerError as exc:
+            fallback = self.fallback_model_name
+            if _SCHEMA_MISMATCH_MARKER not in str(exc) or not fallback or fallback == self.model_name:
+                raise
+            logger.warning(
+                f"Tool {self.name} - {self.id}: {action_label} produced schema-invalid output with "
+                f"{self.model_name}; retrying this call with {fallback}."
+            )
+            retry_payload = dict(payload)
+            options = dict(retry_payload.get("options") or {})
+            options["model"] = fallback
+            retry_payload["options"] = options
+            return await call(retry_payload)
 
     async def execute_async(
         self, input_data: StagehandInputSchema, config: RunnableConfig | None = None, **kwargs
@@ -854,13 +978,19 @@ class Stagehand(ConnectionNode):
         try:
             payload = self._build_call_kwargs(getattr(input_data, "model_extra", {}) or {}, input_data.action_type)
             if input_data.action_type == StagehandActionType.EXTRACT:
-                response_obj = await session.extract(instruction=input_data.instruction, **payload)
+                response_obj = await self._call_with_model_fallback(
+                    lambda p: session.extract(instruction=input_data.instruction, **p), "extract", payload
+                )
                 result = response_obj.data.result
             elif input_data.action_type == StagehandActionType.OBSERVE:
-                response_obj = await session.observe(instruction=input_data.instruction, **payload)
+                response_obj = await self._call_with_model_fallback(
+                    lambda p: session.observe(instruction=input_data.instruction, **p), "observe", payload
+                )
                 result = [el.model_dump() for el in response_obj.data.result]
             elif input_data.action_type == StagehandActionType.ACT:
-                response_obj = await session.act(input=input_data.instruction, **payload)
+                response_obj = await self._call_with_model_fallback(
+                    lambda p: session.act(input=input_data.instruction, **p), "act", payload
+                )
                 result = response_obj.data.result.model_dump()
                 zip_data = await self.get_downloads_via_sdk(self._session_id, config=config)
                 files = self.extract_files_from_zip(zip_data) if zip_data else []
@@ -873,7 +1003,15 @@ class Stagehand(ConnectionNode):
                 result = "Navigated to " + input_data.url
             elif input_data.action_type == StagehandActionType.GOBACK:
                 page = await self._ensure_page()
-                await page.go_back()
+                url_before = page.url
+                try:
+                    await page.go_back(wait_until="domcontentloaded", timeout=_HISTORY_NAV_TIMEOUT_MS)
+                except Exception:
+                    # A back-navigation restored from the bfcache completes without firing the
+                    # awaited lifecycle event; the URL moving is the real signal it worked.
+                    if page.url == url_before:
+                        raise
+                    logger.info(f"Tool {self.name} - {self.id}: go_back completed without a load event.")
                 result = "Navigated to previous page"
             elif input_data.action_type == StagehandActionType.UPLOAD:
                 if input_data.files is None:
@@ -883,8 +1021,11 @@ class Stagehand(ConnectionNode):
 
                 page = await self._ensure_page()
                 # The chooser only opens after act's server-side LLM round-trip and click, which
-                # can outlast Playwright's stock 30s waiter — wait as long as the tool itself would.
-                async with page.expect_file_chooser(timeout=self.timeout * 1000) as fc_info:
+                # can outlast Playwright's stock 30s waiter. Cap the wait well below the tool
+                # timeout: if act clicked something that never opens a chooser, an hour-long hold
+                # of the call lock (and shared page control) would starve every other agent.
+                chooser_timeout_ms = min(self.timeout, 300) * 1000
+                async with page.expect_file_chooser(timeout=chooser_timeout_ms) as fc_info:
                     response_obj = await session.act(input=input_data.instruction, **payload)
 
                 file_chooser = await fc_info.value
@@ -905,6 +1046,22 @@ class Stagehand(ConnectionNode):
             else:
                 raise ToolExecutionException(f"Invalid action type: {input_data.action_type}", recoverable=True)
 
+        except ToolExecutionException:
+            raise
+        except CanceledException:
+            # Cancellation must reach the runner, not become a retryable tool observation.
+            raise
+        except NotFoundError as e:
+            # The session is gone server-side (timed out / released elsewhere): drop the local
+            # handle so the retried call starts a fresh session instead of failing forever.
+            self._stagehand_session = None
+            self._session_id = None
+            self._live_view_url = None
+            self._cdp_url = None
+            raise ToolExecutionException(f"Browser session expired, retry will start a new one: {e}", recoverable=True)
+        except (AuthenticationError, PermissionDeniedError) as e:
+            # Bad credentials cannot be fixed by retrying the same call.
+            raise ToolExecutionException(f"Error message: {e}", recoverable=False)
         except Exception as e:
             raise ToolExecutionException(f"Error message: {e}", recoverable=True)
 
@@ -939,17 +1096,17 @@ class Stagehand(ConnectionNode):
             elif self._loop_alive():
                 if self._stagehand_session is not None:
                     try:
-                        self._run_in_loop(self._stagehand_session.end())
+                        self._run_in_loop(self._stagehand_session.end(), timeout=_CLEANUP_TIMEOUT)
                     except Exception as exc:
                         logger.warning(f"Stagehand session end failed: {exc}")
                 if self._pw_browser is not None or self._playwright is not None:
                     try:
-                        self._run_in_loop(self._close_playwright())
+                        self._run_in_loop(self._close_playwright(), timeout=_CLEANUP_TIMEOUT)
                     except Exception as exc:
                         logger.warning(f"Stagehand playwright close failed: {exc}")
                 if self.client is not None and hasattr(self.client, "close"):
                     try:
-                        self._run_in_loop(self.client.close())
+                        self._run_in_loop(self.client.close(), timeout=_CLEANUP_TIMEOUT)
                     except Exception as exc:
                         logger.warning(f"Stagehand client close failed: {exc}")
 
@@ -961,18 +1118,18 @@ class Stagehand(ConnectionNode):
                         session_id = getattr(self._steel_browser_session, "id", self._session_id)
                         if session_id:
                             logger.info(f"Releasing Steel session: {session_id}")
-                            self._run_in_loop(self._steel_client.sessions.release(session_id))
+                            self._run_in_loop(self._steel_client.sessions.release(session_id), timeout=_CLEANUP_TIMEOUT)
                         else:
                             logger.warning("Cannot release Steel session: no valid session ID found")
                     except Exception as exc:
                         logger.warning(f"Failed to release Steel session: {exc}")
                 if self._steel_client and hasattr(self._steel_client, "close"):
                     try:
-                        self._run_in_loop(self._steel_client.close())
+                        self._run_in_loop(self._steel_client.close(), timeout=_CLEANUP_TIMEOUT)
                     except Exception as exc:
                         logger.warning(f"Failed to close Steel client: {exc}")
             elif self._browserbase_client and hasattr(self._browserbase_client, "close"):
-                self._run_in_loop(self._browserbase_client.close())
+                self._run_in_loop(self._browserbase_client.close(), timeout=_CLEANUP_TIMEOUT)
         except Exception as e:
             logger.warning(f"Stagehand close() failed: {e}")
         finally:

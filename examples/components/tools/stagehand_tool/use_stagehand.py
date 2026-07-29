@@ -17,6 +17,7 @@ def set_wf_with_agent(cm):
             model_api_key=os.getenv("OPENAI_API_KEY"),
         ),
         model_name="openai/gpt-4o",
+        fallback_model_name="anthropic/claude-sonnet-4-6",
         is_postponed_component_init=True,
     )
 

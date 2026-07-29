@@ -8,8 +8,8 @@ Keys via environment variables:
     ANTHROPIC_API_KEY                        agent LLM + Stagehand model
     BROWSERBASE_API_KEY / BROWSERBASE_PROJECT_ID   for the Browserbase path
     STEEL_API_KEY                            for the Steel path
-    ANTHROPIC_BASE_URL=https://api.anthropic.com/v1  required for the Steel path with
-                                             anthropic/* models (local server 3.22.x quirk)
+    ANTHROPIC_BASE_URL                       leave unset for the Steel path (defaults correctly);
+                                             if set, it must include the /v1 suffix
 
 Run:
 
@@ -32,6 +32,7 @@ from dynamiq.nodes.tools import Stagehand
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 
 MODEL = "anthropic/claude-sonnet-5"
+FALLBACK_MODEL = "anthropic/claude-sonnet-4-6"
 TASK = (
     "Open https://example.com, extract the page heading and the first paragraph, "
     "then follow the 'More information...' link and report the heading of the page you land on. "
@@ -47,6 +48,7 @@ def build_tool(target: str) -> Stagehand:
     return Stagehand(
         connection=connection,
         model_name=MODEL,
+        fallback_model_name=FALLBACK_MODEL,
         is_return_live_view_url_enabled=True,
         is_postponed_component_init=True,
     )
