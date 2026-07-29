@@ -6,7 +6,13 @@ from typing import NamedTuple
 import pytest
 
 from dynamiq.connections import AWS
-from dynamiq.nodes.knowledgebases.bedrock import BedrockKnowledgeBaseSearch, BedrockManagedSearchConfig
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
+from dynamiq.nodes.knowledgebases.bedrock import (
+    BedrockGuardrailConfig,
+    BedrockKnowledgeBaseSearch,
+    BedrockManagedSearchConfig,
+    BedrockRerankingConfig,
+)
 from dynamiq.runnables import RunnableStatus
 
 pytestmark = pytest.mark.integration
@@ -244,3 +250,116 @@ def test_retrieve_enforces_document_acl(tool, knowledge_base):
     assert denied.status == RunnableStatus.SUCCESS
     assert denied.output["documents"] == [], "the denied identity must not retrieve the document"
     assert denied.output["content"] == "No results found for the given query."
+
+
+def _build_tool(knowledge_base, **kwargs):
+    """A tool aimed at the KB under test, with the identity/managed wiring the fixture implies."""
+    if knowledge_base.is_managed:
+        kwargs.setdefault("managed_search", BedrockManagedSearchConfig())
+    if knowledge_base.allowed_user:
+        kwargs.setdefault("user_id", knowledge_base.allowed_user)
+    return BedrockKnowledgeBaseSearch(connection=AWS(), knowledge_base_id=knowledge_base.id, **kwargs)
+
+
+# Failures a test cannot provision its way out of: the vector store's feature set, a Marketplace
+# subscription, or model entitlement. Treating these as failures would make the suite red for
+# reasons unrelated to the code under test, so they skip instead.
+ENVIRONMENTAL_ERROR_SIGNALS = (
+    "is not supported",
+    "aws-marketplace",
+    "AccessDeniedException",
+    "Model access is denied",
+    "not authorized to perform",
+)
+
+
+def _run_or_skip(tool, query, feature):
+    """Run the tool, returning its output; skip when the account/store cannot support the feature."""
+    try:
+        result = tool.run(input_data={"query": query})
+    except ToolExecutionException as e:  # raised only when the node re-raises rather than wrapping
+        message = str(e)
+    else:
+        if result.status == RunnableStatus.SUCCESS:
+            return result.output
+        # A wrapped failure keeps its detail on result.error, not result.output (which is None).
+        message = result.error.message if result.error else str(result.output)
+
+    if any(signal in message for signal in ENVIRONMENTAL_ERROR_SIGNALS):
+        pytest.skip(f"{feature} unavailable in this account/store: {message[:200]}")
+    raise AssertionError(f"{feature} failed unexpectedly: {message}")
+
+
+def test_hybrid_search_type(knowledge_base):
+    """HYBRID is store-dependent: S3 Vectors and managed stores reject it, OpenSearch accepts it."""
+    if knowledge_base.is_managed:
+        pytest.skip("search_type applies to VECTOR knowledge bases only")
+
+    output = _run_or_skip(_build_tool(knowledge_base, top_k=3, search_type="HYBRID"), QUERY, "HYBRID search")
+
+    assert output["documents"], "expected at least one hybrid-search result"
+
+
+def test_reranking_reorders_and_truncates_results(knowledge_base):
+    """Bedrock reranking runs under the KB service role and needs bedrock:Rerank plus entitlement."""
+    model_arn = os.getenv("BEDROCK_RERANK_MODEL_ARN")
+    if not model_arn:
+        pytest.skip("Set BEDROCK_RERANK_MODEL_ARN to exercise reranking")
+    if knowledge_base.is_managed:
+        pytest.skip("vector reranking config applies to VECTOR knowledge bases only")
+
+    tool = _build_tool(
+        knowledge_base,
+        top_k=5,
+        reranking=BedrockRerankingConfig(model_arn=model_arn, number_of_reranked_results=2),
+    )
+    documents = _run_or_skip(tool, QUERY, "Bedrock reranking")["documents"]
+
+    assert documents, "expected reranked results"
+    assert len(documents) <= 2, "numberOfRerankedResults must cap the result count"
+    scores = [doc.score for doc in documents if doc.score is not None]
+    assert scores == sorted(scores, reverse=True), "reranked results must be ordered by score"
+
+
+def test_guardrail_is_applied_to_retrieval(knowledge_base):
+    """An attached guardrail must not break retrieval, and its action must be surfaced.
+
+    Requires bedrock:ApplyGuardrail on the knowledge base's service role: Bedrock evaluates the
+    guardrail under an assumed BKB-Retrieve-<kb-id> role, not the caller's identity.
+    """
+    guardrail_id = os.getenv("BEDROCK_GUARDRAIL_ID")
+    if not guardrail_id:
+        pytest.skip("Set BEDROCK_GUARDRAIL_ID to exercise guardrails")
+
+    tool = _build_tool(
+        knowledge_base,
+        top_k=5,
+        guardrail_config=BedrockGuardrailConfig(
+            guardrail_id=guardrail_id,
+            guardrail_version=os.getenv("BEDROCK_GUARDRAIL_VERSION", "DRAFT"),
+        ),
+    )
+    output = _run_or_skip(tool, QUERY, "Bedrock guardrails")
+
+    assert output["guardrail_action"] in ("NONE", "INTERVENED")
+
+
+def test_guardrail_intervenes_on_a_blocked_query(knowledge_base):
+    """A query the guardrail denies must report INTERVENED and say so in the content."""
+    guardrail_id = os.getenv("BEDROCK_GUARDRAIL_ID")
+    blocked_query = os.getenv("BEDROCK_GUARDRAIL_BLOCKED_QUERY")
+    if not (guardrail_id and blocked_query):
+        pytest.skip("Set BEDROCK_GUARDRAIL_ID and BEDROCK_GUARDRAIL_BLOCKED_QUERY to exercise interventions")
+
+    tool = _build_tool(
+        knowledge_base,
+        top_k=5,
+        guardrail_config=BedrockGuardrailConfig(
+            guardrail_id=guardrail_id,
+            guardrail_version=os.getenv("BEDROCK_GUARDRAIL_VERSION", "DRAFT"),
+        ),
+    )
+    output = _run_or_skip(tool, blocked_query, "Bedrock guardrails")
+
+    assert output["guardrail_action"] == "INTERVENED"
+    assert "guardrail intervened" in output["content"]
