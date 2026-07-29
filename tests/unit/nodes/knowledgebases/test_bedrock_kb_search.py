@@ -335,6 +335,10 @@ def test_managed_search_reranking_validation_errors(config_kwargs):
         # include/exclude require SELECTIVE mode
         {"metadata_fields_to_include": ["a"]},
         {"metadata_selection_mode": "ALL", "metadata_fields_to_exclude": ["b"]},
+        # SELECTIVE requires include or exclude; Bedrock rejects a bare SELECTIVE at retrieve time
+        # with "SelectiveModeConfiguration is required while using SELECTIVE as metadata selection
+        # mode for reranking", so fail at construction instead.
+        {"metadata_selection_mode": "SELECTIVE"},
     ],
 )
 def test_reranking_metadata_selection_validation_errors(config_kwargs):

@@ -1,5 +1,6 @@
 from typing import Any, ClassVar, Literal
 
+from botocore.config import Config
 from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.connections import AWS as AWSConnection
@@ -24,7 +25,9 @@ DESCRIPTION = (
     '(each takes {"key": <attribute>, "value": <value>}), or andAll/orAll (a list of at least two '
     'sub-filters). Example: {"andAll": [{"equals": {"key": "department", "value": "hr"}}, '
     '{"greaterThan": {"key": "year", "value": 2023}}]}. '
-    "Filters only match metadata attributes that were ingested with the documents."
+    "Filters only match metadata attributes that were ingested with the documents. Operator support "
+    "also depends on the knowledge base's backing store: startsWith and stringContains are rejected "
+    "by S3 Vectors and by managed stores, so prefer equals/in when a filter is refused."
 )
 
 FILTER_LEAF_OPERATORS = frozenset(
@@ -85,6 +88,15 @@ class BedrockRerankingConfig(BaseModel):
             self.metadata_selection_mode != "SELECTIVE"
         ):
             raise ValueError("metadata_fields_to_include/exclude require metadata_selection_mode='SELECTIVE'.")
+        if self.metadata_selection_mode == "SELECTIVE" and not (
+            self.metadata_fields_to_include or self.metadata_fields_to_exclude
+        ):
+            # Bedrock rejects this at retrieve time with "SelectiveModeConfiguration is required
+            # while using SELECTIVE as metadata selection mode for reranking".
+            raise ValueError(
+                "metadata_selection_mode='SELECTIVE' requires metadata_fields_to_include or "
+                "metadata_fields_to_exclude."
+            )
         return self
 
     def to_api(self) -> dict[str, Any]:
@@ -284,8 +296,6 @@ class BedrockKnowledgeBaseSearch(ConnectionNode):
             self.client = self._build_client()
 
     def _build_client(self) -> Any:
-        from botocore.config import Config
-
         session = self.connection.get_boto3_session()
         return session.client(
             "bedrock-agent-runtime",
