@@ -120,6 +120,10 @@ d. Extract data from the results
 # Input fields that map to per-call Stagehand options rather than top-level params.
 _OPTION_FIELDS = ("model", "timeout", "variables")
 
+# Stagehand's bundled local server (3.22.x) calls the Anthropic API without the /v1 path prefix
+# and 404s; pinning the base URL per call works around it until fixed upstream.
+_ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1"
+
 
 def end_browserbase_session(api_key: str, project_id: str, session_id: str) -> None:
     """End a Browserbase session by id, independent of any Stagehand client.
@@ -785,9 +789,30 @@ class Stagehand(ConnectionNode):
             logger.warning(
                 f"Tool {self.name} - {self.id}: ignoring input fields not supported by Stagehand: {sorted(payload)}"
             )
+        if self._is_steel_browser_connection():
+            options = self._patch_local_server_model_options(options)
         if options:
             call_kwargs["options"] = options
         return call_kwargs
+
+    def _patch_local_server_model_options(self, options: dict[str, Any]) -> dict[str, Any]:
+        """Pin the Anthropic base URL for anthropic/* models on the local Stagehand server.
+
+        The bundled server resolves the Anthropic endpoint without the /v1 prefix and gets 404s;
+        an explicit model config with base_url routes correctly. Only applied when the caller has
+        not already supplied a model config object.
+        """
+        model = options.get("model") or self.model_name
+        if not isinstance(model, str) or not model.startswith("anthropic/"):
+            return options
+        options = dict(options)
+        options["model"] = {
+            "model_name": model,
+            "api_key": self.connection.model_api_key,
+            "base_url": _ANTHROPIC_BASE_URL,
+            "provider": "anthropic",
+        }
+        return options
 
     async def execute_async(
         self, input_data: StagehandInputSchema, config: RunnableConfig | None = None, **kwargs
