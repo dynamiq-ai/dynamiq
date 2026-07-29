@@ -344,6 +344,9 @@ class Stagehand(ConnectionNode):
             self._session_id = adopted
             # Our Stagehand session wraps the session we just ended — a later call re-attaches.
             self._stagehand_session = None
+            # The live view URL points at the ended session; clear it so re-attach fetches the
+            # winner's URL instead of publishing a dead debugger link.
+            self._live_view_url = None
             return
         # Ours is the run's session: register an end that does not depend on this tool surviving.
         api_key = self.connection.browserbase_api_key
@@ -581,6 +584,12 @@ class Stagehand(ConnectionNode):
                     )
                 if self._session_id:
                     start_kwargs["browserbase_session_id"] = self._session_id
+                else:
+                    # Creating a fresh session: honor the connection's explicit project id (v3 keys
+                    # are project-scoped, but an explicitly configured project must win).
+                    create_params = dict(start_kwargs.get("browserbase_session_create_params") or {})
+                    create_params.setdefault("project_id", self.connection.browserbase_project_id)
+                    start_kwargs["browserbase_session_create_params"] = create_params
                 self._stagehand_session = await self.client.sessions.start(
                     model_name=self.model_name,
                     **start_kwargs,
