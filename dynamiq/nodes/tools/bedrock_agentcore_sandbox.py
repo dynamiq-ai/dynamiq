@@ -18,6 +18,8 @@ from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.tools.code_interpreter import DESCRIPTION_SANDBOX_INTERPRETER, BaseCodeInterpreterTool
 from dynamiq.utils.logger import logger
 
+AGENTCORE_DESCRIPTION_NOTE_HEADER = "-AgentCore Notes:-"
+
 
 class BedrockAgentCoreInterpreterTool(BaseCodeInterpreterTool):
     """AWS Bedrock AgentCore Code Interpreter implementation of the sandbox interpreter tool.
@@ -52,6 +54,28 @@ class BedrockAgentCoreInterpreterTool(BaseCodeInterpreterTool):
         if kwargs.get("connection") is None:
             kwargs["connection"] = AWSConnection()
         super().__init__(**kwargs)
+        self._append_agentcore_description_note()
+
+    def _append_agentcore_description_note(self) -> None:
+        """Add AgentCore-specific guidance to the agent-facing description.
+
+        The shared description is written for VM-backed sandboxes rooted at an absolute
+        home directory, so it tells the model to use absolute paths. AgentCore's file APIs
+        resolve against the session workspace instead, and outputs are only collected from
+        the output directory, so the model is told explicitly to keep paths relative.
+        Guarded by a marker so a tool rebuilt from a serialized description (which already
+        carries the note) does not accumulate copies.
+        """
+        if AGENTCORE_DESCRIPTION_NOTE_HEADER in self.description:
+            return
+        self.description = self.description.rstrip() + (
+            f"\n\n{AGENTCORE_DESCRIPTION_NOTE_HEADER}\n"
+            f"- Paths resolve against the session workspace, not the filesystem root. Always use "
+            f"workspace-relative paths such as {self.input_dir}/data.csv and {self.output_dir}/result.csv, "
+            f"even where the guidance above mentions absolute paths or the root directory.\n"
+            f"- Only files written to {self.output_dir} are collected and returned to the user.\n"
+            f"- The sandbox exposes no public URLs or ports, so return results as printed output or files."
+        )
 
     def _has_connection_credentials(self) -> bool:
         # The boto3 default credential chain (env vars, profile, IMDS) may resolve

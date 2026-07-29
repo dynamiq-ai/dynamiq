@@ -268,6 +268,29 @@ def test_default_connection_created(mock_agentcore):
     assert isinstance(tool.connection, AWSConnection)
 
 
+def test_description_steers_agent_to_workspace_relative_paths(mock_agentcore):
+    """The agent-facing description must describe AgentCore's workspace-relative paths."""
+    from dynamiq.nodes.tools.bedrock_agentcore_sandbox import (
+        AGENTCORE_DESCRIPTION_NOTE_HEADER,
+        BedrockAgentCoreInterpreterTool,
+    )
+
+    tool = BedrockAgentCoreInterpreterTool(persistent_sandbox=False)
+
+    assert AGENTCORE_DESCRIPTION_NOTE_HEADER in tool.description
+    assert "./input/data.csv" in tool.description
+    assert "./output/result.csv" in tool.description
+    assert "no public URLs or ports" in tool.description
+
+    # base_path aware
+    scoped = BedrockAgentCoreInterpreterTool(persistent_sandbox=False, base_path="workspace")
+    assert "workspace/input/data.csv" in scoped.description
+
+    # Idempotent: rebuilding from a serialized description must not duplicate the note.
+    rebuilt = BedrockAgentCoreInterpreterTool(persistent_sandbox=False, description=tool.description)
+    assert rebuilt.description.count(AGENTCORE_DESCRIPTION_NOTE_HEADER) == 1
+
+
 def test_persistent_initialization_without_connection_fields(mock_agentcore):
     """Persistent mode initializes eagerly even when the AWS connection has no explicit fields."""
     from dynamiq.nodes.tools.bedrock_agentcore_sandbox import BedrockAgentCoreInterpreterTool
