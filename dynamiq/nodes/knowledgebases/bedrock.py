@@ -62,8 +62,12 @@ LOCATION_URI_FIELDS = {
 class BedrockRerankingConfig(BaseModel):
     """Configuration for reranking retrieved results with a Bedrock reranker model.
 
-    Requires a reranker-supported region and `bedrock:Rerank` + `bedrock:InvokeModel` permissions
-    on the reranker model (e.g. amazon.rerank-v1:0, cohere.rerank-v3-5:0).
+    Requires a reranker-supported region and a reranker model (e.g. amazon.rerank-v1:0,
+    cohere.rerank-v3-5:0). Bedrock assumes the *knowledge base's service role* to rerank, so the
+    permissions belong on that role rather than on the caller: `bedrock:Rerank` with
+    `Resource: "*"` (it cannot be scoped to a foundation-model ARN — doing so still yields
+    AccessDenied) plus `bedrock:InvokeModel` on the reranker model. Marketplace-distributed
+    rerankers such as the Cohere models also need their subscription accepted for the account.
     """
 
     model_arn: str
@@ -203,8 +207,10 @@ class BedrockKnowledgeBaseSearch(ConnectionNode):
     Bedrock reranking, and implicit model-inferred filters) as well as MANAGED knowledge bases
     (via `managed_search`, with `user_id` ACL context).
 
-    Requires `bedrock:Retrieve` on the knowledge base (plus `bedrock:Rerank`/`bedrock:InvokeModel`
-    when reranking or implicit filtering is configured) and boto3 >= 1.43.32.
+    Requires `bedrock:Retrieve` on the knowledge base for the caller, and boto3 >= 1.43.32. When
+    reranking or implicit filtering is configured, Bedrock assumes the knowledge base's service role
+    to invoke those models, so `bedrock:Rerank`/`bedrock:InvokeModel` belong on that role instead —
+    see `BedrockRerankingConfig` for the exact scoping.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
