@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 import requests
 from browserbase import AsyncBrowserbase
+from playwright.async_api import async_playwright
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 from stagehand import AsyncStagehand
 from steel import AsyncSteel
@@ -527,6 +528,12 @@ class Stagehand(ConnectionNode):
         we create is configured to outlive our turn and to load ``shared_context_id`` (prior-run state).
         """
         if self._is_steel_browser_connection():
+            if self._steel_client is None:
+                # Recreate Steel client if it was cleaned up during close()
+                if self.connection.environment == SteelBrowserEnvironment.CLOUD:
+                    self._steel_client = AsyncSteel(steel_api_key=self.connection.api_key)
+                elif self.connection.environment == SteelBrowserEnvironment.SELF_HOSTED:
+                    self._steel_client = AsyncSteel(base_url=self.connection.base_url)
             await self._ensure_steel_browser_session()
             if (
                 not hasattr(self._steel_browser_session, "websocket_url")
@@ -535,12 +542,6 @@ class Stagehand(ConnectionNode):
                 raise ToolExecutionException(
                     "Steel session missing required 'websocket_url' attribute or has invalid value", recoverable=False
                 )
-            if self._steel_client is None:
-                # Recreate Steel client if it was cleaned up during close()
-                if self.connection.environment == SteelBrowserEnvironment.CLOUD:
-                    self._steel_client = AsyncSteel(steel_api_key=self.connection.api_key)
-                elif self.connection.environment == SteelBrowserEnvironment.SELF_HOSTED:
-                    self._steel_client = AsyncSteel(base_url=self.connection.base_url)
             if self.client is None:
                 # The bundled local Stagehand server drives the Steel browser over CDP.
                 self.client = AsyncStagehand(
@@ -613,10 +614,8 @@ class Stagehand(ConnectionNode):
             try:
                 if not self._pw_page.is_closed():
                     return self._pw_page
-            except Exception:
-                pass
-        from playwright.async_api import async_playwright
-
+            except Exception as exc:
+                logger.debug(f"Stale playwright page handle, reconnecting: {exc}")
         if self._playwright is None:
             self._playwright = await async_playwright().start()
         if self._pw_browser is None or not self._pw_browser.is_connected():
@@ -843,6 +842,9 @@ class Stagehand(ConnectionNode):
         if shared_browser:
             if create_shared_session:
                 self._record_shared_browser_session(shared_browser)
+                if self._stagehand_session is None:
+                    # Lost the creation race: our session was ended, attach to the winner's.
+                    await self._init_client(shared_context_id, create_shared_session=False)
             shared_browser.set_browser_live_view_url(self._live_view_url)
 
         tool_data = {"tool_session_id": self._session_id}
@@ -984,6 +986,11 @@ class Stagehand(ConnectionNode):
             self._steel_browser_session = None
             self._steel_client = None
             self._live_view_url = None
+            # Drop CDP handles even if teardown failed, so a later run reconnects instead of
+            # reusing a stale page.
+            self._pw_page = None
+            self._pw_browser = None
+            self._playwright = None
             # Clear the (now-terminated) session id so a later run starts fresh, not on a dead id.
             self._session_id = None
             self.close_loop()
