@@ -545,3 +545,158 @@ def test_yaml_roundtrip(tmp_path):
     assert vector_config["numberOfResults"] == 7  # node-level top_k survived the roundtrip
     assert vector_config["overrideSearchType"] == "SEMANTIC"
     assert [doc.content for doc in result["documents"]] == ["hit"]
+
+
+# --- Source-location resolution -------------------------------------------------------------
+# Every entry in LOCATION_URI_FIELDS, so a typo in the map is caught rather than silently
+# degrading to the best-effort scan.
+@pytest.mark.parametrize(
+    ("location", "expected_uri"),
+    [
+        ({"type": "S3", "s3Location": {"uri": "s3://bucket/doc.pdf"}}, "s3://bucket/doc.pdf"),
+        ({"type": "WEB", "webLocation": {"url": "https://example.com/a"}}, "https://example.com/a"),
+        (
+            {"type": "CONFLUENCE", "confluenceLocation": {"url": "https://conf/x"}},
+            "https://conf/x",
+        ),
+        (
+            {"type": "SALESFORCE", "salesforceLocation": {"url": "https://sf/y"}},
+            "https://sf/y",
+        ),
+        (
+            {"type": "SHAREPOINT", "sharePointLocation": {"url": "https://sp/z"}},
+            "https://sp/z",
+        ),
+        ({"type": "CUSTOM", "customDocumentLocation": {"id": "custom-doc-1"}}, "custom-doc-1"),
+        ({"type": "KENDRA", "kendraDocumentLocation": {"uri": "s3://kendra/doc"}}, "s3://kendra/doc"),
+        ({"type": "SQL", "sqlLocation": {"query": "SELECT 1"}}, "SELECT 1"),
+        ({"type": "ONEDRIVE", "oneDriveLocation": {"url": "https://od/w"}}, "https://od/w"),
+        ({"type": "GOOGLEDRIVE", "googleDriveLocation": {"url": "https://gd/v"}}, "https://gd/v"),
+    ],
+)
+def test_every_known_location_type_resolves_its_source_uri(tool, location, expected_uri):
+    tool.client.retrieve.return_value = {
+        "retrievalResults": [{"content": {"type": "TEXT", "text": "Doc"}, "location": location}]
+    }
+
+    result = tool.execute(BedrockKnowledgeBaseSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    document = result["documents"][0]
+    assert document.metadata["source_uri"] == expected_uri
+    assert document.metadata["location_type"] == location["type"]
+
+
+def test_location_without_any_uri_field_yields_no_source_uri(tool):
+    tool.client.retrieve.return_value = {
+        "retrievalResults": [{"content": {"type": "TEXT", "text": "Doc"}, "location": {"type": "S3", "s3Location": {}}}]
+    }
+
+    result = tool.execute(BedrockKnowledgeBaseSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    assert "source_uri" not in result["documents"][0].metadata
+
+
+# --- Media content extraction ---------------------------------------------------------------
+def test_video_content_uses_summary(tool):
+    tool.client.retrieve.return_value = {
+        "retrievalResults": [
+            {
+                "content": {"type": "VIDEO", "video": {"s3Uri": "s3://bucket/v.mp4", "summary": "A product demo"}},
+                "location": {"type": "S3", "s3Location": {"uri": "s3://bucket/v.mp4"}},
+            }
+        ]
+    }
+
+    result = tool.execute(BedrockKnowledgeBaseSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    assert result["documents"][0].content == "A product demo"
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ({"type": "VIDEO", "video": {}}, "[video content from s3://bucket/media]"),
+        ({"type": "AUDIO", "audio": {}}, "[audio content from s3://bucket/media]"),
+        ({"type": "IMAGE"}, "[image content from s3://bucket/media]"),
+    ],
+)
+def test_media_without_text_falls_back_to_a_placeholder(tool, content, expected):
+    """Media chunks must never inline raw bytes; they degrade to a source-labelled placeholder."""
+    tool.client.retrieve.return_value = {
+        "retrievalResults": [
+            {"content": content, "location": {"type": "S3", "s3Location": {"uri": "s3://bucket/media"}}}
+        ]
+    }
+
+    result = tool.execute(BedrockKnowledgeBaseSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    assert result["documents"][0].content == expected
+
+
+def test_media_placeholder_without_a_known_source(tool):
+    tool.client.retrieve.return_value = {"retrievalResults": [{"content": {"type": "IMAGE"}, "location": {}}]}
+
+    result = tool.execute(BedrockKnowledgeBaseSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    assert result["documents"][0].content == "[image content from the knowledge base]"
+
+
+def test_unknown_content_type_falls_back_to_text(tool):
+    tool.client.retrieve.return_value = {
+        "retrievalResults": [
+            {
+                "content": {"type": "FUTURE_MODALITY", "text": "still readable"},
+                "location": {"type": "S3", "s3Location": {"uri": "s3://bucket/doc"}},
+            }
+        ]
+    }
+
+    result = tool.execute(BedrockKnowledgeBaseSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    assert result["documents"][0].content == "still readable"
+
+
+# --- Guardrails -----------------------------------------------------------------------------
+def test_guardrail_action_none_is_surfaced_without_a_note(connection):
+    """A guardrail that did not fire still reports its action, but must not annotate the content."""
+    node = BedrockKnowledgeBaseSearch(
+        connection=connection,
+        knowledge_base_id="KB12345678",
+        guardrail_config=BedrockGuardrailConfig(guardrail_id="guardrail-1", guardrail_version="DRAFT"),
+    )
+    node.client = MagicMock()
+    node.client.retrieve.return_value = {
+        "retrievalResults": [_text_result("Allowed chunk")],
+        "guardrailAction": "NONE",
+    }
+
+    result = node.execute(BedrockKnowledgeBaseSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    assert result["guardrail_action"] == "NONE"
+    assert "guardrail intervened" not in result["content"]
+
+
+def test_guardrail_intervention_on_empty_results_keeps_both_messages(tool):
+    """Bedrock blocks every chunk: the caller still needs to know why nothing came back."""
+    tool.guardrail_config = BedrockGuardrailConfig(guardrail_id="g", guardrail_version="DRAFT")
+    tool.client.retrieve.return_value = {"retrievalResults": [], "guardrailAction": "INTERVENED"}
+
+    result = tool.execute(BedrockKnowledgeBaseSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    assert result["documents"] == []
+    assert "No results found for the given query." in result["content"]
+    assert "guardrail intervened" in result["content"]
+
+
+# --- Knowledge base addressing --------------------------------------------------------------
+def test_knowledge_base_arn_is_sent_verbatim(connection):
+    """Managed and cross-account KBs are addressed by full ARN rather than bare id."""
+    arn = "arn:aws:bedrock:us-east-1:123456789012:knowledge-base/KB12345678"
+    node = BedrockKnowledgeBaseSearch(connection=connection, knowledge_base_id=arn)
+    node.client = MagicMock()
+    node.client.retrieve.return_value = {"retrievalResults": [_text_result("hit")]}
+
+    node.execute(BedrockKnowledgeBaseSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    _, kwargs = node.client.retrieve.call_args
+    assert kwargs["knowledgeBaseId"] == arn

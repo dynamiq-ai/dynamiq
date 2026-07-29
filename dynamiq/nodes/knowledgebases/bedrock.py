@@ -182,7 +182,12 @@ class BedrockManagedSearchConfig(BaseModel):
 
 
 class BedrockGuardrailConfig(BaseModel):
-    """Guardrail applied to retrieved content; blocked/masked results surface as guardrail_action."""
+    """Guardrail applied to retrieved content; blocked/masked results surface as guardrail_action.
+
+    Like reranking, Bedrock evaluates the guardrail under the knowledge base's service role (an
+    assumed `BKB-Retrieve-<kb-id>` session), so that role needs `bedrock:ApplyGuardrail` on the
+    guardrail ARN. Without it the whole Retrieve call fails rather than degrading.
+    """
 
     guardrail_id: str
     guardrail_version: str
