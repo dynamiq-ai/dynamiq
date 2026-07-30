@@ -70,8 +70,13 @@ class VertexAIRagSearch(ConnectionNode):
     local embedder or vector store is needed. The process-global `vertexai.init()` is intentionally
     avoided so multiple workflows with different service accounts can run in one process.
 
-    The corpus region must match the connection's `vertex_project_location` (RAG Engine is regional).
-    Requires the `aiplatform.ragCorpora.query` permission (e.g. roles/aiplatform.user).
+    RAG Engine is regional. A full corpus resource name carries its own region and is used as-is;
+    a bare corpus id is resolved against the connection's `vertex_project_location`, which must
+    then match the corpus's region.
+
+    Retrieval requires the `aiplatform.ragCorpora.query` permission (e.g. roles/aiplatform.user).
+    `rank_service_model` additionally requires `discoveryengine.rankingConfigs.rank` on the
+    *calling* identity, which roles/aiplatform.user does not include.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -93,16 +98,34 @@ class VertexAIRagSearch(ConnectionNode):
     )
     vector_similarity_threshold: float | None = Field(
         default=None,
-        description="Keep contexts with vector similarity above this value (mutually exclusive with distance).",
+        description=(
+            "Keep contexts with vector similarity above this value (mutually exclusive with distance). "
+            "Only backends that score by similarity honour it: RagManagedDb scores by cosine distance "
+            "and accepts this value without applying it, so prefer vector_distance_threshold there."
+        ),
     )
-    metadata_filter: str | None = Field(default=None, description="Default RAG Engine metadata filter expression.")
+    metadata_filter: str | None = Field(
+        default=None,
+        description=(
+            "Default RAG Engine metadata filter, a CEL expression over file metadata keys "
+            "(e.g. 'department == \"support\" && year == 2025'). Note '==', not '='. Only keys "
+            "declared as corpus metadata schemas are filterable; a filter over an unknown key "
+            "matches nothing instead of erroring."
+        ),
+    )
     rank_service_model: str | None = Field(
         default=None,
-        description="Semantic ranker model name (e.g. 'semantic-ranker-default@latest').",
+        description=(
+            "Semantic ranker model name (e.g. 'semantic-ranker-default@latest'). Requires the "
+            "Discovery Engine API and 'discoveryengine.rankingConfigs.rank' on the calling identity."
+        ),
     )
     llm_ranker_model: str | None = Field(
         default=None,
-        description="LLM ranker model name (e.g. 'gemini-2.0-flash'); mutually exclusive with rank_service_model.",
+        description=(
+            "LLM ranker model name (e.g. 'gemini-2.5-flash'); mutually exclusive with "
+            "rank_service_model. The model must be served in the corpus's region."
+        ),
     )
     metadata_fields: list[str] | None = Field(
         default_factory=lambda: ["source_uri", "source_display_name", "page_first", "page_last"],
