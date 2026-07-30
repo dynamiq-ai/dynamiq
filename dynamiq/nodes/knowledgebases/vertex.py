@@ -283,8 +283,13 @@ class VertexAIRagSearch(ConnectionNode):
             )
 
     def _score_type(self) -> str | None:
-        if self.rank_service_model or self.llm_ranker_model:
-            return "ranked"
+        """What the score value means.
+
+        Ranking is deliberately not a case here: a ranker reorders the contexts but RetrieveContexts
+        keeps returning the underlying vector score, so labelling those scores "ranked" would
+        describe the ordering while claiming to describe the number. Reranking is reported
+        separately via the `reranked` metadata flag.
+        """
         if self.vector_similarity_threshold is not None:
             return "similarity"
         if self.vector_distance_threshold is not None:
@@ -307,6 +312,9 @@ class VertexAIRagSearch(ConnectionNode):
         score_type = self._score_type()
         if score_type:
             metadata["score_type"] = score_type
+        if self.rank_service_model or self.llm_ranker_model:
+            # The contexts came back in ranker order; the score below is still the vector score.
+            metadata["reranked"] = True
 
         # RetrieveContexts returns no stable chunk id; derive a deterministic one from source + text.
         digest_source = f"{context.source_uri}|{context.text}".encode()

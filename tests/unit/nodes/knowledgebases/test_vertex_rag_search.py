@@ -296,19 +296,49 @@ def test_rank_service_ranking_is_sent(connection):
 
     request = node.client.retrieve_contexts.call_args.kwargs["request"]
     assert request.query.rag_retrieval_config.ranking.rank_service.model_name == "semantic-ranker-default@latest"
-    assert result["documents"][0].metadata["score_type"] == "ranked"
+    # A ranker reorders contexts but RetrieveContexts keeps returning the vector score, so the
+    # score must not be labelled as a rank score; the reordering is reported separately.
+    metadata = result["documents"][0].metadata
+    assert metadata["reranked"] is True
+    assert "score_type" not in metadata
 
 
 def test_llm_ranker_ranking_is_sent(connection):
     node = VertexAIRagSearch(
-        connection=connection, rag_corpus_id="123", llm_ranker_model="gemini-2.0-flash", client=MagicMock()
+        connection=connection, rag_corpus_id="123", llm_ranker_model="gemini-2.5-flash", client=MagicMock()
     )
     node.client.retrieve_contexts.return_value = _proto_response([])
 
     node.execute(VertexAIRagSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
 
     request = node.client.retrieve_contexts.call_args.kwargs["request"]
-    assert request.query.rag_retrieval_config.ranking.llm_ranker.model_name == "gemini-2.0-flash"
+    assert request.query.rag_retrieval_config.ranking.llm_ranker.model_name == "gemini-2.5-flash"
+
+
+def test_reranking_keeps_the_threshold_score_type(connection):
+    """`reranked` is orthogonal to `score_type`: the threshold still describes the score."""
+    node = VertexAIRagSearch(
+        connection=connection,
+        rag_corpus_id="123",
+        llm_ranker_model="gemini-2.5-flash",
+        vector_distance_threshold=0.6,
+        client=MagicMock(),
+    )
+    node.client.retrieve_contexts.return_value = _proto_response([{"text": "Doc", "score": 0.4}])
+
+    result = node.execute(VertexAIRagSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    metadata = result["documents"][0].metadata
+    assert metadata["score_type"] == "distance"
+    assert metadata["reranked"] is True
+
+
+def test_documents_are_not_marked_reranked_without_a_ranker(tool):
+    tool.client.retrieve_contexts.return_value = _proto_response([{"text": "Doc", "score": 0.4}])
+
+    result = tool.execute(VertexAIRagSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    assert "reranked" not in result["documents"][0].metadata
 
 
 def test_score_absent_stays_none_and_zero_score_is_kept(tool):
