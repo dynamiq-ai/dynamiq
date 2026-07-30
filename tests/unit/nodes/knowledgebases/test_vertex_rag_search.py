@@ -232,17 +232,17 @@ def test_client_only_node_with_bare_corpus_id_raises_recoverable_error():
 
 
 def test_input_overrides_node_defaults(tool):
-    tool.metadata_filter = 'source_display_name = "handbook.pdf"'
+    tool.metadata_filter = 'department == "support"'
     tool.client.retrieve_contexts.return_value = _proto_response([])
 
     tool.execute(
-        VertexAIRagSearchInputSchema(query="q", top_k=3, metadata_filter='category = "hr"'),
+        VertexAIRagSearchInputSchema(query="q", top_k=3, metadata_filter='category == "hr"'),
         RunnableConfig(callbacks=[]),
     )
 
     request = tool.client.retrieve_contexts.call_args.kwargs["request"]
     assert request.query.rag_retrieval_config.top_k == 3
-    assert request.query.rag_retrieval_config.filter.metadata_filter == 'category = "hr"'
+    assert request.query.rag_retrieval_config.filter.metadata_filter == 'category == "hr"'
 
 
 def test_thresholds_and_file_ids_are_sent(connection):
@@ -277,13 +277,13 @@ def test_similarity_threshold_is_sent(connection):
 
 
 def test_node_level_metadata_filter_is_used_when_input_has_none(tool):
-    tool.metadata_filter = 'category = "hr"'
+    tool.metadata_filter = 'category == "hr"'
     tool.client.retrieve_contexts.return_value = _proto_response([])
 
     tool.execute(VertexAIRagSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
 
     request = tool.client.retrieve_contexts.call_args.kwargs["request"]
-    assert request.query.rag_retrieval_config.filter.metadata_filter == 'category = "hr"'
+    assert request.query.rag_retrieval_config.filter.metadata_filter == 'category == "hr"'
 
 
 def test_thresholds_are_mutually_exclusive(connection):
@@ -453,6 +453,35 @@ def test_api_error_raises_recoverable_tool_exception(tool):
     assert "caller lacks permission" in str(exc_info.value)
 
 
+def test_error_code_is_included_when_the_exception_carries_one(tool):
+    from google.api_core import exceptions as google_exceptions
+
+    tool.client.retrieve_contexts.side_effect = google_exceptions.PermissionDenied("denied")
+
+    with pytest.raises(ToolExecutionException) as exc_info:
+        tool.execute(VertexAIRagSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    assert "403" in str(exc_info.value)
+
+
+def test_callable_code_attribute_is_not_treated_as_an_error_code(tool):
+    """Some exceptions expose `code` as a method; formatting it would leak a repr into the message."""
+
+    class ExceptionWithCallableCode(Exception):
+        def code(self):
+            return "not-an-error-code"
+
+    tool.client.retrieve_contexts.side_effect = ExceptionWithCallableCode("upstream blew up")
+
+    with pytest.raises(ToolExecutionException) as exc_info:
+        tool.execute(VertexAIRagSearchInputSchema(query="q"), RunnableConfig(callbacks=[]))
+
+    message = str(exc_info.value)
+    assert "upstream blew up" in message
+    assert "not-an-error-code" not in message
+    assert "bound method" not in message
+
+
 @pytest.mark.asyncio
 async def test_execute_async_builds_request_and_parses_documents(tool):
     async_client = MagicMock()
@@ -497,7 +526,7 @@ def test_yaml_roundtrip(tmp_path, connection):
         rag_corpus_id="123",
         top_k=7,
         vector_distance_threshold=0.5,
-        metadata_filter='category = "hr"',
+        metadata_filter='category == "hr"',
         metadata_fields=["source_uri"],
     )
     workflow = Workflow(id="rag-workflow", flow=Flow(id="rag-flow", nodes=[node]))
@@ -517,7 +546,7 @@ def test_yaml_roundtrip(tmp_path, connection):
     assert roundtrip_node.rag_corpus_id == "123"
     assert roundtrip_node.top_k == 7
     assert roundtrip_node.vector_distance_threshold == 0.5
-    assert roundtrip_node.metadata_filter == 'category = "hr"'
+    assert roundtrip_node.metadata_filter == 'category == "hr"'
     assert roundtrip_node.metadata_fields == ["source_uri"]
     assert roundtrip_node.connection.id == "vertex-conn"
     assert roundtrip_node.connection.vertex_project_location == "us-central1"
