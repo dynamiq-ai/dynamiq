@@ -31,6 +31,22 @@ DESCRIPTION = (
 
 CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 
+CORPUS_NAME_TEMPLATE = "projects/{project}/locations/{location}/ragCorpora/{id}"
+
+
+def parse_corpus_location(rag_corpus_id: str) -> str | None:
+    """Return the region encoded in a full corpus resource name, or None for a bare corpus id.
+
+    Raises ValueError when the value looks like a resource name but is not one, so the mistake is
+    reported where it is made instead of as an opaque endpoint or NOT_FOUND error later.
+    """
+    if not rag_corpus_id.startswith("projects/"):
+        return None
+    parts = rag_corpus_id.split("/")
+    if len(parts) != 6 or parts[2] != "locations" or parts[4] != "ragCorpora" or not all(parts):
+        raise ValueError(f"Invalid rag_corpus_id resource name '{rag_corpus_id}'; expected '{CORPUS_NAME_TEMPLATE}'.")
+    return parts[3]
+
 
 class VertexAIRagSearchInputSchema(BaseModel):
     query: str = Field(..., description="Parameter to provide a query to retrieve documents.")
@@ -105,13 +121,17 @@ class VertexAIRagSearch(ConnectionNode):
         super().__init__(**kwargs)
 
     @model_validator(mode="after")
-    def validate_threshold_and_ranking(self):
+    def validate_configuration(self):
         if self.vector_distance_threshold is not None and self.vector_similarity_threshold is not None:
             raise ValueError(
                 "vector_distance_threshold and vector_similarity_threshold are mutually exclusive; set at most one."
             )
         if self.rank_service_model and self.llm_ranker_model:
             raise ValueError("rank_service_model and llm_ranker_model are mutually exclusive; set at most one.")
+        # Validated here rather than on first use so a malformed resource name surfaces as a
+        # ValidationError alongside the other configuration errors, not as a bare ValueError from
+        # client construction.
+        parse_corpus_location(self.rag_corpus_id)
         return self
 
     def init_components(self, connection_manager: ConnectionManager | None = None):
@@ -159,15 +179,7 @@ class VertexAIRagSearch(ConnectionNode):
 
     def _endpoint_location(self) -> str:
         """Region for the API endpoint — RetrieveContexts is regional and must target the corpus's region."""
-        if self.rag_corpus_id.startswith("projects/"):
-            parts = self.rag_corpus_id.split("/")
-            if len(parts) < 4 or parts[2] != "locations" or not parts[3]:
-                raise ValueError(
-                    f"Invalid rag_corpus_id resource name '{self.rag_corpus_id}'; expected "
-                    "'projects/{project}/locations/{location}/ragCorpora/{id}'."
-                )
-            return parts[3]
-        return self.location
+        return parse_corpus_location(self.rag_corpus_id) or self.location
 
     def _client_options(self) -> Any:
         return ClientOptions(api_endpoint=f"{self._endpoint_location()}-aiplatform.googleapis.com")

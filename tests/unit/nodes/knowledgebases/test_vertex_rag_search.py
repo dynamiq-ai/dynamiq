@@ -184,6 +184,31 @@ def test_endpoint_follows_corpus_region(connection):
     assert bare_id_node._client_options().api_endpoint == "us-central1-aiplatform.googleapis.com"
 
 
+@pytest.mark.parametrize(
+    "corpus_id",
+    [
+        "projects/p/badsegment/l/ragCorpora/123",
+        "projects/p/locations//ragCorpora/123",
+        "projects/p/locations/l/ragCorpora",
+        "projects/p/locations/l/ragCorpora/123/extra",
+        "projects/p/locations/l/notRagCorpora/123",
+    ],
+)
+def test_malformed_corpus_resource_name_is_a_validation_error(connection, corpus_id):
+    """A malformed resource name is a configuration error like any other, not a late ValueError."""
+    with pytest.raises(ValidationError) as exc_info:
+        VertexAIRagSearch(connection=connection, rag_corpus_id=corpus_id, client=MagicMock())
+
+    assert "Invalid rag_corpus_id resource name" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("corpus_id", [CORPUS_NAME, "123", "my-corpus"])
+def test_valid_corpus_ids_are_accepted(connection, corpus_id):
+    node = VertexAIRagSearch(connection=connection, rag_corpus_id=corpus_id, client=MagicMock())
+
+    assert node.rag_corpus_id == corpus_id
+
+
 @pytest.mark.asyncio
 async def test_client_only_node_executes_async_via_sync_client():
     node = VertexAIRagSearch(rag_corpus_id=CORPUS_NAME, client=MagicMock())
