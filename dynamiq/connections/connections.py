@@ -388,18 +388,18 @@ class GoogleCloud(BaseConnection):
         universe_domain (str): The domain associated with the Google Cloud environment.
     """
 
-    project_id: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PROJECT_ID"))
-    private_key_id: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PRIVATE_KEY_ID"))
-    private_key: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PRIVATE_KEY"))
-    client_email: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_EMAIL"))
-    client_id: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_ID"))
-    auth_uri: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_AUTH_URI"))
-    token_uri: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_TOKEN_URI"))
-    auth_provider_x509_cert_url: str = Field(
+    project_id: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PROJECT_ID"))
+    private_key_id: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PRIVATE_KEY_ID"))
+    private_key: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PRIVATE_KEY"))
+    client_email: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_EMAIL"))
+    client_id: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_ID"))
+    auth_uri: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_AUTH_URI"))
+    token_uri: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_TOKEN_URI"))
+    auth_provider_x509_cert_url: str | None = Field(
         default_factory=partial(get_env_var, "GOOGLE_CLOUD_AUTH_PROVIDER_X509_CERT_URL")
     )
-    client_x509_cert_url: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_X509_CERT_URL"))
-    universe_domain: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_UNIVERSE_DOMAIN"))
+    client_x509_cert_url: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_X509_CERT_URL"))
+    universe_domain: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_UNIVERSE_DOMAIN"))
 
     def connect(self):
         pass
