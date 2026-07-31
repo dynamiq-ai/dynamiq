@@ -26,7 +26,7 @@ DESCRIPTION = (
     "and retrieval server-side; each result includes the chunk text, its source document URI and "
     "display name, and a relevance score. Provide a natural-language 'query'; optionally set 'top_k' "
     "to control how many chunks are returned and 'metadata_filter' to restrict results by file "
-    "metadata (RAG Engine metadata filter expression)."
+    "metadata using a CEL expression."
 )
 
 CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
@@ -56,8 +56,11 @@ class VertexAIRagSearchInputSchema(BaseModel):
     metadata_filter: str | None = Field(
         default=None,
         description=(
-            "Parameter to provide a RAG Engine metadata filter expression to retrieve specific documents. "
-            "Overrides the node-level metadata_filter."
+            "Parameter to provide a CEL expression over file metadata keys to retrieve specific documents, "
+            "e.g. 'department == \"support\" && year == 2025'. Use '==' rather than '=', and quote "
+            "string values. Only keys the corpus declares as metadata schemas are filterable, and a filter "
+            "over an unknown key returns no results instead of an error, so retry without the filter before "
+            "concluding the corpus has no matching documents. Overrides the node-level metadata_filter."
         ),
     )
 

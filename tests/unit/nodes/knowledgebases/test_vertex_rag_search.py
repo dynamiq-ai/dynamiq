@@ -78,7 +78,7 @@ def test_query_is_required():
         VertexAIRagSearchInputSchema()
 
 
-def test_all_inputs_are_visible_to_agent():
+def _agent_facing_properties():
     from dynamiq.nodes.agents.components.schema_generator import generate_function_calling_schemas
 
     tool_name = "vertexai-rag-search"
@@ -95,11 +95,27 @@ def test_all_inputs_are_visible_to_agent():
         )
         if s["function"]["name"] == tool_name
     )
-    properties = schema["function"]["parameters"]["properties"]
+    return schema["function"]["parameters"]["properties"]
+
+
+def test_all_inputs_are_visible_to_agent():
+    properties = _agent_facing_properties()
 
     assert "query" in properties
     assert "top_k" in properties
     assert "metadata_filter" in properties
+
+
+def test_agent_is_told_the_metadata_filter_is_cel():
+    """The filter syntax has to reach the LLM, not just the node-level field.
+
+    Agents reach for SQL-style `key = "value"` by default, which RAG Engine rejects outright, so the
+    agent-visible description is the only place that can prevent the failed call.
+    """
+    description = _agent_facing_properties()["metadata_filter"]["description"]
+
+    assert "CEL" in description
+    assert "'=='" in description
 
 
 def test_execute_builds_request_and_parses_documents(tool):
