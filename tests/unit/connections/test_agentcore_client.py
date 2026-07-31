@@ -87,6 +87,36 @@ def test_client_disables_botocore_retries():
         assert call_kwargs["config"].retries == {"total_max_attempts": 1}
 
 
+def test_invoke_is_sent_exactly_once_on_transport_error():
+    """A real boto3 client built with our Config must not re-send a failed invoke.
+
+    Asserts behaviour rather than the Config dict: ``total_max_attempts`` is botocore's
+    canonical key (a client-config ``max_attempts`` is normalized into it by adding one),
+    and re-running a non-idempotent InvokeCodeInterpreter would execute user code twice.
+    """
+    import boto3
+    from botocore.exceptions import EndpointConnectionError
+
+    from dynamiq.connections.agentcore import AgentCoreSession
+
+    real_session = boto3.Session(region_name="us-west-2", aws_access_key_id="k", aws_secret_access_key="s")
+    with patch.object(AWSConnection, "get_boto3_session", return_value=real_session):
+        client = AgentCoreCodeInterpreterClient(AWSConnection(region="us-west-2"))
+
+    boto_client = client._client
+    attempts = []
+
+    def refuse(self, request):
+        attempts.append(request.url)
+        raise EndpointConnectionError(endpoint_url=request.url)
+
+    with patch.object(type(boto_client._endpoint.http_session), "send", refuse):
+        with pytest.raises(Exception):
+            client.invoke(AgentCoreSession(identifier="aws.codeinterpreter.v1", session_id="s"), "executeCode", {})
+
+    assert len(attempts) == 1, f"invoke was sent {len(attempts)} times; user code could run more than once"
+
+
 # --- invoke stream parsing ---------------------------------------------------
 
 
