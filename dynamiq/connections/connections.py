@@ -405,6 +405,19 @@ class GoogleCloud(BaseConnection):
         pass
 
     @property
+    def has_service_account_credentials(self) -> bool:
+        """Whether the service account fields are complete enough to authenticate.
+
+        google-auth needs the private key, the service account email and the token URI before
+        `from_service_account_info` can sign anything. A partially populated set raises instead
+        of authenticating, so callers should treat it the same as no credentials at all.
+
+        Returns:
+            bool: True when the required service account fields are all populated.
+        """
+        return all((self.private_key, self.client_email, self.token_uri))
+
+    @property
     def conn_params(self):
         """
         Returns the parameters required for the connection.
@@ -491,9 +504,11 @@ class VertexAI(GoogleCloud):
         """
         Returns the parameters required for the connection.
 
-        Includes `vertex_credentials` only when service account fields are actually populated,
-        so that LiteLLM falls back to Application Default Credentials otherwise. Includes
-        `api_base` only when a self-deployed endpoint is configured.
+        Includes `vertex_credentials` only when the service account fields are complete enough
+        to authenticate, so that LiteLLM falls back to Application Default Credentials otherwise.
+        A partially filled service account is never usable - passing it on would make google-auth
+        raise instead of falling back. Includes `api_base` only when a self-deployed endpoint is
+        configured.
 
         Returns:
             dict: A dictionary with the keys 'vertex_project' and 'vertex_location', plus
@@ -505,8 +520,14 @@ class VertexAI(GoogleCloud):
         }
 
         service_account = super().conn_params.copy()
-        if any(value for value in service_account.values()):
+        if self.has_service_account_credentials:
             params["vertex_credentials"] = json.dumps(service_account)
+        elif any(service_account.values()):
+            logger.warning(
+                "VertexAI connection has incomplete service account credentials: "
+                "private_key, client_email and token_uri are all required. "
+                "Falling back to Application Default Credentials."
+            )
 
         if api_base := self.api_base:
             params["api_base"] = api_base
