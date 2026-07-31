@@ -203,9 +203,16 @@ class BedrockAgentCoreInterpreterTool(BaseCodeInterpreterTool):
     def _install_packages(self, sandbox: AgentCoreSession, packages: str) -> None:
         if packages:
             logger.debug(f"Tool {self.name} - {self.id}: Installing packages: {packages}")
+            # Quote each requirement: executeCommand runs through a shell, so an unquoted
+            # version pin like "pandas>=2.0" would be parsed as a redirection and silently
+            # install the latest version instead. Split on commas and whitespace so both
+            # "a,b" and "a b" work; shlex.quote leaves plain names untouched.
+            requirements = [shlex.quote(pkg) for pkg in packages.replace(",", " ").split()]
+            if not requirements:
+                return
             try:
                 result = self._get_client().invoke(
-                    sandbox, "executeCommand", {"command": f"pip install -qq {' '.join(packages.split(','))}"}
+                    sandbox, "executeCommand", {"command": f"pip install -qq {' '.join(requirements)}"}
                 )
             except Exception as e:
                 raise ToolExecutionException(f"Error during package installation: {e}", recoverable=True)

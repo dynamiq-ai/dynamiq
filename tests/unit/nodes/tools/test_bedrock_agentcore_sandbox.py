@@ -119,6 +119,32 @@ def test_package_installation(agentcore_tool, mock_agentcore):
     assert any(c == "pip install -qq pandas numpy" for c in commands)
 
 
+def test_package_installation_quotes_version_pins(agentcore_tool, mock_agentcore):
+    """Version pins must be quoted: unquoted '>' would be parsed as a shell redirection."""
+    from dynamiq.nodes.tools.code_interpreter import CodeInterpreterInputSchema
+
+    mock_agentcore["handlers"]["executeCode"] = lambda kwargs: make_stream(make_result(stdout="done"))
+
+    agentcore_tool.execute(CodeInterpreterInputSchema(packages="pandas>=2.0,numpy", python="print('done')"))
+
+    calls = mock_agentcore["client"].invoke_code_interpreter.call_args_list
+    commands = [c.kwargs["arguments"]["command"] for c in calls if c.kwargs["name"] == "executeCommand"]
+    assert any(c == "pip install -qq 'pandas>=2.0' numpy" for c in commands)
+
+
+def test_package_installation_accepts_whitespace_separated(agentcore_tool, mock_agentcore):
+    """Comma- and space-separated requirement lists both resolve to distinct pip arguments."""
+    from dynamiq.nodes.tools.code_interpreter import CodeInterpreterInputSchema
+
+    mock_agentcore["handlers"]["executeCode"] = lambda kwargs: make_stream(make_result(stdout="done"))
+
+    agentcore_tool.execute(CodeInterpreterInputSchema(packages="pandas, numpy", python="print('done')"))
+
+    calls = mock_agentcore["client"].invoke_code_interpreter.call_args_list
+    commands = [c.kwargs["arguments"]["command"] for c in calls if c.kwargs["name"] == "executeCommand"]
+    assert any(c == "pip install -qq pandas numpy" for c in commands)
+
+
 def test_file_upload(agentcore_tool, mock_agentcore):
     """Test file upload sends normalized relative path and raw bytes."""
     from dynamiq.nodes.tools.code_interpreter import CodeInterpreterInputSchema
