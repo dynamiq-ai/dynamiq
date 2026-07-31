@@ -382,6 +382,51 @@ def test_upload_creates_parent_directory(agentcore_tool, mock_agentcore):
     assert write_calls and write_calls[0].kwargs["arguments"]["content"][0]["path"] == "input/data.csv"
 
 
+def test_upload_wraps_transport_error_as_recoverable(agentcore_tool, mock_agentcore):
+    """A throttled upload must be recoverable so the agent retries instead of aborting the run."""
+    from dynamiq.connections.agentcore import AgentCoreThrottlingError
+    from dynamiq.nodes.agents.exceptions import RecoverableAgentException, ToolExecutionException
+
+    def throttle(kwargs):
+        raise AgentCoreThrottlingError("Rate exceeded")
+
+    mock_agentcore["handlers"]["writeFiles"] = throttle
+
+    with pytest.raises(ToolExecutionException) as exc:
+        agentcore_tool._upload_file_to_sandbox(io.BytesIO(b"x"), "report.txt", agentcore_tool._sandbox)
+
+    assert isinstance(exc.value, RecoverableAgentException)
+    assert "Rate exceeded" in str(exc.value)
+
+
+def test_download_wraps_transport_error_as_recoverable(agentcore_tool, mock_agentcore):
+    """A throttled download must be recoverable rather than a hard stop."""
+    from dynamiq.connections.agentcore import AgentCoreThrottlingError
+    from dynamiq.nodes.agents.exceptions import RecoverableAgentException, ToolExecutionException
+
+    def throttle(kwargs):
+        raise AgentCoreThrottlingError("Rate exceeded")
+
+    mock_agentcore["handlers"]["readFiles"] = throttle
+
+    with pytest.raises(ToolExecutionException) as exc:
+        agentcore_tool._download_file_bytes("output/result.csv", agentcore_tool._sandbox)
+
+    assert isinstance(exc.value, RecoverableAgentException)
+
+
+def test_download_missing_file_is_recoverable(agentcore_tool, mock_agentcore):
+    """An empty readFiles payload surfaces as a recoverable tool error, not FileNotFoundError."""
+    from dynamiq.nodes.agents.exceptions import RecoverableAgentException, ToolExecutionException
+
+    mock_agentcore["handlers"]["readFiles"] = lambda kwargs: make_stream(make_result(content=[]))
+
+    with pytest.raises(ToolExecutionException) as exc:
+        agentcore_tool._download_file_bytes("output/missing.csv", agentcore_tool._sandbox)
+
+    assert isinstance(exc.value, RecoverableAgentException)
+
+
 def test_upload_without_parent_directory_skips_mkdir(agentcore_tool, mock_agentcore):
     """Bare-filename uploads go straight to writeFiles without a mkdir round-trip."""
     agentcore_tool._upload_file_to_sandbox(io.BytesIO(b"x"), "report.txt", agentcore_tool._sandbox)

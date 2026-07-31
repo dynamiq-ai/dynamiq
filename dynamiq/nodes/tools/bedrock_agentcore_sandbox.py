@@ -224,12 +224,19 @@ class BedrockAgentCoreInterpreterTool(BaseCodeInterpreterTool):
 
     def _upload_file_to_sandbox(self, file: io.BytesIO, target_path: str, sandbox: AgentCoreSession) -> str:
         normalized = normalize_sandbox_path(target_path)
-        parent = posixpath.dirname(normalized)
-        if parent and parent != ".":
-            # AgentCore writeFiles does not create parent directories; mkdir -p is idempotent.
-            self._get_client().invoke(sandbox, "executeCommand", {"command": f"mkdir -p {shlex.quote(parent)}"})
-        content = {"path": normalized, "blob": file.read()}
-        result = self._get_client().invoke(sandbox, "writeFiles", {"content": [content]})
+        # Transport-level failures (throttling, botocore errors) are wrapped as recoverable,
+        # matching the code/shell/package paths: agents only retry RecoverableAgentException,
+        # so a raw error here would abort the run instead of allowing another attempt.
+        try:
+            parent = posixpath.dirname(normalized)
+            if parent and parent != ".":
+                # AgentCore writeFiles does not create parent directories; mkdir -p is idempotent.
+                self._get_client().invoke(sandbox, "executeCommand", {"command": f"mkdir -p {shlex.quote(parent)}"})
+            content = {"path": normalized, "blob": file.read()}
+            result = self._get_client().invoke(sandbox, "writeFiles", {"content": [content]})
+        except Exception as e:
+            raise ToolExecutionException(f"Error during file upload: {e}", recoverable=True)
+
         if result.is_error:
             raise ToolExecutionException(f"Error during file upload: {result.error_text}", recoverable=True)
         logger.debug(f"Tool {self.name} - {self.id}: Uploaded file to: {normalized}")
@@ -237,10 +244,17 @@ class BedrockAgentCoreInterpreterTool(BaseCodeInterpreterTool):
 
     def _download_file_bytes(self, file_path: str, sandbox: AgentCoreSession) -> bytes:
         client = self._get_client()
-        result = client.invoke(sandbox, "readFiles", {"paths": [normalize_sandbox_path(file_path)]})
+        try:
+            result = client.invoke(sandbox, "readFiles", {"paths": [normalize_sandbox_path(file_path)]})
+        except Exception as e:
+            raise ToolExecutionException(f"Error during file download: {e}", recoverable=True)
+
         if result.is_error:
             raise ToolExecutionException(f"Error during file download: {result.error_text}", recoverable=True)
-        return client.extract_file_bytes(result)
+        try:
+            return client.extract_file_bytes(result)
+        except FileNotFoundError as e:
+            raise ToolExecutionException(f"Error during file download: {e}", recoverable=True)
 
     def _run_shell_command(self, command: str, sandbox: AgentCoreSession) -> tuple[int, str]:
         result = self._get_client().invoke(sandbox, "executeCommand", {"command": command})
