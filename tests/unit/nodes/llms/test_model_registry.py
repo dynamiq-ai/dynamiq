@@ -542,3 +542,25 @@ def test_minimax_m3_registry_preserves_tiered_pricing():
         prompt_tokens=512_001,
         completion_tokens=1,
     ) == pytest.approx((512_001 * 0.0000006, 0.0000024))
+
+
+def test_kimi_k3_resolves_to_structured_output_params_on_together():
+    """Registering K3 keeps it off XML inference mode.
+
+    Together's streaming API silently truncates Kimi K3 mid-sentence whenever a stop
+    sequence containing ``</output>`` is sent (``finish_reason`` still reports ``"stop"``),
+    and XML is the only inference mode that sets those stop sequences. Callers pick the
+    mode from litellm's reported params, so an unregistered K3 fell through to XML and
+    shipped truncated answers. The registry entry makes litellm report ``response_format``
+    support, steering callers to structured output, which sends no stop sequences at all.
+    """
+    import litellm
+
+    info = model_registry.get_model_info("moonshotai/kimi-k3")
+
+    assert info is not None
+    assert info["litellm_provider"] == "together_ai"
+    assert info["supports_response_schema"] is True
+
+    supported_params = litellm.get_supported_openai_params(model="together_ai/moonshotai/Kimi-K3") or []
+    assert "response_format" in supported_params

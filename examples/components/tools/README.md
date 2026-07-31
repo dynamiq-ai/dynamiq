@@ -22,6 +22,11 @@ This directory contains examples demonstrating how to use and integrate various 
 
 - **`custom_tools/file_reader.py`**: Implements a `FileReadTool` for reading the content of a file from local storage.
 
+### Knowledge Base Retrieval
+
+- **`use_bedrock_kb.py`**: Demonstrates the `BedrockKnowledgeBaseSearch` tool for retrieving chunks from an Amazon Bedrock Knowledge Base (server-side embedding and vector search), standalone and as an agent tool, including metadata filters and score thresholds.
+- **`use_vertex_rag.py`**: Demonstrates the `VertexAIRagSearch` tool for retrieving chunks from a Google Cloud Vertex AI RAG Engine corpus (server-side embedding and retrieval), standalone and as an agent tool, including metadata filters and reranking.
+
 ### Firecrawl Integration
 
 - **`use_firecrawl.py`**: Demonstrates using the `FirecrawlTool` to interact with the Firecrawl API for website analysis.
