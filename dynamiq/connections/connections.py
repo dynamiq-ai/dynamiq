@@ -491,6 +491,12 @@ class VertexAI(GoogleCloud):
             return self.vertex_api_base.rstrip("/")
 
         if not (self.vertex_endpoint_id and self.vertex_endpoint_dns):
+            if self.vertex_endpoint_id or self.vertex_endpoint_dns:
+                logger.warning(
+                    "VertexAI connection has an incomplete self-deployed endpoint configuration: "
+                    "vertex_endpoint_id and vertex_endpoint_dns are both required. Falling back to "
+                    "the shared Vertex AI host, which dedicated endpoints reject."
+                )
             return None
 
         host = self.vertex_endpoint_dns.rstrip("/").removeprefix("https://").removeprefix("http://")
