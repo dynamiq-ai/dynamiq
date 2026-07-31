@@ -236,13 +236,22 @@ class PostgreSQL(MemoryBackend):
             raise PostgresMemoryError(f"Error preparing message data: {e}") from e
 
     def get_all(self, limit: int | None = None) -> list[Message]:
-        """Retrieves messages from PostgreSQL, sorted chronologically."""
+        """Retrieves messages from PostgreSQL, sorted chronologically (oldest first).
+
+        When ``limit`` is set this returns the *most recent* ``limit`` messages, still
+        ordered oldest-first -- the contract in MemoryBackend.get_all that InMemory and
+        SQLite implement. Ordering ASC and then LIMIT-ing would take the oldest N
+        instead, so a conversation past memory_limit would permanently show the agent
+        only its opening messages and never the recent turns.
+        """
+        newest_first = limit is not None and limit > 0
+        order = SQL("DESC") if newest_first else SQL("ASC")
         sql = SQL(
             """
             SELECT {message_id_col}, {role_col}, {content_col}, {metadata_col}, {timestamp_col}
             FROM {table_name}
-            ORDER BY {timestamp_col} ASC
-        """
+            ORDER BY {timestamp_col} {order}
+            """
         ).format(
             table_name=Identifier(self.table_name),
             message_id_col=Identifier(self.message_id_col),
@@ -250,15 +259,19 @@ class PostgreSQL(MemoryBackend):
             content_col=Identifier(self.content_col),
             metadata_col=Identifier(self.metadata_col),
             timestamp_col=Identifier(self.timestamp_col),
+            order=order,
         )
 
         params = []
-        if limit is not None and limit > 0:
+        if newest_first:
             sql = sql + SQL(" LIMIT %s")
             params.append(limit)
 
         rows = self._execute_sql(sql, params, fetch=FetchMode.ALL)
         messages = [self._row_to_message(row) for row in rows]
+        if newest_first:
+            # Fetched newest-first to apply the limit; hand back oldest-first.
+            messages.reverse()
         logger.debug(f"PostgreSQL Memory ({self.table_name}): Retrieved {len(messages)} messages.")
         return messages
 

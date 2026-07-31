@@ -53,6 +53,14 @@ class SQLite(MemoryBackend):
         FROM {index_name}
         ORDER BY timestamp ASC
     """
+    SELECT_RECENT_MESSAGES_QUERY: ClassVar[
+        str
+    ] = """
+        SELECT id, role, content, metadata, timestamp
+        FROM {index_name}
+        ORDER BY timestamp DESC
+        LIMIT ?
+    """
     CHECK_IF_EMPTY_QUERY: ClassVar[str] = "SELECT COUNT(*) FROM {index_name}"
     CLEAR_TABLE_QUERY: ClassVar[str] = "DELETE FROM {index_name}"
     SEARCH_MESSAGES_QUERY: ClassVar[
@@ -70,6 +78,7 @@ class SQLite(MemoryBackend):
             "VALIDATE_TABLE_QUERY": True,
             "INSERT_MESSAGE_QUERY": True,
             "SELECT_ALL_MESSAGES_QUERY": True,
+            "SELECT_RECENT_MESSAGES_QUERY": True,
             "CHECK_IF_EMPTY_QUERY": True,
             "CLEAR_TABLE_QUERY": True,
             "SEARCH_MESSAGES_QUERY": True,
@@ -163,15 +172,26 @@ class SQLite(MemoryBackend):
                 (matches the ``InMemory`` backend contract).
         """
         try:
-            query = self.SELECT_ALL_MESSAGES_QUERY.format(index_name=self.index_name)
+            # Push the limit into SQL rather than selecting the whole table, building a
+            # Message (plus a json.loads) per row and then slicing the tail away.
+            if limit is not None and limit > 0:
+                query = self.SELECT_RECENT_MESSAGES_QUERY.format(index_name=self.index_name)
+                params: tuple = (limit,)
+                reverse = True
+            else:
+                query = self.SELECT_ALL_MESSAGES_QUERY.format(index_name=self.index_name)
+                params = ()
+                reverse = False
+
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute(query)
+                cursor.execute(query, params)
                 rows = cursor.fetchall()
-            messages = [Message(role=row[1], content=row[2], metadata=json.loads(row[3] or "{}")) for row in rows]
-            if limit is not None and len(messages) > limit:
-                return messages[-limit:]
-            return messages
+
+            if reverse:
+                # Fetched newest-first to apply the limit; hand back oldest-first.
+                rows = rows[::-1]
+            return [Message(role=row[1], content=row[2], metadata=json.loads(row[3] or "{}")) for row in rows]
 
         except sqlite3.Error as e:
             raise SQLiteError(f"Error retrieving messages from database: {e}") from e
@@ -227,7 +247,10 @@ class SQLite(MemoryBackend):
             query_str = self.SEARCH_MESSAGES_QUERY.format(index_name=self.index_name)
             if where_clauses:
                 query_str += f" WHERE {' AND '.join(where_clauses)}"
-            query_str += " ORDER BY id DESC LIMIT ?"
+            # Order by timestamp, not id: `id` is a random uuid4 (see add()), so
+            # "ORDER BY id DESC LIMIT n" returned an arbitrary n rows in arbitrary
+            # order rather than the n most recent matches.
+            query_str += " ORDER BY timestamp DESC LIMIT ?"
             params.append(limit)
 
             with sqlite3.connect(self.db_path) as conn:
