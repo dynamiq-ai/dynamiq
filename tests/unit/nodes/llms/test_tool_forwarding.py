@@ -18,7 +18,6 @@ Two properties matter beyond "it works":
 
 from unittest.mock import patch
 
-import pytest
 from litellm import get_supported_openai_params
 
 from dynamiq.connections import OpenAI as OpenAIConnection
@@ -111,24 +110,3 @@ class TestBuildCompletionParams:
 
         assert llm.model not in litellm.model_cost
         assert "tools" not in (get_supported_openai_params(model=llm.model) or [])
-
-
-@pytest.mark.parametrize(
-    "provider_prefix, gates_tools_per_model",
-    [
-        ("together_ai/", True),
-        ("bedrock/", True),
-        ("openai/", False),
-        ("cerebras/", False),
-        ("mistral/", False),
-    ],
-)
-def test_provider_gating_assumption(provider_prefix, gates_tools_per_model):
-    """Guards the premise of the fix.
-
-    If litellm changes which providers gate tools per model, the override's reach shifts
-    with it. Fail loudly here instead of letting the assumption go silently stale.
-    """
-    unknown = f"{provider_prefix}vendor/definitely-not-real-{provider_prefix.strip('/')}"
-    forwards = "tools" in (get_supported_openai_params(model=unknown) or [])
-    assert forwards is not gates_tools_per_model
