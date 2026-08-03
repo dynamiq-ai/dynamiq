@@ -20,13 +20,21 @@ CONTEXT_MANAGER_INSTRUCTIONS = """## Context Management
 - Use the context-manager tool proactively when conversation is getting long
 - Save critical info (IDs, filenames) in "notes" field BEFORE calling - previous messages will be summarized"""
 
-TODO_TOOLS_INSTRUCTIONS = """## Todo Management
+_TODO_TOOLS_INSTRUCTIONS_TEMPLATE = """## Todo Management
 - Use the todo-write tool for complex 3+ step tasks; skip for simple requests
-- Current todos shown in [State: ...] at the end of user last messages under "Todos:"
+- {todo_visibility}
 - When creating initial list: first task "in_progress", rest "pending"
 - After initial creation, ONLY update status via merge=true - do not restructure the plan
 - Mark completed IMMEDIATELY after finishing each step - don't batch
 - Only mark completed when FULLY done; if blocked, keep in_progress"""
+
+TODO_TOOLS_INSTRUCTIONS_TRACKED = _TODO_TOOLS_INSTRUCTIONS_TEMPLATE.format(
+    todo_visibility='Current todos shown in [State: ...] at the end of user last messages under "Todos:"'
+)
+
+TODO_TOOLS_INSTRUCTIONS = _TODO_TOOLS_INSTRUCTIONS_TEMPLATE.format(
+    todo_visibility="The todo-write result lists the full current todo list - re-read it there"
+)
 
 
 SANDBOX_INSTRUCTIONS_TEMPLATE = """## Sandbox Environment
