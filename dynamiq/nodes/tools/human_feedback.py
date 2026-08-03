@@ -2,10 +2,11 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any, ClassVar, Literal
 
-from jinja2 import Template
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from jinja2 import Environment, Template, meta
+from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 
 from dynamiq.nodes import NodeGroup
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import Node, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
@@ -81,6 +82,22 @@ class OutputMethodCallable(ABC):
         pass
 
 
+def extract_template_variables(msg_template: str) -> list[str]:
+    """Return the variable names a Jinja message template references.
+
+    Used to advertise a custom ``msg_template``'s placeholders in the model-facing
+    input schema; a placeholder the LLM is never told about is never sent, and the
+    template then renders to an empty prompt.
+    """
+    try:
+        # This environment only parses (never renders), so autoescape has no effect on the
+        # result - it is enabled to keep the default-off construction off the audit radar.
+        return sorted(meta.find_undeclared_variables(Environment(autoescape=True).parse(msg_template)))
+    except Exception as e:
+        logger.warning(f"HumanFeedbackTool: failed to parse msg_template '{msg_template}': {e}")
+        return []
+
+
 class HumanFeedbackInputSchema(BaseModel):
     """Input schema for HumanFeedbackTool."""
 
@@ -146,6 +163,53 @@ Important:
 
     _GUIDANCE_ANCHOR: ClassVar[str] = "\nInteraction mode:"
 
+    def _resolve_input_schema(self) -> None:
+        """Extend the resolved schema with the ``msg_template``'s own placeholders.
+
+        The base schema only declares ``action`` and ``input``. A custom template
+        (e.g. ``"Draft: {{sketch}}. Approve?"``) needs ``sketch`` too, but the
+        agent-facing schema is built from ``resolved_input_schema`` and closes the
+        object (``additionalProperties: false`` in function-calling mode), so an
+        undeclared placeholder can never be supplied and renders empty. Declaring
+        the placeholders makes them visible - and passable - in every inference mode.
+
+        Fields are optional and untyped (``Any``) so non-agent workflow usage, where
+        values arrive from upstream nodes in any shape, keeps working unchanged.
+        """
+        super()._resolve_input_schema()
+        base = self._resolved_input_schema
+        if base is None:
+            return
+
+        extra_vars = [
+            name
+            for name in extract_template_variables(self.msg_template)
+            if name not in base.model_fields and name.isidentifier() and not hasattr(BaseModel, name)
+        ]
+        if not extra_vars:
+            return
+
+        try:
+            self._resolved_input_schema = create_model(
+                f"{base.__name__}Templated",
+                __base__=base,
+                **{
+                    name: (
+                        Any,
+                        Field(
+                            default="", description=f"Value substituted for '{{{{{name}}}}}' in the message template."
+                        ),
+                    )
+                    for name in extra_vars
+                },
+            )
+        except Exception as e:
+            # A schema we can't extend still runs (extra="allow" accepts the values at
+            # execution time); only the model-facing advertisement is lost.
+            logger.warning(
+                f"Tool {self.name} - {self.id}: could not add template parameters {extra_vars} to the input schema: {e}"
+            )
+
     @model_validator(mode="after")
     def update_description(self):
         # Strip any previously generated guidance before regenerating so repeated validation,
@@ -162,11 +226,16 @@ Important:
         else:
             interaction = "Interaction mode: the user can only provide text responses - they can not perform actions."
 
-        self.description = (
-            f"{base}\n{interaction}"
-            f"\nMessage template: '{self.msg_template}'."
-            " Parameters will be substituted based on the provided input data."
-        )
+        template_vars = extract_template_variables(self.msg_template)
+        if template_vars:
+            params = (
+                f" You MUST provide every template parameter ({', '.join(template_vars)}) "
+                "in the call - a missing parameter renders an empty message to the user."
+            )
+        else:
+            params = " It takes no template parameters."
+
+        self.description = f"{base}\n{interaction}" f"\nMessage template: '{self.msg_template}'.{params}"
         return self
 
     def input_method_console(self, prompt: str, config: RunnableConfig = None) -> str:
@@ -329,8 +398,26 @@ Important:
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        input_text = Template(self.msg_template).render(input_data.model_dump())
+        dumped = input_data.model_dump()
+        input_text = Template(self.msg_template).render(dumped)
         action = self.action if self.action is not None else input_data.action
+
+        if not input_text.strip():
+            # Every template placeholder came back empty: the caller (usually an LLM)
+            # skipped them. Fall back to the raw message before failing, so a plain
+            # `{"input": ...}` call still reaches the user with a non-default template.
+            input_text = (dumped.get("input") or "").strip()
+            if not input_text:
+                raise ToolExecutionException(
+                    f"Message rendered empty from template '{self.msg_template}'. Call "
+                    f"{self.name} again and provide a value for every template parameter "
+                    f"({', '.join(extract_template_variables(self.msg_template)) or 'input'}).",
+                    recoverable=True,
+                )
+            logger.warning(
+                f"Tool {self.name} - {self.id}: template '{self.msg_template}' rendered empty; "
+                "falling back to the raw 'input' value."
+            )
 
         if action == HumanFeedbackAction.ASK:
             result = self._execute_ask(input_text, config, **kwargs)
