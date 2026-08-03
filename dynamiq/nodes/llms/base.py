@@ -454,6 +454,13 @@ class BaseLLM(ConnectionNode):
                 "assuming it supports function calling. Set the flag to silence this.",
                 self.model,
             )
+        elif litellm_info is not None:
+            logger.warning(
+                "Model %s has a litellm entry with no 'supports_function_calling' flag; "
+                "assuming it supports function calling. Add a registry entry or set "
+                "model_info.supports_function_calling to silence this.",
+                self.model,
+            )
         else:
             logger.warning(
                 "Model %s is unknown to litellm and the custom registry; assuming it supports "
