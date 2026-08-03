@@ -2139,8 +2139,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         self.state.update_loop(loop_num)
 
-        # Todos are only read to render the [State: ...] block; skip the per-loop
-        # backend read (a network round-trip for remote sandboxes) when it is off.
         if not self.track_state:
             return
 
