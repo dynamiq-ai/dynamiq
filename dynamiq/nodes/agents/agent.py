@@ -228,6 +228,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
     state: AgentState = Field(default_factory=AgentState, exclude=True)
+    track_state: bool = Field(
+        default=True,
+        description=(
+            "Append a [State: ...] block (loop progress and current todos) to the last user message "
+            "on every LLM call. The block is sent to the model only - it is never written to prompt "
+            "history, memory or checkpoints. Set False to keep the state out of the prompt; todos "
+            "then reach the model only via the todo-write tool result."
+        ),
+    )
     response_format: dict[str, Any] | None = Field(
         default=None,
         description=(
@@ -1662,6 +1671,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         Original messages are not modified. Handles both Message and VisionMessage types.
         """
+        if not self.track_state:
+            return messages
+
         state_info = self.state.to_prompt_string()
         if not state_info or not messages:
             return messages
@@ -2126,6 +2138,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
             loop_num: Current loop iteration number.
         """
         self.state.update_loop(loop_num)
+
+        if not self.track_state:
+            return
+
         todo_backend = None
         if self.sandbox_backend:
             todo_backend = self.sandbox_backend
@@ -2216,6 +2232,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             context_compaction_enabled=self.summarization_config.enabled,
             todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
             or bool(self.sandbox_backend),
+            track_state=self.track_state,
             sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
             has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in tools),
             role=self.role,
