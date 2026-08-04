@@ -35,12 +35,6 @@ class AgentIterationData(BaseModel):
     pending_action: str | None = None
     pending_action_input: Any = None
     pending_thought: str | None = None
-    # Tool-call ids from the assistant message that is already in `prompt_messages` but
-    # has no matching `role: tool` reply yet. Without them the replayed call answers with
-    # a legacy `role: user` "Observation:" turn, leaving the tool_calls unanswered - the
-    # FC sanitizer then injects a synthetic "tool execution skipped" reply and the model
-    # is told the tool failed while the real result arrives in the wrong role.
-    pending_fc_tool_call_ids: list[str] = Field(default_factory=list)
 
 
 class AgentCheckpointState(BaseCheckpointState):
@@ -121,7 +115,6 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
             pending_action=self._pending_action,
             pending_action_input=self._pending_action_input,
             pending_thought=self._pending_thought,
-            pending_fc_tool_call_ids=list(getattr(self, "_pending_fc_tool_call_ids", None) or []),
         )
         return IterationState(completed_iterations=self._completed_loops, iteration_data=data.model_dump())
 
@@ -138,9 +131,6 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
         self._pending_action = data.pending_action
         self._pending_action_input = data.pending_action_input
         self._pending_thought = data.pending_thought
-        # Restored so the replayed tool call answers the assistant tool_calls already in
-        # the restored history with a proper `role: tool` message.
-        self._pending_fc_tool_call_ids = list(data.pending_fc_tool_call_ids)
         # Mirror the completed-loop count back onto the instance so a snapshot
         # taken before any new loop finishes (e.g. an input timeout during the
         # replayed tool call) doesn't overwrite the saved progress with 0.
