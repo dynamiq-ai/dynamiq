@@ -110,7 +110,7 @@ class HistoryManagerMixin:
                     summary = f"{summary}\n\nOriginal request: {pinned_content}"
 
             self._prompt.messages.append(
-                Message(role=MessageRole.USER, content=f"\nObservation: {summary}\n", static=True)
+                Message(role=MessageRole.USER, content=f"Observation: {summary}\n", static=True)
             )
 
         self._prompt.messages.extend(preserved)
