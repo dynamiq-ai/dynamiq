@@ -292,12 +292,16 @@ class Agent(HistoryManagerMixin, BaseAgent):
         restored from the checkpoint data inside _run_agent().
         """
         super().reset_run_state()
+        self._streaming_tool_run_id = None
+        self._streaming_tool_run_ids = []
         if not self.is_resumed:
             self.state.reset()
             self.clear_pending_tool_call()
-        self._streaming_tool_run_id = None
-        self._streaming_tool_run_ids = []
-        self._pending_fc_tool_call_ids: list[str] = []
+            self._pending_fc_tool_call_ids: list[str] = []
+        elif not hasattr(self, "_pending_fc_tool_call_ids"):
+            # A resumed run gets these back from restore_iteration_state(), which runs
+            # later via get_start_iteration(); only ensure the attribute exists here.
+            self._pending_fc_tool_call_ids: list[str] = []
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
