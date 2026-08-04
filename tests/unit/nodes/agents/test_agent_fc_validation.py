@@ -46,7 +46,15 @@ def test_function_calling_truly_unknown_model_warns_and_allows(mocker, _litellm_
 def test_function_calling_litellm_known_unsupported_still_raises(mocker):
     """When litellm KNOWS the model and says no FC, construction must still fail."""
     mocker.patch("dynamiq.nodes.llms.base.get_model_info", return_value={"supports_function_calling": False})
-    mocker.patch("dynamiq.nodes.llms.base.supports_function_calling", return_value=False)
 
     with pytest.raises(ValueError, match="does not support function calling"):
         Agent(name="a", llm=_make_llm(), tools=[], inference_mode=InferenceMode.FUNCTION_CALLING)
+
+
+def test_function_calling_allowed_when_litellm_entry_omits_the_flag(mocker):
+    """An entry without the flag is an omission, not a denial -- construction must succeed."""
+    mocker.patch("dynamiq.nodes.llms.base.get_model_info", return_value={"max_tokens": 4096})
+    mocker.patch("dynamiq.nodes.llms.base.model_registry", ModelRegistry())
+
+    agent = Agent(name="a", llm=_make_llm(), tools=[], inference_mode=InferenceMode.FUNCTION_CALLING)
+    assert agent.inference_mode == InferenceMode.FUNCTION_CALLING
