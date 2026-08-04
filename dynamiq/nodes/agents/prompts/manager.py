@@ -31,6 +31,7 @@ from dynamiq.nodes.agents.prompts.secondary_instructions import (
     SANDBOX_INSTRUCTIONS_TEMPLATE,
     SUB_AGENT_INSTRUCTIONS,
     TODO_TOOLS_INSTRUCTIONS,
+    TODO_TOOLS_INSTRUCTIONS_TRACKED,
 )
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.types import InferenceMode
@@ -46,6 +47,7 @@ class ReactPromptConfig(BaseModel):
     delegation_allowed: bool = False
     context_compaction_enabled: bool = False
     todo_management_enabled: bool = False
+    track_state: bool = False
     sandbox_base_path: str | None = None
     has_sub_agent_tools: bool = False
     role: str | None = None
@@ -316,7 +318,7 @@ class AgentPromptManager:
         if config.context_compaction_enabled:
             ops_parts.append(CONTEXT_MANAGER_INSTRUCTIONS)
         if config.todo_management_enabled:
-            ops_parts.append(TODO_TOOLS_INSTRUCTIONS)
+            ops_parts.append(TODO_TOOLS_INSTRUCTIONS_TRACKED if config.track_state else TODO_TOOLS_INSTRUCTIONS)
         if config.has_sub_agent_tools:
             ops_parts.append(SUB_AGENT_INSTRUCTIONS)
 
