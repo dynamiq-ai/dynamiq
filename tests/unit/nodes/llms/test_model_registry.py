@@ -272,18 +272,34 @@ def test_model_info_function_calling_override_takes_priority():
     assert llm.is_function_calling_supported is False
 
 
-def test_basellm_uses_litellm_when_model_is_known():
-    """When litellm knows the model, its FC verdict is used (registry not consulted)."""
+def test_basellm_uses_litellm_when_model_declares_support():
+    """A value litellm actually declares wins, and the registry is not consulted."""
     from dynamiq.connections import TogetherAI as TogetherAIConnection
     from dynamiq.nodes.llms.togetherai import TogetherAI
 
     llm = TogetherAI(model=MODEL_A, connection=TogetherAIConnection(api_key="test-key"))
     with (
         patch("dynamiq.nodes.llms.base.get_model_info", return_value={"supports_function_calling": False}),
-        patch("dynamiq.nodes.llms.base.supports_function_calling", return_value=False) as mock_fc,
+        patch.object(model_registry, "supports_function_calling") as mock_registry,
     ):
         assert llm.is_function_calling_supported is False
-        mock_fc.assert_called_once()
+        mock_registry.assert_not_called()
+
+
+def test_basellm_ignores_a_litellm_entry_that_omits_the_flag():
+    """An omission is not a denial.
+
+    litellm leaves ``supports_function_calling`` unset on ~688 of its 2285 chat entries,
+    and its ``supports_function_calling()`` helper reports those as False. Treating that
+    as a denial refuses function calling for models that support it, so an entry without
+    the flag must fall through to the registry / assume-True default.
+    """
+    from dynamiq.connections import TogetherAI as TogetherAIConnection
+    from dynamiq.nodes.llms.togetherai import TogetherAI
+
+    llm = TogetherAI(model=MODEL_A, connection=TogetherAIConnection(api_key="test-key"))
+    with patch("dynamiq.nodes.llms.base.get_model_info", return_value={"max_tokens": 4096}):
+        assert llm.is_function_calling_supported is True
 
 
 # ---------------------------------------------------------------------------

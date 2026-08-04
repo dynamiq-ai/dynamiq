@@ -664,6 +664,68 @@ def test_todo_tools_added_when_enabled(openai_node, mock_llm_executor):
     prompt = agent.generate_prompt()
     assert "Todo Management" in prompt, "TODO instructions should be in system prompt"
     assert "todo-write" in prompt, "todo-write tool should be mentioned in prompt"
+    assert "[State: ...]" in prompt, "tracking is on by default, so todos are advertised there"
+
+
+def test_todo_instructions_avoid_state_block_when_tracking_disabled(openai_node, mock_llm_executor):
+    """With track_state=False the instructions must not point at a block that is never injected."""
+
+    file_store_config = FileStoreConfig(enabled=True, backend=InMemoryFileStore(), todo_enabled=True)
+    agent = Agent(
+        name="Todo Agent",
+        llm=openai_node,
+        tools=[],
+        file_store=file_store_config,
+        inference_mode=InferenceMode.DEFAULT,
+        track_state=False,
+    )
+
+    prompt = agent.generate_prompt()
+    assert "Todo Management" in prompt
+    assert "[State: ...]" not in prompt, "must not reference a state block that is never injected"
+    assert "The todo-write result lists the full current todo list" in prompt
+
+
+@pytest.mark.parametrize("track_state", [False, True])
+def test_inject_state_into_messages_respects_track_state(openai_node, track_state):
+    """The [State: ...] suffix is only appended when track_state is enabled."""
+
+    agent = Agent(name="Agent", llm=openai_node, tools=[], track_state=track_state)
+    agent.state.max_loops = 15
+    agent.state.update_loop(3)
+
+    messages = [Message(role=MessageRole.USER, content="do the thing")]
+    result = agent._inject_state_into_messages(messages)
+
+    if track_state:
+        assert result is not messages, "must not mutate the original message list"
+        assert "[State: Progress: Loop 3/15]" in result[-1].content
+        assert messages[-1].content == "do the thing", "original message must be untouched"
+    else:
+        assert result is messages
+        assert result[-1].content == "do the thing"
+
+
+def test_refresh_agent_state_skips_todo_read_when_not_tracking(openai_node):
+    """Loop number is always tracked, but todos are only loaded when track_state is on."""
+    from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH
+
+    backend = InMemoryFileStore()
+    backend.store(
+        file_path=TODOS_FILE_PATH,
+        content=b'{"todos": [{"id": "1", "content": "do X", "status": "in_progress"}]}',
+        content_type="application/json",
+    )
+    file_store_config = FileStoreConfig(enabled=True, backend=backend, todo_enabled=True)
+
+    agent = Agent(name="Agent", llm=openai_node, tools=[], file_store=file_store_config, track_state=False)
+    agent._refresh_agent_state(2)
+    assert agent.state.current_loop == 2, "loop progress is tracked regardless of the flag"
+    assert agent.state.todos == [], "todos must not be read from the backend when tracking is off"
+
+    tracking_agent = Agent(name="Agent", llm=openai_node, tools=[], file_store=file_store_config)
+    tracking_agent._refresh_agent_state(2)
+    assert [t.id for t in tracking_agent.state.todos] == ["1"], "default agent still loads todos"
 
 
 def test_agent_state_updates_with_todos(openai_node):

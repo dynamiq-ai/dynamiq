@@ -126,7 +126,7 @@ PROVIDERS = {
     ),
     "togetherai_kimi": (
         ["TOGETHER_API_KEY"],
-        _llm_factory(llms.TogetherAI, conn.TogetherAI, "moonshotai/kimi-k2.6"),
+        _llm_factory(llms.TogetherAI, conn.TogetherAI, "moonshotai/kimi-k3"),
     ),
     "vertexai": (VERTEXAI_ENV_KEYS, _llm_factory(llms.VertexAI, conn.VertexAI, "gemini-2.5-pro")),
     "watsonx": (

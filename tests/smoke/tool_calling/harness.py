@@ -33,7 +33,6 @@ from __future__ import annotations
 
 from typing import Any, ClassVar, Literal
 
-import litellm
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq import Workflow
@@ -48,20 +47,6 @@ from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from dynamiq.utils.logger import logger
 from tests.integration_with_creds.agents.streaming_assertions import collect_streaming_events
-
-# LiteLLM may have no `together_ai` mapping for some newer models, in which case it defaults
-# supports_function_calling=False and STRIPS `tools`/`tool_choice` -- the model then never
-# sees the tool. Register its FC support so the tools survive. Harmless for models LiteLLM
-# already knows; runs once when the harness loads, which is when the together test needs it.
-litellm.register_model(
-    {
-        "together_ai/moonshotai/kimi-k2.6": {
-            "litellm_provider": "together_ai",
-            "mode": "chat",
-            "supports_function_calling": True,
-        },
-    }
-)
 
 # Eight independent enum constraints (two single-value / const-like), all string + flat +
 # closed. Nested objects, numeric/boolean types and arrays are deliberately avoided -- those
