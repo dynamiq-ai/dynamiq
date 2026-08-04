@@ -1,3 +1,4 @@
+import json
 from queue import Queue
 
 import pytest
@@ -18,6 +19,7 @@ from dynamiq.nodes.tools.human_feedback import (
     HumanFeedbackAction,
     HumanFeedbackTool,
 )
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.feedback import (
@@ -661,3 +663,166 @@ class TestAppendModeAgentCheckpoints:
         chain = backend.get_chain(latest.id)
         assert len(chain) >= 2
         assert chain[0].status == CheckpointStatus.FAILED
+
+
+# ---------------------------------------------------------------- prompt roundtrip
+
+RT_TOOL_ID = "prompt-roundtrip-tool"
+RT_TOOL_NAME = "human-input"
+RT_ANSWER = "yes, go ahead"
+RT_TIMEOUT = 0.3
+_ASK = '{"action": "ask", "input": "proceed?"}'
+
+# (content, tool_calls) per LLM call: ask the human, then finish. Held as plain data so
+# each run builds its own ModelResponse objects.
+MODE_SCRIPTS = {
+    InferenceMode.DEFAULT: [
+        (f"Thought: I need approval.\nAction: {RT_TOOL_NAME}\nAction Input: {_ASK}", None),
+        ("Thought: Done.\nAnswer: finished", None),
+    ],
+    InferenceMode.XML: [
+        (
+            f"<thought>I need approval.</thought><action>{RT_TOOL_NAME}</action>"
+            f"<action_input>{_ASK}</action_input>",
+            None,
+        ),
+        ("<thought>Done.</thought><answer>finished</answer>", None),
+    ],
+    InferenceMode.STRUCTURED_OUTPUT: [
+        (
+            json.dumps(
+                {"thought": "I need approval.", "action": RT_TOOL_NAME, "action_input": _ASK, "output_files": ""}
+            ),
+            None,
+        ),
+        (json.dumps({"thought": "Done.", "action": "finish", "action_input": "finished", "output_files": ""}), None),
+    ],
+    InferenceMode.FUNCTION_CALLING: [
+        (
+            None,
+            [
+                {
+                    "id": "call_ask",
+                    "type": "function",
+                    "function": {
+                        "name": RT_TOOL_NAME,
+                        "arguments": '{"thought": "I need approval.", "action": "ask", "input": "proceed?"}',
+                    },
+                }
+            ],
+        ),
+        (
+            None,
+            [
+                {
+                    "id": "call_final",
+                    "type": "function",
+                    "function": {
+                        "name": "provide_final_answer",
+                        "arguments": '{"thought": "Done.", "answer": "finished"}',
+                    },
+                }
+            ],
+        ),
+    ],
+}
+
+
+class TestPromptRoundtrip:
+    """A run paused by a HITL timeout and resumed must rebuild the exact same prompt.
+
+    Each mode is run twice with an identical LLM script: once straight through (the
+    human answers immediately) and once interrupted (nobody answers, the input times
+    out, a checkpoint is written, and the human replies only on resume). The two
+    conversations must come out identical - a resume is meant to be invisible to the
+    model, and any divergence is state the checkpoint failed to carry.
+    """
+
+    def _patch_llm(self, mocker, mode):
+        """Serve the mode's scripted turns, one per LLM call."""
+        script = MODE_SCRIPTS[mode]
+        calls = {"n": 0}
+
+        def side_effect(stream: bool, *args, **kwargs):
+            content, tool_calls = script[min(calls["n"], len(script) - 1)]
+            calls["n"] += 1
+            message = {"content": content}
+            if tool_calls:
+                message["tool_calls"] = tool_calls
+            return ModelResponse(choices=[{"message": message}])
+
+        mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=side_effect)
+
+    def _build(self, mode, backend, queue):
+        tool = HumanFeedbackTool(
+            id=RT_TOOL_ID,
+            name=RT_TOOL_NAME,
+            action=HumanFeedbackAction.ASK,
+            input_method=FeedbackMethod.STREAM,
+            output_method=FeedbackMethod.STREAM,
+            streaming=StreamingConfig(enabled=True, input_queue=queue, timeout=RT_TIMEOUT),
+        )
+        agent = Agent(
+            id=AGENT_ID,
+            name="Roundtrip Agent",
+            llm=make_agent_llm(),
+            tools=[tool],
+            role="Assistant",
+            inference_mode=mode,
+            max_loops=3,
+        )
+        flow = flows.Flow(id=FLOW_ID, nodes=[agent], checkpoint=_input_timeout_only_config(backend))
+        return flow, agent
+
+    @staticmethod
+    def _answer(queue):
+        queue.put(
+            HFStreamingInputEventMessage(
+                entity_id=RT_TOOL_ID,
+                data=HFStreamingInputEventMessageData(content=RT_ANSWER),
+            ).model_dump_json()
+        )
+
+    @staticmethod
+    def _history(agent):
+        return [m.to_dict() for m in agent._prompt.messages]
+
+    def _run_straight_through(self, mocker, mode):
+        """The human answers before being asked, so the tool never blocks."""
+        queue = Queue()
+        self._answer(queue)
+        flow, agent = self._build(mode, InMemory(), queue)
+        self._patch_llm(mocker, mode)
+
+        result = flow.run_sync(input_data={"input": "do something"})
+        assert result.status == RunnableStatus.SUCCESS
+        return self._history(agent)
+
+    def _run_paused_and_resumed(self, mocker, mode):
+        """Nobody answers: the input times out, checkpoints, and resumes with the reply."""
+        queue = Queue()
+        backend = InMemory()
+        flow, agent = self._build(mode, backend, queue)
+        self._patch_llm(mocker, mode)
+
+        first = flow.run_sync(input_data={"input": "do something"})
+        assert first.status == RunnableStatus.FAILURE, "an unanswered HITL prompt must time out"
+
+        saved = backend.get_latest_by_flow(FLOW_ID)
+        assert saved is not None and AGENT_ID in saved.node_states
+
+        self._answer(queue)
+        second = flow.run_sync(input_data={"input": "do something"}, resume_from=saved.id)
+        assert second.status == RunnableStatus.SUCCESS
+        return self._history(agent)
+
+    @pytest.mark.parametrize("mode", list(MODE_SCRIPTS), ids=lambda m: m.value)
+    def test_prompt_survives_timeout_and_resume(self, mocker, mode):
+        straight = self._run_straight_through(mocker, mode)
+        resumed = self._run_paused_and_resumed(mocker, mode)
+
+        assert resumed == straight, (
+            f"[{mode.value}] resumed conversation differs from an uninterrupted one\n"
+            f"straight: {straight}\nresumed : {resumed}"
+        )
+        assert any(RT_ANSWER in str(m.get("content", "")) for m in resumed), "the human's answer must reach the prompt"
