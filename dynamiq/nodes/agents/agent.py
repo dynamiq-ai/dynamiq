@@ -228,6 +228,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
     state: AgentState = Field(default_factory=AgentState, exclude=True)
+    track_state: bool = Field(
+        default=True,
+        description=(
+            "Append a [State: ...] block (loop progress and current todos) to the last user message "
+            "on every LLM call. The block is sent to the model only - it is never written to prompt "
+            "history, memory or checkpoints. Set False to keep the state out of the prompt; todos "
+            "then reach the model only via the todo-write tool result."
+        ),
+    )
     response_format: dict[str, Any] | None = Field(
         default=None,
         description=(
@@ -1436,8 +1445,33 @@ class Agent(HistoryManagerMixin, BaseAgent):
         Args:
             tool_result: The result from the tool execution.
         """
-        observation = f"\nObservation: {tool_result}\n"
+        observation = f"Observation: {tool_result}\n"
         self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
+
+    def _unanswered_tool_call_ids(self) -> list[str]:
+        """Recover tool_call ids from history that still have no ``role: tool`` reply.
+
+        ``_pending_fc_tool_call_ids`` is in-memory scratch state, normally live for the
+        few milliseconds between the LLM emitting a tool call and the tool returning. An
+        interruption in that window (a HITL input timeout that checkpoints and resumes)
+        loses it, and without the ids the result would be appended as an unattached
+        ``role: user`` observation, leaving the assistant's tool_calls unanswered.
+
+        The ids are still in the restored conversation, so read them back: walk from the
+        newest message, collecting replies already given, until the most recent assistant
+        message carrying tool_calls; whatever it requested and did not get back is
+        outstanding. Returns them in the order the assistant emitted them, matching how
+        ``_emit_tool_observations`` zips them against per-tool results.
+        """
+        answered: set[str] = set()
+        for msg in reversed(self._prompt.messages):
+            if msg.role == MessageRole.TOOL and msg.tool_call_id:
+                answered.add(msg.tool_call_id)
+            elif msg.role == MessageRole.ASSISTANT:
+                if not msg.tool_calls:
+                    return []
+                return [tc_id for tc in msg.tool_calls if (tc_id := tc.get("id")) is not None and tc_id not in answered]
+        return []
 
     def _emit_tool_observations(
         self,
@@ -1454,6 +1488,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
         ``Observation: ...`` message in all other cases.
         """
         pending_ids = getattr(self, "_pending_fc_tool_call_ids", None) or []
+        if self.inference_mode == InferenceMode.FUNCTION_CALLING and not pending_ids:
+            pending_ids = self._unanswered_tool_call_ids()
         if self.inference_mode == InferenceMode.FUNCTION_CALLING and pending_ids:
             if ordered_results and len(ordered_results) == len(pending_ids):
                 for tc_id, result in zip(pending_ids, ordered_results):
@@ -1662,6 +1698,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         Original messages are not modified. Handles both Message and VisionMessage types.
         """
+        if not self.track_state:
+            return messages
+
         state_info = self.state.to_prompt_string()
         if not state_info or not messages:
             return messages
@@ -2126,6 +2165,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
             loop_num: Current loop iteration number.
         """
         self.state.update_loop(loop_num)
+
+        if not self.track_state:
+            return
+
         todo_backend = None
         if self.sandbox_backend:
             todo_backend = self.sandbox_backend
@@ -2216,6 +2259,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             context_compaction_enabled=self.summarization_config.enabled,
             todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
             or bool(self.sandbox_backend),
+            track_state=self.track_state,
             sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
             has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in tools),
             role=self.role,
