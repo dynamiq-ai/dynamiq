@@ -1,16 +1,22 @@
 """Node-level `tool_params_from_input` on an Agent: bind agent input keys to tool parameters."""
 
+import json
 from typing import Any, ClassVar, Literal
+from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 from pydantic import BaseModel, Field
 
+from dynamiq import Workflow
 from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.flows import Flow
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.base import ToolParams
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.node import Node
+from dynamiq.nodes.node import Node, NodeDependency, NodeOutputReference
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 
 
@@ -24,6 +30,9 @@ class DocsSearchInputSchema(BaseModel):
     limit: int = Field(default=1, description="How many documents to return.")
 
 
+TOOL_CALLS: list[DocsSearchInputSchema] = []
+
+
 class DocsSearchTool(Node):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "docs-search"
@@ -33,6 +42,7 @@ class DocsSearchTool(Node):
     def execute(
         self, input_data: DocsSearchInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
+        TOOL_CALLS.append(input_data)
         return {"content": f"docs for {input_data.user}"}
 
 
@@ -88,13 +98,16 @@ class TestBindings:
         assert params.global_params == {"tenant": "acme"}
 
     def test_binds_a_dependency_output(self, test_llm):
-        """A value from another node, once input_mapping/transformer put it in the agent input."""
+        """input_mapping lifts another node's output into the agent input; the binding names it."""
+        auth = DocsSearchTool(id="auth-1", name="auth-lookup")
         agent = build_agent(test_llm, {"by_name": {"docs-search": {"user": "auth_user"}}})
+        agent.depends = [NodeDependency(auth)]
+        agent.input_mapping = {"auth_user": NodeOutputReference(node=auth, output_key="user")}
+
         dep = RunnableResult(status=RunnableStatus.SUCCESS, input={}, output={"user": "alice@corp.com"})
-        run_input = agent.transform_input(
-            input_data={"input": "q"},
-            depends_result={"auth_1": dep},
-        ) | {"auth_user": "alice@corp.com"}
+        run_input = agent.transform_input(input_data={"input": "q"}, depends_result={auth.id: dep})
+
+        assert run_input["auth_user"] == "alice@corp.com", "input_mapping must produce the key the binding names"
 
         params = agent._resolve_tool_params(agent.validate_input_schema(run_input))
 
@@ -178,6 +191,48 @@ class TestBoundValuesReachTheTool:
         assert content == "docs for alice@corp.com"
 
 
+class TestBindingsAppliedDuringARun:
+    """End-to-end through agent.run(), so the wiring inside execute() is covered too."""
+
+    @staticmethod
+    def _mock_llm(responses: list[str]):
+        stream = iter(responses)
+
+        def run(**kwargs):
+            result = MagicMock(spec=RunnableResult)
+            result.status = RunnableStatus.SUCCESS
+            result.output = {"content": next(stream)}
+            return result
+
+        return run
+
+    def _run(self, agent: Agent, run_input: dict) -> RunnableResult:
+        agent.inference_mode = InferenceMode.STRUCTURED_OUTPUT
+        agent.init_components()
+        responses = [
+            json.dumps({"thought": "search", "action": "docs-search", "action_input": {"query": "margins"}}),
+            json.dumps({"thought": "done", "action": "finish", "action_input": "Q3 margin was 41%"}),
+        ]
+        TOOL_CALLS.clear()
+        with patch.object(agent.llm, "run", side_effect=self._mock_llm(responses)):
+            return agent.run(input_data=run_input)
+
+    def test_bound_value_reaches_the_tool(self, test_llm):
+        agent = build_agent(test_llm, {"by_name": {"docs-search": {"user": "user"}}})
+
+        result = self._run(agent, {"input": "Q3 margins?", "user": "alice@corp.com"})
+
+        assert result.status == RunnableStatus.SUCCESS
+        assert [call.user for call in TOOL_CALLS] == ["alice@corp.com"]
+
+    def test_without_bindings_the_tool_keeps_its_default(self, test_llm):
+        agent = build_agent(test_llm)
+
+        self._run(agent, {"input": "Q3 margins?", "user": "alice@corp.com"})
+
+        assert [call.user for call in TOOL_CALLS] == ["anonymous"], "no binding -> input key must not leak in"
+
+
 class TestSerialization:
     def test_to_dict_uses_aliases_and_round_trips(self, test_llm):
         bindings = {"by_name": {"docs-search": {"user": "user"}}, "global": {"tenant": "metadata.tenant"}}
@@ -188,3 +243,38 @@ class TestSerialization:
         assert dumped["by_name"] == {"docs-search": {"user": "user"}}
         assert dumped["global"] == {"tenant": "metadata.tenant"}
         assert ToolParams.model_validate(dumped) == agent.tool_params_from_input
+
+    def test_yaml_roundtrip_keeps_bindings_working(self, tmp_path):
+        """Dump a workflow, reload it, and check the reloaded agent still binds its input."""
+        llm = OpenAI(id="llm-1", connection=OpenAIConnection(id="conn-1", api_key="test-key"), model="gpt-4o")
+        agent = Agent(
+            id="docs-agent",
+            name="docs-assistant",
+            llm=llm,
+            role="answer questions",
+            tools=[DocsSearchTool(id="docs-tool")],
+            tool_params_from_input={
+                "by_name": {"docs-search": {"user": "user"}},
+                "global": {"tenant": "metadata.tenant"},
+            },
+        )
+        workflow = Workflow(id="wf", flow=Flow(id="flow", nodes=[agent]))
+
+        yaml_path = tmp_path / "workflow.yaml"
+        workflow.to_yaml_file(yaml_path)
+
+        raw = yaml.safe_load(yaml_path.read_text())["nodes"]["docs-agent"]["tool_params_from_input"]
+        assert raw == {
+            "global": {"tenant": "metadata.tenant"},
+            "by_name": {"docs-search": {"user": "user"}},
+            "by_id": {},
+        }, "YAML must carry the aliases, not the field names"
+
+        loaded_agent = Workflow.from_yaml_file(str(yaml_path), init_components=True).flow.nodes[0]
+        assert loaded_agent.tool_params_from_input == agent.tool_params_from_input
+
+        run_input = {"input": "q", "user": "alice@corp.com", "metadata": {"tenant": "acme"}}
+        params = loaded_agent._resolve_tool_params(loaded_agent.validate_input_schema(run_input))
+
+        assert params.by_name_params["docs-search"] == {"user": "alice@corp.com"}
+        assert params.global_params == {"tenant": "acme"}
