@@ -157,9 +157,65 @@ class AgentStatus(str, Enum):
 
 
 class ToolParams(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     global_params: dict[str, Any] = Field(default_factory=dict, alias="global")
     by_name_params: dict[str, Union[dict[str, Any], "ToolParams"]] = Field(default_factory=dict, alias="by_name")
     by_id_params: dict[str, Union[dict[str, Any], "ToolParams"]] = Field(default_factory=dict, alias="by_id")
+
+    def is_empty(self) -> bool:
+        return not (self.global_params or self.by_name_params or self.by_id_params)
+
+
+# Marks a binding whose source key the agent input did not carry.
+_UNRESOLVED = object()
+
+
+def _lookup_agent_input(key: str, context: dict[str, Any]) -> Any:
+    """Read ``key`` out of the agent input; dotted keys walk into nested dicts."""
+    value: Any = context
+    for part in key.split("."):
+        if not isinstance(value, dict) or part not in value:
+            return _UNRESOLVED
+        value = value[part]
+    return value
+
+
+def _resolve_bindings(bindings: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    """Turn ``{tool_param: input_key}`` into ``{tool_param: value}`` for one tool.
+
+    A key the agent input does not carry is dropped, so the tool's own default stands rather than
+    a half-filled parameter reaching it. Values keep their type — binding to a list or dict input
+    passes the object through untouched.
+    """
+    resolved = {}
+    for param, source_key in bindings.items():
+        value = _lookup_agent_input(source_key, context) if isinstance(source_key, str) else source_key
+        if value is _UNRESOLVED:
+            logger.debug(f"Tool params: agent input has no '{source_key}'; leaving '{param}' unset.")
+            continue
+        resolved[param] = value
+    return resolved
+
+
+def resolve_tool_params_bindings(params: ToolParams, context: dict[str, Any]) -> ToolParams:
+    """Resolve every ``{tool_param: input_key}`` binding in ``params`` against the agent input."""
+
+    def resolve_group(group: dict[str, Union[dict[str, Any], ToolParams]]) -> dict[str, Any]:
+        return {
+            key: (
+                resolve_tool_params_bindings(value, context)
+                if isinstance(value, ToolParams)
+                else _resolve_bindings(value, context)
+            )
+            for key, value in group.items()
+        }
+
+    return ToolParams(
+        global_params=_resolve_bindings(params.global_params, context),
+        by_name_params=resolve_group(params.by_name_params),
+        by_id_params=resolve_group(params.by_id_params),
+    )
 
 
 class AgentInputSchema(BaseModel):
@@ -239,6 +295,17 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     group: NodeGroup = NodeGroup.AGENTS
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=3600))
     tools: list[Node] = []
+    tool_params_from_input: ToolParams = Field(
+        default_factory=ToolParams,
+        description=(
+            "Binds agent input keys to tool parameters, in the same 'global'/'by_name'/'by_id' shape as "
+            "the run-input 'tool_params' field. Each value is the NAME of an agent input key, not a "
+            "literal: {'by_name': {'docs-search': {'user': 'user'}}} passes the input's 'user' to the "
+            "tool's 'user' parameter. Getting that key into the agent input is the workflow's job "
+            "(run input, input_mapping, or input_transformer). An input key that is absent leaves the "
+            "parameter unset. Parameters passed in the run input win over these bindings."
+        ),
+    )
     files: list[io.BytesIO | bytes] | None = None
     is_files_allowed: bool = True
     images: list[str | bytes | io.BytesIO] = None
@@ -495,6 +562,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         if self.videos:
             data["videos"] = [{"name": getattr(f, "name", f"video_{i}")} for i, f in enumerate(self.videos)]
 
+        # Emit the aliases ('global'/'by_name'/'by_id') so a dumped workflow reads back the way it
+        # was written; ToolParams accepts either spelling on load.
+        data["tool_params_from_input"] = self.tool_params_from_input.model_dump(by_alias=True)
+
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
         data["sandbox"] = self.sandbox.to_dict(**kwargs) if self.sandbox else None
         data["skills"] = self.skills.to_dict(**kwargs)
@@ -648,6 +719,44 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             custom_metadata["session_id"] = input_data.session_id
 
         return custom_metadata
+
+    def _tool_params_context(self, input_data: AgentInputSchema) -> dict[str, Any]:
+        """Agent input keys a binding may name. Binary fields are left out."""
+        return input_data.model_dump(exclude={"files", "images", "videos", "tool_params"})
+
+    def _resolve_tool_params(
+        self, input_data: AgentInputSchema, inherited: ToolParams | dict | None = None
+    ) -> ToolParams | None:
+        """Build the tool parameters for this run out of every source that supplies them.
+
+        Lowest priority first: the node's own ``tool_params_from_input`` bindings (resolved against
+        the agent input), then anything a parent agent handed down, then whatever the run input
+        carried. Returns None when no source has anything to say, leaving the caller's kwargs
+        untouched.
+        """
+        layers: list[ToolParams] = []
+
+        if not self.tool_params_from_input.is_empty():
+            layers.append(
+                resolve_tool_params_bindings(self.tool_params_from_input, self._tool_params_context(input_data))
+            )
+
+        for source in (inherited, input_data.tool_params):
+            if not source:
+                continue
+            params = ToolParams.model_validate(source) if isinstance(source, dict) else source
+            if not params.is_empty():
+                layers.append(params)
+
+        if not layers:
+            return None
+        if len(layers) == 1:
+            return layers[0]
+
+        merged = layers[0].model_dump(by_alias=True)
+        for layer in layers[1:]:
+            merged = deep_merge(layer.model_dump(by_alias=True), merged)
+        return ToolParams.model_validate(merged)
 
     def _clear_todos_file(self) -> None:
         """Delete the persisted todos file and reset in-memory todo state.
@@ -823,8 +932,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if images or videos:
                 input_message = self._inject_attached_media_into_message(input_message, images=images, videos=videos)
 
-            if input_data.tool_params:
-                kwargs["tool_params"] = input_data.tool_params
+            # kwargs may already carry tool_params handed down by a parent agent; keep them.
+            if effective_tool_params := self._resolve_tool_params(input_data, kwargs.get("tool_params")):
+                kwargs["tool_params"] = effective_tool_params
 
             self.system_prompt_manager.update_variables(dict(input_data))
             kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
