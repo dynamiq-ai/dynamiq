@@ -201,7 +201,7 @@ def _resolve_bindings(bindings: dict[str, Any], context: dict[str, Any]) -> dict
 def resolve_tool_params_bindings(params: ToolParams, context: dict[str, Any]) -> ToolParams:
     """Resolve every ``{tool_param: input_key}`` binding in ``params`` against the agent input."""
 
-    def resolve_group(group: dict[str, Union[dict[str, Any], ToolParams]]) -> dict[str, Any]:
+    def resolve_group(group: dict[str, dict[str, Any] | ToolParams]) -> dict[str, Any]:
         return {
             key: (
                 resolve_tool_params_bindings(value, context)
