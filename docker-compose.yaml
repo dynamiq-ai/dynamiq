@@ -66,10 +66,10 @@ services:
       NEO4J_AUTH: neo4j/testpassword
     healthcheck:
       test: ["CMD-SHELL", "cypher-shell -u neo4j -p testpassword 'RETURN 1' || exit 1"]
-      interval: 10s
-      timeout: 10s
-      retries: 15
-      start_period: 20s
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 5s
 
   dynamiq-app-test-smoke:
     image: dynamiq-app:${IMAGE_TAG:-local}

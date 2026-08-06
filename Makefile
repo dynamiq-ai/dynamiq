@@ -31,8 +31,12 @@ lock-upgrade:
 test-integration:
 	uv run pytest tests/integration
 
+# These tests spend nearly all their wall time blocked on provider APIs, so they parallelize well past
+# the core count. `loadfile` rather than `worksteal` because several files own shared external state for
+# their whole duration (the Neo4j graph wipes, the `test_user_facts` pgvector table, the `default`
+# Pinecone index written by one test and read by the next) and must not be split across workers.
 test-integration-with-creds:
-	uv run pytest tests/integration_with_creds -m "not smoke"
+	uv run pytest tests/integration_with_creds -m "not smoke" -n auto --dist loadfile
 
 # Smoke tests: slow, paid end-to-end production scenarios. Excluded from every default target and
 # run ONLY here (gated behind the `run-smoke-tests` PR label in CI). -n auto parallelizes the

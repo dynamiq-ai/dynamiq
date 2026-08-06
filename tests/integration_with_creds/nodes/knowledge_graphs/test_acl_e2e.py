@@ -18,11 +18,8 @@ Fixtures wipe the graph and are ordered so each section's wipe follows the previ
 for isolation; a per-run wipe is the isolation mechanism). Run serially against a dedicated test instance.
 """
 
-import os
-
 import pytest
 
-from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder, OpenAITextEmbedder
 from dynamiq.nodes.knowledge_graphs import (
@@ -51,13 +48,6 @@ def _doc_embedder():
 
 def _text_embedder():
     return OpenAITextEmbedder(connection=OpenAIConnection())
-
-
-@pytest.fixture(scope="module")
-def graph_connection():
-    if not (os.getenv("OPENAI_API_KEY") and os.getenv("NEO4J_URI")):
-        pytest.skip("OPENAI_API_KEY and NEO4J_URI required; skipping credentials-required test.")
-    return Neo4jConnection()
 
 
 # --- Isolation: a caller sees its own edges and nothing else -----------------------------------------
