@@ -51,7 +51,7 @@ dependencies = [
     "elasticsearch>=8.12.0,<8.13.0",
     "numpy>=1.26.0,<1.27.0",
     "mcp>=1.23.0,<2.0.0",
-    "datamodel-code-generator==0.30.0",
+    "datamodel-code-generator==0.64.0",
     "python-docx>=1.1.2,<2.0.0",
     "databricks-sql-connector>=4.0.3,<4.1.0",
     "orjson>=3.11.6,<4.0.0",
@@ -93,7 +93,7 @@ documentation = "https://dynamiq-ai.github.io/dynamiq"
 
 [dependency-groups]
 dev = [
-    "setuptools>=78.1.1,<78.2.0",
+    "setuptools>=78.1.1,<83.1.0",
     "pre-commit>=3.7.0,<3.8.0",
     "pytest>=9.0.3,<10.0.0",
     "pytest-mock>=3.14.0,<3.15.0",
@@ -102,7 +102,7 @@ dev = [
     "fakeredis>=2.21.3,<2.22.0",
     "python-dotenv>=1.2.2,<2.0.0",
     "mkdocs>=1.6.0,<1.7.0",
-    "mkdocs-material>=9.5.27,<9.6.0",
+    "mkdocs-material>=9.7.0,<9.8.0",
     "mkdocstrings>=0.25.1,<0.26.0",
     "mkdocstrings-python>=1.10.4,<1.11.0",
     "mkdocs-autorefs<1.4.0",
@@ -113,7 +113,7 @@ dev = [
     "pytest-timeout>=2.4.0,<3.0.0",
 ]
 examples = [
-    "fastapi>=0.116.1,<0.117.0",
+    "fastapi>=0.133.0,<0.134.0",
     "uvicorn>=0.35.0,<0.36.0",
     "websockets>=15.0.0,<15.1.0",
     "sse-starlette>=2.1.0,<2.2.0",
