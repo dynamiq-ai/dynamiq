@@ -8,6 +8,12 @@ on:
     branches:
       - '*'
 
+# Supersede in-flight runs for a pull request, but let runs on main finish: publish-updated-mkdocs
+# deploys to gh-pages, and every commit on main should still produce its coverage report.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest

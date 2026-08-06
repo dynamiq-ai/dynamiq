@@ -5,6 +5,12 @@ on:
   pull_request:
     types: [labeled]
 
+# Every run makes paid provider calls, so a superseded one is pure waste. Only `labeled` triggers this,
+# so pushing a commit does not cancel a run in flight — relabelling or a manual dispatch does.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   integration-tests-with-creds:
     name: Integration Tests With Creds
