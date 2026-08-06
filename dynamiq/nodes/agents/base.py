@@ -167,57 +167,6 @@ class ToolParams(BaseModel):
         return not (self.global_params or self.by_name_params or self.by_id_params)
 
 
-# Marks a binding whose source key the agent input did not carry.
-_UNRESOLVED = object()
-
-
-def _lookup_agent_input(key: str, context: dict[str, Any]) -> Any:
-    """Read ``key`` out of the agent input; dotted keys walk into nested dicts."""
-    value: Any = context
-    for part in key.split("."):
-        if not isinstance(value, dict) or part not in value:
-            return _UNRESOLVED
-        value = value[part]
-    return value
-
-
-def _resolve_bindings(bindings: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-    """Turn ``{tool_param: input_key}`` into ``{tool_param: value}`` for one tool.
-
-    A key the agent input does not carry is dropped, so the tool's own default stands rather than
-    a half-filled parameter reaching it. Values keep their type — binding to a list or dict input
-    passes the object through untouched.
-    """
-    resolved = {}
-    for param, source_key in bindings.items():
-        value = _lookup_agent_input(source_key, context) if isinstance(source_key, str) else source_key
-        if value is _UNRESOLVED:
-            logger.debug(f"Tool params: agent input has no '{source_key}'; leaving '{param}' unset.")
-            continue
-        resolved[param] = value
-    return resolved
-
-
-def resolve_tool_params_bindings(params: ToolParams, context: dict[str, Any]) -> ToolParams:
-    """Resolve every ``{tool_param: input_key}`` binding in ``params`` against the agent input."""
-
-    def resolve_group(group: dict[str, dict[str, Any] | ToolParams]) -> dict[str, Any]:
-        return {
-            key: (
-                resolve_tool_params_bindings(value, context)
-                if isinstance(value, ToolParams)
-                else _resolve_bindings(value, context)
-            )
-            for key, value in group.items()
-        }
-
-    return ToolParams(
-        global_params=_resolve_bindings(params.global_params, context),
-        by_name_params=resolve_group(params.by_name_params),
-        by_id_params=resolve_group(params.by_id_params),
-    )
-
-
 class AgentInputSchema(BaseModel):
     input: str = Field(default="", description="Text input for the agent.")
     images: list[str | bytes | io.BytesIO] | None = Field(
@@ -295,17 +244,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     group: NodeGroup = NodeGroup.AGENTS
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=3600))
     tools: list[Node] = []
-    tool_params_from_input: ToolParams = Field(
-        default_factory=ToolParams,
-        description=(
-            "Binds agent input keys to tool parameters, in the same 'global'/'by_name'/'by_id' shape as "
-            "the run-input 'tool_params' field. Each value is the NAME of an agent input key, not a "
-            "literal: {'by_name': {'docs-search': {'user': 'user'}}} passes the input's 'user' to the "
-            "tool's 'user' parameter. Getting that key into the agent input is the workflow's job "
-            "(run input, input_mapping, or input_transformer). An input key that is absent leaves the "
-            "parameter unset. Parameters passed in the run input win over these bindings."
-        ),
-    )
     files: list[io.BytesIO | bytes] | None = None
     is_files_allowed: bool = True
     images: list[str | bytes | io.BytesIO] = None
@@ -393,6 +331,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     _pinned_input: Message | VisionMessage | None = PrivateAttr(default=None)
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
+    # {node_id: {param: value}} resolved once from this run's input, for tools that declare an
+    # input_transformer. Only the values the selectors name are kept — dependency outputs
+    # themselves are never retained.
+    _tool_input_overrides: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
     _sandbox_is_shared: bool = PrivateAttr(default=False)
     # A borrowed per-agent view of an owner's shared sandbox; when set it is this
     # agent's effective sandbox_backend for the whole run (tools, uploads, output).
@@ -562,10 +504,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         if self.videos:
             data["videos"] = [{"name": getattr(f, "name", f"video_{i}")} for i, f in enumerate(self.videos)]
 
-        # Emit the aliases ('global'/'by_name'/'by_id') so a dumped workflow reads back the way it
-        # was written; ToolParams accepts either spelling on load.
-        data["tool_params_from_input"] = self.tool_params_from_input.model_dump(by_alias=True)
-
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
         data["sandbox"] = self.sandbox.to_dict(**kwargs) if self.sandbox else None
         data["skills"] = self.skills.to_dict(**kwargs)
@@ -720,26 +658,57 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         return custom_metadata
 
-    def _tool_params_context(self, input_data: AgentInputSchema) -> dict[str, Any]:
-        """Agent input keys a binding may name. Binary fields are left out."""
-        return input_data.model_dump(exclude={"files", "images", "videos", "tool_params"})
+    def transform_input(self, input_data: dict, depends_result: dict[Any, Any], **kwargs) -> dict:
+        """Transform as usual, and resolve any tool selectors while the dependencies are in scope.
+
+        A tool called by an agent has no dependencies of its own, so its selector is resolved here
+        instead — against everything the flow offered this node. Resolving now rather than at tool
+        call time means `$.<node_id>.output.x` works even when this agent's own selector narrows
+        its input, and only the selected values are kept.
+        """
+        self._tool_input_overrides = self._resolve_tool_input_overrides(input_data, depends_result)
+        return super().transform_input(input_data=input_data, depends_result=depends_result, **kwargs)
+
+    def _resolve_tool_input_overrides(
+        self, input_data: dict, depends_result: dict[Any, Any] | None
+    ) -> dict[str, dict[str, Any]]:
+        """Run each tool's own selector over this node's input, keeping just what it names.
+
+        The source is assembled locally and dropped on return — an upstream retriever's documents
+        are read through, never stored. ``None`` results are discarded so an unmatched path leaves
+        the parameter unset and the tool's own default stands.
+        """
+        targets = [node for tool in self.tools for node in (tool, getattr(tool, "agent", None)) if node is not None]
+        targets = [node for node in targets if node.input_transformer.path or node.input_transformer.selector]
+        if not targets:
+            return {}
+
+        source = dict(input_data) | {
+            key: {"status": result.status.value, "output": result.output}
+            for key, result in (depends_result or {}).items()
+        }
+
+        overrides: dict[str, dict[str, Any]] = {}
+        for node in targets:
+            try:
+                resolved = node.transform(source, node.input_transformer)
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: input_transformer of '{node.name}' failed: {e}")
+                continue
+            if isinstance(resolved, dict):
+                overrides[node.id] = {key: value for key, value in resolved.items() if value is not None}
+        return overrides
 
     def _resolve_tool_params(
         self, input_data: AgentInputSchema, inherited: ToolParams | dict | None = None
     ) -> ToolParams | None:
         """Build the tool parameters for this run out of every source that supplies them.
 
-        Lowest priority first: the node's own ``tool_params_from_input`` bindings (resolved against
-        the agent input), then anything a parent agent handed down, then whatever the run input
+        Lowest priority first: anything a parent agent handed down, then whatever the run input
         carried. Returns None when no source has anything to say, leaving the caller's kwargs
         untouched.
         """
         layers: list[ToolParams] = []
-
-        if not self.tool_params_from_input.is_empty():
-            layers.append(
-                resolve_tool_params_bindings(self.tool_params_from_input, self._tool_params_context(input_data))
-            )
 
         for source in (inherited, input_data.tool_params):
             if not source:
@@ -1492,6 +1461,24 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             )
         return tool
 
+    def _apply_tool_input_transformer(self, tool: Node, tool_input: dict) -> bool:
+        """Merge what this tool's selector resolved to into the arguments the model produced.
+
+        Merged rather than replacing (the usual Node behavior for a transformer), because here the
+        input *is* the tool call: replacing it would mean re-listing every parameter the model is
+        allowed to send. Returns whether the tool declares a transformer, so the caller can stop
+        ``run_sync`` from applying it a second time.
+        """
+        if not (tool.input_transformer.path or tool.input_transformer.selector):
+            return False
+
+        injected = self._tool_input_overrides.get(tool.id, {})
+        if injected:
+            tool_input.update(injected)
+            if self.verbose:
+                logger.debug(f"Agent {self.name} - {self.id}: '{tool.name}' input_transformer set {injected}")
+        return True
+
     def _apply_parameters(self, merged_input: dict, params: dict, source: str, debug_info: list = None):
         """Apply parameters from the specified source to the merged input."""
         if debug_info is None:
@@ -1697,6 +1684,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
             self._inject_files_into_tool(resolved_agent or tool, merged_input)
 
+            # Before tool_params, so explicitly passed parameters still win over the declaration.
+            transformer_applied = self._apply_tool_input_transformer(resolved_agent or tool, merged_input)
+
             if tool_params:
                 debug_info = []
                 if self.verbose:
@@ -1739,6 +1729,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     logger.debug("\n".join(debug_info))
 
             child_kwargs = kwargs | {"recoverable_error": True}
+            if transformer_applied:
+                # Already resolved above, against a richer source; run_sync would re-apply it with
+                # replace semantics and throw the model's arguments away.
+                child_kwargs["use_input_transformer"] = False
 
             if is_child_agent and self._current_call_context:
                 child_context = self._build_child_agent_context(resolved_agent)
