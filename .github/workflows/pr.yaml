@@ -8,11 +8,6 @@ on:
       - synchronize
       - reopened
 
-# `edited` fires on every title and description change, so stale validations stack up quickly.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   pr-lint:
     name: validate PR title

@@ -5,12 +5,6 @@ on:
     types: [ published ]
   workflow_dispatch:
 
-# Never cancel a publish: it uploads to CodeArtifact and then to PyPI, so interrupting it between the
-# two leaves the release half-published. Concurrent publishes queue behind each other instead.
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
-
 jobs:
   pipeline:
     environment: prod
