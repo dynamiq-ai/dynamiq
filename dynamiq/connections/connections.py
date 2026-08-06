@@ -660,7 +660,7 @@ class Weaviate(BaseApiKeyConnection):
     http_port: int = Field(default_factory=partial(get_env_var, "WEAVIATE_HTTP_PORT", 443))
     grpc_host: str = Field(default_factory=partial(get_env_var, "WEAVIATE_GRPC_HOST"))
     grpc_port: int = Field(default_factory=partial(get_env_var, "WEAVIATE_GRPC_PORT", 50051))
-    timeout_init: int = Field(default=30, description="Timeout for initialization checks in seconds")
+    timeout_init: int = Field(default=180, description="Timeout for initialization checks in seconds")
     timeout_query: int = Field(default=180, description="Timeout for query operations in seconds")
     timeout_insert: int = Field(default=120, description="Timeout for insert operations in seconds")
 
