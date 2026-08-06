@@ -36,7 +36,6 @@ nodes:
       todo_enabled: true
     max_loops: 15
     inference_mode: XML
-    track_state: false
     summarization_config:
       enabled: true
 
