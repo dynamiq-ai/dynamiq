@@ -157,14 +157,9 @@ class AgentStatus(str, Enum):
 
 
 class ToolParams(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
     global_params: dict[str, Any] = Field(default_factory=dict, alias="global")
     by_name_params: dict[str, Union[dict[str, Any], "ToolParams"]] = Field(default_factory=dict, alias="by_name")
     by_id_params: dict[str, Union[dict[str, Any], "ToolParams"]] = Field(default_factory=dict, alias="by_id")
-
-    def is_empty(self) -> bool:
-        return not (self.global_params or self.by_name_params or self.by_id_params)
 
 
 class AgentInputSchema(BaseModel):
@@ -331,9 +326,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     _pinned_input: Message | VisionMessage | None = PrivateAttr(default=None)
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
-    # {node_id: {param: value}} resolved once from this run's input, for tools that declare an
-    # input_transformer. Only the values the selectors name are kept — dependency outputs
-    # themselves are never retained.
+    # {node_id: {param: value}} from each tool's input_transformer; only selected values are kept.
     _tool_input_overrides: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
     _sandbox_is_shared: bool = PrivateAttr(default=False)
     # A borrowed per-agent view of an owner's shared sandbox; when set it is this
@@ -699,34 +692,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 overrides[node.id] = {key: value for key, value in resolved.items() if value is not None}
         return overrides
 
-    def _resolve_tool_params(
-        self, input_data: AgentInputSchema, inherited: ToolParams | dict | None = None
-    ) -> ToolParams | None:
-        """Build the tool parameters for this run out of every source that supplies them.
-
-        Lowest priority first: anything a parent agent handed down, then whatever the run input
-        carried. Returns None when no source has anything to say, leaving the caller's kwargs
-        untouched.
-        """
-        layers: list[ToolParams] = []
-
-        for source in (inherited, input_data.tool_params):
-            if not source:
-                continue
-            params = ToolParams.model_validate(source) if isinstance(source, dict) else source
-            if not params.is_empty():
-                layers.append(params)
-
-        if not layers:
-            return None
-        if len(layers) == 1:
-            return layers[0]
-
-        merged = layers[0].model_dump(by_alias=True)
-        for layer in layers[1:]:
-            merged = deep_merge(layer.model_dump(by_alias=True), merged)
-        return ToolParams.model_validate(merged)
-
     def _clear_todos_file(self) -> None:
         """Delete the persisted todos file and reset in-memory todo state.
 
@@ -901,9 +866,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if images or videos:
                 input_message = self._inject_attached_media_into_message(input_message, images=images, videos=videos)
 
-            # kwargs may already carry tool_params handed down by a parent agent; keep them.
-            if effective_tool_params := self._resolve_tool_params(input_data, kwargs.get("tool_params")):
-                kwargs["tool_params"] = effective_tool_params
+            if input_data.tool_params:
+                kwargs["tool_params"] = input_data.tool_params
 
             self.system_prompt_manager.update_variables(dict(input_data))
             kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}

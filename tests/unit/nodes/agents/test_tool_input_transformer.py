@@ -17,7 +17,6 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.agents.base import ToolParams
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.node import InputTransformer, Node, NodeDependency
 from dynamiq.nodes.types import InferenceMode
@@ -213,24 +212,3 @@ class TestPrecedence:
         ], "tool_params override the selector; untouched selector values remain"
 
 
-class TestInheritedToolParams:
-    """Retained coverage: a parent agent's params must survive a child's empty input."""
-
-    def test_inherited_params_survive_an_empty_run_input(self, test_llm):
-        agent = Agent(name="child", llm=test_llm, role="r", tools=[])
-        inherited = ToolParams(**{"global": {"from_parent": "yes"}})
-
-        params = agent._resolve_tool_params(agent.validate_input_schema({"input": "q"}), inherited)
-
-        assert params.global_params == {"from_parent": "yes"}
-
-    def test_run_input_merges_over_inherited(self, test_llm):
-        agent = Agent(name="child", llm=test_llm, role="r", tools=[])
-        inherited = ToolParams(**{"global": {"source": "parent", "only_parent": 1}})
-
-        params = agent._resolve_tool_params(
-            agent.validate_input_schema({"input": "q", "tool_params": {"global": {"source": "run_input"}}}),
-            inherited,
-        )
-
-        assert params.global_params == {"source": "run_input", "only_parent": 1}
