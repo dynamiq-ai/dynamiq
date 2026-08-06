@@ -15,11 +15,8 @@ Fixtures wipe the graph before ingesting and are ordered so each section's wipe 
 section's assertions; run serially against a dedicated test instance.
 """
 
-import os
-
 import pytest
 
-from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder, OpenAITextEmbedder
 from dynamiq.nodes.knowledge_graphs import (
@@ -47,13 +44,6 @@ def _doc_embedder():
 
 def _text_embedder():
     return OpenAITextEmbedder(connection=OpenAIConnection(), model=EMBED_MODEL)
-
-
-@pytest.fixture(scope="module")
-def graph_connection():
-    if not (os.getenv("OPENAI_API_KEY") and os.getenv("NEO4J_URI")):
-        pytest.skip("OPENAI_API_KEY and NEO4J_URI required; skipping credentials-required test.")
-    return Neo4jConnection()
 
 
 # --- 1. Multi-hop edge ranking -----------------------------------------------------------------------

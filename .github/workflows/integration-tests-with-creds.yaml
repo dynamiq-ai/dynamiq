@@ -17,6 +17,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Loading the test image back into the daemon costs ~90s of tarball export/import against the
+      # legacy overlay2 store. The containerd store takes the layers directly. Must precede buildx,
+      # since restarting the daemon would kill the builder container.
+      - name: Enable the containerd image store
+        run: |
+          echo '{"features":{"containerd-snapshotter":true}}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -42,6 +50,11 @@ jobs:
           # A networkMode=PUBLIC interpreter id; only needed for the package-installation test,
           # which skips when unset because the built-in interpreter has no network egress.
           envkey_BEDROCK_AGENTCORE_INTERPRETER_ID: ${{ secrets.BEDROCK_AGENTCORE_INTERPRETER_ID }}
+
+      # Started before the image load so Neo4j's pull and startup overlap with it instead of sitting
+      # on the critical path; by the time the test container starts it is already healthy.
+      - name: Start Neo4j
+        run: docker compose up -d neo4j
 
       - name: Load Test Image
         uses: docker/bake-action@v5
