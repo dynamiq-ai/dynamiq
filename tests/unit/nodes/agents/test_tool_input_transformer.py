@@ -210,5 +210,3 @@ class TestPrecedence:
         assert [(call.user, call.limit) for call in TOOL_CALLS] == [
             ("override@corp.com", 7)
         ], "tool_params override the selector; untouched selector values remain"
-
-
