@@ -376,7 +376,9 @@ class MilvusVectorStore(BaseVectorStore, DryRunMixin):
             entity = hit.get("entity", {})
             content = entity.get(content_key, "")
             embedding = entity.get(embedding_key, [])
-            metadata = {k: v for k, v in entity.items() if k not in (content_key, embedding_key)}
+            # "sparse" is the BM25 function output, not user metadata: Milvus returns it for
+            # output_fields=["*"] and rejects it on write.
+            metadata = {k: v for k, v in entity.items() if k not in (content_key, embedding_key, "sparse")}
 
             doc = Document(
                 id=str(hit.get("id", "")),
@@ -451,7 +453,9 @@ class MilvusVectorStore(BaseVectorStore, DryRunMixin):
             }
             if return_embeddings:
                 document_dict["embedding"] = entry.get(embedding_key, [])
-            metadata = {k: v for k, v in entry.items() if k not in ("id", content_key, embedding_key)}
+            # "sparse" is the BM25 function output, not user metadata: Milvus returns it for
+            # output_fields=["*"] and rejects it on write.
+            metadata = {k: v for k, v in entry.items() if k not in ("id", content_key, embedding_key, "sparse")}
 
             if metadata:
                 document_dict["metadata"] = metadata
