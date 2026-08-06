@@ -15,11 +15,8 @@ Fixtures wipe the graph before writing and are ordered so each section's wipe fo
 assertions; run serially against a dedicated test instance.
 """
 
-import os
-
 import pytest
 
-from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
 from dynamiq.nodes.knowledge_graphs import KnowledgeGraphEntityExtractor, KnowledgeGraphWriter, Ontology
@@ -33,13 +30,6 @@ ONTOLOGY = Ontology(entity_types=["Organization", "System"], relationship_types=
 
 def _llm():
     return OpenAI(connection=OpenAIConnection(), model="gpt-4o-mini", temperature=0)
-
-
-@pytest.fixture(scope="module")
-def graph_connection():
-    if not (os.getenv("OPENAI_API_KEY") and os.getenv("NEO4J_URI")):
-        pytest.skip("OPENAI_API_KEY and NEO4J_URI required; skipping credentials-required test.")
-    return Neo4jConnection()
 
 
 def _counter(store):
