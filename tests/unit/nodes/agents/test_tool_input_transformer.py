@@ -17,6 +17,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents.components import schema_generator
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.node import InputTransformer, Node, NodeDependency
 from dynamiq.nodes.types import InferenceMode
@@ -189,6 +190,28 @@ class TestToolSelectorInAWorkflow:
             workflow.run(input_data={"input": "Q3 margins?"})
 
         assert [call.user for call in TOOL_CALLS] == ["alice@corp.com"]
+
+    def test_selector_target_is_neither_visible_nor_settable_by_the_model(self, test_llm):
+        """A selector-filled parameter stays out of the schemas the model sees, and stays unset
+        when the model invents it and no selector fills it."""
+        workflow, agent = self.build(test_llm, tool_selector=None)
+        tools = agent._runtime_tools
+
+        advertised = json.dumps(
+            [
+                schema_generator.generate_input_formats(tools, agent.sanitize_tool_name),
+                schema_generator.generate_structured_output_schemas(tools, agent.sanitize_tool_name, False),
+                schema_generator.generate_function_calling_schemas(tools, False, agent.sanitize_tool_name),
+            ],
+            default=str,
+        )
+        assert "query" in advertised, "control: a visible parameter does appear in the schemas"
+        assert "user" not in advertised, "a hidden parameter must not appear in any schema the model sees"
+
+        with mocked_llm(agent, tool_input={"query": "margins", "user": "mallory@evil.com"}):
+            workflow.run(input_data={"input": "Q3 margins?"})
+
+        assert [call.user for call in TOOL_CALLS] == ["anonymous"], "a model-supplied hidden value must be dropped"
 
 
 class TestPrecedence:
