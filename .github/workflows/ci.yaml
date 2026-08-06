@@ -9,41 +9,6 @@ on:
       - '*'
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Create .env file on push or internal PR
-        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
-        uses: SpicyPizza/create-envfile@v2.0
-        with:
-          envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          envkey_UNSTRUCTURED_API_KEY: ${{ secrets.UNSTRUCTURED_API_KEY }}
-          envkey_PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
-          envkey_PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD }}
-          envkey_PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
-          envkey_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          envkey_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          envkey_QDRANT_URL: ${{ secrets.QDRANT_URL }}
-          envkey_QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-
-      - name: Create .env file on fork PR
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-        uses: SpicyPizza/create-envfile@v2.0
-
-      - name: Build
-        uses: docker/bake-action@v5
-        with:
-          set: |
-            *.cache-from=type=gha
-            *.cache-to=type=gha,mode=max
-          targets: dynamiq-app
-
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -63,12 +28,18 @@ jobs:
           SKIP: 'no-commit-to-branch'
 
   test:
-    needs:
-      - build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      # Loading the test image back into the daemon costs ~50s of tarball export/import against the
+      # legacy overlay2 store. The containerd store takes the layers directly. Must precede buildx,
+      # since restarting the daemon would kill the builder container.
+      - name: Enable the containerd image store
+        run: |
+          echo '{"features":{"containerd-snapshotter":true}}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
