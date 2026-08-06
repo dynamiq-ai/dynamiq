@@ -1513,7 +1513,7 @@ requires-dist = [
     { name = "tenacity", specifier = "==9.1.2" },
     { name = "tiktoken", specifier = "==0.12.0" },
     { name = "unstructured-client", specifier = ">=0.42.3,<0.43.0" },
-    { name = "weaviate-client", specifier = "==4.22.0" },
+    { name = "weaviate-client", specifier = ">=4.22.0,<4.23.0" },
 ]
 provides-extras = ["cua", "monty"]
 
