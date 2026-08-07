@@ -9,7 +9,6 @@ from dynamiq.nodes.node import Node, ensure_config
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
-from dynamiq.utils.logger import logger
 
 REMEMBER_DESCRIPTION = """Persist a durable fact about the current user to long-term memory.
 
@@ -136,7 +135,6 @@ class RememberFactTool(_LongTermMemoryTool):
     def execute(
         self, input_data: RememberFactInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
-        logger.debug(f"Tool {self.name} - {self.id}: started")
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -161,7 +159,6 @@ class RecallFactsTool(_LongTermMemoryTool):
     def execute(
         self, input_data: RecallFactsInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
-        logger.debug(f"Tool {self.name} - {self.id}: started")
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)

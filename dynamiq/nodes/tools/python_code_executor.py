@@ -304,12 +304,6 @@ class PythonCodeExecutor(Node):
     def execute(
         self, input_data: PythonCodeExecutorInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
-        code_preview = input_data.code.strip().replace("\n", "\\n")[:200]
-        logger.info(f"Tool {self.name} - {self.id}: started with code length={len(input_data.code)}")
-        logger.debug(
-            f"Tool {self.name} - {self.id}: code preview="
-            f"'{code_preview}{'...' if len(input_data.code) > 200 else ''}'"
-        )
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -394,11 +388,6 @@ class PythonCodeExecutor(Node):
             sanitized_content = self._sanitize_output(content)
             if stdout_value:
                 logger.debug(f"Tool {self.name} - {self.id}: captured stdout ({len(stdout_value)} chars).")
-            keys_repr = (
-                list(sanitized_content.keys()) if isinstance(sanitized_content, dict) else type(sanitized_content)
-            )
-            logger.info(f"Tool {self.name} - {self.id}: finished execution with keys {keys_repr}")
-            logger.debug(f"Tool {self.name} - {self.id}: result preview={self._preview_for_log(sanitized_content)}")
             return {"content": sanitized_content}
         finally:
             os.chdir(original_cwd)
@@ -745,13 +734,3 @@ class PythonCodeExecutor(Node):
         if isinstance(value, tuple):
             return tuple(self._stringify_keys(item) for item in value)
         return value
-
-    def _preview_for_log(self, value: Any, limit: int = 200) -> str:
-        try:
-            serialized = json.dumps(value)
-        except Exception:
-            serialized = str(value)
-        serialized = serialized.replace("\n", "\\n")
-        if len(serialized) > limit:
-            return f"'{serialized[:limit]}...'"
-        return f"'{serialized}'"

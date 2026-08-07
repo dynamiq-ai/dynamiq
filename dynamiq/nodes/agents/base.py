@@ -2,7 +2,6 @@ import base64
 import binascii
 import io
 import json
-import logging
 import mimetypes
 import re
 from contextvars import ContextVar
@@ -721,17 +720,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         """
         Executes the agent with the given input data.
         """
-        logger.info(f"Agent {self.name} - {self.id}: started")
-        if logger.isEnabledFor(logging.DEBUG):
-            # Convert to dict only for logging (to avoid logging BytesIO objects)
-            log_data = input_data.model_dump()
-            if log_data.get("images"):
-                log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
-            if log_data.get("videos"):
-                log_data["videos"] = [f"video_{i}" for i in range(len(log_data["videos"]))]
-            if log_data.get("files"):
-                log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]
-            logger.debug(f"Agent {self.name} - {self.id}: started with input {log_data}")
         self.reset_run_state()
 
         config = ensure_config(config)
@@ -951,9 +939,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                         f"Agent {self.name} - {self.id}: "
                         f"returning {len(sandbox_files)} requested file(s) from sandbox"
                     )
-
-            logger.info(f"Node {self.name} - {self.id}: finished")
-            logger.debug(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
             self._maybe_surface_live_view(execution_result, shared_session_token)
             return execution_result
@@ -2625,16 +2610,6 @@ class AgentManager(Agent):
         self, input_data: AgentManagerInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Executes the manager agent with the given input data and action."""
-        logger.info(f"Agent {self.name} - {self.id}: started")
-        if logger.isEnabledFor(logging.DEBUG):
-            log_data = dict(input_data).copy()
-            if log_data.get("images"):
-                log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
-            if log_data.get("videos"):
-                log_data["videos"] = [f"video_{i}" for i in range(len(log_data["videos"]))]
-            if log_data.get("files"):
-                log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]
-            logger.debug(f"Agent {self.name} - {self.id}: started with input {log_data}")
         self.reset_run_state()
         config = config or RunnableConfig()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -2648,13 +2623,9 @@ class AgentManager(Agent):
         _result_llm = self._actions[action](config=config, **kwargs)
         result = {"action": action, "result": _result_llm}
 
-        execution_result = {
+        return {
             "content": result,
         }
-        logger.info(f"Agent {self.name} - {self.id}: finished")
-        logger.debug(f"Agent {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
-
-        return execution_result
 
     def _plan(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'plan' action."""
