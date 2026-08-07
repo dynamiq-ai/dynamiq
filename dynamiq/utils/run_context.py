@@ -1,9 +1,9 @@
 """Per-node-run correlation id for log lines.
 
 Set by ``Node.run_sync`` / ``Node._run_async_native`` after ``_prepare_execution``
-mints ``run_id``, so helpers like ``log_execution_start`` / ``log_execution_finish``
-(and private format helpers that never receive ``kwargs``) can tag matching
-started/finished lines without threading the id through every signature.
+mints ``run_id``, so ``Node._node_run_log`` and related helpers can tag every
+lifecycle line (start/finish, retries, errors, skip/cancel) without threading
+the id through every signature.
 """
 
 from contextvars import ContextVar, Token
