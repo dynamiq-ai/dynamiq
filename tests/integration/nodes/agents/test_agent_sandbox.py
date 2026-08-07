@@ -249,6 +249,70 @@ def test_agent_e2b_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
     assert isinstance(roundtrip_agent.sandbox.backend, E2BSandbox)
 
 
+def test_agent_cloudflare_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
+    """Roundtrip for the Cloudflare backend: dump → load → dump → load with init_components.
+
+    Mirrors the E2B roundtrip above; ensures the CloudflareSandbox backend class and its
+    connection survive serialization and sandbox tools are not duplicated.
+    """
+    from dynamiq.connections import Cloudflare
+    from dynamiq.sandboxes.cloudflare import CloudflareSandbox
+
+    cloudflare_conn = Cloudflare(id="cloudflare-conn", api_key="test-key", url="https://bridge.test.workers.dev")
+    openai_conn = OpenAIConnection(id="openai-conn", api_key="test-key")
+
+    backend = CloudflareSandbox(connection=cloudflare_conn)
+    sandbox_config = SandboxConfig(enabled=True, backend=backend)
+
+    agent = Agent(
+        id="cloudflare-sandbox-agent",
+        name="Cloudflare Sandbox Agent",
+        llm=OpenAI(
+            id="cloudflare-sandbox-agent-llm",
+            connection=openai_conn,
+            model="gpt-4o",
+        ),
+        role="a helpful assistant that can execute shell commands in a sandbox.",
+        sandbox=sandbox_config,
+        max_loops=15,
+    )
+
+    workflow = Workflow(
+        id="cloudflare-sandbox-workflow",
+        flow=Flow(id="cloudflare-sandbox-flow", name="Cloudflare Sandbox Agent Flow", nodes=[agent]),
+        version="1",
+    )
+
+    yaml_path = tmp_path / "agent_cloudflare_sandbox.yaml"
+    workflow.to_yaml_file(yaml_path)
+
+    loaded = Workflow.from_yaml_file(str(yaml_path), init_components=True)
+    loaded_agent = loaded.flow.nodes[0]
+    assert isinstance(loaded_agent, Agent)
+    assert loaded_agent.sandbox is not None
+    assert loaded_agent.sandbox.enabled
+    assert isinstance(loaded_agent.sandbox.backend, CloudflareSandbox)
+    assert loaded_agent.sandbox.backend.base_path == "/workspace"
+    assert loaded_agent.sandbox.backend.connection.url == "https://bridge.test.workers.dev"
+
+    shell_tools_first = [t for t in loaded_agent.tools if isinstance(t, SandboxShellTool)]
+    assert len(shell_tools_first) == 1, "First load should have exactly one SandboxShellTool"
+
+    roundtrip_path = tmp_path / "agent_cloudflare_sandbox_roundtrip.yaml"
+    loaded.to_yaml_file(roundtrip_path)
+    roundtrip = Workflow.from_yaml_file(str(roundtrip_path), init_components=True)
+
+    roundtrip_agent = roundtrip.flow.nodes[0]
+    assert isinstance(roundtrip_agent, Agent)
+
+    shell_tools_roundtrip = [t for t in roundtrip_agent.tools if isinstance(t, SandboxShellTool)]
+    assert len(shell_tools_roundtrip) == 1, "After roundtrip, SandboxShellTool must not be duplicated"
+
+    assert roundtrip_agent.sandbox is not None
+    assert roundtrip_agent.sandbox.enabled
+    assert isinstance(roundtrip_agent.sandbox.backend, CloudflareSandbox)
+
+
 def test_agent_with_sandbox_returns_files(mocker):
     """Agent with sandbox collects files explicitly listed in <output_files>."""
     from litellm import ModelResponse
