@@ -3,9 +3,10 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from dynamiq.connections.connections import HTTPMethod
+from dynamiq.connections.connections import AWS as AWSConnection
 from dynamiq.connections.connections import Http as HttpConnection
 from dynamiq.connections.connections import HttpApiKey as HttpApiKeyConnection
+from dynamiq.connections.connections import HTTPMethod
 from dynamiq.connections.connections import Milvus as MilvusConnection
 from dynamiq.connections.connections import MilvusDeploymentType
 from dynamiq.connections.connections import Qdrant as QdrantConnection
@@ -138,3 +139,72 @@ def test_http_api_key_connect_returns_requests_module():
 
     conn = HttpApiKeyConnection(url="https://example.com", api_key="k")
     assert conn.connect() is requests_module
+
+
+@pytest.fixture
+def mock_aws_temporary_credentials(monkeypatch):
+    for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_REGION"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_PROFILE", raising=False)
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "ASIAEXAMPLE")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret")
+    monkeypatch.setenv("AWS_SESSION_TOKEN", "session-token")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+
+
+def test_aws_reads_session_token_from_env(mock_aws_temporary_credentials):
+    aws = AWSConnection()
+    assert aws.session_token == "session-token"
+
+
+def test_aws_boto3_session_forwards_session_token(mock_aws_temporary_credentials):
+    aws = AWSConnection()
+
+    with patch("boto3.Session") as mock_session:
+        aws.get_boto3_session()
+
+    mock_session.assert_called_once_with(
+        aws_access_key_id="ASIAEXAMPLE",
+        aws_secret_access_key="secret",
+        aws_session_token="session-token",
+        region_name="us-east-1",
+    )
+
+
+def test_aws_conn_params_include_session_token(mock_aws_temporary_credentials):
+    assert AWSConnection().conn_params == {
+        "aws_access_key_id": "ASIAEXAMPLE",
+        "aws_secret_access_key": "secret",
+        "aws_session_token": "session-token",
+        "aws_region_name": "us-east-1",
+    }
+
+
+def test_aws_omits_session_token_when_unset(monkeypatch):
+    monkeypatch.delenv("AWS_DEFAULT_PROFILE", raising=False)
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret")
+    monkeypatch.delenv("AWS_SESSION_TOKEN", raising=False)
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+
+    aws = AWSConnection()
+    assert aws.session_token is None
+    assert "aws_session_token" not in aws.conn_params
+
+    with patch("boto3.Session") as mock_session:
+        aws.get_boto3_session()
+
+    assert "aws_session_token" not in mock_session.call_args.kwargs
+
+
+def test_aws_profile_takes_precedence_over_session_token(mock_aws_temporary_credentials, monkeypatch):
+    """A named profile carries its own credentials; mixing in a stray token would break signing."""
+    monkeypatch.setenv("AWS_DEFAULT_PROFILE", "some-profile")
+
+    aws = AWSConnection()
+
+    with patch("boto3.Session") as mock_session:
+        aws.get_boto3_session()
+
+    mock_session.assert_called_once_with(profile_name="some-profile", region_name="us-east-1")
+    assert "aws_session_token" not in aws.conn_params
