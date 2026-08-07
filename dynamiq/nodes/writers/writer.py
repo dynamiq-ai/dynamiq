@@ -186,7 +186,6 @@ class VectorStoreWriter(Node):
             dict[str, Any]: Result of the writing operation.
         """
 
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
         config = ensure_config(config)
         self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -217,7 +216,6 @@ class VectorStoreWriter(Node):
             logger.debug(f"Tool {self.name} - {self.id}: wrote {upserted_count} documents to vector store")
 
             result = {"upserted_count": upserted_count}
-            logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
             return result
         except Exception as e:

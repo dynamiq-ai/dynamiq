@@ -3,6 +3,7 @@ import contextvars
 import copy
 import functools
 import inspect
+import logging
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import TimeoutError
@@ -60,6 +61,7 @@ from dynamiq.utils.duration import format_duration
 from dynamiq.utils.jsonpath import filter as jsonpath_filter
 from dynamiq.utils.jsonpath import mapper as jsonpath_mapper
 from dynamiq.utils.logger import logger
+from dynamiq.utils.run_context import current_node_run_id, reset_node_run_id, set_node_run_id
 from dynamiq.utils.utils import clear_annotation
 
 if TYPE_CHECKING:
@@ -917,18 +919,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         approval_result.data = {**input_data, **update_params}
 
         if approval_result.is_approved is None:
-            if approval_result.feedback == approval_config.accept_pattern:
-                logger.info(
-                    f"Node {self.name} action was approved by human "
-                    f"with provided feedback '{approval_result.feedback}'."
-                )
-                approval_result.is_approved = True
-            else:
-                approval_result.is_approved = False
-                logger.info(
-                    f"Node {self.name} action was canceled by human"
-                    f"with provided feedback '{approval_result.feedback}'."
-                )
+            approval_result.is_approved = approval_result.feedback == approval_config.accept_pattern
+            decision = "approved" if approval_result.is_approved else "canceled"
+            logger.info("Node %s action was %s by human.", self.name, decision)
+            logger.debug("Node %s human feedback: %r", self.name, approval_result.feedback)
 
         return approval_result
 
@@ -1012,6 +1006,42 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         if depends_result is None:
             depends_result = {}
         return config, merged_kwargs, depends_result
+
+    @staticmethod
+    def _dump_for_log(value: Any) -> Any:
+        """Serialize a value for DEBUG log payloads without raising on odd types."""
+        if hasattr(value, "model_dump"):
+            try:
+                return value.model_dump()
+            except Exception:
+                return value
+        return value
+
+    def log_execution_start(self, input_data: Any) -> None:
+        """Log a payload-free INFO start line; dump input at DEBUG when enabled."""
+        run = current_node_run_id()
+        logger.info("Node %s - %s: run=%s started", self.name, self.id, run)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Node %s - %s: run=%s input: %s",
+                self.name,
+                self.id,
+                run,
+                self._dump_for_log(input_data),
+            )
+
+    def log_execution_finish(self, result: Any) -> None:
+        """Log a payload-free INFO finish line; dump result at DEBUG when enabled."""
+        run = current_node_run_id()
+        logger.info("Node %s - %s: run=%s finished", self.name, self.id, run)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Node %s - %s: run=%s result: %s",
+                self.name,
+                self.id,
+                run,
+                self._dump_for_log(result),
+            )
 
     def _handle_skip(
         self,
@@ -1132,10 +1162,11 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         Returns:
             RunnableResult: Result of the node execution.
         """
-        logger.info(f"Node {self.name} - {self.id}: execution started.")
         transformed_input = input_data
         time_start = datetime.now()
         config, merged_kwargs, depends_result = self._prepare_execution(input_data, config, depends_result, **kwargs)
+        token = set_node_run_id(merged_kwargs["run_id"])
+        logger.info(f"Node {self.name} - {self.id}: run={current_node_run_id()} execution started.")
 
         try:
             try:
@@ -1164,6 +1195,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             return self._handle_canceled(config, time_start, "", **merged_kwargs)
         except Exception as e:
             return self._handle_failure(e, transformed_input, config, time_start, "", **merged_kwargs)
+        finally:
+            reset_node_run_id(token)
 
     async def _run_async_native(
         self,
@@ -1181,10 +1214,11 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         the provided executor when supplied, otherwise to the default asyncio
         thread pool via asyncio.to_thread.
         """
-        logger.info(f"Node {self.name} - {self.id}: async execution started.")
         transformed_input = input_data
         time_start = datetime.now()
         config, merged_kwargs, depends_result = self._prepare_execution(input_data, config, depends_result, **kwargs)
+        token = set_node_run_id(merged_kwargs["run_id"])
+        logger.info(f"Node {self.name} - {self.id}: run={current_node_run_id()} async execution started.")
 
         try:
             try:
@@ -1225,6 +1259,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             return self._handle_canceled(config, time_start, "async ", **merged_kwargs)
         except Exception as e:
             return self._handle_failure(e, transformed_input, config, time_start, "async ", **merged_kwargs)
+        finally:
+            reset_node_run_id(token)
 
     @staticmethod
     async def _offload_to_executor(executor: "ThreadPoolExecutor | None", func: Callable, *args, **kwargs) -> Any:
@@ -1371,6 +1407,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                         raise
 
                 self.run_on_node_execute_start(config.callbacks, input_data, **merged_kwargs)
+                self.log_execution_start(input_data)
 
                 try:
                     if executor and timeout is not None:
@@ -1384,6 +1421,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                     else:
                         output = self.execute(input_data=input_data, config=config, **merged_kwargs)
 
+                    self.log_execution_finish(output)
                     self.run_on_node_execute_end(config.callbacks, output, **merged_kwargs)
                     return output
                 except CanceledException:
@@ -1492,6 +1530,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                     raise
 
             self.run_on_node_execute_start(config.callbacks, input_data, **merged_kwargs)
+            self.log_execution_start(input_data)
 
             try:
                 if timeout is not None:
@@ -1502,6 +1541,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 else:
                     output = await self.execute_async(input_data=input_data, config=config, **merged_kwargs)
 
+                self.log_execution_finish(output)
                 self.run_on_node_execute_end(config.callbacks, output, **merged_kwargs)
                 return output
             except CanceledException:

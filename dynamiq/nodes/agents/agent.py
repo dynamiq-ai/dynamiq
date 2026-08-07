@@ -284,6 +284,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         Logs reasoning step of agent.
 
+        Action name stays at INFO (truncated — LLM-generated in some modes).
+        Thought and action_input may contain user data and are logged at DEBUG.
+
         Args:
             thought (str): Reasoning about next step.
             action (str): Chosen action.
@@ -291,28 +294,44 @@ class Agent(HistoryManagerMixin, BaseAgent):
             loop_num (int): Number of reasoning loop.
         """
         logger.info(
-            "\n------------------------------------------\n"
-            f"Agent {self.name}: Loop {loop_num}:\n"
-            f"Thought: {thought}\n"
-            f"Action: {action}\n"
-            f"Action Input: {action_input}"
-            "\n------------------------------------------"
+            "Agent %s - %s: Loop %s: Action: %s",
+            self.name,
+            self.id,
+            loop_num,
+            str(action)[:120],
+        )
+        logger.debug(
+            "Agent %s - %s: Loop %s: Thought: %s | Action Input: %s",
+            self.name,
+            self.id,
+            loop_num,
+            thought,
+            action_input,
         )
 
     def log_final_output(self, thought: str, final_output: str, loop_num: int) -> None:
         """
         Logs final output of the agent.
 
+        Emits a payload-free INFO line; thought and final answer go to DEBUG.
+
         Args:
             final_output (str): Final output of agent.
             loop_num (int): Number of reasoning loop
         """
         logger.info(
-            "\n------------------------------------------\n"
-            f"Agent {self.name}: Loop {loop_num}\n"
-            f"Thought: {thought}\n"
-            f"Final answer: {final_output}"
-            "\n------------------------------------------\n"
+            "Agent %s - %s: Loop %s: final answer produced",
+            self.name,
+            self.id,
+            loop_num,
+        )
+        logger.debug(
+            "Agent %s - %s: Loop %s: Thought: %s | Final answer: %s",
+            self.name,
+            self.id,
+            loop_num,
+            thought,
+            final_output,
         )
 
     def _emit_tool_input_error(
@@ -1732,7 +1751,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         llm_reasoning = (
             llm_generated_output[:200] if llm_generated_output else str(llm_result.output.get("tool_calls", ""))[:200]
         )
-        logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num}, reasoning:\n{llm_reasoning}...")
+        logger.debug(f"Agent {self.name} - {self.id}: Loop {loop_num}, reasoning:\n{llm_reasoning}...")
 
         # Append assistant message to conversation history BEFORE parsing
         # This ensures the LLM can see its own output during error recovery

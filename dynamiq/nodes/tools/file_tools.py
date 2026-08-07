@@ -104,7 +104,7 @@ def detect_file_type(file: BytesIO, filename: str) -> FileType | None:
 
         for file_type, extensions in EXTENSION_MAP.items():
             if file_ext in extensions:
-                logger.info(f"Detected file type: {file_type} for file: {filename}")
+                logger.debug(f"Detected file type: {file_type} for file: {filename}")
                 return file_type
 
         logger.warning(f"Unknown file extension: {file_ext} for file: {filename}")
@@ -692,7 +692,6 @@ class FileReadTool(Node):
         For large files, returns first, middle, and last chunks instead of full content.
         Automatically detects file type and extracts text content when possible.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -1063,7 +1062,7 @@ class FileReadTool(Node):
                 },
                 overwrite=True,
             )
-            logger.info(f"Tool {self.name} - {self.id}: cached extracted text at {cache_path}")
+            logger.debug(f"Tool {self.name} - {self.id}: cached extracted text at {cache_path}")
             return cache_path
         except Exception as exc:
             logger.warning(f"Tool {self.name} - {self.id}: failed to cache extracted text for {original_path}: {exc}")
@@ -1099,13 +1098,13 @@ class FileReadTool(Node):
         return content
 
     def _log_text_preview(self, text: str, context: str, limit: int = 200) -> None:
-        """Emit a short preview of extracted text so logs show what was parsed."""
+        """Emit a short preview of extracted text at DEBUG so logs show what was parsed."""
         if not text:
             return
         preview = text.strip().replace("\n", " ")
         preview = preview[:limit]
         suffix = "..." if len(text.strip()) > limit else ""
-        logger.info(
+        logger.debug(
             f"Tool {self.name} - {self.id}: {context} preview ({min(len(preview), limit)} chars) => {preview}{suffix}"
         )
 
@@ -1267,7 +1266,6 @@ class FileWriteTool(Node):
         Raises:
             ToolExecutionException: On file I/O errors or failed edit pre-checks.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         if input_data.file_path.startswith(f"{RESERVED_AGENT_PATH_PREFIX}/"):
             raise ToolExecutionException(
@@ -1321,7 +1319,6 @@ class FileWriteTool(Node):
         )
 
         message = f"File '{input_data.file_path}' written successfully"
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(file_info)[:200]}...")
 
         return {
             "content": message,
@@ -1492,7 +1489,6 @@ class FileSearchTool(Node):
         config: RunnableConfig | None = None,
         **kwargs,
     ) -> dict[str, Any]:
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -1682,7 +1678,7 @@ class FileSearchTool(Node):
                 text = raw.decode("utf-8", errors="ignore")
                 if text:
                     if candidate.endswith(EXTRACTED_TEXT_SUFFIX):
-                        logger.info(
+                        logger.debug(
                             f"Tool {self.name} - {self.id}: using cached extracted text for search: {candidate}"
                         )
                     return text, candidate
@@ -1738,8 +1734,6 @@ class FileListTool(Node):
         **kwargs,
     ) -> dict[str, Any]:
 
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
-
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
@@ -1754,7 +1748,6 @@ class FileListTool(Node):
             else:
                 files_string = "No files are currently available in the file store."
 
-            logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{files_string}")
             return {"content": files_string}
 
         except Exception as e:

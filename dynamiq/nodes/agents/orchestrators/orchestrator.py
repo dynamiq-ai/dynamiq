@@ -336,7 +336,8 @@ class Orchestrator(IterativeCheckpointMixin, Node, ABC):
         Raises:
             OrchestratorError: If the orchestration process fails.
         """
-        logger.info(f"Orchestrator {self.name} - {self.id}: started with INPUT DATA:\n{input_data}")
+        logger.info(f"Orchestrator {self.name} - {self.id}: started")
+        logger.debug(f"Orchestrator {self.name} - {self.id}: started with INPUT DATA:\n{input_data}")
         resuming = self.is_resumed
         self.reset_run_state()
         if resuming:
@@ -359,7 +360,8 @@ class Orchestrator(IterativeCheckpointMixin, Node, ABC):
             **kwargs,
         )
 
-        logger.info(f"Orchestrator {self.name} - {self.id}: finished with RESULT:\n{str(output)[:200]}...")
+        logger.info(f"Orchestrator {self.name} - {self.id}: finished")
+        logger.debug(f"Orchestrator {self.name} - {self.id}: finished with RESULT:\n{str(output)[:200]}...")
         return output
 
     def parse_xml_content(self, text: str, tag: str) -> str:

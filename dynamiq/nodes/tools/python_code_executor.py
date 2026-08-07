@@ -305,9 +305,10 @@ class PythonCodeExecutor(Node):
         self, input_data: PythonCodeExecutorInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
         code_preview = input_data.code.strip().replace("\n", "\\n")[:200]
-        logger.info(
-            f"Tool {self.name} - {self.id}: started with code length={len(input_data.code)} "
-            f"preview='{code_preview}{'...' if len(input_data.code) > 200 else ''}'"
+        logger.info(f"Tool {self.name} - {self.id}: started with code length={len(input_data.code)}")
+        logger.debug(
+            f"Tool {self.name} - {self.id}: code preview="
+            f"'{code_preview}{'...' if len(input_data.code) > 200 else ''}'"
         )
         config = ensure_config(config)
         check_cancellation(config)
@@ -396,10 +397,8 @@ class PythonCodeExecutor(Node):
             keys_repr = (
                 list(sanitized_content.keys()) if isinstance(sanitized_content, dict) else type(sanitized_content)
             )
-            logger.info(
-                f"Tool {self.name} - {self.id}: finished execution with keys {keys_repr} "
-                f"preview={self._preview_for_log(sanitized_content)}"
-            )
+            logger.info(f"Tool {self.name} - {self.id}: finished execution with keys {keys_repr}")
+            logger.debug(f"Tool {self.name} - {self.id}: result preview={self._preview_for_log(sanitized_content)}")
             return {"content": sanitized_content}
         finally:
             os.chdir(original_cwd)

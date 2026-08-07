@@ -2,6 +2,7 @@ import base64
 import binascii
 import io
 import json
+import logging
 import mimetypes
 import re
 from contextvars import ContextVar
@@ -720,16 +721,17 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         """
         Executes the agent with the given input data.
         """
-        # Convert to dict only for logging (to avoid logging BytesIO objects)
-        log_data = input_data.model_dump()
-        if log_data.get("images"):
-            log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
-        if log_data.get("videos"):
-            log_data["videos"] = [f"video_{i}" for i in range(len(log_data["videos"]))]
-        if log_data.get("files"):
-            log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]
-
-        logger.info(f"Agent {self.name} - {self.id}: started with input {log_data}")
+        logger.info(f"Agent {self.name} - {self.id}: started")
+        if logger.isEnabledFor(logging.DEBUG):
+            # Convert to dict only for logging (to avoid logging BytesIO objects)
+            log_data = input_data.model_dump()
+            if log_data.get("images"):
+                log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
+            if log_data.get("videos"):
+                log_data["videos"] = [f"video_{i}" for i in range(len(log_data["videos"]))]
+            if log_data.get("files"):
+                log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]
+            logger.debug(f"Agent {self.name} - {self.id}: started with input {log_data}")
         self.reset_run_state()
 
         config = ensure_config(config)
@@ -950,7 +952,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                         f"returning {len(sandbox_files)} requested file(s) from sandbox"
                     )
 
-            logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
+            logger.info(f"Node {self.name} - {self.id}: finished")
+            logger.debug(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
             self._maybe_surface_live_view(execution_result, shared_session_token)
             return execution_result
@@ -2037,7 +2040,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 logger.warning(f"Unsupported file type from tool '{tool.name}': {type(file)}")
 
         if stored_files:
-            logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
+            logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s)")
+            logger.debug(f"Tool '{tool.name}' generated file(s): {stored_files}")
         return stored_files
 
     def _upload_files_to_sandbox(self, normalized_files: list) -> list[str]:
@@ -2621,18 +2625,16 @@ class AgentManager(Agent):
         self, input_data: AgentManagerInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Executes the manager agent with the given input data and action."""
-        log_data = dict(input_data).copy()
-
-        if log_data.get("images"):
-            log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
-
-        if log_data.get("videos"):
-            log_data["videos"] = [f"video_{i}" for i in range(len(log_data["videos"]))]
-
-        if log_data.get("files"):
-            log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]
-
-        logger.info(f"Agent {self.name} - {self.id}: started with input {log_data}")
+        logger.info(f"Agent {self.name} - {self.id}: started")
+        if logger.isEnabledFor(logging.DEBUG):
+            log_data = dict(input_data).copy()
+            if log_data.get("images"):
+                log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
+            if log_data.get("videos"):
+                log_data["videos"] = [f"video_{i}" for i in range(len(log_data["videos"]))]
+            if log_data.get("files"):
+                log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]
+            logger.debug(f"Agent {self.name} - {self.id}: started with input {log_data}")
         self.reset_run_state()
         config = config or RunnableConfig()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -2649,7 +2651,8 @@ class AgentManager(Agent):
         execution_result = {
             "content": result,
         }
-        logger.info(f"Agent {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
+        logger.info(f"Agent {self.name} - {self.id}: finished")
+        logger.debug(f"Agent {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
         return execution_result
 

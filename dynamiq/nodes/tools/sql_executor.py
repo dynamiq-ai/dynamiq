@@ -92,7 +92,6 @@ class SQLExecutor(ConnectionNode):
         return "\n\n".join(formatted_results)
 
     def execute(self, input_data: SQLInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         check_cancellation(config)
