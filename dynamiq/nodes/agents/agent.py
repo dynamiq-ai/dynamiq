@@ -1801,9 +1801,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             RuntimeError: If the maximum number of loops is reached without finding a final answer.
             Exception: If an error occurs during execution.
         """
-        if self.verbose:
-            logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
-
         self.state.max_loops = self.max_loops
 
         completed = self.get_start_iteration()

@@ -1027,7 +1027,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
     def log_execution_start(self, input_data: Any) -> None:
         """Log a payload-free INFO start line; dump input at DEBUG when enabled."""
         run = current_node_run_id()
-        logger.info("Node %s - %s: run=%s started", self.name, self.id, run)
+        logger.info("Node %s - %s: run=%s started.", self.name, self.id, run)
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
                 "Node %s - %s: run=%s input: %s",
@@ -1040,7 +1040,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
     def log_execution_finish(self, result: Any) -> None:
         """Log a payload-free INFO finish line; dump result at DEBUG when enabled."""
         run = current_node_run_id()
-        logger.info("Node %s - %s: run=%s finished", self.name, self.id, run)
+        logger.info("Node %s - %s: run=%s finished.", self.name, self.id, run)
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
                 "Node %s - %s: run=%s result: %s",
