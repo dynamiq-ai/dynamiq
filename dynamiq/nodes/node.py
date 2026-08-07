@@ -4,6 +4,7 @@ import copy
 import functools
 import inspect
 import logging
+import reprlib
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import TimeoutError
@@ -66,6 +67,21 @@ from dynamiq.utils.utils import clear_annotation, format_value_for_log
 
 if TYPE_CHECKING:
     from concurrent.futures import ThreadPoolExecutor
+
+# Hard ceiling on a single payload log line. `_LOG_REPR` should keep output well under
+# this on realistic payloads; the cap is a backstop for shapes it does not anticipate.
+LOG_PAYLOAD_MAX_CHARS = 4000
+
+# Bounded renderer for payload dumps. Truncates while rendering (rather than stringifying
+# everything and slicing), so a huge node input/result cannot be fully materialized as text.
+_LOG_REPR = reprlib.Repr()
+_LOG_REPR.maxstring = 200
+_LOG_REPR.maxother = 100
+_LOG_REPR.maxlist = 5
+_LOG_REPR.maxtuple = 5
+_LOG_REPR.maxset = 5
+_LOG_REPR.maxdict = 20
+_LOG_REPR.maxlevel = 6
 
 
 def ensure_config(config: RunnableConfig = None) -> RunnableConfig:
@@ -1008,34 +1024,46 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         return config, merged_kwargs, depends_result
 
     @staticmethod
-    def _dump_for_log(value: Any) -> Any:
-        """Serialize a value for log payloads without raising on odd types.
+    def _dump_for_log(value: Any) -> str:
+        """Render a value for log payloads: file-safe, structurally truncated, size-capped.
 
         File-like inputs (``BytesIO`` / ``bytes``) are reduced to names via
-        :func:`format_value_for_log` so content is never written to logs.
+        :func:`format_value_for_log` so content is never written to logs. The result is
+        then rendered through :data:`_LOG_REPR` and hard-capped at
+        :data:`LOG_PAYLOAD_MAX_CHARS`, so a large node input or result cannot produce an
+        unbounded log line. Omitted items are marked with ``...`` by the renderer.
         """
         try:
-            return format_value_for_log(value)
+            dumped = format_value_for_log(value)
         except Exception:
+            dumped = value
             if hasattr(value, "model_dump"):
                 try:
-                    return value.model_dump()
+                    dumped = value.model_dump()
                 except Exception:
-                    return value
-            return value
+                    dumped = value
+
+        try:
+            rendered = _LOG_REPR.repr(dumped)
+        except Exception:
+            rendered = f"<unrenderable {type(dumped).__name__}>"
+
+        if len(rendered) > LOG_PAYLOAD_MAX_CHARS:
+            return f"{rendered[:LOG_PAYLOAD_MAX_CHARS]}... [truncated]"
+        return rendered
 
     def _node_run_log(self, message: str) -> str:
         """Format a node lifecycle log line with the active short run id."""
         return f"Node {self.name} - {self.id}: run={current_node_run_id()} {message}"
 
     def log_execution_start(self, input_data: Any) -> None:
-        """Log a payload-free INFO start line; dump input at DEBUG when enabled."""
+        """Log a payload-free INFO start line; dump a truncated input at DEBUG when enabled."""
         logger.info(self._node_run_log("started."))
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(self._node_run_log(f"input: {self._dump_for_log(input_data)}"))
 
     def log_execution_finish(self, result: Any) -> None:
-        """Log a payload-free INFO finish line; dump result at DEBUG when enabled."""
+        """Log a payload-free INFO finish line; dump a truncated result at DEBUG when enabled."""
         logger.info(self._node_run_log("finished."))
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(self._node_run_log(f"result: {self._dump_for_log(result)}"))
