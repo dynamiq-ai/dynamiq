@@ -284,7 +284,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         Logs reasoning step of agent.
 
-        Action name stays at INFO (truncated — LLM-generated in some modes).
+        Action name stays at INFO.
         Thought and action_input may contain user data and are logged at DEBUG.
 
         Args:
@@ -298,7 +298,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self.name,
             self.id,
             loop_num,
-            str(action)[:120],
+            action,
         )
         logger.debug(
             "Agent %s - %s: Loop %s: Thought: %s | Action Input: %s",
