@@ -9,7 +9,6 @@ from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.cancellation import check_cancellation
-from dynamiq.utils.logger import logger
 
 
 class SummarizerCheckpointState(BaseCheckpointState):
@@ -220,10 +219,6 @@ Parameter Guide:
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         input_text = input_data.input
-        logger.debug(
-            f"Tool {self.name} - {self.id}: started with input text length: {len(input_text)}, "
-            f"word count: {len(input_text.split())}"
-        )
 
         words = input_text.split()
         if len(words) > self.chunk_size:
@@ -239,8 +234,4 @@ Parameter Guide:
         else:
             summary = self._process_chunk(input_text, config, **kwargs)
 
-        logger.debug(
-            f"Tool {self.name} - {self.id}: finished with result length: {len(summary)}, "
-            f"word count: {len(summary.split())}"
-        )
         return {"content": summary}

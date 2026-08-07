@@ -440,7 +440,6 @@ class MCPTool(ConnectionNode):
         Returns:
             dict[str, Any]: A dictionary containing the tool's output.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump(by_alias=True)}")
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
@@ -478,7 +477,6 @@ class MCPTool(ConnectionNode):
         else:
             content = extract_text_from_mcp_content(result.content)
 
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(content)[:200]}...")
         output = {"content": content}
         if self.is_optimized_for_agents:
             output["raw_response"] = raw_response

@@ -191,7 +191,6 @@ class DynamiqKnowledgebaseVectorSearch(ConnectionNode):
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
 
         request_kwargs = self._build_request_kwargs(input_data)
 
@@ -212,7 +211,6 @@ class DynamiqKnowledgebaseVectorSearch(ConnectionNode):
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
 
         request_kwargs = self._build_request_kwargs(input_data)
         client = await self.get_async_client()

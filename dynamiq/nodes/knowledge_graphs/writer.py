@@ -574,7 +574,7 @@ class KnowledgeGraphWriter(Node):
             if score >= self.similarity_threshold and score > best_score:
                 best_id, best_score = cand_id, score
         if best_id:
-            logger.info(
+            logger.debug(
                 f"Node {self.name} - {self.id}: linking {name!r} -> existing node {best_id!r} "
                 f"(trigram={best_score:.2f})"
             )

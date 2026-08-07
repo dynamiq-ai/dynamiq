@@ -529,7 +529,6 @@ class BedrockKnowledgeBaseSearch(ConnectionNode):
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
 
         request = self._build_retrieve_request(input_data)
 
