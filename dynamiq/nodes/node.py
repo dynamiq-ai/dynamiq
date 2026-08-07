@@ -62,7 +62,7 @@ from dynamiq.utils.jsonpath import filter as jsonpath_filter
 from dynamiq.utils.jsonpath import mapper as jsonpath_mapper
 from dynamiq.utils.logger import logger
 from dynamiq.utils.run_context import current_node_run_id, reset_node_run_id, set_node_run_id
-from dynamiq.utils.utils import clear_annotation
+from dynamiq.utils.utils import clear_annotation, format_value_for_log
 
 if TYPE_CHECKING:
     from concurrent.futures import ThreadPoolExecutor
@@ -1009,13 +1009,20 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
     @staticmethod
     def _dump_for_log(value: Any) -> Any:
-        """Serialize a value for DEBUG log payloads without raising on odd types."""
-        if hasattr(value, "model_dump"):
-            try:
-                return value.model_dump()
-            except Exception:
-                return value
-        return value
+        """Serialize a value for log payloads without raising on odd types.
+
+        File-like inputs (``BytesIO`` / ``bytes``) are reduced to names via
+        :func:`format_value_for_log` so content is never written to logs.
+        """
+        try:
+            return format_value_for_log(value)
+        except Exception:
+            if hasattr(value, "model_dump"):
+                try:
+                    return value.model_dump()
+                except Exception:
+                    return value
+            return value
 
     def log_execution_start(self, input_data: Any) -> None:
         """Log a payload-free INFO start line; dump input at DEBUG when enabled."""
