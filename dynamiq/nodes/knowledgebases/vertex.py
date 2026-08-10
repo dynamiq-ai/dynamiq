@@ -194,6 +194,9 @@ class VertexAIRagSearch(ConnectionNode):
         Application Default Credentials path `VertexAI.conn_params` relies on for LiteLLM.
         """
         connection = self.connection
+        if connection is None:
+            raise ValueError("A VertexAI connection is required to build credentials.")
+
         if not connection.has_service_account_credentials:
             return None
 

@@ -63,6 +63,19 @@ class BaseConnection(BaseModel, ABC):
         """
         return {}
 
+    @property
+    def completion_params(self) -> dict:
+        """Parameters for LLM completion calls specifically.
+
+        Defaults to `conn_params`. Override when a connection carries settings that apply to
+        completions but not to the embedding, image or ranking nodes that share the same
+        connection - `conn_params` is read by all of them.
+
+        Returns:
+            dict: The connection parameters to pass to a completion call.
+        """
+        return self.conn_params
+
     def to_dict(self, for_tracing: bool = False, **kwargs) -> dict:
         """Converts the connection instance to a dictionary.
 
@@ -487,11 +500,14 @@ class VertexAI(GoogleCloud):
         Returns:
             str | None: The api base, or None when no self-deployed endpoint is configured.
         """
-        if self.vertex_api_base:
-            return self.vertex_api_base.rstrip("/")
+        if api_base := (self.vertex_api_base or "").strip():
+            return api_base.rstrip("/")
 
-        if not (self.vertex_endpoint_id and self.vertex_endpoint_dns):
-            if self.vertex_endpoint_id or self.vertex_endpoint_dns:
+        endpoint_id = (self.vertex_endpoint_id or "").strip()
+        endpoint_dns = (self.vertex_endpoint_dns or "").strip()
+
+        if not (endpoint_id and endpoint_dns):
+            if endpoint_id or endpoint_dns:
                 logger.warning(
                     "VertexAI connection has an incomplete self-deployed endpoint configuration: "
                     "vertex_endpoint_id and vertex_endpoint_dns are both required. Falling back to "
@@ -499,11 +515,18 @@ class VertexAI(GoogleCloud):
                 )
             return None
 
-        host = self.vertex_endpoint_dns.rstrip("/").removeprefix("https://").removeprefix("http://")
-        return (
-            f"https://{host}/v1/projects/{self.vertex_project_id}"
-            f"/locations/{self.vertex_project_location}/endpoints/{self.vertex_endpoint_id}"
-        )
+        project_id = (self.vertex_project_id or "").strip()
+        location = (self.vertex_project_location or "").strip()
+        if not (project_id and location):
+            logger.warning(
+                "VertexAI connection cannot address its self-deployed endpoint: vertex_project_id "
+                "and vertex_project_location are both required to build the endpoint path. "
+                "Falling back to the shared Vertex AI host, which dedicated endpoints reject."
+            )
+            return None
+
+        host = endpoint_dns.rstrip("/").removeprefix("https://").removeprefix("http://")
+        return f"https://{host}/v1/projects/{project_id}/locations/{location}/endpoints/{endpoint_id}"
 
     @property
     def conn_params(self):
@@ -513,12 +536,15 @@ class VertexAI(GoogleCloud):
         Includes `vertex_credentials` only when the service account fields are complete enough
         to authenticate, so that LiteLLM falls back to Application Default Credentials otherwise.
         A partially filled service account is never usable - passing it on would make google-auth
-        raise instead of falling back. Includes `api_base` only when a self-deployed endpoint is
-        configured.
+        raise instead of falling back.
+
+        `api_base` is deliberately absent here: a self-deployed endpoint serves chat completions,
+        while embedder, image and ranker nodes read `conn_params` from the same connection and
+        would send their requests to it too. See `completion_params`.
 
         Returns:
             dict: A dictionary with the keys 'vertex_project' and 'vertex_location', plus
-                'vertex_credentials' and 'api_base' when available.
+                'vertex_credentials' when available.
         """
         params = {
             "vertex_project": self.vertex_project_id,
@@ -535,6 +561,16 @@ class VertexAI(GoogleCloud):
                 "Falling back to Application Default Credentials."
             )
 
+        return params
+
+    @property
+    def completion_params(self) -> dict:
+        """Connection params for completion calls, including any self-deployed endpoint.
+
+        Returns:
+            dict: `conn_params` plus 'api_base' when a self-deployed endpoint is configured.
+        """
+        params = self.conn_params
         if api_base := self.api_base:
             params["api_base"] = api_base
 
