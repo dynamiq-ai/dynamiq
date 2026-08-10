@@ -326,6 +326,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     _pinned_input: Message | VisionMessage | None = PrivateAttr(default=None)
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
+    # {node_id: {param: value}} from each tool's input_transformer; only selected values are kept.
+    _tool_input_overrides: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
     _sandbox_is_shared: bool = PrivateAttr(default=False)
     # A borrowed per-agent view of an owner's shared sandbox; when set it is this
     # agent's effective sandbox_backend for the whole run (tools, uploads, output).
@@ -648,6 +650,47 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             custom_metadata["session_id"] = input_data.session_id
 
         return custom_metadata
+
+    def transform_input(self, input_data: dict, depends_result: dict[Any, Any], **kwargs) -> dict:
+        """Transform as usual, and resolve any tool selectors while the dependencies are in scope.
+
+        A tool called by an agent has no dependencies of its own, so its selector is resolved here
+        instead — against everything the flow offered this node. Resolving now rather than at tool
+        call time means `$.<node_id>.output.x` works even when this agent's own selector narrows
+        its input, and only the selected values are kept.
+        """
+        self._tool_input_overrides = self._resolve_tool_input_overrides(input_data, depends_result)
+        return super().transform_input(input_data=input_data, depends_result=depends_result, **kwargs)
+
+    def _resolve_tool_input_overrides(
+        self, input_data: dict, depends_result: dict[Any, Any] | None
+    ) -> dict[str, dict[str, Any]]:
+        """Run each tool's own selector over this node's input, keeping just what it names.
+
+        The source is assembled locally and dropped on return — an upstream retriever's documents
+        are read through, never stored. ``None`` results are discarded so an unmatched path leaves
+        the parameter unset and the tool's own default stands.
+        """
+        targets = [node for tool in self.tools for node in (tool, getattr(tool, "agent", None)) if node is not None]
+        targets = [node for node in targets if node.input_transformer.path or node.input_transformer.selector]
+        if not targets:
+            return {}
+
+        source = dict(input_data) | {
+            key: {"status": result.status.value, "output": result.output}
+            for key, result in (depends_result or {}).items()
+        }
+
+        overrides: dict[str, dict[str, Any]] = {}
+        for node in targets:
+            try:
+                resolved = node.transform(source, node.input_transformer)
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: input_transformer of '{node.name}' failed: {e}")
+                continue
+            if isinstance(resolved, dict):
+                overrides[node.id] = {key: value for key, value in resolved.items() if value is not None}
+        return overrides
 
     def _clear_todos_file(self) -> None:
         """Delete the persisted todos file and reset in-memory todo state.
@@ -1382,6 +1425,24 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             )
         return tool
 
+    def _apply_tool_input_transformer(self, tool: Node, tool_input: dict) -> bool:
+        """Merge what this tool's selector resolved to into the arguments the model produced.
+
+        Merged rather than replacing (the usual Node behavior for a transformer), because here the
+        input *is* the tool call: replacing it would mean re-listing every parameter the model is
+        allowed to send. Returns whether the tool declares a transformer, so the caller can stop
+        ``run_sync`` from applying it a second time.
+        """
+        if not (tool.input_transformer.path or tool.input_transformer.selector):
+            return False
+
+        injected = self._tool_input_overrides.get(tool.id, {})
+        if injected:
+            tool_input.update(injected)
+            if self.verbose:
+                logger.debug(f"Agent {self.name} - {self.id}: '{tool.name}' input_transformer set {injected}")
+        return True
+
     def _apply_parameters(self, merged_input: dict, params: dict, source: str, debug_info: list = None):
         """Apply parameters from the specified source to the merged input."""
         if debug_info is None:
@@ -1587,6 +1648,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
             self._inject_files_into_tool(resolved_agent or tool, merged_input)
 
+            # Before tool_params, so explicitly passed parameters still win over the declaration.
+            transformer_applied = self._apply_tool_input_transformer(resolved_agent or tool, merged_input)
+
             if tool_params:
                 debug_info = []
                 if self.verbose:
@@ -1629,6 +1693,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     logger.debug("\n".join(debug_info))
 
             child_kwargs = kwargs | {"recoverable_error": True}
+            if transformer_applied:
+                # Already resolved above, against a richer source; run_sync would re-apply it with
+                # replace semantics and throw the model's arguments away.
+                child_kwargs["use_input_transformer"] = False
 
             if is_child_agent and self._current_call_context:
                 child_context = self._build_child_agent_context(resolved_agent)

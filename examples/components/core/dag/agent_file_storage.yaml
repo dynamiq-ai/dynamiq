@@ -33,6 +33,7 @@ nodes:
       backend:
         type: dynamiq.storages.file.InMemoryFileStore
       agent_file_write_enabled: true
+      todo_enabled: true
     max_loops: 15
     inference_mode: XML
     summarization_config:

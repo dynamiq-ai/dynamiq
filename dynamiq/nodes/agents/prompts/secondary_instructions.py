@@ -22,7 +22,7 @@ CONTEXT_MANAGER_INSTRUCTIONS = """## Context Management
 
 TODO_TOOLS_INSTRUCTIONS = """## Todo Management
 - Use the todo-write tool for complex 3+ step tasks; skip for simple requests
-- Current todos shown in [State: ...] at the end of user last messages under "Todos:"
+- The todo-write result lists the full current todo list - re-read it there
 - When creating initial list: first task "in_progress", rest "pending"
 - After initial creation, ONLY update status via merge=true - do not restructure the plan
 - Mark completed IMMEDIATELY after finishing each step - don't batch
