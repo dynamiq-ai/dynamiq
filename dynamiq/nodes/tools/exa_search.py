@@ -592,7 +592,6 @@ class ExaTool(ConnectionNode):
             }
             output = {"content": result}
 
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
         return output
 
     def execute(self, input_data: ExaInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
@@ -601,7 +600,6 @@ class ExaTool(ConnectionNode):
 
         Input parameters override node parameters when provided.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         check_cancellation(config)
@@ -627,7 +625,6 @@ class ExaTool(ConnectionNode):
         self, input_data: ExaInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Native async execution path mirroring ``execute``."""
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)

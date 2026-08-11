@@ -3,6 +3,8 @@ import contextvars
 import copy
 import functools
 import inspect
+import logging
+import reprlib
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import TimeoutError
@@ -60,10 +62,26 @@ from dynamiq.utils.duration import format_duration
 from dynamiq.utils.jsonpath import filter as jsonpath_filter
 from dynamiq.utils.jsonpath import mapper as jsonpath_mapper
 from dynamiq.utils.logger import logger
-from dynamiq.utils.utils import clear_annotation
+from dynamiq.utils.run_context import current_node_run_id, reset_node_run_id, set_node_run_id
+from dynamiq.utils.utils import clear_annotation, format_value_for_log
 
 if TYPE_CHECKING:
     from concurrent.futures import ThreadPoolExecutor
+
+# Hard ceiling on a single payload log line. `_LOG_REPR` should keep output well under
+# this on realistic payloads; the cap is a backstop for shapes it does not anticipate.
+LOG_PAYLOAD_MAX_CHARS = 4000
+
+# Bounded renderer for payload dumps. Truncates while rendering (rather than stringifying
+# everything and slicing), so a huge node input/result cannot be fully materialized as text.
+_LOG_REPR = reprlib.Repr()
+_LOG_REPR.maxstring = 200
+_LOG_REPR.maxother = 100
+_LOG_REPR.maxlist = 5
+_LOG_REPR.maxtuple = 5
+_LOG_REPR.maxset = 5
+_LOG_REPR.maxdict = 20
+_LOG_REPR.maxlevel = 6
 
 
 def ensure_config(config: RunnableConfig = None) -> RunnableConfig:
@@ -832,7 +850,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             ),
         )
 
-        logger.info(f"Node {self.name} - {self.id}: sending approval.")
+        logger.info(self._node_run_log("sending approval."))
         check_cancellation(config)
 
         self.run_on_node_execute_stream(callbacks=config.callbacks, event=event, **kwargs)
@@ -891,7 +909,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             ApprovalInputData: Result of approval.
         """
         if self._pending_approval_response is not None:
-            logger.info(f"Node {self.name} - {self.id}: using stored approval response from checkpoint")
+            logger.info(self._node_run_log("using stored approval response from checkpoint."))
             approval_result = self._pending_approval_response
         else:
             message = Template(approval_config.msg_template).render(self.to_dict(), input_data=input_data)
@@ -917,18 +935,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         approval_result.data = {**input_data, **update_params}
 
         if approval_result.is_approved is None:
-            if approval_result.feedback == approval_config.accept_pattern:
-                logger.info(
-                    f"Node {self.name} action was approved by human "
-                    f"with provided feedback '{approval_result.feedback}'."
-                )
-                approval_result.is_approved = True
-            else:
-                approval_result.is_approved = False
-                logger.info(
-                    f"Node {self.name} action was canceled by human"
-                    f"with provided feedback '{approval_result.feedback}'."
-                )
+            approval_result.is_approved = approval_result.feedback == approval_config.accept_pattern
+            decision = "approved" if approval_result.is_approved else "canceled"
+            logger.info(self._node_run_log(f"action was {decision} by human."))
+            logger.debug(self._node_run_log(f"human feedback: {approval_result.feedback!r}"))
 
         return approval_result
 
@@ -1013,6 +1023,51 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             depends_result = {}
         return config, merged_kwargs, depends_result
 
+    @staticmethod
+    def _dump_for_log(value: Any) -> str:
+        """Render a value for log payloads: file-safe, structurally truncated, size-capped.
+
+        File-like inputs (``BytesIO`` / ``bytes``) are reduced to names via
+        :func:`format_value_for_log` so content is never written to logs. The result is
+        then rendered through :data:`_LOG_REPR` and hard-capped at
+        :data:`LOG_PAYLOAD_MAX_CHARS`, so a large node input or result cannot produce an
+        unbounded log line. Omitted items are marked with ``...`` by the renderer.
+        """
+        try:
+            dumped = format_value_for_log(value)
+        except Exception:
+            dumped = value
+            if hasattr(value, "model_dump"):
+                try:
+                    dumped = value.model_dump()
+                except Exception:
+                    dumped = value
+
+        try:
+            rendered = _LOG_REPR.repr(dumped)
+        except Exception:
+            rendered = f"<unrenderable {type(dumped).__name__}>"
+
+        if len(rendered) > LOG_PAYLOAD_MAX_CHARS:
+            return f"{rendered[:LOG_PAYLOAD_MAX_CHARS]}... [truncated]"
+        return rendered
+
+    def _node_run_log(self, message: str) -> str:
+        """Format a node lifecycle log line with the active short run id."""
+        return f"Node {self.name} - {self.id}: run={current_node_run_id()} {message}"
+
+    def log_execution_start(self, input_data: Any) -> None:
+        """Log a payload-free INFO start line; dump a truncated input at DEBUG when enabled."""
+        logger.info(self._node_run_log("started."))
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(self._node_run_log(f"input: {self._dump_for_log(input_data)}"))
+
+    def log_execution_finish(self, result: Any) -> None:
+        """Log a payload-free INFO finish line; dump a truncated result at DEBUG when enabled."""
+        logger.info(self._node_run_log("finished."))
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(self._node_run_log(f"result: {self._dump_for_log(result)}"))
+
     def _handle_skip(
         self,
         e: "NodeException",
@@ -1031,7 +1086,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             human_feedback=getattr(e, "human_feedback", None),
             **merged_kwargs,
         )
-        logger.info(f"Node {self.name} - {self.id}: execution skipped.")
+        logger.info(self._node_run_log("execution skipped."))
         return RunnableResult(
             status=RunnableStatus.SKIP,
             input=transformed_input,
@@ -1060,8 +1115,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         self._pending_approval_response = None
 
         logger.info(
-            f"Node {self.name} - {self.id}: {log_prefix}execution succeeded in "
-            f"{format_duration(time_start, datetime.now())}."
+            self._node_run_log(f"{log_prefix}execution succeeded in {format_duration(time_start, datetime.now())}.")
         )
         return RunnableResult(status=RunnableStatus.SUCCESS, input=dict(transformed_input), output=transformed_output)
 
@@ -1079,8 +1133,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
         self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
         logger.error(
-            f"Node {self.name} - {self.id}: {log_prefix}execution failed in "
-            f"{format_duration(time_start, datetime.now())}. {e}"
+            self._node_run_log(f"{log_prefix}execution failed in {format_duration(time_start, datetime.now())}. {e}")
         )
         recoverable = isinstance(e, RecoverableAgentException)
         return RunnableResult(
@@ -1100,8 +1153,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         """Handle cooperative cancel — fire on_node_canceled, return CANCELED result."""
         self.run_on_node_canceled(callbacks=config.callbacks, **merged_kwargs)
         logger.info(
-            f"Node {self.name} - {self.id}: {log_prefix}execution canceled in "
-            f"{format_duration(time_start, datetime.now())}."
+            self._node_run_log(f"{log_prefix}execution canceled in {format_duration(time_start, datetime.now())}.")
         )
         return RunnableResult(
             status=RunnableStatus.CANCELED,
@@ -1132,10 +1184,11 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         Returns:
             RunnableResult: Result of the node execution.
         """
-        logger.info(f"Node {self.name} - {self.id}: execution started.")
         transformed_input = input_data
         time_start = datetime.now()
         config, merged_kwargs, depends_result = self._prepare_execution(input_data, config, depends_result, **kwargs)
+        token = set_node_run_id(merged_kwargs["run_id"])
+        logger.info(self._node_run_log("execution started."))
 
         try:
             try:
@@ -1164,6 +1217,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             return self._handle_canceled(config, time_start, "", **merged_kwargs)
         except Exception as e:
             return self._handle_failure(e, transformed_input, config, time_start, "", **merged_kwargs)
+        finally:
+            reset_node_run_id(token)
 
     async def _run_async_native(
         self,
@@ -1181,10 +1236,11 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         the provided executor when supplied, otherwise to the default asyncio
         thread pool via asyncio.to_thread.
         """
-        logger.info(f"Node {self.name} - {self.id}: async execution started.")
         transformed_input = input_data
         time_start = datetime.now()
         config, merged_kwargs, depends_result = self._prepare_execution(input_data, config, depends_result, **kwargs)
+        token = set_node_run_id(merged_kwargs["run_id"])
+        logger.info(self._node_run_log("async execution started."))
 
         try:
             try:
@@ -1225,6 +1281,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             return self._handle_canceled(config, time_start, "async ", **merged_kwargs)
         except Exception as e:
             return self._handle_failure(e, transformed_input, config, time_start, "async ", **merged_kwargs)
+        finally:
+            reset_node_run_id(token)
 
     @staticmethod
     async def _offload_to_executor(executor: "ThreadPoolExecutor | None", func: Callable, *args, **kwargs) -> Any:
@@ -1298,7 +1356,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             parent = asyncio.current_task()
             if parent is not None and hasattr(parent, "uncancel"):
                 parent.uncancel()
-            logger.info(f"Node {self.name} - {self.id}: asyncio task canceled, draining thread.")
+            logger.info(self._node_run_log("asyncio task canceled, draining thread."))
             try:
                 return await task
             except BaseException:
@@ -1358,19 +1416,20 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 try:
                     self.ensure_client()
                 except Exception as conn_error:
-                    logger.error(f"Node {self.name} - {self.id}: Failed to ensure client connection: {conn_error}")
+                    logger.error(self._node_run_log(f"Failed to ensure client connection: {conn_error}"))
                     error = conn_error
                     if attempt < n_attempt - 1:
                         time_to_sleep = self.error_handling.retry_interval_seconds * (
                             self.error_handling.backoff_rate**attempt
                         )
-                        logger.info(f"Node {self.name} - {self.id}: retrying connection in {time_to_sleep} seconds.")
+                        logger.info(self._node_run_log(f"retrying connection in {time_to_sleep} seconds."))
                         time.sleep(time_to_sleep)
                         continue
                     else:
                         raise
 
                 self.run_on_node_execute_start(config.callbacks, input_data, **merged_kwargs)
+                self.log_execution_start(input_data)
 
                 try:
                     if executor and timeout is not None:
@@ -1384,6 +1443,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                     else:
                         output = self.execute(input_data=input_data, config=config, **merged_kwargs)
 
+                    self.log_execution_finish(output)
                     self.run_on_node_execute_end(config.callbacks, output, **merged_kwargs)
                     return output
                 except CanceledException:
@@ -1392,21 +1452,21 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                     error = e
                     timed_out = True
                     self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
-                    logger.warning(f"Node {self.name} - {self.id}: timeout.")
+                    logger.warning(self._node_run_log("timeout."))
                 except Exception as e:
                     error = e
                     self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
-                    logger.error(f"Node {self.name} - {self.id}: execution error: {e}")
+                    logger.error(self._node_run_log(f"execution error: {e}"))
 
                 # do not sleep after the last attempt
                 if attempt < n_attempt - 1:
                     time_to_sleep = self.error_handling.retry_interval_seconds * (
                         self.error_handling.backoff_rate**attempt
                     )
-                    logger.info(f"Node {self.name} - {self.id}: retrying in {time_to_sleep} seconds.")
+                    logger.info(self._node_run_log(f"retrying in {time_to_sleep} seconds."))
                     time.sleep(time_to_sleep)
 
-            logger.error(f"Node {self.name} - {self.id}: execution failed after {n_attempt} attempts.")
+            logger.error(self._node_run_log(f"execution failed after {n_attempt} attempts."))
             raise error
         finally:
             if executor is not None:
@@ -1479,19 +1539,20 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 # Offload blocking client initialization to a thread to avoid blocking the event loop
                 await self._offload_to_executor(executor, self.ensure_client)
             except Exception as conn_error:
-                logger.error(f"Node {self.name} - {self.id}: Failed to ensure client connection: {conn_error}")
+                logger.error(self._node_run_log(f"Failed to ensure client connection: {conn_error}"))
                 error = conn_error
                 if attempt < n_attempt - 1:
                     time_to_sleep = self.error_handling.retry_interval_seconds * (
                         self.error_handling.backoff_rate**attempt
                     )
-                    logger.info(f"Node {self.name} - {self.id}: retrying connection in {time_to_sleep} seconds.")
+                    logger.info(self._node_run_log(f"retrying connection in {time_to_sleep} seconds."))
                     await asyncio.sleep(time_to_sleep)
                     continue
                 else:
                     raise
 
             self.run_on_node_execute_start(config.callbacks, input_data, **merged_kwargs)
+            self.log_execution_start(input_data)
 
             try:
                 if timeout is not None:
@@ -1502,6 +1563,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 else:
                     output = await self.execute_async(input_data=input_data, config=config, **merged_kwargs)
 
+                self.log_execution_finish(output)
                 self.run_on_node_execute_end(config.callbacks, output, **merged_kwargs)
                 return output
             except CanceledException:
@@ -1509,18 +1571,18 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             except asyncio.TimeoutError as e:
                 error = e
                 self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
-                logger.warning(f"Node {self.name} - {self.id}: timeout.")
+                logger.warning(self._node_run_log("timeout."))
             except Exception as e:
                 error = e
                 self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
-                logger.error(f"Node {self.name} - {self.id}: execution error: {e}")
+                logger.error(self._node_run_log(f"execution error: {e}"))
 
             if attempt < n_attempt - 1:
                 time_to_sleep = self.error_handling.retry_interval_seconds * (self.error_handling.backoff_rate**attempt)
-                logger.info(f"Node {self.name} - {self.id}: retrying in {time_to_sleep} seconds.")
+                logger.info(self._node_run_log(f"retrying in {time_to_sleep} seconds."))
                 await asyncio.sleep(time_to_sleep)
 
-        logger.error(f"Node {self.name} - {self.id}: execution failed after {n_attempt} attempts.")
+        logger.error(self._node_run_log(f"execution failed after {n_attempt} attempts."))
         raise error
 
     def get_context_for_input_schema(self) -> dict:
@@ -1570,7 +1632,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                     try:
                         checkpoint_ctx.save_on_input_timeout(self.id)
                     except Exception as e:
-                        logger.warning(f"Node {self.id}: checkpoint save on input-streaming timeout failed: {e}")
+                        logger.warning(self._node_run_log(f"checkpoint save on input-streaming timeout failed: {e}"))
                 raise InputStreamingTimeoutError(node_id=self.id, timeout=streaming.timeout)
 
             remaining = streaming.timeout - elapsed if streaming.timeout is not None else poll_interval
@@ -2095,19 +2157,18 @@ class ConnectionNode(Node, ABC):
         if self.is_client_closed():
             if self.connection is None:
                 logger.debug(
-                    f"Node {self.name} - {self.id}: Client connection is closed but no connection available "
-                    f"for reinitialization."
+                    self._node_run_log("Client connection is closed but no connection available for reinitialization.")
                 )
                 return
 
-            logger.warning(f"Node {self.name} - {self.id}: Client connection is closed. Reinitializing")
+            logger.warning(self._node_run_log("Client connection is closed. Reinitializing."))
             connection_manager = self._connection_manager or ConnectionManager()
 
             try:
                 self.client = connection_manager.get_connection_client(connection=self.connection)
-                logger.info(f"Node {self.name} - {self.id}: Client reinitialized successfully")
+                logger.info(self._node_run_log("Client reinitialized successfully."))
             except Exception as e:
-                logger.error(f"Node {self.name} - {self.id}: Failed to reinitialize client: {e}")
+                logger.error(self._node_run_log(f"Failed to reinitialize client: {e}"))
                 raise ConnectionManagerException(f"Failed to reinitialize client for node {self.name}: {e}") from e
 
 
@@ -2137,8 +2198,7 @@ class VectorStoreNode(ConnectionNode, BaseVectorStoreParams, ABC):
         vector_store = self.vector_store_cls(**vector_store_params)
 
         logger.debug(
-            f"Node {self.name} - {self.id}: connected to {self.vector_store_cls.__name__} vector store with"
-            f" {vector_store_params}"
+            self._node_run_log(f"connected to {self.vector_store_cls.__name__} vector store with {vector_store_params}")
         )
 
         return vector_store
@@ -2186,20 +2246,21 @@ class VectorStoreNode(ConnectionNode, BaseVectorStoreParams, ABC):
         if self.is_client_closed():
             if self.connection is None:
                 logger.debug(
-                    f"Node {self.name} - {self.id}: Vector store client connection is closed but no connection "
-                    f"available for reinitialization."
+                    self._node_run_log(
+                        "Vector store client connection is closed but no connection available for reinitialization."
+                    )
                 )
                 return
 
-            logger.warning(f"Node {self.name} - {self.id}: Vector store client connection is closed. Reinitializing")
+            logger.warning(self._node_run_log("Vector store client connection is closed. Reinitializing."))
             connection_manager = self._connection_manager or ConnectionManager()
 
             try:
                 self.client = connection_manager.get_connection_client(connection=self.connection)
                 self.vector_store = self.connect_to_vector_store()
-                logger.info(f"Node {self.name} - {self.id}: Vector store reinitialized successfully")
+                logger.info(self._node_run_log("Vector store reinitialized successfully."))
             except Exception as e:
-                logger.error(f"Node {self.name} - {self.id}: Failed to reinitialize vector store: {e}")
+                logger.error(self._node_run_log(f"Failed to reinitialize vector store: {e}"))
                 raise ConnectionManagerException(
                     f"Failed to reinitialize vector store for node {self.name}: {e}"
                 ) from e
