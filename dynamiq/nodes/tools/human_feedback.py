@@ -210,7 +210,6 @@ Important:
         Returns:
             str: The user's input.
         """
-        logger.debug(f"Tool {self.name} - {self.id}: started with prompt {prompt}")
         check_cancellation(config)
 
         streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
@@ -324,7 +323,6 @@ Important:
         Returns:
             dict[str, Any]: A dictionary containing the result under the 'content' key.
         """
-        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -334,7 +332,6 @@ Important:
 
         if action == HumanFeedbackAction.ASK:
             result = self._execute_ask(input_text, config, **kwargs)
-            logger.debug(f"Tool {self.name} - {self.id}: finished with result {result}")
             return {"content": result}
         elif action == HumanFeedbackAction.INFO:
             self._execute_send(input_text, config, **kwargs)

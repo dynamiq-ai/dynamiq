@@ -613,7 +613,7 @@ class MultiFileTypeConverter(Node):
             )
 
             detected_type = file_type_extractor_result.get("type")
-            logger.info(f"Detected file type: {detected_type} for file: {filename}")
+            logger.debug(f"Detected file type: {detected_type} for file: {filename}")
 
             converter_template = self._select_converter(file, filename, detected_type)
             if converter_template is not None:
@@ -761,7 +761,7 @@ class MultiFileTypeConverter(Node):
             tuple: ``(documents, run_depends)`` from the conversion.
         """
         try:
-            logger.info(f"Attempting conversion with fallback converter for {filename}")
+            logger.debug(f"Attempting conversion with fallback converter for {filename}")
 
             converter_input = {"files": [file]}
             if metadata:

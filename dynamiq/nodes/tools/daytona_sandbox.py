@@ -57,7 +57,7 @@ class DaytonaInterpreterTool(BaseCodeInterpreterTool):
             code = vars_code + "\n" + code
 
         try:
-            logger.info(f"Executing Python code: {code}")
+            logger.debug(f"Executing Python code: {code}")
             result = sandbox.code_interpreter.run_code(code, timeout=timeout)
             output_parts = []
 

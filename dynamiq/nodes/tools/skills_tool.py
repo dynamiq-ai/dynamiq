@@ -125,9 +125,13 @@ class SkillsTool(Node):
         one_line = instructions.instructions.replace("\n", " ").strip()
         preview = (one_line[:50] + "...") if len(one_line) > 50 else one_line
         logger.info(
-            "SkillsTool - get: skill=%s -> content received (%d chars), preview: %s",
+            "SkillsTool - get: skill=%s -> content received (%d chars)",
             skill_name,
             len(instructions.instructions),
+        )
+        logger.debug(
+            "SkillsTool - get: skill=%s preview: %s",
+            skill_name,
             preview,
         )
         return {"content": out}

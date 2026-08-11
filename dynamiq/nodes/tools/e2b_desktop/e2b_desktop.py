@@ -41,7 +41,6 @@ ACTION_SCHEMA_MAP: dict[E2BAction, type] = {
     E2BAction.LAUNCH: E2BLaunchSchema,
 }
 
-
 DESCRIPTION_E2B_DESKTOP = """## Sandbox Desktop Tool
 ### Overview
 Use this tool to control a virtual desktop by performing `computer`
@@ -323,7 +322,7 @@ class E2BDesktopTool(ConnectionNode):
                 reports.append({"name": name, "path": dest_path, "status": "error", "error": str(e)})
         if reports:
             self._uploads_report = reports
-            logger.info(f"E2BDesktopTool uploads: {reports}")
+            logger.debug(f"E2BDesktopTool uploads: {reports}")
 
     async def _init_client(self):
         """Initialize E2B desktop sandbox and stream (idempotent)."""
@@ -375,13 +374,12 @@ class E2BDesktopTool(ConnectionNode):
         Raises:
             ToolExecutionException: If the input is invalid or execution fails.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
         check_cancellation(config)
 
         await self._init_client()
 
         if input_data.files:
-            logger.info(f"E2BDesktopTool uploading files: {input_data.files}")
+            logger.debug(f"E2BDesktopTool uploading files: {input_data.files}")
             await self._upload_files(input_data.files)
         # E2B sandbox is initialized in _init_client; no separate VM instance step
 
@@ -392,8 +390,6 @@ class E2BDesktopTool(ConnectionNode):
                 raise ToolExecutionException(f"Error message: {e}", recoverable=True) from e
         else:
             raise ToolExecutionException(f"Invalid action_type: {input_data.action_type}", recoverable=True)
-
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
 
         # If inner result contains files, lift them to top-level for agent processing
         files = None
@@ -433,7 +429,8 @@ class E2BDesktopTool(ConnectionNode):
             )
 
         # Map actions to E2B Sandbox API
-        logger.info(f"E2BDesktopTool executing action={action_enum.value} params={params}")
+        logger.info(f"E2BDesktopTool executing action={action_enum.value}")
+        logger.debug(f"E2BDesktopTool executing action={action_enum.value} params={params}")
         files: list[io.BytesIO] | None = None
         if action_enum == E2BAction.MOVE_MOUSE:
             x, y = params["coordinates"]

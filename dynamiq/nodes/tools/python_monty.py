@@ -99,10 +99,6 @@ class PythonMonty(Node):
         Raises:
             ToolExecutionException: If ``pydantic_monty`` is unavailable or the user code fails.
         """
-        logger.info(
-            f"Tool {self.name} - {self.id}: started with INPUT DATA:\n"
-            f"{input_data.model_dump() if hasattr(input_data, 'model_dump') else input_data}"
-        )
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -133,7 +129,6 @@ class PythonMonty(Node):
             logger.error(error_msg)
             raise ToolExecutionException(error_msg, recoverable=True) from e
 
-        logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
         return self._format_result(result)
 
     def _format_result(self, result: Any) -> Any:
