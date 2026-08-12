@@ -2,6 +2,7 @@ from jsonpath_ng import parse
 from jsonpath_ng.exceptions import JsonPathParserError
 
 JSONPATH_EXPRESSION_PREFIXES = ("$", "@")
+COALESCE_SEPARATOR = "||"
 
 
 def is_jsonpath(path: str) -> bool:
@@ -19,6 +20,34 @@ def is_jsonpath(path: str) -> bool:
         return True
     except JsonPathParserError:
         return False
+
+
+def _coalesce(json: dict | list, path: str):
+    """
+    Resolve an ordered list of alternatives, e.g. "$.a.output.x || $.b.output.y".
+
+    Returns the value of the first candidate that resolves to something, or None.
+    A non-JSONPath candidate is treated as a literal default, so a trailing
+    "|| no result" always yields a populated field. Used when branches of a Choice
+    converge on a single field and only one of them produced a value.
+
+    Args:
+        json (dict | list): The input JSON object to resolve against.
+        path (str): Candidates separated by COALESCE_SEPARATOR.
+
+    Returns:
+        The first resolved value, or None if nothing resolved.
+    """
+    for candidate in (c.strip() for c in path.split(COALESCE_SEPARATOR)):
+        if not candidate:
+            continue
+        if not is_jsonpath(candidate):
+            return candidate
+        found = [match for match in parse(candidate).find(json) if match.value is not None]
+        if found:
+            return found[0].value if len(found) == 1 else [match.value for match in found]
+
+    return None
 
 
 def mapper(
@@ -52,6 +81,9 @@ def mapper(
 
     new_json = {}
     for key, path in expression_map.items():
+        if isinstance(path, str) and COALESCE_SEPARATOR in path:
+            new_json[key] = _coalesce(json, path)
+            continue
         if not is_jsonpath(path):
             new_json[key] = path
             continue
