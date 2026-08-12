@@ -125,7 +125,8 @@ class SandboxShellTool(Node):
         Returns:
             Dictionary with stdout, stderr, and exit_code from command execution.
         """
-        logger.info(f"Tool {self.name} - {self.id}: executing command: {input_data.command[:100]}...")
+        logger.info(f"Tool {self.name} - {self.id}: executing command")
+        logger.debug(f"Tool {self.name} - {self.id}: executing command: {input_data.command[:100]}...")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)

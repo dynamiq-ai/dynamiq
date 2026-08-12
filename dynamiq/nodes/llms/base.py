@@ -945,7 +945,7 @@ class BaseLLM(ConnectionNode):
             Dict of params ready to pass to _completion or _acompletion.
         """
         extra = copy.deepcopy(self.__pydantic_extra__)
-        params = self.connection.conn_params.copy()
+        params = self.connection.completion_params.copy()
         if include_sync_client and self.client and not isinstance(self.connection, HttpApiKey):
             params.update({"client": self.client})
         if self.thinking_enabled:

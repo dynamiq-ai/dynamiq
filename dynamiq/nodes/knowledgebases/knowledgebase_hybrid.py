@@ -298,7 +298,6 @@ class DynamiqKnowledgebaseHybridSearch(Node):
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
 
         run_depends = kwargs.get("run_depends", [])
         sub_kwargs = self._sub_run_kwargs(kwargs)
@@ -321,7 +320,6 @@ class DynamiqKnowledgebaseHybridSearch(Node):
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
 
         run_depends = kwargs.get("run_depends", [])
         sub_kwargs = self._sub_run_kwargs(kwargs)

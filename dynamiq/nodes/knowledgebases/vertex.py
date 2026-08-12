@@ -186,7 +186,20 @@ class VertexAIRagSearch(ConnectionNode):
         return location
 
     def _build_credentials(self) -> Any:
+        """Build service account credentials, or None to let the client resolve ADC itself.
+
+        `from_service_account_info` raises on an incomplete info dict rather than falling back,
+        so a connection carrying no usable service account must never reach it. Returning None
+        makes the google-cloud client call `google.auth.default()`, which is the same
+        Application Default Credentials path `VertexAI.conn_params` relies on for LiteLLM.
+        """
         connection = self.connection
+        if connection is None:
+            raise ValueError("A VertexAI connection is required to build credentials.")
+
+        if not connection.has_service_account_credentials:
+            return None
+
         info = {
             "type": "service_account",
             "project_id": connection.project_id,
@@ -423,7 +436,6 @@ class VertexAIRagSearch(ConnectionNode):
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
 
         request = self._prepare_request(input_data)
 
@@ -448,7 +460,6 @@ class VertexAIRagSearch(ConnectionNode):
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
 
         request = self._prepare_request(input_data)
 

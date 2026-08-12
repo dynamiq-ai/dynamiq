@@ -272,7 +272,6 @@ class TavilyTool(ConnectionNode):
         Returns:
             dict[str, Any]: The result of the search operation.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         check_cancellation(config)
@@ -297,7 +296,6 @@ class TavilyTool(ConnectionNode):
         self, input_data: TavilyInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Native async execution path mirroring ``execute``."""
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         check_cancellation(config)
@@ -383,7 +381,5 @@ class TavilyTool(ConnectionNode):
                 "auto_parameters": auto_parameters or {},
                 "search_parameters": request_payload,
             }
-
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
 
         return {"content": result}
