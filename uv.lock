@@ -1475,7 +1475,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.6,<3.2.0" },
     { name = "jsonpath-ng", specifier = ">=1.6.1,<1.7.0" },
     { name = "jsonpickle", specifier = ">=3.0.3,<3.1.0" },
-    { name = "litellm", specifier = ">=1.83.7,<2.0.0" },
+    { name = "litellm", specifier = ">=1.89.0,<2.0.0" },
     { name = "lxml", specifier = ">=6.1.0,<7.0.0" },
     { name = "markdown", specifier = ">=3.8.1,<4.0.0" },
     { name = "matplotlib", specifier = ">=3.10.7,<4.0.0" },

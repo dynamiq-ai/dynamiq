@@ -98,7 +98,6 @@ performance, use this option only when necessary, such as when encountering an i
    }
    ```
 
-
 ### Tips
 
 - !!! Always divide complex tasks into clear, isolated actions. For example:
@@ -414,9 +413,9 @@ class Stagehand(ConnectionNode):
         if self._steel_browser_session is None:
             self._steel_browser_session = await self._steel_client.sessions.create(**self.connection.session_config)
             if hasattr(self._steel_browser_session, "id"):
-                logger.info(f"Steel session created: {self._steel_browser_session.id}")
+                logger.debug(f"Steel session created: {self._steel_browser_session.id}")
             if hasattr(self._steel_browser_session, "session_viewer_url"):
-                logger.info(f"Steel session viewer: {self._steel_browser_session.session_viewer_url}")
+                logger.debug(f"Steel session viewer: {self._steel_browser_session.session_viewer_url}")
         return self._steel_browser_session
 
     def _upload_file_bytes_to_steel_browser_session(self, session_id: str, file_bytes: bytes, file_name: str) -> dict:
@@ -434,7 +433,7 @@ class Stagehand(ConnectionNode):
         response.raise_for_status()
         payload = response.json()
         if isinstance(payload, dict):
-            logger.info(f"Steel session files: {payload.get('data') or []}")
+            logger.debug(f"Steel session files: {payload.get('data') or []}")
             return payload.get("data") or []
         return []
 
@@ -505,7 +504,7 @@ class Stagehand(ConnectionNode):
                     file_obj.getvalue(),
                     file_obj.name,
                 )
-                logger.info(f"Uploaded {file_obj.name} to Steel session: {result}")
+                logger.debug(f"Uploaded {file_obj.name} to Steel session: {result}")
             return
 
         for file_obj in files:
@@ -513,7 +512,7 @@ class Stagehand(ConnectionNode):
                 file_obj.name = "uploaded_file"
 
             result = await self._browserbase_client.sessions.uploads.create(self._session_id, file=file_obj)
-            logger.info(f"Uploaded {file_obj.name}: {result}")
+            logger.debug(f"Uploaded {file_obj.name}: {result}")
 
     async def _init_client(
         self,
@@ -599,7 +598,7 @@ class Stagehand(ConnectionNode):
                         self._live_view_url = debug_info.debuggerFullscreenUrl
 
             if self._live_view_url:
-                logger.info(f"Live view URL: {self._live_view_url}")
+                logger.debug(f"Live view URL: {self._live_view_url}")
         except Exception as e:
             logger.warning(f"Could not fetch live view URL: {e}")
 
@@ -721,7 +720,6 @@ class Stagehand(ConnectionNode):
         Raises:
             ToolExecutionException: If the input is invalid or execution fails.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
         config = ensure_config(config)
         check_cancellation(config)
         shared_browser = await self._acquire_shared_browser()
@@ -779,13 +777,13 @@ class Stagehand(ConnectionNode):
 
                 file_chooser = await fc_info.value
                 if file_chooser:
-                    logger.info(f"{self.id} - {self.name} - Uploading file {input_data.files.name}")
+                    logger.debug(f"{self.id} - {self.name} - Uploading file {input_data.files.name}")
 
                     # Read file content and automatically detect MIME type
                     file_content = input_data.files.getvalue()
                     mime_type = guess_mime_type_from_bytes(file_content, input_data.files.name)
 
-                    logger.info(f"Detected MIME type: {mime_type} for file: {input_data.files.name}")
+                    logger.debug(f"Detected MIME type: {mime_type} for file: {input_data.files.name}")
 
                     await file_chooser.set_files(
                         [{"name": input_data.files.name, "mimeType": mime_type, "buffer": file_content}]
@@ -807,8 +805,6 @@ class Stagehand(ConnectionNode):
             StagehandActionType.UPLOAD,
         ):
             screenshot = await self._take_screenshot()
-
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
 
         response: dict[str, Any] = {"content": result}
         if files:

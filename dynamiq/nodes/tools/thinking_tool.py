@@ -213,8 +213,6 @@ Examples:
         context = input_data.context
         focus = input_data.focus
 
-        logger.debug(f"Tool {self.name} - {self.id}: started thinking process for thought: '{thought[:100]}...'")
-
         context_section = self._build_context_section(context, focus)
 
         prompt_content = self.prompt_template.format(thought=thought, context_section=context_section)

@@ -686,7 +686,6 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
         Raises:
             ToolExecutionException: If execution fails or invalid input provided.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n" f"{str(input_data.model_dump())[:300]}")
         config = ensure_config(config)
         check_cancellation(config)
 
@@ -854,7 +853,6 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
                 if files_list:
                     result_text += f"*Files uploaded: {', '.join(files_list)}*\n"
                     result_text += f"Note: Uploaded files are available under {self.input_dir}. "
-            logger.info(f"Tool {self.name} - {self.id}: finished with result:\n" f"{str(result_text)[:200]}...")
 
             return {"content": result_text, "files": files_bytesio}
 
@@ -866,7 +864,6 @@ class BaseCodeInterpreterTool(ConnectionNode, abc.ABC):
             except (json.JSONDecodeError, ValueError):
                 pass
 
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n" f"{str(content)[:200]}...")
         return {"content": content}
 
     def _create_sandbox_with_retry(self) -> Any:

@@ -252,14 +252,12 @@ class FirecrawlSearchTool(ConnectionNode):
             result = self._format_agent_response(query, data)
         else:
             result = {"success": search_result.get("success", False), "query": query, "data": data}
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
         return {"content": result}
 
     def execute(
         self, input_data: FirecrawlSearchInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Execute the search tool with the provided input data."""
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         check_cancellation(config)
@@ -285,7 +283,6 @@ class FirecrawlSearchTool(ConnectionNode):
         self, input_data: FirecrawlSearchInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Native async execution path mirroring ``execute``."""
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)

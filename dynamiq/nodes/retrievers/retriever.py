@@ -425,7 +425,6 @@ class VectorStoreRetriever(Node):
             dict[str, Any]: Result of the retrieval.
         """
 
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
         config = ensure_config(config)
         self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -510,7 +509,6 @@ class VectorStoreRetriever(Node):
                 retrieved_documents,
                 metadata_fields=self._resolve_formatted_metadata_fields(),
             )
-            logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
             return {"content": result, "documents": retrieved_documents}
         except Exception as e:
