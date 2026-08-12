@@ -20,6 +20,22 @@ CONTEXT_MANAGER_INSTRUCTIONS = """## Context Management
 - Use the context-manager tool proactively when conversation is getting long
 - Save critical info (IDs, filenames) in "notes" field BEFORE calling - previous messages will be summarized"""
 
+AGENT_NOTES_FILENAME = "agent_notes.md"
+
+PERSISTENT_NOTES_INSTRUCTIONS_TEMPLATE = """## Persistent Notes
+- Maintain a notes file at {notes_path} for details that must never be lost: user-provided values \
+(keys, credentials, IDs, URLs), decisions, and constraints.
+- Write such details to the file verbatim as soon as they appear; keep entries short, one per line.
+- Conversation history may be compacted at any time and the summary can drop exact values - \
+only the notes file keeps them verbatim.
+- When an observation says history was compacted, read {notes_path} before continuing."""
+
+NOTES_REVISIT_INSTRUCTION_TEMPLATE = (
+    "Conversation history was compacted. If the notes file {notes_path} exists, "
+    "read it before continuing - it keeps exact values (user-provided keys, IDs, decisions) "
+    "that the summary above may have dropped."
+)
+
 TODO_TOOLS_INSTRUCTIONS = """## Todo Management
 - Use the todo-write tool for complex 3+ step tasks; skip for simple requests
 - The todo-write result lists the full current todo list - re-read it there

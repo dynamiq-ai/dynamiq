@@ -1,9 +1,11 @@
 """Unit tests for HistoryManagerMixin — token-bounded _split_history and _compact_history."""
 
 import uuid
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
+from dynamiq.nodes.agents.prompts.secondary_instructions import AGENT_NOTES_FILENAME
 from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.prompts.prompts import Prompt
@@ -260,6 +262,57 @@ class TestCompactHistory:
         with patch.object(agent, "_split_history", wraps=agent._split_history) as spy:
             agent._compact_history(summary="A summary.")
             spy.assert_called_once()
+
+
+class TestPersistentNotes:
+    """get_notes_file_path resolution and the post-compaction revisit instruction."""
+
+    def test_no_file_capability_returns_none(self):
+        agent = FakeAgent(messages=[_system()])
+        assert agent.get_notes_file_path() is None
+
+    def test_sandbox_path_joined_with_base_path(self):
+        agent = FakeAgent(messages=[_system()])
+        agent.sandbox_backend = SimpleNamespace(base_path="/home/user/")
+        assert agent.get_notes_file_path() == f"/home/user/{AGENT_NOTES_FILENAME}"
+
+    def test_file_store_requires_write_access(self):
+        agent = FakeAgent(messages=[_system()])
+        agent.file_store = SimpleNamespace(enabled=True, agent_file_write_enabled=False)
+        assert agent.get_notes_file_path() is None
+
+        agent.file_store = SimpleNamespace(enabled=True, agent_file_write_enabled=True)
+        assert agent.get_notes_file_path() == AGENT_NOTES_FILENAME
+
+    def test_compact_appends_revisit_instruction_when_notes_available(self):
+        msgs = [
+            _system(),
+            _user("old message " * 1000),
+            _assistant("old response " * 1000),
+            _user("recent"),
+        ]
+        agent = FakeAgent(messages=msgs, max_preserved_tokens=500)
+        agent.sandbox_backend = SimpleNamespace(base_path="/home/user")
+
+        agent._compact_history(summary="A summary.")
+
+        summary_msg = agent._prompt.messages[1]
+        assert "A summary." in summary_msg.content
+        assert f"/home/user/{AGENT_NOTES_FILENAME}" in summary_msg.content
+        assert "read it before continuing" in summary_msg.content
+
+    def test_compact_without_notes_capability_has_no_revisit(self):
+        msgs = [
+            _system(),
+            _user("old message " * 1000),
+            _assistant("old response " * 1000),
+            _user("recent"),
+        ]
+        agent = FakeAgent(messages=msgs, max_preserved_tokens=500)
+
+        agent._compact_history(summary="A summary.")
+
+        assert all(AGENT_NOTES_FILENAME not in m.content for m in agent._prompt.messages)
 
 
 def _assistant_tc(content: str, tool_calls: list[dict]) -> Message:
