@@ -4,6 +4,8 @@ Exactly one branch runs per execution, so the other is SKIPPED. The workflow Out
 must still produce a result, while conditional branching itself stays strict.
 """
 
+import asyncio
+
 import pytest
 
 from dynamiq import Workflow
@@ -103,6 +105,20 @@ def test_choice_option_gate_is_still_enforced_with_extra_dependency():
 
     assert per_node["agent"]["status"] == RunnableStatus.SKIP.value
     assert per_node["output"]["output"] == {"output": "BLOCKED"}
+
+
+@pytest.mark.parametrize(
+    ("detected", "expected"),
+    [(False, "AGENT ANSWER"), (True, "BLOCKED")],
+)
+def test_output_runs_on_either_branch_async(detected, expected):
+    """The async executor validates dependencies on its own path; cover it too."""
+    workflow = build_workflow({"output": COALESCE})
+    result = asyncio.run(workflow.run_async(input_data={"detected": detected}, config=RunnableConfig()))
+    per_node = result.output or {}
+
+    assert per_node["output"]["status"] == RunnableStatus.SUCCESS.value
+    assert per_node["output"]["output"] == {"output": expected}
 
 
 def test_single_dependency_skip_still_propagates():

@@ -1,4 +1,6 @@
-from dynamiq.utils.jsonpath import COALESCE_SEPARATOR, mapper
+import pytest
+
+from dynamiq.utils.jsonpath import COALESCE_SEPARATOR, is_expression, mapper
 
 AGENT_RAN = {
     "agent": {"status": "success", "output": {"content": "AGENT ANSWER"}},
@@ -73,6 +75,49 @@ def test_coalesce_does_not_leak_the_expression_as_a_value():
     result = mapper(NEITHER_RAN, {"output": COALESCE})
     assert COALESCE_SEPARATOR not in str(result["output"])
     assert "$." not in str(result["output"])
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        "a || b",
+        "true || false",
+        "yes||no",
+        "Answer: A || B",
+        "0 || 1",
+        "x||y||z",
+        "|| leading",
+        "trailing ||",
+        "spaced  ||  out",
+        "||",
+    ],
+)
+def test_literal_values_containing_the_separator_are_preserved(literal):
+    """A value is only coalesced when an alternative is a rooted JSONPath.
+
+    A bare word parses as a valid JSONPath, so without the rooting check plain text
+    such as "a || b" would resolve to None and silently lose the user's value.
+    """
+    assert mapper(AGENT_RAN, {"output": literal}) == {"output": literal}
+
+
+def test_is_expression_requires_a_root():
+    assert is_expression("$.agent.output.content") is True
+    assert is_expression("@.content") is True
+    # Parses as a JSONPath but is not rooted, so it is a literal here.
+    assert is_expression("agent") is False
+    assert is_expression("a") is False
+    assert is_expression("no result") is False
+    # Never raises, whatever it is given.
+    assert is_expression("{{ template }}") is False
+    assert is_expression("$.broken[") is False
+    assert is_expression(None) is False
+
+
+def test_coalesce_needs_only_one_rooted_alternative():
+    result = mapper(AGENT_RAN, {"output": f"$.missing.output.x {COALESCE_SEPARATOR} plain words"})
+
+    assert result == {"output": "plain words"}
 
 
 def test_plain_jsonpath_is_unchanged():

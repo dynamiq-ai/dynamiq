@@ -22,27 +22,50 @@ def is_jsonpath(path: str) -> bool:
         return False
 
 
-def _coalesce(json: dict | list, path: str):
+def is_expression(path: str, expression_prefixes: tuple = JSONPATH_EXPRESSION_PREFIXES) -> bool:
+    """
+    Check whether a string is a rooted JSONPath expression rather than a literal value.
+
+    `is_jsonpath` alone is not enough here: a bare word such as "a" parses as a valid
+    JSONPath, so plain text would otherwise be mistaken for a path.
+
+    Args:
+        path (str): The string to be checked.
+        expression_prefixes (tuple): The prefixes a JSONPath expression must start with.
+
+    Returns:
+        bool: True if the string is a rooted JSONPath expression, False otherwise.
+    """
+    if not isinstance(path, str) or not path.startswith(expression_prefixes):
+        return False
+
+    try:
+        return is_jsonpath(path)
+    except Exception:
+        return False
+
+
+def _coalesce(json: dict | list, candidates: list[str], expression_prefixes: tuple):
     """
     Resolve an ordered list of alternatives, e.g. "$.a.output.x || $.b.output.y".
 
     Returns the value of the first candidate that resolves to something, or None.
-    A non-JSONPath candidate is treated as a literal default, so a trailing
+    A candidate that is not a rooted JSONPath is a literal default, so a trailing
     "|| no result" always yields a populated field. Used when branches of a Choice
     converge on a single field and only one of them produced a value.
 
     Args:
         json (dict | list): The input JSON object to resolve against.
-        path (str): Candidates separated by COALESCE_SEPARATOR.
+        candidates (list[str]): Alternatives, already split and stripped.
+        expression_prefixes (tuple): The prefixes of the JSONPath expressions.
 
     Returns:
         The first resolved value, or None if nothing resolved.
     """
-    for candidate in (c.strip() for c in path.split(COALESCE_SEPARATOR)):
-        if not candidate:
-            continue
-        if not is_jsonpath(candidate):
+    for candidate in candidates:
+        if not is_expression(candidate, expression_prefixes):
             return candidate
+
         found = [match for match in parse(candidate).find(json) if match.value is not None]
         if found:
             return found[0].value if len(found) == 1 else [match.value for match in found]
@@ -82,8 +105,13 @@ def mapper(
     new_json = {}
     for key, path in expression_map.items():
         if isinstance(path, str) and COALESCE_SEPARATOR in path:
-            new_json[key] = _coalesce(json, path)
-            continue
+            candidates = [c.strip() for c in path.split(COALESCE_SEPARATOR) if c.strip()]
+            # "||" only means "try these in order" when at least one alternative is a
+            # rooted JSONPath. Otherwise the value is ordinary text that happens to
+            # contain the characters, and must be preserved as-is.
+            if any(is_expression(candidate, expression_prefixes) for candidate in candidates):
+                new_json[key] = _coalesce(json, candidates, expression_prefixes)
+                continue
         if not is_jsonpath(path):
             new_json[key] = path
             continue
