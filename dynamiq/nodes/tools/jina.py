@@ -235,7 +235,6 @@ class JinaScrapeTool(ConnectionNode):
                     "remove_selector": headers.get("X-Remove-Selector"),
                 },
             }
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
         return {"content": result}
 
     def execute(self, input_data: JinaScrapeInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
@@ -250,7 +249,6 @@ class JinaScrapeTool(ConnectionNode):
         Returns:
             dict[str, Any]: Dictionary containing the scraped content and metadata
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         check_cancellation(config)
@@ -277,7 +275,6 @@ class JinaScrapeTool(ConnectionNode):
         self, input_data: JinaScrapeInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
         """Native async execution path mirroring ``execute``."""
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -666,7 +663,6 @@ class JinaSearchTool(ConnectionNode):
                 "include_full_content": include_full,
             }
 
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
         return {"content": result}
 
     def execute(self, input_data: JinaSearchInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
@@ -681,7 +677,6 @@ class JinaSearchTool(ConnectionNode):
         Returns:
             dict[str, Any]: A dictionary containing the search results.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -712,7 +707,6 @@ class JinaSearchTool(ConnectionNode):
         self, input_data: JinaSearchInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
         """Native async execution path mirroring ``execute``."""
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)

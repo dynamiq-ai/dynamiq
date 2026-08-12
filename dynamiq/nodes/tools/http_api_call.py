@@ -237,7 +237,6 @@ class HttpApiCall(ConnectionNode):
             raise ValueError(
                 f"Response type must be one of the following: {', '.join(allowed_types)}"
             )
-        logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n" f"{str(content)[:200]}...")
         return {"content": content, "status_code": response.status_code}
 
     def execute(self, input_data: HttpApiCallInputSchema, config: RunnableConfig = None, **kwargs):
@@ -259,7 +258,6 @@ class HttpApiCall(ConnectionNode):
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n" f"{input_data.model_dump()}")
 
         request_kwargs = self._build_request_kwargs(input_data)
 
@@ -278,7 +276,6 @@ class HttpApiCall(ConnectionNode):
         """Native async execution path mirroring ``execute``."""
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n" f"{input_data.model_dump()}")
 
         request_kwargs = self._build_request_kwargs(input_data)
         client = await self.get_async_client()

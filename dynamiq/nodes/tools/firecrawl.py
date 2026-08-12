@@ -348,14 +348,12 @@ class FirecrawlTool(ConnectionNode):
         else:
             result = {"success": scrape_result.get("success", False), "url": url, **(scrape_result.get("data") or {})}
             output = {"content": result}
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
         return output
 
     def execute(
         self, input_data: FirecrawlInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Execute the scraping tool with the provided input data."""
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         check_cancellation(config)
@@ -381,7 +379,6 @@ class FirecrawlTool(ConnectionNode):
         self, input_data: FirecrawlInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Native async execution path mirroring ``execute``."""
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)

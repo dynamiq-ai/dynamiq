@@ -153,6 +153,46 @@ def serialize_files_in_value(value: Any) -> Any:
     return value
 
 
+def _file_name_for_log(file_obj: Any, index: int | None = None) -> str:
+    """Return a log-safe label for a file-like object (name only, never content)."""
+    name = getattr(file_obj, "name", None)
+    if name:
+        return str(name)
+    if index is not None:
+        return f"file_{index}"
+    return "<unnamed file>"
+
+
+def format_value_for_log(value: Any) -> Any:
+    """Recursively replace BytesIO/bytes with file names for safe logging.
+
+    Mirrors :func:`serialize_files_in_value` structure but never embeds file content —
+    only ``name`` (or a ``file_{i}`` / ``<unnamed file>`` placeholder).
+    """
+    if isinstance(value, BytesIO):
+        return _file_name_for_log(value)
+    if isinstance(value, bytes):
+        return f"<bytes len={len(value)}>"
+    if isinstance(value, dict):
+        return {k: format_value_for_log(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [
+            _file_name_for_log(item, i) if isinstance(item, BytesIO) else format_value_for_log(item)
+            for i, item in enumerate(value)
+        ]
+    if isinstance(value, tuple):
+        return tuple(
+            _file_name_for_log(item, i) if isinstance(item, BytesIO) else format_value_for_log(item)
+            for i, item in enumerate(value)
+        )
+    if isinstance(value, BaseModel):
+        data = {k: format_value_for_log(getattr(value, k)) for k in type(value).model_fields}
+        if value.model_extra:
+            data.update({k: format_value_for_log(v) for k, v in value.model_extra.items()})
+        return data
+    return value
+
+
 def encode_bytes(value: bytes) -> str:
     """
     Encode a bytes object to an encoded string (lossy - for display/tracing).

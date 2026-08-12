@@ -6,6 +6,7 @@ from .utils import (
     encode,
     encode_reversible,
     format_value,
+    format_value_for_log,
     generate_uuid,
     is_called_from_async_context,
     merge,
