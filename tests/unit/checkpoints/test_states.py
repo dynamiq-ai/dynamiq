@@ -12,6 +12,8 @@ from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentCheckpo
 from dynamiq.nodes.tools import Python
 from dynamiq.nodes.tools.llm_summarizer import SummarizerTool
 from dynamiq.nodes.tools.thinking_tool import ThinkingTool
+from dynamiq.sandboxes.base import SandboxConfig
+from dynamiq.sandboxes.e2b import E2BSandbox
 from dynamiq.types.feedback import ApprovalInputData
 
 TEST_API_KEY = "test-api-key"
@@ -92,6 +94,91 @@ class TestAgentCheckpointState:
         assert new_agent._is_resumed is True
         assert new_agent.llm._is_fallback_run is True
         assert new_agent.llm._is_resumed is True
+
+
+class TestSandboxCheckpointState:
+    """Tests for sandbox reconnect info in Agent checkpoints."""
+
+    def _agent_with_sandbox(self, agent_id: str = "sbx-agent", sandbox_id: str | None = None) -> Agent:
+        return Agent(
+            id=agent_id,
+            name="Sandbox Agent",
+            llm=create_test_llm(f"{agent_id}-llm"),
+            role="Test",
+            goal="Test",
+            sandbox=SandboxConfig(
+                enabled=True,
+                backend=E2BSandbox(connection=connections.E2B(api_key=TEST_API_KEY), sandbox_id=sandbox_id),
+            ),
+        )
+
+    def test_no_sandbox_saves_none(self):
+        agent = Agent(
+            id="no-sbx-agent",
+            name="Agent",
+            llm=create_test_llm(),
+            role="Test",
+            goal="Test",
+        )
+        assert agent.to_checkpoint_state().sandbox_state is None
+
+    def test_unstarted_sandbox_saves_none(self):
+        agent = self._agent_with_sandbox()
+        assert agent.to_checkpoint_state().sandbox_state is None
+
+    def test_started_sandbox_saves_reconnect_info(self):
+        agent = self._agent_with_sandbox(sandbox_id="sbx-123")
+
+        state = agent.to_checkpoint_state()
+
+        assert state.sandbox_state == {
+            "type": agent.sandbox.backend.type,
+            "sandbox_id": "sbx-123",
+            "base_path": agent.sandbox.backend.base_path,
+        }
+
+    def test_restore_sets_sandbox_id_for_lazy_reconnect(self):
+        saved = self._agent_with_sandbox(agent_id="saved-agent", sandbox_id="sbx-123").to_checkpoint_state()
+
+        restored = self._agent_with_sandbox(agent_id="restored-agent")
+        restored.from_checkpoint_state(saved)
+
+        assert restored.sandbox.backend.sandbox_id == "sbx-123"
+
+    def test_restore_keeps_explicitly_configured_sandbox_id(self):
+        saved = self._agent_with_sandbox(agent_id="saved-agent", sandbox_id="sbx-123").to_checkpoint_state()
+
+        restored = self._agent_with_sandbox(agent_id="restored-agent", sandbox_id="sbx-explicit")
+        restored.from_checkpoint_state(saved)
+
+        assert restored.sandbox.backend.sandbox_id == "sbx-explicit"
+
+    def test_restore_skips_on_sandbox_type_mismatch(self):
+        restored = self._agent_with_sandbox(agent_id="restored-agent")
+        restored.from_checkpoint_state(
+            {"sandbox_state": {"type": "dynamiq.sandboxes.DaytonaSandbox", "sandbox_id": "sbx-123"}}
+        )
+
+        assert restored.sandbox.backend.sandbox_id is None
+
+    def test_restore_without_own_sandbox_is_noop(self):
+        agent = Agent(
+            id="no-sbx-agent",
+            name="Agent",
+            llm=create_test_llm(),
+            role="Test",
+            goal="Test",
+        )
+        agent.from_checkpoint_state({"sandbox_state": {"type": "dynamiq.sandboxes.E2BSandbox", "sandbox_id": "sbx-1"}})
+
+        assert agent._is_resumed is True
+
+    def test_old_checkpoint_without_sandbox_state_is_backward_compatible(self):
+        agent = self._agent_with_sandbox()
+        agent.from_checkpoint_state({"history_offset": 3})
+
+        assert agent._history_offset == 3
+        assert agent.sandbox.backend.sandbox_id is None
 
 
 class TestAgentCheckpointMixin:
