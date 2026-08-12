@@ -2,6 +2,7 @@
 
 from litellm import token_counter
 
+from dynamiq.nodes.agents.prompts.secondary_instructions import AGENT_NOTES_FILENAME, NOTES_REVISIT_INSTRUCTION_TEMPLATE
 from dynamiq.nodes.agents.utils import extract_message_text
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.utils.logger import logger
@@ -18,7 +19,24 @@ class HistoryManagerMixin:
       everything from this index onward is eligible for summarization.
     - name: str agent name
     - id: str agent id
+    - sandbox_backend / file_store (optional): file capabilities used to
+      resolve the persistent notes file path.
     """
+
+    def get_notes_file_path(self) -> str | None:
+        """Path of the dedicated persistent-notes file, or None without write access.
+
+        The file lives in the sandbox (or file store) so exact values survive
+        context compaction; the path is advertised in the system prompt and
+        re-surfaced in the compaction observation.
+        """
+        sandbox = getattr(self, "sandbox_backend", None)
+        if sandbox is not None:
+            return f"{sandbox.base_path.rstrip('/')}/{AGENT_NOTES_FILENAME}"
+        file_store = getattr(self, "file_store", None)
+        if file_store is not None and file_store.enabled and file_store.agent_file_write_enabled:
+            return AGENT_NOTES_FILENAME
+        return None
 
     def is_token_limit_exceeded(self) -> bool:
         """
@@ -108,6 +126,9 @@ class HistoryManagerMixin:
                 preserved_has_pinned = any(extract_message_text(m) == pinned_content for m in preserved)
                 if not preserved_has_pinned:
                     summary = f"{summary}\n\nOriginal request: {pinned_content}"
+
+            if notes_path := self.get_notes_file_path():
+                summary = f"{summary}\n\n{NOTES_REVISIT_INSTRUCTION_TEMPLATE.format(notes_path=notes_path)}"
 
             self._prompt.messages.append(
                 Message(role=MessageRole.USER, content=f"Observation: {summary}\n", static=True)

@@ -2056,6 +2056,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                         parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
                         delegation_allowed=self.delegation_allowed,
                         context_compaction_enabled=self.summarization_config.enabled,
+                        notes_file_path=self.get_notes_file_path(),
                         todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
                         or bool(self.sandbox_backend),
                         track_state=self.track_state,

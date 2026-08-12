@@ -27,6 +27,7 @@ from dynamiq.nodes.agents.prompts.secondary_instructions import (
     CONTEXT_MANAGER_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS_XML,
+    PERSISTENT_NOTES_INSTRUCTIONS_TEMPLATE,
     REACT_BLOCK_MULTI_TOOL_PLANNING,
     SANDBOX_INSTRUCTIONS_TEMPLATE,
     SUB_AGENT_INSTRUCTIONS,
@@ -46,6 +47,7 @@ class ReactPromptConfig(BaseModel):
     parallel_tool_calls_enabled: bool = False
     delegation_allowed: bool = False
     context_compaction_enabled: bool = False
+    notes_file_path: str | None = None
     todo_management_enabled: bool = False
     track_state: bool = False
     sandbox_base_path: str | None = None
@@ -317,6 +319,8 @@ class AgentPromptManager:
                 ops_parts.append(DELEGATION_INSTRUCTIONS)
         if config.context_compaction_enabled:
             ops_parts.append(CONTEXT_MANAGER_INSTRUCTIONS)
+            if config.notes_file_path:
+                ops_parts.append(PERSISTENT_NOTES_INSTRUCTIONS_TEMPLATE.format(notes_path=config.notes_file_path))
         if config.todo_management_enabled:
             ops_parts.append(TODO_TOOLS_INSTRUCTIONS_TRACKED if config.track_state else TODO_TOOLS_INSTRUCTIONS)
         if config.has_sub_agent_tools:
