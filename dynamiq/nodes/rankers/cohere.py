@@ -58,7 +58,6 @@ class CohereReranker(Node):
         Returns:
             dict[str, Any]: A dictionary containing the reranked documents.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)

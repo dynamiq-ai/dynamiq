@@ -483,11 +483,14 @@ class Memory(BaseModel):
 
                 relevant_messages = self.search(query=query, filters=filters, limit=search_limit)
 
-                message_dict = {msg.metadata.get("timestamp", 0): msg for msg in recent_messages}
-                for msg in relevant_messages:
-                    message_dict[msg.metadata.get("timestamp", 0)] = msg
+                # Keyed on identity, not timestamp alone: two messages written in the
+                # same tick -- or any message whose metadata lost its timestamp, which
+                # all collapse to 0 -- used to silently overwrite each other here.
+                message_dict: dict[Any, Message] = {}
+                for msg in [*recent_messages, *relevant_messages]:
+                    message_dict[self._dedup_key(msg)] = msg
 
-                messages = [msg for _, msg in sorted(message_dict.items())]
+                messages = sorted(message_dict.values(), key=lambda m: m.metadata.get("timestamp", 0))
             else:
                 messages = self.search(query=None, filters=filters, limit=search_limit)
 
@@ -496,6 +499,24 @@ class Memory(BaseModel):
         except Exception as e:
             logger.error(f"Error retrieving agent conversation: {e}")
             raise MemoryError(f"Failed to retrieve agent conversation: {e}") from e
+
+    @staticmethod
+    def _dedup_key(message: Message) -> Any:
+        """Stable identity for a message, used to merge recent + relevant result sets.
+
+        Prefers the backend-assigned ``message_id`` when present; otherwise falls back
+        to the content signature, which still distinguishes messages that share a
+        timestamp.
+        """
+        message_id = (message.metadata or {}).get("message_id")
+        if message_id is not None:
+            return ("id", message_id)
+        return (
+            "sig",
+            message.role.value,
+            message.content,
+            (message.metadata or {}).get("timestamp", 0),
+        )
 
     def _extract_valid_conversation(self, messages: list[Message], limit: int) -> list[Message]:
         """

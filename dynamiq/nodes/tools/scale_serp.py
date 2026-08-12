@@ -218,7 +218,6 @@ class ScaleSerpTool(ConnectionNode):
         """
         Executes the search using the Scale SERP API and returns the formatted results.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         check_cancellation(config)
@@ -238,7 +237,6 @@ class ScaleSerpTool(ConnectionNode):
         self, input_data: ScaleSerpInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Native async execution path mirroring ``execute``."""
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)

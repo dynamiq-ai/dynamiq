@@ -326,6 +326,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     _pinned_input: Message | VisionMessage | None = PrivateAttr(default=None)
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
+    # {node_id: {param: value}} from each tool's input_transformer; only selected values are kept.
+    _tool_input_overrides: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
     _sandbox_is_shared: bool = PrivateAttr(default=False)
     # A borrowed per-agent view of an owner's shared sandbox; when set it is this
     # agent's effective sandbox_backend for the whole run (tools, uploads, output).
@@ -649,6 +651,47 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         return custom_metadata
 
+    def transform_input(self, input_data: dict, depends_result: dict[Any, Any], **kwargs) -> dict:
+        """Transform as usual, and resolve any tool selectors while the dependencies are in scope.
+
+        A tool called by an agent has no dependencies of its own, so its selector is resolved here
+        instead — against everything the flow offered this node. Resolving now rather than at tool
+        call time means `$.<node_id>.output.x` works even when this agent's own selector narrows
+        its input, and only the selected values are kept.
+        """
+        self._tool_input_overrides = self._resolve_tool_input_overrides(input_data, depends_result)
+        return super().transform_input(input_data=input_data, depends_result=depends_result, **kwargs)
+
+    def _resolve_tool_input_overrides(
+        self, input_data: dict, depends_result: dict[Any, Any] | None
+    ) -> dict[str, dict[str, Any]]:
+        """Run each tool's own selector over this node's input, keeping just what it names.
+
+        The source is assembled locally and dropped on return — an upstream retriever's documents
+        are read through, never stored. ``None`` results are discarded so an unmatched path leaves
+        the parameter unset and the tool's own default stands.
+        """
+        targets = [node for tool in self.tools for node in (tool, getattr(tool, "agent", None)) if node is not None]
+        targets = [node for node in targets if node.input_transformer.path or node.input_transformer.selector]
+        if not targets:
+            return {}
+
+        source = dict(input_data) | {
+            key: {"status": result.status.value, "output": result.output}
+            for key, result in (depends_result or {}).items()
+        }
+
+        overrides: dict[str, dict[str, Any]] = {}
+        for node in targets:
+            try:
+                resolved = node.transform(source, node.input_transformer)
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: input_transformer of '{node.name}' failed: {e}")
+                continue
+            if isinstance(resolved, dict):
+                overrides[node.id] = {key: value for key, value in resolved.items() if value is not None}
+        return overrides
+
     def _clear_todos_file(self) -> None:
         """Delete the persisted todos file and reset in-memory todo state.
 
@@ -677,16 +720,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         """
         Executes the agent with the given input data.
         """
-        # Convert to dict only for logging (to avoid logging BytesIO objects)
-        log_data = input_data.model_dump()
-        if log_data.get("images"):
-            log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
-        if log_data.get("videos"):
-            log_data["videos"] = [f"video_{i}" for i in range(len(log_data["videos"]))]
-        if log_data.get("files"):
-            log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]
-
-        logger.info(f"Agent {self.name} - {self.id}: started with input {log_data}")
         self.reset_run_state()
 
         config = ensure_config(config)
@@ -906,8 +939,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                         f"Agent {self.name} - {self.id}: "
                         f"returning {len(sandbox_files)} requested file(s) from sandbox"
                     )
-
-            logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
             self._maybe_surface_live_view(execution_result, shared_session_token)
             return execution_result
@@ -1382,6 +1413,24 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             )
         return tool
 
+    def _apply_tool_input_transformer(self, tool: Node, tool_input: dict) -> bool:
+        """Merge what this tool's selector resolved to into the arguments the model produced.
+
+        Merged rather than replacing (the usual Node behavior for a transformer), because here the
+        input *is* the tool call: replacing it would mean re-listing every parameter the model is
+        allowed to send. Returns whether the tool declares a transformer, so the caller can stop
+        ``run_sync`` from applying it a second time.
+        """
+        if not (tool.input_transformer.path or tool.input_transformer.selector):
+            return False
+
+        injected = self._tool_input_overrides.get(tool.id, {})
+        if injected:
+            tool_input.update(injected)
+            if self.verbose:
+                logger.debug(f"Agent {self.name} - {self.id}: '{tool.name}' input_transformer set {injected}")
+        return True
+
     def _apply_parameters(self, merged_input: dict, params: dict, source: str, debug_info: list = None):
         """Apply parameters from the specified source to the merged input."""
         if debug_info is None:
@@ -1587,6 +1636,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
             self._inject_files_into_tool(resolved_agent or tool, merged_input)
 
+            # Before tool_params, so explicitly passed parameters still win over the declaration.
+            transformer_applied = self._apply_tool_input_transformer(resolved_agent or tool, merged_input)
+
             if tool_params:
                 debug_info = []
                 if self.verbose:
@@ -1629,6 +1681,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     logger.debug("\n".join(debug_info))
 
             child_kwargs = kwargs | {"recoverable_error": True}
+            if transformer_applied:
+                # Already resolved above, against a richer source; run_sync would re-apply it with
+                # replace semantics and throw the model's arguments away.
+                child_kwargs["use_input_transformer"] = False
 
             if is_child_agent and self._current_call_context:
                 child_context = self._build_child_agent_context(resolved_agent)
@@ -1969,7 +2025,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 logger.warning(f"Unsupported file type from tool '{tool.name}': {type(file)}")
 
         if stored_files:
-            logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
+            logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s)")
+            logger.debug(f"Tool '{tool.name}' generated file(s): {stored_files}")
         return stored_files
 
     def _upload_files_to_sandbox(self, normalized_files: list) -> list[str]:
@@ -2553,18 +2610,6 @@ class AgentManager(Agent):
         self, input_data: AgentManagerInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Executes the manager agent with the given input data and action."""
-        log_data = dict(input_data).copy()
-
-        if log_data.get("images"):
-            log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
-
-        if log_data.get("videos"):
-            log_data["videos"] = [f"video_{i}" for i in range(len(log_data["videos"]))]
-
-        if log_data.get("files"):
-            log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]
-
-        logger.info(f"Agent {self.name} - {self.id}: started with input {log_data}")
         self.reset_run_state()
         config = config or RunnableConfig()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -2578,12 +2623,9 @@ class AgentManager(Agent):
         _result_llm = self._actions[action](config=config, **kwargs)
         result = {"action": action, "result": _result_llm}
 
-        execution_result = {
+        return {
             "content": result,
         }
-        logger.info(f"Agent {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
-
-        return execution_result
 
     def _plan(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'plan' action."""

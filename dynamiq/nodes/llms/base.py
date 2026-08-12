@@ -5,7 +5,7 @@ import warnings
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
 
-from litellm import get_max_tokens, get_model_info, supports_function_calling, supports_vision
+from litellm import get_max_tokens, get_model_info, get_supported_openai_params, supports_vision
 from litellm.exceptions import (
     APIConnectionError,
     BudgetExceededError,
@@ -438,11 +438,13 @@ class BaseLLM(ConnectionNode):
         """Check if the LLM supports native function/tool calling."""
         if self.model_info and self.model_info.supports_function_calling is not None:
             return self.model_info.supports_function_calling
-        if self._get_litellm_model_info() is not None:
-            try:
-                return supports_function_calling(self.model)
-            except Exception:
-                return False
+        litellm_info = self._get_litellm_model_info()
+        if litellm_info is not None:
+            # Only an explicit value counts: litellm omits the flag on 688 of its 2285
+            # chat entries, and an omission is not a denial.
+            declared = litellm_info.get("supports_function_calling")
+            if declared is not None:
+                return bool(declared)
         custom = model_registry.supports_function_calling(self.model)
         if custom is not None:
             return custom
@@ -450,6 +452,13 @@ class BaseLLM(ConnectionNode):
             logger.warning(
                 "Model %s has a registry entry with no 'supports_function_calling' flag; "
                 "assuming it supports function calling. Set the flag to silence this.",
+                self.model,
+            )
+        elif litellm_info is not None:
+            logger.warning(
+                "Model %s has a litellm entry with no 'supports_function_calling' flag; "
+                "assuming it supports function calling. Add a registry entry or set "
+                "model_info.supports_function_calling to silence this.",
                 self.model,
             )
         else:
@@ -743,6 +752,43 @@ class BaseLLM(ConnectionNode):
             return False
         return (int(major), int(minor or 0)) >= cutoff
 
+    def _tool_params_to_force(self) -> list[str]:
+        """Params to push through litellm's per-model filter so ``tools`` is not dropped.
+
+        litellm filters request params against a per-model allowlist, and completions are
+        dispatched with ``drop_params=True``, so for a model litellm does not recognise
+        ``tools`` is deleted rather than sent. The model never sees a tool, the agent loops,
+        and the run fails with a max-loops error that names nothing. This affects models
+        litellm has not catalogued on providers that gate tools per model -- currently
+        together_ai, bedrock, sambanova, perplexity, anyscale and ollama.
+
+        Dropping ``temperature`` is harmless: the request still means the same thing.
+        Dropping ``tools`` changes what the request *is*, and the caller explicitly asked
+        for it, so force it through. A model that genuinely cannot use tools then fails
+        with the provider's own error, which is diagnosable.
+
+        Returns the ``allowed_openai_params`` value for this request -- litellm's own
+        per-request escape hatch, so nothing mutates the shared ``litellm.model_cost``.
+        That matters under concurrency: the alternative -- ``litellm.register_model`` --
+        writes to that dict without locking, and concurrent writes can raise
+        ``RuntimeError: dictionary changed size during iteration`` in anything iterating
+        it. Carrying the value on the request keeps parallel workflows independent.
+
+        Never raises -- a metadata check must not block dispatch.
+        """
+        try:
+            if "tools" in (get_supported_openai_params(model=self.model) or []):
+                return []
+            logger.debug(
+                "LLM '%s': litellm would strip 'tools' for model '%s'; forcing it through for this request.",
+                self.name,
+                self.model,
+            )
+            return ["tools", "tool_choice"]
+        except Exception as exc:  # noqa: BLE001 - metadata check, never fatal
+            logger.warning("LLM '%s': could not check tool forwarding for '%s': %s", self.name, self.model, exc)
+            return []
+
     def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """
         Updates or modifies the parameters for the completion method.
@@ -879,7 +925,7 @@ class BaseLLM(ConnectionNode):
             Dict of params ready to pass to _completion or _acompletion.
         """
         extra = copy.deepcopy(self.__pydantic_extra__)
-        params = self.connection.conn_params.copy()
+        params = self.connection.completion_params.copy()
         if include_sync_client and self.client and not isinstance(self.connection, HttpApiKey):
             params.update({"client": self.client})
         if self.thinking_enabled:
@@ -892,7 +938,9 @@ class BaseLLM(ConnectionNode):
             tools=tools,
             response_format=response_format,
         )
+        forced_tool_params: list[str] = []
         if tools:
+            forced_tool_params = self._tool_params_to_force()
             tools = self.transform_tool_schemas(tools)
             messages = self._sanitize_fc_messages(messages)
         # Check if a streaming callback is available in the config and enable streaming only if it is.
@@ -920,6 +968,8 @@ class BaseLLM(ConnectionNode):
         }
         if parallel_tool_calls is not None:
             common_params["parallel_tool_calls"] = parallel_tool_calls
+        if forced_tool_params:
+            common_params["allowed_openai_params"] = forced_tool_params
         if not tools and common_params.get("tool_choice") is not None:
             common_params.pop("tool_choice")
 

@@ -297,7 +297,6 @@ class Python(Node):
         Returns:
             Any: The result from code execution.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n" f"{input_data.model_dump()}")
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -327,8 +326,6 @@ class Python(Node):
             error_msg = f"Code execution error: {str(e)}"
             logger.error(error_msg)
             raise ToolExecutionException(error_msg, recoverable=True)
-
-        logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n" f"{str(result)[:200]}...")
 
         if isinstance(result, dict) and "content" in result:
             if self.is_optimized_for_agents:

@@ -235,7 +235,6 @@ class CypherExecutor(ConnectionNode):
         Raises:
             ToolExecutionException: If execution fails or the graph store is not initialized.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -255,9 +254,6 @@ class CypherExecutor(ConnectionNode):
                 )
                 result_payload["mode"] = input_data.mode
                 result_payload["content"] = self._build_schema_content(result_payload)
-                logger.info(
-                    f"Tool {self.name} - {self.id}: finished successfully. Content: {result_payload['content']}"
-                )
                 return result_payload
 
             if isinstance(input_data.query, list):
@@ -276,9 +272,6 @@ class CypherExecutor(ConnectionNode):
                     "results": results,
                 }
                 result_payload["content"] = self._build_batch_content(results, input_data.graph_return_enabled)
-                logger.info(
-                    f"Tool {self.name} - {self.id}: finished successfully. Content: {result_payload['content']}"
-                )
                 return result_payload
 
             result_payload = self._execute_single(
@@ -290,7 +283,6 @@ class CypherExecutor(ConnectionNode):
                 writes_allowed=input_data.writes_allowed,
             )
             result_payload["mode"] = input_data.mode
-            logger.info(f"Tool {self.name} - {self.id}: finished successfully. Content: {result_payload['content']}")
             return result_payload
         except Exception as exc:  # noqa: BLE001
             logger.error(f"Tool {self.name} - {self.id}: failed to execute Cypher. Error: {exc}")

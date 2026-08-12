@@ -272,18 +272,34 @@ def test_model_info_function_calling_override_takes_priority():
     assert llm.is_function_calling_supported is False
 
 
-def test_basellm_uses_litellm_when_model_is_known():
-    """When litellm knows the model, its FC verdict is used (registry not consulted)."""
+def test_basellm_uses_litellm_when_model_declares_support():
+    """A value litellm actually declares wins, and the registry is not consulted."""
     from dynamiq.connections import TogetherAI as TogetherAIConnection
     from dynamiq.nodes.llms.togetherai import TogetherAI
 
     llm = TogetherAI(model=MODEL_A, connection=TogetherAIConnection(api_key="test-key"))
     with (
         patch("dynamiq.nodes.llms.base.get_model_info", return_value={"supports_function_calling": False}),
-        patch("dynamiq.nodes.llms.base.supports_function_calling", return_value=False) as mock_fc,
+        patch.object(model_registry, "supports_function_calling") as mock_registry,
     ):
         assert llm.is_function_calling_supported is False
-        mock_fc.assert_called_once()
+        mock_registry.assert_not_called()
+
+
+def test_basellm_ignores_a_litellm_entry_that_omits_the_flag():
+    """An omission is not a denial.
+
+    litellm leaves ``supports_function_calling`` unset on ~688 of its 2285 chat entries,
+    and its ``supports_function_calling()`` helper reports those as False. Treating that
+    as a denial refuses function calling for models that support it, so an entry without
+    the flag must fall through to the registry / assume-True default.
+    """
+    from dynamiq.connections import TogetherAI as TogetherAIConnection
+    from dynamiq.nodes.llms.togetherai import TogetherAI
+
+    llm = TogetherAI(model=MODEL_A, connection=TogetherAIConnection(api_key="test-key"))
+    with patch("dynamiq.nodes.llms.base.get_model_info", return_value={"max_tokens": 4096}):
+        assert llm.is_function_calling_supported is True
 
 
 # ---------------------------------------------------------------------------
@@ -526,3 +542,25 @@ def test_minimax_m3_registry_preserves_tiered_pricing():
         prompt_tokens=512_001,
         completion_tokens=1,
     ) == pytest.approx((512_001 * 0.0000006, 0.0000024))
+
+
+def test_kimi_k3_resolves_to_structured_output_params_on_together():
+    """Registering K3 keeps it off XML inference mode.
+
+    Together's streaming API silently truncates Kimi K3 mid-sentence whenever a stop
+    sequence containing ``</output>`` is sent (``finish_reason`` still reports ``"stop"``),
+    and XML is the only inference mode that sets those stop sequences. Callers pick the
+    mode from litellm's reported params, so an unregistered K3 fell through to XML and
+    shipped truncated answers. The registry entry makes litellm report ``response_format``
+    support, steering callers to structured output, which sends no stop sequences at all.
+    """
+    import litellm
+
+    info = model_registry.get_model_info("moonshotai/kimi-k3")
+
+    assert info is not None
+    assert info["litellm_provider"] == "together_ai"
+    assert info["supports_response_schema"] is True
+
+    supported_params = litellm.get_supported_openai_params(model="together_ai/moonshotai/Kimi-K3") or []
+    assert "response_format" in supported_params

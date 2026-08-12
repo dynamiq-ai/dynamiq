@@ -664,21 +664,36 @@ def test_todo_tools_added_when_enabled(openai_node, mock_llm_executor):
     prompt = agent.generate_prompt()
     assert "Todo Management" in prompt, "TODO instructions should be in system prompt"
     assert "todo-write" in prompt, "todo-write tool should be mentioned in prompt"
+    assert "The todo-write result lists the full current todo list" in prompt
+
+
+def test_agent_does_not_append_state_to_llm_messages(openai_node, mocker):
+    """Agent bookkeeping must not alter the user message sent to the LLM."""
+    agent = Agent(name="Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    answer_result = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        output={"content": "Thought: Done.\nAnswer: Complete."},
+    )
+    mock_run_llm = mocker.patch.object(agent, "_run_llm", return_value=answer_result)
+
+    result = agent.run(input_data={"input": "do the thing"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    messages = mock_run_llm.call_args.kwargs["messages"]
+    user_message = next(message for message in messages if message.role == MessageRole.USER)
+    assert user_message.content == "do the thing"
 
 
 def test_agent_state_updates_with_todos(openai_node):
-    """Test that AgentState correctly updates and serializes todo state."""
+    """Test that AgentState correctly updates todo state."""
     from dynamiq.nodes.agents.agent import AgentState
     from dynamiq.nodes.tools.todo_tools import TodoItem, TodoStatus
 
     state = AgentState()
 
-    assert state.to_prompt_string() == ""
-
     state.max_loops = 15
     state.update_loop(3)
-    prompt_str = state.to_prompt_string()
-    assert "Progress: Loop 3/15" in prompt_str
+    assert state.current_loop == 3
 
     # Update with todos (accepts both dicts and TodoItem objects)
     state.update_todos(
@@ -688,11 +703,6 @@ def test_agent_state_updates_with_todos(openai_node):
             TodoItem(id="3", content="Third task", status=TodoStatus.PENDING),
         ]
     )
-    prompt_str = state.to_prompt_string()
-    assert "[+] 1: First task" in prompt_str, "Completed todo should show [+]"
-    assert "[~] 2: Second task" in prompt_str, "In-progress todo should show [~]"
-    assert "[ ] 3: Third task" in prompt_str, "Pending todo should show [ ]"
-
     # Verify todos are TodoItem instances
     assert all(isinstance(t, TodoItem) for t in state.todos)
 

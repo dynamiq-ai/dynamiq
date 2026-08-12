@@ -105,7 +105,6 @@ Optional fields passed in the input (beyond the ones above) are forwarded to Sta
    }
    ```
 
-
 ### Tips
 
 - !!! Always divide complex tasks into clear, isolated actions. For example:
@@ -486,16 +485,16 @@ class Stagehand(ConnectionNode):
         if self._steel_browser_session is None:
             self._steel_browser_session = await self._steel_client.sessions.create(**self.connection.session_config)
             if hasattr(self._steel_browser_session, "id"):
-                logger.info(f"Steel session created: {self._steel_browser_session.id}")
+                logger.debug(f"Steel session created: {self._steel_browser_session.id}")
             if hasattr(self._steel_browser_session, "session_viewer_url"):
-                logger.info(f"Steel session viewer: {self._steel_browser_session.session_viewer_url}")
+                logger.debug(f"Steel session viewer: {self._steel_browser_session.session_viewer_url}")
         return self._steel_browser_session
 
     async def _list_steel_browser_session_files(self, session_id: str) -> list:
         """List all files in the Steel session's filesystem."""
         listing = await self._steel_client.sessions.files.list(session_id)
         files = getattr(listing, "data", None) or []
-        logger.info(f"Steel session files: {files}")
+        logger.debug(f"Steel session files: {files}")
         return list(files)
 
     async def _download_steel_browser_session_files_archive(self, session_id: str) -> bytes:
@@ -568,7 +567,7 @@ class Stagehand(ConnectionNode):
                 result = await self._steel_client.sessions.files.upload(
                     session.id, file=(file_obj.name, file_obj.getvalue())
                 )
-                logger.info(f"Uploaded {file_obj.name} to Steel session: {result}")
+                logger.debug(f"Uploaded {file_obj.name} to Steel session: {result}")
             return
 
         self._browserbase_client = self._browserbase_client or AsyncBrowserbase(
@@ -579,7 +578,7 @@ class Stagehand(ConnectionNode):
                 file_obj.name = "uploaded_file"
 
             result = await self._browserbase_client.sessions.uploads.create(self._session_id, file=file_obj)
-            logger.info(f"Uploaded {file_obj.name}: {result}")
+            logger.debug(f"Uploaded {file_obj.name}: {result}")
 
     def _session_start_options(self) -> dict[str, Any]:
         """Session start parameters supplied via the connection (self_heal, system_prompt, ...).
@@ -765,7 +764,7 @@ class Stagehand(ConnectionNode):
                         self._live_view_url = debug_info.debuggerFullscreenUrl
 
             if self._live_view_url:
-                logger.info(f"Live view URL: {self._live_view_url}")
+                logger.debug(f"Live view URL: {self._live_view_url}")
         except Exception as e:
             logger.warning(f"Could not fetch live view URL: {e}")
 
@@ -947,7 +946,6 @@ class Stagehand(ConnectionNode):
         Raises:
             ToolExecutionException: If the input is invalid or execution fails.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
         config = ensure_config(config)
         check_cancellation(config)
         shared_browser = await self._acquire_shared_browser()
@@ -1030,13 +1028,13 @@ class Stagehand(ConnectionNode):
 
                 file_chooser = await fc_info.value
                 if file_chooser:
-                    logger.info(f"{self.id} - {self.name} - Uploading file {input_data.files.name}")
+                    logger.debug(f"{self.id} - {self.name} - Uploading file {input_data.files.name}")
 
                     # Read file content and automatically detect MIME type
                     file_content = input_data.files.getvalue()
                     mime_type = guess_mime_type_from_bytes(file_content, input_data.files.name)
 
-                    logger.info(f"Detected MIME type: {mime_type} for file: {input_data.files.name}")
+                    logger.debug(f"Detected MIME type: {mime_type} for file: {input_data.files.name}")
 
                     await file_chooser.set_files(
                         [{"name": input_data.files.name, "mimeType": mime_type, "buffer": file_content}]
@@ -1074,8 +1072,6 @@ class Stagehand(ConnectionNode):
             StagehandActionType.UPLOAD,
         ):
             screenshot = await self._take_screenshot()
-
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
 
         response: dict[str, Any] = {"content": result}
         if files:

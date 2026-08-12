@@ -758,7 +758,6 @@ class KnowledgeGraphRetriever(ConnectionNode):
 
     def execute(self, input_data: GraphRetrieverInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """Retrieve filtered graph context for the query and render it as Documents."""
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
         config = ensure_config(config)
         self.reset_run_state()
         check_cancellation(config)

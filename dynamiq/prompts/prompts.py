@@ -124,6 +124,10 @@ class Message(BaseModel):
             data["tool_call_id"] = self.tool_call_id
         if self.name is not None:
             data["name"] = self.name
+        # Kept out of the provider payload by format_messages()'s exclude, so carrying it
+        # here only affects round-trips (checkpoint restore, memory snapshots).
+        if self.metadata is not None:
+            data["metadata"] = self.metadata
         return data
 
     @classmethod
@@ -135,6 +139,7 @@ class Message(BaseModel):
             tool_calls=data.get("tool_calls"),
             tool_call_id=data.get("tool_call_id"),
             name=data.get("name"),
+            metadata=data.get("metadata"),
         )
 
 
