@@ -23,11 +23,12 @@ CONTEXT_MANAGER_INSTRUCTIONS = """## Context Management
 AGENT_NOTES_FILENAME = "agent_notes.md"
 
 PERSISTENT_NOTES_INSTRUCTIONS_TEMPLATE = """## Persistent Notes
-- Maintain a notes file at {notes_path} for details that must never be lost: user-provided values \
-(keys, credentials, IDs, URLs), decisions, and constraints.
-- Write such details to the file verbatim as soon as they appear; keep entries short, one per line.
-- Conversation history may be compacted at any time and the summary can drop exact values - \
-only the notes file keeps them verbatim.
+- {notes_path} is your durable copy of details that must never be lost. Conversation history \
+is compacted when it grows long, and the summary can drop exact values - only this file keeps them verbatim.
+- The moment the user or a tool provides an exact value you will need later (key, credential, \
+token, ID, URL, decision), IMMEDIATELY append it to {notes_path} as a separate step, BEFORE \
+starting the requested work.
+- Keep entries short, one per line, verbatim. Append new entries; do not rewrite existing ones.
 - When an observation says history was compacted, read {notes_path} before continuing."""
 
 NOTES_REVISIT_INSTRUCTION_TEMPLATE = (

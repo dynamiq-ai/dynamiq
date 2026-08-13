@@ -19,23 +19,20 @@ class HistoryManagerMixin:
       everything from this index onward is eligible for summarization.
     - name: str agent name
     - id: str agent id
-    - sandbox_backend / file_store (optional): file capabilities used to
-      resolve the persistent notes file path.
+    - sandbox_backend (optional): sandbox used to resolve the persistent
+      notes file path.
     """
 
     def get_notes_file_path(self) -> str | None:
-        """Path of the dedicated persistent-notes file, or None without write access.
+        """Path of the dedicated persistent-notes file, or None without a sandbox.
 
-        The file lives in the sandbox (or file store) so exact values survive
-        context compaction; the path is advertised in the system prompt and
+        The file lives in the sandbox so exact values survive context
+        compaction; the path is advertised in the system prompt and
         re-surfaced in the compaction observation.
         """
         sandbox = getattr(self, "sandbox_backend", None)
         if sandbox is not None:
             return f"{sandbox.base_path.rstrip('/')}/{AGENT_NOTES_FILENAME}"
-        file_store = getattr(self, "file_store", None)
-        if file_store is not None and file_store.enabled and file_store.agent_file_write_enabled:
-            return AGENT_NOTES_FILENAME
         return None
 
     def is_token_limit_exceeded(self) -> bool:

@@ -276,13 +276,11 @@ class TestPersistentNotes:
         agent.sandbox_backend = SimpleNamespace(base_path="/home/user/")
         assert agent.get_notes_file_path() == f"/home/user/{AGENT_NOTES_FILENAME}"
 
-    def test_file_store_requires_write_access(self):
+    def test_file_store_alone_does_not_enable_notes(self):
+        """Notes are sandbox-only; a writable file store must not advertise them."""
         agent = FakeAgent(messages=[_system()])
-        agent.file_store = SimpleNamespace(enabled=True, agent_file_write_enabled=False)
-        assert agent.get_notes_file_path() is None
-
         agent.file_store = SimpleNamespace(enabled=True, agent_file_write_enabled=True)
-        assert agent.get_notes_file_path() == AGENT_NOTES_FILENAME
+        assert agent.get_notes_file_path() is None
 
     def test_compact_appends_revisit_instruction_when_notes_available(self):
         msgs = [
