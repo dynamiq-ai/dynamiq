@@ -2,7 +2,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from dynamiq.connections import TogetherAI as TogetherAIConnection
 from dynamiq.nodes.llms.base import BaseLLM
+from dynamiq.nodes.llms.togetherai import TogetherAI
 from dynamiq.nodes.node import ErrorHandling
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.prompts import Message, MessageRole
@@ -36,6 +38,39 @@ def test_retry_raises_when_all_attempts_empty():
     with pytest.raises(ValueError, match="failed to generate summary after 3 attempts"):
         tool._call_llm_for_summary([Message(role=MessageRole.USER, content="x")])
     assert llm.run.call_count == 3
+
+
+def test_summary_retries_as_stream_for_streaming_only_model():
+    """Summarization runs outside the agent's streaming window, so it sends `stream: false`.
+    A streaming-only endpoint (e.g. together_ai/Qwen/Qwen3.7-Max) rejects that with a 400,
+    which used to fail the whole run; the request is retried as a stream instead.
+    """
+    llm = TogetherAI(name="t", model="Qwen/Qwen3.7-Max", connection=TogetherAIConnection(api_key="x"))
+    calls = []
+
+    def fake_completion(**params):
+        calls.append(params)
+        if not params.get("stream"):
+            raise Exception('Together_aiException - This model only supports streaming. Set "stream": true.')
+        return [MagicMock()]
+
+    summary = MagicMock()
+    summary.choices = [MagicMock(message=MagicMock(content="summary", tool_calls=None))]
+    summary.model_extra = {}
+    summary.usage = MagicMock(
+        prompt_tokens=0,
+        completion_tokens=0,
+        total_tokens=0,
+        prompt_tokens_details=None,
+        cache_read_input_tokens=None,
+        cache_creation_input_tokens=None,
+    )
+    llm._completion = fake_completion
+    llm._stream_chunk_builder = lambda chunks, messages: summary
+
+    tool = ContextManagerTool(llm=llm)
+    assert tool._call_llm_for_summary([Message(role=MessageRole.USER, content="x")]) == "summary"
+    assert [call["stream"] for call in calls] == [False, True]
 
 
 USER_PROMPT = "Compare the weather in Paris and Tokyo today."
