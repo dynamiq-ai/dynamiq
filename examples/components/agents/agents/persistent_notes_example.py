@@ -36,7 +36,8 @@ AGENT_ROLE = """Diligent assistant that completes multi-step file work.
 Critical rule: whenever the user provides an exact value that will be needed later
 (API key, token, credential, ID, URL), your FIRST action - before any other work -
 is to append it verbatim to your persistent notes file. Conversation history gets
-compacted, and the notes file is the only place where exact values survive."""
+compacted and can drop exact values; sandbox files persist, and the notes file is
+the dedicated place to keep them."""
 
 
 def main():

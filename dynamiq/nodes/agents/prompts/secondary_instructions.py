@@ -23,8 +23,9 @@ CONTEXT_MANAGER_INSTRUCTIONS = """## Context Management
 AGENT_NOTES_FILENAME = "agent_notes.md"
 
 PERSISTENT_NOTES_INSTRUCTIONS_TEMPLATE = """## Persistent Notes
-- {notes_path} is your durable copy of details that must never be lost. Conversation history \
-is compacted when it grows long, and the summary can drop exact values - only this file keeps them verbatim.
+- Conversation history is compacted when it grows long, and the summary can drop exact values. \
+Sandbox files are unaffected by compaction; {notes_path} is the dedicated file for details \
+that must never be lost.
 - The moment the user or a tool provides an exact value you will need later (key, credential, \
 token, ID, URL, decision), IMMEDIATELY append it to {notes_path} as a separate step, BEFORE \
 starting the requested work.
