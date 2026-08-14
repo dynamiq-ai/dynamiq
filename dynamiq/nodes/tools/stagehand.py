@@ -982,6 +982,53 @@ class Stagehand(ConnectionNode):
             retry_payload["options"] = options
             return await call(retry_payload)
 
+    async def _session_expired_error(
+        self, exc: NotFoundError, shared_browser: "SharedSession | None"
+    ) -> ToolExecutionException:
+        """Forget a session that is gone server-side and return the error to raise for it.
+
+        Raised both when a live session dies mid-action and when RESUMING one that expired between
+        turns, so it must be reachable from the session setup as well as the action itself.
+        """
+        # Steel owns the browser separately from the Stagehand session, so release it too —
+        # otherwise the retry either reattaches to a dead browser or strands a live one.
+        await self._release_steel_browser_session()
+        if shared_browser is not None and self._session_id:
+            # Clearing our own handles is not enough under sharing: the dead id is still the run's
+            # published session, so _join_shared_browser would hand it straight back and the retry
+            # would resume the same corpse. Retract it and the retry creates a new one.
+            shared_browser.invalidate_browser_session(self._session_id)
+        self._stagehand_session = None
+        self._session_id = None
+        self._live_view_url = None
+        self._cdp_url = None
+        # Our CDP connection points at the dead browser; a stale handle can still report
+        # connected, so drop it rather than let _ensure_page reuse it.
+        await self._close_playwright()
+        return ToolExecutionException(f"Browser session expired, retry will start a new one: {exc}", recoverable=True)
+
+    async def _start_session(self, shared_browser: "SharedSession | None") -> None:
+        """Attach this turn to a live browser session, creating or resuming one as needed.
+
+        Kept out of the action's try block on purpose: only NotFoundError is meaningful here (the
+        session we tried to resume is gone), and everything else must surface with its own taxonomy
+        rather than be flattened into a generic recoverable tool error.
+        """
+        create_shared_session = False
+        shared_context_id = None
+        if shared_browser:
+            await self._join_shared_browser(shared_browser)
+            create_shared_session = self._session_id is None  # nobody has created it yet: we do
+            shared_context_id = shared_browser.browser_context_id()
+        await self._init_client(shared_context_id, create_shared_session)
+        if shared_browser:
+            if create_shared_session:
+                self._record_shared_browser_session(shared_browser)
+                if self._stagehand_session is None:
+                    # Lost the creation race: our session was ended, attach to the winner's.
+                    await self._init_client(shared_context_id, create_shared_session=False)
+            shared_browser.set_browser_live_view_url(self._live_view_url)
+
     async def execute_async(
         self, input_data: StagehandInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
@@ -1000,20 +1047,13 @@ class Stagehand(ConnectionNode):
         config = ensure_config(config)
         check_cancellation(config)
         shared_browser = await self._acquire_shared_browser()
-        create_shared_session = False
-        shared_context_id = None
-        if shared_browser:
-            await self._join_shared_browser(shared_browser)
-            create_shared_session = self._session_id is None  # nobody has created it yet: we do
-            shared_context_id = shared_browser.browser_context_id()
-        await self._init_client(shared_context_id, create_shared_session)
-        if shared_browser:
-            if create_shared_session:
-                self._record_shared_browser_session(shared_browser)
-                if self._stagehand_session is None:
-                    # Lost the creation race: our session was ended, attach to the winner's.
-                    await self._init_client(shared_context_id, create_shared_session=False)
-            shared_browser.set_browser_live_view_url(self._live_view_url)
+        try:
+            await self._start_session(shared_browser)
+        except NotFoundError as e:
+            # The session we were told to resume is already gone. Under sharing that dead id is the
+            # run's published session, so without retracting it here every retry would be handed the
+            # same id again by _join_shared_browser and rediscover the same death.
+            raise await self._session_expired_error(e, shared_browser)
 
         tool_data = {"tool_session_id": self._session_id}
         self.run_on_node_execute_run(
@@ -1105,24 +1145,7 @@ class Stagehand(ConnectionNode):
             # Cancellation must reach the runner, not become a retryable tool observation.
             raise
         except NotFoundError as e:
-            # The session is gone server-side (timed out / released elsewhere): drop the local
-            # handle so the retried call starts a fresh session instead of failing forever.
-            # Steel owns the browser separately from the Stagehand session, so release it too —
-            # otherwise the retry either reattaches to a dead browser or strands a live one.
-            await self._release_steel_browser_session()
-            if shared_browser is not None and self._session_id:
-                # Clearing our own handles is not enough under sharing: the dead id is still the
-                # run's published session, so _join_shared_browser would hand it straight back and
-                # the retry would resume the same corpse. Retract it and the retry creates a new one.
-                shared_browser.invalidate_browser_session(self._session_id)
-            self._stagehand_session = None
-            self._session_id = None
-            self._live_view_url = None
-            self._cdp_url = None
-            # Our CDP connection points at the dead browser; a stale handle can still report
-            # connected, so drop it rather than let _ensure_page reuse it.
-            await self._close_playwright()
-            raise ToolExecutionException(f"Browser session expired, retry will start a new one: {e}", recoverable=True)
+            raise await self._session_expired_error(e, shared_browser)
         except (AuthenticationError, PermissionDeniedError) as e:
             # Bad credentials cannot be fixed by retrying the same call.
             raise ToolExecutionException(f"Error message: {e}", recoverable=False)

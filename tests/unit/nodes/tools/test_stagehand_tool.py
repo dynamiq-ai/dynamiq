@@ -450,6 +450,34 @@ class TestErrorTaxonomy:
         shared.end_browser_session()
         replacement_end.assert_called_once_with()
 
+    def test_a_session_that_died_between_turns_is_retracted_at_resume(self):
+        """The common shape: the turn opens by resuming an id that expired while nobody was driving.
+
+        The failure surfaces from session setup, not from the action, so recovery has to be reachable
+        from there too — otherwise the raw NotFoundError escapes and the dead id stays published.
+        """
+        shared = SharedSession(share_browser=True)
+        shared.adopt_browser_session_id("sess-1")
+        tool = bare_stagehand()
+        _stub_execute_scaffolding(tool, shared)
+
+        async def _join(ss):
+            tool._session_id = ss.browser_session_id()  # what the real _join_shared_browser does
+
+        async def _resume_dead_session(*args, **kwargs):
+            raise NotFoundError("gone", response=MagicMock(), body=None)
+
+        object.__setattr__(tool, "_join_shared_browser", _join)
+        object.__setattr__(tool, "_init_client", _resume_dead_session)
+        data = StagehandInputSchema(action_type=StagehandActionType.EXTRACT, instruction="get the title")
+
+        with pytest.raises(ToolExecutionException) as info:
+            asyncio.run(tool.execute_async(data))
+
+        assert info.value.recoverable is True
+        assert shared.browser_session_id() is None
+        assert tool._session_id is None
+
 
 class TestSharedSessionInvalidation:
     """Retracting a dead session is what lets a shared run recover instead of retrying forever."""
