@@ -14,6 +14,7 @@ from stagehand import AuthenticationError, InternalServerError, NotFoundError
 
 from dynamiq.connections import Browserbase as BrowserbaseConnection
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
+from dynamiq.nodes.agents.shared_session import SharedSession
 from dynamiq.nodes.tools.stagehand import Stagehand, StagehandActionType, StagehandInputSchema
 
 
@@ -53,13 +54,21 @@ def bare_stagehand(**attrs) -> Stagehand:
     return tool
 
 
-def _stub_execute_scaffolding(tool: Stagehand) -> None:
-    """Neutralize everything execute_async does around the action itself."""
+def _stub_execute_scaffolding(tool: Stagehand, shared: SharedSession | None = None) -> None:
+    """Neutralize everything execute_async does around the action itself.
+
+    Passing ``shared`` sends the tool down the shared-browser path with joining stubbed out, so
+    only the shared session's own bookkeeping is under test.
+    """
 
     async def _noop(*args, **kwargs):
         return None
 
-    object.__setattr__(tool, "_acquire_shared_browser", _noop)
+    async def _acquire(*args, **kwargs):
+        return shared
+
+    object.__setattr__(tool, "_acquire_shared_browser", _acquire)
+    object.__setattr__(tool, "_join_shared_browser", _noop)
     object.__setattr__(tool, "_init_client", _noop)
     object.__setattr__(tool, "run_on_node_execute_run", lambda *a, **k: None)
     object.__setattr__(tool, "is_return_screenshot_bytes_enabled", False)
@@ -380,7 +389,7 @@ class TestPageResolution:
 class TestErrorTaxonomy:
     """Agents retry recoverable errors; hopeless ones must not be marked recoverable."""
 
-    def _run_failing_action(self, tool, exc):
+    def _run_failing_action(self, tool, exc, shared: SharedSession | None = None):
         session = MagicMock()
 
         async def _raise(**kwargs):
@@ -388,7 +397,7 @@ class TestErrorTaxonomy:
 
         session.extract = _raise
         tool._stagehand_session = session
-        _stub_execute_scaffolding(tool)
+        _stub_execute_scaffolding(tool, shared)
         data = StagehandInputSchema(action_type=StagehandActionType.EXTRACT, instruction="get the title")
         with pytest.raises(ToolExecutionException) as info:
             asyncio.run(tool.execute_async(data))
@@ -422,3 +431,46 @@ class TestErrorTaxonomy:
 
         steel_client.sessions.release.assert_awaited_once_with("steel-1")
         assert tool._steel_browser_session is None
+
+    def test_missing_session_retracts_the_runs_shared_session(self):
+        """Otherwise _join_shared_browser hands the dead id back and the retry resumes a corpse."""
+        shared = SharedSession(share_browser=True)
+        shared.adopt_browser_session_id("sess-1")
+        shared.register_browser_end(lambda: None)
+        shared.set_browser_live_view_url("https://lv")
+        tool = bare_stagehand(_session_id="sess-1")
+
+        self._run_failing_action(tool, NotFoundError("gone", response=MagicMock(), body=None), shared=shared)
+
+        assert shared.browser_session_id() is None
+        assert shared.browser_live_view_url() is None
+        # The replacement must be able to register its own teardown, or it leaks at end of run.
+        replacement_end = MagicMock()
+        shared.register_browser_end(replacement_end)
+        shared.end_browser_session()
+        replacement_end.assert_called_once_with()
+
+
+class TestSharedSessionInvalidation:
+    """Retracting a dead session is what lets a shared run recover instead of retrying forever."""
+
+    def test_invalidation_clears_the_published_identity(self):
+        shared = SharedSession(share_browser=True)
+        shared.adopt_browser_session_id("sess-1")
+        shared.adopt_browser_context_id("ctx-1")
+
+        shared.invalidate_browser_session("sess-1")
+
+        assert shared.browser_session_id() is None
+        # The Context outlives any single session — it is what carries state across runs.
+        assert shared.browser_context_id() == "ctx-1"
+        assert shared.adopt_browser_session_id("sess-2") == "sess-2"
+
+    def test_a_straggler_cannot_retract_the_replacement(self):
+        """An agent failing on the previous session must not kill the session that replaced it."""
+        shared = SharedSession(share_browser=True)
+        shared.adopt_browser_session_id("sess-2")
+
+        shared.invalidate_browser_session("sess-1")
+
+        assert shared.browser_session_id() == "sess-2"

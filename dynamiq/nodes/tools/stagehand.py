@@ -1110,6 +1110,11 @@ class Stagehand(ConnectionNode):
             # Steel owns the browser separately from the Stagehand session, so release it too —
             # otherwise the retry either reattaches to a dead browser or strands a live one.
             await self._release_steel_browser_session()
+            if shared_browser is not None and self._session_id:
+                # Clearing our own handles is not enough under sharing: the dead id is still the
+                # run's published session, so _join_shared_browser would hand it straight back and
+                # the retry would resume the same corpse. Retract it and the retry creates a new one.
+                shared_browser.invalidate_browser_session(self._session_id)
             self._stagehand_session = None
             self._session_id = None
             self._live_view_url = None
