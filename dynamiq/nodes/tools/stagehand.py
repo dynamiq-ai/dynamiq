@@ -10,14 +10,8 @@ from urllib.parse import urlparse
 
 from browserbase import AsyncBrowserbase
 from playwright.async_api import async_playwright
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
-from stagehand import (
-    AsyncStagehand,
-    AuthenticationError,
-    InternalServerError,
-    NotFoundError,
-    PermissionDeniedError,
-)
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from stagehand import AsyncStagehand, AuthenticationError, InternalServerError, NotFoundError, PermissionDeniedError
 from steel import AsyncSteel
 
 from dynamiq.connections import Browserbase, SteelBrowser, SteelBrowserEnvironment
@@ -50,8 +44,11 @@ and extract structured data from web pages using natural language instructions.
 
 Optional fields passed in the input (beyond the ones above) are forwarded to Stagehand:
 - `schema`: (extract only) JSON Schema describing the structure of the data to extract.
-- `variables`: A mapping of variables to substitute in the instruction, e.g.
+- `variables`: (act, upload, observe) A mapping of variables to substitute in the instruction, e.g.
   {"username": "jdoe"} with instruction "type %username% into the login field".
+- `selector`: (extract, observe) CSS selector scoping the call to one part of the page.
+- `ignore_selectors`: (extract, observe) List of CSS selectors to exclude, e.g. cookie banners or
+  navigation chrome that would otherwise crowd out the content you asked for.
 - `frame_id`: Target a specific frame by id. Iframes are otherwise handled automatically.
 
 ### Usage Examples
@@ -123,17 +120,26 @@ d. Extract data from the results
 - Make sure you use 'upload' action instead of 'act' when you expect that file chooser will be opened.
 """
 
-# Input fields that map to per-call Stagehand options rather than top-level params, per action:
-# variables only exist for act (and upload, which acts under the hood); navigate options carry
-# no model/variables.
+# Input fields that map to per-call Stagehand options rather than top-level params. The option set
+# differs per action (stagehand 3.22.x session_{act,observe,extract,navigate}_params.Options), so a
+# field is accepted only for the actions whose API actually carries it:
+#   * variables — act/upload substitute values into the instruction; observe only exposes the NAMES
+#     so suggested actions come back as %placeholders% instead of literal secrets. extract has none.
+#   * selector / ignore_selectors — scope or prune the accessibility tree observe and extract read.
+#   * screenshot — extract only: include a viewport image in the extraction call.
+#   * referer / wait_until — navigate only.
 _OPTION_FIELDS_BY_ACTION = {
     "act": ("model", "timeout", "variables"),
     "upload": ("model", "timeout", "variables"),
-    "observe": ("model", "timeout"),
-    "extract": ("model", "timeout"),
-    "goto": ("timeout",),
+    "observe": ("ignore_selectors", "model", "selector", "timeout", "variables"),
+    "extract": ("ignore_selectors", "model", "screenshot", "selector", "timeout"),
+    "goto": ("referer", "timeout", "wait_until"),
     "go_back": (),
 }
+
+# Every field that is an option for at least one action. A field valid elsewhere but not for the
+# action at hand is dropped with a warning naming the action, rather than silently forwarded.
+_OPTION_FIELDS = tuple(sorted({field for fields in _OPTION_FIELDS_BY_ACTION.values() for field in fields}))
 
 # Seconds any single teardown step may take. Cleanup runs from close()/__del__, where an unbounded
 # wait can hang interpreter shutdown on a loop thread that is already frozen.
@@ -247,7 +253,9 @@ class Stagehand(ConnectionNode):
             "Model used to retry a single act/observe/extract call when the primary model's answer "
             "is rejected by Stagehand's structured-output validation. Recommended whenever the "
             "primary model is newer than the Stagehand server: retrying the same model cannot "
-            "recover (the server decodes deterministically), a different one does."
+            "recover (the server decodes deterministically), a different one does. Must come from "
+            "the same provider as model_name unless the connection routes through the Browserbase "
+            "Model Gateway (model_api_key unset), because one provider key serves both models."
         ),
     )
     is_return_screenshot_bytes_enabled: bool = Field(
@@ -297,6 +305,29 @@ class Stagehand(ConnectionNode):
     # reset_clone_resources MUST run first: it clears the shallow-copied loop reference so the
     # clone's init_loop does not stop the ORIGINAL instance's running loop.
     _clone_init_methods_names: ClassVar[list[str]] = ["reset_clone_resources", "init_loop", "init_call_lock"]
+
+    @model_validator(mode="after")
+    def warn_on_cross_provider_fallback(self):
+        """Warn when the fallback model cannot authenticate with the configured provider key.
+
+        ``model_api_key`` becomes a single ``x-model-api-key`` header covering every call on the
+        session, so a fallback from another provider authenticates with the wrong key and turns a
+        recoverable schema mismatch into a hard auth failure. Only the Browserbase Model Gateway
+        (``model_api_key`` unset) can serve two providers.
+        """
+        fallback = self.fallback_model_name
+        if not fallback or not getattr(self.connection, "model_api_key", None):
+            return self
+        primary_provider, _, _ = self.model_name.partition("/")
+        fallback_provider, _, _ = fallback.partition("/")
+        if primary_provider and fallback_provider and primary_provider != fallback_provider:
+            logger.warning(
+                f"Tool {self.name} - {self.id}: fallback_model_name '{fallback}' is from a different "
+                f"provider than model_name '{self.model_name}', but the connection supplies a single "
+                f"model_api_key. The fallback will fail to authenticate — use a '{primary_provider}/' "
+                f"model, or leave model_api_key unset to route through the Browserbase Model Gateway."
+            )
+        return self
 
     def reset_clone_resources(self):
         """Detach a clone from the original's live resources.
@@ -489,6 +520,24 @@ class Stagehand(ConnectionNode):
             if hasattr(self._steel_browser_session, "session_viewer_url"):
                 logger.debug(f"Steel session viewer: {self._steel_browser_session.session_viewer_url}")
         return self._steel_browser_session
+
+    async def _release_steel_browser_session(self) -> None:
+        """Best-effort release of the Steel session, then drop the handle.
+
+        No-op off the Steel path. Releasing is best-effort because the caller is already handling
+        a failure: an unreachable Steel API must not mask the original error.
+        """
+        session = self._steel_browser_session
+        if session is None:
+            return
+        self._steel_browser_session = None
+        session_id = getattr(session, "id", None)
+        if not session_id or self._steel_client is None:
+            return
+        try:
+            await self._steel_client.sessions.release(session_id)
+        except Exception as exc:
+            logger.warning(f"Failed to release Steel session {session_id}: {exc}")
 
     async def _list_steel_browser_session_files(self, session_id: str) -> list:
         """List all files in the Steel session's filesystem."""
@@ -712,19 +761,20 @@ class Stagehand(ConnectionNode):
 
         Needed only for operations the Stagehand API does not cover: file choosers, history
         navigation and screenshots.
+
+        The CONNECTION is cached but the page is re-resolved on every call. Stagehand runs
+        server-side and may have moved to a tab we never saw (a link opening in a new window, a
+        popup): a cached handle would then screenshot, go back on, or wait for a file chooser on
+        the tab the user has already left. Re-resolving costs nothing — the driver keeps
+        ``context.pages`` locally.
         """
-        if self._pw_page is not None:
-            try:
-                if not self._pw_page.is_closed():
-                    return self._pw_page
-            except Exception as exc:
-                logger.debug(f"Stale playwright page handle, reconnecting: {exc}")
         if self._playwright is None:
             self._playwright = await async_playwright().start()
         if self._pw_browser is None or not self._pw_browser.is_connected():
             self._pw_browser = await self._playwright.chromium.connect_over_cdp(await self._get_connect_cdp_url())
         context = self._pw_browser.contexts[0] if self._pw_browser.contexts else await self._pw_browser.new_context()
-        self._pw_page = context.pages[-1] if context.pages else await context.new_page()
+        open_pages = [page for page in context.pages if not page.is_closed()]
+        self._pw_page = open_pages[-1] if open_pages else await context.new_page()
         return self._pw_page
 
     async def _close_playwright(self) -> None:
@@ -875,14 +925,15 @@ class Stagehand(ConnectionNode):
     def _build_call_kwargs(self, payload: dict[str, Any], action_type: StagehandActionType) -> dict[str, Any]:
         """Map extra input fields onto Stagehand v3 call parameters.
 
-        Top-level `model`/`timeout`/`variables` fold into `options`; `schema` is passed through for
-        extract; unknown fields are dropped with a warning instead of failing the whole call.
+        Top-level option fields (`model`, `variables`, `selector`, ...) fold into `options`;
+        `schema` is passed through for extract; unknown fields are dropped with a warning instead
+        of failing the whole call.
         """
         payload = dict(payload)
         call_kwargs: dict[str, Any] = {}
         options = dict(payload.pop("options", None) or {})
         allowed_options = _OPTION_FIELDS_BY_ACTION.get(action_type.value, ())
-        for key in ("model", "timeout", "variables"):
+        for key in _OPTION_FIELDS:
             if key in payload:
                 if key in allowed_options:
                     options[key] = payload.pop(key)
@@ -1023,8 +1074,12 @@ class Stagehand(ConnectionNode):
                 # timeout: if act clicked something that never opens a chooser, an hour-long hold
                 # of the call lock (and shared page control) would starve every other agent.
                 chooser_timeout_ms = min(self.timeout, 300) * 1000
+                # The fallback retry stays INSIDE the waiter: its click is the one that opens the
+                # chooser when the primary model's answer was unusable.
                 async with page.expect_file_chooser(timeout=chooser_timeout_ms) as fc_info:
-                    response_obj = await session.act(input=input_data.instruction, **payload)
+                    response_obj = await self._call_with_model_fallback(
+                        lambda p: session.act(input=input_data.instruction, **p), "upload", payload
+                    )
 
                 file_chooser = await fc_info.value
                 if file_chooser:
@@ -1052,10 +1107,16 @@ class Stagehand(ConnectionNode):
         except NotFoundError as e:
             # The session is gone server-side (timed out / released elsewhere): drop the local
             # handle so the retried call starts a fresh session instead of failing forever.
+            # Steel owns the browser separately from the Stagehand session, so release it too —
+            # otherwise the retry either reattaches to a dead browser or strands a live one.
+            await self._release_steel_browser_session()
             self._stagehand_session = None
             self._session_id = None
             self._live_view_url = None
             self._cdp_url = None
+            # Our CDP connection points at the dead browser; a stale handle can still report
+            # connected, so drop it rather than let _ensure_page reuse it.
+            await self._close_playwright()
             raise ToolExecutionException(f"Browser session expired, retry will start a new one: {e}", recoverable=True)
         except (AuthenticationError, PermissionDeniedError) as e:
             # Bad credentials cannot be fixed by retrying the same call.
@@ -1143,6 +1204,9 @@ class Stagehand(ConnectionNode):
             self._playwright = None
             # Clear the (now-terminated) session id so a later run starts fresh, not on a dead id.
             self._session_id = None
+            # Sharing is re-established per turn by _join_shared_browser. Leaving this set would
+            # make a later UNSHARED run detach instead of end, stranding its session.
+            self._shares_browser_session = False
             self.close_loop()
 
     def __del__(self):

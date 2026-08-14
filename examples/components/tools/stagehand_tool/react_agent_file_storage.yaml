@@ -20,7 +20,6 @@ nodes:
         type: dynamiq.nodes.tools.Stagehand
         connection: stagehand-conn
         model_name: openai/gpt-4o
-        fallback_model_name: anthropic/claude-sonnet-4-6
     role: "a helpful assistant capable of retaining context and answering questions effectively using file storage."
     file_store:
       enabled: true

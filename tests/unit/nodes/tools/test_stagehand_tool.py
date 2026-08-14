@@ -5,11 +5,14 @@ covered separately in tests/unit/nodes/agents/test_browser_sharing_wiring.py.
 """
 
 import asyncio
-from unittest.mock import MagicMock
+import io
+import logging
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from stagehand import AuthenticationError, InternalServerError, NotFoundError
 
+from dynamiq.connections import Browserbase as BrowserbaseConnection
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.tools.stagehand import Stagehand, StagehandActionType, StagehandInputSchema
 
@@ -50,6 +53,32 @@ def bare_stagehand(**attrs) -> Stagehand:
     return tool
 
 
+def _stub_execute_scaffolding(tool: Stagehand) -> None:
+    """Neutralize everything execute_async does around the action itself."""
+
+    async def _noop(*args, **kwargs):
+        return None
+
+    object.__setattr__(tool, "_acquire_shared_browser", _noop)
+    object.__setattr__(tool, "_init_client", _noop)
+    object.__setattr__(tool, "run_on_node_execute_run", lambda *a, **k: None)
+    object.__setattr__(tool, "is_return_screenshot_bytes_enabled", False)
+    object.__setattr__(tool, "is_return_live_view_url_enabled", False)
+
+
+class _FakeChooserWait:
+    """Stand-in for page.expect_file_chooser(...): an async CM exposing an awaitable `value`."""
+
+    def __init__(self, chooser):
+        self._chooser = chooser
+
+    async def __aenter__(self):
+        return MagicMock(value=asyncio.sleep(0, result=self._chooser))
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+
 class TestCallKwargsMapping:
     """Extra input fields must map onto the parameters each v3 action actually accepts."""
 
@@ -87,6 +116,39 @@ class TestCallKwargsMapping:
         tool = bare_stagehand()
         kwargs = tool._build_call_kwargs({"nonsense": 1, "iframes": True}, StagehandActionType.ACT)
         assert kwargs == {}
+
+    def test_variables_are_kept_for_observe(self):
+        """observe takes variables to return %placeholders% instead of literal secrets."""
+        tool = bare_stagehand()
+        kwargs = tool._build_call_kwargs({"variables": {"password": "hunter2"}}, StagehandActionType.OBSERVE)
+        assert kwargs["options"]["variables"] == {"password": "hunter2"}
+
+    def test_selectors_scope_extract_and_observe(self):
+        tool = bare_stagehand()
+        payload = {"selector": "#main", "ignore_selectors": [".cookie-banner"]}
+        for action in (StagehandActionType.EXTRACT, StagehandActionType.OBSERVE):
+            options = tool._build_call_kwargs(dict(payload), action)["options"]
+            assert options["selector"] == "#main"
+            assert options["ignore_selectors"] == [".cookie-banner"]
+
+    def test_selectors_dropped_for_act(self):
+        """act has no selector options; forwarding them would be rejected server-side."""
+        tool = bare_stagehand()
+        assert tool._build_call_kwargs({"selector": "#main"}, StagehandActionType.ACT) == {}
+
+    def test_screenshot_option_is_extract_only(self):
+        tool = bare_stagehand()
+        assert tool._build_call_kwargs({"screenshot": True}, StagehandActionType.EXTRACT)["options"] == {
+            "screenshot": True
+        }
+        assert tool._build_call_kwargs({"screenshot": True}, StagehandActionType.OBSERVE) == {}
+
+    def test_navigation_options_pass_through_for_goto(self):
+        tool = bare_stagehand()
+        kwargs = tool._build_call_kwargs(
+            {"wait_until": "networkidle", "referer": "https://example.com"}, StagehandActionType.GOTO
+        )
+        assert kwargs["options"] == {"wait_until": "networkidle", "referer": "https://example.com"}
 
 
 class TestSessionStartOptions:
@@ -221,6 +283,99 @@ class TestModelFallback:
         asyncio.run(tool._call_with_model_fallback(call, "observe", payload))
         assert payload == {"options": {"timeout": 5000}}
 
+    def test_upload_retries_inside_the_file_chooser_wait(self):
+        """upload acts under the hood, so it needs the fallback too — and the retry's click is
+        the one that must be caught by the still-open chooser waiter."""
+        tool = bare_stagehand(fallback_model_name="anthropic/claude-sonnet-4-6")
+        chooser = MagicMock(set_files=AsyncMock())
+        page = MagicMock(expect_file_chooser=lambda **kw: _FakeChooserWait(chooser))
+        attempts = []
+
+        async def act(*, input, **params):
+            attempts.append(params)
+            if len(attempts) == 1:
+                raise _schema_error()
+            return MagicMock(data=MagicMock(result=MagicMock(model_dump=lambda: {"success": True})))
+
+        session = MagicMock(act=act)
+        tool._stagehand_session = session
+        _stub_execute_scaffolding(tool)
+        object.__setattr__(tool, "_ensure_page", AsyncMock(return_value=page))
+
+        upload = io.BytesIO(b"col_a,col_b\n1,2\n")
+        upload.name = "report.csv"
+        result = asyncio.run(
+            tool.execute_async(
+                StagehandInputSchema(action_type=StagehandActionType.UPLOAD, instruction="click Upload", files=upload)
+            )
+        )
+
+        assert len(attempts) == 2
+        assert attempts[1]["options"]["model"] == "anthropic/claude-sonnet-4-6"
+        assert result["content"] == {"success": True}
+        chooser.set_files.assert_awaited_once()
+
+
+class TestCrossProviderFallbackWarning:
+    """One model_api_key serves both models, so a fallback from another provider cannot authenticate."""
+
+    def _tool(self, **kwargs) -> Stagehand:
+        connection = BrowserbaseConnection(
+            browserbase_api_key="bb-key",
+            browserbase_project_id="proj-1",
+            model_api_key=kwargs.pop("model_api_key", "openai-key"),
+        )
+        return Stagehand(connection=connection, is_postponed_component_init=True, **kwargs)
+
+    def test_warns_when_providers_differ(self, caplog):
+        with caplog.at_level(logging.WARNING):
+            self._tool(model_name="openai/gpt-4o", fallback_model_name="anthropic/claude-sonnet-4-6")
+        assert "different provider" in caplog.text
+
+    def test_silent_when_providers_match(self, caplog):
+        with caplog.at_level(logging.WARNING):
+            self._tool(model_name="anthropic/claude-sonnet-5", fallback_model_name="anthropic/claude-sonnet-4-6")
+        assert "different provider" not in caplog.text
+
+    def test_silent_without_a_provider_key(self, caplog):
+        """No key means the Browserbase Model Gateway, which can serve both providers."""
+        with caplog.at_level(logging.WARNING):
+            self._tool(
+                model_api_key=None,
+                model_name="openai/gpt-4o",
+                fallback_model_name="anthropic/claude-sonnet-4-6",
+            )
+        assert "different provider" not in caplog.text
+
+
+class TestPageResolution:
+    """Stagehand runs server-side and may have moved to a tab we never saw."""
+
+    def _connected_browser(self, pages):
+        context = MagicMock(pages=pages)
+        return MagicMock(contexts=[context], is_connected=MagicMock(return_value=True))
+
+    def test_newest_open_page_wins_over_the_previous_handle(self):
+        """A popup opened by act must be the one we screenshot / go back on / upload through."""
+        first, popup = MagicMock(), MagicMock()
+        first.is_closed.return_value = False
+        popup.is_closed.return_value = False
+        tool = bare_stagehand(
+            _playwright=MagicMock(),
+            _pw_browser=self._connected_browser([first, popup]),
+            _pw_page=first,
+        )
+
+        assert asyncio.run(tool._ensure_page()) is popup
+
+    def test_closed_pages_are_skipped(self):
+        live, closed = MagicMock(), MagicMock()
+        live.is_closed.return_value = False
+        closed.is_closed.return_value = True
+        tool = bare_stagehand(_playwright=MagicMock(), _pw_browser=self._connected_browser([live, closed]))
+
+        assert asyncio.run(tool._ensure_page()) is live
+
 
 class TestErrorTaxonomy:
     """Agents retry recoverable errors; hopeless ones must not be marked recoverable."""
@@ -233,15 +388,7 @@ class TestErrorTaxonomy:
 
         session.extract = _raise
         tool._stagehand_session = session
-
-        async def _noop(*args, **kwargs):
-            return None
-
-        object.__setattr__(tool, "_acquire_shared_browser", _noop)
-        object.__setattr__(tool, "_init_client", _noop)
-        object.__setattr__(tool, "run_on_node_execute_run", lambda *a, **k: None)
-        object.__setattr__(tool, "is_return_screenshot_bytes_enabled", False)
-        object.__setattr__(tool, "is_return_live_view_url_enabled", False)
+        _stub_execute_scaffolding(tool)
         data = StagehandInputSchema(action_type=StagehandActionType.EXTRACT, instruction="get the title")
         with pytest.raises(ToolExecutionException) as info:
             asyncio.run(tool.execute_async(data))
@@ -260,3 +407,18 @@ class TestErrorTaxonomy:
         assert tool._session_id is None
         assert tool._stagehand_session is None
         assert tool._live_view_url is None
+
+    def test_missing_session_releases_the_steel_browser(self):
+        """Steel owns the browser separately: leaving it running would strand a paid session."""
+        steel_client = MagicMock()
+        steel_client.sessions.release = AsyncMock()
+        tool = bare_stagehand(
+            _session_id="steel-1",
+            _steel_client=steel_client,
+            _steel_browser_session=MagicMock(id="steel-1"),
+        )
+
+        self._run_failing_action(tool, NotFoundError("gone", response=MagicMock(), body=None))
+
+        steel_client.sessions.release.assert_awaited_once_with("steel-1")
+        assert tool._steel_browser_session is None
