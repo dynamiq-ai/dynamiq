@@ -98,6 +98,8 @@ print(result.output)
 An agent that has the access to E2B Code Interpreter and is capable of solving complex coding tasks.
 
 ```python
+import asyncio
+
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.connections import OpenAI as OpenAIConnection, E2B as E2BConnection
 from dynamiq.nodes.agents import Agent
