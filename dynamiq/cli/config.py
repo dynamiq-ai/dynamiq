@@ -24,6 +24,39 @@ DYNAMIQ_BASE_URL = "https://api.getdynamiq.ai"
 # }
 
 
+def _restrict_permissions(path: Path, mode: int) -> None:
+    """Tighten a path's mode, ignoring filesystems that cannot express it.
+
+    Best effort: Windows and some mounts raise on chmod, and refusing to read or write
+    credentials there would be worse than leaving the mode alone.
+    """
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        pass
+
+
+def _write_private_text(path: Path, text: str) -> None:
+    """Write text to a file only its owner can read.
+
+    ``Path.write_text`` leaves the mode to the umask, which is 0022 on most systems and
+    lands an API key at 0644. A new file is created 0600; an existing one keeps its old
+    mode until the chmod below, since ``O_CREAT`` does not touch the mode of a file that
+    already exists. What closes that window is the caller tightening the parent
+    directory to 0700 *before* calling this — do not reorder those two steps.
+
+    Best effort: filesystems without POSIX permissions (Windows, some mounts) raise on
+    chmod, and failing to save credentials there would be worse than saving them
+    without a mode change.
+    """
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    # Wrapped in a file object so a short write (a quota or disk-full boundary) raises
+    # instead of silently truncating the credentials.
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    _restrict_permissions(path, 0o600)
+
+
 class Settings(BaseModel):
     org_id: str | None = Field(default=None)
     project_id: str | None = Field(default=None)
@@ -62,6 +95,10 @@ class Settings(BaseModel):
             except json.JSONDecodeError as exc:
                 raise SystemExit(f"❌ Corrupted config file at {_CONFIG_FILE_PATH}: {exc}") from exc
         if _CREDS_FILE_PATH.exists():
+            # Repair on read as well as on write: a file an older version created at 0644
+            # would otherwise stay world-readable until the user happens to save again.
+            _restrict_permissions(_CREDS_FILE_PATH.parent, 0o700)
+            _restrict_permissions(_CREDS_FILE_PATH, 0o600)
             try:
                 env = json.loads(_CREDS_FILE_PATH.read_text())
             except json.JSONDecodeError as exc:
@@ -79,5 +116,6 @@ class Settings(BaseModel):
         _CONFIG_FILE_PATH.write_text(json.dumps(payload, indent=2))
 
         _CREDS_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _restrict_permissions(_CREDS_FILE_PATH.parent, 0o700)
         payload = self.model_dump(include={"api_key", "api_host"})
-        _CREDS_FILE_PATH.write_text(json.dumps(payload, indent=2))
+        _write_private_text(_CREDS_FILE_PATH, json.dumps(payload, indent=2))

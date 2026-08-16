@@ -4,6 +4,7 @@ import copy
 import functools
 import inspect
 import logging
+import random
 import reprlib
 import time
 from abc import ABC, abstractmethod
@@ -100,6 +101,44 @@ def ensure_config(config: RunnableConfig = None) -> RunnableConfig:
     return config
 
 
+# Retry delays are spread by ±10% so that many nodes failing at once do not all wake up
+# together and hit the provider in the same instant.
+RETRY_JITTER_RATIO = 0.1
+
+
+def is_retryable_error(exc: BaseException) -> bool:
+    """Whether waiting and trying again could plausibly succeed.
+
+    Only failures that are certainly permanent are reported as non-retryable — a bad
+    credential, a malformed request, an exhausted budget. Anything unrecognised keeps the
+    previous behaviour and is retried, so this narrows the retry budget rather than
+    second-guessing errors it does not understand.
+    """
+    from dynamiq.nodes.agents.exceptions import LLMContextWindowExceededError
+
+    if isinstance(exc, LLMContextWindowExceededError):
+        # The prompt is too long for the model; re-sending it unchanged cannot help.
+        return False
+
+    try:
+        from litellm.exceptions import (
+            AuthenticationError,
+            BadRequestError,
+            BudgetExceededError,
+            NotFoundError,
+            PermissionDeniedError,
+        )
+    except ImportError:  # provider library unavailable: keep retrying as before
+        return True
+
+    # BadRequestError also covers ContextWindowExceededError and UnsupportedParamsError.
+    # RateLimitError is deliberately absent — it is retryable and does not subclass these.
+    return not isinstance(
+        exc,
+        (AuthenticationError, PermissionDeniedError, BadRequestError, NotFoundError, BudgetExceededError),
+    )
+
+
 class ErrorHandling(BaseModel):
     """
     Configuration for error handling in nodes.
@@ -109,12 +148,15 @@ class ErrorHandling(BaseModel):
         retry_interval_seconds (float): Interval between retries in seconds.
         max_retries (int): Maximum number of retries.
         backoff_rate (float): Rate of increase for retry intervals.
+        max_retry_interval_seconds (float | None): Ceiling on a single backoff wait.
+            Unset, waits grow unbounded as before.
         behavior (Behavior): Behavior for error handling.
     """
     timeout_seconds: float | None = None
     retry_interval_seconds: float = 1
     max_retries: int = 0
     backoff_rate: float = 1
+    max_retry_interval_seconds: float | None = None
     behavior: Behavior = Behavior.RAISE
 
 
@@ -861,14 +903,23 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
         return output
 
-    def send_console_approval_message(self, template: str, config: RunnableConfig = None) -> ApprovalInputData:
+    def send_console_approval_message(
+        self, template: str, config: RunnableConfig = None, approve_when_unanswerable: bool = False
+    ) -> ApprovalInputData:
         """
         Sends approval message in console and waits for response.
         Cancellable: runs input() in a daemon thread and polls for cancellation.
 
+        An empty answer means approval, so a prompt that could not be read at all must
+        not be reported as an empty answer. Without a stdin to read — a container, a
+        service, a CI job — ``input()`` raises immediately, and that is recorded as a
+        refusal rather than being indistinguishable from the user pressing enter.
+
         Args:
             template (str): Template to send.
             config (RunnableConfig, optional): Configuration for cancellation check.
+            approve_when_unanswerable (bool): Approve instead of refusing when the
+                prompt cannot be read. Restores the previous fail-open behavior.
         Returns:
             ApprovalInputData: Response to approval message.
         """
@@ -879,7 +930,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         result = {}
 
         def _read_input():
-            result["feedback"] = input(template)
+            try:
+                result["feedback"] = input(template)
+            except Exception as e:  # EOFError with no stdin; OSError if it is closed
+                result["error"] = e
 
         input_thread = _threading.Thread(target=_read_input, daemon=True)
         input_thread.start()
@@ -888,7 +942,20 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             check_cancellation(config)
             input_thread.join(timeout=0.5)
 
-        return ApprovalInputData(feedback=result.get("feedback", ""))
+        if "feedback" not in result:
+            reason = result.get("error")
+            if approve_when_unanswerable:
+                logger.warning(
+                    self._node_run_log(
+                        f"approval prompt could not be read ({reason!r}); approving because "
+                        "approve_when_unanswerable is set."
+                    )
+                )
+                return ApprovalInputData(feedback="", is_approved=True)
+            logger.warning(self._node_run_log(f"approval prompt could not be read ({reason!r}); treating as canceled."))
+            return ApprovalInputData(feedback="", is_approved=False)
+
+        return ApprovalInputData(feedback=result["feedback"])
 
     def send_approval_message(
         self, approval_config: ApprovalConfig, input_data: dict, config: RunnableConfig = None, **kwargs
@@ -921,7 +988,11 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                         message, input_data, approval_config, config=config, **kwargs
                     )
                 case FeedbackMethod.CONSOLE:
-                    approval_result = self.send_console_approval_message(message, config=config)
+                    approval_result = self.send_console_approval_message(
+                        message,
+                        config=config,
+                        approve_when_unanswerable=approval_config.approve_when_unanswerable,
+                    )
                 case _:
                     raise ValueError(f"Error: Incorrect feedback method is chosen {approval_config.feedback_method}.")
 
@@ -1382,6 +1453,19 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         """
         pass
 
+    def _retry_backoff_seconds(self, attempt: int) -> float:
+        """How long to wait before the retry that follows ``attempt``.
+
+        Shared by the sync and async retry loops so that the ceiling and the jitter behave
+        the same way whichever one a node happens to run under.
+        """
+        time_to_sleep = self.error_handling.retry_interval_seconds * (self.error_handling.backoff_rate**attempt)
+        if self.error_handling.max_retry_interval_seconds is not None:
+            time_to_sleep = min(time_to_sleep, self.error_handling.max_retry_interval_seconds)
+        # Spreading retries in time, not a security decision.
+        jitter = random.uniform(-RETRY_JITTER_RATIO, RETRY_JITTER_RATIO)  # nosec B311
+        return time_to_sleep * (1 + jitter)
+
     def execute_with_retry(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs):
         """
         Execute the node with retry logic and automatic connection management.
@@ -1458,12 +1542,16 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                     self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
                     logger.error(self._node_run_log(f"execution error: {e}"))
 
+                # A permanent failure will fail identically on every attempt, so spending
+                # the remaining budget on it only delays the error the caller already has.
+                if not is_retryable_error(error):
+                    logger.info(self._node_run_log(f"not retrying: {type(error).__name__} cannot succeed on a retry."))
+                    break
+
                 # do not sleep after the last attempt
                 if attempt < n_attempt - 1:
-                    time_to_sleep = self.error_handling.retry_interval_seconds * (
-                        self.error_handling.backoff_rate**attempt
-                    )
-                    logger.info(self._node_run_log(f"retrying in {time_to_sleep} seconds."))
+                    time_to_sleep = self._retry_backoff_seconds(attempt)
+                    logger.info(self._node_run_log(f"retrying in {time_to_sleep:.2f} seconds."))
                     time.sleep(time_to_sleep)
 
             logger.error(self._node_run_log(f"execution failed after {n_attempt} attempts."))
@@ -1577,9 +1665,15 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
                 logger.error(self._node_run_log(f"execution error: {e}"))
 
+            # A permanent failure will fail identically on every attempt, so spending
+            # the remaining budget on it only delays the error the caller already has.
+            if not is_retryable_error(error):
+                logger.info(self._node_run_log(f"not retrying: {type(error).__name__} cannot succeed on a retry."))
+                break
+
             if attempt < n_attempt - 1:
-                time_to_sleep = self.error_handling.retry_interval_seconds * (self.error_handling.backoff_rate**attempt)
-                logger.info(self._node_run_log(f"retrying in {time_to_sleep} seconds."))
+                time_to_sleep = self._retry_backoff_seconds(attempt)
+                logger.info(self._node_run_log(f"retrying in {time_to_sleep:.2f} seconds."))
                 await asyncio.sleep(time_to_sleep)
 
         logger.error(self._node_run_log(f"execution failed after {n_attempt} attempts."))

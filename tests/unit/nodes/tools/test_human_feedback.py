@@ -1,10 +1,14 @@
-"""Unit tests for HumanFeedbackTool streaming behaviour.
+"""Unit tests for HumanFeedbackTool.
 
-Focus: the ``is_browser_takeover`` flag must travel in the streamed event data so a
-chat UI can render a browser-takeover interaction instead of a plain text prompt.
+Covers the streaming behaviour — the ``is_browser_takeover`` flag must travel in the
+streamed event data so a chat UI can render a browser-takeover interaction instead of a
+plain text prompt — and the console path's behaviour when no console is attached.
 """
 
+import builtins
 from queue import Queue
+
+import pytest
 
 from dynamiq.callbacks.base import BaseCallbackHandler
 from dynamiq.nodes.tools.human_feedback import (
@@ -12,7 +16,7 @@ from dynamiq.nodes.tools.human_feedback import (
     HFStreamingInputEventMessageData,
     HumanFeedbackTool,
 )
-from dynamiq.runnables import RunnableConfig
+from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.feedback import FeedbackMethod
 from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig
 
@@ -124,3 +128,67 @@ def test_description_flag_flip_does_not_stack_conflicting_notes():
 
     assert "browser takeover is enabled" not in desc
     assert "can not perform actions" in desc
+
+
+class TestConsoleIsUnreadable:
+    """An empty answer is a real answer, so a console that could not be read at all must
+    not be reported as one — the agent would take it as the human declining to respond.
+    """
+
+    @pytest.fixture(autouse=True)
+    def no_stdin(self, monkeypatch):
+        def _raise(*args, **kwargs):
+            raise EOFError("EOF when reading a line")
+
+        monkeypatch.setattr(builtins, "input", _raise)
+
+    def test_asking_fails_instead_of_returning_an_empty_answer(self):
+        tool = HumanFeedbackTool(input_method=FeedbackMethod.CONSOLE)
+
+        result = tool.run(input_data={"action": "ask", "input": "Proceed?"})
+
+        assert result.status == RunnableStatus.FAILURE
+        assert result.output is None or "" == str(result.output.get("content", ""))
+
+    def test_failure_is_recoverable_so_the_agent_can_react(self):
+        tool = HumanFeedbackTool(input_method=FeedbackMethod.CONSOLE)
+
+        result = tool.run(input_data={"action": "ask", "input": "Proceed?"})
+
+        assert result.error.recoverable is True
+
+    def test_message_tells_the_agent_what_to_do_instead(self):
+        tool = HumanFeedbackTool(input_method=FeedbackMethod.CONSOLE)
+
+        result = tool.run(input_data={"action": "ask", "input": "Proceed?"})
+
+        assert "console" in result.error.message.lower()
+
+    def test_closed_stdin_behaves_the_same(self, monkeypatch):
+        def _raise(*args, **kwargs):
+            raise OSError("Bad file descriptor")
+
+        monkeypatch.setattr(builtins, "input", _raise)
+        tool = HumanFeedbackTool(input_method=FeedbackMethod.CONSOLE)
+
+        assert tool.run(input_data={"action": "ask", "input": "Proceed?"}).status == RunnableStatus.FAILURE
+
+
+class TestConsoleAnswersAreUnchanged:
+    def test_empty_answer_is_still_a_real_answer(self, monkeypatch):
+        monkeypatch.setattr(builtins, "input", lambda *a, **k: "")
+        tool = HumanFeedbackTool(input_method=FeedbackMethod.CONSOLE)
+
+        result = tool.run(input_data={"action": "ask", "input": "Proceed?"})
+
+        assert result.status == RunnableStatus.SUCCESS
+        assert result.output["content"] == ""
+
+    def test_normal_answer_is_returned(self, monkeypatch):
+        monkeypatch.setattr(builtins, "input", lambda *a, **k: "yes, go ahead")
+        tool = HumanFeedbackTool(input_method=FeedbackMethod.CONSOLE)
+
+        result = tool.run(input_data={"action": "ask", "input": "Proceed?"})
+
+        assert result.status == RunnableStatus.SUCCESS
+        assert result.output["content"] == "yes, go ahead"

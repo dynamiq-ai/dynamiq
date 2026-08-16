@@ -16,6 +16,7 @@ from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     JSONParsingError,
+    LLMContextWindowExceededError,
     MaxLoopsExceededException,
     OutputFileNotFoundError,
     ParsingError,
@@ -174,6 +175,42 @@ class AgentState(BaseModel):
 
 UNKNOWN_TOOL_NAME = "unknown_tool"
 
+# Prefixed onto a tool result the model would otherwise read as a success. Applied
+# wherever a single result reaches the model without a status of its own: each
+# `role: tool` message in function-calling mode, and the legacy single-tool
+# `Observation:` message. Batched observations already carry their own per-tool
+# SUCCESS/ERROR header and are left alone. Successful results are never modified.
+TOOL_ERROR_PREFIX = "[tool_error]"
+
+# Sent back for a tool call that was requested but never reached execution, so the model
+# knows the work is still outstanding and can ask for it again.
+TOOL_NOT_EXECUTED_PREFIX = "[tool_not_executed]"
+
+
+def tool_not_executed_notice(reason: str | None = None) -> str:
+    """Message for a requested call that never ran.
+
+    The reason is worth stating: the producers know exactly why (compaction had to run
+    alone, a sub-agent budget was spent), and a model told the specific cause can act on
+    it, where one told "something happened" can only retry blindly.
+    """
+    return (
+        f"{TOOL_NOT_EXECUTED_PREFIX} This call was not executed"
+        f"{f' because {reason}' if reason else ''}. Request it again if the work is still needed."
+    )
+
+
+def mark_tool_failure(content: str, success: Any) -> str:
+    """Tag a failed tool result so the model can tell it apart from a success.
+
+    Only ``success is False`` counts as a failure: ``None`` means the caller reported
+    no status, and is left alone rather than guessed at. Already-tagged content is
+    returned unchanged so repeated passes cannot stack prefixes.
+    """
+    if success is False and not content.startswith(TOOL_ERROR_PREFIX):
+        return f"{TOOL_ERROR_PREFIX} {content}"
+    return content
+
 
 class ReactStep(BaseModel):
     """Outcome of one ReAct reasoning step, in one of three shapes:
@@ -228,6 +265,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
     # Raw text of the most recent LLM call; kept so loop-level recovery
     # handlers can echo it back to the model after a parsing failure.
     _last_llm_output: str = PrivateAttr(default="")
+    # Set only while recovering from a provider context-window rejection, so the split
+    # knows the local token estimate has already been proven wrong.
+    _forced_compaction: bool = PrivateAttr(default=False)
 
     @field_validator("response_format", mode="before")
     @classmethod
@@ -855,9 +895,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         if function_name == "provide_final_answer":
                             payload.append(entry)
                             fa_stub_ids.append(tc_id)
-                        elif self.parallel_tool_calls_enabled or not pending_ids:
-                            # Only the first non-final-answer call is kept when parallel
-                            # execution is disabled
+                        else:
                             payload.append(entry)
                             pending_ids.append(tc_id)
                     if payload:
@@ -870,11 +908,22 @@ class Agent(HistoryManagerMixin, BaseAgent):
                                 static=True,
                             )
                         )
+                        # A final answer batched with tool calls was written before those
+                        # results existed, so it cannot be informed by them and is not
+                        # accepted. Saying so here is what lets the model answer for real
+                        # on the next step instead of repeating the same batch.
+                        final_answer_reply = (
+                            "Not accepted: you requested tools in this same step, so this answer was "
+                            "written before their results existed. Their results follow — answer "
+                            "again using them."
+                            if pending_ids
+                            else "Acknowledged."
+                        )
                         for fa_id in fa_stub_ids:
                             self._prompt.messages.append(
                                 Message(
                                     role=MessageRole.TOOL,
-                                    content="Acknowledged.",
+                                    content=final_answer_reply,
                                     tool_call_id=fa_id,
                                     name="provide_final_answer",
                                     static=True,
@@ -954,27 +1003,28 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 recoverable=True,
             )
 
-        first_call = tool_calls[0]
-        action = first_call.function.name.strip()
+        actual_tool_calls = [tc for tc in tool_calls if tc.function.name.strip() != "provide_final_answer"]
 
-        if action == "provide_final_answer":
+        # A model may put its final answer anywhere in the batch — llama-3.3-70b puts it last —
+        # so position is not used to find it. It is only accepted when nothing else was
+        # requested: an answer batched with tool calls was written before those results
+        # existed, so returning it hands back a guess and throws away the work that would have
+        # informed it. Batched with tools, the tools run and the model answers on the next
+        # loop, told why the finish was not accepted (see _append_assistant_message).
+        final_answer_call = next((tc for tc in tool_calls if tc.function.name.strip() == "provide_final_answer"), None)
+
+        if final_answer_call is not None and not actual_tool_calls:
             self._acknowledge_pending_fc_tool_calls("Skipped — superseded by a final-answer call.")
-            final_args = first_call.function.parse_as_final_answer()
+            final_args = final_answer_call.function.parse_as_final_answer()
             thought = final_args.thought
             self._requested_output_files = self._parse_output_files_csv(final_args.output_files)
             self.log_final_output(thought, final_args.answer, loop_num)
             return thought, "final_answer", final_args.answer
 
-        actual_tool_calls = [tc for tc in tool_calls if tc.function.name.strip() != "provide_final_answer"]
-
-        if len(actual_tool_calls) > 1 and not self.parallel_tool_calls_enabled:
-            logger.warning(
-                f"Agent {self.name} - {self.id}: LLM returned {len(actual_tool_calls)} tool calls "
-                f"but parallel_tool_calls_enabled is False. Only the first tool call will be executed, "
-                f"remaining {len(actual_tool_calls) - 1} call(s) will be dropped."
-            )
-
-        if len(actual_tool_calls) > 1 and self.parallel_tool_calls_enabled:
+        # Every call the model asked for is executed. ``parallel_tool_calls_enabled``
+        # decides whether they run concurrently or one-by-one (see
+        # ``_is_tool_parallel_eligible``), never whether they run at all.
+        if len(actual_tool_calls) > 1:
             tool_items = []
             for tc in actual_tool_calls:
                 tc_name = tc.function.name.strip()
@@ -1049,8 +1099,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
         except (json.JSONDecodeError, ValueError) as e:
             raise ActionParsingException(f"Error parsing action. {e}", recoverable=True)
 
-        if "action" not in llm_generated_output_json or "thought" not in llm_generated_output_json:
-            raise ActionParsingException("No action or thought provided.", recoverable=True)
+        # Valid JSON is not necessarily an object: `null`, a bare list, or a string all
+        # parse cleanly and then fail the membership test below with a TypeError, which
+        # is not recoverable and ends the run. Treated as a parse failure like any other,
+        # so the model gets a chance to answer again.
+        if not isinstance(llm_generated_output_json, dict):
+            raise ActionParsingException("Expected a JSON object containing 'thought' and 'action'.", recoverable=True)
+
+        missing = [key for key in ("thought", "action", "action_input") if key not in llm_generated_output_json]
+        if missing:
+            # `action_input` belongs in the same check: reading it below without one is a
+            # KeyError, which is not recoverable and ends the run, where a model that
+            # simply left a key out should just be asked again.
+            raise ActionParsingException(f"Missing required field(s): {', '.join(missing)}.", recoverable=True)
 
         thought = llm_generated_output_json["thought"]
         action = llm_generated_output_json["action"]
@@ -1299,7 +1360,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             check_cancellation(config)
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
-                to_summarize, to_preserve = self._split_history()
+                to_summarize, to_preserve = self._split_history(force=self._forced_compaction)
                 if not to_summarize:
                     logger.info(f"Agent {self.name} - {self.id}: Nothing to summarize, skipping context compaction.")
                     skip_message = (
@@ -1469,6 +1530,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
         tool_result: Any,
         ordered_results: list[dict[str, Any]] | None = None,
         tool_name: str | None = None,
+        success: Any = None,
+        not_executed_reason: str | None = None,
     ) -> None:
         """Append tool observations to prompt history.
 
@@ -1482,30 +1545,51 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if self.inference_mode == InferenceMode.FUNCTION_CALLING and not pending_ids:
             pending_ids = self._unanswered_tool_call_ids()
         if self.inference_mode == InferenceMode.FUNCTION_CALLING and pending_ids:
+            answered: set[str] = set()
             if ordered_results and len(ordered_results) == len(pending_ids):
                 for tc_id, result in zip(pending_ids, ordered_results):
                     self._prompt.messages.append(
                         Message(
                             role=MessageRole.TOOL,
-                            content=str(result.get("result", "")),
+                            content=mark_tool_failure(str(result.get("result", "")), result.get("success")),
                             tool_call_id=tc_id,
                             name=result.get("tool_name"),
                             static=True,
                         )
                     )
+                    answered.add(tc_id)
             else:
                 self._prompt.messages.append(
                     Message(
                         role=MessageRole.TOOL,
-                        content=str(tool_result),
+                        content=mark_tool_failure(str(tool_result), success),
                         tool_call_id=pending_ids[0],
                         name=tool_name,
                         static=True,
                     )
                 )
+                answered.add(pending_ids[0])
+
+            # Every id the assistant asked about must come back with something: a request
+            # carrying an unanswered tool_call_id is rejected by the provider. Paths that
+            # stop a batch early (context-compaction taking the step, a sub-agent budget
+            # refusal) leave ids behind, so they are closed out here rather than at each
+            # of those call sites.
+            notice = tool_not_executed_notice(not_executed_reason)
+            for tc_id in pending_ids:
+                if tc_id not in answered:
+                    self._prompt.messages.append(
+                        Message(
+                            role=MessageRole.TOOL,
+                            content=notice,
+                            tool_call_id=tc_id,
+                            name=tool_name,
+                            static=True,
+                        )
+                    )
             self._pending_fc_tool_call_ids = []
             return
-        self._add_observation(tool_result)
+        self._add_observation(mark_tool_failure(str(tool_result), success) if success is False else tool_result)
 
     def _validate_parallel_tool_input(self, action_input: Any) -> list[dict[str, Any]] | None:
         """Validate and parse parallel tool input schema.
@@ -1524,7 +1608,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
         except Exception as e:
             error_message = f"Invalid parallel tool input: {e}"
             logger.error(error_message)
-            self._add_observation(error_message)
+            # Emitted rather than added as a bare observation so that, in function-calling
+            # mode, the batch's tool_call_ids are closed out instead of left unanswered.
+            self._emit_tool_observations(
+                error_message,
+                tool_name=PARALLEL_TOOL_NAME,
+                success=False,
+                not_executed_reason="the batch could not be parsed",
+            )
             return None
 
     def _check_subagent_limits(self, tools_data: list[dict[str, Any]], action: str) -> str | None:
@@ -1563,7 +1654,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     def _should_skip_parallel_mode(
         self, action: str | None, action_input: Any
-    ) -> tuple[bool, str | None, Any, list[str]]:
+    ) -> tuple[bool, str | None, Any, list[str], int | None]:
         """Check if parallel mode should be skipped for ContextManagerTool.
 
         When ContextManagerTool is detected in a parallel tool list, we filter
@@ -1574,11 +1665,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
             action_input: The action input (list for parallel mode)
 
         Returns:
-            tuple: (skip_parallel, action_name, action_input, skipped_tools)
+            tuple: (skip_parallel, action_name, action_input, skipped_tools, executed_index)
                 - skip_parallel: True if parallel mode should be skipped
                 - action_name: The tool name to execute
                 - action_input: The tool input to use
                 - skipped_tools: List of tool names that were skipped
+                - executed_index: Position of the executed call in the original batch,
+                  so its result can be attributed to the right tool_call_id. None when
+                  the batch was not filtered.
         """
         # Get ContextManagerTool names
         context_manager_names = {
@@ -1587,7 +1681,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         # Check if ContextManagerTool is in a parallel tool list
         if isinstance(action_input, list):
-            for tool_data in action_input:
+            for idx, tool_data in enumerate(action_input):
                 if isinstance(tool_data, dict):
                     tool_name = self.sanitize_tool_name(tool_data.get("name", ""))
                     if tool_name in context_manager_names:
@@ -1602,12 +1696,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
                             f"Agent {self.name} - {self.id}: ContextManagerTool detected in parallel call. "
                             f"Filtering to execute only ContextManagerTool. Skipped tools: {skipped_tools}"
                         )
-                        return True, tool_data.get("name", ""), tool_data.get("input", {}), skipped_tools
+                        return True, tool_data.get("name", ""), tool_data.get("input", {}), skipped_tools, idx
         elif isinstance(action, str) and self.sanitize_tool_name(action) in context_manager_names:
             # Single tool mode - ContextManagerTool detected, no tools skipped
-            return True, action, action_input, []
+            return True, action, action_input, [], None
 
-        return False, action, action_input, []
+        return False, action, action_input, [], None
 
     def _execute_tools_and_update_prompt(
         self,
@@ -1641,8 +1735,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 if action_input is None:
                     return None
 
+            # Kept before the filter below collapses a batch down to one call, so each
+            # original call can still be matched to its own tool_call_id afterwards.
+            requested_calls = action_input if isinstance(action_input, list) else [action_input]
+
             # Check if ContextManagerTool is in the action - if so, skip parallel mode
-            skip_parallel, action, action_input, skipped_tools = self._should_skip_parallel_mode(action, action_input)
+            skip_parallel, action, action_input, skipped_tools, executed_index = self._should_skip_parallel_mode(
+                action, action_input
+            )
 
             # Handle XML parallel mode (only for multiple tools, not for ContextManagerTool)
             tools_data = action_input if isinstance(action_input, list) else [action_input]
@@ -1650,20 +1750,24 @@ class Agent(HistoryManagerMixin, BaseAgent):
             # Check subagent invocation limits before executing
             subagent_error = self._check_subagent_limits(tools_data, action)
             if subagent_error:
-                self._add_observation(subagent_error)
+                # Emitted rather than added as a bare observation so the batch's
+                # tool_call_ids are closed out in function-calling mode.
+                self._emit_tool_observations(
+                    subagent_error,
+                    tool_name=action,
+                    success=False,
+                    not_executed_reason="the sub-agent call budget for this run is exhausted",
+                )
                 return None
 
             ordered_results: list[dict[str, Any]] = []
-            if (
-                self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME
-                and self.parallel_tool_calls_enabled
-                and not skip_parallel
-            ):
+            tool_success: Any = None
+            if self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME and not skip_parallel:
                 tool_result, _, ordered_results = self._execute_tools(
                     tools_data, thought, loop_num, config, **kwargs
                 )
             else:
-                tool_result, _, is_delegated, _, _ = self._execute_single_tool(
+                tool_result, _, is_delegated, tool_success, _ = self._execute_single_tool(
                     action, action_input, thought, loop_num, config, **kwargs
                 )
                 if is_delegated:
@@ -1677,11 +1781,73 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
                 tool_result = f"{tool_result}{skipped_notice}" if tool_result else skipped_notice
 
-            self._emit_tool_observations(tool_result, ordered_results, tool_name=action)
+                # Rebuild the batch's results so each call's outcome reaches its own
+                # tool_call_id: the one tool that ran gets its result, the rest are told
+                # they did not run. Without this the compaction result would be attributed
+                # to whichever call happened to be first.
+                if executed_index is not None and len(requested_calls) > 1:
+                    ordered_results = [
+                        {
+                            "order": idx,
+                            "tool_name": (td.get("name") if isinstance(td, dict) else None) or UNKNOWN_TOOL_NAME,
+                            # The executed call keeps its real status so a failure is
+                            # still marked; `None` for the skipped ones, which are
+                            # outstanding work rather than failures.
+                            "success": tool_success if idx == executed_index else None,
+                            "result": (
+                                tool_result
+                                if idx == executed_index
+                                else tool_not_executed_notice("context compaction must run on its own")
+                            ),
+                            "files": [],
+                        }
+                        for idx, td in enumerate(requested_calls)
+                    ]
+
+            self._emit_tool_observations(tool_result, ordered_results, tool_name=action, success=tool_success)
 
         # else: No action or no tools available - no reasoning to stream
 
         return None
+
+    def _run_react_llm_step_with_overflow_recovery(
+        self, config: RunnableConfig | None, loop_num: int, **kwargs
+    ) -> ReactStep:
+        """Run one ReAct step, compacting and retrying once if the prompt was too long.
+
+        The proactive check in ``_try_summarize_history`` runs on a local token estimate,
+        which can disagree with the provider — tool schemas and images are easy to
+        under-count. When it does, the request is rejected outright and, before this
+        recovery existed, every completed loop of the run was lost.
+
+        Retried exactly once, and only if compaction actually shortened the history, so
+        a prompt that cannot be reduced fails immediately instead of looping. The retry
+        does not consume a loop: the step never produced one.
+        """
+        try:
+            return self._run_react_llm_step(config, loop_num, **kwargs)
+        except LLMContextWindowExceededError as e:
+            try:
+                compacted = self._try_summarize_history(config, force=True, **kwargs)
+            except Exception as compaction_error:
+                # Recovery is best-effort. Surfacing the summarizer's failure would
+                # bury the real problem, so report the overflow that got us here.
+                logger.error(
+                    f"Agent {self.name} - {self.id}: compaction failed while recovering from a "
+                    f"context-window rejection ({compaction_error}); reporting the original error."
+                )
+                raise e from compaction_error
+            if not compacted:
+                logger.error(
+                    f"Agent {self.name} - {self.id}: prompt exceeds the context window and could not be "
+                    f"reduced (summarization enabled: {self.summarization_config.enabled}). Failing."
+                )
+                raise
+            logger.info(
+                f"Agent {self.name} - {self.id}: Loop {loop_num}, history compacted after a context-window "
+                f"rejection ({e}); retrying the request once."
+            )
+            return self._run_react_llm_step(config, loop_num, **kwargs)
 
     def _run_react_llm_step(self, config: RunnableConfig | None, loop_num: int, **kwargs) -> ReactStep:
         """Run one ReAct LLM call and resolve it to a ReactStep.
@@ -1850,7 +2016,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     )
                     self.log_reasoning(step.thought, step.action, step.action_input, loop_num)
                 else:
-                    step = self._run_react_llm_step(config, loop_num, **kwargs)
+                    step = self._run_react_llm_step_with_overflow_recovery(config, loop_num, **kwargs)
 
                 if step.kind == "final_answer":
                     return step.final_answer
@@ -1969,8 +2135,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
     def _try_summarize_history(
         self,
         config: RunnableConfig | None = None,
+        *,
+        force: bool = False,
         **kwargs,
-    ) -> None:
+    ) -> bool:
         """
         Check if summarization is needed and inject it automatically if token limit is exceeded.
 
@@ -1978,24 +2146,35 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         Args:
             config: Configuration for the agent run
+            force: Compact regardless of the local token estimate. Used after a provider
+                rejects a prompt as too long — the provider's verdict is authoritative,
+                and the estimate that let the request through is by definition wrong.
             **kwargs: Additional parameters for running the agent
+
+        Returns:
+            bool: True if history actually got shorter. False means retrying the same
+            request is pointless, so callers must not treat it as recoverable.
         """
         if not self.summarization_config.enabled:
-            return
+            return False
 
-        if self.is_token_limit_exceeded():
-            logger.info(
-                f"Agent {self.name} - {self.id}: Token limit exceeded. Automatically invoking Context Manager Tool."
-            )
+        if not force and not self.is_token_limit_exceeded():
+            return False
 
-            context_tool = next((t for t in self.tools if isinstance(t, ContextManagerTool)), None)
+        reason = "Provider rejected the prompt as too long" if force else "Token limit exceeded"
+        logger.info(f"Agent {self.name} - {self.id}: {reason}. Automatically invoking Context Manager Tool.")
 
-            if context_tool is None:
-                logger.error(f"Agent {self.name} - {self.id}: Context Manager Tool not found.")
-                return
+        context_tool = next((t for t in self.tools if isinstance(t, ContextManagerTool)), None)
 
-            action = self.sanitize_tool_name(context_tool.name)
+        if context_tool is None:
+            logger.error(f"Agent {self.name} - {self.id}: Context Manager Tool not found.")
+            return False
 
+        action = self.sanitize_tool_name(context_tool.name)
+
+        size_before = self._history_size()
+        self._forced_compaction = force
+        try:
             self._execute_tools_and_update_prompt(
                 action=action,
                 action_input={},
@@ -2004,6 +2183,30 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 config=config,
                 **kwargs,
             )
+        finally:
+            self._forced_compaction = False
+        return self._history_size() < size_before
+
+    def _history_size(self) -> int:
+        """Rough serialized size of the conversation, in characters.
+
+        Used only to decide whether compaction reclaimed anything. Message count is the
+        wrong measure — replacing three huge messages with one long summary can leave the
+        count unchanged, or a summary plus a preserved tail can even raise it, while the
+        prompt got dramatically smaller.
+
+        The whole serialized message is measured rather than just its text, because the
+        bulk is often somewhere else entirely: tool-call arguments and inline image data
+        are exactly what a local token estimate under-counts, and so exactly what tends
+        to be present when a provider rejects a prompt this path is recovering from.
+        """
+        total = 0
+        for message in self._prompt.messages:
+            try:
+                total += len(str(message.model_dump(exclude={"metadata"})))
+            except Exception:  # a message that cannot be dumped still has text worth counting
+                total += len(extract_message_text(message) or "")
+        return total
 
     @staticmethod
     def _parse_output_files_csv(raw: str) -> list[str]:
@@ -2282,7 +2485,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
             aggregated[unique_key] = files
 
     def _is_tool_parallel_eligible(self, tool_name: str) -> bool:
-        """Check if a tool is eligible for parallel execution based on its is_parallel_execution_allowed flag."""
+        """Check whether a tool may run concurrently with the rest of its batch.
+
+        Both gates must allow it: the agent-level ``parallel_tool_calls_enabled``
+        and the tool's own ``is_parallel_execution_allowed``. A tool that fails
+        either one still runs — just in the sequential phase.
+        """
+        if not self.parallel_tool_calls_enabled:
+            return False
         tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
         return tool.is_parallel_execution_allowed if tool else False
 
@@ -2379,14 +2589,23 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 if sequential_group:
                     seq_names = [tp["name"] for tp in sequential_group]
-                    logger.info(
-                        f"Agent {self.name} - {self.id}: tools excluded from parallel execution "
-                        f"(is_parallel_execution_allowed=False): {seq_names}"
+                    reason = (
+                        "parallel_tool_calls_enabled=False"
+                        if not self.parallel_tool_calls_enabled
+                        else "is_parallel_execution_allowed=False"
                     )
+                    logger.info(f"Agent {self.name} - {self.id}: running sequentially ({reason}): {seq_names}")
 
                 # Phase 1: run parallel-eligible tools concurrently
                 if len(parallel_group) > 1:
-                    max_workers = len(parallel_group)
+                    # Bounded: the model decides how many tools to call, not how many
+                    # threads the process spawns. Excess calls queue on the pool.
+                    max_workers = min(len(parallel_group), self.max_parallel_tool_calls)
+                    if len(parallel_group) > max_workers:
+                        logger.info(
+                            f"Agent {self.name} - {self.id}: {len(parallel_group)} parallel tool calls "
+                            f"queued across {max_workers} workers (max_parallel_tool_calls)."
+                        )
                     with ContextAwareThreadPoolExecutor(max_workers=max_workers) as executor:
                         future_map = {}
                         for tool_payload in parallel_group:

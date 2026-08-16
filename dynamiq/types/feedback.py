@@ -52,6 +52,11 @@ class ApprovalConfig(BaseModel):
     enabled: bool = False
     feedback_method: FeedbackMethod = FeedbackMethod.CONSOLE
 
+    # An approval prompt that cannot be answered — no stdin, as in any container or
+    # service deployment — is treated as a refusal, so a gate that nobody can answer
+    # never silently opens. Set True to restore the previous fail-open behavior.
+    approve_when_unanswerable: bool = False
+
     mutable_data_params: list[str] = []
     msg_template: str = """
             Node {{name}}: Approve or cancel execution. Send nothing for approval; provide feedback to cancel.

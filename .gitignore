@@ -165,3 +165,6 @@ mkdocs/
 /.data/
 
 .skills
+
+# Local research, analysis notes and reproduction scripts. Never committed.
+.research/

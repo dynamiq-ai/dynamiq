@@ -9,6 +9,7 @@ from litellm import get_max_tokens, get_model_info, get_supported_openai_params,
 from litellm.exceptions import (
     APIConnectionError,
     BudgetExceededError,
+    ContextWindowExceededError,
     InternalServerError,
     RateLimitError,
     ServiceUnavailableError,
@@ -49,6 +50,17 @@ LLM_RATE_LIMIT_ERROR_INDICATORS = (
 )
 
 LLM_DEFAULT_MAX_TOKENS = 32768
+
+LLM_CONTEXT_WINDOW_ERROR_INDICATORS = (
+    "context window",
+    "context_length_exceeded",
+    "context length",
+    "maximum context",
+    "too many tokens",
+    "prompt is too long",
+    "reduce the length",
+    "input length and `max_tokens` exceed",
+)
 
 LLM_CONNECTION_ERROR_INDICATORS = (
     "connection",
@@ -1219,6 +1231,30 @@ class BaseLLM(ConnectionNode):
         if issubclass(exception_type, (RateLimitError, BudgetExceededError)):
             return True
         return any(indicator in error_str for indicator in LLM_RATE_LIMIT_ERROR_INDICATORS)
+
+    def _is_context_window_error(self, exception_type: type[Exception], error_str: str) -> bool:
+        """Check if the error is the provider rejecting an over-long prompt.
+
+        Distinct from a rate limit: no amount of waiting helps, the request itself has
+        to get smaller. Providers that do not raise the typed litellm error are matched
+        on their message instead.
+
+        Args:
+            exception_type: The type of exception.
+            error_str: Lowercase error message string.
+
+        Returns:
+            bool: True if it's a context window error.
+        """
+        if issubclass(exception_type, ContextWindowExceededError):
+            return True
+        # A typed rate limit is never an over-long prompt, and its message often talks about
+        # tokens and length ("too many tokens this minute, reduce the length of your
+        # request"), which the substring match below would read as a context-window
+        # rejection. The type is the stronger signal, so it decides.
+        if issubclass(exception_type, RateLimitError):
+            return False
+        return any(indicator in error_str for indicator in LLM_CONTEXT_WINDOW_ERROR_INDICATORS)
 
     def _is_connection_error(self, exception_type: type[Exception], error_str: str) -> bool:
         """Check if the error is a connection error.

@@ -6,6 +6,7 @@ from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dynamiq.nodes import NodeGroup
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import Node, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
@@ -180,6 +181,12 @@ Important:
 
         Returns:
             str: The user's input.
+
+        Raises:
+            ToolExecutionException: The console could not be read at all — no stdin, as
+                in any container or service. Reporting that as an empty answer would tell
+                the agent the human chose to say nothing, so it is surfaced as a
+                recoverable failure and the agent can decide how to proceed.
         """
         import threading as _threading
 
@@ -188,7 +195,10 @@ Important:
         result = {}
 
         def _read_input():
-            result["feedback"] = input(prompt)
+            try:
+                result["feedback"] = input(prompt)
+            except Exception as e:  # EOFError with no stdin; OSError if it is closed
+                result["error"] = e
 
         input_thread = _threading.Thread(target=_read_input, daemon=True)
         input_thread.start()
@@ -197,7 +207,16 @@ Important:
             check_cancellation(config)
             input_thread.join(timeout=0.5)
 
-        return result.get("feedback", "")
+        if "feedback" not in result:
+            reason = result.get("error")
+            logger.warning(f"Tool {self.name} - {self.id}: console is not readable ({reason!r}); cannot ask the user.")
+            raise ToolExecutionException(
+                "Cannot ask the user: no readable console is attached to this process. "
+                "Continue without human input, or use the 'stream' input method.",
+                recoverable=True,
+            )
+
+        return result["feedback"]
 
     def input_method_streaming(self, prompt: str, config: RunnableConfig, **kwargs) -> str:
         """

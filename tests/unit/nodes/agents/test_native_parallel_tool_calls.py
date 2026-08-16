@@ -285,16 +285,19 @@ class TestFunctionCallingProtocolEmission:
         assert fa_stub.role == MessageRole.TOOL
         assert fa_stub.tool_call_id == "call_fa"
         assert fa_stub.name == "provide_final_answer"
-        assert fa_stub.content == "Acknowledged."
+        # Batched with real calls, the answer predates their results and is not accepted;
+        # the stub says so, which is what lets the next loop answer informed.
+        assert fa_stub.content.startswith("Not accepted")
 
         # Pending stash holds ONLY real-tool ids (FA is acknowledged inline, not pending).
         # Stale id from previous loop is gone.
         assert agent._pending_fc_tool_call_ids == ["call_a", "call_b"]
 
-    def test_append_assistant_message_drops_extra_calls_when_parallel_disabled(self):
-        """Regression: when parallel is disabled and the LLM still returns multiple
-        non-final-answer tool calls, only the first one may be recorded in the assistant
-        message."""
+    def test_append_assistant_message_keeps_every_call_when_parallel_disabled(self):
+        """Regression: ``parallel_tool_calls_enabled=False`` means "do not run these
+        concurrently", not "throw the extras away". Every non-final-answer call the LLM
+        returned must be recorded and must receive a tool_call_id awaiting a result, so
+        the work the model asked for is executed (sequentially) rather than discarded."""
         from dynamiq.nodes.agents.agent import Agent
         from dynamiq.nodes.types import InferenceMode
 
@@ -318,12 +321,11 @@ class TestFunctionCallingProtocolEmission:
         Agent._append_assistant_message(agent, llm_result, llm_generated_output="")
 
         assistant = agent._prompt.messages[0]
-        # Only call_a (first non-FA) and call_fa survive in the assistant payload —
-        # call_b is dropped at source so no orphan tool_call_id is left behind.
-        assert [tc["id"] for tc in assistant.tool_calls] == ["call_a", "call_fa"]
-        # Pending ids match: only call_a will get a tool response from execution;
+        # Both real calls survive alongside the final-answer stub.
+        assert [tc["id"] for tc in assistant.tool_calls] == ["call_a", "call_b", "call_fa"]
+        # Both real calls await a role:'tool' reply, so neither is left unanswered;
         # call_fa is acknowledged inline.
-        assert agent._pending_fc_tool_call_ids == ["call_a"]
+        assert agent._pending_fc_tool_call_ids == ["call_a", "call_b"]
 
     def test_emit_tool_observations_parallel_pairs_ids_results_and_names(self):
         """In FC mode, parallel observations must produce one role:'tool' message per

@@ -828,3 +828,52 @@ def test_normalize_fields_coerces_nested_model():
     assert action_input["filters"]["metadata"] == {"source": "web", "score": 1}
     # Non-string nested values are left untouched.
     assert action_input["filters"]["min_score"] == 0.5
+
+
+class TestStructuredOutputNonObjectJson:
+    """`null`, a bare list, and a quoted string are all valid JSON that is not an object.
+
+    Each parses cleanly and then fails the `"action" not in ...` membership test with a
+    TypeError, which is not recoverable and ends the whole run. They are parse failures
+    and must be reported as such so the agent can ask the model again.
+    """
+
+    def _parse(self, raw: str):
+        from unittest.mock import MagicMock
+
+        from dynamiq.nodes.agents.agent import Agent
+
+        agent = MagicMock()
+        agent.verbose = False
+        return Agent._handle_structured_output_mode(agent, raw, loop_num=1)
+
+    @pytest.mark.parametrize("raw", ["null", "[1, 2, 3]", '"just a string"', "123", "true"])
+    def test_non_object_json_is_a_recoverable_parse_error(self, raw):
+        with pytest.raises(ActionParsingException) as exc:
+            self._parse(raw)
+        assert exc.value.recoverable is True
+
+    def test_object_missing_keys_names_them(self):
+        with pytest.raises(ActionParsingException) as exc:
+            self._parse('{"foo": "bar"}')
+        assert exc.value.recoverable is True
+        for key in ("thought", "action", "action_input"):
+            assert key in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            '{"thought": "t", "action": "search"}',  # no action_input
+            '{"thought": "t", "action": "finish"}',  # finish is not special-cased
+        ],
+    )
+    def test_missing_action_input_is_recoverable_not_a_keyerror(self, raw):
+        """Reading `action_input` without one raised a KeyError that ended the run."""
+        with pytest.raises(ActionParsingException) as exc:
+            self._parse(raw)
+        assert exc.value.recoverable is True
+        assert "action_input" in str(exc.value)
+
+    def test_a_well_formed_object_still_parses(self):
+        thought, action, action_input = self._parse('{"thought": "t", "action": "search", "action_input": {"q": "x"}}')
+        assert (thought, action, action_input) == ("t", "search", {"q": "x"})

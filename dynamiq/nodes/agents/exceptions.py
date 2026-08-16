@@ -89,3 +89,13 @@ class OutputFileNotFoundError(RecoverableAgentException):
     """Exception raised when files listed in <output_files> do not exist on the backend."""
 
     pass
+
+
+class LLMContextWindowExceededError(ValueError):
+    """Raised when the provider rejected the request because the prompt was too long.
+
+    Subclasses ``ValueError`` because that is what a failed LLM step raised before this
+    class existed, so callers already catching ``ValueError`` keep working unchanged.
+    """
+
+    pass

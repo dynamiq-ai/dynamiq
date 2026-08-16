@@ -19,7 +19,12 @@ from dynamiq.memory import Memory, MemoryRetrievalStrategy, MemorySaveMode
 from dynamiq.memory.long_term import LongTermMemoryConfig
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentIterativeCheckpointMixin
-from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
+from dynamiq.nodes.agents.exceptions import (
+    AgentUnknownToolException,
+    InvalidActionException,
+    LLMContextWindowExceededError,
+    ToolExecutionException,
+)
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.agents.shared_session import (
@@ -257,8 +262,16 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     )
     parallel_tool_calls_enabled: bool = Field(
         default=False,
-        description="Enable multi-tool execution in a single step. "
-        "When True, the agent can call multiple tools in parallel.",
+        description="Run a step's tool calls concurrently. When False, every requested "
+        "tool still runs, one after another. Left unset it defaults to True in "
+        "FUNCTION_CALLING mode, where the provider already batches the calls, and to "
+        "False in the other modes, which would need an extra tool in the prompt.",
+    )
+    max_parallel_tool_calls: int = Field(
+        default=8,
+        ge=1,
+        description="Upper bound on tools executing concurrently in one step. Calls beyond "
+        "the limit queue and run as workers free up; none are dropped.",
     )
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
@@ -433,6 +446,15 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             )
             if self.file_store.agent_file_write_enabled:
                 self.tools.append(FileWriteTool(file_store=self.file_store_backend))
+
+        # Default to concurrent execution where the provider batches the calls itself.
+        # In function-calling mode that costs nothing: the model already emits one step
+        # with several calls, and running them concurrently changes only how fast they
+        # finish. The other modes reach parallelism through an injected `run-parallel`
+        # tool, which would change the prompt of every agent that never asked for it, so
+        # they stay opt-in. An explicit setting always wins.
+        if "parallel_tool_calls_enabled" not in self.model_fields_set:
+            self.parallel_tool_calls_enabled = getattr(self, "inference_mode", None) == InferenceMode.FUNCTION_CALLING
 
         if self.parallel_tool_calls_enabled:
             inference_mode = getattr(self, "inference_mode", None)
@@ -1311,6 +1333,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 raise CanceledException()
             if llm_result.status != RunnableStatus.SUCCESS:
                 error_message = f"LLM '{self.llm.name}' failed: {llm_result.error.message}"
+                # Classified here, where the original exception class is still available;
+                # by the time it reaches the loop only this message survives.
+                if self.llm._is_context_window_error(llm_result.error.type, (llm_result.error.message or "").lower()):
+                    raise LLMContextWindowExceededError(error_message)
                 raise ValueError(error_message)
 
             return llm_result

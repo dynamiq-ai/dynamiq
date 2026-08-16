@@ -51,11 +51,18 @@ class HistoryManagerMixin:
 
     def _split_history(
         self,
+        force: bool = False,
     ) -> tuple[list[Message | VisionMessage], list[Message | VisionMessage]]:
         """Split conversation history into messages to summarize and messages to preserve.
 
         Walks from newest to oldest, greedily keeping messages that fit within
         ``max_preserved_tokens``.  Everything else goes to the summarize bucket.
+
+        Args:
+            force: Summarize even when the local token estimate says the history fits.
+                Set when a provider has already rejected the prompt as too long, which
+                means that estimate was wrong and preserving the whole tail would make
+                compaction a no-op exactly when it is needed.
 
         Returns:
             Tuple of (to_summarize, to_preserve).
@@ -85,7 +92,7 @@ class HistoryManagerMixin:
         while to_preserve and to_preserve[0].role == MessageRole.TOOL:
             to_summarize = list(to_summarize) + [to_preserve.pop(0)]
 
-        if to_summarize == [] and self.is_token_limit_exceeded():
+        if to_summarize == [] and (force or self.is_token_limit_exceeded()):
             to_summarize = conversation_history
             to_preserve = []
 
