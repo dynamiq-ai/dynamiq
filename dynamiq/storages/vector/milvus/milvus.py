@@ -85,7 +85,10 @@ class MilvusVectorStore(BaseVectorStore, DryRunMixin):
         self.schema.add_function(bm25_function)
 
         self.index_params = self.client.prepare_index_params()
-        self.index_params.add_index(field_name="id")
+        # milvus-lite >= 3.0 rejects an index entry without an explicit index_type; the scalar
+        # default the server picks for a VARCHAR field is INVERTED, so naming it keeps both paths
+        # identical. AUTOINDEX is not a substitute here: Milvus only accepts it on vector fields.
+        self.index_params.add_index(field_name="id", index_type="INVERTED")
         self.index_params.add_index(
             field_name=self.embedding_key, index_type=self.index_type, metric_type=self.metric_type
         )
@@ -373,7 +376,9 @@ class MilvusVectorStore(BaseVectorStore, DryRunMixin):
             entity = hit.get("entity", {})
             content = entity.get(content_key, "")
             embedding = entity.get(embedding_key, [])
-            metadata = {k: v for k, v in entity.items() if k not in (content_key, embedding_key)}
+            # "sparse" is the BM25 function output, not user metadata: Milvus returns it for
+            # output_fields=["*"] and rejects it on write.
+            metadata = {k: v for k, v in entity.items() if k not in (content_key, embedding_key, "sparse")}
 
             doc = Document(
                 id=str(hit.get("id", "")),
@@ -448,7 +453,9 @@ class MilvusVectorStore(BaseVectorStore, DryRunMixin):
             }
             if return_embeddings:
                 document_dict["embedding"] = entry.get(embedding_key, [])
-            metadata = {k: v for k, v in entry.items() if k not in ("id", content_key, embedding_key)}
+            # "sparse" is the BM25 function output, not user metadata: Milvus returns it for
+            # output_fields=["*"] and rejects it on write.
+            metadata = {k: v for k, v in entry.items() if k not in ("id", content_key, embedding_key, "sparse")}
 
             if metadata:
                 document_dict["metadata"] = metadata

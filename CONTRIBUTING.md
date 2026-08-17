@@ -38,7 +38,7 @@ Good documentation is key to a successful project. If you find areas in our docu
    git clone https://github.com/YOUR-USERNAME/dynamiq
    ```
 
-3. Create a virtaul environment and install project requirements:
+3. Create a virtual environment and install project requirements:
    ```sh
    make install
    ```
