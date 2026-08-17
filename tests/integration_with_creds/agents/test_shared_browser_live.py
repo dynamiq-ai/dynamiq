@@ -16,7 +16,6 @@ agent, read on another via httpbin — SKIP on 5xx), session status (queried fro
 once, at owner teardown). Page-content asserts use example.com (httpbin 5xx's under load).
 """
 
-import io
 import os
 import threading
 import time
@@ -73,11 +72,10 @@ class RecordingStagehand(Stagehand):
 
     async def _init_client(
         self,
-        files: list[io.BytesIO],
         shared_context_id: str | None = None,
         create_shared_session: bool = False,
     ):
-        await super()._init_client(files, shared_context_id, create_shared_session)
+        await super()._init_client(shared_context_id, create_shared_session)
         record = {"session_id": self._session_id, "context_id": shared_context_id}
         if record not in SESSION_LOG[self.name]:
             SESSION_LOG[self.name].append(record)
@@ -126,7 +124,7 @@ def _stagehand_tool(name: str, **kwargs) -> RecordingStagehand:
     return RecordingStagehand(
         name=name,
         connection=StagehandConnection(model_api_key=os.getenv("OPENAI_API_KEY")),
-        model_name="gpt-4o",
+        model_name="openai/gpt-4o",
         is_return_live_view_url_enabled=True,
         is_postponed_component_init=True,
         **kwargs,

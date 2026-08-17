@@ -16,6 +16,7 @@ from dynamiq.checkpoints.checkpoint import (
     IterativeCheckpointMixin,
 )
 from dynamiq.prompts import Prompt
+from dynamiq.utils.logger import logger
 
 # Default prompt prefix length: [system_message, user_message].
 # At runtime, _history_offset is recalculated to len(prompt.messages) before the ReAct loop,
@@ -49,6 +50,10 @@ class AgentCheckpointState(BaseCheckpointState):
     tool_states: dict[str, dict] = Field(
         default_factory=dict, description="Tool component checkpoint states keyed by tool ID"
     )
+    sandbox_state: dict | None = Field(
+        default=None,
+        description="Reconnect info (type, sandbox_id, base_path) for the agent's own sandbox, if one was started",
+    )
 
 
 class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
@@ -59,8 +64,8 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
     and the pending tool call replayed after an input-streaming timeout.
 
     Designed to be mixed into ``Agent``; the methods read host attributes
-    (``llm``, ``tools``, ``state``, ``_prompt``, ``_history_offset``) provided
-    by the concrete class.
+    (``llm``, ``tools``, ``state``, ``sandbox``, ``_prompt``, ``_history_offset``)
+    provided by the concrete class.
     """
 
     # Loop-level progress and the in-flight tool call captured before tool
@@ -87,10 +92,66 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
             history_offset=self._history_offset,
             llm_state=llm_checkpoint.model_dump() if hasattr(llm_checkpoint, "model_dump") else llm_checkpoint,
             tool_states=tool_states,
+            sandbox_state=self._sandbox_checkpoint_state(),
             **base_fields,
         )
         self._save_iteration_to_checkpoint(state)
         return state
+
+    def _own_sandbox(self):
+        """The agent's own configured sandbox backend, or None.
+
+        Deliberately not the ``sandbox_backend`` property: a borrowed
+        shared-sandbox view belongs to the owning agent, which checkpoints it.
+        """
+        sandbox_config = getattr(self, "sandbox", None)
+        if sandbox_config is not None and sandbox_config.enabled:
+            return sandbox_config.backend
+        return None
+
+    def _sandbox_checkpoint_state(self) -> dict | None:
+        """Reconnect info for the agent's own sandbox, or None if never started.
+
+        Only the id is needed to reconnect; type and base_path are stored so
+        restore can refuse to point a differently-configured backend at it.
+        """
+        sandbox = self._own_sandbox()
+        sandbox_id = getattr(sandbox, "current_sandbox_id", None)
+        if not sandbox_id:
+            return None
+        return {"type": sandbox.type, "sandbox_id": sandbox_id, "base_path": sandbox.base_path}
+
+    def _restore_sandbox_state(self, sandbox_state: dict) -> None:
+        """Point the agent's own sandbox at a checkpointed sandbox id.
+
+        The reconnect itself stays lazy — the first sandbox use calls
+        ``_ensure_sandbox``, which reconnects by id or raises
+        ``SandboxConnectionError`` if the sandbox has expired. Skipped when the
+        agent has no own sandbox, the backend type changed, or an explicit
+        different sandbox_id is already configured (explicit config wins).
+        """
+        saved_id = sandbox_state.get("sandbox_id")
+        sandbox = self._own_sandbox()
+        if not saved_id or sandbox is None or not hasattr(sandbox, "sandbox_id"):
+            return
+
+        saved_type = sandbox_state.get("type")
+        if saved_type and saved_type != sandbox.type:
+            logger.warning(
+                f"Agent checkpoint restore: sandbox type changed ({saved_type} -> {sandbox.type}); "
+                f"not reconnecting to sandbox {saved_id}."
+            )
+            return
+
+        if sandbox.sandbox_id and sandbox.sandbox_id != saved_id:
+            logger.info(
+                f"Agent checkpoint restore: keeping explicitly configured sandbox_id {sandbox.sandbox_id} "
+                f"over checkpointed {saved_id}."
+            )
+            return
+
+        sandbox.sandbox_id = saved_id
+        logger.info(f"Agent checkpoint restore: sandbox will reconnect to {saved_id} on first use.")
 
     def set_pending_tool_call(self, action: str | None, action_input: Any, thought: str | None) -> None:
         """Record the tool call about to run so it can be checkpointed on interruption."""
@@ -153,6 +214,8 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
             self.llm.from_checkpoint_state(llm_state)
         if (tool_states := state_dict.get("tool_states")) is not None:
             self._restore_tool_states(tool_states)
+        if (sandbox_state := state_dict.get("sandbox_state")) is not None:
+            self._restore_sandbox_state(sandbox_state)
 
         self._restore_iteration_from_checkpoint(state_dict)
 

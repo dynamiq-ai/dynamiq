@@ -1544,6 +1544,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         if not tool.is_files_allowed:
             return
 
+        # Wiring the store is independent of whether anything is in it: a
+        # PythonCodeExecutor refuses to run without one, and the store is empty
+        # on any run where the user uploaded no files — which is most of them.
+        if isinstance(tool, PythonCodeExecutor) and not tool.file_store and self.file_store_backend:
+            tool.file_store = self.file_store_backend
+            logger.debug(f"Agent {self.name} - {self.id}: injected file_store into PythonCodeExecutor tool {tool.name}")
+
         file_paths = self._extract_file_paths_from_input(tool, merged_input)
 
         if self.sandbox_backend and file_paths:
@@ -1575,10 +1582,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         if isinstance(tool, Python):
             merged_input["files"] = files
-
-        if isinstance(tool, PythonCodeExecutor) and not tool.file_store and self.file_store_backend:
-            tool.file_store = self.file_store_backend
-            logger.debug(f"Agent {self.name} - {self.id}: injected file_store into PythonCodeExecutor tool {tool.name}")
 
     def _run_tool(
         self,

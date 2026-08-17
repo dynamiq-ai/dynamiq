@@ -16,7 +16,7 @@ def set_wf_with_agent(cm):
         connection=StagehandConnection(
             model_api_key=os.getenv("OPENAI_API_KEY"),
         ),
-        model_name="gpt-4o",
+        model_name="openai/gpt-4o",
         is_postponed_component_init=True,
     )
 

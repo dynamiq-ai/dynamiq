@@ -34,6 +34,11 @@ def bare_stagehand(**attrs) -> Stagehand:
         "_browserbase_client": None,
         "_steel_client": None,
         "_steel_browser_session": None,
+        "_stagehand_session": None,
+        "_cdp_url": None,
+        "_playwright": None,
+        "_pw_browser": None,
+        "_pw_page": None,
         "_loop": None,
         "_loop_thread": None,
         "browser_context_id": None,
@@ -256,33 +261,28 @@ def test_shared_config_sets_context_keepalive_and_timeout(monkeypatch):
     monkeypatch.setattr(Stagehand, "_is_steel_browser_connection", lambda self: False)
     tool = bare_stagehand(connection=MagicMock(browserbase_project_id="proj-1"), shared_browser_session_timeout=1800)
 
-    config = MagicMock(browserbase_session_create_params=None)
-    tool._apply_shared_browser_config(config, "ctx-1")
+    params = tool._apply_shared_browser_config(None, "ctx-1")
 
-    params = config.browserbase_session_create_params
     assert params["browser_settings"]["context"] == {"id": "ctx-1", "persist": True}
     assert params["project_id"] == "proj-1"
     # the session now spans the whole run, so it must survive its creator disconnecting
     assert params["keep_alive"] is True
-    # "timeout", not "api_timeout": Stagehand camel-cases naively and the API rejects "apiTimeout"
     assert params["timeout"] == 1800
-    assert "api_timeout" not in params
 
 
 def test_shared_config_preserves_user_supplied_params(monkeypatch):
     monkeypatch.setattr(Stagehand, "_is_steel_browser_connection", lambda self: False)
     tool = bare_stagehand(connection=MagicMock(browserbase_project_id="proj-1"))
 
-    config = MagicMock(
-        browserbase_session_create_params={
+    params = tool._apply_shared_browser_config(
+        {
             "project_id": "proj-explicit",
             "keep_alive": False,
             "browser_settings": {"block_ads": True},
-        }
+        },
+        "ctx-1",
     )
-    tool._apply_shared_browser_config(config, "ctx-1")
 
-    params = config.browserbase_session_create_params
     assert params["project_id"] == "proj-explicit"
     assert params["keep_alive"] is False  # user's own value wins
     assert params["browser_settings"]["block_ads"] is True
