@@ -66,7 +66,8 @@ def main():
     # 3. A fresh agent (new process in real life) has no sandbox id ...
     agent_b = build_agent("agent-b")
     sandbox_b = agent_b.sandbox.backend
-    assert sandbox_b.sandbox_id is None
+    if sandbox_b.sandbox_id is not None:
+        raise RuntimeError(f"Fresh agent unexpectedly has sandbox_id={sandbox_b.sandbox_id!r}")
     print(f"\nAgent B before restore: sandbox_id={sandbox_b.sandbox_id}")
 
     # ... until the checkpoint is restored.
