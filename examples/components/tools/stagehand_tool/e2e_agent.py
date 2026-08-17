@@ -31,8 +31,11 @@ from dynamiq.nodes.llms import Anthropic
 from dynamiq.nodes.tools import Stagehand
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 
-# claude-sonnet-5 is NOT usable here: its observe fails 100% of the time server-side (bare 502),
-# and the Browserbase Model Gateway rejects it outright (400, unsupported model).
+# Deliberately NOT claude-sonnet-5. Its observe fails on the HOSTED Browserbase v3 server, not just
+# the bundled local one: 0/7 on api.stagehand.browserbase.com, always a bare 502. act, extract and
+# go_back are fine — observe alone is broken. The Model Gateway refuses sonnet-5 outright (400,
+# unsupported model), so no key arrangement makes it usable there. Revisit once Browserbase ships a
+# fix; `fallback_model_name` also covers it now, at the cost of a failed round-trip per observe.
 MODEL = "anthropic/claude-sonnet-4-6"
 TASK = (
     "Open https://example.com, extract the page heading and the first paragraph, "

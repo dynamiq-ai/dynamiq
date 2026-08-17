@@ -31,8 +31,11 @@ from dynamiq.connections import Browserbase as BrowserbaseConnection
 from dynamiq.connections import SteelBrowser
 from dynamiq.nodes.tools.stagehand import Stagehand, StagehandInputSchema
 
-# claude-sonnet-5 is NOT usable here: its observe fails 100% of the time server-side (bare 502),
-# and the Browserbase Model Gateway rejects it outright (400, unsupported model).
+# Deliberately NOT claude-sonnet-5. Its observe fails on the HOSTED Browserbase v3 server, not just
+# the bundled local one: 0/7 on api.stagehand.browserbase.com, always a bare 502. act, extract and
+# go_back are fine — observe alone is broken. The Model Gateway refuses sonnet-5 outright (400,
+# unsupported model), so no key arrangement makes it usable there. Revisit once Browserbase ships a
+# fix; `fallback_model_name` also covers it now, at the cost of a failed round-trip per observe.
 MODEL = "anthropic/claude-sonnet-4-6"
 # The shipped examples drive Stagehand with gpt-4o, so keep that exact model covered.
 OPENAI_MODEL = "openai/gpt-4o"
