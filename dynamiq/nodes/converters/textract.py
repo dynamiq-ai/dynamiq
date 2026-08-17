@@ -1,13 +1,12 @@
 from io import BytesIO
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dynamiq.components.converters.textract import TextractAdapter, TextractFeatureType
 from dynamiq.components.converters.textract import TextractFileConverter as TextractFileConverterComponent
 from dynamiq.components.converters.textract import (
     TextractNotificationChannel,
-    TextractOutputConfig,
     TextractProcessingMode,
     TextractQuery,
     TextractS3Object,
@@ -64,24 +63,14 @@ class TextractFileConverter(ConnectionNode):
             with, and only valid with, the `QUERIES` feature.
         adapters (list[TextractAdapter], optional): Trained Textract adapters to apply.
         processing_mode (TextractProcessingMode, optional): Whether to use the synchronous API, the
-            asynchronous (S3-based) API, or pick automatically. Defaults to "auto".
+            asynchronous (S3-based) API, or pick automatically. Defaults to "async".
         min_confidence (float, optional): Drop text blocks below this Textract confidence (0-100).
         skip_headers_and_footers (bool, optional): Drop layout headers, footers and page numbers.
             Requires the `LAYOUT` feature. Defaults to False.
-        staging_s3_bucket (str, optional): Bucket used to stage local files that are too large or
-            too long for the synchronous API. Defaults to a per-account bucket named
-            `dynamiq-textract-staging-<account-id>-<region>`, created on first use. Each staged
-            document is deleted once its job finishes (see `delete_staged_object`); the bucket
-            itself is reused across runs rather than deleted.
-        create_staging_bucket (bool, optional): Create the staging bucket when it is missing.
-            Defaults to True. A created bucket gets public access blocked and a lifecycle rule that
-            expires the staging prefix, so anything an interrupted run leaves behind still goes
-            away. When staging is impossible, multi-page PDFs fall back to being split locally and
-            sent one page per synchronous request.
-        delete_staged_object (bool, optional): Delete each staged document right after its job
-            completes, successfully or not. Defaults to True.
-        staged_object_expiration_days (int, optional): Expiration applied to the staging prefix when
-            the bucket is created, as the backstop for killed runs. Defaults to 1.
+        Local documents sent asynchronously are staged in an internal per-account, per-region
+        bucket managed by Dynamiq. The bucket name and retention settings are intentionally not
+        configurable. Staged objects are deleted after processing, with a one-day lifecycle policy
+        as a backstop for interrupted runs.
 
     Example:
         ```python
@@ -113,7 +102,7 @@ class TextractFileConverter(ConnectionNode):
     feature_types: list[TextractFeatureType] = Field(default_factory=list)
     queries: list[TextractQuery] = Field(default_factory=list)
     adapters: list[TextractAdapter] = Field(default_factory=list)
-    processing_mode: TextractProcessingMode = TextractProcessingMode.AUTO
+    processing_mode: TextractProcessingMode = TextractProcessingMode.ASYNC
     separator: str = "\n\n"
 
     render_tables_as_markdown: bool = True
@@ -122,19 +111,6 @@ class TextractFileConverter(ConnectionNode):
     skip_headers_and_footers: bool = False
     min_confidence: float | None = Field(default=None, ge=0, le=100)
 
-    staging_s3_bucket: str | None = None
-    staging_s3_prefix: str = "dynamiq/textract"
-    create_staging_bucket: bool = True
-    delete_staged_object: bool = True
-    staged_object_expiration_days: int = Field(default=1, ge=1)
-
-    @field_validator("staging_s3_prefix")
-    @classmethod
-    def normalize_staging_s3_prefix(cls, prefix: str) -> str:
-        """Normalize the prefix here too, so the node and its component always report the same value."""
-        return TextractFileConverterComponent.normalize_staging_s3_prefix(prefix)
-
-    output_config: TextractOutputConfig | None = None
     notification_channel: TextractNotificationChannel | None = None
     kms_key_id: str | None = None
     job_tag: str | None = None
@@ -184,12 +160,6 @@ class TextractFileConverter(ConnectionNode):
                 include_query_section=self.include_query_section,
                 skip_headers_and_footers=self.skip_headers_and_footers,
                 min_confidence=self.min_confidence,
-                staging_s3_bucket=self.staging_s3_bucket,
-                staging_s3_prefix=self.staging_s3_prefix,
-                create_staging_bucket=self.create_staging_bucket,
-                delete_staged_object=self.delete_staged_object,
-                staged_object_expiration_days=self.staged_object_expiration_days,
-                output_config=self.output_config,
                 notification_channel=self.notification_channel,
                 kms_key_id=self.kms_key_id,
                 job_tag=self.job_tag,

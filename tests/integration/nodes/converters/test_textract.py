@@ -70,6 +70,7 @@ def converter(connection, client):
         name="Test Textract Converter",
         connection=connection,
         client=client,
+        processing_mode=TextractProcessingMode.SYNC,
     )
 
 
@@ -104,6 +105,21 @@ def run_converter(converter, input_data) -> list:
     return result.output[converter.id]["output"]["documents"]
 
 
+def mock_internal_staging(monkeypatch, region: str = "us-east-1", account_id: str = "123456789012"):
+    """Mock the S3 and STS clients used by Dynamiq's internal staging infrastructure."""
+    s3_client = MagicMock()
+    s3_client.meta.region_name = region
+    s3_client.put_object.return_value = {}
+    sts_client = MagicMock()
+    sts_client.get_caller_identity.return_value = {"Account": account_id}
+    monkeypatch.setattr(
+        AWSTextract,
+        "get_client",
+        lambda self, service_name="textract": sts_client if service_name == "sts" else s3_client,
+    )
+    return s3_client
+
+
 class TestDetectDocumentText:
     def test_lines_are_joined_in_reading_order(self, converter, client, png_file):
         client.detect_document_text.return_value = {
@@ -134,7 +150,12 @@ class TestDetectDocumentText:
                 line("line-2", "Smudged text", confidence=42.0),
             ],
         }
-        converter = TextractFileConverter(connection=connection, client=client, min_confidence=80)
+        converter = TextractFileConverter(
+            connection=connection,
+            client=client,
+            min_confidence=80,
+            processing_mode=TextractProcessingMode.SYNC,
+        )
 
         documents = run_converter(converter, {"files": [png_file]})
 
@@ -180,7 +201,10 @@ class TestTables:
     def test_table_is_rendered_as_markdown_and_exposed_in_metadata(self, connection, client, png_file, table_response):
         client.analyze_document.return_value = table_response
         converter = TextractFileConverter(
-            connection=connection, client=client, feature_types=[TextractFeatureType.TABLES]
+            connection=connection,
+            client=client,
+            feature_types=[TextractFeatureType.TABLES],
+            processing_mode=TextractProcessingMode.SYNC,
         )
 
         documents = run_converter(converter, {"files": [png_file]})
@@ -227,7 +251,10 @@ class TestTables:
             ],
         }
         converter = TextractFileConverter(
-            connection=connection, client=client, feature_types=[TextractFeatureType.TABLES]
+            connection=connection,
+            client=client,
+            feature_types=[TextractFeatureType.TABLES],
+            processing_mode=TextractProcessingMode.SYNC,
         )
 
         rows = run_converter(converter, {"files": [png_file]})[0]["metadata"]["tables"][0]["rows"]
@@ -247,7 +274,10 @@ class TestTables:
             ],
         }
         converter = TextractFileConverter(
-            connection=connection, client=client, feature_types=[TextractFeatureType.TABLES]
+            connection=connection,
+            client=client,
+            feature_types=[TextractFeatureType.TABLES],
+            processing_mode=TextractProcessingMode.SYNC,
         )
 
         assert "| a\\|b |" in run_converter(converter, {"files": [png_file]})[0]["content"]
@@ -274,7 +304,10 @@ class TestForms:
             ],
         }
         converter = TextractFileConverter(
-            connection=connection, client=client, feature_types=[TextractFeatureType.FORMS]
+            connection=connection,
+            client=client,
+            feature_types=[TextractFeatureType.FORMS],
+            processing_mode=TextractProcessingMode.SYNC,
         )
 
         documents = run_converter(converter, {"files": [png_file]})
@@ -322,6 +355,7 @@ class TestForms:
             client=client,
             feature_types=[TextractFeatureType.FORMS],
             min_confidence=60,
+            processing_mode=TextractProcessingMode.SYNC,
         )
 
         document = run_converter(converter, {"files": [png_file]})[0]
@@ -348,7 +382,10 @@ class TestForms:
             ],
         }
         converter = TextractFileConverter(
-            connection=connection, client=client, feature_types=[TextractFeatureType.FORMS]
+            connection=connection,
+            client=client,
+            feature_types=[TextractFeatureType.FORMS],
+            processing_mode=TextractProcessingMode.SYNC,
         )
 
         assert run_converter(converter, {"files": [png_file]})[0]["metadata"]["forms"][0]["value"] == "[X]"
@@ -374,6 +411,7 @@ class TestQueries:
             client=client,
             feature_types=[TextractFeatureType.QUERIES],
             queries=[TextractQuery(text="What is the total?", alias="total")],
+            processing_mode=TextractProcessingMode.SYNC,
         )
 
         documents = run_converter(converter, {"files": [png_file]})
@@ -423,7 +461,10 @@ class TestLayout:
     def test_layout_regions_become_markdown_structure(self, connection, client, png_file, layout_response):
         client.analyze_document.return_value = layout_response
         converter = TextractFileConverter(
-            connection=connection, client=client, feature_types=[TextractFeatureType.LAYOUT]
+            connection=connection,
+            client=client,
+            feature_types=[TextractFeatureType.LAYOUT],
+            processing_mode=TextractProcessingMode.SYNC,
         )
 
         content = run_converter(converter, {"files": [png_file]})[0]["content"]
@@ -442,6 +483,7 @@ class TestLayout:
             client=client,
             feature_types=[TextractFeatureType.LAYOUT],
             skip_headers_and_footers=True,
+            processing_mode=TextractProcessingMode.SYNC,
         )
 
         content = run_converter(converter, {"files": [png_file]})[0]["content"]
@@ -473,6 +515,7 @@ class TestLayout:
             connection=connection,
             client=client,
             feature_types=[TextractFeatureType.LAYOUT, TextractFeatureType.TABLES],
+            processing_mode=TextractProcessingMode.SYNC,
         )
 
         content = run_converter(converter, {"files": [png_file]})[0]["content"]
@@ -493,7 +536,10 @@ class TestSignatures:
             ],
         }
         converter = TextractFileConverter(
-            connection=connection, client=client, feature_types=[TextractFeatureType.SIGNATURES]
+            connection=connection,
+            client=client,
+            feature_types=[TextractFeatureType.SIGNATURES],
+            processing_mode=TextractProcessingMode.SYNC,
         )
 
         signatures = run_converter(converter, {"files": [png_file]})[0]["metadata"]["signatures"]
@@ -610,7 +656,9 @@ class TestAsyncJobs:
 
 
 class TestMultiPagePdf:
-    def test_pages_are_split_locally_when_staging_is_not_possible(self, connection, client, two_page_pdf, monkeypatch):
+    def test_auto_mode_splits_pages_locally_when_staging_is_not_possible(
+        self, connection, client, two_page_pdf, monkeypatch
+    ):
         def deny_s3(self, service_name="textract"):
             raise RuntimeError("s3:PutObject denied")
 
@@ -623,6 +671,7 @@ class TestMultiPagePdf:
             connection=connection,
             client=client,
             document_creation_mode=DocumentCreationMode.ONE_DOC_PER_PAGE,
+            processing_mode=TextractProcessingMode.AUTO,
         )
 
         documents = run_converter(converter, {"files": [two_page_pdf]})
@@ -632,18 +681,10 @@ class TestMultiPagePdf:
         assert [document["metadata"]["page_number"] for document in documents] == [1, 2]
         assert [document["content"] for document in documents] == ["First page", "Second page"]
 
-    def test_multi_page_pdf_defaults_to_a_per_account_staging_bucket(
+    def test_async_default_uses_the_internal_per_account_staging_bucket(
         self, connection, client, two_page_pdf, monkeypatch
     ):
-        s3_client = MagicMock()
-        s3_client.meta.region_name = "us-west-2"
-        sts_client = MagicMock()
-        sts_client.get_caller_identity.return_value = {"Account": "123456789012"}
-        monkeypatch.setattr(
-            AWSTextract,
-            "get_client",
-            lambda self, service_name="textract": sts_client if service_name == "sts" else s3_client,
-        )
+        s3_client = mock_internal_staging(monkeypatch, region="us-west-2")
         client.start_document_text_detection.return_value = {"JobId": "job-1"}
         client.get_document_text_detection.return_value = {
             "JobStatus": "SUCCEEDED",
@@ -658,43 +699,44 @@ class TestMultiPagePdf:
         assert s3_client.put_object.call_args.kwargs["Bucket"] == "dynamiq-textract-staging-123456789012-us-west-2"
         client.detect_document_text.assert_not_called()
 
-    def test_missing_staging_bucket_is_created_in_the_connection_region(
+    def test_missing_internal_bucket_is_created_in_the_connection_region(
         self, connection, client, two_page_pdf, monkeypatch
     ):
-        s3_client = MagicMock()
-        s3_client.meta.region_name = "eu-central-1"
+        s3_client = mock_internal_staging(monkeypatch, region="eu-central-1")
         s3_client.head_bucket.side_effect = RuntimeError("404")
-        monkeypatch.setattr(AWSTextract, "get_client", lambda self, service_name="textract": s3_client)
         client.start_document_text_detection.return_value = {"JobId": "job-1"}
         client.get_document_text_detection.return_value = {
             "JobStatus": "SUCCEEDED",
             "DocumentMetadata": {"Pages": 2},
             "Blocks": [line("line-1", "First page", page=1)],
         }
-        converter = TextractFileConverter(connection=connection, client=client, staging_s3_bucket="staging-bucket")
+        converter = TextractFileConverter(connection=connection, client=client)
 
         run_converter(converter, {"files": [two_page_pdf]})
 
         s3_client.create_bucket.assert_called_once_with(
-            Bucket="staging-bucket",
+            Bucket="dynamiq-textract-staging-123456789012-eu-central-1",
             CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
         )
         # A bucket the converter created is locked down and expires anything a killed run leaves.
-        assert s3_client.put_public_access_block.call_args.kwargs["Bucket"] == "staging-bucket"
+        assert (
+            s3_client.put_public_access_block.call_args.kwargs["Bucket"]
+            == "dynamiq-textract-staging-123456789012-eu-central-1"
+        )
         lifecycle = s3_client.put_bucket_lifecycle_configuration.call_args.kwargs["LifecycleConfiguration"]
         assert lifecycle["Rules"][0]["Filter"] == {"Prefix": "dynamiq/textract/"}
         assert lifecycle["Rules"][0]["Expiration"] == {"Days": 1}
+        assert lifecycle["Rules"][0]["NoncurrentVersionExpiration"] == {"NoncurrentDays": 1}
 
-    def test_an_existing_staging_bucket_is_left_untouched(self, connection, client, two_page_pdf, monkeypatch):
-        s3_client = MagicMock()
-        monkeypatch.setattr(AWSTextract, "get_client", lambda self, service_name="textract": s3_client)
+    def test_an_existing_internal_bucket_is_left_untouched(self, connection, client, two_page_pdf, monkeypatch):
+        s3_client = mock_internal_staging(monkeypatch)
         client.start_document_text_detection.return_value = {"JobId": "job-1"}
         client.get_document_text_detection.return_value = {
             "JobStatus": "SUCCEEDED",
             "DocumentMetadata": {"Pages": 2},
             "Blocks": [line("line-1", "First page", page=1)],
         }
-        converter = TextractFileConverter(connection=connection, client=client, staging_s3_bucket="staging-bucket")
+        converter = TextractFileConverter(connection=connection, client=client)
 
         run_converter(converter, {"files": [two_page_pdf]})
 
@@ -705,39 +747,15 @@ class TestMultiPagePdf:
         s3_client.delete_bucket.assert_not_called()
         s3_client.delete_object.assert_called_once()
 
-    def test_creation_can_be_disabled_for_out_of_band_buckets(self, connection, client, two_page_pdf, monkeypatch):
-        s3_client = MagicMock()
-        s3_client.head_bucket.side_effect = RuntimeError("404")
-        monkeypatch.setattr(AWSTextract, "get_client", lambda self, service_name="textract": s3_client)
-        client.start_document_text_detection.return_value = {"JobId": "job-1"}
-        client.get_document_text_detection.return_value = {
-            "JobStatus": "SUCCEEDED",
-            "DocumentMetadata": {"Pages": 2},
-            "Blocks": [line("line-1", "First page", page=1)],
-        }
-        converter = TextractFileConverter(
-            connection=connection,
-            client=client,
-            staging_s3_bucket="staging-bucket",
-            create_staging_bucket=False,
-        )
-
-        run_converter(converter, {"files": [two_page_pdf]})
-
-        s3_client.head_bucket.assert_not_called()
-        s3_client.create_bucket.assert_not_called()
-        s3_client.put_object.assert_called_once()
-
-    def test_staging_bucket_routes_multi_page_pdf_through_s3(self, connection, client, two_page_pdf, monkeypatch):
-        s3_client = MagicMock()
-        monkeypatch.setattr(AWSTextract, "get_client", lambda self, service_name="textract": s3_client)
+    def test_internal_staging_routes_multi_page_pdf_through_s3(self, connection, client, two_page_pdf, monkeypatch):
+        s3_client = mock_internal_staging(monkeypatch)
         client.start_document_text_detection.return_value = {"JobId": "job-1"}
         client.get_document_text_detection.return_value = {
             "JobStatus": "SUCCEEDED",
             "DocumentMetadata": {"Pages": 2},
             "Blocks": [line("line-1", "First page", page=1), line("line-2", "Second page", page=2)],
         }
-        converter = TextractFileConverter(connection=connection, client=client, staging_s3_bucket="staging-bucket")
+        converter = TextractFileConverter(connection=connection, client=client)
 
         documents = run_converter(converter, {"files": [two_page_pdf]})
 
@@ -748,13 +766,15 @@ class TestMultiPagePdf:
         assert staged_key.startswith("dynamiq/textract/")
         assert staged_key.endswith("report.pdf")
         # The staged copy is removed once the job completes.
-        s3_client.delete_object.assert_called_once_with(Bucket="staging-bucket", Key=staged_key)
+        s3_client.delete_object.assert_called_once_with(
+            Bucket="dynamiq-textract-staging-123456789012-us-east-1",
+            Key=staged_key,
+        )
 
     def test_staged_object_is_removed_even_when_the_job_fails(self, connection, client, two_page_pdf, monkeypatch):
-        s3_client = MagicMock()
-        monkeypatch.setattr(AWSTextract, "get_client", lambda self, service_name="textract": s3_client)
+        s3_client = mock_internal_staging(monkeypatch)
         client.start_document_text_detection.side_effect = RuntimeError("throttled")
-        converter = TextractFileConverter(connection=connection, client=client, staging_s3_bucket="staging-bucket")
+        converter = TextractFileConverter(connection=connection, client=client)
 
         output_node = Output(id="output_node", depends=[NodeDependency(converter)])
         workflow = Workflow(flow=flows.Flow(nodes=[converter, output_node]), version="1")
@@ -763,47 +783,9 @@ class TestMultiPagePdf:
         assert result.status == RunnableStatus.FAILURE
         s3_client.delete_object.assert_called_once()
 
-    def test_oversized_file_without_staging_bucket_is_rejected(self, connection, client):
-        file = BytesIO(PNG_HEADER + b"x" * (11 * 1024 * 1024))
-        file.name = "huge.png"
-        converter = TextractFileConverter(connection=connection, client=client)
-
-        output_node = Output(id="output_node", depends=[NodeDependency(converter)])
-        workflow = Workflow(flow=flows.Flow(nodes=[converter, output_node]), version="1")
-        result = workflow.run(input_data={"files": [file]})
-
-        assert result.status == RunnableStatus.FAILURE
-        client.detect_document_text.assert_not_called()
-
-
-class TestSerialization:
-    def test_node_round_trips_through_to_dict(self, connection):
-        converter = TextractFileConverter(
-            connection=connection,
-            feature_types=[TextractFeatureType.LAYOUT, TextractFeatureType.TABLES],
-            staging_s3_bucket="staging-bucket",
-        )
-
-        data = converter.to_dict()
-
-        assert data["type"] == "dynamiq.nodes.converters.TextractFileConverter"
-        assert data["feature_types"] == [TextractFeatureType.LAYOUT, TextractFeatureType.TABLES]
-        assert data["staging_s3_bucket"] == "staging-bucket"
-        assert data["connection"]["type"] == "dynamiq.connections.AWSTextract"
-        assert "file_converter" not in data
-
-    def test_an_auto_derived_staging_bucket_does_not_leak_into_the_config(
-        self, connection, client, two_page_pdf, monkeypatch
-    ):
-        s3_client = MagicMock()
-        s3_client.meta.region_name = "us-east-1"
-        sts_client = MagicMock()
-        sts_client.get_caller_identity.return_value = {"Account": "123456789012"}
-        monkeypatch.setattr(
-            AWSTextract,
-            "get_client",
-            lambda self, service_name="textract": sts_client if service_name == "sts" else s3_client,
-        )
+    def test_versioned_staged_object_is_deleted_permanently(self, connection, client, two_page_pdf, monkeypatch):
+        s3_client = mock_internal_staging(monkeypatch)
+        s3_client.put_object.return_value = {"VersionId": "version-1"}
         client.start_document_text_detection.return_value = {"JobId": "job-1"}
         client.get_document_text_detection.return_value = {
             "JobStatus": "SUCCEEDED",
@@ -814,20 +796,126 @@ class TestSerialization:
 
         run_converter(converter, {"files": [two_page_pdf]})
 
-        # Re-serializing a converter that ran must not pin it to one account's bucket.
-        assert converter.to_dict()["staging_s3_bucket"] is None
-        assert converter.file_converter.staging_s3_bucket is None
+        staged_key = s3_client.put_object.call_args.kwargs["Key"]
+        assert client.start_document_text_detection.call_args.kwargs["DocumentLocation"]["S3Object"]["Version"] == (
+            "version-1"
+        )
+        s3_client.delete_object.assert_called_once_with(
+            Bucket="dynamiq-textract-staging-123456789012-us-east-1",
+            Key=staged_key,
+            VersionId="version-1",
+        )
+
+    def test_auto_mode_routes_tiff_through_async_without_guessing_page_count(self, connection, client, monkeypatch):
+        tiff_file = BytesIO(b"fake tiff bytes")
+        tiff_file.name = "multipage.tiff"
+        s3_client = mock_internal_staging(monkeypatch)
+        client.start_document_text_detection.return_value = {"JobId": "job-1"}
+        client.get_document_text_detection.return_value = {
+            "JobStatus": "SUCCEEDED",
+            "DocumentMetadata": {"Pages": 2},
+            "Blocks": [line("line-1", "First page", page=1)],
+        }
+        converter = TextractFileConverter(
+            connection=connection,
+            client=client,
+            processing_mode=TextractProcessingMode.AUTO,
+        )
+
+        documents = run_converter(converter, {"files": [tiff_file]})
+
+        assert documents[0]["metadata"]["textract_processing_mode"] == "async"
+        s3_client.put_object.assert_called_once()
+        client.detect_document_text.assert_not_called()
+
+    def test_oversized_image_is_rejected_before_async_staging(self, connection, client):
+        file = BytesIO(PNG_HEADER + b"x" * (11 * 1024 * 1024))
+        file.name = "huge.png"
+        converter = TextractFileConverter(connection=connection, client=client)
+
+        output_node = Output(id="output_node", depends=[NodeDependency(converter)])
+        workflow = Workflow(flow=flows.Flow(nodes=[converter, output_node]), version="1")
+        result = workflow.run(input_data={"files": [file]})
+
+        assert result.status == RunnableStatus.FAILURE
+        client.start_document_text_detection.assert_not_called()
+
+    def test_oversized_file_is_rejected_in_sync_mode(self, connection, client):
+        file = BytesIO(PNG_HEADER + b"x" * (11 * 1024 * 1024))
+        file.name = "huge.png"
+        converter = TextractFileConverter(
+            connection=connection,
+            client=client,
+            processing_mode=TextractProcessingMode.SYNC,
+        )
+
+        output_node = Output(id="output_node", depends=[NodeDependency(converter)])
+        workflow = Workflow(flow=flows.Flow(nodes=[converter, output_node]), version="1")
+        result = workflow.run(input_data={"files": [file]})
+
+        assert result.status == RunnableStatus.FAILURE
+        client.detect_document_text.assert_not_called()
 
 
-class TestStagingPrefix:
-    @pytest.mark.parametrize("prefix", ["/staged/textract/", "staged/textract"])
-    def test_surrounding_slashes_are_normalized(self, connection, client, prefix):
-        converter = TextractFileConverter(connection=connection, client=client, staging_s3_prefix=prefix)
+class TestSerialization:
+    def test_public_enum_values_are_lowercase(self):
+        assert {feature.value for feature in TextractFeatureType} == {
+            "tables",
+            "forms",
+            "queries",
+            "signatures",
+            "layout",
+        }
+        assert {mode.value for mode in TextractProcessingMode} == {"auto", "sync", "async"}
 
-        assert converter.staging_s3_prefix == "staged/textract"
-        assert converter.file_converter.staging_s3_prefix == "staged/textract"
+    def test_node_round_trips_through_to_dict(self, connection):
+        converter = TextractFileConverter(
+            connection=connection,
+            feature_types=[TextractFeatureType.LAYOUT, TextractFeatureType.TABLES],
+        )
 
-    @pytest.mark.parametrize("prefix", ["", "/"])
-    def test_an_empty_prefix_is_rejected(self, connection, client, prefix):
-        with pytest.raises(ValueError, match="staging_s3_prefix"):
-            TextractFileConverter(connection=connection, client=client, staging_s3_prefix=prefix)
+        data = converter.to_dict()
+
+        assert data["type"] == "dynamiq.nodes.converters.TextractFileConverter"
+        assert data["feature_types"] == [TextractFeatureType.LAYOUT, TextractFeatureType.TABLES]
+        assert data["processing_mode"] == TextractProcessingMode.ASYNC
+        assert data["connection"]["type"] == "dynamiq.connections.AWSTextract"
+        assert "file_converter" not in data
+        assert not {
+            "staging_s3_bucket",
+            "staging_s3_prefix",
+            "create_staging_bucket",
+            "delete_staged_object",
+            "staged_object_expiration_days",
+            "output_config",
+        }.intersection(data)
+
+    def test_an_auto_derived_staging_bucket_does_not_leak_into_the_config(
+        self, connection, client, two_page_pdf, monkeypatch
+    ):
+        mock_internal_staging(monkeypatch)
+        client.start_document_text_detection.return_value = {"JobId": "job-1"}
+        client.get_document_text_detection.return_value = {
+            "JobStatus": "SUCCEEDED",
+            "DocumentMetadata": {"Pages": 2},
+            "Blocks": [line("line-1", "First page", page=1)],
+        }
+        converter = TextractFileConverter(connection=connection, client=client)
+
+        run_converter(converter, {"files": [two_page_pdf]})
+
+        # Re-serializing a converter that ran must not expose or pin internal infrastructure.
+        assert "staging_s3_bucket" not in converter.to_dict()
+        assert converter.file_converter._resolved_staging_bucket == ("dynamiq-textract-staging-123456789012-us-east-1")
+
+
+class TestInternalStagingConfiguration:
+    def test_staging_policy_is_not_part_of_the_public_node_model(self):
+        assert not {
+            "staging_s3_bucket",
+            "staging_s3_prefix",
+            "create_staging_bucket",
+            "delete_staged_object",
+            "staged_object_expiration_days",
+            "output_config",
+        }.intersection(TextractFileConverter.model_fields)

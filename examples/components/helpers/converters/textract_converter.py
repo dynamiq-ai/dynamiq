@@ -67,12 +67,11 @@ def large_document_via_s3() -> None:
     """Multi-page PDFs go through the asynchronous API, which reads the document from S3.
 
     Documents already in S3 are passed via `s3_objects` and are never read locally. Local files
-    are staged in `staging_s3_bucket` and the staged copy is deleted once the job completes.
+    are staged in Dynamiq's internal bucket and the staged copy is deleted once the job completes.
     """
     converter = TextractFileConverter(
         connection=AWSTextract(region="us-east-1"),
         feature_types=[TextractFeatureType.LAYOUT, TextractFeatureType.TABLES],
-        staging_s3_bucket="my-textract-staging-bucket",
     )
     run_converter(
         converter,

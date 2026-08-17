@@ -49,19 +49,18 @@ nodes:
         # Each feature adds cost and latency. Drop this key for the cheaper DetectDocumentText
         # API, which returns plain text lines only.
         feature_types:
-            - LAYOUT
-            - TABLES
-            - FORMS
-            - SIGNATURES
+            - layout
+            - tables
+            - forms
+            - signatures
         # One Document per input file. Use "one-doc-per-page" to keep pages separate.
         document_creation_mode: one-doc-per-file
         render_tables_as_markdown: true
         include_form_section: true
         skip_headers_and_footers: true
         min_confidence: 60
-        # Files above 10 MB or 1 page use the asynchronous API, which reads from S3. A per-account
-        # staging bucket is created and cleaned up automatically; set this to use your own.
-        # staging_s3_bucket: my-textract-staging-bucket
+        # Async is the default. Local files are staged in Dynamiq's internal per-account/per-region
+        # bucket and removed after processing; its one-day retention policy is not configurable.
     output:
         id: output
         name: output

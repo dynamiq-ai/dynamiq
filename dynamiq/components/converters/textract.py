@@ -5,7 +5,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from dynamiq.components.converters.base import BaseConverter
 from dynamiq.components.converters.utils import build_source_metadata, get_filename_for_bytesio
@@ -18,6 +18,15 @@ from dynamiq.utils.utils import generate_uuid
 SYNC_MAX_BYTES = 10 * 1024 * 1024
 SYNC_MAX_PAGES = 1
 ASYNC_MAX_PAGES = 3000
+ASYNC_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+ASYNC_MAX_PDF_TIFF_BYTES = 500 * 1024 * 1024
+
+# Staging is infrastructure owned by Dynamiq rather than part of the converter's public contract.
+# The bucket name still includes account and region because S3 bucket names are globally unique and
+# Textract requires its input bucket to be in the same region as the API call.
+_STAGING_BUCKET_PREFIX = "dynamiq-textract-staging"
+_STAGING_S3_PREFIX = "dynamiq/textract"
+_STAGED_OBJECT_EXPIRATION_DAYS = 1
 
 SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif"}
 
@@ -26,24 +35,28 @@ _TEXT_BLOCK_TYPES = {"LINE"}
 
 
 class TextractFeatureType(str, enum.Enum):
-    """Analysis features requested from Textract's AnalyzeDocument/StartDocumentAnalysis APIs."""
+    """Lowercase public feature values mapped to AWS's uppercase request values."""
 
-    TABLES = "TABLES"
-    FORMS = "FORMS"
-    QUERIES = "QUERIES"
-    SIGNATURES = "SIGNATURES"
-    LAYOUT = "LAYOUT"
+    TABLES = "tables"
+    FORMS = "forms"
+    QUERIES = "queries"
+    SIGNATURES = "signatures"
+    LAYOUT = "layout"
+
+    def to_api(self) -> str:
+        """Return the value expected by Textract's FeatureTypes parameter."""
+        return self.value.upper()
 
 
 class TextractProcessingMode(str, enum.Enum):
     """How a document is submitted to Textract.
 
     - ``auto``: use the synchronous API for single-page documents and images, and switch to the
-      asynchronous API (via S3) for multi-page PDF/TIFF when a staging bucket is available.
+      asynchronous API (via S3) for multi-page documents.
     - ``sync``: always call the synchronous API. Multi-page PDFs are split locally and each page
       is sent as its own single-page request.
-    - ``async``: always call the asynchronous API. Requires the document to live in S3, either
-      because it was passed as an S3 object or because ``staging_s3_bucket`` is set.
+    - ``async``: always call the asynchronous API. Direct S3 inputs are used in place; local files
+      are uploaded temporarily to Dynamiq's internal staging bucket.
     """
 
     AUTO = "auto"
@@ -119,24 +132,6 @@ class TextractS3Object(BaseModel):
         return f"s3://{self.bucket}/{self.name}"
 
 
-class TextractOutputConfig(BaseModel):
-    """Where Textract writes the raw analysis output for asynchronous jobs.
-
-    Attributes:
-        s3_bucket (str): Destination bucket.
-        s3_prefix (str | None): Key prefix within the bucket.
-    """
-
-    s3_bucket: str
-    s3_prefix: str | None = None
-
-    def to_api(self) -> dict[str, Any]:
-        config: dict[str, Any] = {"S3Bucket": self.s3_bucket}
-        if self.s3_prefix:
-            config["S3Prefix"] = self.s3_prefix
-        return config
-
-
 class TextractNotificationChannel(BaseModel):
     """SNS topic notified when an asynchronous Textract job completes.
 
@@ -196,7 +191,7 @@ class TextractFileConverter(BaseConverter):
     feature_types: list[TextractFeatureType] = Field(default_factory=list)
     queries: list[TextractQuery] = Field(default_factory=list)
     adapters: list[TextractAdapter] = Field(default_factory=list)
-    processing_mode: TextractProcessingMode = TextractProcessingMode.AUTO
+    processing_mode: TextractProcessingMode = TextractProcessingMode.ASYNC
     separator: str = "\n\n"
 
     render_tables_as_markdown: bool = True
@@ -210,31 +205,6 @@ class TextractFileConverter(BaseConverter):
         description="Drop text blocks whose Textract confidence (0-100) is below this threshold.",
     )
 
-    staging_s3_bucket: str | None = Field(
-        default=None,
-        description="Bucket used to stage local documents that exceed the synchronous limits. When "
-        "unset, a per-account bucket named 'dynamiq-textract-staging-<account-id>-<region>' is used.",
-    )
-    staging_s3_prefix: str = Field(
-        default="dynamiq/textract",
-        description="Key prefix for staged documents, and the prefix the expiration lifecycle targets.",
-    )
-    create_staging_bucket: bool = Field(
-        default=True,
-        description="Create the staging bucket if it does not exist. Set to False when the bucket "
-        "is provisioned out of band and the credentials lack s3:CreateBucket.",
-    )
-    delete_staged_object: bool = Field(
-        default=True,
-        description="Delete each staged document once its job finishes, successfully or not.",
-    )
-    staged_object_expiration_days: int = Field(
-        default=1,
-        ge=1,
-        description="Expiration applied to the staging prefix when the bucket is created, so documents "
-        "left behind by an interrupted run cannot linger.",
-    )
-    output_config: TextractOutputConfig | None = None
     notification_channel: TextractNotificationChannel | None = None
     kms_key_id: str | None = None
     job_tag: str | None = None
@@ -243,15 +213,6 @@ class TextractFileConverter(BaseConverter):
 
     # Private so a derived bucket name never leaks into `to_dict()` as if it were configured.
     _resolved_staging_bucket: str | None = PrivateAttr(default=None)
-
-    @field_validator("staging_s3_prefix")
-    @classmethod
-    def normalize_staging_s3_prefix(cls, prefix: str) -> str:
-        """Strip surrounding slashes so keys and the lifecycle prefix are built consistently."""
-        normalized = prefix.strip("/")
-        if not normalized:
-            raise ValueError("`staging_s3_prefix` cannot be empty or consist only of slashes.")
-        return normalized
 
     @model_validator(mode="after")
     def validate_configuration(self):
@@ -382,9 +343,12 @@ class TextractFileConverter(BaseConverter):
         there. When staging is impossible, a multi-page PDF is split locally instead and each page
         sent as its own synchronous request; an oversized one has no fallback and raises.
         """
-        page_count = self._count_pdf_pages(content) if file_path.lower().endswith(".pdf") else 1
+        extension = Path(file_path).suffix.lower()
+        page_count = self._count_pdf_pages(content) if extension == ".pdf" else 1
         oversized = len(content) > SYNC_MAX_BYTES
-        exceeds_sync_limits = page_count > SYNC_MAX_PAGES or oversized
+        # Counting TIFF frames would add a heavyweight image dependency. Conservatively send TIFF
+        # through async in AUTO mode, where both single-page and multi-page files are supported.
+        exceeds_sync_limits = page_count > SYNC_MAX_PAGES or oversized or extension in {".tif", ".tiff"}
 
         if self.processing_mode == TextractProcessingMode.ASYNC or (
             self.processing_mode == TextractProcessingMode.AUTO and exceeds_sync_limits
@@ -393,12 +357,13 @@ class TextractFileConverter(BaseConverter):
                 raise ValueError(
                     f"'{file_path}' has {page_count} pages, above the Textract limit of {ASYNC_MAX_PAGES}."
                 )
+            self._validate_async_file_size(content, file_path, extension)
             return self._analyze_async_with_local_fallback(content, file_path, page_count, oversized)
 
         if oversized:
             raise ValueError(
                 f"'{file_path}' is {len(content)} bytes, above the {SYNC_MAX_BYTES}-byte limit of the "
-                "synchronous Textract API. Set `staging_s3_bucket` or pass the document via `s3_objects`."
+                "synchronous Textract API. Use async processing or pass the document via `s3_objects`."
             )
 
         if page_count > SYNC_MAX_PAGES:
@@ -419,8 +384,8 @@ class TextractFileConverter(BaseConverter):
                 raise TextractError(
                     f"'{file_path}' needs the asynchronous Textract API ({page_count} pages, "
                     f"{len(content)} bytes), which reads the document from S3, but staging it failed: "
-                    f"{error}. Set `staging_s3_bucket` to a bucket the credentials can write to, or "
-                    "pass the document via `s3_objects`."
+                    f"{error}. Ensure the AWS credentials can use Dynamiq's internal staging bucket, "
+                    "or pass the document via `s3_objects`."
                 ) from error
             logger.warning(
                 f"Could not stage '{file_path}' in S3 ({error}). Falling back to splitting the "
@@ -439,19 +404,18 @@ class TextractFileConverter(BaseConverter):
         if self._resolved_staging_bucket:
             return self._resolved_staging_bucket
 
-        bucket = self.staging_s3_bucket or self._default_staging_bucket_name(s3_client)
-        if self.create_staging_bucket:
-            self._provision_staging_bucket(s3_client, bucket)
+        bucket = self._internal_staging_bucket_name(s3_client)
+        self._provision_staging_bucket(s3_client, bucket)
 
         self._resolved_staging_bucket = bucket
         return bucket
 
-    def _default_staging_bucket_name(self, s3_client) -> str:
+    def _internal_staging_bucket_name(self, s3_client) -> str:
         """Derive the per-account, per-region staging bucket name from the caller's identity."""
         if self.connection is None:
             raise TextractError("Deriving a staging bucket name requires a `connection` with AWS credentials.")
         account_id = self.connection.get_client("sts").get_caller_identity()["Account"]
-        return f"dynamiq-textract-staging-{account_id}-{s3_client.meta.region_name}"
+        return f"{_STAGING_BUCKET_PREFIX}-{account_id}-{s3_client.meta.region_name}"
 
     def _provision_staging_bucket(self, s3_client, bucket: str) -> None:
         """Create the staging bucket when it is missing, then lock it down."""
@@ -506,8 +470,11 @@ class TextractFileConverter(BaseConverter):
                         {
                             "ID": "dynamiq-textract-staging-expiration",
                             "Status": "Enabled",
-                            "Filter": {"Prefix": f"{self.staging_s3_prefix}/"},
-                            "Expiration": {"Days": self.staged_object_expiration_days},
+                            "Filter": {"Prefix": f"{_STAGING_S3_PREFIX}/"},
+                            "Expiration": {"Days": _STAGED_OBJECT_EXPIRATION_DAYS},
+                            "NoncurrentVersionExpiration": {
+                                "NoncurrentDays": _STAGED_OBJECT_EXPIRATION_DAYS,
+                            },
                             "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 1},
                         }
                     ]
@@ -520,9 +487,10 @@ class TextractFileConverter(BaseConverter):
         """Upload the document to the staging bucket, analyze it asynchronously, then clean up."""
         s3_client = self._get_s3_client()
         bucket = self._resolve_staging_bucket(s3_client)
-        key = f"{self.staging_s3_prefix}/{generate_uuid()}-{Path(file_path).name}"
-        s3_client.put_object(Bucket=bucket, Key=key, Body=content)
-        staged_object = TextractS3Object(bucket=bucket, name=key)
+        key = f"{_STAGING_S3_PREFIX}/{generate_uuid()}-{Path(file_path).name}"
+        upload = s3_client.put_object(Bucket=bucket, Key=key, Body=content)
+        version = upload.get("VersionId") if isinstance(upload, dict) else None
+        staged_object = TextractS3Object(bucket=bucket, name=key, version=version)
         logger.debug(f"Staged '{file_path}' at {staged_object.uri} for asynchronous Textract analysis.")
 
         try:
@@ -532,12 +500,23 @@ class TextractFileConverter(BaseConverter):
 
     def _delete_staged_object(self, s3_client, staged_object: TextractS3Object) -> None:
         """Remove a staged document once its job has finished, successfully or not."""
-        if not self.delete_staged_object:
-            return
         try:
-            s3_client.delete_object(Bucket=staged_object.bucket, Key=staged_object.name)
+            params = {"Bucket": staged_object.bucket, "Key": staged_object.name}
+            if staged_object.version:
+                params["VersionId"] = staged_object.version
+            s3_client.delete_object(**params)
         except Exception as error:  # noqa: BLE001
             logger.warning(f"Failed to delete staged object {staged_object.uri}: {error}")
+
+    @staticmethod
+    def _validate_async_file_size(content: bytes, file_path: str, extension: str) -> None:
+        """Reject files that exceed Textract's format-specific asynchronous limits before upload."""
+        max_bytes = ASYNC_MAX_PDF_TIFF_BYTES if extension in {".pdf", ".tif", ".tiff"} else ASYNC_MAX_IMAGE_BYTES
+        if len(content) > max_bytes:
+            raise ValueError(
+                f"'{file_path}' is {len(content)} bytes, above the {max_bytes}-byte asynchronous "
+                f"Textract limit for {extension or 'this file type'}."
+            )
 
     def _analyze_pdf_page_by_page(self, content: bytes, file_path: str) -> tuple[list[dict], dict[str, Any]]:
         """Split a multi-page PDF locally and analyze each page with the synchronous API.
@@ -574,7 +553,7 @@ class TextractFileConverter(BaseConverter):
 
     def _feature_params(self) -> dict[str, Any]:
         """Build the FeatureTypes/QueriesConfig/AdaptersConfig shared by both analysis APIs."""
-        params: dict[str, Any] = {"FeatureTypes": [feature.value for feature in self.feature_types]}
+        params: dict[str, Any] = {"FeatureTypes": [feature.to_api() for feature in self.feature_types]}
         if self.queries:
             params["QueriesConfig"] = {"Queries": [query.to_api() for query in self.queries]}
         if self.adapters:
@@ -606,8 +585,6 @@ class TextractFileConverter(BaseConverter):
         client = self._get_client()
 
         request: dict[str, Any] = {"DocumentLocation": {"S3Object": s3_object.to_api()}}
-        if self.output_config:
-            request["OutputConfig"] = self.output_config.to_api()
         if self.notification_channel:
             request["NotificationChannel"] = self.notification_channel.to_api()
         if self.kms_key_id:
