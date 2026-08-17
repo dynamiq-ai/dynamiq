@@ -69,6 +69,8 @@ class ContextManagerTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    # Agent machinery, not an outside-world integration: never swept in by MockPolicy.ALL.
+    is_mockable: ClassVar[bool] = False
     name: str = "context-manager"
     description: str = (
         "Generates a conversation summary to help manage context.\n\n"
