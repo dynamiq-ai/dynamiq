@@ -584,7 +584,7 @@ wheels = [
 
 [[package]]
 name = "browserbase"
-version = "1.7.0"
+version = "1.15.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -594,9 +594,9 @@ dependencies = [
     { name = "sniffio" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d8/72/27d4ca6fec8d107f3ee905675ce7a48b47fcf7918a5ce17fdbe40846beef/browserbase-1.7.0.tar.gz", hash = "sha256:e5b7acd33fad07666c1b9c7a33acea14d46a1693adaf5620c52839a746a342b8", size = 143680, upload-time = "2026-03-16T21:01:26.837Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/61/1c/ea686d5adb345fa1ba0f0a900abbbda7abece3afd2c05068c56baa975d94/browserbase-1.15.0.tar.gz", hash = "sha256:d3861de5bbec38603238810daf6bc49d3637bdece0ad0e7703519fff7e78ef52", size = 166908, upload-time = "2026-07-14T00:58:27.863Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/93/59/ae53543ca44b232f64f18413eaf5c3eb968d690ae6960ffb4b4d1a9449d9/browserbase-1.7.0-py3-none-any.whl", hash = "sha256:6ff0ad602f18a7b2034e9e564fbaee05f02954456f1709fc36061f53755356ce", size = 107840, upload-time = "2026-03-16T21:01:25.698Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/59/f1c97fcbd362d48274501f4844b640a35c1a1001675035a7055d8df5e004/browserbase-1.15.0-py3-none-any.whl", hash = "sha256:096c427d7382397b1a0a11fb43b4f27ef9ff5ca02694fbf283c975ff71d09d34", size = 144614, upload-time = "2026-07-14T00:58:26.597Z" },
 ]
 
 [[package]]
@@ -1374,6 +1374,7 @@ dependencies = [
     { name = "beautifulsoup4" },
     { name = "black" },
     { name = "boto3" },
+    { name = "browserbase" },
     { name = "charset-normalizer" },
     { name = "chromadb-client" },
     { name = "databricks-sql-connector" },
@@ -1407,6 +1408,7 @@ dependencies = [
     { name = "pdfplumber" },
     { name = "pgvector" },
     { name = "pinecone-client" },
+    { name = "playwright" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
     { name = "pymilvus", extra = ["milvus-lite"] },
@@ -1494,6 +1496,7 @@ requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.12.3,<4.13.0" },
     { name = "black", specifier = ">=26.3.1,<27.0.0" },
     { name = "boto3", specifier = ">=1.43.32,<2.0.0" },
+    { name = "browserbase", specifier = ">=1.15.0,<2.0.0" },
     { name = "charset-normalizer", specifier = ">=3.4.2,<4.0.0" },
     { name = "chromadb-client", specifier = ">=0.5.5.dev0,<0.6.0" },
     { name = "cua-computer", marker = "python_full_version >= '3.12' and python_full_version < '3.14' and extra == 'cua'", specifier = "==0.4.19" },
@@ -1528,6 +1531,7 @@ requires-dist = [
     { name = "pdfplumber", specifier = ">=0.11.8,<0.12.0" },
     { name = "pgvector", specifier = ">=0.3.6,<0.4.0" },
     { name = "pinecone-client", specifier = ">=3.2.2,<3.3.0" },
+    { name = "playwright", specifier = ">=1.50.0,<2.0.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2.3,<3.3.0" },
     { name = "pydantic", specifier = ">=2.12.5,<2.13.0" },
     { name = "pydantic-monty", marker = "extra == 'monty'", specifier = ">=0.0.16,<0.0.17" },
@@ -1549,7 +1553,7 @@ requires-dist = [
     { name = "sacrebleu", specifier = ">=2.5.1,<2.6.0" },
     { name = "seaborn", specifier = ">=0.13.2,<0.14.0" },
     { name = "snowflake-connector-python", specifier = ">=4.6.0,<5.0.0" },
-    { name = "stagehand", specifier = ">=0.4.0,<0.5.0" },
+    { name = "stagehand", specifier = ">=3.22.0,<4.0.0" },
     { name = "steel-sdk", specifier = "==0.15.0" },
     { name = "tenacity", specifier = "==9.1.2" },
     { name = "tiktoken", specifier = "==0.12.0" },
@@ -6651,23 +6655,22 @@ wheels = [
 
 [[package]]
 name = "stagehand"
-version = "0.4.1"
+version = "3.22.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anthropic" },
-    { name = "browserbase" },
+    { name = "anyio" },
+    { name = "distro" },
     { name = "httpx" },
-    { name = "litellm" },
-    { name = "openai" },
-    { name = "playwright" },
     { name = "pydantic" },
-    { name = "python-dotenv" },
-    { name = "requests" },
-    { name = "rich" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e8/82/24f6ade40784ad51b6e2687ff2e077d02210bb0db35fdb3302d7425c9dc5/stagehand-0.4.1.tar.gz", hash = "sha256:721934b47b0756519ce9920d50879b58a3e919f44fa11ac1b1957490f3903124", size = 89751, upload-time = "2025-07-18T19:51:05.216Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fc/d5/cc171eea809a00b4776e17a0c588ce2d720c7693366cf4c06f3a4b113651/stagehand-3.22.0.tar.gz", hash = "sha256:eb9c70fd69bc80c4ee64aae3c67e1f9a679fca5a69850ad21f87b7cb2480bbb9", size = 289978, upload-time = "2026-07-22T23:38:22.471Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/db/594daf76d214ceed02733f1225ea2e66ab7c84e454cbf5da67b3f5e8447b/stagehand-0.4.1-py3-none-any.whl", hash = "sha256:a212f5d018e0e44991c28f27a9140fa841aca0365c72b0d97dd137faa8f1c226", size = 100874, upload-time = "2025-07-18T19:51:03.903Z" },
+    { url = "https://files.pythonhosted.org/packages/93/3f/05aa6fff7c44e83180f40aa12dd14b2417d86d91bf7f84b2739807a6c2a6/stagehand-3.22.0-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:60b487395e2fbdc1f48c94ae71f90a2179f776cd22b9a3ebf5fb80a6b40f335c", size = 34609838, upload-time = "2026-07-22T23:38:13.004Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/7a/5f363b8406fd24b761730b7f9f4d0233b930d582089dfc71380f29a95f32/stagehand-3.22.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:c64ec9cbb910e65d75643b2015139bc76bf2fe594f9e42e825cc0aaa73c5ab8b", size = 33306116, upload-time = "2026-07-22T23:38:24.781Z" },
+    { url = "https://files.pythonhosted.org/packages/74/1a/81db3274aafb6047aa1fded74081abd605212c5691e371df4b14f0ed6a33/stagehand-3.22.0-py3-none-manylinux2014_x86_64.whl", hash = "sha256:dfffc28c5e307688c1c363e1a6a0fe3631fb1dca5d42b04c0cfb6ddc4e2986ab", size = 37383725, upload-time = "2026-07-22T23:38:20.374Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/f9/709924a4d1c0795b2faa48b7f29988343b3d3d4f19eabe34c7747d181be8/stagehand-3.22.0-py3-none-win_amd64.whl", hash = "sha256:e16423747cdc7b840af05b9d7c092c80e2c80f9c94367e038c18faffea64f7ac", size = 30872619, upload-time = "2026-07-22T23:38:16.412Z" },
 ]
 
 [[package]]

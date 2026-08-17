@@ -105,6 +105,26 @@ class SharedSession:
                 self._browser_session_id = session_id
             return self._browser_session_id
 
+    def invalidate_browser_session(self, session_id: str) -> None:
+        """Retract a shared session that is gone server-side, so the next agent creates a fresh one.
+
+        Adoption is first-writer-wins and has no other reset, so without this a session that expired
+        mid-run stays published: every agent (including the retry of the call that just discovered
+        the death) resumes the same dead id and fails again. The end callback and live-view URL are
+        dropped with it — both describe the session that no longer exists, and leaving the callback
+        registered would block the replacement's from registering, stranding it at teardown. The
+        persistent Context is untouched: it outlives any single session.
+
+        Guarded on the id so a straggler failing on a PREVIOUS session cannot retract the
+        replacement another agent has already published.
+        """
+        with self._browser_identity_lock:
+            if self._browser_session_id != session_id:
+                return
+            self._browser_session_id = None
+            self._browser_end_fn = None
+            self._browser_live_view_url = None
+
     def browser_context_id(self) -> str | None:
         return self._browser_context_id
 
