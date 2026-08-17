@@ -31,8 +31,9 @@ from dynamiq.nodes.llms import Anthropic
 from dynamiq.nodes.tools import Stagehand
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 
-MODEL = "anthropic/claude-sonnet-5"
-FALLBACK_MODEL = "anthropic/claude-sonnet-4-6"
+# claude-sonnet-5 is NOT usable here: its observe fails 100% of the time server-side (bare 502),
+# and the Browserbase Model Gateway rejects it outright (400, unsupported model).
+MODEL = "anthropic/claude-sonnet-4-6"
 TASK = (
     "Open https://example.com, extract the page heading and the first paragraph, "
     "then follow the 'More information...' link and report the heading of the page you land on. "
@@ -48,7 +49,6 @@ def build_tool(target: str) -> Stagehand:
     return Stagehand(
         connection=connection,
         model_name=MODEL,
-        fallback_model_name=FALLBACK_MODEL,
         is_return_live_view_url_enabled=True,
         is_postponed_component_init=True,
     )

@@ -10,7 +10,7 @@ import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from stagehand import AuthenticationError, InternalServerError, NotFoundError
+from stagehand import APIStatusError, AuthenticationError, InternalServerError, NotFoundError
 
 from dynamiq.connections import Browserbase as BrowserbaseConnection
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -73,6 +73,19 @@ def _stub_execute_scaffolding(tool: Stagehand, shared: SharedSession | None = No
     object.__setattr__(tool, "run_on_node_execute_run", lambda *a, **k: None)
     object.__setattr__(tool, "is_return_screenshot_bytes_enabled", False)
     object.__setattr__(tool, "is_return_live_view_url_enabled", False)
+
+
+def _session_gone(status: int = 410) -> APIStatusError:
+    """The error a dead session really produces.
+
+    Browserbase answers a completed or timed-out session with 410 Gone, which the SDK maps to the
+    generic APIStatusError — not NotFoundError. Defaulting to 410 keeps these tests honest about
+    what the server sends; pass 404 to cover the id-never-existed case.
+    """
+    response = MagicMock(status_code=status)
+    if status == 404:
+        return NotFoundError("gone", response=response, body=None)
+    return APIStatusError("gone", response=response, body=None)
 
 
 class _FakeChooserWait:
@@ -216,9 +229,15 @@ class TestCloneSafety:
 
 
 def _schema_error() -> InternalServerError:
+    """What the server sends today when a model's answer cannot be decoded.
+
+    It used to name the cause ("did not match schema"); it now returns a bare 502. The trigger must
+    not depend on the wording — keying off the message made the whole fallback dead code once the
+    server stopped saying it.
+    """
     return InternalServerError(
-        "Error code: 500 - {'success': False, 'message': 'No object generated: response did not match schema.'}",
-        response=MagicMock(),
+        "Error code: 502 - {'success': False, 'message': 'An internal server error occurred'}",
+        response=MagicMock(status_code=502),
         body=None,
     )
 
@@ -268,15 +287,34 @@ class TestModelFallback:
             asyncio.run(tool._call_with_model_fallback(call, "observe", {}))
         assert len(calls) == 1  # the same model would fail identically
 
-    def test_other_server_errors_are_not_retried(self):
+    def test_the_trigger_does_not_depend_on_the_error_wording(self):
+        """A 5xx with no diagnostic text at all must still reach the fallback.
+
+        This is the regression that matters: the live server reports the deterministic decode
+        failure as a bare 502, so a trigger that reads the message never fires.
+        """
+        tool = bare_stagehand(fallback_model_name="anthropic/claude-sonnet-4-6")
+        seen = []
+
+        async def call(payload):
+            seen.append(payload)
+            if len(seen) == 1:
+                raise InternalServerError("boom", response=MagicMock(status_code=500), body=None)
+            return "recovered"
+
+        assert asyncio.run(tool._call_with_model_fallback(call, "act", {})) == "recovered"
+        assert seen[1]["options"]["model"] == "anthropic/claude-sonnet-4-6"
+
+    def test_client_errors_are_not_retried_on_another_model(self):
+        """A 4xx is our fault (bad input, dead session) — another model cannot fix it."""
         tool = bare_stagehand(fallback_model_name="anthropic/claude-sonnet-4-6")
         calls = []
 
         async def call(payload):
             calls.append(payload)
-            raise InternalServerError("boom", response=MagicMock(), body=None)
+            raise _session_gone(410)
 
-        with pytest.raises(InternalServerError):
+        with pytest.raises(APIStatusError):
             asyncio.run(tool._call_with_model_fallback(call, "act", {}))
         assert len(calls) == 1
 
@@ -408,10 +446,25 @@ class TestErrorTaxonomy:
         err = self._run_failing_action(tool, AuthenticationError("bad key", response=MagicMock(), body=None))
         assert err.recoverable is False
 
+    @pytest.mark.parametrize("status", [410, 404])
+    def test_both_session_gone_statuses_clear_state(self, status):
+        """410 is what Browserbase actually sends; 404 covers an id the API never knew."""
+        tool = bare_stagehand(_session_id="sess-1", _live_view_url="https://lv")
+        err = self._run_failing_action(tool, _session_gone(status))
+        assert err.recoverable is True
+        assert tool._session_id is None
+
+    def test_other_status_errors_do_not_discard_the_session(self):
+        """A 429 says slow down, not that the session died — discarding it would waste a live one."""
+        tool = bare_stagehand(_session_id="sess-1")
+        err = self._run_failing_action(tool, _session_gone(429))
+        assert err.recoverable is True
+        assert tool._session_id == "sess-1"
+
     def test_missing_session_is_recoverable_and_clears_state(self):
         """A dead session must be forgotten so the retry starts a fresh one."""
         tool = bare_stagehand(_session_id="sess-1", _live_view_url="https://lv", _cdp_url="ws://x")
-        err = self._run_failing_action(tool, NotFoundError("gone", response=MagicMock(), body=None))
+        err = self._run_failing_action(tool, _session_gone())
         assert err.recoverable is True
         assert tool._session_id is None
         assert tool._stagehand_session is None
@@ -427,7 +480,7 @@ class TestErrorTaxonomy:
             _steel_browser_session=MagicMock(id="steel-1"),
         )
 
-        self._run_failing_action(tool, NotFoundError("gone", response=MagicMock(), body=None))
+        self._run_failing_action(tool, _session_gone())
 
         steel_client.sessions.release.assert_awaited_once_with("steel-1")
         assert tool._steel_browser_session is None
@@ -440,7 +493,7 @@ class TestErrorTaxonomy:
         shared.set_browser_live_view_url("https://lv")
         tool = bare_stagehand(_session_id="sess-1")
 
-        self._run_failing_action(tool, NotFoundError("gone", response=MagicMock(), body=None), shared=shared)
+        self._run_failing_action(tool, _session_gone(), shared=shared)
 
         assert shared.browser_session_id() is None
         assert shared.browser_live_view_url() is None
@@ -465,7 +518,7 @@ class TestErrorTaxonomy:
             tool._session_id = ss.browser_session_id()  # what the real _join_shared_browser does
 
         async def _resume_dead_session(*args, **kwargs):
-            raise NotFoundError("gone", response=MagicMock(), body=None)
+            raise _session_gone()
 
         object.__setattr__(tool, "_join_shared_browser", _join)
         object.__setattr__(tool, "_init_client", _resume_dead_session)

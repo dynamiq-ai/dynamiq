@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 from browserbase import AsyncBrowserbase
 from playwright.async_api import async_playwright
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
-from stagehand import AsyncStagehand, AuthenticationError, InternalServerError, NotFoundError, PermissionDeniedError
+from stagehand import APIStatusError, AsyncStagehand, AuthenticationError, InternalServerError, PermissionDeniedError
 from steel import AsyncSteel
 
 from dynamiq.connections import Browserbase, SteelBrowser, SteelBrowserEnvironment
@@ -148,10 +148,11 @@ _CLEANUP_TIMEOUT = 30.0
 # Milliseconds to wait for a history navigation to settle.
 _HISTORY_NAV_TIMEOUT_MS = 30_000
 
-# Marker of a server-side failure to turn the model's answer into the shape act/observe/extract
-# require. Retrying the same model is pointless (the server decodes deterministically: the retry
-# reproduces the same invalid answer) — only a different model recovers it.
-_SCHEMA_MISMATCH_MARKER = "did not match schema"
+# Statuses that mean "this session is gone and is not coming back". Browserbase answers a request
+# on a completed or timed-out session with 410 Gone — NOT 404, which it reserves for an id the API
+# never knew. Matching on the status rather than the exception class keeps both covered: the SDK
+# maps 404 to NotFoundError but 410 only to the generic APIStatusError.
+_SESSION_GONE_STATUSES = frozenset({404, 410})
 
 # Keyword params accepted by stagehand 3.22.x sessions.start; anything else in extra_config would
 # raise a TypeError outside the tool's error handling.
@@ -958,22 +959,28 @@ class Stagehand(ConnectionNode):
         return call_kwargs
 
     async def _call_with_model_fallback(self, call, action_label: str, payload: dict[str, Any]):
-        """Run a Stagehand call, retrying on ``fallback_model_name`` if the model's answer is
-        rejected by the server's structured-output validation.
+        """Run a Stagehand call, retrying on ``fallback_model_name`` when the server fails it 5xx.
 
-        Some models produce answers the server cannot coerce into the shape act/observe/extract
-        require. It is deterministic per request — measured on claude-sonnet-5, whose observe fails
-        this way for a sizeable share of pages and fails identically on every same-model retry —
-        so the only recovery is a different model for that one call.
+        Some models produce answers the server cannot turn into the shape act/observe/extract
+        require, and it reports that as a server error. The failure is deterministic per request —
+        claude-sonnet-5's observe fails on every same-model retry — so a different model for that
+        one call is the only recovery.
+
+        This deliberately does NOT match on the response body. The server used to name the cause
+        ("did not match schema"); it now returns a bare 502 "An internal server error occurred" for
+        the same deterministic failure, which made a message-matching trigger silently dead. Any 5xx
+        is treated as worth one try on the other model: the retry is bounded, opt-in via
+        ``fallback_model_name``, and a genuinely transient 5xx is no worse for being retried.
         """
         try:
             return await call(payload)
         except InternalServerError as exc:
             fallback = self.fallback_model_name
-            if _SCHEMA_MISMATCH_MARKER not in str(exc) or not fallback or fallback == self.model_name:
+            if not fallback or fallback == self.model_name:
                 raise
+            logger.debug(f"Tool {self.name} - {self.id}: {action_label} server error: {exc}")
             logger.warning(
-                f"Tool {self.name} - {self.id}: {action_label} produced schema-invalid output with "
+                f"Tool {self.name} - {self.id}: {action_label} failed server-side with "
                 f"{self.model_name}; retrying this call with {fallback}."
             )
             retry_payload = dict(payload)
@@ -982,8 +989,12 @@ class Stagehand(ConnectionNode):
             retry_payload["options"] = options
             return await call(retry_payload)
 
+    @staticmethod
+    def _is_session_gone(exc: APIStatusError) -> bool:
+        return exc.status_code in _SESSION_GONE_STATUSES
+
     async def _session_expired_error(
-        self, exc: NotFoundError, shared_browser: "SharedSession | None"
+        self, exc: APIStatusError, shared_browser: "SharedSession | None"
     ) -> ToolExecutionException:
         """Forget a session that is gone server-side and return the error to raise for it.
 
@@ -1010,9 +1021,9 @@ class Stagehand(ConnectionNode):
     async def _start_session(self, shared_browser: "SharedSession | None") -> None:
         """Attach this turn to a live browser session, creating or resuming one as needed.
 
-        Kept out of the action's try block on purpose: only NotFoundError is meaningful here (the
-        session we tried to resume is gone), and everything else must surface with its own taxonomy
-        rather than be flattened into a generic recoverable tool error.
+        Kept out of the action's try block on purpose: only a session-gone status is meaningful here
+        (the session we tried to resume no longer exists), and everything else must surface with its
+        own taxonomy rather than be flattened into a generic recoverable tool error.
         """
         create_shared_session = False
         shared_context_id = None
@@ -1049,10 +1060,12 @@ class Stagehand(ConnectionNode):
         shared_browser = await self._acquire_shared_browser()
         try:
             await self._start_session(shared_browser)
-        except NotFoundError as e:
+        except APIStatusError as e:
             # The session we were told to resume is already gone. Under sharing that dead id is the
             # run's published session, so without retracting it here every retry would be handed the
             # same id again by _join_shared_browser and rediscover the same death.
+            if not self._is_session_gone(e):
+                raise
             raise await self._session_expired_error(e, shared_browser)
 
         tool_data = {"tool_session_id": self._session_id}
@@ -1144,11 +1157,14 @@ class Stagehand(ConnectionNode):
         except CanceledException:
             # Cancellation must reach the runner, not become a retryable tool observation.
             raise
-        except NotFoundError as e:
-            raise await self._session_expired_error(e, shared_browser)
         except (AuthenticationError, PermissionDeniedError) as e:
-            # Bad credentials cannot be fixed by retrying the same call.
+            # Bad credentials cannot be fixed by retrying the same call. Must precede the generic
+            # APIStatusError clause below, which would otherwise swallow them as retryable.
             raise ToolExecutionException(f"Error message: {e}", recoverable=False)
+        except APIStatusError as e:
+            if not self._is_session_gone(e):
+                raise ToolExecutionException(f"Error message: {e}", recoverable=True)
+            raise await self._session_expired_error(e, shared_browser)
         except Exception as e:
             raise ToolExecutionException(f"Error message: {e}", recoverable=True)
 

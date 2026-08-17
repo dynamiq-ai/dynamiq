@@ -43,8 +43,7 @@ def set_wf_with_steeldev_agent(cm, use_cloud: bool = True):
 
     stagehand_tool = Stagehand(
         connection=connection,
-        model_name="anthropic/claude-sonnet-5",
-        fallback_model_name="anthropic/claude-sonnet-4-6",
+        model_name="anthropic/claude-sonnet-4-6",
         is_postponed_component_init=True,
     )
 

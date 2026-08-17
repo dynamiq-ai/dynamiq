@@ -25,8 +25,9 @@ from dynamiq.connections import Browserbase as BrowserbaseConnection
 from dynamiq.connections import SteelBrowser
 from dynamiq.nodes.tools.stagehand import Stagehand, StagehandInputSchema
 
-MODEL = "anthropic/claude-sonnet-5"
-FALLBACK_MODEL = "anthropic/claude-sonnet-4-6"
+# claude-sonnet-5 is NOT usable here: its observe fails 100% of the time server-side (bare 502),
+# and the Browserbase Model Gateway rejects it outright (400, unsupported model).
+MODEL = "anthropic/claude-sonnet-4-6"
 RESULTS = {}
 
 ACTIONS = [
@@ -66,7 +67,6 @@ if "bb-provider" in targets:
         Stagehand(
             connection=BrowserbaseConnection(model_api_key=os.environ["ANTHROPIC_API_KEY"]),
             model_name=MODEL,
-            fallback_model_name=FALLBACK_MODEL,
             is_return_screenshot_bytes_enabled=True,
             is_return_live_view_url_enabled=True,
         ),
@@ -80,7 +80,6 @@ if "bb-gateway" in targets:
         Stagehand(
             connection=BrowserbaseConnection(model_api_key=None),
             model_name=MODEL,
-            fallback_model_name=FALLBACK_MODEL,
         ),
         "bb-gateway",
         ACTIONS[:2],
@@ -92,7 +91,6 @@ if "steel" in targets:
         Stagehand(
             connection=SteelBrowser(model_api_key=os.environ["ANTHROPIC_API_KEY"]),
             model_name=MODEL,
-            fallback_model_name=FALLBACK_MODEL,
         ),
         "steel",
         ACTIONS[:2],
