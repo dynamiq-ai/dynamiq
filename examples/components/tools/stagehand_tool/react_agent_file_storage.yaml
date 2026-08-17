@@ -19,7 +19,7 @@ nodes:
         name: stagehand
         type: dynamiq.nodes.tools.Stagehand
         connection: stagehand-conn
-        model_name: gpt-4o
+        model_name: openai/gpt-4o
     role: "a helpful assistant capable of retaining context and answering questions effectively using file storage."
     file_store:
       enabled: true
