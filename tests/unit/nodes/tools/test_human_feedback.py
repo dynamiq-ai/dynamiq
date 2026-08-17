@@ -148,7 +148,7 @@ def test_input_schema_requires_one_to_four_questions_when_given():
     HumanFeedbackInputSchema(action=HumanFeedbackAction.ASK, questions=[Question(question="Any concerns?")])
 
 
-def test_input_method_streaming_sends_questions_and_mints_request_id():
+def test_input_method_streaming_sends_questions():
     node_id = "hf-questions"
     tool = HumanFeedbackTool(
         id=node_id,
@@ -169,60 +169,6 @@ def test_input_method_streaming_sends_questions_and_mints_request_id():
     sent = capture.events[0].data
     assert sent.questions[0].question == "Which scope?"
     assert sent.questions[0].id == "0", "unset question id should default to its batch index"
-    assert sent.request_id, "every ask, structured or not, must mint a request_id"
-
-
-def test_get_input_streaming_event_discards_stale_request_id():
-    """A reply left over from an earlier question must not satisfy the current one (stale-answer replay)."""
-    node_id = "hf-multi-round"
-    tool = HumanFeedbackTool(id=node_id, input_method=FeedbackMethod.STREAM, output_method=FeedbackMethod.STREAM)
-    queue = Queue()
-    tool.streaming = StreamingConfig(enabled=True, input_queue=queue, timeout=5.0)
-    queue.put(
-        HFStreamingInputEventMessage(
-            entity_id=node_id,
-            event=STREAMING_EVENT,
-            data=HFStreamingInputEventMessageData(content="stale answer", request_id="round-1"),
-        ).model_dump_json()
-    )
-    queue.put(
-        HFStreamingInputEventMessage(
-            entity_id=node_id,
-            event=STREAMING_EVENT,
-            data=HFStreamingInputEventMessageData(content="fresh answer", request_id="round-2"),
-        ).model_dump_json()
-    )
-
-    result = tool.get_input_streaming_event(
-        event_msg_type=HFStreamingInputEventMessage,
-        event=STREAMING_EVENT,
-        config=RunnableConfig(),
-        request_id="round-2",
-    )
-
-    assert result.data.content == "fresh answer"
-
-
-def test_get_input_streaming_event_accepts_reply_without_request_id():
-    """Backward compat: a reply from a sender that doesn't echo request_id is still accepted."""
-    node_id = "hf-legacy-client"
-    tool = HumanFeedbackTool(id=node_id, input_method=FeedbackMethod.STREAM, output_method=FeedbackMethod.STREAM)
-    queue = Queue()
-    tool.streaming = StreamingConfig(enabled=True, input_queue=queue, timeout=5.0)
-    queue.put(
-        HFStreamingInputEventMessage(
-            entity_id=node_id, event=STREAMING_EVENT, data=HFStreamingInputEventMessageData(content="plain reply")
-        ).model_dump_json()
-    )
-
-    result = tool.get_input_streaming_event(
-        event_msg_type=HFStreamingInputEventMessage,
-        event=STREAMING_EVENT,
-        config=RunnableConfig(),
-        request_id="round-2",
-    )
-
-    assert result.data.content == "plain reply"
 
 
 def test_execute_ask_formats_structured_answers_for_llm_observation():

@@ -1532,7 +1532,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         event_msg_type: "type[StreamingEventMessage]" = StreamingEventMessage,
         event: str | None = None,
         config: RunnableConfig = None,
-        request_id: str | None = None,
     ) -> StreamingEventMessage:
         """
         Get the input streaming event from the input streaming.
@@ -1541,10 +1540,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             event_msg_type (Type[StreamingEventMessage], optional): The event message type to use.
             event (str, optional): The event to use for the message.
             config (RunnableConfig, optional): Configuration for the runnable.
-            request_id (str, optional): If set, only accept a reply whose ``data.request_id`` matches
-                (or omits) this value. Discards replies from an earlier, already-answered round instead
-                of returning them - guards against a stale answer (e.g. replayed on reconnect/resume)
-                being mistaken for the answer to the current question.
 
         Returns:
             StreamingEventMessage: The validated streaming event message.
@@ -1601,15 +1596,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                     f"Allowed event: {event}, event_msg_type: {event_msg_type}"
                 )
                 continue
-
-            if request_id is not None:
-                incoming_request_id = getattr(event_msg.data, "request_id", None)
-                if incoming_request_id is not None and incoming_request_id != request_id:
-                    logger.debug(
-                        f"Node {self.id}: discarding stale input event for request_id={incoming_request_id}, "
-                        f"expected {request_id}."
-                    )
-                    continue
 
             return event_msg
 

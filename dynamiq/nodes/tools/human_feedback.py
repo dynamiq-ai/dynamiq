@@ -11,7 +11,6 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.feedback import FeedbackMethod
 from dynamiq.types.streaming import StreamingEntitySource, StreamingEventMessage
-from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
 
 
@@ -59,7 +58,6 @@ class Answer(BaseModel):
 class HFStreamingInputEventMessageData(BaseModel):
     content: str = ""
     answers: list[Answer] | None = None
-    request_id: str | None = None
 
 
 class HFStreamingInputEventMessage(StreamingEventMessage):
@@ -71,7 +69,6 @@ class HFStreamingOutputEventMessageData(BaseModel):
     action: HumanFeedbackAction = HumanFeedbackAction.ASK
     is_browser_takeover: bool = False
     questions: list[Question] | None = None
-    request_id: str | None = None
 
 
 class HFStreamingOutputEventMessage(StreamingEventMessage):
@@ -302,9 +299,6 @@ Important:
 
         streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
 
-        # Minted per ask so a reply can be matched to its round; also lets the queue reader
-        # discard a stale answer left over from an earlier question (see get_input_streaming_event).
-        request_id = generate_uuid()
         if questions:
             for index, question in enumerate(questions):
                 if question.id is None:
@@ -318,7 +312,6 @@ Important:
                 action=HumanFeedbackAction.ASK,
                 is_browser_takeover=self.is_browser_takeover,
                 questions=questions,
-                request_id=request_id,
             ),
             event=streaming.event,
             source=StreamingEntitySource(
@@ -334,7 +327,6 @@ Important:
             event_msg_type=HFStreamingInputEventMessage,
             event=streaming.event,
             config=config,
-            request_id=request_id,
         )
         logger.debug(f"Tool {self.name} - {self.id}: received input event {event}")
 
