@@ -537,7 +537,8 @@ class TestFailedToolResultsAreMarked:
         agent = TestEveryPendingIdIsAnswered._agent(["call_ok", "call_bad"])
         ordered_results = [
             {"tool_call_id": "call_ok", "tool_name": "Search", "result": "3 results", "success": True},
-            {"tool_call_id": "call_bad", "tool_name": "Fetch", "result": "ToolExecutionException: 500", "success": False},
+            {"tool_call_id": "call_bad", "tool_name": "Fetch", "result": "ToolExecutionException: 500",
+             "success": False},
         ]
 
         Agent._emit_tool_observations(agent, tool_result="unused", ordered_results=ordered_results)
