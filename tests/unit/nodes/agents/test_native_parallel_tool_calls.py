@@ -410,9 +410,7 @@ class TestEveryPendingIdIsAnswered:
 
         agent = self._agent(["call_a", "call_b", "call_c"])
 
-        Agent._emit_tool_observations(
-            agent, tool_result="Sub-agent invocation limit exceeded.", tool_name="researcher"
-        )
+        Agent._emit_tool_observations(agent, tool_result="Sub-agent invocation limit exceeded.")
 
         assert [m.tool_call_id for m in agent._prompt.messages] == ["call_a", "call_b", "call_c"]
         assert all(m.role == MessageRole.TOOL for m in agent._prompt.messages)
@@ -565,9 +563,7 @@ class TestFailedToolResultsAreMarked:
 
         agent = TestEveryPendingIdIsAnswered._agent(["call_a", "call_b"])
 
-        Agent._emit_tool_observations(
-            agent, tool_result="Sub-agent invocation limit exceeded.", tool_name="researcher", success=False
-        )
+        Agent._emit_tool_observations(agent, tool_result="Sub-agent invocation limit exceeded.", success=False)
 
         assert all(m.content.startswith(TOOL_ERROR_PREFIX) for m in agent._prompt.messages)
 
@@ -632,6 +628,7 @@ class TestNoToolCallIsDropped:
             ),
             tools=[ProbeTool()],
             inference_mode=InferenceMode.FUNCTION_CALLING,
+            parallel_tool_calls_enabled=False,
             max_loops=3,
             **kwargs,
         )
@@ -673,7 +670,7 @@ class TestNoToolCallIsDropped:
     def test_every_call_runs_when_parallel_is_disabled(self):
         """The batch used to execute one call and discard the rest."""
         probe = {"inflight": 0, "peak": 0, "order": []}
-        agent = self._agent_with_probe(probe, parallel_tool_calls_enabled=False)
+        agent = self._agent_with_probe(probe)
 
         self._run(agent, 5)
 
@@ -686,7 +683,7 @@ class TestNoToolCallIsDropped:
         from dynamiq.prompts.prompts import MessageRole
 
         probe = {"inflight": 0, "peak": 0, "order": []}
-        agent = self._agent_with_probe(probe, parallel_tool_calls_enabled=False)
+        agent = self._agent_with_probe(probe)
 
         self._run(agent, 4)
 
@@ -705,7 +702,7 @@ class TestNoToolCallIsDropped:
         from dynamiq.prompts.prompts import MessageRole
 
         probe = {"inflight": 0, "peak": 0, "order": []}
-        agent = self._agent_with_probe(probe, parallel_tool_calls_enabled=False)
+        agent = self._agent_with_probe(probe)
 
         self._run(agent, 3)
 

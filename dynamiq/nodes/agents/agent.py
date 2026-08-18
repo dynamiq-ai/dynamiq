@@ -610,22 +610,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         return self
 
-    def _acknowledge_pending_fc_tool_calls(self, content: str) -> None:
-        """Answer and clear any pending FC tool_call ids with a neutral stub.
-
-        Keeps OpenAI's function-calling protocol valid when tool calls are
-        abandoned without execution (e.g. the model returned ``provide_final_answer``
-        alongside other tool calls), so no unpaired ``tool_call`` is left to 400 a
-        subsequent request and recovery for unrelated errors is not misdirected to
-        these ids.
-        """
-        pending_ids = getattr(self, "_pending_fc_tool_call_ids", None) or []
-        for tc_id in pending_ids:
-            self._prompt.messages.append(
-                Message(role=MessageRole.TOOL, content=content, tool_call_id=tc_id, static=True)
-            )
-        self._pending_fc_tool_call_ids = []
-
     def _append_recovery_instruction(
         self,
         *,
@@ -890,10 +874,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                                 static=True,
                             )
                         )
-                        # An answer batched with tool calls was written before those results
-                        # existed, so it cannot be informed by them and is not accepted.
-                        # Saying so is what lets the model answer for real on the next step
-                        # instead of re-emitting the same batch.
+                        # Declined when batched with tools: the answer predates their
+                        # results. Saying so is what stops the model re-emitting the batch.
                         final_answer_reply = (
                             "Not accepted: you requested tools in this same step, so this answer was "
                             "written before their results existed. Their results follow — answer "
@@ -996,7 +978,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         final_answer_call = next((tc for tc in tool_calls if tc.function.name.strip() == "provide_final_answer"), None)
 
         if final_answer_call is not None and not actual_tool_calls:
-            self._acknowledge_pending_fc_tool_calls("Skipped — superseded by a final-answer call.")
             final_args = final_answer_call.function.parse_as_final_answer()
             thought = final_args.thought
             self._requested_output_files = self._parse_output_files_csv(final_args.output_files)
@@ -1524,7 +1505,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self,
         tool_result: Any,
         ordered_results: list[dict[str, Any]] | None = None,
-        tool_name: str | None = None,
         success: Any = None,
     ) -> None:
         """Append tool observations to prompt history.
@@ -1566,7 +1546,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                             else mark_tool_failure(str(tool_result), success)
                         ),
                         tool_call_id=tc_id,
-                        name=result.get("tool_name") if result else tool_name,
+                        name=result.get("tool_name") if result else None,
                         static=True,
                     )
                 )
@@ -1595,7 +1575,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             logger.error(error_message)
             # Emitted, not added as a bare observation: the batch never ran, so every id
             # in it is answered with the parse error that applies to all of them.
-            self._emit_tool_observations(error_message, tool_name=PARALLEL_TOOL_NAME, success=False)
+            self._emit_tool_observations(error_message, success=False)
             return None
 
     def _check_subagent_limits(self, tools_data: list[dict[str, Any]], action: str) -> str | None:
@@ -1723,7 +1703,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             if subagent_error:
                 # Emitted, not added as a bare observation: no call ran, so every id in
                 # the batch is answered with the refusal that applies to all of them.
-                self._emit_tool_observations(subagent_error, tool_name=action, success=False)
+                self._emit_tool_observations(subagent_error, success=False)
                 return None
 
             ordered_results: list[dict[str, Any]] = []
@@ -1734,11 +1714,27 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     tools_data, thought, loop_num, config, **kwargs
                 )
             else:
-                tool_result, _, is_delegated, tool_success, _ = self._execute_single_tool(
+                tool_result, tool_files, is_delegated, tool_success, _ = self._execute_single_tool(
                     action, action_input, thought, loop_num, config, **kwargs
                 )
                 if is_delegated:
                     return tool_result
+                # Wrapped in the same shape ``_execute_tools`` produces, so one executed
+                # call reaches its own id the same way a batch does. Only when this step
+                # is that call: compaction also lands here, having filtered a batch whose
+                # other ids it cannot answer.
+                pending_ids = self._current_tool_call_ids()
+                if len(pending_ids) == 1:
+                    ordered_results = [
+                        {
+                            "order": 0,
+                            "tool_call_id": pending_ids[0],
+                            "tool_name": action,
+                            "success": tool_success,
+                            "result": tool_result,
+                            "files": tool_files,
+                        }
+                    ]
 
             if skipped_tools:
                 skipped_notice = (
@@ -1748,7 +1744,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
                 tool_result = f"{tool_result}{skipped_notice}" if tool_result else skipped_notice
 
-            self._emit_tool_observations(tool_result, ordered_results, tool_name=action, success=tool_success)
+            self._emit_tool_observations(tool_result, ordered_results, success=tool_success)
 
         # else: No action or no tools available - no reasoning to stream
 
