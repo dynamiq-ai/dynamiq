@@ -1,5 +1,6 @@
 import enum
 import json
+import os
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from enum import Enum
@@ -312,6 +313,10 @@ class Anthropic(BaseApiKeyConnection):
 class AWS(BaseConnection):
     access_key_id: str | None = Field(default_factory=partial(get_env_var, "AWS_ACCESS_KEY_ID"))
     secret_access_key: str | None = Field(default_factory=partial(get_env_var, "AWS_SECRET_ACCESS_KEY"))
+    # Required alongside the key pair for any temporary credential (STS AssumeRole, IAM
+    # Identity Center / SSO export, CI OIDC). Without it SigV4 signing is rejected with
+    # InvalidClientTokenId, so credentials that work in the AWS CLI would fail here.
+    session_token: str | None = Field(default_factory=partial(get_env_var, "AWS_SESSION_TOKEN"))
     region: str = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_REGION"))
     profile: str | None = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_PROFILE"))
 
@@ -329,6 +334,8 @@ class AWS(BaseConnection):
             params["aws_access_key_id"] = self.access_key_id
             params["aws_secret_access_key"] = self.secret_access_key
             params["aws_region_name"] = self.region
+            if self.session_token:
+                params["aws_session_token"] = self.session_token
         return params
 
     def get_boto3_session(self):
@@ -341,6 +348,8 @@ class AWS(BaseConnection):
         elif self.access_key_id and self.secret_access_key:
             params["aws_access_key_id"] = self.access_key_id
             params["aws_secret_access_key"] = self.secret_access_key
+            if self.session_token:
+                params["aws_session_token"] = self.session_token
         if self.region:
             params["region_name"] = self.region
         return boto3.Session(**params)
@@ -1891,24 +1900,23 @@ class Browserbase(BaseConnection):
 
     browserbase_api_key: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_API_KEY"))
     browserbase_project_id: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_PROJECT_ID"))
-    model_api_key: str = Field(..., description="API key for the LLM model.")
+    model_api_key: str | None = Field(
+        default_factory=lambda: os.environ.get("MODEL_API_KEY") or None,
+        description=(
+            "API key for the LLM model provider. Optional: when unset, model calls route through "
+            "the Browserbase Model Gateway using the Browserbase API key."
+        ),
+    )
     extra_config: dict[str, Any] = Field(
-        default_factory=dict, description="Additional options to pass into StagehandConfig"
+        default_factory=dict,
+        description=(
+            "Additional Stagehand session start options (e.g. self_heal, system_prompt, "
+            "dom_settle_timeout_ms, verbose, browserbase_session_create_params)."
+        ),
     )
 
     def connect(self):
         pass
-
-    @property
-    def config(self):
-        from stagehand import StagehandConfig
-
-        return StagehandConfig(
-            env=StagehandEnvironment.BROWSERBASE,
-            api_key=self.browserbase_api_key,
-            project_id=self.browserbase_project_id,
-            **self.extra_config,
-        )
 
 
 class Stagehand(Browserbase):
@@ -1927,6 +1935,11 @@ class SteelBrowserEnvironment(str, enum.Enum):
 class SteelBrowser(BaseConnection):
     """
     Steel.dev connection configuration for Stagehand.
+
+    Steel sessions are driven by Stagehand's bundled local server, which inherits the process
+    environment. With ``anthropic/*`` models, leave ``ANTHROPIC_BASE_URL`` unset (the server then
+    defaults to ``https://api.anthropic.com/v1``); if the deployment does set it, the value must
+    include the ``/v1`` suffix or model calls fail with 404.
     """
 
     environment: SteelBrowserEnvironment = Field(
@@ -1944,11 +1957,18 @@ class SteelBrowser(BaseConnection):
     )
     model_api_key: str = Field(..., description="API key for the LLM model.")
     session_config: dict[str, Any] = Field(
-        default_factory=lambda: {"block_ads": True},
-        description="Configuration options for Steel session creation",
+        default_factory=lambda: {"block_ads": True, "timeout": 3600000},
+        description=(
+            "Configuration options for Steel session creation. The timeout (ms) overrides Steel's "
+            "short default session lifetime so the session outlasts a full agent run."
+        ),
     )
     extra_config: dict[str, Any] = Field(
-        default_factory=dict, description="Additional options to pass into StagehandConfig"
+        default_factory=dict,
+        description=(
+            "Additional Stagehand session start options (e.g. self_heal, system_prompt, "
+            "dom_settle_timeout_ms, verbose)."
+        ),
     )
 
     @model_validator(mode="after")
