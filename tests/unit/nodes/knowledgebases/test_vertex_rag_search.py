@@ -188,6 +188,14 @@ def test_client_only_node_with_full_resource_name_executes():
     assert result["documents"][0].content == "Doc"
 
 
+def test_building_credentials_without_a_connection_is_a_clear_error():
+    """A client-only node has no connection; report that rather than an AttributeError."""
+    node = VertexAIRagSearch(rag_corpus_id=CORPUS_NAME, client=MagicMock())
+
+    with pytest.raises(ValueError, match="A VertexAI connection is required"):
+        node._build_credentials()
+
+
 def test_endpoint_follows_corpus_region(connection):
     node = VertexAIRagSearch(
         connection=connection,

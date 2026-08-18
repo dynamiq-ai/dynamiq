@@ -294,7 +294,6 @@ Important:
             tuple[str, list[Answer] | None]: The rendered text observation, and the raw structured
                 answers if the reply carried any.
         """
-        logger.debug(f"Tool {self.name} - {self.id}: started with prompt {prompt}")
         check_cancellation(config)
 
         streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
@@ -423,7 +422,6 @@ Important:
             dict[str, Any]: A dictionary with the result under 'content', plus 'answers' (the raw
                 structured answers) when the reply to a structured ask carried any.
         """
-        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)

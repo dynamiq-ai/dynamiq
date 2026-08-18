@@ -1,6 +1,7 @@
 import asyncio
 import threading
 import time
+from io import BytesIO
 from queue import Queue
 from threading import Event
 from typing import ClassVar
@@ -10,7 +11,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.nodes.node import ErrorHandling, Node, NodeGroup
+from dynamiq.nodes.node import LOG_PAYLOAD_MAX_CHARS, ErrorHandling, Node, NodeGroup
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.streaming import StreamingConfig, StreamingEventMessage
@@ -977,3 +978,50 @@ def test_clone_shared_survives_multiple_clones():
     assert clone1.shared is node.shared
     assert clone2.shared is node.shared
     assert clone3.shared is node.shared, "Shared reference was lost when cloning a clone."
+
+
+def test_dump_for_log_caps_large_payload():
+    """A large node result must never render an unbounded DEBUG log line."""
+    payload = {
+        "content": "formatted answer " * 500,
+        "documents": [
+            {"content": "lorem ipsum " * 200, "embedding": [0.1] * 1536, "metadata": {"source": f"doc{i}.pdf"}}
+            for i in range(100)
+        ],
+    }
+    untruncated = len(str(payload))
+    rendered = Node._dump_for_log(payload)
+
+    assert untruncated > 100_000, "Fixture is too small to exercise truncation."
+    assert len(rendered) <= LOG_PAYLOAD_MAX_CHARS
+    assert "..." in rendered, "Truncation points should be marked so readers know data was omitted."
+
+
+def test_dump_for_log_keeps_small_payload_intact():
+    """Payloads under the limits must not be mangled by the bounded renderer."""
+    rendered = Node._dump_for_log({"query": "who is on call?", "top_k": 3})
+
+    assert "who is on call?" in rendered
+    assert "3" in rendered
+    assert "[truncated]" not in rendered
+
+
+def test_dump_for_log_never_writes_file_content():
+    """BytesIO must be reduced to its name, and raw bytes to a length marker."""
+    named = BytesIO(b"super secret file body")
+    named.name = "report.pdf"
+
+    rendered = Node._dump_for_log({"files": [named], "blob": b"super secret raw body"})
+
+    assert "report.pdf" in rendered
+    assert "secret" not in rendered, "File content leaked into the log payload."
+
+
+def test_dump_for_log_survives_unrenderable_value():
+    """A value whose repr raises must not break node logging."""
+
+    class Exploding:
+        def __repr__(self):
+            raise RuntimeError("boom")
+
+    assert Node._dump_for_log({"bad": Exploding()})

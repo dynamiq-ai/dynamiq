@@ -37,7 +37,7 @@ from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsInputSchema, ToolCallItem
 from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
 from dynamiq.nodes.types import ActionType, Behavior, InferenceMode
-from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
+from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.llm_tool import Tool
@@ -150,8 +150,7 @@ class AgentState(BaseModel):
     """
     Encapsulates the dynamic state of an agent during execution.
 
-    Tracks loop progress and todos. Provides its own serialization
-    to string for injection into observations.
+    Tracks loop progress and todos for checkpointing and run cleanup.
     """
 
     current_loop: int = 0
@@ -171,24 +170,6 @@ class AgentState(BaseModel):
     def update_todos(self, todos: list[dict | TodoItem]) -> None:
         """Update todo list from dicts or TodoItem objects."""
         self.todos = [t if isinstance(t, TodoItem) else TodoItem(**t) for t in todos]
-
-    def to_prompt_string(self) -> str:
-        """
-        Serialize state to a string for observation injection.
-
-        Returns:
-            str: Formatted state string, or empty string if no state to show.
-        """
-        sections = []
-
-        if self.current_loop > 0:
-            sections.append(f"Progress: Loop {self.current_loop}/{self.max_loops}")
-
-        if self.todos:
-            todo_lines = [t.to_display_string() for t in self.todos]
-            sections.append("Todos:\n" + "\n".join(todo_lines))
-
-        return "\n".join(sections) if sections else ""
 
 
 UNKNOWN_TOOL_NAME = "unknown_tool"
@@ -228,15 +209,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
     state: AgentState = Field(default_factory=AgentState, exclude=True)
-    track_state: bool = Field(
-        default=True,
-        description=(
-            "Append a [State: ...] block (loop progress and current todos) to the last user message "
-            "on every LLM call. The block is sent to the model only - it is never written to prompt "
-            "history, memory or checkpoints. Set False to keep the state out of the prompt; todos "
-            "then reach the model only via the todo-write tool result."
-        ),
-    )
     response_format: dict[str, Any] | None = Field(
         default=None,
         description=(
@@ -312,6 +284,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         Logs reasoning step of agent.
 
+        Action name stays at INFO.
+        Thought and action_input may contain user data and are logged at DEBUG.
+
         Args:
             thought (str): Reasoning about next step.
             action (str): Chosen action.
@@ -319,28 +294,44 @@ class Agent(HistoryManagerMixin, BaseAgent):
             loop_num (int): Number of reasoning loop.
         """
         logger.info(
-            "\n------------------------------------------\n"
-            f"Agent {self.name}: Loop {loop_num}:\n"
-            f"Thought: {thought}\n"
-            f"Action: {action}\n"
-            f"Action Input: {action_input}"
-            "\n------------------------------------------"
+            "Agent %s - %s: Loop %s: Action: %s",
+            self.name,
+            self.id,
+            loop_num,
+            action,
+        )
+        logger.debug(
+            "Agent %s - %s: Loop %s: Thought: %s | Action Input: %s",
+            self.name,
+            self.id,
+            loop_num,
+            thought,
+            action_input,
         )
 
     def log_final_output(self, thought: str, final_output: str, loop_num: int) -> None:
         """
         Logs final output of the agent.
 
+        Emits a payload-free INFO line; thought and final answer go to DEBUG.
+
         Args:
             final_output (str): Final output of agent.
             loop_num (int): Number of reasoning loop
         """
         logger.info(
-            "\n------------------------------------------\n"
-            f"Agent {self.name}: Loop {loop_num}\n"
-            f"Thought: {thought}\n"
-            f"Final answer: {final_output}"
-            "\n------------------------------------------\n"
+            "Agent %s - %s: Loop %s: final answer produced",
+            self.name,
+            self.id,
+            loop_num,
+        )
+        logger.debug(
+            "Agent %s - %s: Loop %s: Thought: %s | Final answer: %s",
+            self.name,
+            self.id,
+            loop_num,
+            thought,
+            final_output,
         )
 
     def _emit_tool_input_error(
@@ -1692,44 +1683,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         return None
 
-    def _inject_state_into_messages(self, messages: list[Message | VisionMessage]) -> list[Message | VisionMessage]:
-        """
-        Create a copy of messages with state injected into the last user message.
-
-        Original messages are not modified. Handles both Message and VisionMessage types.
-        """
-        if not self.track_state:
-            return messages
-
-        state_info = self.state.to_prompt_string()
-        if not state_info or not messages:
-            return messages
-
-        last_msg = messages[-1]
-        if last_msg.role != MessageRole.USER:
-            return messages
-
-        state_suffix = f"\n\n[State: {state_info}]"
-
-        if isinstance(last_msg, VisionMessage):
-            new_content = list(last_msg.content) + [VisionMessageTextContent(text=state_suffix)]
-            return messages[:-1] + [
-                VisionMessage(
-                    role=last_msg.role,
-                    content=new_content,
-                    static=last_msg.static,
-                )
-            ]
-
-        return messages[:-1] + [
-            Message(
-                role=last_msg.role,
-                content=f"{last_msg.content}{state_suffix}",
-                metadata=last_msg.metadata,
-                static=last_msg.static,
-            )
-        ]
-
     def _run_react_llm_step(self, config: RunnableConfig | None, loop_num: int, **kwargs) -> ReactStep:
         """Run one ReAct LLM call and resolve it to a ReactStep.
 
@@ -1748,9 +1701,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             config, loop_num, **kwargs
         )
 
-        # Append state to the last user message before LLM call
-        messages = self._inject_state_into_messages(self._prompt.messages)
-
         try:
             native_parallel = self.parallel_tool_calls_enabled and self.inference_mode == InferenceMode.FUNCTION_CALLING
             fc_tools, response_format = self._effective_inference_schemas()
@@ -1766,7 +1716,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             ):
                 forced_tool_choice = "required"
             llm_result = self._run_llm(
-                messages=messages,
+                messages=self._prompt.messages,
                 tools=fc_tools,
                 response_format=response_format,
                 config=llm_config,
@@ -1801,7 +1751,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         llm_reasoning = (
             llm_generated_output[:200] if llm_generated_output else str(llm_result.output.get("tool_calls", ""))[:200]
         )
-        logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num}, reasoning:\n{llm_reasoning}...")
+        logger.debug(f"Agent {self.name} - {self.id}: Loop {loop_num}, reasoning:\n{llm_reasoning}...")
 
         # Append assistant message to conversation history BEFORE parsing
         # This ensures the LLM can see its own output during error recovery
@@ -1851,9 +1801,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             RuntimeError: If the maximum number of loops is reached without finding a final answer.
             Exception: If an error occurs during execution.
         """
-        if self.verbose:
-            logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
-
         self.state.max_loops = self.max_loops
 
         completed = self.get_start_iteration()
@@ -2166,9 +2113,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         self.state.update_loop(loop_num)
 
-        if not self.track_state:
-            return
-
         todo_backend = None
         if self.sandbox_backend:
             todo_backend = self.sandbox_backend
@@ -2257,9 +2201,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
             delegation_allowed=self.delegation_allowed,
             context_compaction_enabled=self.summarization_config.enabled,
+            notes_file_path=self.get_notes_file_path(),
             todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
             or bool(self.sandbox_backend),
-            track_state=self.track_state,
             sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
             has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in tools),
             role=self.role,

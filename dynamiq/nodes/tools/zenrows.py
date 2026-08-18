@@ -80,7 +80,6 @@ class ZenRowsTool(ConnectionNode):
             result = f"## Source URL\n{input_data.url}\n\n## Scraped Result\n\n{scrape_result}\n"
         else:
             result = {"url": input_data.url, "content": scrape_result}
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
         return {"content": result}
 
     def _wrap_request_exception(self, exc: Exception) -> ToolExecutionException:
@@ -103,7 +102,6 @@ class ZenRowsTool(ConnectionNode):
         Returns:
             dict[str, Any]: A dictionary containing the URL and the scraped content.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -120,7 +118,6 @@ class ZenRowsTool(ConnectionNode):
         self, input_data: ZenRowsInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
         """Native async execution path mirroring ``execute``."""
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
         config = ensure_config(config)
         check_cancellation(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)

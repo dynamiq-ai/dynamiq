@@ -398,7 +398,7 @@ class CuaDesktopTool(ConnectionNode):
             except Exception as e:
                 reports.append({"name": name, "path": dest_path, "status": "error", "error": str(e)})
         if reports:
-            logger.info(f"CuaDesktopTool uploads: {reports}")
+            logger.debug(f"CuaDesktopTool uploads: {reports}")
             return reports
         return None
 
@@ -464,7 +464,6 @@ class CuaDesktopTool(ConnectionNode):
         Raises:
             ToolExecutionException: If the input is invalid or execution fails.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
         check_cancellation(config)
 
         await self._init_client()
@@ -473,15 +472,13 @@ class CuaDesktopTool(ConnectionNode):
         files_to_upload = self._filter_screenshots(input_data.files)
         uploads_report = None
         if files_to_upload:
-            logger.info(f"CuaDesktopTool uploading files: {files_to_upload}")
+            logger.debug(f"CuaDesktopTool uploading files: {files_to_upload}")
             uploads_report = await self._upload_files(files_to_upload)
 
         try:
             result = await self.execute_command(input_data, uploads_report)
         except Exception as e:
             raise ToolExecutionException(f"Error message: {e}", recoverable=True) from e
-
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
 
         files = None
         if isinstance(result, dict) and "files" in result:
@@ -510,7 +507,7 @@ class CuaDesktopTool(ConnectionNode):
             if hasattr(f, "name"):
                 # Skip files named screenshot.png or containing "screenshot" in the name
                 if isinstance(f.name, str) and "screenshot" in f.name.lower():
-                    logger.info(f"Filtering out screenshot file: {f.name}")
+                    logger.debug(f"Filtering out screenshot file: {f.name}")
                     continue
             filtered.append(f)
 
@@ -542,7 +539,8 @@ class CuaDesktopTool(ConnectionNode):
             )
 
         # Map actions to CUA Computer API
-        logger.info(f"CuaDesktopTool executing action={action_enum.value} params={params}")
+        logger.info(f"CuaDesktopTool executing action={action_enum.value}")
+        logger.debug(f"CuaDesktopTool executing action={action_enum.value} params={params}")
         files: list[io.BytesIO] | None = None
         if action_enum == CuaAction.MOVE_MOUSE:
             x, y = params["coordinates"]

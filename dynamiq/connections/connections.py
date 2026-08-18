@@ -1,5 +1,6 @@
 import enum
 import json
+import os
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from enum import Enum
@@ -62,6 +63,19 @@ class BaseConnection(BaseModel, ABC):
             dict: An empty dictionary.
         """
         return {}
+
+    @property
+    def completion_params(self) -> dict:
+        """Parameters for LLM completion calls specifically.
+
+        Defaults to `conn_params`. Override when a connection carries settings that apply to
+        completions but not to the embedding, image or ranking nodes that share the same
+        connection - `conn_params` is read by all of them.
+
+        Returns:
+            dict: The connection parameters to pass to a completion call.
+        """
+        return self.conn_params
 
     def to_dict(self, for_tracing: bool = False, **kwargs) -> dict:
         """Converts the connection instance to a dictionary.
@@ -388,21 +402,34 @@ class GoogleCloud(BaseConnection):
         universe_domain (str): The domain associated with the Google Cloud environment.
     """
 
-    project_id: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PROJECT_ID"))
-    private_key_id: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PRIVATE_KEY_ID"))
-    private_key: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PRIVATE_KEY"))
-    client_email: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_EMAIL"))
-    client_id: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_ID"))
-    auth_uri: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_AUTH_URI"))
-    token_uri: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_TOKEN_URI"))
-    auth_provider_x509_cert_url: str = Field(
+    project_id: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PROJECT_ID"))
+    private_key_id: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PRIVATE_KEY_ID"))
+    private_key: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PRIVATE_KEY"))
+    client_email: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_EMAIL"))
+    client_id: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_ID"))
+    auth_uri: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_AUTH_URI"))
+    token_uri: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_TOKEN_URI"))
+    auth_provider_x509_cert_url: str | None = Field(
         default_factory=partial(get_env_var, "GOOGLE_CLOUD_AUTH_PROVIDER_X509_CERT_URL")
     )
-    client_x509_cert_url: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_X509_CERT_URL"))
-    universe_domain: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_UNIVERSE_DOMAIN"))
+    client_x509_cert_url: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_X509_CERT_URL"))
+    universe_domain: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_UNIVERSE_DOMAIN"))
 
     def connect(self):
         pass
+
+    @property
+    def has_service_account_credentials(self) -> bool:
+        """Whether the service account fields are complete enough to authenticate.
+
+        google-auth needs the private key, the service account email and the token URI before
+        `from_service_account_info` can sign anything. A partially populated set raises instead
+        of authenticating, so callers should treat it the same as no credentials at all.
+
+        Returns:
+            bool: True when the required service account fields are all populated.
+        """
+        return all((self.private_key, self.client_email, self.token_uri))
 
     @property
     def conn_params(self):
@@ -433,35 +460,122 @@ class VertexAI(GoogleCloud):
     Represents a connection to the Vertex AI service.
 
     This connection requires additional GCP application credentials. The credentials should be provided in the
-    connection fields (related to Google Cloud) or set in the environment variables.
+    connection fields (related to Google Cloud) or set in the environment variables. If no service account
+    fields are supplied, Application Default Credentials (ADC) are used instead.
+
+    To target a self-deployed model (Model Garden / custom vLLM endpoint) rather than a managed
+    publisher model, supply either `vertex_api_base` directly, or `vertex_endpoint_id` together with
+    `vertex_endpoint_dns`.
+
+    Model Garden deployments enable a dedicated endpoint, which refuses traffic on the shared
+    `{location}-aiplatform.googleapis.com` host. The dedicated DNS is not derivable from the project
+    id or number - read it from the API:
+
+        gcloud ai endpoints describe {ENDPOINT_ID} --region={LOCATION} \
+            --format='value(dedicatedEndpointDns)'
 
     Attributes:
         vertex_project_id (str): The GCP project ID.
         vertex_project_location (str): The location of the GCP project.
+        vertex_endpoint_id (str): Optional id of a self-deployed Vertex endpoint.
+        vertex_endpoint_dns (str): Optional dedicated endpoint DNS for that endpoint.
+        vertex_api_base (str): Optional fully-built API base, overriding the two fields above.
     """
 
     vertex_project_id: str = Field(default_factory=partial(get_env_var, "VERTEXAI_PROJECT_ID"))
     vertex_project_location: str = Field(default_factory=partial(get_env_var, "VERTEXAI_PROJECT_LOCATION"))
+    vertex_endpoint_id: str | None = Field(default_factory=partial(get_env_var, "VERTEXAI_ENDPOINT_ID", None))
+    vertex_endpoint_dns: str | None = Field(default_factory=partial(get_env_var, "VERTEXAI_ENDPOINT_DNS", None))
+    vertex_api_base: str | None = Field(default_factory=partial(get_env_var, "VERTEXAI_API_BASE", None))
 
     def connect(self):
         pass
+
+    @property
+    def api_base(self) -> str | None:
+        """Build the API base for a self-deployed Vertex endpoint, if one is configured.
+
+        LiteLLM only ever builds the shared `{location}-aiplatform.googleapis.com` host for
+        `vertex_ai/openai/*` models, so a dedicated endpoint has to be addressed explicitly.
+
+        Returns:
+            str | None: The api base, or None when no self-deployed endpoint is configured.
+        """
+        if api_base := (self.vertex_api_base or "").strip():
+            return api_base.rstrip("/")
+
+        endpoint_id = (self.vertex_endpoint_id or "").strip()
+        endpoint_dns = (self.vertex_endpoint_dns or "").strip()
+
+        if not (endpoint_id and endpoint_dns):
+            if endpoint_id or endpoint_dns:
+                logger.warning(
+                    "VertexAI connection has an incomplete self-deployed endpoint configuration: "
+                    "vertex_endpoint_id and vertex_endpoint_dns are both required. Falling back to "
+                    "the shared Vertex AI host, which dedicated endpoints reject."
+                )
+            return None
+
+        project_id = (self.vertex_project_id or "").strip()
+        location = (self.vertex_project_location or "").strip()
+        if not (project_id and location):
+            logger.warning(
+                "VertexAI connection cannot address its self-deployed endpoint: vertex_project_id "
+                "and vertex_project_location are both required to build the endpoint path. "
+                "Falling back to the shared Vertex AI host, which dedicated endpoints reject."
+            )
+            return None
+
+        host = endpoint_dns.rstrip("/").removeprefix("https://").removeprefix("http://")
+        return f"https://{host}/v1/projects/{project_id}/locations/{location}/endpoints/{endpoint_id}"
 
     @property
     def conn_params(self):
         """
         Returns the parameters required for the connection.
 
-        This property returns a dictionary containing the project ID and project location.
+        Includes `vertex_credentials` only when the service account fields are complete enough
+        to authenticate, so that LiteLLM falls back to Application Default Credentials otherwise.
+        A partially filled service account is never usable - passing it on would make google-auth
+        raise instead of falling back.
+
+        `api_base` is deliberately absent here: a self-deployed endpoint serves chat completions,
+        while embedder, image and ranker nodes read `conn_params` from the same connection and
+        would send their requests to it too. See `completion_params`.
 
         Returns:
-            dict: A dictionary with the keys 'vertex_project' and 'vertex_location'.
+            dict: A dictionary with the keys 'vertex_project' and 'vertex_location', plus
+                'vertex_credentials' when available.
         """
-        vertex_credentials = json.dumps(super().conn_params.copy())
-        return {
+        params = {
             "vertex_project": self.vertex_project_id,
             "vertex_location": self.vertex_project_location,
-            "vertex_credentials": vertex_credentials,
         }
+
+        service_account = super().conn_params.copy()
+        if self.has_service_account_credentials:
+            params["vertex_credentials"] = json.dumps(service_account)
+        elif any(service_account.values()):
+            logger.warning(
+                "VertexAI connection has incomplete service account credentials: "
+                "private_key, client_email and token_uri are all required. "
+                "Falling back to Application Default Credentials."
+            )
+
+        return params
+
+    @property
+    def completion_params(self) -> dict:
+        """Connection params for completion calls, including any self-deployed endpoint.
+
+        Returns:
+            dict: `conn_params` plus 'api_base' when a self-deployed endpoint is configured.
+        """
+        params = self.conn_params
+        if api_base := self.api_base:
+            params["api_base"] = api_base
+
+        return params
 
 
 class Cohere(BaseApiKeyConnection):
@@ -660,7 +774,7 @@ class Weaviate(BaseApiKeyConnection):
     http_port: int = Field(default_factory=partial(get_env_var, "WEAVIATE_HTTP_PORT", 443))
     grpc_host: str = Field(default_factory=partial(get_env_var, "WEAVIATE_GRPC_HOST"))
     grpc_port: int = Field(default_factory=partial(get_env_var, "WEAVIATE_GRPC_PORT", 50051))
-    timeout_init: int = Field(default=30, description="Timeout for initialization checks in seconds")
+    timeout_init: int = Field(default=180, description="Timeout for initialization checks in seconds")
     timeout_query: int = Field(default=180, description="Timeout for query operations in seconds")
     timeout_insert: int = Field(default=120, description="Timeout for insert operations in seconds")
 
@@ -1726,24 +1840,23 @@ class Browserbase(BaseConnection):
 
     browserbase_api_key: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_API_KEY"))
     browserbase_project_id: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_PROJECT_ID"))
-    model_api_key: str = Field(..., description="API key for the LLM model.")
+    model_api_key: str | None = Field(
+        default_factory=lambda: os.environ.get("MODEL_API_KEY") or None,
+        description=(
+            "API key for the LLM model provider. Optional: when unset, model calls route through "
+            "the Browserbase Model Gateway using the Browserbase API key."
+        ),
+    )
     extra_config: dict[str, Any] = Field(
-        default_factory=dict, description="Additional options to pass into StagehandConfig"
+        default_factory=dict,
+        description=(
+            "Additional Stagehand session start options (e.g. self_heal, system_prompt, "
+            "dom_settle_timeout_ms, verbose, browserbase_session_create_params)."
+        ),
     )
 
     def connect(self):
         pass
-
-    @property
-    def config(self):
-        from stagehand import StagehandConfig
-
-        return StagehandConfig(
-            env=StagehandEnvironment.BROWSERBASE,
-            api_key=self.browserbase_api_key,
-            project_id=self.browserbase_project_id,
-            **self.extra_config,
-        )
 
 
 class Stagehand(Browserbase):
@@ -1762,6 +1875,11 @@ class SteelBrowserEnvironment(str, enum.Enum):
 class SteelBrowser(BaseConnection):
     """
     Steel.dev connection configuration for Stagehand.
+
+    Steel sessions are driven by Stagehand's bundled local server, which inherits the process
+    environment. With ``anthropic/*`` models, leave ``ANTHROPIC_BASE_URL`` unset (the server then
+    defaults to ``https://api.anthropic.com/v1``); if the deployment does set it, the value must
+    include the ``/v1`` suffix or model calls fail with 404.
     """
 
     environment: SteelBrowserEnvironment = Field(
@@ -1779,11 +1897,18 @@ class SteelBrowser(BaseConnection):
     )
     model_api_key: str = Field(..., description="API key for the LLM model.")
     session_config: dict[str, Any] = Field(
-        default_factory=lambda: {"block_ads": True},
-        description="Configuration options for Steel session creation",
+        default_factory=lambda: {"block_ads": True, "timeout": 3600000},
+        description=(
+            "Configuration options for Steel session creation. The timeout (ms) overrides Steel's "
+            "short default session lifetime so the session outlasts a full agent run."
+        ),
     )
     extra_config: dict[str, Any] = Field(
-        default_factory=dict, description="Additional options to pass into StagehandConfig"
+        default_factory=dict,
+        description=(
+            "Additional Stagehand session start options (e.g. self_heal, system_prompt, "
+            "dom_settle_timeout_ms, verbose)."
+        ),
     )
 
     @model_validator(mode="after")

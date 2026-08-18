@@ -1,0 +1,557 @@
+"""Unit tests for the Stagehand tool's v3 call mapping, clone safety and error taxonomy.
+
+These cover pure logic only — no network, no browser. The shared-browser-session protocol is
+covered separately in tests/unit/nodes/agents/test_browser_sharing_wiring.py.
+"""
+
+import asyncio
+import io
+import logging
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from stagehand import APIStatusError, AuthenticationError, InternalServerError, NotFoundError
+
+from dynamiq.connections import Browserbase as BrowserbaseConnection
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
+from dynamiq.nodes.agents.shared_session import SharedSession
+from dynamiq.nodes.tools.stagehand import Stagehand, StagehandActionType, StagehandInputSchema
+
+
+def bare_stagehand(**attrs) -> Stagehand:
+    """A Stagehand instance without connection/pydantic init, for pure-logic tests."""
+    tool = Stagehand.__new__(Stagehand)
+    object.__setattr__(tool, "__pydantic_fields_set__", set())
+    object.__setattr__(tool, "__pydantic_extra__", None)
+    defaults = {
+        "name": "T",
+        "id": "id-1",
+        "model_name": "anthropic/claude-sonnet-5",
+        "fallback_model_name": None,
+        "timeout": 3600,
+        "client": None,
+        "_session_id": None,
+        "_stagehand_session": None,
+        "_cdp_url": None,
+        "_live_view_url": None,
+        "_shares_browser_session": False,
+        "_browserbase_client": None,
+        "_steel_client": None,
+        "_steel_browser_session": None,
+        "_playwright": None,
+        "_pw_browser": None,
+        "_pw_page": None,
+        "_loop": None,
+        "_loop_thread": None,
+        "browser_context_id": None,
+        "shared_browser_session_timeout": 3600,
+    }
+    merged = {**defaults, **attrs}
+    object.__setattr__(tool, "__pydantic_private__", {k: v for k, v in merged.items() if k.startswith("_")})
+    for key, value in merged.items():
+        if not key.startswith("_"):
+            object.__setattr__(tool, key, value)
+    return tool
+
+
+def _stub_execute_scaffolding(tool: Stagehand, shared: SharedSession | None = None) -> None:
+    """Neutralize everything execute_async does around the action itself.
+
+    Passing ``shared`` sends the tool down the shared-browser path with joining stubbed out, so
+    only the shared session's own bookkeeping is under test.
+    """
+
+    async def _noop(*args, **kwargs):
+        return None
+
+    async def _acquire(*args, **kwargs):
+        return shared
+
+    object.__setattr__(tool, "_acquire_shared_browser", _acquire)
+    object.__setattr__(tool, "_join_shared_browser", _noop)
+    object.__setattr__(tool, "_init_client", _noop)
+    object.__setattr__(tool, "run_on_node_execute_run", lambda *a, **k: None)
+    object.__setattr__(tool, "is_return_screenshot_bytes_enabled", False)
+    object.__setattr__(tool, "is_return_live_view_url_enabled", False)
+
+
+def _session_gone(status: int = 410) -> APIStatusError:
+    """The error a dead session really produces.
+
+    Browserbase answers a completed or timed-out session with 410 Gone, which the SDK maps to the
+    generic APIStatusError — not NotFoundError. Defaulting to 410 keeps these tests honest about
+    what the server sends; pass 404 to cover the id-never-existed case.
+    """
+    response = MagicMock(status_code=status)
+    if status == 404:
+        return NotFoundError("gone", response=response, body=None)
+    return APIStatusError("gone", response=response, body=None)
+
+
+class _FakeChooserWait:
+    """Stand-in for page.expect_file_chooser(...): an async CM exposing an awaitable `value`."""
+
+    def __init__(self, chooser):
+        self._chooser = chooser
+
+    async def __aenter__(self):
+        return MagicMock(value=asyncio.sleep(0, result=self._chooser))
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+
+class TestCallKwargsMapping:
+    """Extra input fields must map onto the parameters each v3 action actually accepts."""
+
+    def test_variables_go_to_options_for_act(self):
+        tool = bare_stagehand()
+        kwargs = tool._build_call_kwargs({"variables": {"user": "jdoe"}}, StagehandActionType.ACT)
+        assert kwargs["options"]["variables"] == {"user": "jdoe"}
+
+    def test_variables_dropped_for_extract(self):
+        """The extract API has no options.variables — sending it would be silently ignored."""
+        tool = bare_stagehand()
+        kwargs = tool._build_call_kwargs({"variables": {"user": "jdoe"}}, StagehandActionType.EXTRACT)
+        assert "options" not in kwargs
+
+    def test_model_and_variables_dropped_for_goto(self):
+        tool = bare_stagehand()
+        kwargs = tool._build_call_kwargs(
+            {"model": "openai/gpt-5", "variables": {"a": "b"}, "timeout": 5000}, StagehandActionType.GOTO
+        )
+        assert kwargs["options"] == {"timeout": 5000}
+
+    def test_schema_passthrough_only_for_extract(self):
+        tool = bare_stagehand()
+        schema = {"type": "object", "properties": {"title": {"type": "string"}}}
+        assert tool._build_call_kwargs({"schema": schema}, StagehandActionType.EXTRACT)["schema"] == schema
+        assert "schema" not in tool._build_call_kwargs({"schema": schema}, StagehandActionType.ACT)
+
+    def test_frame_id_is_a_top_level_param(self):
+        tool = bare_stagehand()
+        kwargs = tool._build_call_kwargs({"frame_id": "frame-1"}, StagehandActionType.OBSERVE)
+        assert kwargs["frame_id"] == "frame-1"
+
+    def test_unknown_fields_are_dropped_not_raised(self):
+        """A hallucinated field must not abort the agent's whole step."""
+        tool = bare_stagehand()
+        kwargs = tool._build_call_kwargs({"nonsense": 1, "iframes": True}, StagehandActionType.ACT)
+        assert kwargs == {}
+
+    def test_variables_are_kept_for_observe(self):
+        """observe takes variables to return %placeholders% instead of literal secrets."""
+        tool = bare_stagehand()
+        kwargs = tool._build_call_kwargs({"variables": {"password": "hunter2"}}, StagehandActionType.OBSERVE)
+        assert kwargs["options"]["variables"] == {"password": "hunter2"}
+
+    def test_selectors_scope_extract_and_observe(self):
+        tool = bare_stagehand()
+        payload = {"selector": "#main", "ignore_selectors": [".cookie-banner"]}
+        for action in (StagehandActionType.EXTRACT, StagehandActionType.OBSERVE):
+            options = tool._build_call_kwargs(dict(payload), action)["options"]
+            assert options["selector"] == "#main"
+            assert options["ignore_selectors"] == [".cookie-banner"]
+
+    def test_selectors_dropped_for_act(self):
+        """act has no selector options; forwarding them would be rejected server-side."""
+        tool = bare_stagehand()
+        assert tool._build_call_kwargs({"selector": "#main"}, StagehandActionType.ACT) == {}
+
+    def test_screenshot_option_is_extract_only(self):
+        tool = bare_stagehand()
+        assert tool._build_call_kwargs({"screenshot": True}, StagehandActionType.EXTRACT)["options"] == {
+            "screenshot": True
+        }
+        assert tool._build_call_kwargs({"screenshot": True}, StagehandActionType.OBSERVE) == {}
+
+    def test_navigation_options_pass_through_for_goto(self):
+        tool = bare_stagehand()
+        kwargs = tool._build_call_kwargs(
+            {"wait_until": "networkidle", "referer": "https://example.com"}, StagehandActionType.GOTO
+        )
+        assert kwargs["options"] == {"wait_until": "networkidle", "referer": "https://example.com"}
+
+
+class TestSessionStartOptions:
+    """extra_config feeds sessions.start, whose signature is a fixed keyword list."""
+
+    def test_supported_keys_pass_through(self):
+        tool = bare_stagehand(connection=MagicMock(extra_config={"self_heal": False, "verbose": 2}))
+        assert tool._session_start_options() == {"self_heal": False, "verbose": 2}
+
+    def test_legacy_keys_are_filtered_out(self):
+        """0.4-era keys would raise TypeError inside the SDK, outside our error handling."""
+        tool = bare_stagehand(
+            connection=MagicMock(extra_config={"enable_caching": True, "api_url": "x", "self_heal": True})
+        )
+        assert tool._session_start_options() == {"self_heal": True}
+
+
+class TestCloneSafety:
+    """clone() copies private attrs shallowly; a clone must not touch the original's resources."""
+
+    def test_reset_clears_every_live_handle(self):
+        tool = bare_stagehand(
+            _loop=MagicMock(),
+            _loop_thread=MagicMock(),
+            client=MagicMock(),
+            _stagehand_session=MagicMock(),
+            _session_id="sess-1",
+            _cdp_url="ws://x",
+            _live_view_url="https://lv",
+            _browserbase_client=MagicMock(),
+            _steel_client=MagicMock(),
+            _steel_browser_session=MagicMock(),
+            _playwright=MagicMock(),
+            _pw_browser=MagicMock(),
+            _pw_page=MagicMock(),
+            _shares_browser_session=True,
+        )
+
+        tool.reset_clone_resources()
+
+        assert tool._loop is None  # init_loop must not stop the ORIGINAL's loop
+        assert tool.client is None
+        assert tool._stagehand_session is None
+        assert tool._session_id is None
+        assert tool._browserbase_client is None
+        assert tool._steel_client is None
+        assert tool._steel_browser_session is None
+        assert tool._pw_browser is None
+        assert tool._playwright is None
+        assert tool._shares_browser_session is False
+
+    def test_reset_runs_before_loop_init(self):
+        """Order matters: resetting after init_loop would discard the clone's own loop."""
+        names = Stagehand._clone_init_methods_names
+        assert names.index("reset_clone_resources") < names.index("init_loop")
+
+
+def _schema_error() -> InternalServerError:
+    """What the server sends today when a model's answer cannot be decoded.
+
+    It used to name the cause ("did not match schema"); it now returns a bare 502. The trigger must
+    not depend on the wording — keying off the message made the whole fallback dead code once the
+    server stopped saying it.
+    """
+    return InternalServerError(
+        "Error code: 502 - {'success': False, 'message': 'An internal server error occurred'}",
+        response=MagicMock(status_code=502),
+        body=None,
+    )
+
+
+class TestModelFallback:
+    """A model whose answer the server cannot coerce fails identically on same-model retry."""
+
+    def test_failed_call_is_retried_on_the_fallback_model(self):
+        tool = bare_stagehand(fallback_model_name="anthropic/claude-sonnet-4-6")
+        seen = []
+
+        async def call(payload):
+            seen.append(payload)
+            if len(seen) == 1:
+                raise _schema_error()
+            return "recovered"
+
+        result = asyncio.run(tool._call_with_model_fallback(call, "observe", {"frame_id": "f1"}))
+
+        assert result == "recovered"
+        assert len(seen) == 2
+        assert "options" not in seen[0]  # first attempt uses the session's own model
+        assert seen[1]["options"]["model"] == "anthropic/claude-sonnet-4-6"
+        assert seen[1]["frame_id"] == "f1"  # other params survive the retry
+
+    def test_no_retry_without_a_fallback_configured(self):
+        tool = bare_stagehand(fallback_model_name=None)
+        calls = []
+
+        async def call(payload):
+            calls.append(payload)
+            raise _schema_error()
+
+        with pytest.raises(InternalServerError):
+            asyncio.run(tool._call_with_model_fallback(call, "observe", {}))
+        assert len(calls) == 1
+
+    def test_no_retry_when_fallback_equals_primary(self):
+        tool = bare_stagehand(fallback_model_name="anthropic/claude-sonnet-5")
+        calls = []
+
+        async def call(payload):
+            calls.append(payload)
+            raise _schema_error()
+
+        with pytest.raises(InternalServerError):
+            asyncio.run(tool._call_with_model_fallback(call, "observe", {}))
+        assert len(calls) == 1  # the same model would fail identically
+
+    def test_the_trigger_does_not_depend_on_the_error_wording(self):
+        """A 5xx with no diagnostic text at all must still reach the fallback.
+
+        This is the regression that matters: the live server reports the deterministic decode
+        failure as a bare 502, so a trigger that reads the message never fires.
+        """
+        tool = bare_stagehand(fallback_model_name="anthropic/claude-sonnet-4-6")
+        seen = []
+
+        async def call(payload):
+            seen.append(payload)
+            if len(seen) == 1:
+                raise InternalServerError("boom", response=MagicMock(status_code=500), body=None)
+            return "recovered"
+
+        assert asyncio.run(tool._call_with_model_fallback(call, "act", {})) == "recovered"
+        assert seen[1]["options"]["model"] == "anthropic/claude-sonnet-4-6"
+
+    def test_client_errors_are_not_retried_on_another_model(self):
+        """A 4xx is our fault (bad input, dead session) — another model cannot fix it."""
+        tool = bare_stagehand(fallback_model_name="anthropic/claude-sonnet-4-6")
+        calls = []
+
+        async def call(payload):
+            calls.append(payload)
+            raise _session_gone(410)
+
+        with pytest.raises(APIStatusError):
+            asyncio.run(tool._call_with_model_fallback(call, "act", {}))
+        assert len(calls) == 1
+
+    def test_caller_payload_is_not_mutated(self):
+        tool = bare_stagehand(fallback_model_name="anthropic/claude-sonnet-4-6")
+        payload = {"options": {"timeout": 5000}}
+
+        async def call(p):
+            if "model" not in (p.get("options") or {}):
+                raise _schema_error()
+            return "ok"
+
+        asyncio.run(tool._call_with_model_fallback(call, "observe", payload))
+        assert payload == {"options": {"timeout": 5000}}
+
+    def test_upload_retries_inside_the_file_chooser_wait(self):
+        """upload acts under the hood, so it needs the fallback too — and the retry's click is
+        the one that must be caught by the still-open chooser waiter."""
+        tool = bare_stagehand(fallback_model_name="anthropic/claude-sonnet-4-6")
+        chooser = MagicMock(set_files=AsyncMock())
+        page = MagicMock(expect_file_chooser=lambda **kw: _FakeChooserWait(chooser))
+        attempts = []
+
+        async def act(*, input, **params):
+            attempts.append(params)
+            if len(attempts) == 1:
+                raise _schema_error()
+            return MagicMock(data=MagicMock(result=MagicMock(model_dump=lambda: {"success": True})))
+
+        session = MagicMock(act=act)
+        tool._stagehand_session = session
+        _stub_execute_scaffolding(tool)
+        object.__setattr__(tool, "_ensure_page", AsyncMock(return_value=page))
+
+        upload = io.BytesIO(b"col_a,col_b\n1,2\n")
+        upload.name = "report.csv"
+        result = asyncio.run(
+            tool.execute_async(
+                StagehandInputSchema(action_type=StagehandActionType.UPLOAD, instruction="click Upload", files=upload)
+            )
+        )
+
+        assert len(attempts) == 2
+        assert attempts[1]["options"]["model"] == "anthropic/claude-sonnet-4-6"
+        assert result["content"] == {"success": True}
+        chooser.set_files.assert_awaited_once()
+
+
+class TestCrossProviderFallbackWarning:
+    """One model_api_key serves both models, so a fallback from another provider cannot authenticate."""
+
+    def _tool(self, **kwargs) -> Stagehand:
+        connection = BrowserbaseConnection(
+            browserbase_api_key="bb-key",
+            browserbase_project_id="proj-1",
+            model_api_key=kwargs.pop("model_api_key", "openai-key"),
+        )
+        return Stagehand(connection=connection, is_postponed_component_init=True, **kwargs)
+
+    def test_warns_when_providers_differ(self, caplog):
+        with caplog.at_level(logging.WARNING):
+            self._tool(model_name="openai/gpt-4o", fallback_model_name="anthropic/claude-sonnet-4-6")
+        assert "different provider" in caplog.text
+
+    def test_silent_when_providers_match(self, caplog):
+        with caplog.at_level(logging.WARNING):
+            self._tool(model_name="anthropic/claude-sonnet-5", fallback_model_name="anthropic/claude-sonnet-4-6")
+        assert "different provider" not in caplog.text
+
+    def test_silent_without_a_provider_key(self, caplog):
+        """No key means the Browserbase Model Gateway, which can serve both providers."""
+        with caplog.at_level(logging.WARNING):
+            self._tool(
+                model_api_key=None,
+                model_name="openai/gpt-4o",
+                fallback_model_name="anthropic/claude-sonnet-4-6",
+            )
+        assert "different provider" not in caplog.text
+
+
+class TestPageResolution:
+    """Stagehand runs server-side and may have moved to a tab we never saw."""
+
+    def _connected_browser(self, pages):
+        context = MagicMock(pages=pages)
+        return MagicMock(contexts=[context], is_connected=MagicMock(return_value=True))
+
+    def test_newest_open_page_wins_over_the_previous_handle(self):
+        """A popup opened by act must be the one we screenshot / go back on / upload through."""
+        first, popup = MagicMock(), MagicMock()
+        first.is_closed.return_value = False
+        popup.is_closed.return_value = False
+        tool = bare_stagehand(
+            _playwright=MagicMock(),
+            _pw_browser=self._connected_browser([first, popup]),
+            _pw_page=first,
+        )
+
+        assert asyncio.run(tool._ensure_page()) is popup
+
+    def test_closed_pages_are_skipped(self):
+        live, closed = MagicMock(), MagicMock()
+        live.is_closed.return_value = False
+        closed.is_closed.return_value = True
+        tool = bare_stagehand(_playwright=MagicMock(), _pw_browser=self._connected_browser([live, closed]))
+
+        assert asyncio.run(tool._ensure_page()) is live
+
+
+class TestErrorTaxonomy:
+    """Agents retry recoverable errors; hopeless ones must not be marked recoverable."""
+
+    def _run_failing_action(self, tool, exc, shared: SharedSession | None = None):
+        session = MagicMock()
+
+        async def _raise(**kwargs):
+            raise exc
+
+        session.extract = _raise
+        tool._stagehand_session = session
+        _stub_execute_scaffolding(tool, shared)
+        data = StagehandInputSchema(action_type=StagehandActionType.EXTRACT, instruction="get the title")
+        with pytest.raises(ToolExecutionException) as info:
+            asyncio.run(tool.execute_async(data))
+        return info.value
+
+    def test_auth_error_is_not_recoverable(self):
+        tool = bare_stagehand(_session_id="sess-1")
+        err = self._run_failing_action(tool, AuthenticationError("bad key", response=MagicMock(), body=None))
+        assert err.recoverable is False
+
+    @pytest.mark.parametrize("status", [410, 404])
+    def test_both_session_gone_statuses_clear_state(self, status):
+        """410 is what Browserbase actually sends; 404 covers an id the API never knew."""
+        tool = bare_stagehand(_session_id="sess-1", _live_view_url="https://lv")
+        err = self._run_failing_action(tool, _session_gone(status))
+        assert err.recoverable is True
+        assert tool._session_id is None
+
+    def test_other_status_errors_do_not_discard_the_session(self):
+        """A 429 says slow down, not that the session died — discarding it would waste a live one."""
+        tool = bare_stagehand(_session_id="sess-1")
+        err = self._run_failing_action(tool, _session_gone(429))
+        assert err.recoverable is True
+        assert tool._session_id == "sess-1"
+
+    def test_missing_session_is_recoverable_and_clears_state(self):
+        """A dead session must be forgotten so the retry starts a fresh one."""
+        tool = bare_stagehand(_session_id="sess-1", _live_view_url="https://lv", _cdp_url="ws://x")
+        err = self._run_failing_action(tool, _session_gone())
+        assert err.recoverable is True
+        assert tool._session_id is None
+        assert tool._stagehand_session is None
+        assert tool._live_view_url is None
+
+    def test_missing_session_releases_the_steel_browser(self):
+        """Steel owns the browser separately: leaving it running would strand a paid session."""
+        steel_client = MagicMock()
+        steel_client.sessions.release = AsyncMock()
+        tool = bare_stagehand(
+            _session_id="steel-1",
+            _steel_client=steel_client,
+            _steel_browser_session=MagicMock(id="steel-1"),
+        )
+
+        self._run_failing_action(tool, _session_gone())
+
+        steel_client.sessions.release.assert_awaited_once_with("steel-1")
+        assert tool._steel_browser_session is None
+
+    def test_missing_session_retracts_the_runs_shared_session(self):
+        """Otherwise _join_shared_browser hands the dead id back and the retry resumes a corpse."""
+        shared = SharedSession(share_browser=True)
+        shared.adopt_browser_session_id("sess-1")
+        shared.register_browser_end(lambda: None)
+        shared.set_browser_live_view_url("https://lv")
+        tool = bare_stagehand(_session_id="sess-1")
+
+        self._run_failing_action(tool, _session_gone(), shared=shared)
+
+        assert shared.browser_session_id() is None
+        assert shared.browser_live_view_url() is None
+        # The replacement must be able to register its own teardown, or it leaks at end of run.
+        replacement_end = MagicMock()
+        shared.register_browser_end(replacement_end)
+        shared.end_browser_session()
+        replacement_end.assert_called_once_with()
+
+    def test_a_session_that_died_between_turns_is_retracted_at_resume(self):
+        """The common shape: the turn opens by resuming an id that expired while nobody was driving.
+
+        The failure surfaces from session setup, not from the action, so recovery has to be reachable
+        from there too — otherwise the raw NotFoundError escapes and the dead id stays published.
+        """
+        shared = SharedSession(share_browser=True)
+        shared.adopt_browser_session_id("sess-1")
+        tool = bare_stagehand()
+        _stub_execute_scaffolding(tool, shared)
+
+        async def _join(ss):
+            tool._session_id = ss.browser_session_id()  # what the real _join_shared_browser does
+
+        async def _resume_dead_session(*args, **kwargs):
+            raise _session_gone()
+
+        object.__setattr__(tool, "_join_shared_browser", _join)
+        object.__setattr__(tool, "_init_client", _resume_dead_session)
+        data = StagehandInputSchema(action_type=StagehandActionType.EXTRACT, instruction="get the title")
+
+        with pytest.raises(ToolExecutionException) as info:
+            asyncio.run(tool.execute_async(data))
+
+        assert info.value.recoverable is True
+        assert shared.browser_session_id() is None
+        assert tool._session_id is None
+
+
+class TestSharedSessionInvalidation:
+    """Retracting a dead session is what lets a shared run recover instead of retrying forever."""
+
+    def test_invalidation_clears_the_published_identity(self):
+        shared = SharedSession(share_browser=True)
+        shared.adopt_browser_session_id("sess-1")
+        shared.adopt_browser_context_id("ctx-1")
+
+        shared.invalidate_browser_session("sess-1")
+
+        assert shared.browser_session_id() is None
+        # The Context outlives any single session — it is what carries state across runs.
+        assert shared.browser_context_id() == "ctx-1"
+        assert shared.adopt_browser_session_id("sess-2") == "sess-2"
+
+    def test_a_straggler_cannot_retract_the_replacement(self):
+        """An agent failing on the previous session must not kill the session that replaced it."""
+        shared = SharedSession(share_browser=True)
+        shared.adopt_browser_session_id("sess-2")
+
+        shared.invalidate_browser_session("sess-1")
+
+        assert shared.browser_session_id() == "sess-2"
