@@ -317,6 +317,106 @@ def test_concurrent_commands_on_one_session(sandbox):
     assert all(r.is_success for r in results)
 
 
+# --- session env --------------------------------------------------------------
+
+ENV_PATH = f"{BASE_PATH}/.dqenv"
+
+
+def test_session_env_reaches_a_later_separate_command(runtime):
+    sandbox = make_sandbox(runtime, session_env={"DQ_LIVE_TOKEN": "s3cr3t-value"}, session_env_path=ENV_PATH)
+    try:
+        result = sandbox.run_command_shell('printf "%s" "$DQ_LIVE_TOKEN"')
+        assert result.stdout == "s3cr3t-value"
+    finally:
+        sandbox.close(kill=True)
+
+
+@pytest.mark.parametrize("value", ["a'b", "a$b", "a;b", "a b", 'a"b', "a\nb"])
+def test_awkward_values_survive_the_round_trip(runtime, value):
+    """A value must not break out of its assignment or get re-expanded by the shell."""
+    sandbox = make_sandbox(runtime, session_env={"DQ_LIVE_ODD": value}, session_env_path=ENV_PATH)
+    try:
+        assert sandbox.run_command_shell('printf "%s" "$DQ_LIVE_ODD"').stdout == value
+    finally:
+        sandbox.close(kill=True)
+
+
+def test_the_value_does_not_appear_in_commands_after_bootstrap(runtime):
+    """The whole point of the design: the secret transits one command, not every command."""
+    secret = f"canary-{uuid.uuid4().hex}"
+    sandbox = make_sandbox(runtime, session_env={"DQ_LIVE_TOKEN": secret}, session_env_path=ENV_PATH)
+    sent: list[str] = []
+    try:
+        sandbox.ensure_started()
+        original = sandbox._invoke_with_retry
+
+        def record(command, timeout=None):
+            sent.append(command)
+            return original(command, timeout=timeout)
+
+        sandbox._invoke_with_retry = record
+        assert sandbox.run_command_shell('printf "%s" "$DQ_LIVE_TOKEN"').stdout == secret
+        assert sent and all(secret not in command for command in sent)
+    finally:
+        sandbox.close(kill=True)
+
+
+def test_the_env_file_is_private(runtime):
+    sandbox = make_sandbox(runtime, session_env={"DQ_LIVE_TOKEN": "abc"}, session_env_path=ENV_PATH)
+    try:
+        assert sandbox.run_command_shell(f"stat -c %a {ENV_PATH}").stdout.strip() == "600"
+    finally:
+        sandbox.close(kill=True)
+
+
+def test_a_rewritten_env_replaces_the_previous_value(runtime):
+    """Token refresh: a new sandbox over the same session must not serve the stale value."""
+    seed = f"env-refresh-{uuid.uuid4().hex}"
+    first = make_sandbox(runtime, session_seed=seed, session_env={"DQ_LIVE_TOKEN": "stale"}, session_env_path=ENV_PATH)
+    first.ensure_started()
+
+    second = make_sandbox(runtime, session_seed=seed, session_env={"DQ_LIVE_TOKEN": "fresh"}, session_env_path=ENV_PATH)
+    try:
+        assert second.ensure_started() == first.session_id
+        assert second.run_command_shell('printf "%s" "$DQ_LIVE_TOKEN"').stdout == "fresh"
+    finally:
+        second.close(kill=True)
+
+
+def test_session_env_survives_stop_and_resume(runtime):
+    seed = f"env-persist-{uuid.uuid4().hex}"
+    first = make_sandbox(runtime, session_seed=seed, session_env={"DQ_LIVE_TOKEN": "kept"}, session_env_path=ENV_PATH)
+    first.ensure_started()
+    first.close(kill=True)
+
+    # No session_env this time: the value must come from the file left in session storage.
+    second = make_sandbox(runtime, session_seed=seed, session_env={}, session_env_path=ENV_PATH)
+    try:
+        assert second.run_command_shell(f'set -a; . {ENV_PATH}; set +a; printf "%s" "$DQ_LIVE_TOKEN"').stdout == "kept"
+    finally:
+        second.close(kill=True)
+
+
+def test_both_views_see_the_session_env(runtime):
+    sandbox = make_sandbox(runtime, session_env={"DQ_LIVE_TOKEN": "shared"}, session_env_path=ENV_PATH)
+    try:
+        view_a = sandbox.create_view(base_path=f"{BASE_PATH}/env-a")
+        view_b = sandbox.create_view(base_path=f"{BASE_PATH}/env-b")
+
+        for view in (view_a, view_b):
+            assert view.run_command_shell('printf "%s" "$DQ_LIVE_TOKEN"').stdout == "shared"
+    finally:
+        sandbox.close(kill=True)
+
+
+def test_no_session_env_leaves_commands_unprefixed(runtime):
+    sandbox = make_sandbox(runtime)
+    try:
+        assert sandbox.run_command_shell('printf "%s" "${DQ_LIVE_TOKEN:-unset}"').stdout == "unset"
+    finally:
+        sandbox.close(kill=True)
+
+
 # --- metadata ----------------------------------------------------------------
 
 

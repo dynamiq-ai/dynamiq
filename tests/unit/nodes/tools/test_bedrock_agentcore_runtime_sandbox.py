@@ -106,6 +106,34 @@ def test_create_sandbox_passes_configuration_through():
     factory.return_value.ensure_started.assert_called_once()
 
 
+@pytest.mark.parametrize("construct", ["_create_sandbox", "_reconnect_sandbox"])
+def test_both_construction_sites_pass_the_session_env_through(construct):
+    """The two sites drift easily, and a dropped env means an unauthenticated toolchain."""
+    tool = make_tool(session_env={"TOKEN": "abc"}, session_env_param="/dq/conv-1", session_env_path="/mnt/w/.env")
+    with patch("dynamiq.sandboxes.bedrock_agentcore_runtime.BedrockAgentCoreRuntimeSandbox") as factory:
+        if construct == "_create_sandbox":
+            tool._create_sandbox()
+        else:
+            tool._reconnect_sandbox("dq-restored-0000000000000000000000")
+
+    kwargs = factory.call_args.kwargs
+    assert kwargs["session_env"] == {"TOKEN": "abc"}
+    assert kwargs["session_env_param"] == "/dq/conv-1"
+    assert kwargs["session_env_path"] == "/mnt/w/.env"
+
+
+def test_session_env_is_treated_as_a_credential_when_serializing():
+    tool = make_tool(session_env={"TOKEN": "super-secret"}, session_env_param="/dq/conv-1")
+
+    traced = tool.to_dict()
+    executable = tool.to_dict(include_secure_params=True)
+
+    assert "session_env" not in traced
+    assert executable["session_env"] == {"TOKEN": "super-secret"}
+    # The parameter name is not a secret, so it travels on both paths.
+    assert traced["session_env_param"] == "/dq/conv-1"
+
+
 def test_get_sandbox_id_returns_the_session_id():
     tool = make_tool()
     sandbox = make_sandbox_mock()

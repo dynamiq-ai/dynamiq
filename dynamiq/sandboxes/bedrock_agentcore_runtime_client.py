@@ -42,6 +42,9 @@ MAX_SESSION_ID_LENGTH = 256
 # Sandbox defaults. They live here rather than in the sandbox module so the node can import
 # them without importing the sandbox module itself — see that module's import note.
 DEFAULT_BASE_PATH = "/mnt/workspace"
+# The session env file lives on the session-storage mount rather than under ``base_path``,
+# because views of one session differ only in base_path and must all see the same file.
+DEFAULT_SESSION_ENV_PATH = f"{DEFAULT_BASE_PATH}/.dqenv"
 # Inline base64 costs 4/3 in size and must leave room for the bash -c wrapper and the
 # mkdir/decode boilerplate inside the 64 KB command budget.
 DEFAULT_INLINE_TRANSFER_MAX_BYTES = 40_000
@@ -95,6 +98,73 @@ def wrap_shell_command(command: str) -> str:
     The wrapper costs ~10 bytes against the 64 KB command budget.
     """
     return f"bash -c {shlex.quote(command)}"
+
+
+def format_env_file(env: dict[str, str]) -> str:
+    """Render ``env`` as shell-sourceable ``KEY='value'`` lines.
+
+    Values are ``shlex.quote``d, so a value containing quotes, ``$``, ``;`` or a newline
+    survives ``set -a; . file`` without breaking out of its assignment.
+
+    Exported because the writer of the env file is not always this process: with
+    :func:`build_env_bootstrap_command`'s ``param_name`` form the content is produced by
+    whoever populates the parameter, and it has to agree on this format.
+    """
+    return "".join(f"{key}={shlex.quote(str(value))}\n" for key, value in env.items())
+
+
+def build_env_bootstrap_command(
+    path: str,
+    env: dict[str, str] | None = None,
+    param_name: str | None = None,
+    region: str | None = None,
+) -> str:
+    """Build the command that (re)writes the session env file.
+
+    Two ways to source the content, and the choice decides where the secret is exposed:
+
+    - ``env`` inlines the values, so they appear in this one command string — and therefore
+      in whatever logs AgentCore keeps of it.
+    - ``param_name`` fetches from SSM Parameter Store using the runtime's execution role, so
+      only the parameter *name* ever appears in a command string. Prefer it for secrets.
+
+    ``param_name`` wins if both are given.
+
+    The write is atomic (``> tmp && mv``) because views of one session share this file and
+    each holds its own lock, so nothing serialises two concurrent bootstraps against each
+    other; a reader must never observe a half-written file. ``$$`` is left unquoted so each
+    invocation gets its own temp path.
+    """
+    if param_name:
+        producer = (
+            f"aws ssm get-parameter --name {shlex.quote(param_name)} --with-decryption "
+            f"--query Parameter.Value --output text"
+        )
+        if region:
+            producer += f" --region {shlex.quote(region)}"
+    else:
+        producer = f"printf '%s' {shlex.quote(format_env_file(env or {}))}"
+
+    quoted_path = shlex.quote(path)
+    tmp_path = f"{quoted_path}.tmp.$$"
+    parent = posixpath.dirname(path)
+    mkdir = f"mkdir -p {shlex.quote(parent)} && " if parent and parent != "/" else ""
+    return f"umask 077 && {mkdir}{producer} > {tmp_path} && chmod 600 {tmp_path} && mv {tmp_path} {quoted_path}"
+
+
+def build_env_prefix(path: str) -> str:
+    """Build the prefix that sources the session env file into a command's environment.
+
+    ``set -a`` marks the assignments for export so child processes inherit them; the
+    existence test keeps a command runnable in a session whose bootstrap never happened,
+    rather than failing it with a confusing "No such file" from ``.``.
+
+    Costs ~60 bytes of the 64 KB command budget. That is accounted for automatically:
+    :meth:`AgentCoreRuntimeClient.invoke_command` measures the *wrapped* payload, and the
+    prefix is part of the command by then.
+    """
+    quoted = shlex.quote(path)
+    return f"set -a; [ -f {quoted} ] && . {quoted}; set +a; "
 
 
 def clamp_command_timeout(timeout: int | None) -> int:

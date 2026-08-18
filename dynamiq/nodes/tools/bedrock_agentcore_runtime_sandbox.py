@@ -30,6 +30,7 @@ from dynamiq.nodes.tools.code_interpreter import DESCRIPTION_SANDBOX_INTERPRETER
 from dynamiq.sandboxes.bedrock_agentcore_runtime_client import (
     DEFAULT_BASE_PATH,
     DEFAULT_INLINE_TRANSFER_MAX_BYTES,
+    DEFAULT_SESSION_ENV_PATH,
     AgentCoreRuntimeConflictError,
     AgentCoreRuntimeThrottlingError,
 )
@@ -67,6 +68,25 @@ class BedrockAgentCoreRuntimeInterpreterTool(BaseCodeInterpreterTool):
         default=None,
         description="Seed for deterministic session-ID derivation (typically a conversation ID).",
     )
+    session_env: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Environment variables sourced by every shell command in the session. The values "
+            "travel inside a command string and are present in a serialized node config, so "
+            "prefer session_env_param for secrets."
+        ),
+    )
+    session_env_param: str | None = Field(
+        default=None,
+        description=(
+            "SSM Parameter Store parameter holding the env-file content, fetched from inside "
+            "the container. Only the name is ever sent. Takes precedence over session_env."
+        ),
+    )
+    session_env_path: str = Field(
+        default=DEFAULT_SESSION_ENV_PATH,
+        description="Where the session env file lives; shared by every view of the session.",
+    )
     s3_relay_bucket: str | None = Field(
         default=None, description="Bucket used to relay files above the inline transfer limit."
     )
@@ -90,6 +110,18 @@ class BedrockAgentCoreRuntimeInterpreterTool(BaseCodeInterpreterTool):
         self._append_runtime_description_note()
         if persistent:
             self._initialize_persistent_sandbox_safely()
+
+    @property
+    def to_dict_exclude_secure_params(self) -> dict:
+        """Treat ``session_env`` as a credential, alongside ``connection``.
+
+        It is therefore absent from tracing and logging dumps, and present only where
+        secure params are explicitly requested — which includes workflow serialization
+        (``Flow.to_dict`` defaults ``include_secure_params=True``), since the executing
+        process has to receive the values. Use ``session_env_param`` where that payload
+        crosses a trust boundary.
+        """
+        return super().to_dict_exclude_secure_params | {"session_env": True}
 
     def _append_runtime_description_note(self) -> None:
         """Add backend-specific guidance to the agent-facing description.
@@ -149,6 +181,9 @@ class BedrockAgentCoreRuntimeInterpreterTool(BaseCodeInterpreterTool):
             qualifier=self.qualifier,
             session_seed=self.session_seed,
             base_path=self.base_path,
+            session_env=self.session_env,
+            session_env_param=self.session_env_param,
+            session_env_path=self.session_env_path,
             timeout=self.timeout,
             s3_relay_bucket=self.s3_relay_bucket,
             inline_transfer_max_bytes=self.inline_transfer_max_bytes,
@@ -313,6 +348,9 @@ class BedrockAgentCoreRuntimeInterpreterTool(BaseCodeInterpreterTool):
             qualifier=self.qualifier,
             session_id=sandbox_id,
             base_path=self.base_path,
+            session_env=self.session_env,
+            session_env_param=self.session_env_param,
+            session_env_path=self.session_env_path,
             timeout=self.timeout,
             s3_relay_bucket=self.s3_relay_bucket,
             inline_transfer_max_bytes=self.inline_transfer_max_bytes,

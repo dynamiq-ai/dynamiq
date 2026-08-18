@@ -1,5 +1,6 @@
 from .agent_tool import SubAgentTool
 from .bedrock_agentcore_runtime_sandbox import BedrockAgentCoreRuntimeInterpreterTool
+from .bedrock_agentcore_sandbox import BedrockAgentCoreInterpreterTool
 from .cua_desktop import CuaDesktopTool
 from .cypher_executor import CypherExecutor
 from .daytona_sandbox import DaytonaInterpreterTool

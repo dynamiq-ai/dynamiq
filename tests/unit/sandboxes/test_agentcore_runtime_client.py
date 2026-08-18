@@ -21,7 +21,10 @@ from dynamiq.sandboxes.bedrock_agentcore_runtime_client import (
     AgentCoreRuntimeConflictError,
     AgentCoreRuntimeThrottlingError,
     CommandTooLargeError,
+    build_env_bootstrap_command,
+    build_env_prefix,
     derive_session_id,
+    format_env_file,
     normalize_sandbox_path,
     wrap_shell_command,
 )
@@ -82,6 +85,95 @@ def test_wrap_shell_command_overhead_is_small():
     """The wrapper must not meaningfully eat into the 64 KB command budget."""
     command = "echo " + "y" * 60_000
     assert len(wrap_shell_command(command)) - len(command) < 100
+
+
+# --- session env shaping -----------------------------------------------------
+
+
+@pytest.mark.parametrize("value", ["plain", "a b", "a'b", 'a"b', "a$b", "a;b", "a\nb", "a`b`", "a\\b", ""])
+def test_format_env_file_survives_a_shell_round_trip(value):
+    """A value must land in the shell verbatim, not break out of its own assignment."""
+    rendered = format_env_file({"TOKEN": value})
+
+    assert shlex.split(rendered) == [f"TOKEN={value}"]
+
+
+def test_format_env_file_renders_one_line_per_key():
+    rendered = format_env_file({"A": "1", "B": "2"})
+    assert rendered.splitlines() == ["A=1", "B=2"]
+
+
+def test_bootstrap_from_values_inlines_them():
+    command = build_env_bootstrap_command("/mnt/workspace/.dqenv", env={"TOKEN": "abc"})
+
+    assert "printf" in command
+    assert "TOKEN=abc" in command
+
+
+def test_bootstrap_from_a_parameter_sends_only_the_name():
+    command = build_env_bootstrap_command("/mnt/workspace/.dqenv", param_name="/dq/conv-1", region="eu-west-1")
+
+    assert "aws ssm get-parameter --name /dq/conv-1" in command
+    assert "--with-decryption" in command
+    assert "--region eu-west-1" in command
+
+
+def test_bootstrap_omits_the_region_flag_when_unknown():
+    command = build_env_bootstrap_command("/mnt/workspace/.dqenv", param_name="/dq/conv-1")
+    assert "--region" not in command
+
+
+def test_a_parameter_wins_over_inline_values():
+    command = build_env_bootstrap_command("/x/.dqenv", env={"TOKEN": "leak"}, param_name="/dq/conv-1")
+
+    assert "aws ssm get-parameter" in command
+    assert "leak" not in command
+
+
+def test_bootstrap_writes_atomically_with_a_private_mode():
+    command = build_env_bootstrap_command("/mnt/workspace/.dqenv", env={"A": "1"})
+
+    # Temp-then-move, so a concurrent reader never sees a partially written file. `$$` is
+    # left unquoted precisely so the shell expands it into a per-invocation temp path.
+    assert command.endswith("mv /mnt/workspace/.dqenv.tmp.$$ /mnt/workspace/.dqenv")
+    assert "umask 077" in command
+    assert "chmod 600" in command
+    assert "mkdir -p /mnt/workspace" in command
+
+
+def test_bootstrap_keeps_the_temp_suffix_outside_the_quotes():
+    """A quoted path must still concatenate with `.tmp.$$` and let the shell expand `$$`."""
+    command = build_env_bootstrap_command("/mnt/work space/.dqenv", env={"A": "1"})
+
+    assert command.endswith("mv '/mnt/work space/.dqenv'.tmp.$$ '/mnt/work space/.dqenv'")
+
+
+def test_bootstrap_skips_mkdir_at_the_filesystem_root():
+    command = build_env_bootstrap_command("/.dqenv", env={"A": "1"})
+    assert "mkdir" not in command
+
+
+def test_env_prefix_sources_the_file_and_exports_it():
+    prefix = build_env_prefix("/mnt/workspace/.dqenv")
+
+    assert prefix.startswith("set -a; ")
+    assert prefix.endswith("set +a; ")
+    assert ". /mnt/workspace/.dqenv" in prefix
+
+
+def test_env_prefix_tolerates_a_missing_file():
+    """A session whose bootstrap never ran must still run commands, not fail on `.`."""
+    assert "[ -f /mnt/workspace/.dqenv ]" in build_env_prefix("/mnt/workspace/.dqenv")
+
+
+def test_env_prefix_overhead_is_small():
+    """It rides along on every command, so it must not eat the 64 KB budget."""
+    assert len(build_env_prefix("/mnt/workspace/.dqenv")) < 100
+
+
+def test_env_prefix_quotes_an_awkward_path():
+    prefix = build_env_prefix("/mnt/work space/.dqenv")
+    assert "'/mnt/work space/.dqenv'" in prefix
 
 
 # --- stream parsing ----------------------------------------

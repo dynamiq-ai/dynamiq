@@ -33,10 +33,13 @@ from dynamiq.sandboxes.base import Sandbox, SandboxInfo, ShellCommandResult
 from dynamiq.sandboxes.bedrock_agentcore_runtime_client import (
     DEFAULT_BASE_PATH,
     DEFAULT_INLINE_TRANSFER_MAX_BYTES,
+    DEFAULT_SESSION_ENV_PATH,
     AgentCoreRuntimeClient,
     AgentCoreRuntimeCommandResult,
     AgentCoreRuntimeConflictError,
     AgentCoreRuntimeThrottlingError,
+    build_env_bootstrap_command,
+    build_env_prefix,
     derive_session_id,
     normalize_sandbox_path,
 )
@@ -79,6 +82,29 @@ class BedrockAgentCoreRuntimeSandbox(Sandbox):
         ),
     )
     base_path: str = Field(default=DEFAULT_BASE_PATH, description="Base path in the sandbox filesystem.")
+    session_env: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Environment variables written to a session-scoped env file and sourced by every "
+            "shell command. The values travel inside a command string, so prefer "
+            "session_env_param for secrets."
+        ),
+    )
+    session_env_param: str | None = Field(
+        default=None,
+        description=(
+            "SSM Parameter Store parameter holding the env-file content, fetched from inside "
+            "the container with the runtime's execution role. Only the name is ever sent, so "
+            "the value reaches no command string. Takes precedence over session_env."
+        ),
+    )
+    session_env_path: str = Field(
+        default=DEFAULT_SESSION_ENV_PATH,
+        description=(
+            "Where the session env file lives. Pinned to the session-storage mount rather "
+            "than base_path so that every view of a session shares one file."
+        ),
+    )
     timeout: int = Field(default=300, description="Per-command timeout in seconds (AgentCore allows 1..3600).")
     s3_relay_bucket: str | None = Field(
         default=None,
@@ -97,6 +123,27 @@ class BedrockAgentCoreRuntimeSandbox(Sandbox):
     _s3_client: Any = PrivateAttr(default=None)
     _started: bool = PrivateAttr(default=False)
     _sandbox_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
+
+    @property
+    def to_dict_exclude_params(self) -> dict[str, bool]:
+        """Exclude sensitive fields from model_dump; re-added in to_dict when not tracing."""
+        return super().to_dict_exclude_params | {"session_env": True}
+
+    def to_dict(self, **kwargs) -> dict[str, Any]:
+        """Serialize the sandbox, omitting ``session_env`` from tracing output.
+
+        Mirrors :class:`~dynamiq.sandboxes.e2b.E2BSandbox`. Note what this does *not* buy:
+        the field is still present in a normal (``for_tracing=False``) dump, because the
+        executing process has to receive the values somehow. Anywhere that dump crosses a
+        trust boundary — a serialized workflow on a queue, a persisted node config — the
+        values cross with it. ``session_env_param`` is the answer there; it carries a name
+        instead of a secret and is safe to serialize.
+        """
+        for_tracing = kwargs.get("for_tracing", False)
+        data = super().to_dict(**kwargs)
+        if not for_tracing and self.session_env is not None:
+            data["session_env"] = self.session_env
+        return data
 
     @property
     def current_sandbox_id(self) -> str | None:
@@ -150,7 +197,48 @@ class BedrockAgentCoreRuntimeSandbox(Sandbox):
 
             self._started = True
             self._ensure_directories()
+            self._bootstrap_env()
             return self.session_id
+
+    @property
+    def _has_session_env(self) -> bool:
+        return bool(self.session_env or self.session_env_param)
+
+    def _bootstrap_env(self) -> None:
+        """Write the session env file so later commands can source it.
+
+        Overwrites unconditionally rather than skipping an existing file. Session storage
+        outlives the credentials in it — a caller refreshing a short-lived token constructs
+        a new sandbox against the same session, and a "write once" bootstrap would silently
+        keep serving the expired value.
+
+        Goes through :meth:`_invoke_with_retry` rather than :meth:`run_command_shell` for two
+        reasons: ``_sandbox_lock`` is not reentrant and is held here, and the prefix
+        ``run_command_shell`` applies would source the very file this is writing.
+        """
+        if not self._has_session_env:
+            return
+
+        command = build_env_bootstrap_command(
+            self.session_env_path,
+            env=self.session_env,
+            param_name=self.session_env_param,
+            region=self.connection.region or None,
+        )
+        # Failures are reported without their output: for the inline form the command
+        # carries the values, and a shell is free to echo the failing command back.
+        try:
+            result = self._invoke_with_retry(command, timeout=self.timeout)
+            if not result.is_success:
+                logger.warning(
+                    "BedrockAgentCoreRuntimeSandbox failed to write the session env file at "
+                    f"{self.session_env_path} (exit code {result.exit_code}); commands will run without it"
+                )
+        except Exception:
+            logger.warning(
+                "BedrockAgentCoreRuntimeSandbox failed to write the session env file at "
+                f"{self.session_env_path}; commands will run without it"
+            )
 
     def _ensure_directories(self) -> None:
         """Create the base directory inside the sandbox if it does not exist."""
@@ -201,6 +289,9 @@ class BedrockAgentCoreRuntimeSandbox(Sandbox):
             qualifier=self.qualifier,
             session_id=sandbox_id or self.ensure_started(),
             base_path=base_path,
+            session_env=self.session_env,
+            session_env_param=self.session_env_param,
+            session_env_path=self.session_env_path,
             timeout=self.timeout,
             s3_relay_bucket=self.s3_relay_bucket,
             s3_relay_prefix=self.s3_relay_prefix,
@@ -224,19 +315,27 @@ class BedrockAgentCoreRuntimeSandbox(Sandbox):
         Background execution has no native equivalent on this API — there is no
         ``startCommandExecution`` — so it is emulated with ``nohup … &``, which returns as
         soon as the command is detached and therefore captures no output.
+
+        Only this path applies the session-env prefix. The internal callers that also reach
+        the wire through :meth:`_invoke_with_retry` — directory setup, transfers, listing —
+        need no user env and are already tight against the 64 KB command budget.
         """
         self.ensure_started()
         logger.debug(f"BedrockAgentCoreRuntimeSandbox running command: {command[:100]}...")
 
+        prefix = build_env_prefix(self.session_env_path) if self._has_session_env else ""
+
         try:
             if run_in_background_enabled:
-                detached = f"nohup {command} > /dev/null 2>&1 &"
+                # The prefix sits outside ``nohup`` so that ``&`` still detaches only the
+                # user's command; the env is sourced first, in the foreground.
+                detached = f"{prefix}nohup {command} > /dev/null 2>&1 &"
                 result = self._invoke_with_retry(detached, timeout=timeout)
                 if not result.is_success:
                     return ShellCommandResult(error=result.error_text)
                 return ShellCommandResult(background=True)
 
-            result = self._invoke_with_retry(command, timeout=timeout)
+            result = self._invoke_with_retry(f"{prefix}{command}", timeout=timeout)
             if result.timed_out:
                 return ShellCommandResult(
                     stdout=result.stdout,

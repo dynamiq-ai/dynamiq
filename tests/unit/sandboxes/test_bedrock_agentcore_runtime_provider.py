@@ -1,6 +1,7 @@
 """Unit tests for BedrockAgentCoreRuntimeSandbox."""
 
 import base64
+import shlex
 from unittest.mock import MagicMock
 
 import pytest
@@ -8,9 +9,11 @@ import pytest
 from dynamiq.connections import AWS as AWSConnection
 from dynamiq.sandboxes import BedrockAgentCoreRuntimeSandbox
 from dynamiq.sandboxes.bedrock_agentcore_runtime_client import (
+    MAX_COMMAND_BYTES,
     AgentCoreRuntimeCommandResult,
     AgentCoreRuntimeConflictError,
     AgentCoreRuntimeThrottlingError,
+    CommandTooLargeError,
 )
 
 ARN = "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-abc123"
@@ -160,6 +163,226 @@ def test_create_view_accepts_an_explicit_sandbox_id():
     sandbox, _ = make_sandbox()
     view = sandbox.create_view(base_path="/mnt/workspace/x", sandbox_id="dq-other-session-00000000000000000")
     assert view.session_id == "dq-other-session-00000000000000000"
+
+
+def test_create_view_carries_the_session_env():
+    """Views share one session, so they must share the file that session's env lives in."""
+    sandbox, _ = make_sandbox(session_env={"TOKEN": "abc"}, session_env_param="/dq/conv-1")
+
+    view = sandbox.create_view(base_path="/mnt/workspace/x")
+
+    assert view.session_env == {"TOKEN": "abc"}
+    assert view.session_env_param == "/dq/conv-1"
+    assert view.session_env_path == sandbox.session_env_path
+
+
+# --- session env -------------------------------------------------------------
+
+
+def bootstrap_commands(client):
+    return [cmd for cmd in commands_sent(client) if ".dqenv" in cmd]
+
+
+def bootstrap_command(client) -> str:
+    sent = bootstrap_commands(client)
+    assert sent, "no bootstrap command was sent"
+    return sent[0]
+
+
+def only_bootstrap_fails(result_or_error):
+    """Side effect that fails the env-file write while leaving mkdir and friends healthy."""
+
+    def side_effect(**kwargs):
+        if ".dqenv" not in kwargs["command"]:
+            return ok()
+        if isinstance(result_or_error, Exception):
+            raise result_or_error
+        return result_or_error
+
+    return side_effect
+
+
+def test_no_env_means_no_bootstrap_and_no_prefix():
+    sandbox, client = make_sandbox()
+
+    sandbox.run_command_shell("echo hi")
+
+    assert bootstrap_commands(client) == []
+    assert commands_sent(client)[-1] == "echo hi"
+
+
+def test_bootstrap_writes_the_env_file_atomically_and_locks_it_down():
+    sandbox, client = make_sandbox(session_env={"TOKEN": "abc"})
+
+    sandbox.ensure_started()
+
+    command = bootstrap_command(client)
+    assert command is not None
+    assert "TOKEN=abc" in command
+    assert "umask 077" in command and "chmod 600" in command
+    # Written to a temp path and moved, so a concurrent view never reads a partial file.
+    assert ".tmp.$$" in command and "mv " in command
+
+
+def test_bootstrap_runs_once_per_ensure_started():
+    sandbox, client = make_sandbox(session_env={"TOKEN": "abc"})
+
+    sandbox.ensure_started()
+    sandbox.ensure_started()
+
+    assert len(bootstrap_commands(client)) == 1
+
+
+def test_bootstrap_overwrites_rather_than_skipping():
+    """Session storage outlives the token in it; a write-once bootstrap serves a stale one."""
+    sandbox, client = make_sandbox(session_env={"TOKEN": "fresh"})
+
+    sandbox.ensure_started()
+
+    command = bootstrap_command(client)
+    assert "TOKEN=fresh" in command
+    # No existence guard anywhere in the write path.
+    assert "-f " not in command and "-e " not in command
+
+
+@pytest.mark.parametrize("value", ["a'b", "a$b", "a;b", "a\nb", 'a"b', "a b"])
+def test_bootstrap_quotes_values_that_would_otherwise_break_out(value):
+    sandbox, client = make_sandbox(session_env={"TOKEN": value})
+
+    sandbox.ensure_started()
+
+    command = bootstrap_command(client)
+    # The value survives shlex round-tripping rather than terminating the assignment.
+    assert shlex.split(shlex.split(command[command.index("printf") :])[2])[0] == f"TOKEN={value}"
+
+
+def test_bootstrap_from_a_parameter_never_sends_the_value():
+    sandbox, client = make_sandbox(session_env_param="/dynamiq/prod/conv-42")
+
+    sandbox.ensure_started()
+
+    command = bootstrap_command(client)
+    assert "aws ssm get-parameter" in command
+    assert "/dynamiq/prod/conv-42" in command
+    assert "--with-decryption" in command
+    assert "--region us-east-1" in command
+
+
+def test_a_parameter_takes_precedence_over_inline_values():
+    sandbox, client = make_sandbox(session_env={"TOKEN": "inline-secret"}, session_env_param="/dq/conv-1")
+
+    sandbox.ensure_started()
+
+    command = bootstrap_command(client)
+    assert "aws ssm get-parameter" in command
+    assert "inline-secret" not in command
+
+
+def test_bootstrap_failure_is_not_fatal():
+    sandbox, client = make_sandbox(session_env={"TOKEN": "abc"})
+    client.invoke_command.side_effect = only_bootstrap_fails(RuntimeError("boom"))
+
+    assert sandbox.ensure_started() is not None
+
+
+def test_a_failed_bootstrap_does_not_log_its_output(caplog):
+    """``error_text`` is the command's stderr, which on the inline path can echo the values."""
+    sandbox, client = make_sandbox(session_env={"TOKEN": "super-secret"})
+    client.invoke_command.side_effect = only_bootstrap_fails(
+        ok(stderr="bash: TOKEN=super-secret: command not found", exit_code=127)
+    )
+
+    sandbox.ensure_started()
+
+    assert "super-secret" not in caplog.text
+
+
+def test_no_env_value_reaches_the_logs(caplog):
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    sandbox, _ = make_sandbox(session_env={"TOKEN": "super-secret"})
+
+    sandbox.ensure_started()
+    sandbox.run_command_shell("echo hi")
+
+    assert "super-secret" not in caplog.text
+
+
+def test_commands_source_the_env_file():
+    sandbox, client = make_started_sandbox(session_env={"TOKEN": "abc"})
+
+    sandbox.run_command_shell("echo hi")
+
+    sent = commands_sent(client)[-1]
+    assert sent.startswith("set -a; ")
+    assert "/mnt/workspace/.dqenv" in sent
+    assert sent.endswith("echo hi")
+
+
+def test_the_prefix_does_not_carry_the_value():
+    """The whole point: after bootstrap the secret is absent from every command string."""
+    sandbox, client = make_started_sandbox(session_env={"TOKEN": "super-secret"})
+
+    sandbox.run_command_shell("echo hi")
+
+    assert all("super-secret" not in cmd for cmd in commands_sent(client))
+
+
+def test_background_commands_source_the_env_outside_nohup():
+    sandbox, client = make_started_sandbox(session_env={"TOKEN": "abc"})
+
+    sandbox.run_command_shell("sleep 100", run_in_background_enabled=True)
+
+    sent = commands_sent(client)[-1]
+    # `&` must detach only the user's command, not the sourcing.
+    assert sent.index("set -a;") < sent.index("nohup")
+
+
+def test_internal_plumbing_is_not_prefixed():
+    """Uploads and listings need no user env and are tight against the 64 KB budget."""
+    sandbox, client = make_started_sandbox(session_env={"TOKEN": "abc"})
+
+    sandbox.upload_file("f.txt", b"data")
+    sandbox.list_files()
+    sandbox.exists("f.txt")
+
+    assert all(not cmd.startswith("set -a;") for cmd in commands_sent(client))
+
+
+def test_the_env_file_is_pinned_to_the_session_mount_not_base_path():
+    """Views differ only in base_path, so a base_path-relative file would fork per view."""
+    sandbox, client = make_started_sandbox(base_path="/mnt/workspace/agent-2", session_env={"TOKEN": "abc"})
+
+    sandbox.run_command_shell("echo hi")
+
+    assert "/mnt/workspace/.dqenv" in commands_sent(client)[-1]
+
+
+def test_an_oversized_env_degrades_instead_of_crashing_the_session():
+    """`CommandTooLargeError` is raised client-side, before the wire; bootstrap absorbs it.
+
+    Asserted here rather than through ``run_command_shell``, which swallows every exception
+    into ``ShellCommandResult(error=...)`` and so can never surface the type.
+    """
+    sandbox, client = make_sandbox(session_env={"BIG": "x" * (MAX_COMMAND_BYTES + 1)})
+    client.invoke_command.side_effect = only_bootstrap_fails(CommandTooLargeError("too large"))
+
+    assert sandbox.ensure_started() is not None
+    assert sandbox._started is True
+
+
+def test_session_env_is_hidden_from_tracing_but_present_for_execution():
+    sandbox, _ = make_sandbox(session_env={"TOKEN": "abc"})
+
+    assert sandbox.to_dict(for_tracing=True).get("session_env") is None
+    assert sandbox.to_dict()["session_env"] == {"TOKEN": "abc"}
+
+
+def test_a_parameter_name_is_safe_to_serialize_either_way():
+    sandbox, _ = make_sandbox(session_env_param="/dq/conv-1")
+
+    assert sandbox.to_dict(for_tracing=True)["session_env_param"] == "/dq/conv-1"
 
 
 # --- command execution -------------------------------------------------------
