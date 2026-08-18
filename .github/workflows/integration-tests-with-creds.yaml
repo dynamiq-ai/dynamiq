@@ -45,6 +45,11 @@ jobs:
           envkey_AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           envkey_AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           envkey_AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          # Opt-in for the live Bedrock AgentCore tests; empty (unset secret) keeps them skipped.
+          envkey_BEDROCK_AGENTCORE_TESTS: ${{ secrets.BEDROCK_AGENTCORE_TESTS }}
+          # A networkMode=PUBLIC interpreter id; only needed for the package-installation test,
+          # which skips when unset because the built-in interpreter has no network egress.
+          envkey_BEDROCK_AGENTCORE_INTERPRETER_ID: ${{ secrets.BEDROCK_AGENTCORE_INTERPRETER_ID }}
 
       # Started before the image load so Neo4j's pull and startup overlap with it instead of sitting
       # on the critical path; by the time the test container starts it is already healthy.
