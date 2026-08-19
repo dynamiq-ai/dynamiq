@@ -41,7 +41,7 @@ def set_wf_with_agent(cm):
             enabled=True,
             max_token_context_length=50000,
             context_usage_ratio=0.5,
-            context_history_length=10,
+            max_preserved_tokens=10000,
         ),
     )
 
