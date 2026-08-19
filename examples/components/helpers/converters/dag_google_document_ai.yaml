@@ -1,0 +1,46 @@
+connections:
+  google-document-ai-conn:
+    type: dynamiq.connections.GoogleDocumentAI
+    project_id: ${oc.env:GOOGLE_CLOUD_PROJECT_ID}
+    location: ${oc.env:GOOGLE_DOCUMENT_AI_LOCATION,us}
+    private_key: ${oc.env:GOOGLE_CLOUD_PRIVATE_KEY,null}
+    client_email: ${oc.env:GOOGLE_CLOUD_CLIENT_EMAIL,null}
+    token_uri: ${oc.env:GOOGLE_CLOUD_TOKEN_URI,null}
+
+nodes:
+  google-document-ai-converter-1:
+    type: dynamiq.nodes.converters.GoogleDocumentAIFileConverter
+    name: Google Document AI File Converter
+    connection: google-document-ai-conn
+    processor_id: ${oc.env:GOOGLE_DOCUMENT_AI_PROCESSOR_ID}
+    enable_native_pdf_parsing: true
+    imageless_mode: true
+    document_creation_mode: one-doc-per-file
+    error_handling:
+      timeout_seconds: 300
+      retry_interval_seconds: 5
+      max_retries: 2
+      backoff_rate: 2
+
+  document-splitter-1:
+    type: dynamiq.nodes.splitters.DocumentSplitter
+    name: Document Splitter
+    split_by: passage
+    split_length: 10
+    split_overlap: 1
+    depends:
+      - node: google-document-ai-converter-1
+    input_transformer:
+      path: null
+      selector:
+        "documents": "$.google-document-ai-converter-1.output.documents"
+
+flows:
+  google-document-ai-flow:
+    nodes:
+      - google-document-ai-converter-1
+      - document-splitter-1
+
+workflows:
+  google-document-ai-workflow:
+    flow: google-document-ai-flow

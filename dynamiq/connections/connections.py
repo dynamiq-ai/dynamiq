@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from functools import cached_property, partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, field_validator, model_validator
 from pydantic_core.core_schema import ValidationInfo
@@ -17,6 +17,7 @@ from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
     from chromadb import ClientAPI as ChromaClient
+    from google.cloud.documentai import DocumentProcessorServiceClient as DocumentAIClient
     from neo4j import Driver as Neo4jDriver
     from openai import OpenAI as OpenAIClient
     from pinecone import Pinecone as PineconeClient
@@ -418,18 +419,36 @@ class GoogleCloud(BaseConnection):
     def connect(self):
         pass
 
+    SERVICE_ACCOUNT_REQUIRED_FIELDS: ClassVar[tuple[str, ...]] = ("private_key", "client_email", "token_uri")
+
     @property
     def has_service_account_credentials(self) -> bool:
         """Whether the service account fields are complete enough to authenticate.
 
-        google-auth needs the private key, the service account email and the token URI before
-        `from_service_account_info` can sign anything. A partially populated set raises instead
-        of authenticating, so callers should treat it the same as no credentials at all.
+        A partially populated set makes google-auth raise instead of authenticating, so callers
+        should treat it the same as no credentials at all.
 
         Returns:
             bool: True when the required service account fields are all populated.
         """
-        return all((self.private_key, self.client_email, self.token_uri))
+        return all(getattr(self, field) for field in self.SERVICE_ACCOUNT_REQUIRED_FIELDS)
+
+    def warn_on_partial_service_account(self) -> None:
+        """Warn when a service account is half-filled, since it silently falls back to ADC.
+
+        Only the fields google-auth actually requires are considered: connections populate other
+        Google Cloud fields (`project_id` above all) on their own, and those must not read as an
+        attempt to supply a service account.
+        """
+        if self.has_service_account_credentials:
+            return
+
+        if any(getattr(self, field) for field in self.SERVICE_ACCOUNT_REQUIRED_FIELDS):
+            logger.warning(
+                f"{type(self).__name__} connection has incomplete service account credentials: "
+                f"{', '.join(self.SERVICE_ACCOUNT_REQUIRED_FIELDS)} are all required. "
+                f"Falling back to Application Default Credentials."
+            )
 
     @property
     def conn_params(self):
@@ -552,15 +571,10 @@ class VertexAI(GoogleCloud):
             "vertex_location": self.vertex_project_location,
         }
 
-        service_account = super().conn_params.copy()
         if self.has_service_account_credentials:
-            params["vertex_credentials"] = json.dumps(service_account)
-        elif any(service_account.values()):
-            logger.warning(
-                "VertexAI connection has incomplete service account credentials: "
-                "private_key, client_email and token_uri are all required. "
-                "Falling back to Application Default Credentials."
-            )
+            params["vertex_credentials"] = json.dumps(super().conn_params.copy())
+        else:
+            self.warn_on_partial_service_account()
 
         return params
 
@@ -576,6 +590,62 @@ class VertexAI(GoogleCloud):
             params["api_base"] = api_base
 
         return params
+
+
+class GoogleDocumentAI(GoogleCloud):
+    """
+    Represents a connection to the Google Cloud Document AI service.
+
+    Inherits the Google Cloud service account fields. When those fields are not populated,
+    Application Default Credentials (ADC) are used instead - the same fallback the VertexAI
+    connection relies on.
+
+    The processor itself is not part of the connection: a single project/location pair can host
+    many processors, so `processor_id` belongs to the node that uses this connection.
+
+    Attributes:
+        location (str): The Document AI multi-region or region, e.g. 'us', 'eu' or 'us-central1'.
+            Fetched from the environment variable 'GOOGLE_DOCUMENT_AI_LOCATION', defaults to 'us'.
+    """
+
+    location: str = Field(default_factory=partial(get_env_var, "GOOGLE_DOCUMENT_AI_LOCATION", "us"))
+
+    @property
+    def api_endpoint(self) -> str:
+        """The location-scoped Document AI endpoint.
+
+        Document AI is regionalized: the default global host routes to `us`, so a processor
+        created in another region is only reachable through its own endpoint.
+
+        Returns:
+            str: The API endpoint host for the configured location.
+        """
+        return f"{self.location}-documentai.googleapis.com"
+
+    def connect(self) -> "DocumentAIClient":
+        """
+        Connects to the Google Cloud Document AI API.
+
+        Returns:
+            DocumentProcessorServiceClient: A client bound to the connection's location.
+        """
+        # Import in runtime to save memory
+        from google.api_core.client_options import ClientOptions
+        from google.cloud import documentai
+        from google.oauth2 import service_account
+
+        credentials = None
+        if self.has_service_account_credentials:
+            credentials = service_account.Credentials.from_service_account_info(super().conn_params)
+        else:
+            self.warn_on_partial_service_account()
+
+        client = documentai.DocumentProcessorServiceClient(
+            credentials=credentials,
+            client_options=ClientOptions(api_endpoint=self.api_endpoint),
+        )
+        logger.debug(f"Connected to Google Document AI at {self.api_endpoint}")
+        return client
 
 
 class Cohere(BaseApiKeyConnection):

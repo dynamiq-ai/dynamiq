@@ -79,6 +79,7 @@ dependencies = [
     "steel-sdk==0.15.0",
     "reportlab>=4.3.0,<4.4.0",
     "daytona>=0.161.0,<0.162.0",
+    "google-cloud-documentai>=3.15.0,<4.0.0",
 ]
 
 [project.optional-dependencies]
