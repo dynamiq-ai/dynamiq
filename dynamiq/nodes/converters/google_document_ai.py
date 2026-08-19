@@ -41,23 +41,8 @@ class GoogleDocumentAIFileConverter(ConnectionNode):
     consecutive batches, whose texts are then concatenated. Images are sent as-is; any other
     file type is rejected before the request is made.
 
-    Args:
-        connection (GoogleDocumentAI, optional): The connection to use for the Document AI API.
-            Defaults to a new GoogleDocumentAI connection, which reads its settings from the
-            environment.
-        processor_id (str): The id of the Document AI processor to run, e.g. '1e0795e517c827d1'.
-        processor_version (str | None, optional): An optional pinned processor version, e.g.
-            'pretrained-ocr-v2.0-2023-06-02'. Defaults to None, which runs the processor's
-            default version.
-        document_creation_mode (DocumentCreationMode, optional): Determines how to create Documents
-            from the processed result. Options are:
-            - ONE_DOC_PER_FILE: Creates one Document per file, with all page texts concatenated.
-            - ONE_DOC_PER_PAGE: Creates one Document per page.
-            Defaults to ONE_DOC_PER_FILE.
-        enable_native_pdf_parsing (bool, optional): Whether to read embedded text from digital PDFs
-            instead of OCR-ing their rendered pages. Defaults to True.
-        imageless_mode (bool, optional): Whether to omit page images from the response. Halves the
-            payload and doubles the online page limit to 30. Defaults to True.
+    The processor is configured on the node rather than on the connection, since one
+    project/location pair can host many processors. See the field descriptions for the options.
     """
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
@@ -88,6 +73,10 @@ class GoogleDocumentAIFileConverter(ConnectionNode):
         default=True,
         description="Omit page images from the response, which also doubles the online page limit.",
     )
+    page_separator: str = Field(
+        default="\n\n",
+        description="Separator inserted between page texts in one-doc-per-file mode.",
+    )
     file_converter: GoogleDocumentAIFileConverterComponent | None = None
     input_schema: ClassVar[type[GoogleDocumentAIFileConverterInputSchema]] = GoogleDocumentAIFileConverterInputSchema
 
@@ -114,6 +103,7 @@ class GoogleDocumentAIFileConverter(ConnectionNode):
                 document_creation_mode=self.document_creation_mode,
                 enable_native_pdf_parsing=self.enable_native_pdf_parsing,
                 imageless_mode=self.imageless_mode,
+                page_separator=self.page_separator,
             )
 
     def execute(
@@ -141,18 +131,15 @@ class GoogleDocumentAIFileConverter(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        file_paths = input_data.file_paths
-        files = input_data.files
-        metadata = input_data.metadata
-
-        output = self.file_converter.run(file_paths=file_paths, files=files, metadata=metadata)
-        documents = output["documents"]
-
-        count_file_paths = len(file_paths) if file_paths else 0
-        count_files = len(files) if files else 0
+        documents = self.file_converter.run(
+            file_paths=input_data.file_paths,
+            files=input_data.files,
+            metadata=input_data.metadata,
+        )["documents"]
 
         logger.debug(
-            f"Converted {count_file_paths} file paths and {count_files} file objects " f"to {len(documents)} Documents."
+            f"Converted {len(input_data.file_paths or [])} file paths and {len(input_data.files or [])} "
+            f"file objects to {len(documents)} Documents."
         )
 
         return {"documents": documents}

@@ -10,7 +10,7 @@ from pypdf import PdfWriter
 from dynamiq.components.converters.google_document_ai import (
     MAX_PAGES_PER_REQUEST_IMAGELESS,
     MAX_PAGES_PER_REQUEST_WITH_IMAGES,
-    DocumentAIMimeType,
+    SUPPORTED_MIME_TYPES,
     GoogleDocumentAIFileConverter,
 )
 from dynamiq.connections import GoogleDocumentAI
@@ -223,15 +223,15 @@ class TestRequestOptions:
 
 
 class TestMimeTypes:
-    @pytest.mark.parametrize("mime_type", list(DocumentAIMimeType), ids=lambda value: value.name)
+    @pytest.mark.parametrize("mime_type", sorted(SUPPORTED_MIME_TYPES))
     def test_every_supported_type_is_declared_verbatim(self, converter, client, mime_type):
-        extension = mimetypes.guess_extension(mime_type.value)
+        extension = mimetypes.guess_extension(mime_type)
         file = BytesIO(b"file-bytes")
         file.name = f"scan{extension}"
 
         converter.run(files=[file])
 
-        assert client.process_document.call_args.kwargs["request"].raw_document.mime_type == mime_type.value
+        assert client.process_document.call_args.kwargs["request"].raw_document.mime_type == mime_type
 
     @pytest.mark.parametrize("filename", ["notes.docx", "notes.txt", "sheet.csv"])
     def test_unsupported_type_is_rejected_before_the_api_call(self, converter, client, filename):
@@ -323,6 +323,22 @@ class TestPageLimitSplitting:
 
 
 class TestInputValidation:
+    def test_raw_bytes_are_accepted(self, converter, client):
+        """The node's input schema accepts `bytes` alongside BytesIO, so the component must too."""
+        documents = converter.run(files=[build_pdf(2).getvalue()])["documents"]
+
+        assert documents[0].content == "PAGE ONE\n\n\nPAGE TWO\n"
+        assert client.process_document.call_args.kwargs["request"].raw_document.mime_type == "application/pdf"
+
+    def test_a_consumed_bytesio_is_still_read_in_full(self, converter, client):
+        """An upstream reader may leave the stream at EOF; the file must not be seen as empty."""
+        file = build_pdf(2)
+        file.read()
+
+        converter.run(files=[file])
+
+        assert client.process_document.call_args.kwargs["request"].raw_document.content == file.getvalue()
+
     def test_empty_file_is_rejected(self, converter):
         empty = BytesIO(b"")
         empty.name = "empty.pdf"

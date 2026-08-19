@@ -66,6 +66,21 @@ class TestConnect:
         assert from_info.call_args.args[0]["client_email"] == "sa@proj.iam.gserviceaccount.com"
         assert client_class.call_args.kwargs["credentials"] is from_info.return_value
 
+    def test_unset_fields_are_not_passed_as_nulls(self):
+        """google-auth reads a null universe_domain as a non-default universe and switches to
+        self-signed JWT auth, which the Document AI endpoint rejects."""
+        connection = make_connection(**service_account_fields())
+
+        with (
+            patch("google.cloud.documentai.DocumentProcessorServiceClient"),
+            patch("google.oauth2.service_account.Credentials.from_service_account_info") as from_info,
+        ):
+            connection.connect()
+
+        info = from_info.call_args.args[0]
+        assert "universe_domain" not in info
+        assert all(value for value in info.values())
+
     def test_absent_service_account_falls_back_to_adc_silently(self, caplog):
         connection = make_connection()
 

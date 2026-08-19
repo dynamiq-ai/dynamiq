@@ -1,5 +1,4 @@
 import copy
-import enum
 import mimetypes
 from collections.abc import Iterator
 from io import BytesIO
@@ -19,24 +18,13 @@ if TYPE_CHECKING:
     from google.cloud.documentai import Document as GoogleDocument
     from google.cloud.documentai import DocumentProcessorServiceClient as DocumentAIClient
 
+# The file types Document AI accepts for online processing. Declared to the API verbatim, as
+# `RawDocument.mime_type` is a plain string. See https://cloud.google.com/document-ai/docs/file-types
+PDF_MIME_TYPE = "application/pdf"
+SUPPORTED_MIME_TYPES = frozenset(
+    {PDF_MIME_TYPE, "image/bmp", "image/gif", "image/jpeg", "image/png", "image/tiff", "image/webp"}
+)
 
-class DocumentAIMimeType(str, enum.Enum):
-    """The file types Document AI accepts for online processing.
-
-    See https://cloud.google.com/document-ai/docs/file-types
-    """
-
-    PDF = "application/pdf"
-    BMP = "image/bmp"
-    GIF = "image/gif"
-    JPEG = "image/jpeg"
-    PNG = "image/png"
-    TIFF = "image/tiff"
-    WEBP = "image/webp"
-
-
-SUPPORTED_MIME_TYPES = frozenset(mime_type.value for mime_type in DocumentAIMimeType)
-DEFAULT_MIME_TYPE = DocumentAIMimeType.PDF
 MAX_PAGES_PER_REQUEST_IMAGELESS = 30
 MAX_PAGES_PER_REQUEST_WITH_IMAGES = 15
 
@@ -167,12 +155,12 @@ class GoogleDocumentAIFileConverter(BaseConverter):
             self.processor_id,
         )
 
-    def _process_file(self, file: Path | BytesIO, metadata: dict[str, Any]) -> list[Any]:
+    def _process_file(self, file: Path | BytesIO | bytes, metadata: dict[str, Any]) -> list[Any]:
         """
         Process a single file and create documents.
 
         Args:
-            file (Path | BytesIO): The file to process.
+            file (Path | BytesIO | bytes): The file to process.
             metadata (dict[str, Any]): Metadata to attach to the documents.
 
         Returns:
@@ -181,12 +169,16 @@ class GoogleDocumentAIFileConverter(BaseConverter):
         Raises:
             ValueError: If the file is empty, if its type is one Document AI cannot process, or if
                 a BytesIO object has neither a name nor a guessable extension.
-            TypeError: If the file argument is neither a Path nor a BytesIO object.
+            TypeError: If the file argument is not a Path, a BytesIO object or bytes.
         """
+        if isinstance(file, bytes):
+            file = BytesIO(file)
+
         if isinstance(file, Path):
             file_path = str(file)
             content = file.read_bytes()
         elif isinstance(file, BytesIO):
+            file.seek(0)
             file_path = get_filename_for_bytesio(file)
             file.seek(0)
             content = file.read()
@@ -206,7 +198,7 @@ class GoogleDocumentAIFileConverter(BaseConverter):
         )
 
     @staticmethod
-    def _resolve_mime_type(file_path: str) -> DocumentAIMimeType:
+    def _resolve_mime_type(file_path: str) -> str:
         """
         Resolve the MIME type to declare to Document AI from a file name.
 
@@ -214,14 +206,14 @@ class GoogleDocumentAIFileConverter(BaseConverter):
             file_path (str): The path or name of the file being processed.
 
         Returns:
-            DocumentAIMimeType: The guessed type, or PDF when the name carries no usable extension.
+            str: The guessed type, or PDF when the name carries no usable extension.
 
         Raises:
             ValueError: If the file type is one Document AI cannot process.
         """
         guessed_mime_type = mimetypes.guess_type(file_path)[0]
         if guessed_mime_type is None:
-            return DEFAULT_MIME_TYPE
+            return PDF_MIME_TYPE
 
         if guessed_mime_type not in SUPPORTED_MIME_TYPES:
             raise ValueError(
@@ -229,68 +221,62 @@ class GoogleDocumentAIFileConverter(BaseConverter):
                 f"Document AI accepts: {', '.join(sorted(SUPPORTED_MIME_TYPES))}."
             )
 
-        return DocumentAIMimeType(guessed_mime_type)
+        return guessed_mime_type
 
-    def _extract_page_texts(self, content: bytes, mime_type: DocumentAIMimeType) -> list[str]:
+    def _extract_page_texts(self, content: bytes, mime_type: str) -> list[str]:
         """
         Extract the text of every page, splitting oversized PDFs into several requests.
 
         Args:
             content (bytes): The raw file content.
-            mime_type (DocumentAIMimeType): The MIME type to declare to Document AI.
+            mime_type (str): The MIME type to declare to Document AI.
 
         Returns:
-            list[str]: The extracted text, one entry per page.
+            list[str]: The extracted text, one entry per page, in page order.
         """
-        if mime_type is not DocumentAIMimeType.PDF:
-            return self._page_texts(self._process_bytes(content=content, mime_type=mime_type))
-
-        page_count = self._count_pdf_pages(content)
-        if page_count is None or page_count <= self.max_pages_per_request:
-            return self._page_texts(self._process_bytes(content=content, mime_type=mime_type))
-
-        logger.debug(
-            f"PDF has {page_count} pages, exceeding the {self.max_pages_per_request}-page online limit. "
-            f"Splitting it into batches."
-        )
         page_texts = []
-        for batch in self._split_pdf(content, self.max_pages_per_request):
-            page_texts.extend(self._page_texts(self._process_bytes(content=batch, mime_type=mime_type)))
+        for request_content in self._request_batches(content, mime_type):
+            page_texts.extend(self._page_texts(self._process_bytes(content=request_content, mime_type=mime_type)))
 
         return page_texts
 
-    @staticmethod
-    def _count_pdf_pages(content: bytes) -> int | None:
+    def _request_batches(self, content: bytes, mime_type: str) -> Iterator[bytes]:
         """
-        Count the pages of a PDF.
+        Split the content into per-request payloads, in page order.
+
+        Only PDFs over the online page limit are split; everything else is yielded as-is, either
+        because it is single-page by nature or because pypdf could not read it - in which case
+        Document AI is left to report the real error.
 
         Args:
-            content (bytes): The raw PDF content.
-
-        Returns:
-            int | None: The page count, or None when pypdf cannot read the file - in which case
-                the file is handed to Document AI unsplit so that it reports the real error.
-        """
-        try:
-            return len(PdfReader(BytesIO(content)).pages)
-        except Exception as e:
-            logger.warning(f"Could not read the PDF page count locally, sending the file unsplit. Error: {e}")
-            return None
-
-    @staticmethod
-    def _split_pdf(content: bytes, pages_per_batch: int) -> Iterator[bytes]:
-        """
-        Split a PDF into batches of at most `pages_per_batch` pages.
-
-        Args:
-            content (bytes): The raw PDF content.
-            pages_per_batch (int): The maximum number of pages per batch.
+            content (bytes): The raw file content.
+            mime_type (str): The MIME type to declare to Document AI.
 
         Yields:
-            bytes: The raw content of each batch, in page order.
+            bytes: The raw content of each request, in page order.
         """
-        reader = PdfReader(BytesIO(content))
-        for start in range(0, len(reader.pages), pages_per_batch):
+        if mime_type != PDF_MIME_TYPE:
+            yield content
+            return
+
+        pages_per_batch = self.max_pages_per_request
+        try:
+            reader = PdfReader(BytesIO(content))
+            page_count = len(reader.pages)
+        except Exception as e:
+            logger.warning(f"Could not read the PDF page count locally, sending the file unsplit. Error: {e}")
+            yield content
+            return
+
+        if page_count <= pages_per_batch:
+            yield content
+            return
+
+        logger.debug(
+            f"PDF has {page_count} pages, exceeding the {pages_per_batch}-page online limit. "
+            f"Splitting it into batches."
+        )
+        for start in range(0, page_count, pages_per_batch):
             writer = PdfWriter()
             for page in reader.pages[start : start + pages_per_batch]:
                 writer.add_page(page)
@@ -299,13 +285,13 @@ class GoogleDocumentAIFileConverter(BaseConverter):
             writer.write(batch)
             yield batch.getvalue()
 
-    def _process_bytes(self, content: bytes, mime_type: DocumentAIMimeType) -> "GoogleDocument":
+    def _process_bytes(self, content: bytes, mime_type: str) -> "GoogleDocument":
         """
         Send a single online processing request to Document AI.
 
         Args:
             content (bytes): The raw file content.
-            mime_type (DocumentAIMimeType): The MIME type to declare to Document AI.
+            mime_type (str): The MIME type to declare to Document AI.
 
         Returns:
             Document: The processed Google Document AI document.
@@ -314,7 +300,7 @@ class GoogleDocumentAIFileConverter(BaseConverter):
 
         request = documentai.ProcessRequest(
             name=self.processor_name,
-            raw_document=documentai.RawDocument(content=content, mime_type=mime_type.value),
+            raw_document=documentai.RawDocument(content=content, mime_type=mime_type),
             process_options=documentai.ProcessOptions(
                 ocr_config=documentai.OcrConfig(enable_native_pdf_parsing=self.enable_native_pdf_parsing),
             ),

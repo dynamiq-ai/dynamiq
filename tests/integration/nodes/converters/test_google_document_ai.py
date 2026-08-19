@@ -192,6 +192,21 @@ def test_missing_input_fails_the_node(workflow, document_ai_node):
     assert response.output[document_ai_node.id]["status"] == RunnableStatus.FAILURE.value
 
 
+def test_page_separator_reaches_the_component(document_ai_connection, document_ai_client):
+    node = GoogleDocumentAIFileConverter(
+        connection=document_ai_connection,
+        client=document_ai_client,
+        processor_id="abc123",
+        page_separator="\n---\n",
+    )
+    workflow = Workflow(flow=flows.Flow(nodes=[node]))
+
+    response = workflow.run(input_data={"files": [build_pdf(2)]})
+
+    assert response.status == RunnableStatus.SUCCESS
+    assert response.output[node.id]["output"]["documents"][0]["content"] == "PAGE ONE\n\n---\nPAGE TWO\n"
+
+
 def test_node_is_serializable_without_its_component(document_ai_node):
     data = document_ai_node.to_dict()
 

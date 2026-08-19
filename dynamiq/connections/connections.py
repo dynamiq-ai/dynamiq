@@ -416,10 +416,22 @@ class GoogleCloud(BaseConnection):
     client_x509_cert_url: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_X509_CERT_URL"))
     universe_domain: str | None = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_UNIVERSE_DOMAIN"))
 
+    SERVICE_ACCOUNT_FIELDS: ClassVar[tuple[str, ...]] = (
+        "project_id",
+        "private_key_id",
+        "private_key",
+        "client_email",
+        "client_id",
+        "client_x509_cert_url",
+        "auth_uri",
+        "token_uri",
+        "auth_provider_x509_cert_url",
+        "universe_domain",
+    )
+    SERVICE_ACCOUNT_REQUIRED_FIELDS: ClassVar[tuple[str, ...]] = ("private_key", "client_email", "token_uri")
+
     def connect(self):
         pass
-
-    SERVICE_ACCOUNT_REQUIRED_FIELDS: ClassVar[tuple[str, ...]] = ("private_key", "client_email", "token_uri")
 
     @property
     def has_service_account_credentials(self) -> bool:
@@ -433,22 +445,30 @@ class GoogleCloud(BaseConnection):
         """
         return all(getattr(self, field) for field in self.SERVICE_ACCOUNT_REQUIRED_FIELDS)
 
-    def warn_on_partial_service_account(self) -> None:
-        """Warn when a service account is half-filled, since it silently falls back to ADC.
+    @property
+    def service_account_info(self) -> dict[str, Any] | None:
+        """The service account info to hand to google-auth, or None to let it resolve ADC instead.
 
-        Only the fields google-auth actually requires are considered: connections populate other
-        Google Cloud fields (`project_id` above all) on their own, and those must not read as an
-        attempt to supply a service account.
+        Unset fields are dropped rather than passed as nulls: google-auth reads a `universe_domain`
+        of None as a non-default universe and silently switches to self-signed JWT auth. A partial
+        set is reported and treated as no credentials at all, since google-auth would raise on it.
+
+        Returns:
+            dict[str, Any] | None: The populated service account fields, or None for the ADC path.
         """
         if self.has_service_account_credentials:
-            return
+            return {field: getattr(self, field) for field in self.SERVICE_ACCOUNT_FIELDS if getattr(self, field)}
 
+        # Only the fields google-auth actually requires are considered: connections populate other
+        # Google Cloud fields (`project_id` above all) on their own, and those must not read as an
+        # attempt to supply a service account.
         if any(getattr(self, field) for field in self.SERVICE_ACCOUNT_REQUIRED_FIELDS):
             logger.warning(
                 f"{type(self).__name__} connection has incomplete service account credentials: "
                 f"{', '.join(self.SERVICE_ACCOUNT_REQUIRED_FIELDS)} are all required. "
                 f"Falling back to Application Default Credentials."
             )
+        return None
 
     @property
     def conn_params(self):
@@ -458,20 +478,9 @@ class GoogleCloud(BaseConnection):
         This property returns a dictionary containing Google Cloud service account credentials.
 
         Returns:
-            dict: A dictionary with the keys 'vertex_project' and 'vertex_location'.
+            dict: The service account fields, including any that are unset.
         """
-        return {
-            "project_id": self.project_id,
-            "private_key_id": self.private_key_id,
-            "private_key": self.private_key,
-            "client_email": self.client_email,
-            "client_id": self.client_id,
-            "client_x509_cert_url": self.client_x509_cert_url,
-            "auth_uri": self.auth_uri,
-            "token_uri": self.token_uri,
-            "auth_provider_x509_cert_url": self.auth_provider_x509_cert_url,
-            "universe_domain": self.universe_domain,
-        }
+        return {field: getattr(self, field) for field in self.SERVICE_ACCOUNT_FIELDS}
 
 
 class VertexAI(GoogleCloud):
@@ -571,10 +580,8 @@ class VertexAI(GoogleCloud):
             "vertex_location": self.vertex_project_location,
         }
 
-        if self.has_service_account_credentials:
-            params["vertex_credentials"] = json.dumps(super().conn_params.copy())
-        else:
-            self.warn_on_partial_service_account()
+        if service_account_info := self.service_account_info:
+            params["vertex_credentials"] = json.dumps(service_account_info)
 
         return params
 
@@ -634,11 +641,10 @@ class GoogleDocumentAI(GoogleCloud):
         from google.cloud import documentai
         from google.oauth2 import service_account
 
+        # None makes the client resolve Application Default Credentials itself.
         credentials = None
-        if self.has_service_account_credentials:
-            credentials = service_account.Credentials.from_service_account_info(super().conn_params)
-        else:
-            self.warn_on_partial_service_account()
+        if service_account_info := self.service_account_info:
+            credentials = service_account.Credentials.from_service_account_info(service_account_info)
 
         client = documentai.DocumentProcessorServiceClient(
             credentials=credentials,
