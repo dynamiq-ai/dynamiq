@@ -149,9 +149,11 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
         index_name = self._fix_and_validate_index_name(index_name)
         collection_name = index_name
 
-        # Initialize client
+        # Initialize client. A client handed in may already have been closed by whoever owns it —
+        # pooled clients are shared, and closing one is not visible to the next holder. PGVectorStore
+        # makes the same check against psycopg's `closed`; Weaviate reports it through is_connected().
         self.client = client
-        if self.client is None:
+        if self.client is None or (hasattr(self.client, "is_connected") and not self.client.is_connected()):
             if connection is None:
                 connection = Weaviate()
             self.client = connection.connect()
