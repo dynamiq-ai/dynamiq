@@ -406,6 +406,28 @@ def test_edit_sequential_and_replace_all(file_store):
     assert "2 of 2 edit(s)" in result.output["content"]
 
 
+def test_edit_success_reports_changed_lines(file_store):
+    """The summary locates every changed line, so the caller can re-read a window not the file."""
+    file_store.store("app.py", b"foo\nbar\nfoo\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "app.py",
+            "edits": [
+                {"find": "bar", "replace": "BAR"},
+                {"find": "foo", "replace": "qux", "replace_all": True},
+            ],
+            "brief": "Edit one line and replace every foo",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "3 replacement(s)" in result.output["content"]
+    assert "(lines 1, 2, 3)" in result.output["content"]
+
+
 def test_edit_find_not_found_aborts(file_store):
     """If a find string doesn't exist in the original file, return a message with no changes."""
     file_store.store("readme.md", b"# Title\n")
@@ -446,6 +468,253 @@ def test_edit_prior_edit_removes_later_find_skips_with_warning(file_store):
     assert file_store.retrieve("code.py") == b"new_func()\n"
     assert "1 of 2 edit(s)" in result.output["content"]
     assert "Warning" in result.output["content"]
+
+
+def test_edit_ambiguous_find_aborts_without_writing(file_store):
+    """A find string matching several places is an error, not a silent first-match edit."""
+    file_store.store("app.py", b"value = 1\nother = 2\nvalue = 1\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "app.py",
+            "edits": [{"find": "value = 1", "replace": "value = 42"}],
+            "brief": "Change one of two identical lines",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "ambiguous" in result.output["content"]
+    assert "matches 2 places (lines 1, 3)" in result.output["content"]
+    assert file_store.retrieve("app.py") == b"value = 1\nother = 2\nvalue = 1\n"
+
+
+def test_edit_ambiguity_reports_lines_for_multi_line_find(file_store):
+    """Line numbers come from match offsets, so a find string spanning lines still locates."""
+    file_store.store("app.py", b"def f():\n    pass\nx = 0\ndef f():\n    pass\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "app.py",
+            "edits": [{"find": "def f():\n    pass", "replace": "def f():\n    return 1"}],
+            "brief": "Edit one of two identical function bodies",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "matches 2 places (lines 1, 4)" in result.output["content"]
+
+
+def test_edit_ambiguity_line_list_is_capped(file_store):
+    """A find string matching everywhere must not turn the error into a wall of numbers."""
+    file_store.store("app.py", b"x\n" * 30)
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "app.py",
+            "edits": [{"find": "x", "replace": "y"}],
+            "brief": "Edit one of thirty identical lines",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "matches 30 places (lines 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ...)" in result.output["content"]
+
+
+def test_edit_ambiguous_find_counts_overlapping_positions(file_store):
+    """Overlapping candidates are ambiguous too, even though str.count reports one."""
+    file_store.store("seq.txt", b"aaa")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "seq.txt",
+            "edits": [{"find": "aa", "replace": "b"}],
+            "brief": "Replace an overlapping run",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "matches 2 places (lines 1, 1)" in result.output["content"]
+    assert file_store.retrieve("seq.txt") == b"aaa"
+
+
+def test_edit_ambiguity_aborts_whole_batch(file_store):
+    """An unambiguous sibling edit is not written when another edit in the batch is ambiguous."""
+    file_store.store("app.py", b"import os\nvalue = 1\nvalue = 1\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "app.py",
+            "edits": [
+                {"find": "import os", "replace": "import sys"},
+                {"find": "value = 1", "replace": "value = 42"},
+            ],
+            "brief": "One clean edit and one ambiguous edit",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "ambiguous" in result.output["content"]
+    assert file_store.retrieve("app.py") == b"import os\nvalue = 1\nvalue = 1\n"
+
+
+def test_edit_ambiguity_introduced_by_prior_edit_is_caught(file_store):
+    """Ambiguity is judged against the content as it stands, not against the original file."""
+    file_store.store("app.py", b"alpha\nbeta\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "app.py",
+            "edits": [
+                {"find": "alpha", "replace": "beta"},
+                {"find": "beta", "replace": "gamma"},
+            ],
+            "brief": "Second edit becomes ambiguous after the first",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "ambiguous" in result.output["content"]
+    assert file_store.retrieve("app.py") == b"alpha\nbeta\n"
+
+
+def test_edit_replace_all_accepts_repeated_find(file_store):
+    """replace_all is the documented escape hatch for a find string with many matches."""
+    file_store.store("app.py", b"value = 1\nother = 2\nvalue = 1\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "app.py",
+            "edits": [{"find": "value = 1", "replace": "value = 42", "replace_all": True}],
+            "brief": "Change both identical lines",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("app.py") == b"value = 42\nother = 2\nvalue = 42\n"
+    assert "2 replacement(s)" in result.output["content"]
+
+
+def test_edit_crlf_file_matches_lf_find_and_keeps_crlf(file_store):
+    """A CRLF file is matched on an LF view, then written back with its endings intact."""
+    file_store.store("cfg.ini", b"host=localhost\r\nport=8080\r\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "cfg.ini",
+            "edits": [{"find": "host=localhost\nport=8080", "replace": "host=0.0.0.0\nport=9090"}],
+            "brief": "Edit across two CRLF lines",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("cfg.ini") == b"host=0.0.0.0\r\nport=9090\r\n"
+
+
+def test_edit_crlf_find_string_matches_crlf_file_literally(file_store):
+    """A caller that spells out CRLF gets a literal match, with no normalization in the way."""
+    file_store.store("cfg.ini", b"host=localhost\r\nport=8080\r\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "cfg.ini",
+            "edits": [{"find": "host=localhost\r\nport=8080", "replace": "host=0.0.0.0\r\nport=9090"}],
+            "brief": "Edit with explicit CRLF",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("cfg.ini") == b"host=0.0.0.0\r\nport=9090\r\n"
+
+
+def test_edit_can_convert_crlf_to_lf(file_store):
+    """Normalizing the caller's own line-ending conversion would silently make it a no-op."""
+    file_store.store("cfg.ini", b"a\r\nb\r\nc\r\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "cfg.ini",
+            "edits": [{"find": "\r\n", "replace": "\n", "replace_all": True}],
+            "brief": "Convert CRLF to LF",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("cfg.ini") == b"a\nb\nc\n"
+    assert "3 replacement(s)" in result.output["content"]
+
+
+def test_edit_mixed_file_adapts_find_to_a_crlf_region(file_store):
+    """A bare-newline find string is aligned to CRLF when that is what the target region uses."""
+    file_store.store("mixed.txt", b"alpha\r\nbeta\ngamma\r\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "mixed.txt",
+            "edits": [{"find": "alpha\nbeta", "replace": "ALPHA\nBETA"}],
+            "brief": "Edit across the CRLF half",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("mixed.txt") == b"ALPHA\r\nBETA\ngamma\r\n"
+
+
+def test_edit_mixed_file_leaves_an_lf_region_find_alone(file_store):
+    """A find string that already matches is used as written, so the LF half stays reachable."""
+    file_store.store("mixed.txt", b"alpha\r\nbeta\ngamma\r\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "mixed.txt",
+            "edits": [{"find": "beta\ngamma", "replace": "BETA\nGAMMA"}],
+            "brief": "Edit across the LF half",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("mixed.txt") == b"alpha\r\nBETA\nGAMMA\r\n"
+
+
+def test_edit_mixed_line_endings_are_left_untouched(file_store):
+    """Line endings are never rewritten, so an unrelated region keeps its own convention."""
+    file_store.store("mixed.txt", b"alpha\r\nbeta\ngamma\r\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "mixed.txt",
+            "edits": [{"find": "beta", "replace": "BETA"}],
+            "brief": "Edit a mixed-ending file",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("mixed.txt") == b"alpha\r\nBETA\ngamma\r\n"
 
 
 def test_edit_validation_rejects_invalid_inputs():
