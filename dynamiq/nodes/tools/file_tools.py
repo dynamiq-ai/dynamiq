@@ -59,6 +59,32 @@ def _line_of(content: str, offset: int) -> int:
     return content.count("\n", 0, offset) + 1
 
 
+def _replace_at(
+    content: str, positions: list[int], find: str, replace: str, tracked: list[int]
+) -> tuple[str, list[int]]:
+    """Replace ``find`` with ``replace`` at each ascending offset in ``positions``.
+
+    Returns the new content, and the offsets of every replacement so far: those in
+    ``tracked`` from earlier edits, shifted by the length this one adds or removes, plus
+    the new ones. Reported line numbers are resolved from these against the *final*
+    content, so an edit that changes the line count does not leave the offsets recorded
+    before it — or the later hits of its own ``replace_all`` — pointing somewhere stale.
+    """
+    delta = len(replace) - len(find)
+    pieces: list[str] = []
+    cursor = 0
+    for offset in positions:
+        pieces.append(content[cursor:offset])
+        pieces.append(replace)
+        cursor = offset + len(find)
+    pieces.append(content[cursor:])
+
+    def shifted(offset: int) -> int:
+        return offset + delta * sum(1 for position in positions if position < offset)
+
+    return "".join(pieces), [shifted(offset) for offset in tracked + positions]
+
+
 def _format_lines(numbers: list[int], limit: int = 10) -> str:
     """Render line numbers as a display string, capped at ``limit``."""
     shown = ", ".join(str(number) for number in numbers[:limit])
@@ -269,17 +295,26 @@ class EditOperation(BaseModel):
     )
 
 
-def _align_line_endings(edit: EditOperation, content: str) -> EditOperation:
-    """Rewrite an edit's bare newlines to CRLF, for a file that uses CRLF.
+def _crlf_normalized(content: str, edits: list[EditOperation]) -> tuple[str, bool]:
+    """An LF view of ``content``, and whether the write must restore CRLF.
 
-    Left alone when the find string already matches as written, or already carries a
-    carriage return -- a caller converting line endings means what it wrote.
+    A model writes bare newlines -- it does not emit carriage returns -- so a CRLF file
+    would never match a find string it can plainly see, and no amount of re-reading
+    would tell it why. Matching happens on an LF view to close that gap, and the endings
+    go back on at write time: the caller asked to change a line, not the whole file.
+
+    Only a file that is CRLF throughout is normalized. A mixed file has no single
+    convention to put back, so it is matched literally -- restoring a guessed one would
+    rewrite the endings of every line the edit never touched. A caller that spells out a
+    carriage return itself is managing endings deliberately (converting a file, say), so
+    it is likewise left to match literally against the file as stored.
     """
-    if "\r" in edit.find or "\r" in edit.replace or edit.find in content:
-        return edit
-    return edit.model_copy(
-        update={"find": edit.find.replace("\n", "\r\n"), "replace": edit.replace.replace("\n", "\r\n")}
-    )
+    if any("\r" in edit.find or "\r" in edit.replace for edit in edits):
+        return content, False
+    crlf = content.count("\r\n")
+    if crlf and crlf == content.count("\n"):
+        return content.replace("\r\n", "\n"), True
+    return content, False
 
 
 class FileWriteInputSchema(BaseModel):
@@ -1391,6 +1426,10 @@ class FileWriteTool(Node):
         4. **Conflict handling**: if an earlier edit removes text that a later
            edit targets, the later edit is skipped and a warning is included in
            the returned summary so the caller can take corrective action.
+        5. **Line endings**: a file that is CRLF throughout is matched on an LF
+           view and written back as CRLF, so a caller writing bare newlines can
+           reach it without its untouched lines being rewritten.  See
+           ``_crlf_normalized`` for the cases left to match literally.
 
         Returns:
             Dict with ``content`` (summary with counts and any warnings) and
@@ -1405,12 +1444,7 @@ class FileWriteTool(Node):
         path = input_data.file_path
 
         content = self.file_store.retrieve(path).decode(encoding)
-
-        # A CRLF file never matches a find string written with bare newlines. Adapt the
-        # find string to the file rather than normalizing the file, so line endings
-        # outside the edited region are never rewritten.
-        if "\r\n" in content:
-            edits = [_align_line_endings(e, content) for e in edits]
+        content, restore_crlf = _crlf_normalized(content, edits)
 
         missing = [e.find for e in edits if e.find not in content]
         if missing:
@@ -1423,7 +1457,7 @@ class FileWriteTool(Node):
 
         total = 0
         skipped: list[str] = []
-        changed_lines: list[int] = []
+        changed_offsets: list[int] = []
         ambiguous: list[tuple[str, int, list[int]]] = []
         for edit in edits:
             # Located against current content, not the original: a prior edit can
@@ -1435,15 +1469,10 @@ class FileWriteTool(Node):
             if len(positions) > 1 and not edit.replace_all:
                 ambiguous.append((edit.find, len(positions), [_line_of(content, p) for p in positions]))
                 continue
-            if edit.replace_all:
-                hits = _find_positions(content, edit.find, overlapping=False)
-                total += len(hits)
-                changed_lines.extend(_line_of(content, offset) for offset in hits)
-                content = content.replace(edit.find, edit.replace)
-            else:
-                total += 1
-                changed_lines.append(_line_of(content, positions[0]))
-                content = content.replace(edit.find, edit.replace, 1)
+            # Non-overlapping, since that is what a replacement consumes.
+            hits = _find_positions(content, edit.find, overlapping=False) if edit.replace_all else positions[:1]
+            total += len(hits)
+            content, changed_offsets = _replace_at(content, hits, edit.find, edit.replace, changed_offsets)
 
         # Checked before any write, so an ambiguous batch leaves the file untouched
         # rather than applying its unambiguous half.
@@ -1460,13 +1489,20 @@ class FileWriteTool(Node):
             logger.warning(f"Tool {self.name} - {self.id}: {message}")
             return {"content": message}
 
+        # Resolved once the content is final, so the lines name the file just written.
+        # Before the endings go back on: the offsets index the LF view they were tracked in.
+        changed_lines = sorted({_line_of(content, offset) for offset in changed_offsets})
+
+        if restore_crlf:
+            content = content.replace("\n", "\r\n")
+
         payload = content.encode(encoding)
         content_type = input_data.content_type or mimetypes.guess_type(path)[0] or "text/plain"
         file_info = self.file_store.store(
             path, payload, content_type=content_type, metadata=input_data.metadata, overwrite=True
         )
         applied = len(edits) - len(skipped)
-        location = f" (lines {_format_lines(sorted(set(changed_lines)))})" if changed_lines else ""
+        location = f" (lines {_format_lines(changed_lines)})" if changed_lines else ""
         summary = f"Applied {applied} of {len(edits)} edit(s) with {total} replacement(s) to {path}{location}."
         if skipped:
             summary += (

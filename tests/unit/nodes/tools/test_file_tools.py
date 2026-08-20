@@ -428,6 +428,49 @@ def test_edit_success_reports_changed_lines(file_store):
     assert "(lines 1, 2, 3)" in result.output["content"]
 
 
+def test_edit_reported_lines_survive_a_later_edit_adding_lines(file_store):
+    """A line recorded early is re-mapped, so it still names the written file afterwards."""
+    file_store.store("app.py", b"a\nb\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "app.py",
+            "edits": [
+                {"find": "b", "replace": "B"},
+                {"find": "a", "replace": "x\ny\na"},
+            ],
+            "brief": "Edit a line, then push it down from above",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("app.py") == b"x\ny\na\nB\n"
+    # 'B' ends up on line 4, not the line 2 it sat on when the first edit ran.
+    assert "(lines 1, 4)" in result.output["content"]
+
+
+def test_edit_reported_lines_account_for_growth_within_replace_all(file_store):
+    """Every hit after the first is shifted by what the replacements before it added."""
+    file_store.store("app.py", b"foo\nbar\nfoo\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "app.py",
+            "edits": [{"find": "foo", "replace": "A\nB", "replace_all": True}],
+            "brief": "Replace every foo with two lines",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("app.py") == b"A\nB\nbar\nA\nB\n"
+    # The second replacement lands on line 4, not the line 3 its find string was on.
+    assert "(lines 1, 4)" in result.output["content"]
+
+
 def test_edit_find_not_found_aborts(file_store):
     """If a find string doesn't exist in the original file, return a message with no changes."""
     file_store.store("readme.md", b"# Title\n")
@@ -663,8 +706,45 @@ def test_edit_can_convert_crlf_to_lf(file_store):
     assert "3 replacement(s)" in result.output["content"]
 
 
-def test_edit_mixed_file_adapts_find_to_a_crlf_region(file_store):
-    """A bare-newline find string is aligned to CRLF when that is what the target region uses."""
+def test_edit_crlf_file_adds_lines_with_crlf_through_a_single_line_anchor(file_store):
+    """Matching on an LF view means a replacement cannot splice a bare LF into a CRLF file."""
+    file_store.store("cfg.ini", b"a\r\nb\r\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "cfg.ini",
+            "edits": [{"find": "b", "replace": "b\nc"}],
+            "brief": "Add a line through a one-line anchor",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("cfg.ini") == b"a\r\nb\r\nc\r\n"
+
+
+def test_edit_crlf_file_reports_lines_of_the_lf_view(file_store):
+    """Reported lines count lines, not bytes, so restoring the endings must not shift them."""
+    file_store.store("cfg.ini", b"a\r\nb\r\nc\r\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "cfg.ini",
+            "edits": [{"find": "c", "replace": "C"}],
+            "brief": "Edit the last line of a CRLF file",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("cfg.ini") == b"a\r\nb\r\nC\r\n"
+    assert "(lines 3)" in result.output["content"]
+
+
+def test_edit_mixed_file_matches_literally(file_store):
+    """A mixed file has no convention to restore, so nothing is converted in either direction."""
     file_store.store("mixed.txt", b"alpha\r\nbeta\ngamma\r\n")
     tool = FileWriteTool(file_store=file_store)
 
@@ -673,6 +753,25 @@ def test_edit_mixed_file_adapts_find_to_a_crlf_region(file_store):
             "action": "edit",
             "file_path": "mixed.txt",
             "edits": [{"find": "alpha\nbeta", "replace": "ALPHA\nBETA"}],
+            "brief": "Edit across the CRLF half with a bare-newline find string",
+        }
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert "not found" in result.output["content"]
+    assert file_store.retrieve("mixed.txt") == b"alpha\r\nbeta\ngamma\r\n"
+
+
+def test_edit_mixed_file_reaches_a_crlf_region_with_an_explicit_find(file_store):
+    """Spelling out the endings is how a mixed file's CRLF half stays reachable."""
+    file_store.store("mixed.txt", b"alpha\r\nbeta\ngamma\r\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "mixed.txt",
+            "edits": [{"find": "alpha\r\nbeta", "replace": "ALPHA\r\nBETA"}],
             "brief": "Edit across the CRLF half",
         }
     )
