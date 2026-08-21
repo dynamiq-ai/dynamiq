@@ -406,8 +406,8 @@ def test_edit_sequential_and_replace_all(file_store):
     assert "2 of 2 edit(s)" in result.output["content"]
 
 
-def test_edit_success_reports_changed_lines(file_store):
-    """The summary locates every changed line, so the caller can re-read a window not the file."""
+def test_edit_success_reports_counts_not_locations(file_store):
+    """The summary counts what happened; locating the change is left to file-read."""
     file_store.store("app.py", b"foo\nbar\nfoo\n")
     tool = FileWriteTool(file_store=file_store)
 
@@ -424,51 +424,29 @@ def test_edit_success_reports_changed_lines(file_store):
     )
 
     assert result.status == RunnableStatus.SUCCESS
+    assert file_store.retrieve("app.py") == b"qux\nBAR\nqux\n"
+    assert "2 of 2 edit(s)" in result.output["content"]
     assert "3 replacement(s)" in result.output["content"]
-    assert "(lines 1, 2, 3)" in result.output["content"]
+    assert "(lines" not in result.output["content"]
 
 
-def test_edit_reported_lines_survive_a_later_edit_adding_lines(file_store):
-    """A line recorded early is re-mapped, so it still names the written file afterwards."""
-    file_store.store("app.py", b"a\nb\n")
+def test_edit_replace_all_over_many_matches(file_store):
+    """A find string common enough to hit thousands of times is still one pass."""
+    file_store.store("many.txt", b"foo\n" * 5000)
     tool = FileWriteTool(file_store=file_store)
 
     result = tool.run(
         {
             "action": "edit",
-            "file_path": "app.py",
-            "edits": [
-                {"find": "b", "replace": "B"},
-                {"find": "a", "replace": "x\ny\na"},
-            ],
-            "brief": "Edit a line, then push it down from above",
+            "file_path": "many.txt",
+            "edits": [{"find": "foo", "replace": "foofoo", "replace_all": True}],
+            "brief": "Double every foo",
         }
     )
 
     assert result.status == RunnableStatus.SUCCESS
-    assert file_store.retrieve("app.py") == b"x\ny\na\nB\n"
-    # 'B' ends up on line 4, not the line 2 it sat on when the first edit ran.
-    assert "(lines 1, 4)" in result.output["content"]
-
-
-def test_edit_reported_lines_account_for_growth_within_replace_all(file_store):
-    """Every hit after the first is shifted by what the replacements before it added."""
-    file_store.store("app.py", b"foo\nbar\nfoo\n")
-    tool = FileWriteTool(file_store=file_store)
-
-    result = tool.run(
-        {
-            "action": "edit",
-            "file_path": "app.py",
-            "edits": [{"find": "foo", "replace": "A\nB", "replace_all": True}],
-            "brief": "Replace every foo with two lines",
-        }
-    )
-
-    assert result.status == RunnableStatus.SUCCESS
-    assert file_store.retrieve("app.py") == b"A\nB\nbar\nA\nB\n"
-    # The second replacement lands on line 4, not the line 3 its find string was on.
-    assert "(lines 1, 4)" in result.output["content"]
+    assert file_store.retrieve("many.txt") == b"foofoo\n" * 5000
+    assert "5000 replacement(s)" in result.output["content"]
 
 
 def test_edit_find_not_found_aborts(file_store):
@@ -722,25 +700,6 @@ def test_edit_crlf_file_adds_lines_with_crlf_through_a_single_line_anchor(file_s
 
     assert result.status == RunnableStatus.SUCCESS
     assert file_store.retrieve("cfg.ini") == b"a\r\nb\r\nc\r\n"
-
-
-def test_edit_crlf_file_reports_lines_of_the_lf_view(file_store):
-    """Reported lines count lines, not bytes, so restoring the endings must not shift them."""
-    file_store.store("cfg.ini", b"a\r\nb\r\nc\r\n")
-    tool = FileWriteTool(file_store=file_store)
-
-    result = tool.run(
-        {
-            "action": "edit",
-            "file_path": "cfg.ini",
-            "edits": [{"find": "c", "replace": "C"}],
-            "brief": "Edit the last line of a CRLF file",
-        }
-    )
-
-    assert result.status == RunnableStatus.SUCCESS
-    assert file_store.retrieve("cfg.ini") == b"a\r\nb\r\nC\r\n"
-    assert "(lines 3)" in result.output["content"]
 
 
 def test_edit_mixed_file_matches_literally(file_store):

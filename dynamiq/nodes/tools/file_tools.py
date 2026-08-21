@@ -37,12 +37,13 @@ EXTRACTED_TEXT_SUFFIX = ".extracted.txt"
 RESERVED_AGENT_PATH_PREFIX = "._agent"
 
 
-def _find_positions(content: str, needle: str, overlapping: bool = True) -> list[int]:
-    """Offsets of every position ``needle`` occurs at.
+def _find_positions(content: str, needle: str) -> list[int]:
+    """Offsets of every position ``needle`` occurs at, overlapping ones included.
 
-    Overlapping by default: "aa" in "aaa" reports two candidate positions, where
-    ``str.count`` sees one. Ambiguity is about candidate positions; what a replacement
-    actually consumes is not, so counting replacements passes ``overlapping=False``.
+    "aa" in "aaa" reports two candidate positions where ``str.count`` sees one. Either
+    could be the site the caller meant, which is what makes such a find string
+    ambiguous; how many a replacement would actually consume is a separate question,
+    answered by ``str.count``.
     """
     if not needle:
         return []
@@ -50,39 +51,13 @@ def _find_positions(content: str, needle: str, overlapping: bool = True) -> list
     start = 0
     while (index := content.find(needle, start)) != -1:
         positions.append(index)
-        start = index + 1 if overlapping else index + len(needle)
+        start = index + 1
     return positions
 
 
 def _line_of(content: str, offset: int) -> int:
     """1-based line number of a character offset."""
     return content.count("\n", 0, offset) + 1
-
-
-def _replace_at(
-    content: str, positions: list[int], find: str, replace: str, tracked: list[int]
-) -> tuple[str, list[int]]:
-    """Replace ``find`` with ``replace`` at each ascending offset in ``positions``.
-
-    Returns the new content, and the offsets of every replacement so far: those in
-    ``tracked`` from earlier edits, shifted by the length this one adds or removes, plus
-    the new ones. Reported line numbers are resolved from these against the *final*
-    content, so an edit that changes the line count does not leave the offsets recorded
-    before it — or the later hits of its own ``replace_all`` — pointing somewhere stale.
-    """
-    delta = len(replace) - len(find)
-    pieces: list[str] = []
-    cursor = 0
-    for offset in positions:
-        pieces.append(content[cursor:offset])
-        pieces.append(replace)
-        cursor = offset + len(find)
-    pieces.append(content[cursor:])
-
-    def shifted(offset: int) -> int:
-        return offset + delta * sum(1 for position in positions if position < offset)
-
-    return "".join(pieces), [shifted(offset) for offset in tracked + positions]
 
 
 def _format_lines(numbers: list[int], limit: int = 10) -> str:
@@ -1457,7 +1432,6 @@ class FileWriteTool(Node):
 
         total = 0
         skipped: list[str] = []
-        changed_offsets: list[int] = []
         ambiguous: list[tuple[str, int, list[int]]] = []
         for edit in edits:
             # Located against current content, not the original: a prior edit can
@@ -1469,10 +1443,14 @@ class FileWriteTool(Node):
             if len(positions) > 1 and not edit.replace_all:
                 ambiguous.append((edit.find, len(positions), [_line_of(content, p) for p in positions]))
                 continue
-            # Non-overlapping, since that is what a replacement consumes.
-            hits = _find_positions(content, edit.find, overlapping=False) if edit.replace_all else positions[:1]
-            total += len(hits)
-            content, changed_offsets = _replace_at(content, hits, edit.find, edit.replace, changed_offsets)
+            if edit.replace_all:
+                # str.count, not the candidate positions above: overlapping matches are
+                # what makes a find string ambiguous, not what a replacement consumes.
+                total += content.count(edit.find)
+                content = content.replace(edit.find, edit.replace)
+            else:
+                total += 1
+                content = content.replace(edit.find, edit.replace, 1)
 
         # Checked before any write, so an ambiguous batch leaves the file untouched
         # rather than applying its unambiguous half.
@@ -1489,10 +1467,6 @@ class FileWriteTool(Node):
             logger.warning(f"Tool {self.name} - {self.id}: {message}")
             return {"content": message}
 
-        # Resolved once the content is final, so the lines name the file just written.
-        # Before the endings go back on: the offsets index the LF view they were tracked in.
-        changed_lines = sorted({_line_of(content, offset) for offset in changed_offsets})
-
         if restore_crlf:
             content = content.replace("\n", "\r\n")
 
@@ -1502,8 +1476,7 @@ class FileWriteTool(Node):
             path, payload, content_type=content_type, metadata=input_data.metadata, overwrite=True
         )
         applied = len(edits) - len(skipped)
-        location = f" (lines {_format_lines(changed_lines)})" if changed_lines else ""
-        summary = f"Applied {applied} of {len(edits)} edit(s) with {total} replacement(s) to {path}{location}."
+        summary = f"Applied {applied} of {len(edits)} edit(s) with {total} replacement(s) to {path}."
         if skipped:
             summary += (
                 f" Warning: {len(skipped)} find string(s) were present in the original file "
