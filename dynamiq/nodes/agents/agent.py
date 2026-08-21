@@ -1713,6 +1713,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 tool_result, _, ordered_results = self._execute_tools(
                     tools_data, thought, loop_num, config, **kwargs
                 )
+                # A batch reduced to a single call still delegates; a wider one had its
+                # delegation declined before execution (see ``_execute_tools``). Returned
+                # the same way the single-tool path does — the answer is already streamed,
+                # so continuing the loop would hand the client a second one.
+                delegated = next((r for r in ordered_results if r.get("is_delegated")), None)
+                if delegated is not None:
+                    return delegated.get("result")
             else:
                 tool_result, tool_files, is_delegated, tool_success, _ = self._execute_single_tool(
                     action, action_input, thought, loop_num, config, **kwargs
@@ -2422,9 +2429,42 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 }
             )
 
+        # ``delegate_final`` makes a call answer for the whole step, so it is honoured only
+        # when it is the step's only call. Batched with others it is refused *without being
+        # executed*: its answer would predate its siblings' results — the same reason a
+        # batched ``provide_final_answer`` is declined (see ``_handle_function_calling_mode``)
+        # — and running it anyway would bill a sub-agent whose output nobody reads. The
+        # refusal cannot wait until afterwards: ``_execute_single_tool`` logs and streams the
+        # delegated answer as it returns, so by then the client already has an answer.
+        # Its siblings still run; the refused call is what its own tool_call_id is told.
+        if len(prepared_tools) > 1:
+            executable: list[dict[str, Any]] = []
+            for tool_payload in prepared_tools:
+                tool = self.tool_by_names.get(self.sanitize_tool_name(tool_payload["name"]))
+                if not self._should_delegate_final(tool, tool_payload["input"]):
+                    executable.append(tool_payload)
+                    continue
+                refusal = (
+                    f"'{tool_payload['name']}' was not executed: delegate_final cannot be combined with "
+                    "other tool calls. Call it on its own to return its answer directly, or call it "
+                    "again without delegate_final to use its output as an observation."
+                )
+                logger.warning(f"Agent {self.name} - {self.id}: {refusal}")
+                all_results.append(
+                    {
+                        "order": tool_payload["order"],
+                        "tool_call_id": tool_payload.get("tool_call_id"),
+                        "tool_name": tool_payload["name"],
+                        "success": False,
+                        "result": refusal,
+                        "files": [],
+                    }
+                )
+            prepared_tools = executable
+
         def _execute_single_tool_to_result(tool_payload: dict[str, Any], **extra) -> dict[str, Any]:
             """Execute a single tool and wrap the result as a dict."""
-            tool_result, tool_files, _, success, dependency = self._execute_single_tool(
+            tool_result, tool_files, is_delegated, success, dependency = self._execute_single_tool(
                 tool_payload["name"],
                 tool_payload["input"],
                 tool_payload.get("thought") or thought or "",
@@ -2443,6 +2483,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 "result": tool_result,
                 "files": tool_files,
                 "dependency": dependency,
+                # Carried up so the caller can end the loop with this result. Dropping it
+                # here would leave the loop running after ``_execute_single_tool`` has
+                # already logged and streamed this as the run's answer, and the client
+                # would be handed a second one.
+                "is_delegated": is_delegated,
             }
 
         sequential_group: list[dict[str, Any]] = []

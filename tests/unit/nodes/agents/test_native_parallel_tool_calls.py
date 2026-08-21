@@ -772,3 +772,188 @@ class TestParallelToolConcurrencyIsBounded:
 
         assert stats["completed"] == 12, "capping must queue calls, never drop them"
         assert stats["peak"] <= 3, "more tools ran at once than max_parallel_tool_calls allows"
+
+
+class TestDelegateFinalMustStandAlone:
+    """``delegate_final`` answers for the whole step, so it is only honoured when it is the
+    step's only call. Batched with other tools it is refused before it runs — otherwise the
+    sub-agent's answer is logged and streamed as the run's answer while the ReAct loop keeps
+    going, and the client is handed a second, different answer."""
+
+    @staticmethod
+    def _parent_with_sub_agent(probe, **kwargs):
+        from typing import ClassVar
+
+        from pydantic import BaseModel
+
+        from dynamiq import connections
+        from dynamiq.nodes import llms
+        from dynamiq.nodes.agents import Agent
+        from dynamiq.nodes.node import Node, NodeGroup
+        from dynamiq.nodes.tools.agent_tool import SubAgentTool
+        from dynamiq.nodes.types import InferenceMode
+
+        class _Input(BaseModel):
+            i: int = 0
+
+        class ProbeTool(Node):
+            group: NodeGroup = NodeGroup.TOOLS
+            name: str = "probe"
+            description: str = "records execution"
+            input_schema: ClassVar[type[BaseModel]] = _Input
+
+            def execute(self, input_data, config=None, **kw):
+                probe["ran"].append(input_data.i)
+                return {"content": f"done-{input_data.i}"}
+
+        def _llm(node_id):
+            return llms.OpenAI(
+                id=node_id,
+                model="gpt-4o-mini",
+                connection=connections.OpenAI(api_key="not-used"),
+                is_postponed_component_init=True,
+            )
+
+        child = Agent(id="child", name="child", llm=_llm("child-llm"), tools=[], max_loops=2)
+
+        return Agent(
+            id="agent",
+            name="agent",
+            llm=_llm("llm"),
+            tools=[ProbeTool(), SubAgentTool(agent=child, name="sub_agent", description="delegates")],
+            inference_mode=InferenceMode.FUNCTION_CALLING,
+            parallel_tool_calls_enabled=False,
+            delegation_allowed=True,
+            max_loops=3,
+            **kwargs,
+        )
+
+    @staticmethod
+    def _run(agent, first_turn):
+        from litellm import ModelResponse
+
+        turns = [
+            first_turn,
+            [
+                {
+                    "id": "call_final",
+                    "type": "function",
+                    "function": {
+                        "name": "provide_final_answer",
+                        "arguments": json.dumps({"thought": "done", "answer": "MODEL ANSWER"}),
+                    },
+                }
+            ],
+        ]
+        state = {"n": 0}
+
+        def _completion(stream=False, *a, **kw):
+            calls = turns[min(state["n"], len(turns) - 1)]
+            state["n"] += 1
+            return ModelResponse(choices=[{"message": {"content": None, "tool_calls": calls}}])
+
+        with patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=_completion) as completion:
+            result = agent.run(input_data={"input": "go"})
+        return result, state, completion
+
+    def test_a_batched_delegation_is_refused_and_never_runs(self):
+        """The sub-agent must not be invoked at all: running it and then discarding the flag
+        still streams its answer and bills the call."""
+        from dynamiq.prompts.prompts import MessageRole
+
+        probe = {"ran": []}
+        agent = self._parent_with_sub_agent(probe)
+
+        batch = [
+            {
+                "id": "call_delegate",
+                "type": "function",
+                "function": {
+                    "name": "sub_agent",
+                    "arguments": json.dumps({"thought": "t", "input": "do it", "delegate_final": True}),
+                },
+            },
+            {
+                "id": "call_probe",
+                "type": "function",
+                "function": {"name": "probe", "arguments": json.dumps({"thought": "t", "i": 7})},
+            },
+        ]
+        result, state, completion = self._run(agent, batch)
+
+        by_id = {m.tool_call_id: m.content for m in agent._prompt.messages if m.role == MessageRole.TOOL}
+        assert "was not executed" in by_id["call_delegate"], "the refusal must reach the call that asked"
+        assert probe["ran"] == [7], "the siblings of a refused delegation must still run"
+        assert "done-7" in by_id["call_probe"]
+        assert state["n"] == 2, "the sub-agent must never have been invoked"
+        assert result.output["content"] == "MODEL ANSWER", "the run must end on the model's own single answer"
+
+    def test_a_lone_delegation_still_ends_the_run_with_its_result(self):
+        """The flag survives the batch path when nothing else was called — dropping it here
+        is what let the loop run on and produce a second answer."""
+        from dynamiq.runnables import RunnableConfig
+
+        probe = {"ran": []}
+        agent = self._parent_with_sub_agent(probe)
+
+        with patch.object(type(agent), "_execute_single_tool", return_value=("SUB ANSWER", [], True, True, None)):
+            answer = agent._execute_tools_and_update_prompt(
+                PARALLEL_TOOL_NAME,
+                {"tools": [{"name": "sub_agent", "input": {"input": "do it", "delegate_final": True}, "thought": "t"}]},
+                "t",
+                1,
+                RunnableConfig(),
+            )
+
+        assert answer == "SUB ANSWER", "a delegated result must end the loop, not become an observation"
+
+
+class TestParallelToolInjectionSeesEveryTool:
+    """``run-parallel`` is withheld only from an agent that truly has nothing to batch, so
+    the emptiness check has to run after every tool is in place — ``SkillsTool`` is appended
+    late enough that a skills-only agent used to be treated as tool-less."""
+
+    @staticmethod
+    def _agent(tools, **kwargs):
+        from dynamiq import connections
+        from dynamiq.nodes import llms
+        from dynamiq.nodes.agents import Agent
+        from dynamiq.nodes.types import InferenceMode
+
+        return Agent(
+            id="agent",
+            name="agent",
+            llm=llms.OpenAI(
+                id="llm",
+                model="gpt-4o-mini",
+                connection=connections.OpenAI(api_key="not-used"),
+                is_postponed_component_init=True,
+            ),
+            tools=tools,
+            inference_mode=InferenceMode.XML,
+            parallel_tool_calls_enabled=True,
+            **kwargs,
+        )
+
+    @staticmethod
+    def _skills():
+        from dynamiq.skills.config import SkillsConfig
+        from dynamiq.skills.registries import FileSystem
+        from dynamiq.skills.registries.filesystem import FileSystemSkillEntry
+
+        return SkillsConfig(
+            enabled=True,
+            source=FileSystem(base_path="/nonexistent", skills=[FileSystemSkillEntry(name="a", description="A")]),
+        )
+
+    def test_a_skills_only_agent_can_still_batch(self):
+        agent = self._agent([], skills=self._skills())
+
+        names = [t.name for t in agent.tools]
+        assert "skills-tool" in names, f"expected SkillsTool among {names}"
+        assert PARALLEL_TOOL_NAME in names, f"a skills-only agent has a tool to batch, got {names}"
+
+    def test_a_genuinely_tool_less_agent_is_left_alone(self):
+        agent = self._agent([])
+
+        assert agent.tools == [], "nothing to batch means no run-parallel and no tools prompt block"

@@ -442,6 +442,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if self.file_store.agent_file_write_enabled:
                 self.tools.append(FileWriteTool(file_store=self.file_store_backend))
 
+        if self._skills_should_init():
+            self._init_skills()
+
         if self.parallel_tool_calls_enabled:
             inference_mode = getattr(self, "inference_mode", None)
             use_native_parallel = inference_mode == InferenceMode.FUNCTION_CALLING
@@ -452,8 +455,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 if self.tools:
                     self.tools.append(ParallelToolCallsTool())
 
-        if self._skills_should_init():
-            self._init_skills()
         self._init_prompt_blocks()
         if self._skills_should_init():
             self._apply_skills_to_prompt()
