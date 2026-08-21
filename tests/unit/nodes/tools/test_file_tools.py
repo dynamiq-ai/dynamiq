@@ -610,6 +610,56 @@ def test_edit_ambiguity_introduced_by_prior_edit_is_caught(file_store):
     assert file_store.retrieve("app.py") == b"alpha\nbeta\n"
 
 
+def test_edit_ambiguity_from_a_prior_edit_describes_the_stored_file(file_store):
+    """The caller re-reads the unchanged file, so the message has to describe that, not a state it never sees."""
+    file_store.store("app.py", b"alpha\nbeta\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "app.py",
+            "edits": [
+                {"find": "alpha", "replace": "beta"},
+                {"find": "beta", "replace": "gamma"},
+            ],
+            "brief": "Second edit becomes ambiguous after the first",
+        }
+    )
+
+    content = result.output["content"]
+    # The stored file holds one 'beta', on line 2. Claiming two matches would send the
+    # caller looking for a second one that is not there.
+    assert "occurs once in the file (line 2)" in content
+    assert "matches 2 places once the edits before it are applied" in content
+    assert "reorder the edits" in content
+    assert "matches 2 places (lines" not in content
+
+
+def test_edit_ambiguity_from_a_prior_edit_reports_undrifted_lines(file_store):
+    """Line numbers come from the stored file, so an earlier edit's added lines cannot shift them."""
+    file_store.store("app.py", b"x\nfoo\ny\nfoo\n")
+    tool = FileWriteTool(file_store=file_store)
+
+    result = tool.run(
+        {
+            "action": "edit",
+            "file_path": "app.py",
+            "edits": [
+                {"find": "x\n", "replace": "x\nA\nB\n"},
+                {"find": "foo", "replace": "FOO"},
+            ],
+            "brief": "First edit adds lines above an already-ambiguous find string",
+        }
+    )
+
+    content = result.output["content"]
+    # 'foo' is ambiguous in the stored file too, at lines 2 and 4 - not the 4 and 6 it
+    # would occupy after the first edit's two added lines.
+    assert "matches 2 places (lines 2, 4)" in content
+    assert file_store.retrieve("app.py") == b"x\nfoo\ny\nfoo\n"
+
+
 def test_edit_replace_all_accepts_repeated_find(file_store):
     """replace_all is the documented escape hatch for a find string with many matches."""
     file_store.store("app.py", b"value = 1\nother = 2\nvalue = 1\n")

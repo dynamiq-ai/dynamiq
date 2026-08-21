@@ -1420,6 +1420,9 @@ class FileWriteTool(Node):
 
         content = self.file_store.retrieve(path).decode(encoding)
         content, restore_crlf = _crlf_normalized(content, edits)
+        # Kept for the abort messages: nothing is written when a batch is refused, so the
+        # stored file is what the caller re-reads, and the only thing they can act on.
+        stored = content
 
         missing = [e.find for e in edits if e.find not in content]
         if missing:
@@ -1432,7 +1435,7 @@ class FileWriteTool(Node):
 
         total = 0
         skipped: list[str] = []
-        ambiguous: list[tuple[str, int, list[int]]] = []
+        ambiguous: list[tuple[str, int]] = []
         for edit in edits:
             # Located against current content, not the original: a prior edit can
             # add or remove candidate positions, and shift the lines they sit on.
@@ -1441,7 +1444,7 @@ class FileWriteTool(Node):
                 skipped.append(edit.find)
                 continue
             if len(positions) > 1 and not edit.replace_all:
-                ambiguous.append((edit.find, len(positions), [_line_of(content, p) for p in positions]))
+                ambiguous.append((edit.find, len(positions)))
                 continue
             if edit.replace_all:
                 # str.count, not the candidate positions above: overlapping matches are
@@ -1455,14 +1458,35 @@ class FileWriteTool(Node):
         # Checked before any write, so an ambiguous batch leaves the file untouched
         # rather than applying its unambiguous half.
         if ambiguous:
-            details = "; ".join(
-                f"{repr(find[:80])} matches {count} places (lines {_format_lines(lines)})"
-                for find, count, lines in ambiguous
+            # Described against the stored file, since that is what the caller can re-read.
+            # A find string unique there was duplicated by an earlier edit in this batch;
+            # telling that caller to add context would send them looking for a second match
+            # the file does not contain.
+            details = []
+            duplicated_by_batch = False
+            for find, count in ambiguous:
+                in_file = _find_positions(stored, find)
+                if len(in_file) > 1:
+                    lines = _format_lines([_line_of(stored, position) for position in in_file])
+                    details.append(f"{repr(find[:80])} matches {len(in_file)} places (lines {lines})")
+                else:
+                    duplicated_by_batch = True
+                    details.append(
+                        f"{repr(find[:80])} occurs once in the file (line {_line_of(stored, in_file[0])}) "
+                        f"but matches {count} places once the edits before it are applied"
+                    )
+            advice = (
+                "Include enough surrounding text to make each find string match exactly one place, "
+                "or set 'replace_all': true to change every occurrence."
             )
+            if duplicated_by_batch:
+                advice += (
+                    " Where an earlier edit is what creates the duplicate, reorder the edits or "
+                    "anchor on text that edit does not produce."
+                )
             message = (
-                f"Edit not applied: ambiguous find string(s) in '{path}': {details}. "
-                f"Include enough surrounding text to make each find string match exactly one place, "
-                f"or set 'replace_all': true to change every occurrence. No changes were made."
+                f"Edit not applied: ambiguous find string(s) in '{path}': {'; '.join(details)}. "
+                f"{advice} No changes were made."
             )
             logger.warning(f"Tool {self.name} - {self.id}: {message}")
             return {"content": message}
