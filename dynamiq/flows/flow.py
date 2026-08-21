@@ -21,6 +21,8 @@ from dynamiq.nodes.types import Behavior
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableFailedNodeInfo, RunnableResultError
 from dynamiq.types.cancellation import CanceledException, check_cancellation
+from dynamiq.types.dry_run import DryRunConfig
+from dynamiq.types.mocking import RunMockConfig
 from dynamiq.utils.duration import format_duration
 from dynamiq.utils.logger import logger
 
@@ -366,6 +368,32 @@ class Flow(CheckpointFlowMixin, BaseFlow):
             return RunnableConfig()
         return config
 
+    def _restore_config_from_checkpoint(self, config: RunnableConfig, checkpoint: FlowCheckpoint) -> RunnableConfig:
+        """Restore behavioral run-config fields the caller left unset from the checkpoint.
+
+        Mirrors ``original_input``: explicit caller values win, unset fields fall back to
+        what the interrupted run used — so a resumed dry run stays a dry run instead of
+        silently executing its mocked nodes for real. Only pure-data fields are restored;
+        runtime carriers (callbacks, cache backend, streaming queues, cancellation) cannot
+        round-trip through a checkpoint and stay caller-owned.
+        """
+        stored = checkpoint.original_config
+        if not stored:
+            return config
+
+        updates: dict[str, Any] = {}
+        if config.mock is None and stored.get("mock"):
+            updates["mock"] = RunMockConfig.model_validate(stored["mock"])
+        if config.dry_run is None and stored.get("dry_run"):
+            updates["dry_run"] = DryRunConfig.model_validate(stored["dry_run"])
+        if config.max_node_workers is None and stored.get("max_node_workers") is not None:
+            updates["max_node_workers"] = stored["max_node_workers"]
+        if not updates:
+            return config
+
+        logger.info(f"Flow {self.id}: restored run config from checkpoint: {', '.join(sorted(updates))}")
+        return config.model_copy(update=updates)
+
     def run_sync(
         self,
         input_data: Any,
@@ -406,6 +434,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
             # instead of overwriting the loaded one in-place.
             self._checkpoint_persisted = True
             self._restore_from_checkpoint(self._checkpoint)
+            config = self._restore_config_from_checkpoint(config, self._checkpoint)
 
             if input_data is None:
                 input_data = self._checkpoint.original_input
@@ -606,6 +635,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
             # instead of overwriting the loaded one in-place.
             self._checkpoint_persisted = True
             self._restore_from_checkpoint(self._checkpoint)
+            config = self._restore_config_from_checkpoint(config, self._checkpoint)
 
             if input_data is None:
                 input_data = self._checkpoint.original_input
