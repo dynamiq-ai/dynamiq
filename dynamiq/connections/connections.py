@@ -702,6 +702,38 @@ class ElevenLabs(Http):
         return self
 
 
+class MiniMaxRegion(str, enum.Enum):
+    """MiniMax API regions."""
+
+    GLOBAL = "global"
+    CHINA = "china"
+
+
+_MINIMAX_TTS_URL_BY_REGION = {
+    MiniMaxRegion.GLOBAL: "https://api.minimax.io/v1/t2a_v2",
+    MiniMaxRegion.CHINA: "https://api.minimaxi.com/v1/t2a_v2",
+}
+
+
+class MiniMax(Http):
+    """Represents an HTTP connection to the MiniMax speech synthesis API."""
+
+    region: MiniMaxRegion = MiniMaxRegion.GLOBAL
+    url: str = Field(default_factory=partial(get_env_var, "MINIMAX_TTS_URL", ""))
+    method: HTTPMethod = HTTPMethod.POST
+    api_key: str = Field(default_factory=partial(get_env_var, "MINIMAX_API_KEY"))
+
+    @model_validator(mode="after")
+    def setup_connection(self) -> "MiniMax":
+        """Select the regional endpoint and configure bearer authentication."""
+        if not self.url:
+            self.url = _MINIMAX_TTS_URL_BY_REGION[self.region]
+        self.headers.update({"Content-Type": "application/json"})
+        if self.api_key:
+            self.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        return self
+
+
 class Pinecone(BaseApiKeyConnection):
     """
     Represents a connection to the Pinecone service.
