@@ -37,6 +37,35 @@ EXTRACTED_TEXT_SUFFIX = ".extracted.txt"
 RESERVED_AGENT_PATH_PREFIX = "._agent"
 
 
+def _find_positions(content: str, needle: str) -> list[int]:
+    """Offsets of every position ``needle`` occurs at, overlapping ones included.
+
+    "aa" in "aaa" reports two candidate positions where ``str.count`` sees one. Either
+    could be the site the caller meant, which is what makes such a find string
+    ambiguous; how many a replacement would actually consume is a separate question,
+    answered by ``str.count``.
+    """
+    if not needle:
+        return []
+    positions = []
+    start = 0
+    while (index := content.find(needle, start)) != -1:
+        positions.append(index)
+        start = index + 1
+    return positions
+
+
+def _line_of(content: str, offset: int) -> int:
+    """1-based line number of a character offset."""
+    return content.count("\n", 0, offset) + 1
+
+
+def _format_lines(numbers: list[int], limit: int = 10) -> str:
+    """Render line numbers as a display string, capped at ``limit``."""
+    shown = ", ".join(str(number) for number in numbers[:limit])
+    return f"{shown}, ..." if len(numbers) > limit else shown
+
+
 def validate_file_path(file_path: str, allow_absolute: bool = False) -> str:
     """
     Validate a file path to prevent path traversal attacks.
@@ -227,12 +256,40 @@ class FileWriteAction(str, enum.Enum):
 class EditOperation(BaseModel):
     """A single find-and-replace operation."""
 
-    find: str = Field(..., min_length=1, description="Exact string to locate in the file (literal match, no regex).")
+    find: str = Field(
+        ...,
+        min_length=1,
+        description="Exact string to locate in the file (literal match, no regex). "
+        "Unless 'replace_all' is set it must match exactly one place in the file, so include "
+        "enough surrounding lines to make it unique — an ambiguous find string fails the edit.",
+    )
     replace: str = Field(..., description="Replacement string.")
     replace_all: bool = Field(
         default=False,
-        description="If true, replace all occurrences. Otherwise only the first.",
+        description="If true, replace every occurrence. Otherwise the find string must be unique.",
     )
+
+
+def _crlf_normalized(content: str, edits: list[EditOperation]) -> tuple[str, bool]:
+    """An LF view of ``content``, and whether the write must restore CRLF.
+
+    A model writes bare newlines -- it does not emit carriage returns -- so a CRLF file
+    would never match a find string it can plainly see, and no amount of re-reading
+    would tell it why. Matching happens on an LF view to close that gap, and the endings
+    go back on at write time: the caller asked to change a line, not the whole file.
+
+    Only a file that is CRLF throughout is normalized. A mixed file has no single
+    convention to put back, so it is matched literally -- restoring a guessed one would
+    rewrite the endings of every line the edit never touched. A caller that spells out a
+    carriage return itself is managing endings deliberately (converting a file, say), so
+    it is likewise left to match literally against the file as stored.
+    """
+    if any("\r" in edit.find or "\r" in edit.replace for edit in edits):
+        return content, False
+    crlf = content.count("\r\n")
+    if crlf and crlf == content.count("\n"):
+        return content.replace("\r\n", "\n"), True
+    return content, False
 
 
 class FileWriteInputSchema(BaseModel):
@@ -257,7 +314,8 @@ class FileWriteInputSchema(BaseModel):
         description="Ordered list of find/replace operations for 'edit' action. "
         "Each entry has 'find', 'replace', and optional 'replace_all' (default false). "
         "Edits are applied sequentially with literal matching. "
-        "Atomic: if any find string is not found, the operation fails with no changes.",
+        "Atomic: if any find string is not found, or matches several places without "
+        "'replace_all', the operation fails with no changes.",
     )
     content_type: str | None = Field(default=None, description="MIME type (auto-detected if not provided)")
     metadata: dict[str, Any] | None = Field(default=None, description="Additional metadata for the file")
@@ -1198,8 +1256,8 @@ class FileWriteTool(Node):
     * **Write mode**: provide ``content`` to create, overwrite, or append to a file.
     * **Edit mode**: provide ``edits`` (a list of find/replace operations) to perform
       atomic in-place edits.  Edits are applied sequentially with literal string
-      matching.  If any ``find`` string is missing, the entire operation is aborted
-      and no changes are written.
+      matching.  If any ``find`` string is missing, or matches several places without
+      ``replace_all``, the entire operation is aborted and no changes are written.
 
     Attributes:
         group (Literal[NodeGroup.TOOLS]): The group to which this tool belongs.
@@ -1216,6 +1274,8 @@ class FileWriteTool(Node):
         "Actions:\n"
         "- write: Create or overwrite a file. Requires 'content'. Set 'append: true' to append.\n"
         "- edit: Atomic find-and-replace on an existing file. Requires 'edits' list with 'find'/'replace' pairs. "
+        "Each 'find' must match exactly one place in the file, so include enough surrounding lines to make it "
+        "unique, or set 'replace_all': true to change every occurrence. "
         "Edits are applied sequentially; a prior replacement may remove a later find string.\n"
         "Example:\n"
         "- Write text: {action: 'write', 'file_path': 'readme.txt', 'content': 'Hello World', "
@@ -1330,27 +1390,39 @@ class FileWriteTool(Node):
 
         Semantics:
         1. **Pre-check**: all ``find`` strings are verified against the *original*
-           file content.  If any are missing the operation is aborted with a
-           ``ToolExecutionException`` and the file is left untouched.
+           file content.  If any are missing the operation is aborted and the file
+           is left untouched.
         2. **Application**: edits are applied sequentially in the order given.
-           Each edit does a literal string replacement (first occurrence only,
-           or all occurrences when ``edit.replace_all`` is set).
-        3. **Conflict handling**: if an earlier edit removes text that a later
+           Each edit does a literal string replacement (the single match, or all
+           occurrences when ``edit.replace_all`` is set).
+        3. **Ambiguity**: a ``find`` string matching more than one position without
+           ``replace_all`` aborts the whole operation instead of editing the first
+           match, since the intended site is unknowable.
+        4. **Conflict handling**: if an earlier edit removes text that a later
            edit targets, the later edit is skipped and a warning is included in
            the returned summary so the caller can take corrective action.
+        5. **Line endings**: a file that is CRLF throughout is matched on an LF
+           view and written back as CRLF, so a caller writing bare newlines can
+           reach it without its untouched lines being rewritten.  See
+           ``_crlf_normalized`` for the cases left to match literally.
 
         Returns:
             Dict with ``content`` (summary with counts and any warnings) and
             ``file_info``.
 
-        Returns a result dict with a message when one or more find strings are absent
-        (no changes written), rather than raising — same pattern as shell command errors.
+        Returns a result dict with a message when find strings are absent or
+        ambiguous (no changes written), rather than raising — same pattern as
+        shell command errors.
         """
         edits = input_data.edits
         encoding = input_data.encoding or "utf-8"
         path = input_data.file_path
 
         content = self.file_store.retrieve(path).decode(encoding)
+        content, restore_crlf = _crlf_normalized(content, edits)
+        # Kept for the abort messages: nothing is written when a batch is refused, so the
+        # stored file is what the caller re-reads, and the only thing they can act on.
+        stored = content
 
         missing = [e.find for e in edits if e.find not in content]
         if missing:
@@ -1363,17 +1435,64 @@ class FileWriteTool(Node):
 
         total = 0
         skipped: list[str] = []
+        ambiguous: list[tuple[str, int]] = []
         for edit in edits:
-            occurrences = content.count(edit.find)
-            if occurrences == 0:
+            # Located against current content, not the original: a prior edit can
+            # add or remove candidate positions, and shift the lines they sit on.
+            positions = _find_positions(content, edit.find)
+            if not positions:
                 skipped.append(edit.find)
                 continue
-            count = occurrences if edit.replace_all else min(1, occurrences)
+            if len(positions) > 1 and not edit.replace_all:
+                ambiguous.append((edit.find, len(positions)))
+                continue
             if edit.replace_all:
+                # str.count, not the candidate positions above: overlapping matches are
+                # what makes a find string ambiguous, not what a replacement consumes.
+                total += content.count(edit.find)
                 content = content.replace(edit.find, edit.replace)
             else:
+                total += 1
                 content = content.replace(edit.find, edit.replace, 1)
-            total += count
+
+        # Checked before any write, so an ambiguous batch leaves the file untouched
+        # rather than applying its unambiguous half.
+        if ambiguous:
+            # Described against the stored file, since that is what the caller can re-read.
+            # A find string unique there was duplicated by an earlier edit in this batch;
+            # telling that caller to add context would send them looking for a second match
+            # the file does not contain.
+            details = []
+            duplicated_by_batch = False
+            for find, count in ambiguous:
+                in_file = _find_positions(stored, find)
+                if len(in_file) > 1:
+                    lines = _format_lines([_line_of(stored, position) for position in in_file])
+                    details.append(f"{repr(find[:80])} matches {len(in_file)} places (lines {lines})")
+                else:
+                    duplicated_by_batch = True
+                    details.append(
+                        f"{repr(find[:80])} occurs once in the file (line {_line_of(stored, in_file[0])}) "
+                        f"but matches {count} places once the edits before it are applied"
+                    )
+            advice = (
+                "Include enough surrounding text to make each find string match exactly one place, "
+                "or set 'replace_all': true to change every occurrence."
+            )
+            if duplicated_by_batch:
+                advice += (
+                    " Where an earlier edit is what creates the duplicate, reorder the edits or "
+                    "anchor on text that edit does not produce."
+                )
+            message = (
+                f"Edit not applied: ambiguous find string(s) in '{path}': {'; '.join(details)}. "
+                f"{advice} No changes were made."
+            )
+            logger.warning(f"Tool {self.name} - {self.id}: {message}")
+            return {"content": message}
+
+        if restore_crlf:
+            content = content.replace("\n", "\r\n")
 
         payload = content.encode(encoding)
         content_type = input_data.content_type or mimetypes.guess_type(path)[0] or "text/plain"
