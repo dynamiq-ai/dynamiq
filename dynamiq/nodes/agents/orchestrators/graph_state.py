@@ -18,6 +18,16 @@ from dynamiq.types.cancellation import CanceledException
 from dynamiq.utils.logger import logger
 
 
+def _parse_manager_agent_input(result: str) -> Any:
+    normalized_result = result.strip()
+    if normalized_result.startswith("```") and normalized_result.endswith("```"):
+        opening_fence, separator, fenced_result = normalized_result.partition("\n")
+        if separator and opening_fence.strip().lower() in {"```", "```json"}:
+            normalized_result = fenced_result.rsplit("```", 1)[0].strip()
+
+    return json.loads(normalized_result)["input"]
+
+
 class StateInputSchema(BaseModel):
     context: dict[str, Any] = Field(..., description="Previous context objects.")
     chat_history: list[dict[str, Any]] = Field(..., description="Previous chat history.")
@@ -197,13 +207,7 @@ class GraphState(Node):
 
                 try:
                     agent_input = {
-                        "input": json.loads(
-                            manager_result.output.get("content")
-                            .get("result")
-                            .replace("json", "")
-                            .replace("```", "")
-                            .strip()
-                        )["input"]
+                        "input": _parse_manager_agent_input(manager_result.output.get("content").get("result"))
                     }
                 except Exception as e:
                     logger.error(f"GraphOrchestrator: Error when parsing response about next state {e}")

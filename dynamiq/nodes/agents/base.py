@@ -258,8 +258,16 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     )
     parallel_tool_calls_enabled: bool = Field(
         default=False,
-        description="Enable multi-tool execution in a single step. "
-        "When True, the agent can call multiple tools in parallel.",
+        description="Run a step's tool calls concurrently. When False, every requested "
+        "tool still runs, one after another — the flag controls how they run, never "
+        "whether they run. Outside FUNCTION_CALLING mode, enabling it also adds the "
+        "`run-parallel` tool, which is what lets the model request a batch at all.",
+    )
+    max_parallel_tool_calls: int = Field(
+        default=8,
+        ge=1,
+        description="Upper bound on tools executing concurrently in one step. Calls beyond "
+        "the limit queue and run as workers free up; none are dropped.",
     )
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
@@ -435,15 +443,19 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if self.file_store.agent_file_write_enabled:
                 self.tools.append(FileWriteTool(file_store=self.file_store_backend))
 
+        if self._skills_should_init():
+            self._init_skills()
+
         if self.parallel_tool_calls_enabled:
             inference_mode = getattr(self, "inference_mode", None)
             use_native_parallel = inference_mode == InferenceMode.FUNCTION_CALLING
             if not use_native_parallel:
                 self.tools = [t for t in self.tools if t.name != PARALLEL_TOOL_NAME]
-                self.tools.append(ParallelToolCallsTool())
+                # Nothing to batch without real tools. Runs after _init_skills so a
+                # skills-only agent is not treated as tool-less.
+                if self.tools:
+                    self.tools.append(ParallelToolCallsTool())
 
-        if self._skills_should_init():
-            self._init_skills()
         self._init_prompt_blocks()
         if self._skills_should_init():
             self._apply_skills_to_prompt()

@@ -4,6 +4,7 @@ import copy
 import functools
 import inspect
 import logging
+import random
 import reprlib
 import time
 from abc import ABC, abstractmethod
@@ -102,6 +103,35 @@ def ensure_config(config: RunnableConfig = None) -> RunnableConfig:
     return config
 
 
+# retry waits are spread by this fraction so nodes failing together do not all wake at once
+RETRY_JITTER_RATIO = 0.1
+
+
+def is_retryable_error(exc: BaseException) -> bool:
+    """Whether waiting and trying again could plausibly succeed.
+
+    Only certainly-permanent failures are non-retryable; anything unrecognised is retried
+    as before. Every node type runs through this loop, not only LLMs.
+    """
+    try:
+        from litellm.exceptions import (
+            AuthenticationError,
+            BadRequestError,
+            BudgetExceededError,
+            NotFoundError,
+            PermissionDeniedError,
+        )
+    except ImportError:  # provider library unavailable: keep retrying as before
+        return True
+
+    # BadRequestError also covers ContextWindowExceededError and UnsupportedParamsError.
+    # RateLimitError is deliberately absent — retryable, and does not subclass these.
+    return not isinstance(
+        exc,
+        (AuthenticationError, PermissionDeniedError, BadRequestError, NotFoundError, BudgetExceededError),
+    )
+
+
 class ErrorHandling(BaseModel):
     """
     Configuration for error handling in nodes.
@@ -111,12 +141,15 @@ class ErrorHandling(BaseModel):
         retry_interval_seconds (float): Interval between retries in seconds.
         max_retries (int): Maximum number of retries.
         backoff_rate (float): Rate of increase for retry intervals.
+        max_retry_interval_seconds (float | None): Hard ceiling on a single backoff wait,
+            applied after jitter. Unset, waits grow unbounded as before.
         behavior (Behavior): Behavior for error handling.
     """
     timeout_seconds: float | None = None
     retry_interval_seconds: float = 1
     max_retries: int = 0
     backoff_rate: float = 1
+    max_retry_interval_seconds: float | None = None
     behavior: Behavior = Behavior.RAISE
 
 
@@ -1525,6 +1558,15 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         """
         pass
 
+    def _retry_backoff_seconds(self, attempt: int) -> float:
+        """Wait before the retry that follows ``attempt``, shared by the sync and async loops."""
+        time_to_sleep = self.error_handling.retry_interval_seconds * (self.error_handling.backoff_rate**attempt)
+        jitter = random.uniform(-RETRY_JITTER_RATIO, RETRY_JITTER_RATIO)  # nosec B311
+        time_to_sleep *= 1 + jitter
+        if self.error_handling.max_retry_interval_seconds is not None:
+            time_to_sleep = min(time_to_sleep, self.error_handling.max_retry_interval_seconds)
+        return time_to_sleep
+
     def execute_with_retry(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs):
         """
         Execute the node with retry logic and automatic connection management.
@@ -1562,10 +1604,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                     logger.error(self._node_run_log(f"Failed to ensure client connection: {conn_error}"))
                     error = conn_error
                     if attempt < n_attempt - 1:
-                        time_to_sleep = self.error_handling.retry_interval_seconds * (
-                            self.error_handling.backoff_rate**attempt
-                        )
-                        logger.info(self._node_run_log(f"retrying connection in {time_to_sleep} seconds."))
+                        time_to_sleep = self._retry_backoff_seconds(attempt)
+                        logger.info(self._node_run_log(f"retrying connection in {time_to_sleep:.2f} seconds."))
                         time.sleep(time_to_sleep)
                         continue
                     else:
@@ -1601,15 +1641,18 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                     self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
                     logger.error(self._node_run_log(f"execution error: {e}"))
 
+                # a permanent failure fails the same way on every attempt
+                if not is_retryable_error(error):
+                    logger.info(self._node_run_log(f"not retrying: {type(error).__name__} cannot succeed on a retry."))
+                    break
+
                 # do not sleep after the last attempt
                 if attempt < n_attempt - 1:
-                    time_to_sleep = self.error_handling.retry_interval_seconds * (
-                        self.error_handling.backoff_rate**attempt
-                    )
-                    logger.info(self._node_run_log(f"retrying in {time_to_sleep} seconds."))
+                    time_to_sleep = self._retry_backoff_seconds(attempt)
+                    logger.info(self._node_run_log(f"retrying in {time_to_sleep:.2f} seconds."))
                     time.sleep(time_to_sleep)
 
-            logger.error(self._node_run_log(f"execution failed after {n_attempt} attempts."))
+            logger.error(self._node_run_log(f"execution failed after {attempt + 1} attempts."))
             raise error
         finally:
             if executor is not None:
@@ -1685,10 +1728,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 logger.error(self._node_run_log(f"Failed to ensure client connection: {conn_error}"))
                 error = conn_error
                 if attempt < n_attempt - 1:
-                    time_to_sleep = self.error_handling.retry_interval_seconds * (
-                        self.error_handling.backoff_rate**attempt
-                    )
-                    logger.info(self._node_run_log(f"retrying connection in {time_to_sleep} seconds."))
+                    time_to_sleep = self._retry_backoff_seconds(attempt)
+                    logger.info(self._node_run_log(f"retrying connection in {time_to_sleep:.2f} seconds."))
                     await asyncio.sleep(time_to_sleep)
                     continue
                 else:
@@ -1720,12 +1761,17 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
                 logger.error(self._node_run_log(f"execution error: {e}"))
 
+            # a permanent failure fails the same way on every attempt
+            if not is_retryable_error(error):
+                logger.info(self._node_run_log(f"not retrying: {type(error).__name__} cannot succeed on a retry."))
+                break
+
             if attempt < n_attempt - 1:
-                time_to_sleep = self.error_handling.retry_interval_seconds * (self.error_handling.backoff_rate**attempt)
-                logger.info(self._node_run_log(f"retrying in {time_to_sleep} seconds."))
+                time_to_sleep = self._retry_backoff_seconds(attempt)
+                logger.info(self._node_run_log(f"retrying in {time_to_sleep:.2f} seconds."))
                 await asyncio.sleep(time_to_sleep)
 
-        logger.error(self._node_run_log(f"execution failed after {n_attempt} attempts."))
+        logger.error(self._node_run_log(f"execution failed after {attempt + 1} attempts."))
         raise error
 
     def get_context_for_input_schema(self) -> dict:
