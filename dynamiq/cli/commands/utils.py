@@ -3,7 +3,10 @@ import click
 from dynamiq.cli.client import HTTPError
 from dynamiq.cli.commands.context import DynamiqCtx, pass_dctx
 
+from .app import app
 from .config import config
+from .connection import connection
+from .dataset import dataset
 from .evaluation import evaluation
 from .integration import integration
 from .org import org
@@ -36,6 +39,12 @@ cli.add_command(integration, name="integration")
 cli.add_command(integration, name="integrations")
 cli.add_command(evaluation, name="evaluation")
 cli.add_command(evaluation, name="evaluations")
+cli.add_command(dataset, name="dataset")
+cli.add_command(dataset, name="datasets")
+cli.add_command(connection, name="connection")
+cli.add_command(connection, name="connections")
+cli.add_command(app, name="app")
+cli.add_command(app, name="apps")
 cli.add_command(trigger, name="trigger")
 cli.add_command(trigger, name="triggers")
 cli.add_command(config)
