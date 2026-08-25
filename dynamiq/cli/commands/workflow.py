@@ -74,7 +74,8 @@ def save_workflow(*, api: ApiClient, settings: Settings, workflow_id: str, flow:
 @with_api_and_settings
 def test_workflow(*, api: ApiClient, settings: Settings, flow: str, input_data: str):
     """Dry-run a flow with the given input, without saving or releasing."""
-    echo_response(api.post("/v1/workflows/test", json={"flow": read_json_arg(flow), "input": read_json_arg(input_data)}))
+    body = {"flow": read_json_arg(flow), "input": read_json_arg(input_data)}
+    echo_response(api.post("/v1/workflows/test", json=body))
 
 
 @workflow.command("release")
