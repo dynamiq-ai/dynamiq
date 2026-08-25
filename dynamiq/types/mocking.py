@@ -72,11 +72,15 @@ mock regardless of the output shape.
 *MCP tool schemas still come from discovery.* An ``MCPServer`` is a discovery
 wrapper: the tool names and schemas an agent can call come from a live ``list_tools``
 call at agent construction, and mocking suppresses execution, not discovery. When a
-**mocked** server is unreachable the run degrades instead of dying — a warning is
-logged and the agent simply does not see that server's tools this run. For full
-fidelity (the agent sees and "calls" the real tool names), the server must be
-reachable at startup; only execution is suppressed. An unreachable *unmocked* server
-still fails loudly, as a real run must.
+**pinned** server (``enabled`` and ``locked``) is unreachable the run degrades instead of
+dying — a warning is logged and the agent simply does not see that server's tools this
+run. Discovery happens before any ``RunnableConfig`` exists, so it cannot know whether a
+given run will mock the server; only a pin is guaranteed to hold under every policy, so
+only a pinned server's tools can never be needed for real. For full fidelity (the agent
+sees and "calls" the real tool names), the server must be reachable at startup; only
+execution is suppressed. An unreachable server that is *unmocked*, or mocked without
+``locked``, still fails loudly — a run that turns that mock off with ``MockPolicy.NONE``
+or an exclusion needs the real tools, and would otherwise proceed silently tool-less.
 
 *Mocking is scoped per node and per run, not per subtree.* Two agents sharing one tool
 instance cannot mock it differently: ``resolve_mock`` sees the node, not the caller. For
@@ -91,6 +95,7 @@ and are **not** sandboxed anywhere in this codebase; treat authoring a workflow 
 a trusted operation. The zero-config path renders no template at all.
 """
 
+import copy
 import reprlib
 from enum import Enum
 from typing import Any
@@ -165,7 +170,10 @@ class MockConfig(BaseModel):
         default=None,
         description=(
             "Fail instead of returning `output`, with this message. Lets a dry run exercise an "
-            "agent's error-handling path without a real failure. Takes precedence over `output`."
+            "agent's error-handling path without a real failure. Takes precedence over `output`. "
+            "Raised once, not once per attempt: the mock seam replaces `execute_with_retry`, so "
+            "`error_handling.max_retries` is not applied to an injected failure the way it would "
+            "be to a real one."
         ),
     )
     latency_seconds: float = Field(default=0.0, ge=0.0, description="Artificial delay before returning.")
@@ -232,7 +240,10 @@ class MockConfig(BaseModel):
             # Verbatim: an authored dict owns the whole output shape, so a retriever mock can be
             # {"documents": [...]} without this adding keys its downstream nodes cannot read.
             # The run is still identifiable as mocked through `metadata.is_mocked` in the trace.
-            return dict(self.output)
+            # Deep-copied because one config serves every call: a Map over 1000 items, or an agent
+            # calling the tool repeatedly, would otherwise hand out the same nested objects, and a
+            # single downstream mutation would rewrite the mock for every later call.
+            return copy.deepcopy(self.output)
         if self.output is None:
             output = {"content": self.describe_skipped_call(node_name, input_data)}
         else:
@@ -266,9 +277,10 @@ class RunMockConfig(BaseModel):
         groups (set[str]): Node groups swept in by ``MockPolicy.ALL``, matched
             against ``Node.group``. Defaults to tools only, so agents keep
             reasoning with real LLMs while their side effects are suppressed.
-        exclude_ids (set[str]): Node ids that are never mocked, under any policy —
-            so a read-only search tool can stay live during an otherwise complete
-            dry run.
+        exclude_ids (set[str]): Node ids kept live under every policy — so a read-only
+            search tool can stay live during an otherwise complete dry run. A ``locked``
+            mock still wins: a pin says the node must never fire, and an exclude list is
+            not allowed to override that.
         exclude_names (set[str]): Same, matched by name. Names are not unique; see
             the field description before using it.
         default (MockConfig): Config used for nodes swept in by ``MockPolicy.ALL``
@@ -282,12 +294,16 @@ class RunMockConfig(BaseModel):
     )
     exclude_ids: set[str] = Field(
         default_factory=set,
-        description="Node ids that are never mocked, under any policy. Unambiguous — prefer this.",
+        description=(
+            "Node ids kept live under every policy, except nodes whose mock is `locked` — a pin "
+            "outranks an exclusion. Unambiguous — prefer this over `exclude_names`."
+        ),
     )
     exclude_names: set[str] = Field(
         default_factory=set,
         description=(
-            "Node names that are never mocked. Names are class defaults and are NOT unique — "
+            "Node names kept live, with the same `locked` carve-out as `exclude_ids`. Names are "
+            "class defaults and are NOT unique — "
             "'api-call' matches every HttpApiCall — so a name here can un-mock more nodes than "
             "intended, including one deliberately mocked because it writes to production. Use "
             "`exclude_ids` unless you mean every node with the name."

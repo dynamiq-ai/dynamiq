@@ -627,16 +627,31 @@ class TestMockSerialization:
         assert restored.mock == node.mock
 
     def test_run_config_is_checkpoint_serializable(self):
-        """Only that the policy survives model_dump — the flow does not restore config on resume.
+        """The policy must survive model_dump, because resume reads it back.
 
-        `Flow` writes `original_config` into the checkpoint but never reads it back (no field on
-        the checkpoint restores a RunnableConfig), so a resumed run uses whatever config the
-        caller passes. That is pre-existing and applies to `cache` and `dry_run` too; a resumed
-        dry run therefore has to be given `mock=` again by the caller.
+        `Flow._restore_config_from_checkpoint` restores `mock` (and `dry_run`,
+        `max_node_workers`) from `original_config` when the caller leaves them unset, so a
+        resumed dry run stays a dry run. End-to-end coverage lives in
+        tests/integration/checkpoints/test_resume_restores_run_config.py; this asserts only
+        the serialization step that restore depends on.
         """
         config = RunnableConfig(mock=RunMockConfig(policy=MockPolicy.ALL, exclude_names={"search"}))
 
         assert config.to_checkpoint_dict()["mock"]["policy"] == "all"
+
+
+class TestMockOutputIsolation:
+    """One config serves every call, so an authored dict must not be shared between them."""
+
+    def test_an_authored_dict_is_not_shared_between_calls(self):
+        mock = MockConfig(enabled=True, output={"documents": [{"content": "a"}]})
+
+        first = mock.render(node_name="retriever", node_id="n1", input_data={})
+        first["documents"].append({"content": "injected"})
+        second = mock.render(node_name="retriever", node_id="n1", input_data={})
+
+        assert second["documents"] == [{"content": "a"}], "a mutation downstream rewrote the mock"
+        assert mock.output == {"documents": [{"content": "a"}]}, "the config itself was mutated"
 
 
 class TestMockAcrossClonedExecution:

@@ -585,10 +585,15 @@ Usage Strategy:
             logger.info(f"Tool {self.name}: {len(self._mcp_tools)} MCP tools initialized from a server.")
         except Exception as e:
             error = format_exception(e)
-            if self.mock.enabled:
-                # A mocked server contributes no real calls, so unreachability must not kill the
-                # run. The cost is fidelity, not safety: without discovery there are no tool
-                # schemas, so the agent will not see this server's tools this run.
+            if self.mock.is_pinned:
+                # Discovery runs at agent construction, before any RunnableConfig exists, so this
+                # cannot ask whether *this run* will mock the server. Only a pinned mock
+                # (enabled and locked) is guaranteed to survive every run-level policy, so only a
+                # pinned server's tools can never be needed for real. An enabled-but-unlocked mock
+                # is still turned off by MockPolicy.NONE or an exclusion, and swallowing the
+                # transport failure there would leave that run silently tool-less.
+                # The cost is fidelity, not safety: without discovery there are no tool schemas,
+                # so the agent will not see this server's tools this run.
                 logger.warning(
                     f"Tool {self.name} - {self.id}: mocked MCP server is unreachable; continuing without "
                     f"its tools. The agent will not see this server's tools this run. Error: {error}"

@@ -328,6 +328,25 @@ class TestUnreachableMCPServer:
 
         assert tools == [], "no schemas means no tools, but the run must continue"
 
+    def test_an_enabled_but_unlocked_unreachable_server_still_fails_loudly(self):
+        """An unlocked mock can be turned off by the run, so its tools may still be needed.
+
+        Discovery happens at agent construction, before any RunnableConfig exists. Degrading
+        here would leave a MockPolicy.NONE run — or one that excluded this server — silently
+        without the tools it explicitly asked to execute for real.
+        """
+        from dynamiq.nodes.agents.exceptions import ToolExecutionException
+
+        server = MCPServer(
+            connection=MCPSse(url="https://gone.example.com/"),
+            name="github-mcp",
+            mock=MockConfig(enabled=True),
+        )
+
+        with patch_discovery_failure():
+            with pytest.raises(ToolExecutionException):
+                server.get_mcp_tools()
+
     def test_an_unmocked_unreachable_server_still_fails_loudly(self):
         """A real run must not silently lose its tools."""
         from dynamiq.nodes.agents.exceptions import ToolExecutionException
