@@ -25,6 +25,7 @@ def list_apps(
     page,
     page_size,
     fetch_all,
+    compact,
 ):
     """List apps in the current project (25 per page; --all for every one)."""
     params: dict = {"project_id": require_project(settings)}
@@ -32,7 +33,7 @@ def list_apps(
         params["workflow_id"] = workflow_id
     if include_archived:
         params["include_archived"] = "true"
-    echo_list(api, "/v1/apps", params, page, page_size, fetch_all)
+    echo_list(api, "/v1/apps", params, page, page_size, fetch_all, compact)
 
 
 @app.command("get")

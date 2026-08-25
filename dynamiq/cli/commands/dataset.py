@@ -14,9 +14,9 @@ dataset = click.Group(
 @dataset.command("list")
 @pagination_options
 @with_api_and_settings
-def list_datasets(*, api: ApiClient, settings: Settings, page, page_size, fetch_all):
+def list_datasets(*, api: ApiClient, settings: Settings, page, page_size, fetch_all, compact):
     """List datasets in the current project (25 per page; --all for every one)."""
-    echo_list(api, "/v1/datasets", {"project_id": require_project(settings)}, page, page_size, fetch_all)
+    echo_list(api, "/v1/datasets", {"project_id": require_project(settings)}, page, page_size, fetch_all, compact)
 
 
 @dataset.command("create")
@@ -44,10 +44,10 @@ def get_dataset(*, api: ApiClient, settings: Settings, dataset_id: str):
 @click.argument("dataset_id")
 @pagination_options
 @with_api_and_settings
-def list_versions(*, api: ApiClient, settings: Settings, dataset_id: str, page, page_size, fetch_all):
+def list_versions(*, api: ApiClient, settings: Settings, dataset_id: str, page, page_size, fetch_all, compact):
     """List a dataset's versions. NOTE: this is `/v1/dataset-versions?dataset_id=...`
     (keyed by dataset_id, NOT project_id)."""
-    echo_list(api, "/v1/dataset-versions", {"dataset_id": dataset_id}, page, page_size, fetch_all)
+    echo_list(api, "/v1/dataset-versions", {"dataset_id": dataset_id}, page, page_size, fetch_all, compact)
 
 
 @dataset.command("version-create")
@@ -87,9 +87,9 @@ def add_items(*, api: ApiClient, settings: Settings, dataset_version_id: str, it
 @click.argument("dataset_version_id")
 @pagination_options
 @with_api_and_settings
-def list_items(*, api: ApiClient, settings: Settings, dataset_version_id: str, page, page_size, fetch_all):
+def list_items(*, api: ApiClient, settings: Settings, dataset_version_id: str, page, page_size, fetch_all, compact):
     """List a version's items (25 per page; --all for every item)."""
-    echo_list(api, "/v1/dataset-items", {"dataset_version_id": dataset_version_id}, page, page_size, fetch_all)
+    echo_list(api, "/v1/dataset-items", {"dataset_version_id": dataset_version_id}, page, page_size, fetch_all, compact)
 
 
 @dataset.command("release")

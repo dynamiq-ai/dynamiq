@@ -86,7 +86,7 @@ def connect(*, api: ApiClient, settings: Settings, connector_id: str):
 @integration.command("accounts")
 @pagination_options
 @with_api_and_settings
-def list_accounts(*, api: ApiClient, settings: Settings, page, page_size, fetch_all):
+def list_accounts(*, api: ApiClient, settings: Settings, page, page_size, fetch_all, compact):
     """List project-scoped Pipedream connected accounts.
 
     GET /v1/pipedream/connect/accounts?project_id=... (project REQUIRED).
@@ -94,7 +94,13 @@ def list_accounts(*, api: ApiClient, settings: Settings, page, page_size, fetch_
     project id, because connections are bound to the project rather than to one user.
     """
     echo_list(
-        api, "/v1/pipedream/connect/accounts", {"project_id": require_project(settings)}, page, page_size, fetch_all
+        api,
+        "/v1/pipedream/connect/accounts",
+        {"project_id": require_project(settings)},
+        page,
+        page_size,
+        fetch_all,
+        compact,
     )
 
 

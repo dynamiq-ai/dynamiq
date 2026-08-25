@@ -26,6 +26,7 @@ def list_connections(
     page,
     page_size,
     fetch_all,
+    compact,
 ):
     """List connections and their ids.
 
@@ -43,7 +44,7 @@ def list_connections(
         params["include_system"] = "true"
     if types:
         params["type"] = list(types)
-    echo_list(api, "/v1/connections", params, page, page_size, fetch_all)
+    echo_list(api, "/v1/connections", params, page, page_size, fetch_all, compact)
 
 
 @connection.command("get")

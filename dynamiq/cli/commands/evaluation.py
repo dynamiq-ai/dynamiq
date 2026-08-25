@@ -11,13 +11,13 @@ evaluation = click.Group(name="evaluation", help="Run and inspect evaluations an
 @evaluation.command("metrics")
 @pagination_options
 @with_api_and_settings
-def list_metrics(*, api: ApiClient, settings: Settings, page, page_size, fetch_all):
+def list_metrics(*, api: ApiClient, settings: Settings, page, page_size, fetch_all, compact):
     """List metrics in the current project (project_id is sent automatically).
 
     Reuse an existing `predefined` metric where possible; note its `id` and
     `latest_version_id` for `evaluation start`.
     """
-    echo_list(api, "/v1/metrics", {"project_id": require_project(settings)}, page, page_size, fetch_all)
+    echo_list(api, "/v1/metrics", {"project_id": require_project(settings)}, page, page_size, fetch_all, compact)
 
 
 @evaluation.command("metric")
@@ -92,9 +92,9 @@ def start_evaluation(*, api: ApiClient, settings: Settings, payload: str):
 @evaluation.command("list")
 @pagination_options
 @with_api_and_settings
-def list_evaluations(*, api: ApiClient, settings: Settings, page, page_size, fetch_all):
+def list_evaluations(*, api: ApiClient, settings: Settings, page, page_size, fetch_all, compact):
     """List evaluations in the current project (25 per page; --all for every one)."""
-    echo_list(api, "/v1/evaluations", {"project_id": require_project(settings)}, page, page_size, fetch_all)
+    echo_list(api, "/v1/evaluations", {"project_id": require_project(settings)}, page, page_size, fetch_all, compact)
 
 
 @evaluation.command("get")
@@ -109,9 +109,9 @@ def get_evaluation(*, api: ApiClient, settings: Settings, evaluation_id: str):
 @click.argument("evaluation_id")
 @pagination_options
 @with_api_and_settings
-def get_results(*, api: ApiClient, settings: Settings, evaluation_id: str, page, page_size, fetch_all):
+def get_results(*, api: ApiClient, settings: Settings, evaluation_id: str, page, page_size, fetch_all, compact):
     """Per-item result rows: each row's workflow output and metric scores (--all for every row)."""
-    echo_list(api, f"/v1/evaluations/{evaluation_id}/results", None, page, page_size, fetch_all)
+    echo_list(api, f"/v1/evaluations/{evaluation_id}/results", None, page, page_size, fetch_all, compact)
 
 
 @evaluation.command("results-download")

@@ -43,9 +43,29 @@ def pagination_options(fn):
     only the first page - `--all` walks every page and returns the complete set.
     """
     fn = click.option("--all", "fetch_all", is_flag=True, help="Fetch every page, not just the first 25.")(fn)
+    fn = click.option(
+        "--compact",
+        is_flag=True,
+        help="Print only id/name/status plus a total count, instead of full objects.",
+    )(fn)
     fn = click.option("--page-size", type=int, default=None, help="Items per page (max 500; API default 25).")(fn)
     fn = click.option("--page", type=int, default=None, help="Page number (API default 1).")(fn)
     return fn
+
+
+COMPACT_FIELDS = ("id", "name", "status", "type", "app_slug", "account_id", "external_user_id")
+
+
+def compact_items(items: list) -> list:
+    """Keep only the identifying fields - list payloads are mostly timestamps and avatars."""
+    out = []
+    for item in items:
+        if not isinstance(item, dict):
+            out.append(item)
+            continue
+        row = {k: item[k] for k in COMPACT_FIELDS if k in item}
+        out.append(row or item)
+    return out
 
 
 def echo_list(
@@ -55,6 +75,7 @@ def echo_list(
     page: int | None = None,
     page_size: int | None = None,
     fetch_all: bool = False,
+    compact: bool = False,
 ) -> None:
     """Print a list endpoint's items, optionally walking every page."""
     params = dict(params or {})
@@ -70,10 +91,19 @@ def echo_list(
         body = response.json()
         pagination = body.get("pagination") or {}
         total = pagination.get("total_count")
-        shown = len(body.get("data") or [])
-        if total is not None and shown < total:
-            click.echo(f"note: showing {shown} of {total}. Use --all to fetch every page.", err=True)
-        click.echo(json.dumps(body, indent=2, ensure_ascii=False))
+        items = body.get("data") or []
+        if total is not None and len(items) < total:
+            click.echo(f"note: showing {len(items)} of {total}. Use --all to fetch every page.", err=True)
+        if compact:
+            click.echo(
+                json.dumps(
+                    {"count": len(items), "total_count": total, "items": compact_items(items)},
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+        else:
+            click.echo(json.dumps(body, indent=2, ensure_ascii=False))
         return
 
     items: list = []
@@ -96,7 +126,8 @@ def echo_list(
             break
         current += 1
 
-    click.echo(json.dumps({"data": items, "count": len(items)}, indent=2, ensure_ascii=False))
+    payload = {"count": len(items), "items": compact_items(items)} if compact else {"count": len(items), "data": items}
+    click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
 
 
 def require_project(settings: Settings) -> str:
@@ -325,7 +356,7 @@ def flow_ui_for(flow: dict) -> dict:
 @workflow.command("list")
 @pagination_options
 @with_api_and_settings
-def list_workflows(*, api: ApiClient, settings: Settings, page, page_size, fetch_all):
+def list_workflows(*, api: ApiClient, settings: Settings, page, page_size, fetch_all, compact):
     """List workflows in the current project.
 
     The API returns 25 per page; pass --all to get every workflow.
@@ -337,6 +368,7 @@ def list_workflows(*, api: ApiClient, settings: Settings, page, page_size, fetch
         page=page,
         page_size=page_size,
         fetch_all=fetch_all,
+        compact=compact,
     )
 
 
