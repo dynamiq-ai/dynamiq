@@ -109,6 +109,16 @@ def build_final_answer_function_schema(response_format: dict | type[BaseModel] |
 PRIORITY_FIELDS = ("brief",)
 
 
+def _is_accessible_to_agent(field: Any) -> bool:
+    """True unless the field is marked ``is_accessible_to_agent=False``.
+
+    Applied to nested model fields as well as top-level ones: this renderer walks
+    ``model_fields`` rather than generating JSON schema, so a field left out of the
+    schema by other means is still described here unless the flag is honoured.
+    """
+    return not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True)
+
+
 def _reorder_fields(fields: dict) -> list[tuple[str, Any]]:
     """Reorder fields so that priority fields (e.g. brief) come first."""
     priority = [(k, v) for k, v in fields.items() if k in PRIORITY_FIELDS]
@@ -131,7 +141,7 @@ def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str]
     for tool in tools:
         params = []
         for name, field in _reorder_fields(tool.resolved_input_schema.model_fields):
-            if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
+            if _is_accessible_to_agent(field):
                 args = get_args(field.annotation)
                 if get_origin(field.annotation) in (Union, types.UnionType):
                     type_str = str(field.annotation)
@@ -141,6 +151,7 @@ def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str]
                     nested_fields = [
                         f"{fn}: {getattr(fi.annotation, '__name__', str(fi.annotation))} - {fi.description or ''}"
                         for fn, fi in args[0].model_fields.items()
+                        if _is_accessible_to_agent(fi)
                     ]
                     type_str = f"list[{{{', '.join(nested_fields)}}}, ...]"
                 else:
