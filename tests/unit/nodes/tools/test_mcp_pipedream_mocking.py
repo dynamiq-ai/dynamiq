@@ -147,6 +147,52 @@ class TestMCPServerMockPropagation:
 
         assert tool.resolve_mock(RunnableConfig()).output == "from tool"
 
+    @staticmethod
+    def _pinned_server_with_a_tool_level_mock():
+        """A server pinned off, one of whose tools carries its own (unlocked) mock."""
+        server = MCPServer(
+            connection=MCPSse(url="https://example.com/"),
+            name="github-mcp",
+            mock=MockConfig(enabled=True, locked=True, output="never fires"),
+        )
+        (tool,) = TestMCPServerMockPropagation.discover(server, "create_issue")
+        tool.mock = MockConfig(enabled=True, output="from tool")
+        return tool
+
+    def test_a_tools_own_mock_keeps_the_servers_pin(self):
+        """Authoring a payload for one tool is not opting out of the server's pin.
+
+        The tool's own config wins on output, but `locked` belongs to whoever pinned the
+        server: without it carried across, MockPolicy.NONE would reach the real server.
+        """
+        tool = self._pinned_server_with_a_tool_level_mock()
+
+        resolved = tool.resolve_mock(RunnableConfig(mock=RunMockConfig(policy=MockPolicy.NONE)))
+
+        assert resolved is not None, "the pinned server would have been contacted for real"
+        assert resolved.output == "from tool", "the tool's own payload must still win"
+
+    def test_excluding_a_tool_cannot_unpin_its_server(self):
+        """An exclusion is a run-level request, and a pin outranks every one of those."""
+        tool = self._pinned_server_with_a_tool_level_mock()
+
+        resolved = tool.resolve_mock(RunnableConfig(mock=RunMockConfig(exclude_ids={tool.id})))
+
+        assert resolved is not None, "the pinned server would have been contacted for real"
+        assert resolved.output == "from tool"
+
+    def test_an_unpinned_server_does_not_pin_its_tools(self):
+        """Only `locked` is inherited; an ordinary server mock stays unpinnned."""
+        server = MCPServer(
+            connection=MCPSse(url="https://example.com/"),
+            name="github-mcp",
+            mock=MockConfig(enabled=True, output="from server"),
+        )
+        (tool,) = self.discover(server, "create_issue")
+        tool.mock = MockConfig(enabled=True, output="from tool")
+
+        assert tool.resolve_mock(RunnableConfig(mock=RunMockConfig(policy=MockPolicy.NONE))) is None
+
     def test_the_server_can_be_excluded_by_its_own_id(self):
         """Tool names are discovered at runtime; the server is the node the operator configured."""
         server = MCPServer(

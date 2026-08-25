@@ -424,10 +424,20 @@ class MCPTool(ConnectionNode):
         ``MCPServer`` is a discovery wrapper whose ``execute`` is disabled, so a mock set on it
         can only take effect through the tools it discovered. Reading it here rather than
         copying it at discovery time means a mock configured after discovery still applies.
+
+        A tool's own mock wins on payload, but not on ``locked``: the pin is the server
+        operator's statement that this server must never fire, and authoring an output for one
+        of its tools is not opting out of it. Without carrying the pin across, a tool-level
+        mock would silently downgrade a pinned server to an unpinned one, and a run with
+        ``MockPolicy.NONE`` (or an exclusion naming the tool) would reach the real server.
         """
         owner_mock = getattr(self._owner_server, "mock", None)
-        if not self.mock.enabled and owner_mock is not None and owner_mock.enabled:
+        if owner_mock is None or not owner_mock.enabled:
+            return self.mock
+        if not self.mock.enabled:
             return owner_mock
+        if owner_mock.locked and not self.mock.locked:
+            return self.mock.model_copy(update={"locked": True})
         return self.mock
 
     @property
