@@ -23,29 +23,49 @@ def is_jsonpath(path: str) -> bool:
         return False
 
 
-def is_expression(path: str, expression_prefixes: tuple = JSONPATH_EXPRESSION_PREFIXES) -> bool:
+def _is_rooted(path: str, expression_prefixes: tuple = JSONPATH_EXPRESSION_PREFIXES) -> bool:
     """
-    Check whether a string is a rooted JSONPath expression rather than a literal value.
+    Check whether a string is *shaped* like a JSONPath expression, ignoring whether it parses.
 
-    `is_jsonpath` alone is not enough here: a bare word such as "a" parses as a valid
-    JSONPath, so plain text would otherwise be mistaken for a path.
+    The prefix alone is not enough: "@channel" starts with "@" and even parses, yet it is an
+    at-mention, not a path. So the root must be the whole string ("$") or be followed by an
+    accessor -- "$.a", "@.content", "$[0]".
 
-    The prefix alone is not enough either. "@channel" both starts with "@" and parses,
-    yet it is an at-mention, not a path. So the root must be the whole string ("$") or
-    be followed by an accessor -- "$.a", "@.content", "$[0]".
+    This is deliberately separate from parseability. A rooted string that `jsonpath_ng`
+    cannot parse is still a path the author *meant* as a path -- it must never be mistaken
+    for a literal default and returned as data.
 
     Args:
         path (str): The string to be checked.
         expression_prefixes (tuple): The prefixes a JSONPath expression must start with.
 
     Returns:
-        bool: True if the string is a rooted JSONPath expression, False otherwise.
+        bool: True if the string is rooted like a JSONPath expression, False otherwise.
     """
     if not isinstance(path, str) or not path.startswith(expression_prefixes):
         return False
 
-    remainder = path[len(next(p for p in expression_prefixes if path.startswith(p))) :]
-    if remainder and not remainder.startswith(JSONPATH_ROOT_ACCESSORS):
+    prefix = next(p for p in expression_prefixes if path.startswith(p))
+    remainder = path[len(prefix) :]
+    return not remainder or remainder.startswith(JSONPATH_ROOT_ACCESSORS)
+
+
+def is_expression(path: str, expression_prefixes: tuple = JSONPATH_EXPRESSION_PREFIXES) -> bool:
+    """
+    Check whether a string is a rooted JSONPath expression rather than a literal value.
+
+    `is_jsonpath` alone is not enough here: a bare word such as "a" parses as a valid
+    JSONPath, so plain text would otherwise be mistaken for a path. `_is_rooted` alone is
+    not enough either, since a rooted string may still fail to parse.
+
+    Args:
+        path (str): The string to be checked.
+        expression_prefixes (tuple): The prefixes a JSONPath expression must start with.
+
+    Returns:
+        bool: True if the string is a rooted, parseable JSONPath expression.
+    """
+    if not _is_rooted(path, expression_prefixes):
         return False
 
     try:
@@ -59,9 +79,13 @@ def _coalesce(json: dict | list, candidates: list[str], expression_prefixes: tup
     Resolve an ordered list of alternatives, e.g. "$.a.output.x || $.b.output.y".
 
     Returns the value of the first candidate that resolves to something, or None.
-    A candidate that is not a rooted JSONPath is a literal default, so a trailing
-    "|| no result" always yields a populated field. Used when branches of a Choice
-    converge on a single field and only one of them produced a value.
+    A candidate that is not rooted is a literal default, so a trailing "|| no result"
+    always yields a populated field. Used when branches of a Choice converge on a
+    single field and only one of them produced a value.
+
+    A rooted candidate that fails to parse is skipped, not returned: it was meant as a
+    path, so the remaining alternatives -- including any literal default -- still get
+    their turn, and the raw expression never leaks out as the field's value.
 
     Args:
         json (dict | list): The input JSON object to resolve against.
@@ -72,12 +96,18 @@ def _coalesce(json: dict | list, candidates: list[str], expression_prefixes: tup
         The first resolved value, or None if nothing resolved.
     """
     for candidate in candidates:
-        if not is_expression(candidate, expression_prefixes):
+        if not _is_rooted(candidate, expression_prefixes):
             return candidate
 
-        found = [match for match in parse(candidate).find(json) if match.value is not None]
-        if found:
-            return found[0].value if len(found) == 1 else [match.value for match in found]
+        if not is_expression(candidate, expression_prefixes):
+            continue
+
+        matches = parse(candidate).find(json)
+        # A candidate counts as resolved only if it matched a non-null value, but the
+        # value itself is built from every match, so shape and length match the plain
+        # (non-coalesced) path exactly.
+        if any(match.value is not None for match in matches):
+            return matches[0].value if len(matches) == 1 else [match.value for match in matches]
 
     return None
 
@@ -115,10 +145,11 @@ def mapper(
     for key, path in expression_map.items():
         if isinstance(path, str) and COALESCE_SEPARATOR in path:
             candidates = [c.strip() for c in path.split(COALESCE_SEPARATOR) if c.strip()]
-            # "||" only means "try these in order" when at least one alternative is a
-            # rooted JSONPath. Otherwise the value is ordinary text that happens to
-            # contain the characters, and must be preserved as-is.
-            if any(is_expression(candidate, expression_prefixes) for candidate in candidates):
+            # "||" only means "try these in order" when at least one alternative is
+            # rooted. Otherwise the value is ordinary text that happens to contain the
+            # characters, and must be preserved as-is. Rootedness, not parseability, is
+            # the test: an unparseable "$..." is still a path the author meant as one.
+            if any(_is_rooted(candidate, expression_prefixes) for candidate in candidates):
                 new_json[key] = _coalesce(json, candidates, expression_prefixes)
                 continue
         if not is_jsonpath(path):

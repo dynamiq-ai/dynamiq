@@ -248,3 +248,113 @@ def test_parallel_fan_in_is_unaffected():
 
     result = workflow.run(input_data={}, config=RunnableConfig())
     assert (result.output or {})["output"]["output"] == {"a": "L", "b": "R"}
+
+
+def _build_ungated_dependency_workflow(with_input_dependency: bool) -> Workflow:
+    """input -> choice -{go}-> branch -> output, output optionally also depending on input.
+
+    The ungated `input` edge is the ordinary case where the Output selector wants a field
+    from the original request alongside the branch result.
+    """
+    input_node = Input(id="input", name="input")
+    choice = Choice(
+        id="choice",
+        name="choice",
+        options=[ChoiceOption(id="go", name="go", condition=_boolean_condition("$.go"))],
+        input_transformer=InputTransformer(selector={"go": "$.input.output.go"}),
+        depends=[NodeDependency(input_node)],
+    )
+    branch = Pass(
+        id="branch",
+        name="branch",
+        input_transformer=InputTransformer(selector={"v": "BRANCH RAN"}),
+        depends=[NodeDependency(choice, option="go")],
+    )
+    output_depends = [NodeDependency(branch)]
+    if with_input_dependency:
+        output_depends.append(NodeDependency(input_node))
+    output = Output(
+        id="output",
+        name="output",
+        input_transformer=InputTransformer(selector={"answer": "$.branch.output.v", "question": "$.input.output.go"}),
+        depends=output_depends,
+    )
+    return Workflow(flow=Flow(nodes=[input_node, choice, branch, output]))
+
+
+@pytest.mark.parametrize("with_input_dependency", [True, False])
+def test_ungated_dependency_does_not_make_skip_tolerance_unconditional(with_input_dependency):
+    """An always-succeeding dependency must not license tolerating every skip.
+
+    `input` never branches, so its success says nothing about which branch ran. Counting
+    it would turn "at least one dependency succeeded" into "always tolerate", and an
+    Output whose only branch was skipped would report success carrying nulls.
+    """
+    workflow = _build_ungated_dependency_workflow(with_input_dependency)
+
+    result = workflow.run(input_data={"go": False}, config=RunnableConfig())
+    per_node = result.output or {}
+
+    assert per_node["branch"]["status"] == RunnableStatus.SKIP.value
+    assert per_node["output"]["status"] == RunnableStatus.SKIP.value
+
+
+@pytest.mark.parametrize("with_input_dependency", [True, False])
+def test_ungated_dependency_still_allows_the_taken_branch_through(with_input_dependency):
+    """The tightened rule must not break the case the PR exists to fix."""
+    workflow = _build_ungated_dependency_workflow(with_input_dependency)
+
+    result = workflow.run(input_data={"go": True}, config=RunnableConfig())
+    per_node = result.output or {}
+
+    assert per_node["output"]["status"] == RunnableStatus.SUCCESS.value
+    assert per_node["output"]["output"] == {"answer": "BRANCH RAN", "question": True}
+
+
+def test_skip_tolerance_survives_an_intermediate_ungated_hop():
+    """Branch-gating is inherited: a plain node downstream of a Choice is still gated.
+
+    input -> choice -{a,b}-> {left,right} -> {left_tail,right_tail} -> output.
+    The Output depends on the tails, whose own edges carry no option.
+    """
+    input_node = Input(id="input", name="input")
+    choice = Choice(
+        id="choice",
+        name="choice",
+        options=[
+            ChoiceOption(id="a", name="a", condition=_boolean_condition("$.go")),
+            ChoiceOption(id="b", name="b", condition=_boolean_condition("$.go", value=False)),
+        ],
+        input_transformer=InputTransformer(selector={"go": "$.input.output.go"}),
+        depends=[NodeDependency(input_node)],
+    )
+    nodes = [input_node, choice]
+    tails = []
+    for name, option in (("left", "a"), ("right", "b")):
+        head = Pass(
+            id=name,
+            name=name,
+            input_transformer=InputTransformer(selector={"v": name.upper()}),
+            depends=[NodeDependency(choice, option=option)],
+        )
+        tail = Pass(
+            id=f"{name}_tail",
+            name=f"{name}_tail",
+            input_transformer=InputTransformer(selector={"v": f"$.{name}.output.v"}),
+            depends=[NodeDependency(head)],
+        )
+        nodes += [head, tail]
+        tails.append(tail)
+
+    output = Output(
+        id="output",
+        name="output",
+        input_transformer=InputTransformer(selector={"output": "$.left_tail.output.v || $.right_tail.output.v"}),
+        depends=[NodeDependency(tail) for tail in tails],
+    )
+    workflow = Workflow(flow=Flow(nodes=nodes + [output]))
+
+    for go, expected in ((True, "LEFT"), (False, "RIGHT")):
+        per_node = workflow.run(input_data={"go": go}, config=RunnableConfig()).output or {}
+        assert per_node["output"]["status"] == RunnableStatus.SUCCESS.value
+        assert per_node["output"]["output"] == {"output": expected}

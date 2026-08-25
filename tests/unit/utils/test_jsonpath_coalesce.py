@@ -162,3 +162,72 @@ def test_mixed_selector_keys():
 def test_coalesce_returns_list_when_one_alternative_matches_many():
     data = {"a": {"output": {"v": [1, 2]}}, "items": [{"v": 1}, {"v": 2}]}
     assert mapper(data, {"output": "$.items[*].v || $.a.output.v"}) == {"output": [1, 2]}
+
+
+# A UUID node id starting with a decimal digit is rooted but cannot be lexed by
+# jsonpath-ng, while one starting with a letter parses. Node ids default to uuid4, so
+# both shapes occur in real workflows.
+UNPARSEABLE = "$.264f2233-1f0a-4b21-8d1e-000000000000.output.content"
+PARSEABLE = "$.ab4f2233-1f0a-4b21-8d1e-000000000000.output.output"
+UUID_DATA = {"ab4f2233-1f0a-4b21-8d1e-000000000000": {"output": {"output": "BLOCKED"}}}
+
+
+def test_unparseable_rooted_alternative_does_not_abort_the_chain():
+    """A rooted path that fails to parse is skipped, so later alternatives still run."""
+    expr = f"{UNPARSEABLE} || {PARSEABLE} || no result"
+
+    assert mapper(UUID_DATA, {"output": expr}) == {"output": "BLOCKED"}
+
+
+def test_unparseable_rooted_alternative_falls_through_to_the_literal_default():
+    assert mapper(UUID_DATA, {"output": f"{UNPARSEABLE} || no result"}) == {"output": "no result"}
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        f"{UNPARSEABLE} || {PARSEABLE}",
+        f"{UNPARSEABLE} || {UNPARSEABLE}",
+        f"{UNPARSEABLE} || no result",
+    ],
+)
+def test_unparseable_rooted_alternative_never_leaks_as_the_value(expr):
+    """The raw selector text must never become a coalesced field's payload.
+
+    A plain, non-coalesced selector that fails to parse is still returned verbatim by
+    `mapper`; that is long-standing behaviour and is not in scope here.
+    """
+    assert "$." not in str(mapper(UUID_DATA, {"output": expr})["output"])
+
+
+def test_coalesce_is_a_no_op_when_only_unparseable_paths_are_offered():
+    assert mapper(UUID_DATA, {"output": f"{UNPARSEABLE} || {UNPARSEABLE}"}) == {"output": None}
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"items": [{"v": None}, {"v": 2}]},
+        {"items": [{"v": 1}, {"v": None}, {"v": 2}]},
+        {"items": [{"v": 1}, {"v": 2}]},
+        {"items": [{"v": 1}]},
+    ],
+)
+def test_multi_match_shape_matches_the_plain_path(data):
+    """Adding a `||` tail must not change the type or length of a multi-match result.
+
+    Nulls are what decide whether an alternative resolved, but they must not be stripped
+    from the value itself, or a list silently collapses to a scalar and positions stop
+    lining up with the collection they came from.
+    """
+    plain = mapper(data, {"k": "$.items[*].v"})
+    coalesced = mapper(data, {"k": "$.items[*].v || fallback"})
+
+    assert coalesced == plain
+
+
+def test_all_null_multi_match_falls_through():
+    """Every match being null means the alternative did not resolve."""
+    data = {"items": [{"v": None}, {"v": None}]}
+
+    assert mapper(data, {"k": "$.items[*].v || fallback"}) == {"k": "fallback"}
