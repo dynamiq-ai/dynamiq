@@ -218,6 +218,52 @@ class TestMockedSubAgentTool:
         assert CHARGES == []
 
 
+class TestMockedDelegationDoesNotEchoCallerContext:
+    """Per-agent ids and metadata are injected for the sub-agent to consume, not to be shown.
+
+    A mocked delegation runs on the wrapper, whose schema is `extra="allow"`, so anything
+    injected would be echoed back into the parent's transcript and trace.
+    """
+
+    CONTEXT = {
+        "user_id": "user-8842",
+        "session_id": "sess-privileged-7f31",
+        "metadata": {"tenant": "acme", "internal_billing_ref": "BR-99213"},
+    }
+
+    def build(self, test_llm, mock: MockConfig) -> tuple[Agent, Agent, SubAgentTool]:
+        child_llm = OpenAI(connection=OpenAIConnection(api_key="test-api-key"), model="gpt-4o-mini")
+        child = Agent(id="child", name="specialist", llm=child_llm, role="do the work")
+        wrapper = SubAgentTool(agent=child, name="specialist", description="Delegates.", mock=mock)
+        parent = Agent(id="parent", name="coordinator", llm=test_llm, role="delegate", tools=[wrapper])
+        parent._current_call_context = dict(self.CONTEXT)
+        return parent, child, wrapper
+
+    def test_the_suppressed_call_description_carries_no_injected_context(self, test_llm):
+        """Zero-config mock: `describe_skipped_call` renders the input the node would have run with."""
+        parent, _child, wrapper = self.build(test_llm, MockConfig(enabled=True))
+
+        content, _files, meta = parent._run_tool(wrapper, {"input": "go"}, RunnableConfig(), tool_run_id="rid")
+
+        assert meta["is_mocked"] is True
+        for leaked in ("user_id", "session_id", "user-8842", "sess-privileged-7f31", "BR-99213"):
+            assert leaked not in content, f"{leaked} reached the parent transcript"
+        assert "'input': 'go'" in content, "the model's own arguments are still described"
+
+    def test_a_real_delegation_still_receives_the_injected_context(self, test_llm):
+        """The guard must be narrow: an unmocked delegation is unchanged."""
+        parent, _child, wrapper = self.build(test_llm, MockConfig())
+
+        with patch.object(Agent, "run") as child_run:
+            child_run.return_value = RunnableResult(status=RunnableStatus.SUCCESS, output={"content": "did it"})
+            parent._run_tool(wrapper, {"input": "go"}, RunnableConfig(), tool_run_id="rid")
+
+        delegated_input = child_run.call_args.kwargs["input_data"]
+        assert delegated_input["user_id"] == "user-8842:specialist"
+        assert delegated_input["session_id"] == "sess-privileged-7f31:specialist"
+        assert delegated_input["metadata"] == self.CONTEXT["metadata"]
+
+
 class TestMockedSubAgentToolInFactoryMode:
     """Factory mode is the only mode that allows parallel delegation, so A/B runs land here."""
 

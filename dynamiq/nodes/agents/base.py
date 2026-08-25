@@ -1693,7 +1693,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 # replace semantics and throw the model's arguments away.
                 child_kwargs["use_input_transformer"] = False
 
-            if is_child_agent and self._current_call_context:
+            # Not when mocked: no sub-agent consumes these, so they would only surface in the
+            # suppressed-call description, i.e. in a transcript a real delegation never puts them in.
+            if is_child_agent and self._current_call_context and not is_delegation_mocked:
                 child_context = self._build_child_agent_context(resolved_agent)
                 for ctx_key in ("user_id", "session_id"):
                     if ctx_key not in merged_input and child_context.get(ctx_key):
