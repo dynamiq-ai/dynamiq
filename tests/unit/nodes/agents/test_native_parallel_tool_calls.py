@@ -874,6 +874,47 @@ class TestDelegateFinalMustStandAlone:
         assert state["n"] == 2, "the sub-agent must never have been invoked"
         assert result.output["content"] == "MODEL ANSWER", "the run must end on the model's own single answer"
 
+    def test_a_refused_call_keeps_its_place_in_the_batch_stream(self):
+        """Each tool_run_id was already bound to a tool name client-side while the calls were
+        streaming. Dropping the refused call from the batch shifted every later tool onto an id
+        that belonged to a different tool, so its result landed on the wrong card."""
+        from dynamiq.runnables import RunnableConfig, RunnableStatus
+
+        probe = {"ran": []}
+        agent = self._parent_with_sub_agent(probe)
+        # One id per streamed tool call, minted by the streaming callback in call order.
+        agent._streaming_tool_run_ids = ["id-A", "id-B", "id-C"]
+
+        tools_data = [
+            {"name": "probe", "input": {"i": 1}, "thought": "t", "tool_call_id": "call_1"},
+            {
+                "name": "sub_agent",
+                "input": {"input": "do it", "delegate_final": True},
+                "thought": "t",
+                "tool_call_id": "call_2",
+            },
+            {"name": "probe", "input": {"i": 2}, "thought": "t", "tool_call_id": "call_3"},
+        ]
+
+        with patch.object(type(agent), "_stream_agent_event") as stream:
+            agent._execute_tools(tools_data, "batch", 1, RunnableConfig())
+
+        events = [call[0] for call in stream.call_args_list]
+        reasoning = next(e[0] for e in events if e[1] == "reasoning" and e[0].action == PARALLEL_TOOL_NAME)
+        completion = next(e[0] for e in events if e[1] == "tool" and e[0].name == PARALLEL_TOOL_NAME)
+
+        assert [(entry["action"], entry["tool_run_id"]) for entry in reasoning.action_input] == [
+            ("probe", "id-A"),
+            ("sub_agent", "id-B"),
+            ("probe", "id-C"),
+        ], "a refused call must keep its slot so the surviving tools keep their own ids"
+
+        assert [entry["name"] for entry in completion.result] == ["probe", "sub_agent", "probe"]
+        by_run_id = {entry["tool_run_id"]: entry["status"] for entry in completion.result}
+        assert by_run_id["id-B"] == RunnableStatus.FAILURE, "the refused call must not stream as a success"
+        assert completion.status == RunnableStatus.FAILURE, "a batch holding a refusal did not succeed"
+        assert probe["ran"] == [1, 2], "the siblings of a refused delegation must still run"
+
     def test_a_lone_delegation_still_ends_the_run_with_its_result(self):
         """The flag survives the batch path when nothing else was called — dropping it here
         is what let the loop run on and produce a second answer."""

@@ -2389,11 +2389,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         # Refused before execution: _execute_single_tool streams the delegated answer.
         if len(prepared_tools) > 1:
-            executable: list[dict[str, Any]] = []
             for tool_payload in prepared_tools:
                 tool = self.tool_by_names.get(self.sanitize_tool_name(tool_payload["name"]))
                 if not self._should_delegate_final(tool, tool_payload["input"]):
-                    executable.append(tool_payload)
                     continue
                 refusal = (
                     f"'{tool_payload['name']}' was not executed: delegate_final cannot be combined with "
@@ -2401,6 +2399,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     "again without delegate_final to use its output as an observation."
                 )
                 logger.warning(f"Agent {self.name} - {self.id}: {refusal}")
+                tool_payload["refused"] = True
                 all_results.append(
                     {
                         "order": tool_payload["order"],
@@ -2411,7 +2410,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         "files": [],
                     }
                 )
-            prepared_tools = executable
+
+        # Refused calls stay in prepared_tools so the batch stream keeps one entry per requested
+        # call: dropping them shifts every later tool onto a tool_run_id the client already bound
+        # to a different tool. Only execution skips them.
+        executable = [tp for tp in prepared_tools if not tp.get("refused")]
 
         def _execute_single_tool_to_result(tool_payload: dict[str, Any], **extra) -> dict[str, Any]:
             """Execute a single tool and wrap the result as a dict."""
@@ -2449,8 +2452,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     prepared_tools, thought, loop_num, config, **kwargs
                 )
 
-                parallel_group = [tp for tp in prepared_tools if self._is_tool_parallel_eligible(tp["name"])]
-                sequential_group = [tp for tp in prepared_tools if not self._is_tool_parallel_eligible(tp["name"])]
+                parallel_group = [tp for tp in executable if self._is_tool_parallel_eligible(tp["name"])]
+                sequential_group = [tp for tp in executable if not self._is_tool_parallel_eligible(tp["name"])]
 
                 if sequential_group:
                     seq_names = [tp["name"] for tp in sequential_group]
