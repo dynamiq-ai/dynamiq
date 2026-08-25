@@ -13,6 +13,7 @@ This directory contains examples demonstrating how to use and integrate various 
 ### Code Execution
 
 - **`use_react_with_coding.py`**: Showcases a `Agent` equipped with an `E2BInterpreterTool` for executing Python code. The agent solves coding tasks and provides results.
+- **`use_react_with_coding_agentcore.py`**: The same agent backed by a `BedrockAgentCoreInterpreterTool`, running code in an AWS Bedrock AgentCore session instead of E2B. Note that the built-in `aws.codeinterpreter.v1` interpreter has no network egress, so tasks must be solvable without web access or `pip install`.
 
 ### API Interaction
 

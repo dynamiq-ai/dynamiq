@@ -1,7 +1,10 @@
 """History and context management mixin for agents."""
 
+import json
+
 from litellm import token_counter
 
+from dynamiq.nodes.agents.prompts.secondary_instructions import AGENT_NOTES_FILENAME, NOTES_REVISIT_INSTRUCTION_TEMPLATE
 from dynamiq.nodes.agents.utils import extract_message_text
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.utils.logger import logger
@@ -18,7 +21,59 @@ class HistoryManagerMixin:
       everything from this index onward is eligible for summarization.
     - name: str agent name
     - id: str agent id
+    - sandbox_backend (optional): sandbox used to resolve the persistent
+      notes file path.
     """
+
+    def get_notes_file_path(self) -> str | None:
+        """Path of the dedicated persistent-notes file, or None without a sandbox.
+
+        The file lives in the sandbox so exact values survive context
+        compaction; the path is advertised in the system prompt and
+        re-surfaced in the compaction observation.
+        """
+        sandbox = getattr(self, "sandbox_backend", None)
+        if sandbox is not None:
+            return f"{sandbox.base_path.rstrip('/')}/{AGENT_NOTES_FILENAME}"
+        return None
+
+    def count_context_tokens(self) -> dict[str, int]:
+        """Tokens the request will carry, by component.
+
+        ``tools`` and ``response_format`` are sent as request parameters rather than
+        messages, so they are invisible to a message-only count. In FUNCTION_CALLING mode
+        the schemas alone can be several thousand tokens.
+
+        Split rather than summed because they are different levers: compaction shrinks the
+        conversation and can do nothing about the schemas.
+        """
+        messages = self._prompt.count_tokens(self.llm.model)
+
+        # same accessor the request uses, so a run-time tool overlay is counted too
+        if effective := getattr(self, "_effective_inference_schemas", None):
+            tool_schemas, response_schema = effective()
+        else:
+            tool_schemas = getattr(self, "_tools", None)
+            response_schema = getattr(self, "_response_format", None)
+
+        tools = 0
+        if tool_schemas:
+            tools = token_counter(
+                model=self.llm.model,
+                messages=[],
+                tools=[s if isinstance(s, dict) else s.model_dump() for s in tool_schemas],
+            )
+
+        response_format = 0
+        if response_schema:
+            response_format = token_counter(model=self.llm.model, text=json.dumps(response_schema))
+
+        return {
+            "messages": messages,
+            "tools": tools,
+            "response_format": response_format,
+            "total": messages + tools + response_format,
+        }
 
     def is_token_limit_exceeded(self) -> bool:
         """
@@ -27,12 +82,23 @@ class HistoryManagerMixin:
         Returns:
             bool: Whether token limit is exceeded
         """
-        prompt_tokens = self._prompt.count_tokens(self.llm.model)
+        tokens = self.count_context_tokens()
+        prompt_tokens = tokens["total"]
 
-        return (
-            self.summarization_config.max_token_context_length
-            and prompt_tokens > self.summarization_config.max_token_context_length
-        ) or (prompt_tokens / self.llm.get_token_limit() > self.summarization_config.context_usage_ratio)
+        exceeded = bool(
+            (
+                self.summarization_config.max_token_context_length
+                and prompt_tokens > self.summarization_config.max_token_context_length
+            )
+            or (prompt_tokens / self.llm.get_token_limit() > self.summarization_config.context_usage_ratio)
+        )
+        if exceeded:
+            logger.info(
+                f"Agent {self.name} - {self.id}: context at {prompt_tokens}/{self.llm.get_token_limit()} tokens "
+                f"(messages={tokens['messages']}, tools={tokens['tools']}, "
+                f"response_format={tokens['response_format']})."
+            )
+        return exceeded
 
     def _split_history(
         self,
@@ -108,6 +174,9 @@ class HistoryManagerMixin:
                 preserved_has_pinned = any(extract_message_text(m) == pinned_content for m in preserved)
                 if not preserved_has_pinned:
                     summary = f"{summary}\n\nOriginal request: {pinned_content}"
+
+            if notes_path := self.get_notes_file_path():
+                summary = f"{summary}\n\n{NOTES_REVISIT_INSTRUCTION_TEMPLATE.format(notes_path=notes_path)}"
 
             self._prompt.messages.append(
                 Message(role=MessageRole.USER, content=f"Observation: {summary}\n", static=True)

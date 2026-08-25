@@ -21,8 +21,43 @@ class HumanFeedbackAction(str, Enum):
     INFO = "info"  # Send info message without waiting for response
 
 
+class QuestionOption(BaseModel):
+    """A single choice offered for a structured question."""
+
+    label: str
+    description: str | None = None
+
+
+class Question(BaseModel):
+    """A single structured question, one of up to 4 asked in a single 'ask' batch."""
+
+    id: str | None = Field(default=None, description="Defaults to the question's index within the batch.")
+    header: str | None = Field(default=None, description="Short chip label for the question, e.g. 'Scope'.")
+    question: str
+    options: list[QuestionOption] = Field(default_factory=list)
+    multi_select: bool = False
+    allow_custom_answer: bool = Field(
+        default=True, description="Whether a free-text 'Other' answer is allowed alongside/instead of options."
+    )
+
+    @model_validator(mode="after")
+    def validate_options(self):
+        if self.options and not (2 <= len(self.options) <= 4):
+            raise ValueError("'options' must contain between 2 and 4 choices when provided.")
+        return self
+
+
+class Answer(BaseModel):
+    """A user's answer to one Question."""
+
+    question_id: str
+    selected: list[str] = Field(default_factory=list)
+    custom_text: str | None = None
+
+
 class HFStreamingInputEventMessageData(BaseModel):
-    content: str
+    content: str = ""
+    answers: list[Answer] | None = None
 
 
 class HFStreamingInputEventMessage(StreamingEventMessage):
@@ -33,10 +68,39 @@ class HFStreamingOutputEventMessageData(BaseModel):
     prompt: str
     action: HumanFeedbackAction = HumanFeedbackAction.ASK
     is_browser_takeover: bool = False
+    questions: list[Question] | None = None
 
 
 class HFStreamingOutputEventMessage(StreamingEventMessage):
     data: HFStreamingOutputEventMessageData
+
+
+def _render_questions_prompt(questions: list[Question]) -> str:
+    """Render structured questions as numbered text, for text-only consumers (Slack, old UIs, LLM fallback)."""
+    lines = []
+    for index, question in enumerate(questions, start=1):
+        header = f"[{question.header}] " if question.header else ""
+        lines.append(f"{index}. {header}{question.question}")
+        for option in question.options:
+            suffix = f" - {option.description}" if option.description else ""
+            lines.append(f"   - {option.label}{suffix}")
+        if question.allow_custom_answer:
+            lines.append("   - Other (free text)")
+    return "\n".join(lines)
+
+
+def _format_answers_for_llm(questions: list[Question], answers: list[Answer]) -> str:
+    """Format structured answers as a readable observation for the LLM."""
+    questions_by_id = {(question.id or str(index)): question for index, question in enumerate(questions)}
+    lines = []
+    for answer in answers:
+        question = questions_by_id.get(answer.question_id)
+        label = question.question if question else answer.question_id
+        parts = list(answer.selected)
+        if answer.custom_text:
+            parts.append(f"other: {answer.custom_text}")
+        lines.append(f"Q: {label} -> A: {', '.join(parts) if parts else '(no answer)'}")
+    return "\n".join(lines)
 
 
 class InputMethodCallable(ABC):
@@ -93,7 +157,18 @@ class HumanFeedbackInputSchema(BaseModel):
         description="The message or question shown to the user. Rendered via the message template "
         "(default template is '{{input}}').",
     )
+    questions: list[Question] | None = Field(
+        default=None,
+        description="Optional, for action='ask' only: 1-4 structured questions, each offering 2-4 selectable "
+        "options (single- or multi-select) plus an optional free-text 'Other' answer.",
+    )
     model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="after")
+    def validate_questions(self):
+        if self.questions is not None and not (1 <= len(self.questions) <= 4):
+            raise ValueError("'questions' must contain between 1 and 4 questions.")
+        return self
 
 
 class HumanFeedbackTool(Node):
@@ -119,9 +194,14 @@ class HumanFeedbackTool(Node):
 
 Use 'ask' action to request input - workflow WAITS for user response before continuing.
 Use 'info' action to send notification - workflow continues immediately without waiting.
+For 'ask', you may optionally pass 1-4 structured 'questions' instead of (or in addition to) free-text
+'input' - each question can offer 2-4 selectable options (single- or multi-select) plus a free-text
+'Other' answer, so the user can click instead of typing.
 
 Examples:
 - {"action": "ask", "input": "Should I proceed? (yes/no)"}
+- {"action": "ask", "questions": [{"question": "Which scope?", "options": [{"label": "Q1 only"}, \
+{"label": "Full year"}]}]}
 - {"action": "info", "input": "Task completed."}
 
 Important:
@@ -199,26 +279,38 @@ Important:
 
         return result.get("feedback", "")
 
-    def input_method_streaming(self, prompt: str, config: RunnableConfig, **kwargs) -> str:
+    def input_method_streaming(
+        self, prompt: str, config: RunnableConfig, questions: list[Question] | None = None, **kwargs
+    ) -> tuple[str, list[Answer] | None]:
         """
         Get input from the user using the queue streaming input method.
 
         Args:
             prompt (str): The prompt to display to the user.
             config (RunnableConfig, optional): The configuration for the runnable. Defaults to None.
+            questions (list[Question] | None): Optional structured questions to ask alongside/instead of prompt.
 
         Returns:
-            str: The user's input.
+            tuple[str, list[Answer] | None]: The rendered text observation, and the raw structured
+                answers if the reply carried any.
         """
         check_cancellation(config)
 
         streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
 
+        if questions:
+            for index, question in enumerate(questions):
+                if question.id is None:
+                    question.id = str(index)
+
         event = HFStreamingOutputEventMessage(
             wf_run_id=config.run_id,
             entity_id=self.id,
             data=HFStreamingOutputEventMessageData(
-                prompt=prompt, action=HumanFeedbackAction.ASK, is_browser_takeover=self.is_browser_takeover
+                prompt=prompt,
+                action=HumanFeedbackAction.ASK,
+                is_browser_takeover=self.is_browser_takeover,
+                questions=questions,
             ),
             event=streaming.event,
             source=StreamingEntitySource(
@@ -237,7 +329,11 @@ Important:
         )
         logger.debug(f"Tool {self.name} - {self.id}: received input event {event}")
 
-        return event.data.content
+        answers = event.data.answers
+        content = event.data.content
+        if answers and not content:
+            content = _format_answers_for_llm(questions or [], answers)
+        return content, answers
 
     def output_method_console(self, message: str) -> None:
         """
@@ -275,23 +371,25 @@ Important:
         logger.debug(f"Tool {self.name} - {self.id}: sending output event {event}")
         self.run_on_node_execute_stream(callbacks=config.callbacks, event=event, **kwargs)
 
-    def _execute_ask(self, input_text: str, config: RunnableConfig, **kwargs) -> str:
+    def _execute_ask(
+        self, input_text: str, config: RunnableConfig, questions: list[Question] | None = None, **kwargs
+    ) -> tuple[str, list[Answer] | None]:
         """Execute the 'ask' action - get input from user."""
         check_cancellation(config)
         if isinstance(self.input_method, FeedbackMethod):
             if self.input_method == FeedbackMethod.CONSOLE:
-                return self.input_method_console(input_text, config=config)
+                return self.input_method_console(input_text, config=config), None
             elif self.input_method == FeedbackMethod.STREAM:
                 streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
                 if not streaming.input_streaming_enabled:
                     raise ValueError(
                         f"'{FeedbackMethod.STREAM}' input method requires enabled input and output streaming."
                     )
-                return self.input_method_streaming(prompt=input_text, config=config, **kwargs)
+                return self.input_method_streaming(prompt=input_text, config=config, questions=questions, **kwargs)
             else:
                 raise ValueError(f"Unsupported input method: {self.input_method}")
         else:
-            return self.input_method.get_input(input_text)
+            return self.input_method.get_input(input_text), None
 
     def _execute_send(self, input_text: str, config: RunnableConfig, **kwargs) -> None:
         """Execute the 'info' action - send info message to user."""
@@ -321,7 +419,8 @@ Important:
             **kwargs: Additional keyword arguments to be passed to the node execute run.
 
         Returns:
-            dict[str, Any]: A dictionary containing the result under the 'content' key.
+            dict[str, Any]: A dictionary with the result under 'content', plus 'answers' (the raw
+                structured answers) when the reply to a structured ask carried any.
         """
         config = ensure_config(config)
         check_cancellation(config)
@@ -331,8 +430,20 @@ Important:
         action = self.action if self.action is not None else input_data.action
 
         if action == HumanFeedbackAction.ASK:
-            result = self._execute_ask(input_text, config, **kwargs)
-            return {"content": result}
+            # Browser takeover hands control to the user directly; structured click-through
+            # questions don't apply there, so any questions are ignored in that mode.
+            questions = getattr(input_data, "questions", None) if not self.is_browser_takeover else None
+            prompt_text = input_text
+            if questions:
+                rendered_questions = _render_questions_prompt(questions)
+                prompt_text = f"{input_text}\n{rendered_questions}".strip() if input_text else rendered_questions
+
+            content, answers = self._execute_ask(prompt_text, config, questions=questions, **kwargs)
+            logger.debug(f"Tool {self.name} - {self.id}: finished with result {content}")
+            result = {"content": content}
+            if answers is not None:
+                result["answers"] = [answer.model_dump() for answer in answers]
+            return result
         elif action == HumanFeedbackAction.INFO:
             self._execute_send(input_text, config, **kwargs)
             logger.debug(f"Tool {self.name} - {self.id}: message sent")

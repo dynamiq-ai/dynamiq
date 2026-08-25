@@ -1,0 +1,92 @@
+connections:
+    textract-connection:
+        type: dynamiq.connections.AWSTextract
+        access_key_id: ${oc.env:AWS_ACCESS_KEY_ID,null}
+        secret_access_key: ${oc.env:AWS_SECRET_ACCESS_KEY,null}
+        region: ${oc.env:AWS_DEFAULT_REGION,us-east-1}
+
+nodes:
+    input:
+        id: input
+        name: input
+        type: dynamiq.nodes.utils.Input
+        error_handling: {}
+        schema:
+            properties:
+                files:
+                    deletable: true
+                    required: false
+                    type: list[file]
+                file_paths:
+                    deletable: true
+                    required: false
+                    type: Any
+                metadata:
+                    deletable: true
+                    required: false
+                    type: Any
+    textract-file-converter:
+        id: textract-file-converter
+        name: textract-file-converter
+        type: dynamiq.nodes.converters.TextractFileConverter
+        connection: textract-connection
+        input_transformer:
+            selector:
+                files: $.input.output.files
+                file_paths: $.input.output.file_paths
+                metadata: $.input.output.metadata
+        output_transformer: {}
+        caching:
+            enabled: false
+        streaming:
+            enabled: false
+        error_handling:
+            timeout_seconds: 900
+            max_retries: 1
+            retry_interval_seconds: 5
+        depends:
+            - node: input
+        # Each feature adds cost and latency. Drop this key for the cheaper DetectDocumentText
+        # API, which returns plain text lines only.
+        feature_types:
+            - layout
+            - tables
+            - forms
+            - signatures
+        # One Document per input file. Use "one-doc-per-page" to keep pages separate.
+        document_creation_mode: one-doc-per-file
+        render_tables_as_markdown: true
+        include_form_section: true
+        skip_headers_and_footers: true
+        min_confidence: 60
+        # Async is the default. Local files are staged in Dynamiq's internal per-account/per-region
+        # bucket and removed after processing; its one-day retention policy is not configurable.
+    output:
+        id: output
+        name: output
+        type: dynamiq.nodes.utils.Output
+        input_transformer:
+            selector:
+                output: $.textract-file-converter.output.documents
+        error_handling: {}
+        depends:
+            - node: textract-file-converter
+        schema:
+            properties:
+                output:
+                    deletable: true
+                    required: true
+                    type: Any
+
+flows:
+    textract-converter-flow:
+        name: Textract Converter Flow
+        nodes:
+            - input
+            - textract-file-converter
+            - output
+
+workflows:
+    textract-converter-workflow:
+        flow: textract-converter-flow
+        version: 1
