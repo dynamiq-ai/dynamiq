@@ -2,6 +2,7 @@ from jsonpath_ng import parse
 from jsonpath_ng.exceptions import JsonPathParserError
 
 JSONPATH_EXPRESSION_PREFIXES = ("$", "@")
+JSONPATH_ROOT_ACCESSORS = (".", "[")
 COALESCE_SEPARATOR = "||"
 
 
@@ -29,6 +30,10 @@ def is_expression(path: str, expression_prefixes: tuple = JSONPATH_EXPRESSION_PR
     `is_jsonpath` alone is not enough here: a bare word such as "a" parses as a valid
     JSONPath, so plain text would otherwise be mistaken for a path.
 
+    The prefix alone is not enough either. "@channel" both starts with "@" and parses,
+    yet it is an at-mention, not a path. So the root must be the whole string ("$") or
+    be followed by an accessor -- "$.a", "@.content", "$[0]".
+
     Args:
         path (str): The string to be checked.
         expression_prefixes (tuple): The prefixes a JSONPath expression must start with.
@@ -37,6 +42,10 @@ def is_expression(path: str, expression_prefixes: tuple = JSONPATH_EXPRESSION_PR
         bool: True if the string is a rooted JSONPath expression, False otherwise.
     """
     if not isinstance(path, str) or not path.startswith(expression_prefixes):
+        return False
+
+    remainder = path[len(next(p for p in expression_prefixes if path.startswith(p))) :]
+    if remainder and not remainder.startswith(JSONPATH_ROOT_ACCESSORS):
         return False
 
     try:

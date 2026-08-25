@@ -90,6 +90,10 @@ def test_coalesce_does_not_leak_the_expression_as_a_value():
         "trailing ||",
         "spaced  ||  out",
         "||",
+        # Prefixed text that parses as a JSONPath but is not one: an at-mention and a price.
+        "@channel || @here",
+        "@alice||@bob",
+        "$100 || $50",
     ],
 )
 def test_literal_values_containing_the_separator_are_preserved(literal):
@@ -104,10 +108,23 @@ def test_literal_values_containing_the_separator_are_preserved(literal):
 def test_is_expression_requires_a_root():
     assert is_expression("$.agent.output.content") is True
     assert is_expression("@.content") is True
+    assert is_expression("$[0]") is True
+    assert is_expression("$") is True
+    assert is_expression("@") is True
     # Parses as a JSONPath but is not rooted, so it is a literal here.
     assert is_expression("agent") is False
     assert is_expression("a") is False
     assert is_expression("no result") is False
+    # Prefixed, and parses, but the root is not followed by an accessor: still a literal.
+    assert is_expression("@channel") is False
+    assert is_expression("@here") is False
+    assert is_expression("$100") is False
+
+
+@pytest.mark.parametrize("default", ["no result", "@channel", "$100", "N/A"])
+def test_literal_default_survives_whatever_it_starts_with(default):
+    """The trailing literal default is returned as written, prefix characters included."""
+    assert mapper(NEITHER_RAN, {"output": f"{COALESCE} {COALESCE_SEPARATOR} {default}"}) == {"output": default}
     # Never raises, whatever it is given.
     assert is_expression("{{ template }}") is False
     assert is_expression("$.broken[") is False
