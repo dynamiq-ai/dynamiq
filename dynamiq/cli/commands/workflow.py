@@ -1,4 +1,3 @@
-import difflib
 import json
 import uuid
 
@@ -7,7 +6,6 @@ import click
 from dynamiq.cli.client import ApiClient
 from dynamiq.cli.commands.context import with_api_and_settings
 from dynamiq.cli.config import Settings
-from dynamiq.cli.node_types import ALL_NODE_TYPES, NODE_TYPES
 
 workflow = click.Group(name="workflow", help="Manage workflows: create, save the DAG, test, release")
 
@@ -148,30 +146,6 @@ def check_connection(value, where: str) -> None:
         )
 
 
-def check_node_type(node_type, where: str) -> None:
-    """Fail early on an unknown node/tool/llm type, suggesting the closest real one.
-
-    The API answers an unknown type with a bare `"type": "must be a valid value"`, which
-    gives the caller nothing to act on. The valid set lives in dynamiq.cli.node_types.
-    """
-    if not node_type or node_type in ALL_NODE_TYPES:
-        return
-    # Prefer types whose short name starts the same way ("E2BTool" -> the E2B* tools),
-    # then fall back to fuzzy matching over the whole string.
-    short = str(node_type).rsplit(".", 1)[-1].lower()
-    prefix = short[:3]
-    suggestions = [t for t in sorted(ALL_NODE_TYPES) if prefix and t.rsplit(".", 1)[-1].lower().startswith(prefix)]
-    for guess in difflib.get_close_matches(str(node_type), sorted(ALL_NODE_TYPES), n=3, cutoff=0.5):
-        if guess not in suggestions:
-            suggestions.append(guess)
-    suggestions = suggestions[:3]
-    hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
-    raise click.ClickException(
-        f"Unknown type {node_type!r} on {where}.{hint} "
-        "Run `dynamiq workflow node-types --group tools` to list the valid values."
-    )
-
-
 def normalize_flow(flow):
     """Make a hand-written flow acceptable to the API without changing its meaning.
 
@@ -205,15 +179,12 @@ def normalize_flow(flow):
             node["name"] = node["id"]
             note(f"node {label!r} had no name; used its id")
 
-        check_node_type(node.get("type"), f"node {label!r}")
         check_connection(node.get("connection"), f"node {label!r}")
         for tool in node.get("tools") or []:
             if isinstance(tool, dict):
-                check_node_type(tool.get("type"), f"tool on node {label!r}")
                 check_connection(tool.get("connection"), f"tool {tool.get('type', '?')} on node {label!r}")
         llm = node.get("llm") if isinstance(node.get("llm"), dict) else None
         if llm:
-            check_node_type(llm.get("type"), f"llm on node {label!r}")
             check_connection(llm.get("connection"), f"llm on node {label!r}")
 
         depends = node.get("depends")
@@ -610,34 +581,3 @@ def build_agent_flow(
             },
         ],
     }
-
-
-@workflow.command("node-types")
-@click.option("--group", default=None, help="Only this group, e.g. tools, agents, llms, utils.")
-@click.option("--search", default=None, help="Substring filter, e.g. e2b, search, sql.")
-def list_node_types(group: str | None, search: str | None):
-    """List the node `type` strings the platform accepts (local reference, no HTTP).
-
-    Use this before writing a flow instead of guessing a type: an unknown type is
-    rejected with a bare "must be a valid value".
-
-        dynamiq workflow node-types --group tools
-        dynamiq workflow node-types --search e2b
-    """
-    groups = NODE_TYPES
-    if group:
-        if group not in groups:
-            raise click.ClickException(f"Unknown group {group!r}. Available: {', '.join(sorted(groups))}.")
-        groups = {group: groups[group]}
-
-    found = False
-    for name in sorted(groups):
-        matches = [t for t in groups[name] if not search or search.lower() in t.lower()]
-        if not matches:
-            continue
-        found = True
-        click.echo(f"{name}:")
-        for node_type in matches:
-            click.echo(f"  {node_type}")
-    if not found:
-        raise click.ClickException(f"No node type matches {search!r}.")
