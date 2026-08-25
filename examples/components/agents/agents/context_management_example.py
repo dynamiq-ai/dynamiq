@@ -57,7 +57,7 @@ def create_enhanced_context_agent() -> Agent:
         enabled=True,
         max_token_context_length=10000,
         context_usage_ratio=0.8,
-        context_history_length=10,
+        max_preserved_tokens=2000,
     )
 
     agent = Agent(

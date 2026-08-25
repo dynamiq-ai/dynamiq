@@ -48,7 +48,7 @@ LLM_RATE_LIMIT_ERROR_INDICATORS = (
     "resource_exhausted",
 )
 
-LLM_DEFAULT_MAX_TOKENS = 4096
+LLM_DEFAULT_MAX_TOKENS = 32768
 
 LLM_CONNECTION_ERROR_INDICATORS = (
     "connection",
@@ -193,6 +193,19 @@ _SAMPLING_UNSUPPORTED_INDICATORS: tuple[str, ...] = (
     "unrecognized",
 )
 
+# Streaming-only endpoints reject `stream: false` with a 400 (no provider exposes this as metadata).
+_STREAMING_REQUIRED_INDICATORS: tuple[str, ...] = (
+    "only supports streaming",
+    "only support streaming",
+    "supports streaming only",
+    "requires streaming",
+    "streaming is required",
+    'set "stream": true',
+    "set 'stream': true",
+    "set stream to true",
+    "stream must be true",
+)
+
 # Upper bound on sequential completion-param recoveries (e.g. strip `stop`, then sampling params).
 _MAX_COMPLETION_RECOVERIES = 3
 
@@ -284,6 +297,7 @@ class BaseLLM(ConnectionNode):
     _acompletion: Callable = PrivateAttr()
     _stream_chunk_builder: Callable = PrivateAttr()
     _is_fallback_run: bool = PrivateAttr(default=False)
+    _force_stream: bool = PrivateAttr(default=False)
     _json_schema_fields: ClassVar[list[str]] = ["model", "temperature", "max_tokens", "prompt"]
 
     @classmethod
@@ -645,15 +659,18 @@ class BaseLLM(ConnectionNode):
             dict: A dictionary containing the generated content and tool calls.
         """
         chunks = []
+        # A stream forced by a streaming-only model is transport: its chunks are not for clients.
+        emit_chunks = self.streaming.enabled
         for chunk in response:
             check_cancellation(config)
             chunks.append(chunk)
 
-            self.run_on_node_execute_stream(
-                config.callbacks,
-                chunk.model_dump(),
-                **kwargs,
-            )
+            if emit_chunks:
+                self.run_on_node_execute_stream(
+                    config.callbacks,
+                    chunk.model_dump(),
+                    **kwargs,
+                )
 
         full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
@@ -677,14 +694,17 @@ class BaseLLM(ConnectionNode):
             dict: A dictionary containing the generated content and tool calls.
         """
         chunks = []
+        # A stream forced by a streaming-only model is transport: its chunks are not for clients.
+        emit_chunks = self.streaming.enabled
         async for chunk in response:
             check_cancellation(config)
             chunks.append(chunk)
-            self.run_on_node_execute_stream(
-                config.callbacks,
-                chunk.model_dump(),
-                **kwargs,
-            )
+            if emit_chunks:
+                self.run_on_node_execute_stream(
+                    config.callbacks,
+                    chunk.model_dump(),
+                    **kwargs,
+                )
 
         full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
@@ -948,11 +968,13 @@ class BaseLLM(ConnectionNode):
         is_streaming_callback_available = any(
             isinstance(callback, BaseStreamingCallbackHandler) for callback in config.callbacks
         )
+        # A streaming-only model streams regardless; the chunks are consumed internally.
+        stream = (self.streaming.enabled and is_streaming_callback_available) or self._force_stream
         effective_tool_choice = tool_choice if tool_choice is not None else self.tool_choice
         common_params: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "stream": self.streaming.enabled and is_streaming_callback_available,
+            "stream": stream,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "tools": tools,
@@ -982,13 +1004,23 @@ class BaseLLM(ConnectionNode):
         and return a modified `common_params` dict to retry with, or return ``None`` to
         re-raise the original error.
 
-        Default implementation: backstop for models that reject sampling params with a 400
-        but are not matched by ``_model_rejects_sampling_params``. Returns the params
-        with the sampling params stripped. Only fires when the error both names a present
+        Default implementation handles two cases. A model served streaming-only rejects
+        ``stream: false`` with a 400 before generating anything, so the same request is retried
+        as a stream. Otherwise, a backstop for models that reject sampling params with a 400
+        but are not matched by ``_model_rejects_sampling_params``: returns the params
+        with the sampling params stripped. That one only fires when the error both names a present
         sampling param and looks like an unsupported-param error, so genuine validation
         errors (e.g. out-of-range temperature) still surface.
         """
         msg = str(exc).lower()
+        if not common_params.get("stream") and any(ind in msg for ind in _STREAMING_REQUIRED_INDICATORS):
+            logger.warning(
+                "LLM '%s': model '%s' is served streaming-only; retrying the request as a stream.",
+                self.name,
+                self.model,
+            )
+            return common_params | {"stream": True}
+
         present = [param for param in SAMPLING_PARAMS if common_params.get(param) is not None]
         references_param = any(param in msg for param in present)
         looks_unsupported = any(ind in msg for ind in _SAMPLING_UNSUPPORTED_INDICATORS)
@@ -1012,8 +1044,10 @@ class BaseLLM(ConnectionNode):
         Called only after a retry with ``recovered`` succeeds, so a failed retry never
         leaves the reusable node mutated. Default: for every sampling param the recovery
         dropped, clear it on the instance so later calls in this run skip the failing
-        first attempt.
+        first attempt, and likewise keep streaming on once the provider has demanded it.
         """
+        if recovered.get("stream") and not common_params.get("stream"):
+            self._force_stream = True
         for param in SAMPLING_PARAMS:
             if param in common_params and param not in recovered:
                 if param in type(self).model_fields:
@@ -1067,6 +1101,7 @@ class BaseLLM(ConnectionNode):
             include_sync_client=True,
         )
 
+        used_params = common_params
         try:
             response = self._completion(**common_params)
         except Exception as e:
@@ -1081,12 +1116,14 @@ class BaseLLM(ConnectionNode):
                     e, attempt_params = retry_exc, recovered
                     continue
                 self._persist_completion_recovery(common_params, recovered)
+                used_params = recovered
                 break
             else:
                 raise e
+        # Keyed off the params that produced the response: a recovery may have turned streaming on.
         handle_completion = (
             self._handle_streaming_completion_response
-            if common_params.get("stream")
+            if used_params.get("stream")
             else self._handle_completion_response
         )
 
@@ -1140,6 +1177,7 @@ class BaseLLM(ConnectionNode):
             include_sync_client=False,
         )
 
+        used_params = common_params
         try:
             response = await self._acompletion(**common_params)
         except Exception as e:
@@ -1154,11 +1192,13 @@ class BaseLLM(ConnectionNode):
                     e, attempt_params = retry_exc, recovered
                     continue
                 self._persist_completion_recovery(common_params, recovered)
+                used_params = recovered
                 break
             else:
                 raise e
 
-        if common_params.get("stream"):
+        # Keyed off the params that produced the response: a recovery may have turned streaming on.
+        if used_params.get("stream"):
             return await self._handle_streaming_completion_response_async(
                 response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
             )
@@ -1279,6 +1319,12 @@ class BaseLLM(ConnectionNode):
         if not self._should_trigger_fallback(result.error.type, result.error.message):
             return result
 
+        if self.resolve_mock(config) is not None:
+            # The failure was injected by a mock, so there is nothing to fall back from.
+            # Running the fallback would make a real, billed call from a dry run.
+            logger.info(f"LLM {self.name} - {self.id}: fallback skipped, failure was simulated by a mock.")
+            return result
+
         fallback_llm, fallback_kwargs = self._prepare_fallback_run(kwargs)
         logger.warning(
             f"LLM {self.name} - {self.id}: Primary LLM ({self.model}) failed. "
@@ -1349,6 +1395,12 @@ class BaseLLM(ConnectionNode):
             return result
 
         if not self._should_trigger_fallback(result.error.type, result.error.message):
+            return result
+
+        if self.resolve_mock(config) is not None:
+            # The failure was injected by a mock, so there is nothing to fall back from.
+            # Running the fallback would make a real, billed call from a dry run.
+            logger.info(f"LLM {self.name} - {self.id}: fallback skipped, failure was simulated by a mock.")
             return result
 
         fallback_llm, fallback_kwargs = self._prepare_fallback_run(kwargs)

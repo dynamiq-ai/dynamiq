@@ -14,6 +14,7 @@ from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.mocking import MockConfig
 from dynamiq.utils import is_called_from_async_context
 from dynamiq.utils.logger import logger
 
@@ -372,6 +373,8 @@ class MCPTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str
+    _owner_server: "MCPServer | None" = PrivateAttr(default=None)
+
     description: str
     input_schema: type[BaseModel]
     json_input_schema: dict[str, Any]
@@ -413,6 +416,40 @@ class MCPTool(ConnectionNode):
             schema_dict,
             "MCPToolSchema",
         )
+
+    @property
+    def mock_config(self) -> MockConfig:
+        """Fall back to the owning server's mock.
+
+        ``MCPServer`` is a discovery wrapper whose ``execute`` is disabled, so a mock set on it
+        can only take effect through the tools it discovered. Reading it here rather than
+        copying it at discovery time means a mock configured after discovery still applies.
+
+        A tool's own mock wins on payload but not on ``locked``: the pin says this server must
+        never fire, and authoring an output for one of its tools is not opting out of that.
+        """
+        owner_mock = getattr(self._owner_server, "mock", None)
+        if owner_mock is None or not owner_mock.enabled:
+            return self.mock
+        if not self.mock.enabled:
+            return owner_mock
+        if owner_mock.locked and not self.mock.locked:
+            return self.mock.model_copy(update={"locked": True})
+        return self.mock
+
+    @property
+    def mock_identity(self) -> tuple[set[str], set[str]]:
+        """Also answer to the owning server, so it can be excluded by the name on the canvas.
+
+        Tool names are discovered at runtime; the server is the node the operator actually
+        configured, so `exclude_ids={server.id}` has to reach the tools it owns.
+        """
+        ids, names = super().mock_identity
+        if self._owner_server is not None:
+            ids = ids | {self._owner_server.id}
+            if self._owner_server.name:
+                names = names | {self._owner_server.name}
+        return ids, names
 
     def execute(self, input_data: BaseModel, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """
@@ -534,7 +571,7 @@ Usage Strategy:
                     await session.initialize()
                     tools = await session.list_tools()
                     for tool in tools.tools:
-                        self._mcp_tools[tool.name] = MCPTool(
+                        mcp_tool = MCPTool(
                             name=tool.name,
                             description=tool.description or "MCP Tool",
                             json_input_schema=tool.inputSchema,
@@ -542,10 +579,26 @@ Usage Strategy:
                             server_metadata=ServerMetadata(id=self.id, name=self.name, description=self.description),
                             is_optimized_for_agents=self.is_optimized_for_agents,
                         )
+                        mcp_tool._owner_server = self
+                        self._mcp_tools[tool.name] = mcp_tool
 
             logger.info(f"Tool {self.name}: {len(self._mcp_tools)} MCP tools initialized from a server.")
         except Exception as e:
             error = format_exception(e)
+            if self.mock.is_pinned:
+                # Discovery runs at agent construction, before any RunnableConfig exists, so this
+                # cannot ask whether *this run* will mock the server. Only a pinned mock
+                # (enabled and locked) is guaranteed to survive every run-level policy, so only a
+                # pinned server's tools can never be needed for real. An enabled-but-unlocked mock
+                # is still turned off by MockPolicy.NONE or an exclusion, and swallowing the
+                # transport failure there would leave that run silently tool-less.
+                # The cost is fidelity, not safety: without discovery there are no tool schemas,
+                # so the agent will not see this server's tools this run.
+                logger.warning(
+                    f"Tool {self.name} - {self.id}: mocked MCP server is unreachable; continuing without "
+                    f"its tools. The agent will not see this server's tools this run. Error: {error}"
+                )
+                return
             logger.error(f"Tool {self.name} - {self.id}: failed to initialize session. Error: {error}")
             raise ToolExecutionException(f"Tool {self.name} - {self.id}: failed to initialize session. Error: {error}")
 
