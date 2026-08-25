@@ -465,6 +465,9 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 self._checkpoint.run_id = str(run_id)
                 self._checkpoint.wf_run_id = wf_run_id
                 self._checkpoint.status = CheckpointStatus.ACTIVE
+                # Snapshots appended from here on belong to this run, so they must describe its
+                # config; keeping the previous one would misdirect the next resume.
+                self._checkpoint.original_config = config.to_checkpoint_dict()
             else:
                 self._checkpoint = FlowCheckpoint(
                     flow_id=self.id,
@@ -669,6 +672,9 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 self._checkpoint.run_id = str(run_id)
                 self._checkpoint.wf_run_id = wf_run_id
                 self._checkpoint.status = CheckpointStatus.ACTIVE
+                # Snapshots appended from here on belong to this run, so they must describe its
+                # config; keeping the previous one would misdirect the next resume.
+                self._checkpoint.original_config = config.to_checkpoint_dict()
             else:
                 self._checkpoint = FlowCheckpoint(
                     flow_id=self.id,
