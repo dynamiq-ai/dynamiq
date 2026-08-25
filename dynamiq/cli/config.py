@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -42,12 +43,18 @@ class Settings(BaseModel):
 
     @classmethod
     def _from_env(cls) -> dict[str, Any]:
-        """Pick just the env-vars we care about."""
+        """Pick just the env-vars we care about.
+
+        DYNAMIQ_API_TOKEN / DYNAMIQ_API_BASE_URL are what catalyst injects into sandboxes;
+        DYNAMIQ_API_KEY / DYNAMIQ_API_HOST are kept as fallbacks for existing setups.
+        """
         return {
             k: v
             for k, v in {
-                "api_host": os.getenv("DYNAMIQ_API_HOST"),
-                "api_key": os.getenv("DYNAMIQ_API_KEY"),
+                "api_host": os.getenv("DYNAMIQ_API_BASE_URL") or os.getenv("DYNAMIQ_API_HOST"),
+                "api_key": os.getenv("DYNAMIQ_API_TOKEN") or os.getenv("DYNAMIQ_API_KEY"),
+                "org_id": os.getenv("DYNAMIQ_ORG_ID"),
+                "project_id": os.getenv("DYNAMIQ_PROJECT_ID"),
             }.items()
             if v is not None
         }
@@ -55,6 +62,7 @@ class Settings(BaseModel):
     @classmethod
     def load_settings(cls):
         disk: dict[str, Any] = {}
+        creds: dict[str, Any] = {}
         env: dict = cls._from_env()
         if _CONFIG_FILE_PATH.exists():
             try:
@@ -63,11 +71,22 @@ class Settings(BaseModel):
                 raise SystemExit(f"❌ Corrupted config file at {_CONFIG_FILE_PATH}: {exc}") from exc
         if _CREDS_FILE_PATH.exists():
             try:
-                env = json.loads(_CREDS_FILE_PATH.read_text())
+                creds = json.loads(_CREDS_FILE_PATH.read_text())
             except json.JSONDecodeError as exc:
                 raise SystemExit(f"❌ Corrupted credentials file at {_CREDS_FILE_PATH}: {exc}") from exc
 
-        merged = {**disk, **env}
+        # Explicit env always beats the stored files (catalyst injects env into sandboxes).
+        # Warn when they disagree so the switch is never silent.
+        stored = {**disk, **creds}
+        for key, value in env.items():
+            if key in stored and stored[key] != value:
+                source = "DYNAMIQ_API_TOKEN/KEY" if key == "api_key" else f"DYNAMIQ_{key.upper()}"
+                print(
+                    f"warning: {key} from the environment ({source}) overrides the value stored in "
+                    f"{_CONFIG_FILE_PATH.parent}. Unset it to use the stored one.",
+                    file=sys.stderr,
+                )
+        merged = {**stored, **env}
         try:
             return cls.model_validate(merged)
         except ValidationError as exc:
