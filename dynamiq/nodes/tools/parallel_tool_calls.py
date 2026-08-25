@@ -22,6 +22,8 @@ class ToolCallItem(BaseModel):
         description="Input parameters for the tool as key-value pairs",
     )
     thought: str = Field(default="", description="Reasoning for this tool call.")
+    # Agent-owned: set in FUNCTION_CALLING mode to pair results back to calls.
+    tool_call_id: str | None = Field(default=None, json_schema_extra={"is_accessible_to_agent": False})
 
     model_config = ConfigDict(extra="forbid")
 
