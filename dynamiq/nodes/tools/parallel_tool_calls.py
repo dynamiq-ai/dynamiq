@@ -3,7 +3,6 @@
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from pydantic.json_schema import SkipJsonSchema
 
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.types import ActionType
@@ -23,11 +22,8 @@ class ToolCallItem(BaseModel):
         description="Input parameters for the tool as key-value pairs",
     )
     thought: str = Field(default="", description="Reasoning for this tool call.")
-    # The provider's id for this call, in FUNCTION_CALLING mode. Carried with the call so
-    # its result can be paired back to it by id rather than by position, which execution
-    # order does not preserve. SkipJsonSchema keeps it out of the schema shown to the
-    # model — the other inference modes author this object themselves and have no ids.
-    tool_call_id: SkipJsonSchema[str | None] = None
+    # Agent-owned: set in FUNCTION_CALLING mode to pair results back to calls.
+    tool_call_id: str | None = Field(default=None, json_schema_extra={"is_accessible_to_agent": False})
 
     model_config = ConfigDict(extra="forbid")
 

@@ -450,8 +450,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             use_native_parallel = inference_mode == InferenceMode.FUNCTION_CALLING
             if not use_native_parallel:
                 self.tools = [t for t in self.tools if t.name != PARALLEL_TOOL_NAME]
-                # Nothing to batch without real tools -- injecting it would advertise a
-                # tool, and the whole tools prompt block, to an agent that has none.
+                # Nothing to batch without real tools. Runs after _init_skills so a
+                # skills-only agent is not treated as tool-less.
                 if self.tools:
                     self.tools.append(ParallelToolCallsTool())
 

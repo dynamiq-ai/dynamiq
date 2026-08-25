@@ -285,8 +285,7 @@ class TestFunctionCallingProtocolEmission:
         assert fa_stub.role == MessageRole.TOOL
         assert fa_stub.tool_call_id == "call_fa"
         assert fa_stub.name == "provide_final_answer"
-        # Batched alongside tool calls, so the answer was written before their results
-        # existed. Declining it is what makes the next step answer from real results.
+        # Batched with tool calls, so the answer predates their results.
         assert fa_stub.content.startswith("Not accepted:")
 
         # Pending stash holds ONLY real-tool ids (FA is acknowledged inline, not pending).
@@ -294,9 +293,7 @@ class TestFunctionCallingProtocolEmission:
         assert agent._pending_fc_tool_call_ids == ["call_a", "call_b"]
 
     def test_append_assistant_message_records_every_call_when_parallel_disabled(self):
-        """Regression: the extra calls used to be erased here, which is what made the loss
-        silent — the transcript showed one call requested and one answered, so the provider
-        raised nothing and the model could not tell work had gone missing.
+        """Regression: extra calls used to be erased here, so the loss was silent.
 
         ``parallel_tool_calls_enabled=False`` means "do not run these concurrently", not
         "discard them", so history must record every call the model asked for."""
@@ -449,14 +446,9 @@ class TestEveryPendingIdIsAnswered:
 
 
 class TestFinalAnswerMustStandAlone:
-    """An answer batched with tool calls was written in the same step that requested them,
-    so it cannot have used their results. Returning it hands back a guess and discards the
-    work that would have informed it.
+    """An answer batched with tool calls predates their results, so it is declined.
 
-    Position carries no meaning — llama-3.3-70b puts the answer last, gpt-4o first — so it
-    is found by name. Anchoring on index 0 made the outcome depend on ordering: answer
-    first returned a guess and dropped the tools, answer last dropped the answer and looped
-    to max_loops on the same input."""
+    It is found by name, not position: llama-3.3-70b puts it last, gpt-4o first."""
 
     @staticmethod
     def _call(name, args, call_id):
@@ -494,10 +486,8 @@ class TestFinalAnswerMustStandAlone:
 
 
 class TestStructuredOutputSurvivesOddJson:
-    """`null`, a bare list and a quoted string all parse as valid JSON and then failed a
-    membership test with TypeError; a response without `action_input` failed the read below
-    it with KeyError. Neither is recoverable, so both ended the run — where a model that
-    returned the wrong shape should simply be asked again."""
+    """`null`, a bare list, a quoted string and a missing `action_input` used to raise
+    unrecoverable TypeError/KeyError, ending the run instead of asking the model again."""
 
     def _parse(self, payload):
         from dynamiq.nodes.agents.agent import Agent
@@ -524,10 +514,8 @@ class TestStructuredOutputSurvivesOddJson:
 
 
 class TestFailedToolResultsAreMarked:
-    """The status of a call is computed either way; in FUNCTION_CALLING mode it used to be
-    dropped, so the same failure produced a status-carrying transcript in the other modes
-    and a bare one here. The marker also gives failures a stable token to count, which the
-    rendered exception name is not."""
+    """The status is computed either way, but FUNCTION_CALLING mode used to drop it, so the
+    same failure read as a plain result here and as a failure in every other mode."""
 
     def test_failures_are_tagged_and_successes_are_untouched(self):
         from dynamiq.nodes.agents.agent import TOOL_ERROR_PREFIX, Agent
@@ -578,8 +566,7 @@ class TestFailedToolResultsAreMarked:
 
 class TestNoToolCallIsDropped:
     """``parallel_tool_calls_enabled`` controls *how* a step's tool calls run, never
-    *whether* they run. These drive a real Agent against a scripted LLM, so they cover the
-    whole path — parsing, batching, execution, and the replies the model reads back."""
+    *whether* they run. Driven against a scripted LLM, so the whole path is covered."""
 
     @staticmethod
     def _agent_with_probe(probe, **kwargs):
@@ -776,9 +763,8 @@ class TestParallelToolConcurrencyIsBounded:
 
 class TestDelegateFinalMustStandAlone:
     """``delegate_final`` answers for the whole step, so it is only honoured when it is the
-    step's only call. Batched with other tools it is refused before it runs — otherwise the
-    sub-agent's answer is logged and streamed as the run's answer while the ReAct loop keeps
-    going, and the client is handed a second, different answer."""
+    step's only call. Batched with others it is refused before it runs, since the answer is
+    streamed as it returns and the loop would then produce a second one."""
 
     @staticmethod
     def _parent_with_sub_agent(probe, **kwargs):
@@ -908,10 +894,63 @@ class TestDelegateFinalMustStandAlone:
         assert answer == "SUB ANSWER", "a delegated result must end the loop, not become an observation"
 
 
+class TestAgentOwnedFieldsStayOutOfThePrompt:
+    """``tool_call_id`` is agent bookkeeping. The modes shown ``run-parallel`` author its
+    argument themselves and have no provider ids, so the field must not be described."""
+
+    def test_tool_call_id_is_not_described_to_the_model(self):
+        from dynamiq.nodes.agents.components.schema_generator import generate_input_formats
+        from dynamiq.nodes.tools.parallel_tool_calls import ParallelToolCallsTool
+
+        rendered = generate_input_formats([ParallelToolCallsTool()], lambda n: n)
+
+        assert "tool_call_id" not in rendered, f"agent-owned field reached the prompt: {rendered}"
+        for shown in ("name:", "input:", "thought:"):
+            assert shown in rendered, f"{shown} must still be described, got {rendered}"
+
+    def test_the_field_still_exists_for_the_agent_to_set(self):
+        """Hiding it from the description must not stop FUNCTION_CALLING from carrying it;
+        ``extra='forbid'`` would reject the id outright if the field were removed."""
+        from dynamiq.nodes.tools.parallel_tool_calls import ToolCallItem
+
+        item = ToolCallItem(name="probe", input={"i": 1}, thought="t", tool_call_id="call_1")
+
+        assert item.model_dump()["tool_call_id"] == "call_1"
+
+    def test_nested_visible_fields_are_still_rendered(self):
+        """The filter is per-field, not a blanket skip of the nested branch."""
+        from typing import Any, ClassVar
+
+        from pydantic import BaseModel, Field
+
+        from dynamiq.nodes.agents.components.schema_generator import generate_input_formats
+        from dynamiq.nodes.node import Node, NodeGroup
+
+        class _Item(BaseModel):
+            shown: str = Field(..., description="visible one")
+            hidden: str | None = Field(default=None, json_schema_extra={"is_accessible_to_agent": False})
+
+        class _Schema(BaseModel):
+            items: list[_Item] = Field(..., description="the items")
+
+        class _Tool(Node):
+            group: NodeGroup = NodeGroup.TOOLS
+            name: str = "probe"
+            description: str = "d"
+            input_schema: ClassVar[type[BaseModel]] = _Schema
+
+            def execute(self, input_data, config=None, **kw) -> Any:
+                return {}
+
+        rendered = generate_input_formats([_Tool()], lambda n: n)
+
+        assert "shown: str - visible one" in rendered, rendered
+        assert "hidden" not in rendered, rendered
+
+
 class TestParallelToolInjectionSeesEveryTool:
-    """``run-parallel`` is withheld only from an agent that truly has nothing to batch, so
-    the emptiness check has to run after every tool is in place — ``SkillsTool`` is appended
-    late enough that a skills-only agent used to be treated as tool-less."""
+    """``run-parallel`` is withheld only from an agent with nothing to batch, so the
+    emptiness check must run after ``SkillsTool`` is appended."""
 
     @staticmethod
     def _agent(tools, **kwargs):

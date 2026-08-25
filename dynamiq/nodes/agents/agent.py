@@ -174,20 +174,14 @@ class AgentState(BaseModel):
 
 UNKNOWN_TOOL_NAME = "unknown_tool"
 
-# Prefixed onto a tool result the model would otherwise read as a success. Applied
-# wherever a single result reaches the model without a status of its own: each
-# `role: tool` message in function-calling mode, and the legacy single-tool
-# `Observation:` message. Batched observations already carry their own per-tool
-# SUCCESS/ERROR header and are left alone. Successful results are never modified.
 TOOL_ERROR_PREFIX = "[tool_error]"
 
 
 def mark_tool_failure(content: str, success: Any) -> str:
     """Tag a failed tool result so the model can tell it apart from a success.
 
-    Only ``success is False`` counts as a failure: ``None`` means the caller reported no
-    status, and is left alone rather than guessed at. Already-tagged content is returned
-    unchanged so repeated passes cannot stack prefixes.
+    Only ``success is False`` counts as a failure; ``None`` is left alone. Already-tagged
+    content is returned unchanged so repeated passes cannot stack prefixes.
     """
     if success is False and not content.startswith(TOOL_ERROR_PREFIX):
         return f"{TOOL_ERROR_PREFIX} {content}"
@@ -845,8 +839,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     for tc in tool_calls:
                         function_name = tc["function"]["name"].strip()
                         tc_id = tc.get("id") or generate_uuid()
-                        # Written back so the parse pass below reads the same id rather
-                        # than minting a second one for a provider that sent none.
+                        # Written back so the parse pass below reuses this id.
                         tc["id"] = tc_id
                         raw_args = tc["function"]["arguments"]
                         arguments_str = raw_args if isinstance(raw_args, str) else json.dumps(raw_args)
@@ -874,8 +867,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                                 static=True,
                             )
                         )
-                        # Declined when batched with tools: the answer predates their
-                        # results. Saying so is what stops the model re-emitting the batch.
+                        # Declined when batched with tools: the answer predates their results.
                         final_answer_reply = (
                             "Not accepted: you requested tools in this same step, so this answer was "
                             "written before their results existed. Their results follow — answer "
@@ -969,12 +961,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         actual_tool_calls = [tc for tc in tool_calls if tc.function.name.strip() != "provide_final_answer"]
 
-        # A model may put its final answer anywhere in the batch — llama-3.3-70b puts it
-        # last — so position is not used to find it. It is accepted only when nothing else
-        # was requested: an answer batched with tool calls was written before those results
-        # existed, so returning it hands back a guess and discards the work that would have
-        # informed it. Batched with tools, the tools run and the model answers on the next
-        # loop, told why the finish was declined (see _append_assistant_message).
+        # Searched by name, not position: llama-3.3-70b puts it last.
         final_answer_call = next((tc for tc in tool_calls if tc.function.name.strip() == "provide_final_answer"), None)
 
         if final_answer_call is not None and not actual_tool_calls:
@@ -984,9 +971,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self.log_final_output(thought, final_args.answer, loop_num)
             return thought, "final_answer", final_args.answer
 
-        # Every call the model asked for is executed. ``parallel_tool_calls_enabled``
-        # decides whether they run concurrently or one after another (see
-        # ``_is_tool_parallel_eligible``), never whether they run at all.
+        # parallel_tool_calls_enabled decides concurrency, not whether calls run at all.
         if len(actual_tool_calls) > 1:
             tool_items = []
             for tc in actual_tool_calls:
@@ -1063,16 +1048,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
         except (json.JSONDecodeError, ValueError) as e:
             raise ActionParsingException(f"Error parsing action. {e}", recoverable=True)
 
-        # Valid JSON is not necessarily an object: `null`, a bare list, or a string all
-        # parse cleanly and then fail the membership test below with a TypeError, which is
-        # not recoverable and ends the run. Treated as a parse failure like any other, so
-        # the model gets a chance to answer again.
+        # `null`, a list or a string parse cleanly, then raise TypeError below.
         if not isinstance(llm_generated_output_json, dict):
             raise ActionParsingException("Expected a JSON object containing 'thought' and 'action'.", recoverable=True)
 
-        # `action_input` belongs in the same check: the schema marks it required, and
-        # reading it below without one is a KeyError, which is not recoverable and ends the
-        # run, where a model that simply left a key out should just be asked again.
+        # Checked up front: reading a missing key below raises an unrecoverable KeyError.
         missing = [key for key in ("thought", "action", "action_input") if key not in llm_generated_output_json]
         if missing:
             raise ActionParsingException(f"Missing required field(s): {', '.join(missing)}.", recoverable=True)
@@ -1493,8 +1473,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """Ids still awaiting a reply: the live stash, or read back from history.
 
         The stash is lost across a checkpoint/resume, so it cannot be the only source.
-        Both the side that stamps ids onto results and the side that consumes them read
-        from here, so the two always agree on which call is which.
         """
         pending = getattr(self, "_pending_fc_tool_call_ids", None) or []
         if not pending and self.inference_mode == InferenceMode.FUNCTION_CALLING:
@@ -1509,20 +1487,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
     ) -> None:
         """Append tool observations to prompt history.
 
-        In FUNCTION_CALLING mode every pending tool_call_id gets a reply, because a
-        request carrying an unanswered one is rejected by the provider outright.
-
-        Results are matched to ids by the ``tool_call_id`` each result carries, never by
-        position, so a batch that comes back out of order, partially, or not at all still
-        reaches the right calls. An id with no result of its own gets ``tool_result`` —
-        on the paths that end a batch early that is the explanation covering all of them.
-        A result that arrives without an id therefore costs that call its content, but
-        can never hand it another tool's output.
-
-        Every reply carries its status, so a failed call does not read as a result.
-
-        Falls back to the legacy ``role: "user"`` ``Observation: ...`` message in all
-        other cases.
+        In FUNCTION_CALLING mode every pending tool_call_id gets a reply, since a request
+        carrying an unanswered one is rejected by the provider. Results are matched by id
+        rather than position; an id with no result of its own is answered with
+        ``tool_result``. Falls back to the legacy ``role: "user"``
+        ``Observation: ...`` message in all other cases.
 
         Args:
             success: Status of ``tool_result``, for the ids answered with it. Per-call
@@ -1552,8 +1521,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
             self._pending_fc_tool_call_ids = []
             return
-        # Batched observations already carry a per-tool SUCCESS/ERROR header, and arrive
-        # with success=None, so only a single tool's result is tagged here.
         self._add_observation(mark_tool_failure(str(tool_result), success) if success is False else tool_result)
 
     def _validate_parallel_tool_input(self, action_input: Any) -> list[dict[str, Any]] | None:
@@ -1573,8 +1540,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         except Exception as e:
             error_message = f"Invalid parallel tool input: {e}"
             logger.error(error_message)
-            # Emitted, not added as a bare observation: the batch never ran, so every id
-            # in it is answered with the parse error that applies to all of them.
+            # Emitted, not added as a bare observation: every id in the batch needs a reply.
             self._emit_tool_observations(error_message, success=False)
             return None
 
@@ -1701,8 +1667,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             # Check subagent invocation limits before executing
             subagent_error = self._check_subagent_limits(tools_data, action)
             if subagent_error:
-                # Emitted, not added as a bare observation: no call ran, so every id in
-                # the batch is answered with the refusal that applies to all of them.
+                # Emitted, not added as a bare observation: every id in the batch needs a reply.
                 self._emit_tool_observations(subagent_error, success=False)
                 return None
 
@@ -1713,10 +1678,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 tool_result, _, ordered_results = self._execute_tools(
                     tools_data, thought, loop_num, config, **kwargs
                 )
-                # A batch reduced to a single call still delegates; a wider one had its
-                # delegation declined before execution (see ``_execute_tools``). Returned
-                # the same way the single-tool path does — the answer is already streamed,
-                # so continuing the loop would hand the client a second one.
+                # The answer is already streamed; continuing would produce a second one.
                 delegated = next((r for r in ordered_results if r.get("is_delegated")), None)
                 if delegated is not None:
                     return delegated.get("result")
@@ -1726,10 +1688,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
                 if is_delegated:
                     return tool_result
-                # Wrapped in the same shape ``_execute_tools`` produces, so one executed
-                # call reaches its own id the same way a batch does. Only when this step
-                # is that call: compaction also lands here, having filtered a batch whose
-                # other ids it cannot answer.
+                # Wrapped in the shape _execute_tools produces, so the result reaches its id.
                 pending_ids = self._current_tool_call_ids()
                 if len(pending_ids) == 1:
                     ordered_results = [
@@ -2358,9 +2317,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
     def _is_tool_parallel_eligible(self, tool_name: str) -> bool:
         """Check whether a tool may run concurrently with the rest of its batch.
 
-        Both gates must allow it: the agent-level ``parallel_tool_calls_enabled`` and the
-        tool's own ``is_parallel_execution_allowed``. A tool that fails either one still
-        runs — just in the sequential phase.
+        Both ``parallel_tool_calls_enabled`` and the tool's own
+        ``is_parallel_execution_allowed`` must allow it; otherwise it runs sequentially.
         """
         if not self.parallel_tool_calls_enabled:
             return False
@@ -2429,14 +2387,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 }
             )
 
-        # ``delegate_final`` makes a call answer for the whole step, so it is honoured only
-        # when it is the step's only call. Batched with others it is refused *without being
-        # executed*: its answer would predate its siblings' results — the same reason a
-        # batched ``provide_final_answer`` is declined (see ``_handle_function_calling_mode``)
-        # — and running it anyway would bill a sub-agent whose output nobody reads. The
-        # refusal cannot wait until afterwards: ``_execute_single_tool`` logs and streams the
-        # delegated answer as it returns, so by then the client already has an answer.
-        # Its siblings still run; the refused call is what its own tool_call_id is told.
+        # Refused before execution: _execute_single_tool streams the delegated answer.
         if len(prepared_tools) > 1:
             executable: list[dict[str, Any]] = []
             for tool_payload in prepared_tools:
@@ -2483,10 +2434,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 "result": tool_result,
                 "files": tool_files,
                 "dependency": dependency,
-                # Carried up so the caller can end the loop with this result. Dropping it
-                # here would leave the loop running after ``_execute_single_tool`` has
-                # already logged and streamed this as the run's answer, and the client
-                # would be handed a second one.
+                # Carried up so the caller can end the loop; the answer is already streamed.
                 "is_delegated": is_delegated,
             }
 
@@ -2515,8 +2463,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 # Phase 1: run parallel-eligible tools concurrently
                 if len(parallel_group) > 1:
-                    # Bound the pool: the model decides how many tools to call, not how
-                    # many threads to spawn. Excess calls queue.
+                    # Bounded: the model decides how many tools to call, not thread count.
                     max_workers = min(len(parallel_group), self.max_parallel_tool_calls)
                     if len(parallel_group) > max_workers:
                         logger.info(
