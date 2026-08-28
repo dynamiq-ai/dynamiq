@@ -1,3 +1,5 @@
+import functools
+
 import click
 
 from dynamiq.cli.client import ApiClient
@@ -17,6 +19,7 @@ def with_api_and_settings(fn):
     """Decorator to inject `api` kwarg after verifying settings."""
 
     @pass_dctx
+    @functools.wraps(fn)
     def _wrapper(dctx: DynamiqCtx, *args, **kwargs):
         if dctx.settings is None:
             dctx.settings = Settings.load_settings()

@@ -314,6 +314,10 @@ class Anthropic(BaseApiKeyConnection):
 class AWS(BaseConnection):
     access_key_id: str | None = Field(default_factory=partial(get_env_var, "AWS_ACCESS_KEY_ID"))
     secret_access_key: str | None = Field(default_factory=partial(get_env_var, "AWS_SECRET_ACCESS_KEY"))
+    # Required alongside the key pair for any temporary credential (STS AssumeRole, IAM
+    # Identity Center / SSO export, CI OIDC). Without it SigV4 signing is rejected with
+    # InvalidClientTokenId, so credentials that work in the AWS CLI would fail here.
+    session_token: str | None = Field(default_factory=partial(get_env_var, "AWS_SESSION_TOKEN"))
     region: str = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_REGION"))
     profile: str | None = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_PROFILE"))
 
@@ -331,6 +335,8 @@ class AWS(BaseConnection):
             params["aws_access_key_id"] = self.access_key_id
             params["aws_secret_access_key"] = self.secret_access_key
             params["aws_region_name"] = self.region
+            if self.session_token:
+                params["aws_session_token"] = self.session_token
         return params
 
     def get_boto3_session(self):
@@ -343,9 +349,63 @@ class AWS(BaseConnection):
         elif self.access_key_id and self.secret_access_key:
             params["aws_access_key_id"] = self.access_key_id
             params["aws_secret_access_key"] = self.secret_access_key
+            if self.session_token:
+                params["aws_session_token"] = self.session_token
         if self.region:
             params["region_name"] = self.region
         return boto3.Session(**params)
+
+
+class AWSTextract(AWS):
+    """
+    Represents a connection to the Amazon Textract document analysis service.
+
+    Inherits credential resolution (static keys, named profile or the default AWS credential
+    chain) from :class:`AWS`.
+
+    Attributes:
+        region (str): Region hosting Textract, from 'AWS_TEXTRACT_REGION' or 'AWS_DEFAULT_REGION'.
+        endpoint_url (str | None): Custom endpoint (VPC interface, FIPS or a local mock such as
+            LocalStack), from 'AWS_TEXTRACT_ENDPOINT_URL'.
+        connect_timeout (float): Socket connect timeout, in seconds.
+        read_timeout (float): Socket read timeout, in seconds. Generous, because synchronous calls
+            on dense pages can take tens of seconds.
+        max_attempts (int): Total boto3 attempts per API call.
+        retry_mode (str): boto3 retry mode. 'adaptive' adds the client-side rate limiting that
+            Textract's burst throttling expects.
+    """
+
+    region: str = Field(default_factory=lambda: get_env_var("AWS_TEXTRACT_REGION") or get_env_var("AWS_DEFAULT_REGION"))
+    endpoint_url: str | None = Field(default_factory=partial(get_env_var, "AWS_TEXTRACT_ENDPOINT_URL"))
+    connect_timeout: float = 10.0
+    read_timeout: float = 120.0
+    max_attempts: int = 5
+    retry_mode: Literal["legacy", "standard", "adaptive"] = "adaptive"
+
+    def connect(self):
+        """Build the boto3 Textract client."""
+        return self.get_client("textract")
+
+    def get_client(self, service_name: str = "textract"):
+        """Build a boto3 client for `service_name` using this connection's credentials and config.
+
+        Parameterized because staging a document for asynchronous analysis also needs `s3` and
+        `sts` clients. `endpoint_url` only applies to Textract itself.
+        """
+        from botocore.config import Config
+
+        params: dict[str, Any] = {
+            "config": Config(
+                retries={"mode": self.retry_mode, "max_attempts": self.max_attempts},
+                connect_timeout=self.connect_timeout,
+                read_timeout=self.read_timeout,
+                user_agent_extra="dynamiq",
+            )
+        }
+        if self.endpoint_url and service_name == "textract":
+            params["endpoint_url"] = self.endpoint_url
+
+        return self.get_boto3_session().client(service_name, **params)
 
 
 class AWSNeptune(BaseConnection):

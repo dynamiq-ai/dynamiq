@@ -4,6 +4,7 @@ import copy
 import functools
 import inspect
 import logging
+import random
 import reprlib
 import time
 from abc import ABC, abstractmethod
@@ -36,7 +37,7 @@ from dynamiq.nodes.exceptions import (
     NodeFailedException,
     NodeSkippedException,
 )
-from dynamiq.nodes.schema_utils import apply_param_modes
+from dynamiq.nodes.schema_utils import apply_param_modes, strip_inaccessible_fields
 from dynamiq.nodes.types import ActionType, Behavior, ChoiceCondition, InputParamMode, NodeGroup
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
@@ -50,6 +51,7 @@ from dynamiq.types.feedback import (
     ApprovalStreamingOutputEventMessage,
     FeedbackMethod,
 )
+from dynamiq.types.mocking import MockConfig, RunMockConfig
 from dynamiq.types.streaming import (
     STREAMING_EVENT,
     InputStreamingTimeoutError,
@@ -71,6 +73,7 @@ if TYPE_CHECKING:
 # Hard ceiling on a single payload log line. `_LOG_REPR` should keep output well under
 # this on realistic payloads; the cap is a backstop for shapes it does not anticipate.
 LOG_PAYLOAD_MAX_CHARS = 4000
+MOCK_SLEEP_POLL_INTERVAL = 0.1
 
 # Bounded renderer for payload dumps. Truncates while rendering (rather than stringifying
 # everything and slicing), so a huge node input/result cannot be fully materialized as text.
@@ -100,6 +103,35 @@ def ensure_config(config: RunnableConfig = None) -> RunnableConfig:
     return config
 
 
+# retry waits are spread by this fraction so nodes failing together do not all wake at once
+RETRY_JITTER_RATIO = 0.1
+
+
+def is_retryable_error(exc: BaseException) -> bool:
+    """Whether waiting and trying again could plausibly succeed.
+
+    Only certainly-permanent failures are non-retryable; anything unrecognised is retried
+    as before. Every node type runs through this loop, not only LLMs.
+    """
+    try:
+        from litellm.exceptions import (
+            AuthenticationError,
+            BadRequestError,
+            BudgetExceededError,
+            NotFoundError,
+            PermissionDeniedError,
+        )
+    except ImportError:  # provider library unavailable: keep retrying as before
+        return True
+
+    # BadRequestError also covers ContextWindowExceededError and UnsupportedParamsError.
+    # RateLimitError is deliberately absent — retryable, and does not subclass these.
+    return not isinstance(
+        exc,
+        (AuthenticationError, PermissionDeniedError, BadRequestError, NotFoundError, BudgetExceededError),
+    )
+
+
 class ErrorHandling(BaseModel):
     """
     Configuration for error handling in nodes.
@@ -109,12 +141,15 @@ class ErrorHandling(BaseModel):
         retry_interval_seconds (float): Interval between retries in seconds.
         max_retries (int): Maximum number of retries.
         backoff_rate (float): Rate of increase for retry intervals.
+        max_retry_interval_seconds (float | None): Hard ceiling on a single backoff wait,
+            applied after jitter. Unset, waits grow unbounded as before.
         behavior (Behavior): Behavior for error handling.
     """
     timeout_seconds: float | None = None
     retry_interval_seconds: float = 1
     max_retries: int = 0
     backoff_rate: float = 1
+    max_retry_interval_seconds: float | None = None
     behavior: Behavior = Behavior.RAISE
 
 
@@ -289,6 +324,13 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
     caching: CachingConfig = Field(default_factory=CachingConfig)
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
     approval: ApprovalConfig = Field(default_factory=ApprovalConfig)
+    mock: MockConfig = Field(
+        default_factory=MockConfig,
+        description=(
+            "Mock config. When active the node is not executed; a synthetic result is "
+            "returned instead. Validation, approval, transformers, callbacks and tracing are unaffected."
+        ),
+    )
     depends: list[NodeDependency] = []
     metadata: NodeMetadata | None = None
 
@@ -312,6 +354,11 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
     # (e.g. CuaDesktopTool, E2BDesktopTool) to force run_async to offload
     # via run_in_executor instead of calling execute_async on the main loop.
     _force_thread_executor: ClassVar[bool] = False
+
+    # False for the framework's own machinery (an agent's context manager, todo list, skills
+    # tool): "mock all the tools" never means those, and mocking them corrupts the agent
+    # rather than protecting the outside world. An explicit node-level mock still applies.
+    is_mockable: ClassVar[bool] = True
 
     @property
     def has_native_async(self) -> bool:
@@ -778,6 +825,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             "caching": True,
             "streaming": True,
             "approval": True,
+            "mock": True,
         }
 
     @property
@@ -809,6 +857,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         data["caching"] = self.caching.to_dict(for_tracing=for_tracing, **kwargs)
         data["streaming"] = self.streaming.to_dict(for_tracing=for_tracing, **kwargs)
         data["approval"] = self.approval.to_dict(for_tracing=for_tracing, **kwargs)
+        data["mock"] = self.mock.to_dict(for_tracing=for_tracing, **kwargs)
 
         data["depends"] = [depend.to_dict(for_tracing=for_tracing, **kwargs) for depend in self.depends]
         data["input_mapping"] = format_value(self.input_mapping)
@@ -975,6 +1024,102 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
 
         return input_data
 
+    @property
+    def mock_config(self) -> MockConfig:
+        """The mock config governing this node.
+
+        Almost always the node's own ``mock``. Overridden by nodes whose configuration lives
+        on an owner that never executes itself — an ``MCPServer`` configures the tools it
+        discovers — so the setting is read when the node runs rather than snapshotted earlier.
+        """
+        return self.mock
+
+    @property
+    def mock_identity(self) -> tuple[set[str], set[str]]:
+        """The ids and names a run-level exclude list can match this node by.
+
+        Usually just this node's own. A node whose mock config comes from an owner also
+        answers to the owner, so the operator can exclude the thing they configured.
+        """
+        return {self.id}, ({self.name} if self.name else set())
+
+    def resolve_mock(self, config: RunnableConfig = None) -> MockConfig | None:
+        """
+        Determine whether this node runs mocked (dry run) for the given run.
+
+        The run-level ``RunnableConfig.mock`` policy, when present, arbitrates; otherwise the
+        node's own ``mock`` config decides. A node whose mock is ``locked`` is never unmocked
+        by a run-level policy, so a tool that writes to production stays inert.
+
+        Args:
+            config (RunnableConfig, optional): Configuration for the run.
+
+        Returns:
+            MockConfig | None: The config to mock with, or None to execute for real.
+        """
+        mock = self.mock_config
+        run_mock: RunMockConfig | None = getattr(config, "mock", None)
+        if run_mock is None:
+            return mock if mock.enabled else None
+        node_ids, node_names = self.mock_identity
+        return run_mock.resolve(mock, node_ids, node_names, self.group.value, sweepable=self.is_mockable)
+
+    def _mock_sleep(self, seconds: float, config: RunnableConfig = None) -> None:
+        """Sleep for a mock's simulated latency, staying responsive to cancellation.
+
+        Polls in short slices rather than blocking for the full duration, mirroring how
+        console approval waits for input.
+        """
+        deadline = time.monotonic() + seconds
+        while (remaining := deadline - time.monotonic()) > 0:
+            check_cancellation(config)
+            time.sleep(min(MOCK_SLEEP_POLL_INTERVAL, remaining))
+
+    async def _mock_sleep_async(self, seconds: float, config: RunnableConfig = None) -> None:
+        """Async twin of ``_mock_sleep``, so a long simulated latency stays cancellable."""
+        deadline = time.monotonic() + seconds
+        while (remaining := deadline - time.monotonic()) > 0:
+            check_cancellation(config)
+            await asyncio.sleep(min(MOCK_SLEEP_POLL_INTERVAL, remaining))
+
+    def _build_mocked_output(self, mock: MockConfig, transformed_input: Any) -> Any:
+        """
+        Build the synthetic output for a mocked run, or raise the configured simulated error.
+
+        Args:
+            mock (MockConfig): The resolved mock config.
+            transformed_input (Any): The validated input the node would have executed with.
+
+        Returns:
+            Any: The synthetic node output.
+
+        Raises:
+            ToolExecutionException: If the mock is configured with an ``error``.
+        """
+        from dynamiq.nodes.agents.exceptions import ToolExecutionException
+
+        readable_input = transformed_input
+        if isinstance(transformed_input, BaseModel):
+            readable_input = transformed_input.model_dump()
+        if isinstance(readable_input, dict):
+            # The description of a suppressed call is shown to the model and stored in the trace,
+            # so it must not carry fields the agent is not allowed to see. In a real run these
+            # values go to the tool and never reach the transcript; mocking must not change that.
+            readable_input, hidden = strip_inaccessible_fields(self.resolved_input_schema, readable_input)
+            if hidden:
+                logger.debug(self._node_run_log(f"mock description omits inaccessible fields: {sorted(hidden)}"))
+
+        if mock.error is not None:
+            logger.info(self._node_run_log(f"mocked execution raising simulated error: {mock.error}"))
+            message = mock.error
+            if mock.marker and not message.startswith(mock.marker):
+                message = f"{mock.marker} {message}".strip()
+            raise ToolExecutionException(message, recoverable=True)
+
+        output = mock.render(node_name=self.name or self.id, node_id=self.id, input_data=readable_input)
+        logger.info(self._node_run_log("execution mocked; node was not executed."))
+        return output
+
     def to_checkpoint_state(self) -> "BaseCheckpointState":
         """
         Return node-specific state for checkpointing.
@@ -1019,6 +1164,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         config = ensure_config(config)
         run_id = uuid4()
         merged_kwargs = merge(kwargs, {"run_id": run_id, "parent_run_id": kwargs.get("parent_run_id", None)})
+        # `is_mocked` is framework-reserved and set only by the mock seam below. Dropping any
+        # caller-supplied value here — before validation can fail — keeps a real run from ever
+        # being reported as mocked.
+        merged_kwargs.pop("is_mocked", None)
         if depends_result is None:
             depends_result = {}
         return config, merged_kwargs, depends_result
@@ -1190,10 +1339,15 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         token = set_node_run_id(merged_kwargs["run_id"])
         logger.info(self._node_run_log("execution started."))
 
+        mock = self.resolve_mock(config)
+
         try:
             try:
                 self.validate_depends(depends_result)
-                input_data = self.get_approved_data_or_origin(input_data, config=config, **merged_kwargs)
+                if mock is None:
+                    input_data = self.get_approved_data_or_origin(input_data, config=config, **merged_kwargs)
+                elif self.approval.enabled:
+                    logger.info(self._node_run_log("approval skipped: node is mocked, so there is nothing to approve."))
             except NodeException as e:
                 return self._handle_skip(e, input_data, depends_result, config, **merged_kwargs)
 
@@ -1202,13 +1356,22 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 **kwargs,
             )
             self.run_on_node_start(config.callbacks, dict(transformed_input), **merged_kwargs)
-            cache = cache_wf_entity(
-                entity_id=self.id,
-                cache_enabled=self.caching.enabled,
-                cache_config=config.cache,
-            )
 
-            output, from_cache = cache(self.execute_with_retry)(transformed_input, config, **merged_kwargs)
+            if mock is not None:
+                merged_kwargs["is_mocked"] = True
+
+                if mock.latency_seconds:
+                    self._mock_sleep(mock.latency_seconds, config)
+                check_cancellation(config)
+                output, from_cache = self._build_mocked_output(mock, transformed_input), False
+            else:
+                cache = cache_wf_entity(
+                    entity_id=self.id,
+                    cache_enabled=self.caching.enabled,
+                    cache_config=config.cache,
+                )
+
+                output, from_cache = cache(self.execute_with_retry)(transformed_input, config, **merged_kwargs)
 
             return self._handle_success(
                 output, from_cache, transformed_input, config, time_start, "", merged_kwargs=merged_kwargs, **kwargs
@@ -1242,13 +1405,18 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         token = set_node_run_id(merged_kwargs["run_id"])
         logger.info(self._node_run_log("async execution started."))
 
+        mock = self.resolve_mock(config)
+
         try:
             try:
                 self.validate_depends(depends_result)
-                # Offload blocking approval queue read to a thread to avoid blocking the event loop
-                input_data = await self._offload_to_executor(
-                    executor, self.get_approved_data_or_origin, input_data, config=config, **merged_kwargs
-                )
+                if mock is None:
+                    # Offload blocking approval queue read to a thread to avoid blocking the event loop
+                    input_data = await self._offload_to_executor(
+                        executor, self.get_approved_data_or_origin, input_data, config=config, **merged_kwargs
+                    )
+                elif self.approval.enabled:
+                    logger.info(self._node_run_log("approval skipped: node is mocked, so there is nothing to approve."))
             except NodeException as e:
                 return self._handle_skip(e, input_data, depends_result, config, **merged_kwargs)
 
@@ -1258,14 +1426,22 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             )
             self.run_on_node_start(config.callbacks, dict(transformed_input), **merged_kwargs)
 
-            cache = cache_wf_entity_async(
-                entity_id=self.id,
-                cache_enabled=self.caching.enabled,
-                cache_config=config.cache,
-            )
-            output, from_cache = await cache(self.execute_async_with_retry)(
-                transformed_input, config, executor=executor, **merged_kwargs
-            )
+            if mock is not None:
+                merged_kwargs["is_mocked"] = True
+
+                if mock.latency_seconds:
+                    await self._mock_sleep_async(mock.latency_seconds, config)
+                check_cancellation(config)
+                output, from_cache = self._build_mocked_output(mock, transformed_input), False
+            else:
+                cache = cache_wf_entity_async(
+                    entity_id=self.id,
+                    cache_enabled=self.caching.enabled,
+                    cache_config=config.cache,
+                )
+                output, from_cache = await cache(self.execute_async_with_retry)(
+                    transformed_input, config, executor=executor, **merged_kwargs
+                )
 
             return self._handle_success(
                 output,
@@ -1382,6 +1558,15 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         """
         pass
 
+    def _retry_backoff_seconds(self, attempt: int) -> float:
+        """Wait before the retry that follows ``attempt``, shared by the sync and async loops."""
+        time_to_sleep = self.error_handling.retry_interval_seconds * (self.error_handling.backoff_rate**attempt)
+        jitter = random.uniform(-RETRY_JITTER_RATIO, RETRY_JITTER_RATIO)  # nosec B311
+        time_to_sleep *= 1 + jitter
+        if self.error_handling.max_retry_interval_seconds is not None:
+            time_to_sleep = min(time_to_sleep, self.error_handling.max_retry_interval_seconds)
+        return time_to_sleep
+
     def execute_with_retry(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs):
         """
         Execute the node with retry logic and automatic connection management.
@@ -1419,10 +1604,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                     logger.error(self._node_run_log(f"Failed to ensure client connection: {conn_error}"))
                     error = conn_error
                     if attempt < n_attempt - 1:
-                        time_to_sleep = self.error_handling.retry_interval_seconds * (
-                            self.error_handling.backoff_rate**attempt
-                        )
-                        logger.info(self._node_run_log(f"retrying connection in {time_to_sleep} seconds."))
+                        time_to_sleep = self._retry_backoff_seconds(attempt)
+                        logger.info(self._node_run_log(f"retrying connection in {time_to_sleep:.2f} seconds."))
                         time.sleep(time_to_sleep)
                         continue
                     else:
@@ -1458,15 +1641,18 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                     self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
                     logger.error(self._node_run_log(f"execution error: {e}"))
 
+                # a permanent failure fails the same way on every attempt
+                if not is_retryable_error(error):
+                    logger.info(self._node_run_log(f"not retrying: {type(error).__name__} cannot succeed on a retry."))
+                    break
+
                 # do not sleep after the last attempt
                 if attempt < n_attempt - 1:
-                    time_to_sleep = self.error_handling.retry_interval_seconds * (
-                        self.error_handling.backoff_rate**attempt
-                    )
-                    logger.info(self._node_run_log(f"retrying in {time_to_sleep} seconds."))
+                    time_to_sleep = self._retry_backoff_seconds(attempt)
+                    logger.info(self._node_run_log(f"retrying in {time_to_sleep:.2f} seconds."))
                     time.sleep(time_to_sleep)
 
-            logger.error(self._node_run_log(f"execution failed after {n_attempt} attempts."))
+            logger.error(self._node_run_log(f"execution failed after {attempt + 1} attempts."))
             raise error
         finally:
             if executor is not None:
@@ -1542,10 +1728,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 logger.error(self._node_run_log(f"Failed to ensure client connection: {conn_error}"))
                 error = conn_error
                 if attempt < n_attempt - 1:
-                    time_to_sleep = self.error_handling.retry_interval_seconds * (
-                        self.error_handling.backoff_rate**attempt
-                    )
-                    logger.info(self._node_run_log(f"retrying connection in {time_to_sleep} seconds."))
+                    time_to_sleep = self._retry_backoff_seconds(attempt)
+                    logger.info(self._node_run_log(f"retrying connection in {time_to_sleep:.2f} seconds."))
                     await asyncio.sleep(time_to_sleep)
                     continue
                 else:
@@ -1577,12 +1761,17 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
                 logger.error(self._node_run_log(f"execution error: {e}"))
 
+            # a permanent failure fails the same way on every attempt
+            if not is_retryable_error(error):
+                logger.info(self._node_run_log(f"not retrying: {type(error).__name__} cannot succeed on a retry."))
+                break
+
             if attempt < n_attempt - 1:
-                time_to_sleep = self.error_handling.retry_interval_seconds * (self.error_handling.backoff_rate**attempt)
-                logger.info(self._node_run_log(f"retrying in {time_to_sleep} seconds."))
+                time_to_sleep = self._retry_backoff_seconds(attempt)
+                logger.info(self._node_run_log(f"retrying in {time_to_sleep:.2f} seconds."))
                 await asyncio.sleep(time_to_sleep)
 
-        logger.error(self._node_run_log(f"execution failed after {n_attempt} attempts."))
+        logger.error(self._node_run_log(f"execution failed after {attempt + 1} attempts."))
         raise error
 
     def get_context_for_input_schema(self) -> dict:

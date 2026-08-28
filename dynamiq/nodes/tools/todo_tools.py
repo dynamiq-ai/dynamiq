@@ -76,6 +76,8 @@ class TodoWriteTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    # Agent machinery, not an outside-world integration: never swept in by MockPolicy.ALL.
+    is_mockable: ClassVar[bool] = False
     name: str = "todo-write"
     description: str = """Save or update the todo list. Every item requires 'id', 'content', and 'status'.
 

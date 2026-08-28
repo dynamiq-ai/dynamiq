@@ -378,6 +378,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         run.output = format_value(output_data, for_tracing=True)
         run.status = RunStatus.SUCCEEDED
         run.metadata["is_output_from_cache"] = kwargs.get("is_output_from_cache", False)
+        run.metadata["is_mocked"] = kwargs.get("is_mocked", False)
         # If parent_run_id is None, the run is the highest in the execution tree
         if run.parent_run_id is None:
             self.flush()
@@ -403,6 +404,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             "message": str(error),
             "traceback": traceback.format_exc(),
         }
+        run.metadata["is_mocked"] = kwargs.get("is_mocked", False)
 
         # If parent_run_id is None, the run is the highest in the execution tree
         if run.parent_run_id is None:

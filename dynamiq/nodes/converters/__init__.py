@@ -8,4 +8,5 @@ from .multi_file_type_converter import MultiFileTypeConverter
 from .pptx import PPTXFileConverter
 from .pypdf import PyPDFConverter
 from .text import TextFileConverter
+from .textract import TextractFileConverter
 from .unstructured import UnstructuredFileConverter
