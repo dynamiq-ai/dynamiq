@@ -1887,6 +1887,39 @@ class PipedreamOAuth2(BaseConnection):
         }
 
 
+class Composio(BaseConnection):
+    """Composio connection configuration.
+
+    Composio authenticates with a single project-scoped API key; the project is implied by the
+    key itself, so no project identifier is sent alongside it.
+    """
+
+    api_key: str = Field(default_factory=partial(get_env_var, "COMPOSIO_API_KEY"))
+    url: str = "https://backend.composio.dev/api/v3"
+
+    def connect(self):
+        import requests
+
+        return requests
+
+    async def connect_async(self):
+        """Build an httpx.AsyncClient mirroring requests defaults."""
+        import httpx
+
+        return httpx.AsyncClient(  # nosec B113 - timeout=None is intentional; matches requests defaults
+            follow_redirects=True,
+            trust_env=True,
+            timeout=httpx.Timeout(None),
+        )
+
+    @property
+    def conn_params(self) -> dict:
+        return {
+            "x-api-key": self.api_key,
+            "Content-Type": "application/json",
+        }
+
+
 class StagehandEnvironment(str, enum.Enum):
     BROWSERBASE = "BROWSERBASE"
     LOCAL = "LOCAL"
