@@ -40,7 +40,7 @@ class Composio(ConnectionNode):
     connection: ComposioConnection
     timeout: float = 180
     input_schema: type[BaseModel]
-    input_props: dict[str, Any]
+    input_props: dict[str, Any] = {}
     description: str = ""
     user_id: str
     toolkit_slug: str
@@ -49,8 +49,14 @@ class Composio(ConnectionNode):
     connected_account_id: str | None = None
     arguments: dict[str, Any] = {}
 
-    def __init__(self, input_props: dict[str, Any], **kwargs):
+    def __init__(self, input_props: dict[str, Any] | None = None, **kwargs):
         arguments = kwargs.get("arguments") or {}
+        # A tool that declares no parameters is persisted with an empty or absent schema - the node
+        # type serializes `input_props` with `omitempty`, and Composio itself reports "no declared
+        # schema" as either `{}` or `null` - so every such spelling has to yield an empty schema
+        # rather than a construction error.
+        if not isinstance(input_props, dict):
+            input_props = {}
         input_props = rename_keys_recursive(input_props, {"type": "type_"})
         input_schema = self.get_input_schema(input_props, arguments=arguments)
         super().__init__(
@@ -111,9 +117,9 @@ class Composio(ConnectionNode):
             schema_dict (dict[str, Any]): A JSON schema dictionary describing the tool's expected input.
             arguments (dict[str, Any]): Argument values already configured at design time.
         """
-        schema_dict = rename_keys_recursive(schema_dict, {"type_": "type"})
         if not isinstance(schema_dict, dict):
             schema_dict = {}
+        schema_dict = rename_keys_recursive(schema_dict, {"type_": "type"})
 
         # Composio marks optionality the Pydantic way, so only `required` is authoritative. A parameter
         # already configured at design time is dropped from it: the runtime input may override the

@@ -74,10 +74,44 @@ class TestComposioInputSchema:
 
         assert field.alias == "extra-header"
 
-    def test_empty_schema_builds_a_model_without_fields(self):
-        node = _build_node(input_props={})
+    @pytest.mark.parametrize("input_props", [{}, None])
+    def test_undeclared_schema_builds_a_model_without_fields(self, input_props):
+        # Composio reports "no declared schema" as either `{}` or `null`, and the persisted node omits
+        # the key entirely in that case, so all three spellings must build an empty input schema.
+        node = _build_node(input_props=input_props)
 
         assert node.input_schema.model_fields == {}
+
+    def test_absent_input_props_builds_a_model_without_fields(self):
+        node = Composio(
+            connection=ComposioConnection(api_key="key"),
+            user_id="project-uuid",
+            toolkit_slug="gmail",
+            tool_slug="GMAIL_SEND_EMAIL",
+        )
+
+        assert node.input_schema.model_fields == {}
+
+    def test_node_type_matches_the_wire_contract(self):
+        assert _build_node().type == "dynamiq.nodes.tools.Composio"
+
+    def test_to_dict_carries_the_wire_contract_keys(self):
+        node = _build_node(
+            tool_version="20250905_00",
+            connected_account_id="ca_xxx",
+            arguments={"recipient_email": "a@b.c"},
+        )
+
+        dumped = node.to_dict()
+
+        assert dumped["type"] == "dynamiq.nodes.tools.Composio"
+        assert dumped["user_id"] == "project-uuid"
+        assert dumped["toolkit_slug"] == "gmail"
+        assert dumped["tool_slug"] == "GMAIL_SEND_EMAIL"
+        assert dumped["tool_version"] == "20250905_00"
+        assert dumped["connected_account_id"] == "ca_xxx"
+        assert dumped["arguments"] == {"recipient_email": "a@b.c"}
+        assert "input_props" in dumped
 
     def test_description_lists_parameters_and_configured_arguments(self):
         node = _build_node(description="Send an email.", arguments={"body": "Configured body"})
@@ -131,6 +165,36 @@ class TestComposioExecute:
         node.execute(node.input_schema(recipient_email="a@b.c", body="Runtime body"))
 
         assert client.request.call_args.kwargs["json"]["arguments"]["body"] == "Runtime body"
+
+    def test_tool_version_is_sent_as_version(self):
+        node = _build_node(tool_version="20250905_00")
+        client = MagicMock()
+        client.request = MagicMock(return_value=_mock_response(json_payload={"data": {}, "successful": True}))
+        node.client = client
+
+        node.execute(node.input_schema(recipient_email="a@b.c", body="Body"))
+
+        assert client.request.call_args.kwargs["json"]["version"] == "20250905_00"
+
+    def test_version_is_omitted_when_no_tool_version_is_pinned(self):
+        node = _build_node()
+        client = MagicMock()
+        client.request = MagicMock(return_value=_mock_response(json_payload={"data": {}, "successful": True}))
+        node.client = client
+
+        node.execute(node.input_schema(recipient_email="a@b.c", body="Body"))
+
+        assert "version" not in client.request.call_args.kwargs["json"]
+
+    def test_connected_account_id_is_omitted_when_unset(self):
+        node = _build_node()
+        client = MagicMock()
+        client.request = MagicMock(return_value=_mock_response(json_payload={"data": {}, "successful": True}))
+        node.client = client
+
+        node.execute(node.input_schema(recipient_email="a@b.c", body="Body"))
+
+        assert "connected_account_id" not in client.request.call_args.kwargs["json"]
 
     def test_connected_account_id_is_sent_only_when_set(self):
         node = _build_node(connected_account_id="ca_1")
@@ -196,9 +260,15 @@ class TestComposioExecute:
         )
         node.client = client
 
-        result = node.run(input_data={"recipient_email": "a@b.c", "body": "Body"})
+        # `run` funnels through `execute_with_retry`, which calls `ensure_client` and would replace the
+        # stub above with a live `requests` client - the assertion below would then pass on a real
+        # network failure instead of on the tool-level failure this test is about.
+        with patch.object(Composio, "ensure_client", MagicMock()):
+            result = node.run(input_data={"recipient_email": "a@b.c", "body": "Body"})
 
         assert result.status.value == "failure"
+        assert "boom" in str(result.error.to_dict())
+        assert client.request.call_count == 1
 
 
 class TestComposioAsync:
