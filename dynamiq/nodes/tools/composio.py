@@ -131,6 +131,17 @@ class Composio(ConnectionNode):
         required = schema_dict.get("required") or []
         schema_dict = {**schema_dict, "required": [name for name in required if name not in arguments]}
 
+        properties = schema_dict.get("properties")
+        if arguments and isinstance(properties, dict):
+            # A configured parameter falls back to its configured value, so it must not keep the schema
+            # default as well: the model emits that default whenever the caller leaves the parameter
+            # out, and it wins over `arguments` when the request payload is assembled.
+            schema_dict = {**schema_dict, "properties": dict(properties)}
+            for name in arguments:
+                prop = properties.get(name)
+                if isinstance(prop, dict) and "default" in prop:
+                    schema_dict["properties"][name] = {key: value for key, value in prop.items() if key != "default"}
+
         return create_input_schema_from_json_schema(schema_dict, "ComposioToolSchema")
 
     def _build_request(self, input_data: BaseModel) -> tuple[str, dict]:

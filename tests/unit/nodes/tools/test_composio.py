@@ -173,6 +173,18 @@ class TestComposioExecute:
 
         assert client.request.call_args.kwargs["json"]["arguments"]["body"] == "Runtime body"
 
+    def test_configured_argument_survives_the_schema_default(self):
+        # `is_html` declares `default: false`, so a runtime input that leaves it out would otherwise
+        # carry that default into the payload and silently discard the configured value.
+        node = _build_node(arguments={"is_html": True})
+        client = MagicMock()
+        client.request = MagicMock(return_value=_mock_response(json_payload={"data": {}, "successful": True}))
+        node.client = client
+
+        node.execute(node.input_schema(recipient_email="a@b.c", body="Body"))
+
+        assert client.request.call_args.kwargs["json"]["arguments"]["is_html"] is True
+
     def test_tool_version_is_sent_as_version(self):
         node = _build_node(tool_version="20250905_00")
         client = MagicMock()
