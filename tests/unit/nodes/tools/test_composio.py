@@ -124,6 +124,13 @@ class TestComposioInputSchema:
         assert "Already configured parameters, that can be overridden:" in node.description
         assert "- body: Configured body" in node.description
 
+    def test_description_falls_back_to_the_slugs_when_none_is_supplied(self):
+        # Without a description the agent would otherwise see only the node name, which says
+        # nothing about which action this is.
+        node = _build_node()
+
+        assert node.description.startswith("Executes the Composio tool GMAIL_SEND_EMAIL from the gmail toolkit.")
+
     def test_to_dict_excludes_input_schema(self):
         node = _build_node()
 

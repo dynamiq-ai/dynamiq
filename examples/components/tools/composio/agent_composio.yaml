@@ -1,0 +1,57 @@
+connections:
+  composio-conn:
+    type: dynamiq.connections.Composio
+    api_key: ${oc.env:COMPOSIO_API_KEY}
+
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+nodes:
+  agent-composio:
+    type: dynamiq.nodes.agents.Agent
+    name: Mailer Agent
+    role: |
+      Assistant that sends short, factual status emails on request.
+      Keep the subject under ten words and the body to a few sentences.
+    llm:
+      id: mailer-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o-mini
+    tools:
+      - id: composio-tool
+        type: dynamiq.nodes.tools.composio.Composio
+        connection: composio-conn
+        # Always the project id on the platform.
+        user_id: ${oc.env:COMPOSIO_USER_ID}
+        toolkit_slug: gmail
+        tool_slug: GMAIL_SEND_EMAIL
+        is_optimized_for_agents: true
+        # Configured up front: the agent may override it, but need not supply it.
+        arguments:
+          recipient_email: someone@example.com
+        # The tool's `input_parameters` JSON Schema, from GET /api/v3/tools/{slug}.
+        input_props:
+          type: object
+          title: SendEmailRequest
+          required:
+            - recipient_email
+            - body
+          properties:
+            recipient_email:
+              type: string
+              description: Address of the recipient.
+            body:
+              type: string
+              description: Body of the email.
+            subject:
+              anyOf:
+                - type: string
+                - type: "null"
+              default: null
+              description: Subject of the email.
+            is_html:
+              type: boolean
+              default: false
+              description: Whether the body is HTML.

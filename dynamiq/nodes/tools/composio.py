@@ -86,7 +86,11 @@ class Composio(ConnectionNode):
         schema_fields: dict[str, Any] = self.input_schema.model_fields
         logger.debug(f"Tool {self.name} - Generating description from schema fields")
 
-        desc: list[str] = [self.description if self.description else f"{self.name} tool"]
+        # The platform supplies a description snapshotted from Composio when the action was picked.
+        # Constructed directly, there is none, so fall back to the slugs rather than the node name:
+        # an agent picking between tools needs to know which action this is.
+        fallback = f"Executes the Composio tool {self.tool_slug} from the {self.toolkit_slug} toolkit."
+        desc: list[str] = [self.description or fallback]
 
         required_fields: list[str] = [name for name, field in schema_fields.items() if field.is_required() is not False]
         if required_fields:
