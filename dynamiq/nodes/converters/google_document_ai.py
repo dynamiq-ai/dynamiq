@@ -65,9 +65,12 @@ class GoogleDocumentAIFileConverter(ConnectionNode):
         default=DocumentCreationMode.ONE_DOC_PER_FILE,
         description="Create one document per file, with page texts joined, or one per page.",
     )
-    enable_native_pdf_parsing: bool = Field(
-        default=True,
-        description="Read embedded text from born-digital PDFs instead of OCR-ing rendered pages.",
+    enable_native_pdf_parsing: bool | None = Field(
+        default=None,
+        description=(
+            "Read embedded text from born-digital PDFs instead of OCR-ing rendered pages. "
+            "When unset, OCR-specific process options are omitted."
+        ),
     )
     imageless_mode: bool = Field(
         default=True,

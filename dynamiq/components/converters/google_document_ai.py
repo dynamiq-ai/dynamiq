@@ -1,5 +1,4 @@
 import copy
-import mimetypes
 from collections.abc import Iterator
 from io import BytesIO
 from pathlib import Path
@@ -21,9 +20,19 @@ if TYPE_CHECKING:
 # The file types Document AI accepts for online processing. Declared to the API verbatim, as
 # `RawDocument.mime_type` is a plain string. See https://cloud.google.com/document-ai/docs/file-types
 PDF_MIME_TYPE = "application/pdf"
-SUPPORTED_MIME_TYPES = frozenset(
-    {PDF_MIME_TYPE, "image/bmp", "image/gif", "image/jpeg", "image/png", "image/tiff", "image/webp"}
-)
+MIME_TYPES_BY_EXTENSION = {
+    ".pdf": PDF_MIME_TYPE,
+    ".bmp": "image/bmp",
+    ".gif": "image/gif",
+    ".jpe": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".webp": "image/webp",
+}
+SUPPORTED_MIME_TYPES = frozenset(MIME_TYPES_BY_EXTENSION.values())
 
 MAX_PAGES_PER_REQUEST_IMAGELESS = 30
 MAX_PAGES_PER_REQUEST_WITH_IMAGES = 15
@@ -61,9 +70,10 @@ class GoogleDocumentAIFileConverter(BaseConverter):
             - `ONE_DOC_PER_FILE`: Creates one Document per file, with all page texts concatenated.
             - `ONE_DOC_PER_PAGE`: Creates one Document per page.
             Defaults to `ONE_DOC_PER_FILE`.
-        enable_native_pdf_parsing (bool): Whether to read embedded text from digital PDFs instead
-            of OCR-ing their rendered pages. Faster and more accurate for born-digital PDFs.
-            Defaults to True.
+        enable_native_pdf_parsing (bool | None): Whether to read embedded text from digital PDFs
+            instead of OCR-ing their rendered pages. Faster and more accurate for born-digital
+            PDFs. Defaults to None, which omits OCR-specific options so non-OCR processors remain
+            supported.
         imageless_mode (bool): Whether to omit page images from the response. Halves the payload
             and doubles the online page limit to 30. Defaults to True.
         page_separator (str): The separator inserted between page texts in
@@ -102,9 +112,12 @@ class GoogleDocumentAIFileConverter(BaseConverter):
         default=DocumentCreationMode.ONE_DOC_PER_FILE,
         description="Create one document per file, with page texts joined, or one per page.",
     )
-    enable_native_pdf_parsing: bool = Field(
-        default=True,
-        description="Read embedded text from born-digital PDFs instead of OCR-ing rendered pages.",
+    enable_native_pdf_parsing: bool | None = Field(
+        default=None,
+        description=(
+            "Read embedded text from born-digital PDFs instead of OCR-ing rendered pages. "
+            "When unset, OCR-specific process options are omitted."
+        ),
     )
     imageless_mode: bool = Field(
         default=True,
@@ -211,17 +224,17 @@ class GoogleDocumentAIFileConverter(BaseConverter):
         Raises:
             ValueError: If the file type is one Document AI cannot process.
         """
-        guessed_mime_type = mimetypes.guess_type(file_path)[0]
-        if guessed_mime_type is None:
+        extension = Path(file_path).suffix.lower()
+        if not extension:
             return PDF_MIME_TYPE
 
-        if guessed_mime_type not in SUPPORTED_MIME_TYPES:
-            raise ValueError(
-                f"File {file_path} has the unsupported MIME type '{guessed_mime_type}'. "
-                f"Document AI accepts: {', '.join(sorted(SUPPORTED_MIME_TYPES))}."
-            )
+        if mime_type := MIME_TYPES_BY_EXTENSION.get(extension):
+            return mime_type
 
-        return guessed_mime_type
+        raise ValueError(
+            f"File {file_path} has the unsupported extension '{extension}'. "
+            f"Document AI accepts: {', '.join(sorted(SUPPORTED_MIME_TYPES))}."
+        )
 
     def _extract_page_texts(self, content: bytes, mime_type: str) -> list[str]:
         """
@@ -298,12 +311,14 @@ class GoogleDocumentAIFileConverter(BaseConverter):
         """
         from google.cloud import documentai
 
+        process_options = documentai.ProcessOptions()
+        if self.enable_native_pdf_parsing is not None:
+            process_options.ocr_config = documentai.OcrConfig(enable_native_pdf_parsing=self.enable_native_pdf_parsing)
+
         request = documentai.ProcessRequest(
             name=self.processor_name,
             raw_document=documentai.RawDocument(content=content, mime_type=mime_type),
-            process_options=documentai.ProcessOptions(
-                ocr_config=documentai.OcrConfig(enable_native_pdf_parsing=self.enable_native_pdf_parsing),
-            ),
+            process_options=process_options,
             imageless_mode=self.imageless_mode,
         )
 

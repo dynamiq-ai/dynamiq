@@ -1,4 +1,3 @@
-import mimetypes
 from io import BytesIO
 from unittest.mock import MagicMock, patch
 
@@ -10,7 +9,6 @@ from pypdf import PdfWriter
 from dynamiq.components.converters.google_document_ai import (
     MAX_PAGES_PER_REQUEST_IMAGELESS,
     MAX_PAGES_PER_REQUEST_WITH_IMAGES,
-    SUPPORTED_MIME_TYPES,
     GoogleDocumentAIFileConverter,
 )
 from dynamiq.connections import GoogleDocumentAI
@@ -189,21 +187,22 @@ class TestProcessorName:
 
 
 class TestRequestOptions:
-    def test_request_carries_the_ocr_options(self, converter, client):
+    def test_ocr_options_are_omitted_by_default(self, converter, client):
         converter.run(files=[build_pdf(1)])
 
         request = client.process_document.call_args.kwargs["request"]
         assert request.name == PROCESSOR_PATH
         assert request.imageless_mode is True
-        assert request.process_options.ocr_config.enable_native_pdf_parsing is True
+        assert not documentai.ProcessOptions.pb(request.process_options).HasField("ocr_config")
         assert request.raw_document.mime_type == "application/pdf"
 
-    def test_options_can_be_disabled(self, connection, client):
+    @pytest.mark.parametrize("enable_native_pdf_parsing", [True, False])
+    def test_explicit_ocr_option_is_included(self, connection, client, enable_native_pdf_parsing):
         converter = GoogleDocumentAIFileConverter(
             connection=connection,
             client=client,
             processor_id="abc123",
-            enable_native_pdf_parsing=False,
+            enable_native_pdf_parsing=enable_native_pdf_parsing,
             imageless_mode=False,
         )
 
@@ -211,7 +210,8 @@ class TestRequestOptions:
 
         request = client.process_document.call_args.kwargs["request"]
         assert request.imageless_mode is False
-        assert request.process_options.ocr_config.enable_native_pdf_parsing is False
+        assert documentai.ProcessOptions.pb(request.process_options).HasField("ocr_config")
+        assert request.process_options.ocr_config.enable_native_pdf_parsing is enable_native_pdf_parsing
 
     def test_mime_type_is_guessed_from_the_filename(self, converter, client):
         image = BytesIO(b"not-really-a-png")
@@ -223,11 +223,25 @@ class TestRequestOptions:
 
 
 class TestMimeTypes:
-    @pytest.mark.parametrize("mime_type", sorted(SUPPORTED_MIME_TYPES))
-    def test_every_supported_type_is_declared_verbatim(self, converter, client, mime_type):
-        extension = mimetypes.guess_extension(mime_type)
+    @pytest.mark.parametrize(
+        ("filename", "mime_type"),
+        [
+            ("scan.pdf", "application/pdf"),
+            ("scan.bmp", "image/bmp"),
+            ("scan.gif", "image/gif"),
+            ("scan.jpe", "image/jpeg"),
+            ("scan.jpeg", "image/jpeg"),
+            ("scan.jpg", "image/jpeg"),
+            ("scan.png", "image/png"),
+            ("scan.tif", "image/tiff"),
+            ("scan.tiff", "image/tiff"),
+            ("scan.webp", "image/webp"),
+            ("SCAN.WEBP", "image/webp"),
+        ],
+    )
+    def test_every_supported_extension_is_declared_verbatim(self, converter, client, filename, mime_type):
         file = BytesIO(b"file-bytes")
-        file.name = f"scan{extension}"
+        file.name = filename
 
         converter.run(files=[file])
 
@@ -238,7 +252,7 @@ class TestMimeTypes:
         file = BytesIO(b"file-bytes")
         file.name = filename
 
-        with pytest.raises(ValueError, match="unsupported MIME type"):
+        with pytest.raises(ValueError, match="unsupported extension"):
             converter.run(files=[file])
 
         client.process_document.assert_not_called()
