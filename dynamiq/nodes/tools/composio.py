@@ -178,8 +178,10 @@ class Composio(ConnectionNode):
             "arguments": {
                 **self.arguments,
                 # by_alias restores the original JSON Schema property names for parameters whose
-                # names are not valid Python identifiers.
-                **{k: v for k, v in input_data.model_dump(by_alias=True).items() if v is not None},
+                # names are not valid Python identifiers. exclude_none drops what the caller left
+                # unset at every depth: an optional property is typed `X | None` with default None,
+                # so nested objects would otherwise post an explicit null for each unsupplied field.
+                **input_data.model_dump(by_alias=True, exclude_none=True),
             },
             "user_id": self.user_id,
             # Omitting the version lets Composio resolve its own default, which could differ

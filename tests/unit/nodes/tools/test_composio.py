@@ -41,6 +41,33 @@ def _mock_response(status_code=200, json_payload=None, text="ok"):
     return resp
 
 
+NESTED_INPUT_PROPS = {
+    "$defs": {
+        "Req": {
+            "type": "object",
+            "required": ["addr"],
+            "properties": {
+                "addr": {"$ref": "#/$defs/Addr"},
+                "stops": {"type": "array", "items": {"$ref": "#/$defs/Addr"}},
+                "note": {"type": "string"},
+            },
+        },
+        # More than one optional sub-field, so a test asserting the payload shape cannot pass
+        # merely because there was nothing left to leak.
+        "Addr": {
+            "type": "object",
+            "required": ["city"],
+            "properties": {
+                "city": {"type": "string"},
+                "zip": {"type": "string"},
+                "street": {"type": "string"},
+            },
+        },
+    },
+    "$ref": "#/$defs/Req",
+}
+
+
 def _composed_root(inner: dict, style: str) -> dict:
     """Express `inner` as a root that only reaches its properties through $ref or allOf."""
     if style == "inline":
@@ -123,23 +150,29 @@ class TestComposioInputSchema:
     def test_definitions_survive_a_resolved_root(self):
         # Resolving the root drops the `$defs` that lived on it, so they have to be carried across
         # or a property referencing one of them would fail to build.
-        input_props = {
-            "$defs": {
-                "Req": {
-                    "type": "object",
-                    "required": ["addr"],
-                    "properties": {"addr": {"$ref": "#/$defs/Addr"}, "note": {"type": "string"}},
-                },
-                "Addr": {"type": "object", "properties": {"city": {"type": "string"}}},
-            },
-            "$ref": "#/$defs/Req",
-        }
-        node = _build_node(input_props=input_props)
+        node = _build_node(input_props=NESTED_INPUT_PROPS)
 
         _, payload = node._build_request(node.input_schema(addr={"city": "Kyiv"}, note="x"))
 
-        assert sorted(node.input_schema.model_fields) == ["addr", "note"]
+        assert sorted(node.input_schema.model_fields) == ["addr", "note", "stops"]
         assert payload["arguments"]["addr"] == {"city": "Kyiv"}
+
+    def test_unset_fields_are_dropped_at_every_depth(self):
+        # The payload must carry only what the caller supplied: an optional property is typed
+        # `X | None` with default None, so a nested object would otherwise post an explicit null
+        # for every sub-field nobody set.
+        node = _build_node(input_props=NESTED_INPUT_PROPS)
+
+        _, payload = node._build_request(node.input_schema(addr={"city": "Kyiv"}, stops=[{"city": "Lviv"}]))
+
+        assert payload["arguments"] == {"addr": {"city": "Kyiv"}, "stops": [{"city": "Lviv"}]}
+
+    def test_supplied_nested_values_are_kept(self):
+        node = _build_node(input_props=NESTED_INPUT_PROPS)
+
+        _, payload = node._build_request(node.input_schema(addr={"city": "Kyiv", "zip": "01001"}, note="n"))
+
+        assert payload["arguments"] == {"addr": {"city": "Kyiv", "zip": "01001"}, "note": "n"}
 
     def test_property_name_that_is_not_an_identifier_keeps_its_alias(self):
         node = _build_node()
