@@ -199,6 +199,23 @@ class TestComposioInputSchema:
 
         assert node.input_schema.model_fields == {}
 
+    def test_two_actions_do_not_collide_on_the_default_name(self):
+        # An agent keys its tool registry on `name`, so two actions sharing one default would
+        # collapse to a single entry and leave the first unreachable.
+        fetch = _build_node(tool_slug="GMAIL_FETCH_EMAILS")
+        send = _build_node(tool_slug="GMAIL_SEND_EMAIL")
+
+        by_name = {tool.name: tool for tool in (fetch, send)}
+
+        assert fetch.name == "gmail_fetch_emails"
+        assert send.name == "gmail_send_email"
+        assert by_name == {"gmail_fetch_emails": fetch, "gmail_send_email": send}
+
+    def test_an_explicit_name_is_kept(self):
+        node = _build_node(name="Mailer")
+
+        assert node.name == "Mailer"
+
     def test_node_type_matches_the_wire_contract(self):
         assert _build_node().type == "dynamiq.nodes.tools.Composio"
 

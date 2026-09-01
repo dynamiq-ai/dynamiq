@@ -26,7 +26,7 @@ class Composio(ConnectionNode):
     A tool for executing a single Composio action (tool) on behalf of a Composio user.
 
     Attributes:
-        name (str): Name of the tool
+        name (str): Name of the tool, defaulting to the lowercased `tool_slug`
         description (str): Description of the tool
         group (Literal[NodeGroup.TOOLS]): The group the node belongs to
         connection (ComposioConnection): The Composio API connection
@@ -60,6 +60,12 @@ class Composio(ConnectionNode):
     _source_description: str | None = PrivateAttr(default=None)
 
     def __init__(self, input_props: dict[str, Any] | None = None, **kwargs):
+        # One node is one action, and an agent keys its tool registry, its prompt listing and its
+        # result cache on `name`. Two actions sharing the class default would collapse to a single
+        # entry, leaving the first unreachable, so an unnamed node is named after its action.
+        if not kwargs.get("name"):
+            kwargs["name"] = (kwargs.get("tool_slug") or self.model_fields["name"].default).lower()
+
         arguments = kwargs.get("arguments") or {}
         # A tool that declares no parameters is persisted with an empty or absent schema - the node
         # type serializes `input_props` with `omitempty`, and Composio itself reports "no declared
