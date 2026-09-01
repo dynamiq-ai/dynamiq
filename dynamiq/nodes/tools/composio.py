@@ -6,7 +6,12 @@ from dynamiq.connections import Composio as ComposioConnection
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.mcp import create_input_schema_from_json_schema, rename_keys_recursive
+from dynamiq.nodes.tools.mcp import (
+    create_input_schema_from_json_schema,
+    get_json_schema_definitions,
+    rename_keys_recursive,
+    resolve_root_object_schema,
+)
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
@@ -140,6 +145,13 @@ class Composio(ConnectionNode):
             schema_dict = {}
         schema_dict = rename_keys_recursive(schema_dict, {"type_": "type"})
 
+        # A root composed purely of $ref/allOf is resolved to the object schema it stands for before
+        # anything below inspects it. The schema builder resolves the same way, so rewriting the
+        # unresolved root instead would edit keys it goes on to discard. The definitions live on the
+        # original root and have to be carried across, since the resolved schema no longer holds them.
+        definitions = get_json_schema_definitions(schema_dict)
+        schema_dict = resolve_root_object_schema(schema_dict, definitions)
+
         # Composio marks optionality the Pydantic way, so only `required` is authoritative. A parameter
         # already configured at design time is dropped from it: the runtime input may override the
         # configured value, but does not have to supply one.
@@ -157,7 +169,7 @@ class Composio(ConnectionNode):
                 if isinstance(prop, dict) and "default" in prop:
                     schema_dict["properties"][name] = {key: value for key, value in prop.items() if key != "default"}
 
-        return create_input_schema_from_json_schema(schema_dict, "ComposioToolSchema")
+        return create_input_schema_from_json_schema(schema_dict, "ComposioToolSchema", definitions=definitions)
 
     def _build_request(self, input_data: BaseModel) -> tuple[str, dict]:
         base_url = (self.connection.url or DEFAULT_COMPOSIO_URL).rstrip("/")

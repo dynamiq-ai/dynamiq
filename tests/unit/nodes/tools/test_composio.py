@@ -40,6 +40,18 @@ def _mock_response(status_code=200, json_payload=None, text="ok"):
     return resp
 
 
+def _composed_root(inner: dict, style: str) -> dict:
+    """Express `inner` as a root that only reaches its properties through $ref or allOf."""
+    if style == "inline":
+        return inner
+    if style == "$ref":
+        return {"$defs": {"Req": inner}, "$ref": "#/$defs/Req"}
+    return {"$defs": {"Req": inner}, "allOf": [{"$ref": "#/$defs/Req"}]}
+
+
+COMPOSED_ROOT_STYLES = ["inline", "$ref", "allOf"]
+
+
 def _build_node(**kwargs) -> Composio:
     kwargs.setdefault("input_props", INPUT_PROPS)
     kwargs.setdefault("user_id", "project-uuid")
@@ -66,6 +78,67 @@ class TestComposioInputSchema:
         required = {name for name, field in fields.items() if field.is_required()}
 
         assert required == {"recipient_email"}
+
+    @pytest.mark.parametrize("style", COMPOSED_ROOT_STYLES)
+    def test_configured_argument_stops_being_required_on_a_composed_root(self, style):
+        # Composio may express a tool's schema through a root-level $ref or allOf. The schema builder
+        # resolves such a root before reading its properties, so the configured-argument handling has
+        # to resolve it too - otherwise the agent is asked for a parameter it already has.
+        inner = {
+            "type": "object",
+            "required": ["recipient", "body"],
+            "properties": {"recipient": {"type": "string"}, "body": {"type": "string"}},
+        }
+        node = _build_node(
+            input_props=_composed_root(inner, style),
+            arguments={"recipient": "configured@example.com"},
+        )
+
+        required = {name for name, field in node.input_schema.model_fields.items() if field.is_required()}
+
+        assert required == {"body"}
+
+    @pytest.mark.parametrize("style", COMPOSED_ROOT_STYLES)
+    def test_configured_argument_survives_the_schema_default_on_a_composed_root(self, style):
+        # The silent case: no validation error, the action just executes against Composio's default
+        # instead of the value configured at design time.
+        inner = {
+            "type": "object",
+            "required": ["body"],
+            "properties": {
+                "recipient": {"type": "string", "default": "composio-default@example.com"},
+                "body": {"type": "string"},
+            },
+        }
+        node = _build_node(
+            input_props=_composed_root(inner, style),
+            arguments={"recipient": "configured@example.com"},
+        )
+
+        _, payload = node._build_request(node.input_schema(body="hi"))
+
+        assert payload["arguments"]["recipient"] == "configured@example.com"
+
+    def test_definitions_survive_a_resolved_root(self):
+        # Resolving the root drops the `$defs` that lived on it, so they have to be carried across
+        # or a property referencing one of them would fail to build.
+        input_props = {
+            "$defs": {
+                "Req": {
+                    "type": "object",
+                    "required": ["addr"],
+                    "properties": {"addr": {"$ref": "#/$defs/Addr"}, "note": {"type": "string"}},
+                },
+                "Addr": {"type": "object", "properties": {"city": {"type": "string"}}},
+            },
+            "$ref": "#/$defs/Req",
+        }
+        node = _build_node(input_props=input_props)
+
+        _, payload = node._build_request(node.input_schema(addr={"city": "Kyiv"}, note="x"))
+
+        assert sorted(node.input_schema.model_fields) == ["addr", "note"]
+        assert payload["arguments"]["addr"] == {"city": "Kyiv"}
 
     def test_property_name_that_is_not_an_identifier_keeps_its_alias(self):
         node = _build_node()
