@@ -55,3 +55,14 @@ nodes:
               type: boolean
               default: false
               description: Whether the body is HTML.
+
+flows:
+  composio-agent-flow:
+    name: Composio Agent Flow
+    nodes:
+      - agent-composio
+
+workflows:
+  composio-agent-workflow:
+    flow: composio-agent-flow
+    version: 1
