@@ -1,8 +1,8 @@
 """Unit tests for the Composio action tool.
 
 A Composio execute answers HTTP 200 even when the action itself failed, so the tests below pin
-both the transport-level and the body-level failure handling, and assert the request is never
-replayed - an execute can have side effects.
+both the transport-level and the body-level failure handling, and assert a single execute issues
+a single request - an execute can have side effects.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -13,6 +13,7 @@ from dynamiq.connections.connections import Composio as ComposioConnection
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import Node
 from dynamiq.nodes.tools.composio import Composio
+from dynamiq.runnables import RunnableStatus
 
 INPUT_PROPS = {
     "type": "object",
@@ -343,7 +344,29 @@ class TestComposioExecute:
 
         assert "Invalid recipient" in str(exc_info.value)
         assert exc_info.value.recoverable is False
-        assert client.request.call_count == 1  # an execute is never replayed
+        assert client.request.call_count == 1  # the node itself does not retry an execute
+
+    @pytest.mark.parametrize(
+        ("status_code", "json_payload"),
+        [(200, {"successful": False, "error": "Invalid recipient"}), (500, {}), (400, {})],
+    )
+    def test_run_reports_every_failure_as_recoverable(self, status_code, json_payload):
+        # Characterization, not endorsement: `Node._handle_failure` derives `recoverable` from the
+        # exception type, so the `recoverable=` argument at the raise site and the RECOVERABLE_CODES
+        # split never reach the result - every failure is reported as recoverable and the agent may
+        # re-issue the call. Update this test if `_handle_failure` starts honouring the argument.
+        node = _build_node()
+        client = MagicMock()
+        client.closed = False
+        client.is_closed = MagicMock(return_value=False)
+        client.request = MagicMock(return_value=_mock_response(status_code=status_code, json_payload=json_payload))
+        node.client = client
+
+        result = node.run(input_data={"recipient_email": "a@b.c", "body": "Body"})
+
+        assert result.status == RunnableStatus.FAILURE
+        assert result.error.recoverable is True
+        assert client.request.call_count == 1
 
     @pytest.mark.parametrize(
         ("status_code", "recoverable"),

@@ -200,8 +200,13 @@ class Composio(ConnectionNode):
         """Fail on a tool-level error.
 
         Composio answers 200 even when the action itself failed, so `successful` in the body -
-        not the HTTP status - carries the real outcome. The failure is reported as unrecoverable
-        because an execute must never be replayed: it may have side effects.
+        not the HTTP status - carries the real outcome.
+
+        `recoverable=False` records that an execute should not be replayed - it may have side
+        effects - but it does not currently stop one: `Node._handle_failure` derives the flag
+        from the exception type rather than from this value, and every `ToolExecutionException`
+        is a `RecoverableAgentException`. The same is true of `RECOVERABLE_CODES` above and of
+        every other tool in the repo that passes the argument.
         """
         if not response_json.get("successful", True):
             error_message = f"Composio tool {self.tool_slug} execution failed"
