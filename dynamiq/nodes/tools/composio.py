@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, PrivateAttr
 
 from dynamiq.connections import Composio as ComposioConnection
 from dynamiq.nodes import NodeGroup
@@ -49,6 +49,11 @@ class Composio(ConnectionNode):
     connected_account_id: str | None = None
     arguments: dict[str, Any] = {}
 
+    # The description Composio supplied for the action, before `_generate_description` appends the
+    # parameter listing onto it. `None` means it was never captured, which only happens if the node
+    # was built without running `__init__`.
+    _source_description: str | None = PrivateAttr(default=None)
+
     def __init__(self, input_props: dict[str, Any] | None = None, **kwargs):
         arguments = kwargs.get("arguments") or {}
         # A tool that declares no parameters is persisted with an empty or absent schema - the node
@@ -64,7 +69,17 @@ class Composio(ConnectionNode):
             input_props=input_props,
             **kwargs,
         )
+        self._source_description = self.description
         self.description = self._generate_description()
+
+    def to_dict(self, **kwargs) -> dict:
+        data = super().to_dict(**kwargs)
+        # At runtime `description` carries the parameter listing that `_generate_description` appended
+        # to the description Composio supplied. Persisting that listing would feed it back in on the
+        # next load, where it is appended again, so it would compound on every save/load cycle.
+        if self._source_description is not None and "description" in data:
+            data["description"] = self._source_description
+        return data
 
     @property
     def to_dict_exclude_params(self):

@@ -136,6 +136,24 @@ class TestComposioInputSchema:
 
         assert "input_schema" not in node.to_dict()
 
+    def test_to_dict_persists_the_supplied_description_without_the_parameter_listing(self):
+        node = _build_node(description="Send an email.")
+
+        assert "Required Parameters:" in node.description
+        assert node.to_dict()["description"] == "Send an email."
+
+    def test_description_does_not_compound_across_save_and_load_cycles(self):
+        # The parameter listing is appended onto whatever `description` holds, so persisting the
+        # generated text would make every save/load cycle append another copy of the listing.
+        node = _build_node(description="Send an email.")
+
+        for _ in range(3):
+            node = _build_node(description=node.to_dict()["description"])
+
+        assert node.description.count("Required Parameters:") == 1
+        assert node.description.count("Optional Parameters:") == 1
+        assert node.description.startswith("Send an email.")
+
 
 class TestComposioExecute:
     def test_execute_posts_to_the_tool_execute_endpoint(self):
