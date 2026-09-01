@@ -11,7 +11,7 @@ import os
 from dynamiq.connections import Composio as ComposioConnection
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools import Composio
-from examples.utils.utils_llm import setup_llm
+from examples.components.tools.extra_utils.utils_llm import setup_llm
 
 # The Composio user the action runs as. On the platform this is always the project id.
 USER_ID = os.environ.get("COMPOSIO_USER_ID", "")
