@@ -10,7 +10,7 @@ from pydantic_core import from_json
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.agents.base import Agent as BaseAgent
-from dynamiq.nodes.agents.base import _run_extra_tools, _shared_sandbox_tools
+from dynamiq.nodes.agents.base import _run_extra_tools, _run_notes_index, _shared_sandbox_tools
 from dynamiq.nodes.agents.components import parser, schema_generator
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
@@ -1184,6 +1184,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 tools_name=self.tool_names,
                 tool_description=self.tool_description,
                 input_formats=schema_generator.generate_input_formats(self._runtime_tools, self.sanitize_tool_name),
+                # Per-run value for the `notes` block; a kwarg beats any same-named input key.
+                notes_index=_run_notes_index.get(),
             ),
             static=True,
         )
@@ -1649,7 +1651,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
             str | None: Final answer if delegation occurred, None to continue loop
         """
         check_cancellation(config)
-        if action and self.tools:
+        # `_runtime_tools`, not `self.tools`: per-run overlays (long-term memory, notes,
+        # a borrowed shared sandbox) never appear in the static list, so an agent
+        # configured with `tools=[]` plus one of those would parse an action and then
+        # silently skip dispatching it, looping until it hit max_loops.
+        if action and self._runtime_tools:
             tool_result = None
             skipped_tools: list[str] = []
 
@@ -2228,9 +2234,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         tools = self.tools if tools is None else tools
         ltm_enabled = self.long_term_memory is not None and self.long_term_memory.enabled
+        notes_enabled = self.notes is not None and self.notes.enabled
         return ReactPromptConfig(
             inference_mode=self.inference_mode,
-            has_tools=bool(tools) or (self.skills.enabled and self.skills.source is not None) or ltm_enabled,
+            has_tools=bool(tools)
+            or (self.skills.enabled and self.skills.source is not None)
+            or ltm_enabled
+            or notes_enabled,
+            notes_enabled=notes_enabled,
             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
             delegation_allowed=self.delegation_allowed,
             context_compaction_enabled=self.summarization_config.enabled,

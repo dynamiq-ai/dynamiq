@@ -43,6 +43,13 @@ How to read skill content:
 
 {%- endif %}
 
+{%- if notes %}
+---
+# YOUR SAVED NOTES
+Every note you own, as `title - description`. Use read_note to load full content.
+{{notes}}
+{%- endif %}
+
 {%- if output_format %}
 ---
 # RESPONSE FORMAT

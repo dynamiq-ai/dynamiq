@@ -27,6 +27,7 @@ from dynamiq.nodes.agents.prompts.secondary_instructions import (
     CONTEXT_MANAGER_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS_XML,
+    NOTES_TOOLS_INSTRUCTIONS,
     PERSISTENT_NOTES_INSTRUCTIONS_TEMPLATE,
     REACT_BLOCK_MULTI_TOOL_PLANNING,
     SANDBOX_INSTRUCTIONS_TEMPLATE,
@@ -47,6 +48,9 @@ class ReactPromptConfig(BaseModel):
     delegation_allowed: bool = False
     context_compaction_enabled: bool = False
     notes_file_path: str | None = None
+    # Distinct from `notes_file_path` above, which is the sandbox compaction scratchpad.
+    # This one gates the user-scoped titled notes (write_note / read_note / delete_note).
+    notes_enabled: bool = False
     todo_management_enabled: bool = False
     sandbox_base_path: str | None = None
     has_sub_agent_tools: bool = False
@@ -282,6 +286,11 @@ class AgentPromptManager:
             "tools": "" if not config.has_tools else react_block_tools,
             "instructions": instructions_no_tools if not config.has_tools else instructions_default,
             "output_format": output_format,
+            # A placeholder, never the index text itself: the value is supplied per run as a
+            # `generate_prompt` kwarg. Blocks are rendered as Jinja templates, so putting
+            # LLM-authored note titles here would let a `{{ ... }}` in a title be evaluated
+            # against the prompt variables. Set unconditionally so a rebuild clears a stale one.
+            "notes": "{{ notes_index }}" if config.notes_enabled else "",
         }
 
         match config.inference_mode:
@@ -321,6 +330,8 @@ class AgentPromptManager:
                 ops_parts.append(PERSISTENT_NOTES_INSTRUCTIONS_TEMPLATE.format(notes_path=config.notes_file_path))
         if config.todo_management_enabled:
             ops_parts.append(TODO_TOOLS_INSTRUCTIONS)
+        if config.notes_enabled:
+            ops_parts.append(NOTES_TOOLS_INSTRUCTIONS)
         if config.has_sub_agent_tools:
             ops_parts.append(SUB_AGENT_INSTRUCTIONS)
 
@@ -331,8 +342,9 @@ class AgentPromptManager:
                 user_instructions = f"{{% raw %}}{user_instructions}{{% endraw %}}"
             ops_parts.append(user_instructions)
 
-        if ops_parts:
-            prompt_blocks["operational_instructions"] = "\n\n".join(ops_parts)
+        # Set unconditionally: a rebuild that produces no ops parts must clear the previous
+        # build's instructions rather than leaving them stale on a reused agent instance.
+        prompt_blocks["operational_instructions"] = "\n\n".join(ops_parts)
 
         # 4. Environment block
         if config.sandbox_base_path:

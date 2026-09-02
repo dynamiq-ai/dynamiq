@@ -46,6 +46,17 @@ TODO_TOOLS_INSTRUCTIONS = """## Todo Management
 - Mark completed IMMEDIATELY after finishing each step - don't batch
 - Only mark completed when FULLY done; if blocked, keep in_progress"""
 
+NOTES_TOOLS_INSTRUCTIONS = """## Notes
+- "YOUR SAVED NOTES" is the complete list of notes you own, titles and descriptions only; \
+if a title is not there, the note does not exist
+- read_note before acting on a note or overwriting it - a description is a pointer, not content
+- write_note for what will matter in a LATER conversation: stable preferences, decisions and \
+their reasoning, procedures, reference material
+- Never for this run's scratch work, plans, or anything already in the conversation
+- Titles must be specific and stable; the description must be enough to decide later whether \
+to open the note
+- write_note and delete_note return the refreshed index - trust it over the section above"""
+
 
 SANDBOX_INSTRUCTIONS_TEMPLATE = """## Sandbox Environment
 - You operate inside a persistent sandbox filesystem.
