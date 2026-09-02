@@ -154,12 +154,19 @@ def test_index_is_ordered_by_title_and_can_order_by_recency(backend):
 
 
 def test_index_listing_uses_an_index_only_scan(backend):
-    """The covering PRIMARY KEY is what keeps the per-run hot path off the table heap."""
-    backend.write(user_id=USER_ID, title="Big", description="d", content="x" * 100_000)
+    """The covering PRIMARY KEY is what keeps the per-run hot path off the table heap.
+
+    Needs enough rows for the planner to prefer the index, and a VACUUM so the visibility
+    map is populated — without it Postgres must visit the heap to check tuple visibility
+    and downgrades to a plain Index Scan no matter how well the index covers the columns.
+    """
+    for i in range(200):
+        backend.write(user_id=USER_ID, title=f"note-{i:03d}", description="d", content="x" * 10_000)
+    backend._execute_sql(SQL("VACUUM ANALYZE {table}").format(table=backend._table))
 
     plan = backend._execute_sql(
         SQL(
-            "EXPLAIN (FORMAT JSON) SELECT title, description, updated_at FROM {table} "
+            "EXPLAIN (ANALYZE, FORMAT JSON) SELECT title, description, updated_at FROM {table} "
             "WHERE user_id = %s ORDER BY title ASC LIMIT %s"
         ).format(table=backend._table),
         (USER_ID, 10),
@@ -169,6 +176,7 @@ def test_index_listing_uses_an_index_only_scan(backend):
 
     assert "Index Only Scan" in rendered
     assert f"{TABLE}_pkey" in rendered
+    assert '"Heap Fetches": 0' in rendered
 
 
 def test_index_reports_truncation(backend):

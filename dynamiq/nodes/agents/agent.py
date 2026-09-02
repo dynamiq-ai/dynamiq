@@ -1651,7 +1651,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
             str | None: Final answer if delegation occurred, None to continue loop
         """
         check_cancellation(config)
-        if action and self.tools:
+        # `_runtime_tools`, not `self.tools`: per-run overlays (long-term memory, notes,
+        # a borrowed shared sandbox) never appear in the static list, so an agent
+        # configured with `tools=[]` plus one of those would parse an action and then
+        # silently skip dispatching it, looping until it hit max_loops.
+        if action and self._runtime_tools:
             tool_result = None
             skipped_tools: list[str] = []
 

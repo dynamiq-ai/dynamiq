@@ -8,6 +8,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.memory.notes import NotesConfig
 from dynamiq.memory.notes.backends import InMemoryNotesBackend
 from dynamiq.nodes.agents.agent import Agent as ReactAgent
+from dynamiq.nodes.agents.agent import ReactStep
 from dynamiq.nodes.agents.base import NOTES_INDEX_UNAVAILABLE, Agent, _run_notes_index
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
@@ -344,6 +345,35 @@ def test_concurrent_runs_isolate_per_user_indexes(llm):
     assert set(seen) == {"u1", "u2"}
     assert "Quokka beta" not in seen["u1"]
     assert "Zebra alpha" not in seen["u2"]
+
+
+def test_react_loop_dispatches_a_notes_tool_when_the_agent_has_no_static_tools(llm):
+    """The whole feature depends on this: notes tools live only in the per-run overlay, so
+    an agent built with `tools=[]` must still dispatch them. `_execute_tools_and_update_prompt`
+    previously gated on `self.tools`, which is empty here — the action was parsed, never
+    executed, and the agent looped to max_loops writing nothing.
+    """
+    backend = InMemoryNotesBackend()
+    agent = _make_agent(llm, notes=_notes_config(backend=backend), react=True)
+    steps = [
+        ReactStep(
+            kind="tool_call",
+            thought="saving",
+            action="write_note",
+            action_input={"title": "Runbook", "description": "ship steps", "content": "1. merge"},
+        ),
+        ReactStep(kind="final_answer", thought="done", final_answer="saved"),
+    ]
+
+    with patch.object(agent, "_run_react_llm_step", side_effect=steps):
+        result = agent.run_sync(input_data={"input": "save this", "user_id": "u1"})
+
+    assert result.status.value == "success"
+    stored = backend.list_all(user_id="u1")
+    assert [note.title for note in stored] == ["Runbook"]
+    # The tool result must reach the model as an Observation, not vanish.
+    observations = [m.content for m in agent._prompt.messages if m.content.startswith("Observation:")]
+    assert any("Created note 'Runbook'" in o for o in observations)
 
 
 def test_sub_agent_without_notes_does_not_inherit_the_overlay(llm):
