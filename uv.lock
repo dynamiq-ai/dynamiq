@@ -1345,6 +1345,7 @@ dependencies = [
     { name = "elasticsearch" },
     { name = "filetype" },
     { name = "google-cloud-aiplatform" },
+    { name = "google-cloud-documentai" },
     { name = "inscriptis" },
     { name = "jinja2" },
     { name = "jsonpath-ng" },
@@ -1366,6 +1367,7 @@ dependencies = [
     { name = "pdf2image" },
     { name = "pdfplumber" },
     { name = "pgvector" },
+    { name = "pillow" },
     { name = "pinecone-client" },
     { name = "playwright" },
     { name = "psycopg", extra = ["binary"] },
@@ -1468,6 +1470,7 @@ requires-dist = [
     { name = "elasticsearch", specifier = ">=8.12.0,<8.13.0" },
     { name = "filetype", specifier = ">=1.2.0,<1.3.0" },
     { name = "google-cloud-aiplatform", specifier = ">=1.133.0,<2.0.0" },
+    { name = "google-cloud-documentai", specifier = ">=3.15.0,<4.0.0" },
     { name = "inscriptis", specifier = "==2.5.0" },
     { name = "jinja2", specifier = ">=3.1.6,<3.2.0" },
     { name = "jsonpath-ng", specifier = ">=1.6.1,<1.7.0" },
@@ -1489,6 +1492,7 @@ requires-dist = [
     { name = "pdf2image", specifier = ">=1.17.0,<1.18.0" },
     { name = "pdfplumber", specifier = ">=0.11.8,<0.12.0" },
     { name = "pgvector", specifier = ">=0.3.6,<0.4.0" },
+    { name = "pillow", specifier = ">=12.3.0,<13.0.0" },
     { name = "pinecone-client", specifier = ">=3.2.2,<3.3.0" },
     { name = "playwright", specifier = ">=1.50.0,<2.0.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2.3,<3.3.0" },
@@ -2080,6 +2084,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a6/03/ef0bc99d0e0faf4fdbe67ac445e18cdaa74824fd93cd069e7bb6548cb52d/google_cloud_core-2.5.0.tar.gz", hash = "sha256:7c1b7ef5c92311717bd05301aa1a91ffbc565673d3b0b4163a52d8413a186963", size = 36027, upload-time = "2025-10-29T23:17:39.513Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/89/20/bfa472e327c8edee00f04beecc80baeddd2ab33ee0e86fd7654da49d45e9/google_cloud_core-2.5.0-py3-none-any.whl", hash = "sha256:67d977b41ae6c7211ee830c7912e41003ea8194bff15ae7d72fd6f51e57acabc", size = 29469, upload-time = "2025-10-29T23:17:38.548Z" },
+]
+
+[[package]]
+name = "google-cloud-documentai"
+version = "3.15.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core", extra = ["grpc"] },
+    { name = "google-auth" },
+    { name = "grpcio" },
+    { name = "proto-plus" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e0/63/a775dd454e0fa523b999780665f3117c0026eaa604dd7c47ad3c45c7624f/google_cloud_documentai-3.15.0.tar.gz", hash = "sha256:d50b69a8a62aaf803b0d926f93b6579df440f5f779f45fec2c5972768a1cdbbd", size = 362736, upload-time = "2026-06-03T15:28:21.501Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/55/d1/2a873f97cb08bb592f5b944e39f040161d5f7d2d4edbfae4c7515869b12a/google_cloud_documentai-3.15.0-py3-none-any.whl", hash = "sha256:f040f4f9db43411184197a808b11fde52b580723a9fca336f43ea7c6a885bfd8", size = 310694, upload-time = "2026-06-03T15:27:33.481Z" },
 ]
 
 [[package]]

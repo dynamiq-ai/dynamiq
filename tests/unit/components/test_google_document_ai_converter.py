@@ -1,0 +1,440 @@
+from io import BytesIO
+from unittest.mock import MagicMock, patch
+
+import pytest
+from google.cloud import documentai
+from PIL import Image
+from pydantic import ValidationError
+from pypdf import PdfWriter
+
+from dynamiq.components.converters.google_document_ai import (
+    MAX_PAGES_PER_REQUEST_IMAGELESS,
+    MAX_PAGES_PER_REQUEST_WITH_IMAGES,
+    GoogleDocumentAIFileConverter,
+)
+from dynamiq.connections import GoogleDocumentAI
+from dynamiq.types import DocumentCreationMode
+
+PROCESSOR_PATH = "projects/proj/locations/eu/processors/abc123"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_env(monkeypatch):
+    """Google env vars would otherwise seed the connection defaults."""
+    for key in list(__import__("os").environ):
+        if key.startswith(("GOOGLE_CLOUD_", "GOOGLE_DOCUMENT_AI_")):
+            monkeypatch.delenv(key, raising=False)
+
+
+def build_pdf(page_count: int, filename: str = "file.pdf") -> BytesIO:
+    writer = PdfWriter()
+    for _ in range(page_count):
+        writer.add_blank_page(width=72, height=72)
+    buffer = BytesIO()
+    writer.write(buffer)
+    buffer.seek(0)
+    buffer.name = filename
+    return buffer
+
+
+def build_response(page_texts: list[str]) -> documentai.ProcessResponse:
+    """Build a Document AI response whose pages anchor into a single flat text, as the API does."""
+    text = ""
+    pages = []
+    for page_number, page_text in enumerate(page_texts, start=1):
+        start = len(text)
+        text += page_text
+        pages.append(
+            documentai.Document.Page(
+                page_number=page_number,
+                layout=documentai.Document.Page.Layout(
+                    text_anchor=documentai.Document.TextAnchor(
+                        text_segments=[
+                            documentai.Document.TextAnchor.TextSegment(start_index=start, end_index=len(text))
+                        ]
+                    )
+                ),
+            )
+        )
+    return documentai.ProcessResponse(document=documentai.Document(text=text, pages=pages))
+
+
+def build_tiff(page_count: int, filename: str = "file.tiff") -> BytesIO:
+    frames = [Image.new("1", (8, 8), color=index % 2) for index in range(page_count)]
+    buffer = BytesIO()
+    frames[0].save(buffer, format="TIFF", save_all=True, append_images=frames[1:])
+    buffer.seek(0)
+    buffer.name = filename
+    return buffer
+
+
+@pytest.fixture
+def connection():
+    return GoogleDocumentAI(project_id="proj", location="eu")
+
+
+@pytest.fixture
+def client():
+    client = MagicMock(spec=documentai.DocumentProcessorServiceClient)
+    client.processor_path.return_value = PROCESSOR_PATH
+    client.processor_version_path.return_value = f"{PROCESSOR_PATH}/processorVersions/pretrained-ocr-v2.0"
+    client.process_document.return_value = build_response(["PAGE ONE\n", "PAGE TWO\n"])
+    return client
+
+
+@pytest.fixture
+def converter(connection, client):
+    return GoogleDocumentAIFileConverter(connection=connection, client=client, processor_id="abc123")
+
+
+class TestTextExtraction:
+    def test_one_doc_per_file_concatenates_page_texts(self, converter):
+        documents = converter.run(files=[build_pdf(2)])["documents"]
+
+        assert len(documents) == 1
+        assert documents[0].content == "PAGE ONE\n\n\nPAGE TWO\n"
+
+    def test_one_doc_per_page_creates_one_document_per_page(self, connection, client):
+        converter = GoogleDocumentAIFileConverter(
+            connection=connection,
+            client=client,
+            processor_id="abc123",
+            document_creation_mode=DocumentCreationMode.ONE_DOC_PER_PAGE,
+        )
+
+        documents = converter.run(files=[build_pdf(2)])["documents"]
+
+        assert [document.content for document in documents] == ["PAGE ONE\n", "PAGE TWO\n"]
+        assert [document.metadata["page_number"] for document in documents] == [1, 2]
+
+    def test_text_without_page_anchors_is_kept(self, converter, client):
+        """A processor may return text with no page layout; the text must not be dropped."""
+        client.process_document.return_value = documentai.ProcessResponse(
+            document=documentai.Document(text="ANCHORLESS")
+        )
+
+        documents = converter.run(files=[build_pdf(1)])["documents"]
+
+        assert documents[0].content == "ANCHORLESS"
+
+    def test_pages_with_no_text_yield_empty_strings(self, converter, client):
+        client.process_document.return_value = build_response(["", "SECOND\n"])
+
+        documents = converter.run(files=[build_pdf(2)])["documents"]
+
+        assert documents[0].content == "\n\nSECOND\n"
+
+    def test_custom_page_separator_is_used(self, connection, client):
+        converter = GoogleDocumentAIFileConverter(
+            connection=connection, client=client, processor_id="abc123", page_separator="\n---\n"
+        )
+
+        documents = converter.run(files=[build_pdf(2)])["documents"]
+
+        assert documents[0].content == "PAGE ONE\n\n---\nPAGE TWO\n"
+
+
+class TestMetadata:
+    def test_metadata_carries_file_and_processor_details(self, converter):
+        documents = converter.run(files=[build_pdf(2)], metadata={"request_id": "request-1"})["documents"]
+
+        metadata = documents[0].metadata
+        assert metadata["request_id"] == "request-1"
+        assert metadata["file_path"] == "file.pdf"
+        assert metadata["document_ai_processor_id"] == "abc123"
+        assert metadata["document_ai_pages"] == 2
+
+    def test_processor_version_is_recorded_only_when_pinned(self, connection, client):
+        without_version = GoogleDocumentAIFileConverter(connection=connection, client=client, processor_id="abc123")
+        with_version = GoogleDocumentAIFileConverter(
+            connection=connection,
+            client=client,
+            processor_id="abc123",
+            processor_version="pretrained-ocr-v2.0",
+        )
+
+        assert "document_ai_processor_version" not in without_version.run(files=[build_pdf(1)])["documents"][0].metadata
+        assert (
+            with_version.run(files=[build_pdf(1)])["documents"][0].metadata["document_ai_processor_version"]
+            == "pretrained-ocr-v2.0"
+        )
+
+    def test_file_path_input_is_recorded(self, converter, tmp_path):
+        path = tmp_path / "from-disk.pdf"
+        path.write_bytes(build_pdf(2).getvalue())
+
+        documents = converter.run(file_paths=[str(path)])["documents"]
+
+        assert documents[0].metadata["file_path"] == str(path)
+
+    def test_caller_supplied_file_path_is_preserved(self, converter):
+        documents = converter.run(files=[build_pdf(1)], metadata={"file_path": "contracts/2026/invoice.pdf"})[
+            "documents"
+        ]
+
+        assert documents[0].metadata["file_path"] == "contracts/2026/invoice.pdf"
+
+
+class TestProcessorName:
+    def test_processor_path_is_used_without_a_version(self, converter, client):
+        assert converter.processor_name == PROCESSOR_PATH
+        client.processor_path.assert_called_once_with("proj", "eu", "abc123")
+
+    def test_processor_version_path_is_used_with_a_version(self, connection, client):
+        converter = GoogleDocumentAIFileConverter(
+            connection=connection,
+            client=client,
+            processor_id="abc123",
+            processor_version="pretrained-ocr-v2.0",
+        )
+
+        assert converter.processor_name.endswith("/processorVersions/pretrained-ocr-v2.0")
+        client.processor_version_path.assert_called_once_with("proj", "eu", "abc123", "pretrained-ocr-v2.0")
+
+    @pytest.mark.parametrize("processor_id", ["", "   "], ids=["empty", "blank"])
+    def test_blank_processor_id_is_rejected(self, connection, client, processor_id):
+        with pytest.raises(ValidationError, match="processor_id"):
+            GoogleDocumentAIFileConverter(connection=connection, client=client, processor_id=processor_id)
+
+    def test_processor_id_is_stripped(self, connection, client):
+        """A processor id copied out of the console tends to carry whitespace."""
+        converter = GoogleDocumentAIFileConverter(connection=connection, client=client, processor_id="  abc123\n")
+
+        assert converter.processor_id == "abc123"
+
+
+class TestRequestOptions:
+    def test_ocr_options_are_omitted_by_default(self, converter, client):
+        converter.run(files=[build_pdf(1)])
+
+        request = client.process_document.call_args.kwargs["request"]
+        assert request.name == PROCESSOR_PATH
+        assert request.imageless_mode is True
+        assert not documentai.ProcessOptions.pb(request.process_options).HasField("ocr_config")
+        assert request.raw_document.mime_type == "application/pdf"
+
+    @pytest.mark.parametrize("enable_native_pdf_parsing", [True, False])
+    def test_explicit_ocr_option_is_included(self, connection, client, enable_native_pdf_parsing):
+        converter = GoogleDocumentAIFileConverter(
+            connection=connection,
+            client=client,
+            processor_id="abc123",
+            enable_native_pdf_parsing=enable_native_pdf_parsing,
+            imageless_mode=False,
+        )
+
+        converter.run(files=[build_pdf(1)])
+
+        request = client.process_document.call_args.kwargs["request"]
+        assert request.imageless_mode is False
+        assert documentai.ProcessOptions.pb(request.process_options).HasField("ocr_config")
+        assert request.process_options.ocr_config.enable_native_pdf_parsing is enable_native_pdf_parsing
+
+    def test_mime_type_is_guessed_from_the_filename(self, converter, client):
+        image = BytesIO(b"not-really-a-png")
+        image.name = "scan.png"
+
+        converter.run(files=[image])
+
+        assert client.process_document.call_args.kwargs["request"].raw_document.mime_type == "image/png"
+
+
+class TestMimeTypes:
+    @pytest.mark.parametrize(
+        ("filename", "mime_type"),
+        [
+            ("scan.pdf", "application/pdf"),
+            ("scan.bmp", "image/bmp"),
+            ("scan.gif", "image/gif"),
+            ("scan.jpe", "image/jpeg"),
+            ("scan.jpeg", "image/jpeg"),
+            ("scan.jpg", "image/jpeg"),
+            ("scan.png", "image/png"),
+            ("scan.tif", "image/tiff"),
+            ("scan.tiff", "image/tiff"),
+            ("scan.webp", "image/webp"),
+            ("SCAN.WEBP", "image/webp"),
+        ],
+    )
+    def test_every_supported_extension_is_declared_verbatim(self, converter, client, filename, mime_type):
+        file = BytesIO(b"file-bytes")
+        file.name = filename
+
+        converter.run(files=[file])
+
+        assert client.process_document.call_args.kwargs["request"].raw_document.mime_type == mime_type
+
+    @pytest.mark.parametrize("filename", ["notes.docx", "notes.txt", "sheet.csv"])
+    def test_unsupported_type_is_rejected_before_the_api_call(self, converter, client, filename):
+        file = BytesIO(b"file-bytes")
+        file.name = filename
+
+        with pytest.raises(ValueError, match="unsupported extension"):
+            converter.run(files=[file])
+
+        client.process_document.assert_not_called()
+
+    def test_unguessable_type_falls_back_to_pdf(self, converter, client, tmp_path):
+        """Document AI's own error is more useful than a local guess from a bare filename."""
+        path = tmp_path / "scan-without-extension"
+        path.write_bytes(build_pdf(1).getvalue())
+
+        converter.run(file_paths=[str(path)])
+
+        assert client.process_document.call_args.kwargs["request"].raw_document.mime_type == "application/pdf"
+
+
+class TestPageLimitSplitting:
+    @pytest.mark.parametrize(
+        ("imageless_mode", "expected_limit"),
+        [(True, MAX_PAGES_PER_REQUEST_IMAGELESS), (False, MAX_PAGES_PER_REQUEST_WITH_IMAGES)],
+        ids=["imageless", "with_images"],
+    )
+    def test_page_limit_depends_on_imageless_mode(self, connection, client, imageless_mode, expected_limit):
+        converter = GoogleDocumentAIFileConverter(
+            connection=connection, client=client, processor_id="abc123", imageless_mode=imageless_mode
+        )
+
+        assert converter.max_pages_per_request == expected_limit
+
+    def test_pdf_within_the_limit_is_sent_in_one_request(self, converter, client):
+        converter.run(files=[build_pdf(MAX_PAGES_PER_REQUEST_IMAGELESS)])
+
+        assert client.process_document.call_count == 1
+
+    def test_oversized_pdf_is_split_into_batches(self, converter, client):
+        client.process_document.return_value = build_response(["X"])
+
+        converter.run(files=[build_pdf(MAX_PAGES_PER_REQUEST_IMAGELESS + 1)])
+
+        assert client.process_document.call_count == 2
+
+    def test_split_batches_respect_the_page_limit(self, converter, client):
+        from pypdf import PdfReader
+
+        client.process_document.return_value = build_response(["X"])
+
+        converter.run(files=[build_pdf(MAX_PAGES_PER_REQUEST_IMAGELESS * 2 + 3)])
+
+        batch_page_counts = [
+            len(PdfReader(BytesIO(call.kwargs["request"].raw_document.content)).pages)
+            for call in client.process_document.call_args_list
+        ]
+        assert batch_page_counts == [MAX_PAGES_PER_REQUEST_IMAGELESS, MAX_PAGES_PER_REQUEST_IMAGELESS, 3]
+
+    def test_split_batch_texts_are_concatenated_in_page_order(self, converter, client):
+        client.process_document.side_effect = [
+            build_response([f"BATCH1-P{page}\n" for page in range(1, MAX_PAGES_PER_REQUEST_IMAGELESS + 1)]),
+            build_response(["BATCH2-P1\n"]),
+        ]
+
+        documents = converter.run(files=[build_pdf(MAX_PAGES_PER_REQUEST_IMAGELESS + 1)])["documents"]
+
+        assert documents[0].content.startswith("BATCH1-P1\n")
+        assert documents[0].content.endswith("BATCH2-P1\n")
+        assert documents[0].metadata["document_ai_pages"] == MAX_PAGES_PER_REQUEST_IMAGELESS + 1
+
+    def test_oversized_tiff_is_split_into_batches(self, converter, client):
+        client.process_document.return_value = build_response(["X"])
+
+        converter.run(files=[build_tiff(MAX_PAGES_PER_REQUEST_IMAGELESS * 2 + 3)])
+
+        batch_page_counts = []
+        for call in client.process_document.call_args_list:
+            with Image.open(BytesIO(call.kwargs["request"].raw_document.content)) as image:
+                batch_page_counts.append(image.n_frames)
+        assert batch_page_counts == [
+            MAX_PAGES_PER_REQUEST_IMAGELESS,
+            MAX_PAGES_PER_REQUEST_IMAGELESS,
+            3,
+        ]
+        assert all(
+            call.kwargs["request"].raw_document.mime_type == "image/tiff"
+            for call in client.process_document.call_args_list
+        )
+
+    def test_tiff_batch_failure_does_not_resend_the_whole_file(self, converter, client):
+        file = build_tiff(MAX_PAGES_PER_REQUEST_IMAGELESS + 1)
+        original_copy = Image.Image.copy
+        copy_count = 0
+
+        def fail_on_second_batch(image):
+            nonlocal copy_count
+            copy_count += 1
+            if copy_count > MAX_PAGES_PER_REQUEST_IMAGELESS:
+                raise OSError("could not decode frame")
+            return original_copy(image)
+
+        client.process_document.return_value = build_response(["X"])
+        with patch.object(Image.Image, "copy", fail_on_second_batch), pytest.raises(
+            OSError, match="could not decode frame"
+        ):
+            converter.run(files=[file])
+
+        assert client.process_document.call_count == 1
+        assert client.process_document.call_args.kwargs["request"].raw_document.content != file.getvalue()
+
+    def test_single_page_image_is_not_split(self, converter, client):
+        image = BytesIO(b"not-really-a-png")
+        image.name = "scan.png"
+
+        converter.run(files=[image])
+
+        assert client.process_document.call_count == 1
+        assert client.process_document.call_args.kwargs["request"].raw_document.content == b"not-really-a-png"
+
+    def test_unreadable_tiff_is_sent_unsplit(self, converter, client):
+        broken = BytesIO(b"not-really-a-tiff")
+        broken.name = "broken.tiff"
+
+        converter.run(files=[broken])
+
+        assert client.process_document.call_count == 1
+        assert client.process_document.call_args.kwargs["request"].raw_document.content == b"not-really-a-tiff"
+
+    def test_unreadable_pdf_is_sent_unsplit(self, converter, client):
+        broken = BytesIO(b"%PDF-1.7 truncated")
+        broken.name = "broken.pdf"
+
+        converter.run(files=[broken])
+
+        assert client.process_document.call_count == 1
+        assert client.process_document.call_args.kwargs["request"].raw_document.content == b"%PDF-1.7 truncated"
+
+
+class TestInputValidation:
+    def test_raw_bytes_are_accepted(self, converter, client):
+        """The node's input schema accepts `bytes` alongside BytesIO, so the component must too."""
+        documents = converter.run(files=[build_pdf(2).getvalue()])["documents"]
+
+        assert documents[0].content == "PAGE ONE\n\n\nPAGE TWO\n"
+        assert client.process_document.call_args.kwargs["request"].raw_document.mime_type == "application/pdf"
+
+    def test_a_consumed_bytesio_is_still_read_in_full(self, converter, client):
+        """An upstream reader may leave the stream at EOF; the file must not be seen as empty."""
+        file = build_pdf(2)
+        file.read()
+
+        converter.run(files=[file])
+
+        assert client.process_document.call_args.kwargs["request"].raw_document.content == file.getvalue()
+
+    def test_empty_file_is_rejected(self, converter):
+        empty = BytesIO(b"")
+        empty.name = "empty.pdf"
+
+        with pytest.raises(ValueError, match="is empty"):
+            converter.run(files=[empty])
+
+    def test_missing_input_is_rejected(self, converter):
+        with pytest.raises(ValueError, match="No input provided"):
+            converter.run()
+
+    def test_client_is_built_from_the_connection_once_when_not_supplied(self, connection):
+        converter = GoogleDocumentAIFileConverter(connection=connection, processor_id="abc123")
+
+        with patch.object(GoogleDocumentAI, "connect", return_value="a-client") as connect:
+            assert converter.documentai_client == "a-client"
+            assert converter.documentai_client == "a-client"
+
+        connect.assert_called_once()

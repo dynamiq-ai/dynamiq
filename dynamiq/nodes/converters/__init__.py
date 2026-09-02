@@ -1,6 +1,7 @@
 from .csv import CSVConverter, CSVDocumentCreationMode
 from .docx import DOCXFileConverter
 from .excel import ExcelFileConverter
+from .google_document_ai import GoogleDocumentAIFileConverter
 from .html import HTMLConverter
 from .llm_text_extractor import LLMImageConverter, LLMPDFConverter
 from .multi_file_type_converter import MultiFileTypeConverter
