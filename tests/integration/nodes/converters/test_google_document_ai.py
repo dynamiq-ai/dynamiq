@@ -8,7 +8,10 @@ from pypdf import PdfWriter
 from dynamiq import Workflow, flows
 from dynamiq.components.converters.google_document_ai import MAX_PAGES_PER_REQUEST_IMAGELESS
 from dynamiq.connections import GoogleDocumentAI
-from dynamiq.nodes.converters.google_document_ai import GoogleDocumentAIFileConverter
+from dynamiq.nodes.converters.google_document_ai import (
+    GoogleDocumentAIFileConverter,
+    GoogleDocumentAIFileConverterInputSchema,
+)
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.utils import Output
 from dynamiq.runnables import RunnableStatus
@@ -205,6 +208,20 @@ def test_page_separator_reaches_the_component(document_ai_connection, document_a
 
     assert response.status == RunnableStatus.SUCCESS
     assert response.output[node.id]["output"]["documents"][0]["content"] == "PAGE ONE\n\n---\nPAGE TWO\n"
+
+
+def test_reconnected_client_reaches_the_component(document_ai_node, document_ai_client):
+    document_ai_node.init_components()
+    replacement_client = MagicMock(spec=documentai.DocumentProcessorServiceClient)
+    replacement_client.processor_path.return_value = PROCESSOR_PATH
+    replacement_client.process_document.return_value = build_response(["RECONNECTED"])
+    document_ai_node.client = replacement_client
+
+    output = document_ai_node.execute(GoogleDocumentAIFileConverterInputSchema(files=[build_pdf(1)]))
+
+    assert output["documents"][0].content == "RECONNECTED"
+    replacement_client.process_document.assert_called_once()
+    document_ai_client.process_document.assert_not_called()
 
 
 def test_node_is_serializable_without_its_component(document_ai_node):

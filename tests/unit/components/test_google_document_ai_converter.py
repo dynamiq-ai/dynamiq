@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from google.cloud import documentai
+from PIL import Image
 from pydantic import ValidationError
 from pypdf import PdfWriter
 
@@ -56,6 +57,15 @@ def build_response(page_texts: list[str]) -> documentai.ProcessResponse:
             )
         )
     return documentai.ProcessResponse(document=documentai.Document(text=text, pages=pages))
+
+
+def build_tiff(page_count: int, filename: str = "file.tiff") -> BytesIO:
+    frames = [Image.new("1", (8, 8), color=index % 2) for index in range(page_count)]
+    buffer = BytesIO()
+    frames[0].save(buffer, format="TIFF", save_all=True, append_images=frames[1:])
+    buffer.seek(0)
+    buffer.name = filename
+    return buffer
 
 
 @pytest.fixture
@@ -156,6 +166,13 @@ class TestMetadata:
         documents = converter.run(file_paths=[str(path)])["documents"]
 
         assert documents[0].metadata["file_path"] == str(path)
+
+    def test_caller_supplied_file_path_is_preserved(self, converter):
+        documents = converter.run(files=[build_pdf(1)], metadata={"file_path": "contracts/2026/invoice.pdf"})[
+            "documents"
+        ]
+
+        assert documents[0].metadata["file_path"] == "contracts/2026/invoice.pdf"
 
 
 class TestProcessorName:
@@ -317,11 +334,39 @@ class TestPageLimitSplitting:
         assert documents[0].content.endswith("BATCH2-P1\n")
         assert documents[0].metadata["document_ai_pages"] == MAX_PAGES_PER_REQUEST_IMAGELESS + 1
 
-    def test_non_pdf_input_is_never_split(self, converter, client):
-        image = BytesIO(b"not-really-a-tiff")
-        image.name = "scan.tiff"
+    def test_oversized_tiff_is_split_into_batches(self, converter, client):
+        client.process_document.return_value = build_response(["X"])
+
+        converter.run(files=[build_tiff(MAX_PAGES_PER_REQUEST_IMAGELESS * 2 + 3)])
+
+        batch_page_counts = []
+        for call in client.process_document.call_args_list:
+            with Image.open(BytesIO(call.kwargs["request"].raw_document.content)) as image:
+                batch_page_counts.append(image.n_frames)
+        assert batch_page_counts == [
+            MAX_PAGES_PER_REQUEST_IMAGELESS,
+            MAX_PAGES_PER_REQUEST_IMAGELESS,
+            3,
+        ]
+        assert all(
+            call.kwargs["request"].raw_document.mime_type == "image/tiff"
+            for call in client.process_document.call_args_list
+        )
+
+    def test_single_page_image_is_not_split(self, converter, client):
+        image = BytesIO(b"not-really-a-png")
+        image.name = "scan.png"
 
         converter.run(files=[image])
+
+        assert client.process_document.call_count == 1
+        assert client.process_document.call_args.kwargs["request"].raw_document.content == b"not-really-a-png"
+
+    def test_unreadable_tiff_is_sent_unsplit(self, converter, client):
+        broken = BytesIO(b"not-really-a-tiff")
+        broken.name = "broken.tiff"
+
+        converter.run(files=[broken])
 
         assert client.process_document.call_count == 1
         assert client.process_document.call_args.kwargs["request"].raw_document.content == b"not-really-a-tiff"

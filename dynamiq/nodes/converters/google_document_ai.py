@@ -3,22 +3,25 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from dynamiq.components.converters.google_document_ai import DocumentAICreationMode, DocumentCreationMode
 from dynamiq.components.converters.google_document_ai import (
+    DocumentAICreationMode,
     GoogleDocumentAIFileConverter as GoogleDocumentAIFileConverterComponent,
+    ProcessorId,
 )
-from dynamiq.components.converters.google_document_ai import ProcessorId
 from dynamiq.connections import GoogleDocumentAI
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.node import ConnectionNode, ErrorHandling, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types import DocumentCreationMode
 from dynamiq.utils.logger import logger
 
 
 class GoogleDocumentAIFileConverterInputSchema(BaseModel):
-    file_paths: list[str] = Field(default=None, description="Parameter to provide path to files.")
-    files: list[BytesIO | bytes] = Field(default=None, description="Parameter to provide files.")
-    metadata: dict | list = Field(default=None, description="Parameter to provide metadata.")
+    file_paths: list[str] | None = Field(default=None, description="Parameter to provide path to files.")
+    files: list[BytesIO | bytes] | None = Field(default=None, description="Parameter to provide files.")
+    metadata: dict[str, Any] | list[dict[str, Any]] | None = Field(
+        default=None, description="Parameter to provide metadata."
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -37,9 +40,9 @@ class GoogleDocumentAIFileConverter(ConnectionNode):
     Only the text layer of the processed document is kept - tables, form fields, entities and
     layout blocks are deliberately ignored. Use a splitter downstream to chunk the result.
 
-    PDFs longer than Document AI's online page limit are split locally and processed in
-    consecutive batches, whose texts are then concatenated. Images are sent as-is; any other
-    file type is rejected before the request is made.
+    PDFs and multi-page TIFFs longer than Document AI's online page limit are split locally and
+    processed in consecutive batches, whose texts are then concatenated. Other supported images
+    are sent as-is; any other file type is rejected before the request is made.
 
     The processor is configured on the node rather than on the connection, since one
     project/location pair can host many processors. See the field descriptions for the options.
@@ -133,6 +136,8 @@ class GoogleDocumentAIFileConverter(ConnectionNode):
         """
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        self.file_converter.client = self.client
 
         documents = self.file_converter.run(
             file_paths=input_data.file_paths,

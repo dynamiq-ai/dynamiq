@@ -8,7 +8,7 @@ from pydantic import ConfigDict, Field, StringConstraints
 from pypdf import PdfReader, PdfWriter
 
 from dynamiq.components.converters.base import BaseConverter
-from dynamiq.components.converters.utils import get_filename_for_bytesio
+from dynamiq.components.converters.utils import build_source_metadata, get_filename_for_bytesio
 from dynamiq.connections import GoogleDocumentAI as GoogleDocumentAIConnection
 from dynamiq.types import Document, DocumentCreationMode
 from dynamiq.utils.logger import logger
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 # The file types Document AI accepts for online processing. Declared to the API verbatim, as
 # `RawDocument.mime_type` is a plain string. See https://cloud.google.com/document-ai/docs/file-types
 PDF_MIME_TYPE = "application/pdf"
+TIFF_MIME_TYPE = "image/tiff"
 MIME_TYPES_BY_EXTENSION = {
     ".pdf": PDF_MIME_TYPE,
     ".bmp": "image/bmp",
@@ -28,8 +29,8 @@ MIME_TYPES_BY_EXTENSION = {
     ".jpeg": "image/jpeg",
     ".jpg": "image/jpeg",
     ".png": "image/png",
-    ".tif": "image/tiff",
-    ".tiff": "image/tiff",
+    ".tif": TIFF_MIME_TYPE,
+    ".tiff": TIFF_MIME_TYPE,
     ".webp": "image/webp",
 }
 SUPPORTED_MIME_TYPES = frozenset(MIME_TYPES_BY_EXTENSION.values())
@@ -52,9 +53,9 @@ class GoogleDocumentAIFileConverter(BaseConverter):
     Only the text layer of the processed document is kept - tables, form fields, entities and
     layout blocks are deliberately ignored. Use a splitter downstream to chunk the result.
 
-    PDFs longer than the online page limit are split locally with pypdf and processed in
-    consecutive batches, whose texts are then concatenated. Images are sent as-is, being
-    single-page by nature. Any other file type is rejected before the request is made.
+    PDFs and multi-page TIFFs longer than the online page limit are split locally and processed
+    in consecutive batches, whose texts are then concatenated. Other supported images are sent
+    as-is. Any other file type is rejected before the request is made.
 
     Attributes:
         connection (GoogleDocumentAIConnection): The connection to the Document AI API. A new
@@ -238,7 +239,7 @@ class GoogleDocumentAIFileConverter(BaseConverter):
 
     def _extract_page_texts(self, content: bytes, mime_type: str) -> list[str]:
         """
-        Extract the text of every page, splitting oversized PDFs into several requests.
+        Extract the text of every page, splitting oversized PDFs and TIFFs into several requests.
 
         Args:
             content (bytes): The raw file content.
@@ -257,9 +258,9 @@ class GoogleDocumentAIFileConverter(BaseConverter):
         """
         Split the content into per-request payloads, in page order.
 
-        Only PDFs over the online page limit are split; everything else is yielded as-is, either
-        because it is single-page by nature or because pypdf could not read it - in which case
-        Document AI is left to report the real error.
+        PDFs and multi-page TIFFs over the online page limit are split. Other formats are yielded
+        as-is. If a supported local reader cannot read the content, Document AI is left to report
+        the real error.
 
         Args:
             content (bytes): The raw file content.
@@ -268,6 +269,10 @@ class GoogleDocumentAIFileConverter(BaseConverter):
         Yields:
             bytes: The raw content of each request, in page order.
         """
+        if mime_type == TIFF_MIME_TYPE:
+            yield from self._tiff_request_batches(content)
+            return
+
         if mime_type != PDF_MIME_TYPE:
             yield content
             return
@@ -297,6 +302,35 @@ class GoogleDocumentAIFileConverter(BaseConverter):
             batch = BytesIO()
             writer.write(batch)
             yield batch.getvalue()
+
+    def _tiff_request_batches(self, content: bytes) -> Iterator[bytes]:
+        """Split a multi-frame TIFF into payloads that respect the online page limit."""
+        from PIL import Image
+
+        pages_per_batch = self.max_pages_per_request
+        try:
+            with Image.open(BytesIO(content)) as image:
+                page_count = image.n_frames
+                if page_count <= pages_per_batch:
+                    yield content
+                    return
+
+                logger.debug(
+                    f"TIFF has {page_count} pages, exceeding the {pages_per_batch}-page online limit. "
+                    f"Splitting it into batches."
+                )
+                for start in range(0, page_count, pages_per_batch):
+                    frames = []
+                    for page_number in range(start, min(start + pages_per_batch, page_count)):
+                        image.seek(page_number)
+                        frames.append(image.copy())
+
+                    batch = BytesIO()
+                    frames[0].save(batch, format="TIFF", save_all=True, append_images=frames[1:])
+                    yield batch.getvalue()
+        except Exception as e:
+            logger.warning(f"Could not read the TIFF page count locally, sending the file unsplit. Error: {e}")
+            yield content
 
     def _process_bytes(self, content: bytes, mime_type: str) -> "GoogleDocument":
         """
@@ -371,8 +405,7 @@ class GoogleDocumentAIFileConverter(BaseConverter):
         Returns:
             list[Document]: The created Documents.
         """
-        document_metadata = copy.deepcopy(metadata)
-        document_metadata["file_path"] = filepath
+        document_metadata = build_source_metadata(metadata, filepath)
         document_metadata["document_ai_processor_id"] = self.processor_id
         document_metadata["document_ai_pages"] = len(elements)
         if self.processor_version:
