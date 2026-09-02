@@ -353,6 +353,27 @@ class TestPageLimitSplitting:
             for call in client.process_document.call_args_list
         )
 
+    def test_tiff_batch_failure_does_not_resend_the_whole_file(self, converter, client):
+        file = build_tiff(MAX_PAGES_PER_REQUEST_IMAGELESS + 1)
+        original_copy = Image.Image.copy
+        copy_count = 0
+
+        def fail_on_second_batch(image):
+            nonlocal copy_count
+            copy_count += 1
+            if copy_count > MAX_PAGES_PER_REQUEST_IMAGELESS:
+                raise OSError("could not decode frame")
+            return original_copy(image)
+
+        client.process_document.return_value = build_response(["X"])
+        with patch.object(Image.Image, "copy", fail_on_second_batch), pytest.raises(
+            OSError, match="could not decode frame"
+        ):
+            converter.run(files=[file])
+
+        assert client.process_document.call_count == 1
+        assert client.process_document.call_args.kwargs["request"].raw_document.content != file.getvalue()
+
     def test_single_page_image_is_not_split(self, converter, client):
         image = BytesIO(b"not-really-a-png")
         image.name = "scan.png"

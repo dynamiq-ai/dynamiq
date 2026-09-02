@@ -311,26 +311,29 @@ class GoogleDocumentAIFileConverter(BaseConverter):
         try:
             with Image.open(BytesIO(content)) as image:
                 page_count = image.n_frames
-                if page_count <= pages_per_batch:
-                    yield content
-                    return
-
-                logger.debug(
-                    f"TIFF has {page_count} pages, exceeding the {pages_per_batch}-page online limit. "
-                    f"Splitting it into batches."
-                )
-                for start in range(0, page_count, pages_per_batch):
-                    frames = []
-                    for page_number in range(start, min(start + pages_per_batch, page_count)):
-                        image.seek(page_number)
-                        frames.append(image.copy())
-
-                    batch = BytesIO()
-                    frames[0].save(batch, format="TIFF", save_all=True, append_images=frames[1:])
-                    yield batch.getvalue()
         except Exception as e:
             logger.warning(f"Could not read the TIFF page count locally, sending the file unsplit. Error: {e}")
             yield content
+            return
+
+        if page_count <= pages_per_batch:
+            yield content
+            return
+
+        logger.debug(
+            f"TIFF has {page_count} pages, exceeding the {pages_per_batch}-page online limit. "
+            f"Splitting it into batches."
+        )
+        with Image.open(BytesIO(content)) as image:
+            for start in range(0, page_count, pages_per_batch):
+                frames = []
+                for page_number in range(start, min(start + pages_per_batch, page_count)):
+                    image.seek(page_number)
+                    frames.append(image.copy())
+
+                batch = BytesIO()
+                frames[0].save(batch, format="TIFF", save_all=True, append_images=frames[1:])
+                yield batch.getvalue()
 
     def _process_bytes(self, content: bytes, mime_type: str) -> "GoogleDocument":
         """
