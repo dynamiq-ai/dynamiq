@@ -14,13 +14,9 @@ from .http_api_call import HttpApiCall, ResponseType
 from .human_feedback import HumanFeedbackTool
 from .jina import JinaResponseFormat, JinaScrapeTool, JinaSearchTool
 from .llm_summarizer import SummarizerTool
-from .long_term_memory import (
-    LongTermMemoryBackend,
-    RecallFactsTool,
-    RememberFactTool,
-    build_long_term_memory_tools,
-)
+from .long_term_memory import LongTermMemoryBackend, RecallFactsTool, RememberFactTool, build_long_term_memory_tools
 from .mcp import MCPServer, MCPTool
+from .notes import DeleteNoteTool, NotesBackend, ReadNoteTool, WriteNoteTool, build_notes_tools
 from .parallel_tool_calls import ParallelToolCallsTool
 from .pipedream import Pipedream
 from .preprocess_tool import PreprocessTool

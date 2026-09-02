@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy, MemorySaveMode
 from dynamiq.memory.long_term import LongTermMemoryConfig
+from dynamiq.memory.notes import NotesConfig, render_notes_index
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentIterativeCheckpointMixin
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
@@ -82,6 +83,17 @@ _run_extra_tools: ContextVar[list["Node"] | None] = ContextVar("dynamiq_agent_ru
 
 # Per-call overlay of shared-sandbox tools; isolated per thread / asyncio task, like `_run_extra_tools`.
 _shared_sandbox_tools: ContextVar[list["Node"] | None] = ContextVar("dynamiq_shared_sandbox_tools", default=None)
+
+# Per-call rendered note index, injected into the ReAct system prompt. A ContextVar rather
+# than instance state so two concurrent runs on one agent instance cannot show each other's
+# notes; the prompt manager is shared per instance.
+_run_notes_index: ContextVar[str] = ContextVar("dynamiq_agent_run_notes_index", default="")
+
+NOTES_INDEX_UNAVAILABLE = (
+    "(Your notes index could not be loaded right now. Do not assume you have no notes - if you "
+    "need one, call read_note with the exact title, and avoid overwriting titles you cannot verify.)"
+)
+NOTES_INDEX_TRUNCATED_SUFFIX = "- (index truncated - some notes are not shown)"
 
 
 class StreamChunkChoiceDelta(BaseModel):
@@ -277,6 +289,15 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         description=(
             "Long-term, fact-shaped, user-scoped memory config (enabled + backend + tools). "
             "Accessed via remember/recall tools. Independent of `memory` (short-term messages)."
+        ),
+    )
+    notes: NotesConfig | None = Field(
+        default=None,
+        description=(
+            "Titled, user-scoped notes (enabled + backend + tools). An index of "
+            "`title - description` lines is injected into the ReAct prompt on every run; "
+            "bodies are loaded on demand via read_note. Unrelated to the sandbox "
+            "`agent_notes.md` compaction scratchpad."
         ),
     )
     verbose: bool = Field(False, description="Whether to print verbose logs.")
@@ -483,6 +504,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             "tools": True,
             "memory": True,
             "long_term_memory": True,
+            "notes": True,
             "files": True,
             "images": True,
             "videos": True,
@@ -503,6 +525,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         data["memory"] = self.memory.to_dict(**kwargs) if self.memory else None
         data["long_term_memory"] = self.long_term_memory.to_dict(**kwargs) if self.long_term_memory else None
+        data["notes"] = self.notes.to_dict(**kwargs) if self.notes else None
         if self.files:
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         if self.images:
@@ -767,9 +790,19 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 len(ltm_tools),
                 ", ".join(t.name for t in ltm_tools),
             )
-        # Always set — a sub-agent without LTM would otherwise inherit the
+        notes_tools, notes_index = self._build_notes_runtime(input_data)
+        if notes_tools:
+            logger.info(
+                "Agent %s - %s: attached %d notes tools (%s)",
+                self.name,
+                self.id,
+                len(notes_tools),
+                ", ".join(t.name for t in notes_tools),
+            )
+        # Always set — a sub-agent without LTM or notes would otherwise inherit the
         # parent's overlay via `ContextAwareThreadPoolExecutor`.
-        ltm_token = _run_extra_tools.set(ltm_tools)
+        extra_tools_token = _run_extra_tools.set(ltm_tools + notes_tools)
+        notes_index_token = _run_notes_index.set(notes_index)
         my_run_key = f"{self.sanitize_tool_name(self.name) or 'agent'}-{uuid4().hex[:8]}"
         agent_run_token = _current_agent_run.set(my_run_key)
         # Session/borrow setup lives INSIDE the try so the finally always resets the ContextVars and
@@ -960,7 +993,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 _shared_sandbox_tools.reset(sandbox_overlay_token)
             self._release_shared_sandbox_view(restore_to=prev_shared_view)
             self._teardown_shared_browser(shared_session_token)
-            _run_extra_tools.reset(ltm_token)
+            _run_extra_tools.reset(extra_tools_token)
+            _run_notes_index.reset(notes_index_token)
             _current_agent_run.reset(agent_run_token)
             self._exit_shared_session(shared_session_token)
 
@@ -1050,6 +1084,49 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         for tool in tools:
             tool.is_optimized_for_agents = True
         return tools
+
+    def _build_notes_runtime(self, input_data: "AgentInputSchema") -> tuple[list[Node], str]:
+        """Build the per-run note tools and render the always-loaded note index.
+
+        Returns `([], "")` when notes are off. Raises when notes are enabled but
+        `input_data.user_id` is missing — `user_id` IS the storage key, so there is no safe
+        fallback, and the prompt has already advertised the notes section and its tools.
+
+        A backend failure degrades to a sentinel rather than killing the run: notes are
+        auxiliary context, and the tools stay attached so a real error surfaces at the point
+        of use. The sentinel is deliberately not an empty index — "you have no notes" would
+        invite the agent to overwrite a title it simply could not see.
+        """
+        if self.notes is None or not self.notes.enabled:
+            return [], ""
+
+        user_id = getattr(input_data, "user_id", None)
+        if not user_id:
+            raise ValueError(
+                "notes is enabled but input_data.user_id is missing; " "pass user_id or disable notes for this call"
+            )
+
+        from dynamiq.nodes.tools.notes import build_notes_tools
+
+        tools = build_notes_tools(backend=self.notes.backend, user_id=user_id)
+        for tool in tools:
+            tool.is_optimized_for_agents = True
+
+        return tools, self._render_notes_index(user_id)
+
+    def _render_notes_index(self, user_id: str) -> str:
+        try:
+            entries, truncated = self.notes.backend.index(user_id=user_id, limit=self.notes.max_index_entries)
+        except Exception as e:
+            logger.warning("Agent %s - %s: notes index unavailable: %s", self.name, self.id, e)
+            return NOTES_INDEX_UNAVAILABLE
+
+        rendered = render_notes_index(entries, truncated=truncated)
+        max_chars = self.notes.max_index_chars
+        if max_chars and len(rendered) > max_chars:
+            kept = rendered[:max_chars].rsplit("\n", 1)[0]
+            rendered = f"{kept}\n{NOTES_INDEX_TRUNCATED_SUFFIX}"
+        return rendered
 
     def _is_input_output_trace_message(self, message: Message) -> bool:
         """Return True when a message is an internal ReAct/tool-trace entry."""
@@ -2125,6 +2202,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                         delegation_allowed=self.delegation_allowed,
                         context_compaction_enabled=self.summarization_config.enabled,
                         notes_file_path=self.get_notes_file_path(),
+                        notes_enabled=self.notes is not None and self.notes.enabled,
                         todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
                         or bool(self.sandbox_backend),
                         sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
