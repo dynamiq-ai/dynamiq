@@ -613,19 +613,29 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._chunk_buffer_step = None
 
     def _step_is_decoded(self, step: str) -> bool:
-        """Whether ``step`` carries a JSON string body the client renders rather than parses.
+        """Whether ``step``'s value reaches this emit path as a JSON *string body*.
 
-        Text the client renders must arrive decoded, or escapes reach the user verbatim.
-        Text the client parses again must keep them. Tool input is always re-parsed; XML and
-        DEFAULT modes never carry JSON source in the first place.
+        A string body carries one layer of encoding that only exists to fit the value into a
+        JSON string, and the client cannot remove it: the top-level object is split across
+        streams here, so the client never sees it to parse. Strip exactly that layer. What
+        remains depends on the payload, not on the operation — a thought becomes the plain
+        text the client renders, while a stringified ``action_input`` becomes the JSON source
+        the client parses, escapes inside its own string values intact.
+
+        Values arriving as raw JSON *source* carry no such layer: an FC arguments object, or a
+        brace-delimited answer or tool input. Decoding those would unescape their interior
+        quotes and break the client's parse. XML and DEFAULT carry no JSON encoding at all.
         """
         if self.mode_name not in (InferenceMode.FUNCTION_CALLING.value, InferenceMode.STRUCTURED_OUTPUT.value):
             return False
         if step == StreamingState.REASONING:
             return True
         if step == StreamingState.ANSWER:
-            # A brace-delimited answer is a JSON object the client parses, not prose.
             return not self._fc_object_answer
+        if step == StreamingState.TOOL_INPUT:
+            # SO stuffs the tool's arguments into a string-typed `action_input`, so they
+            # arrive one encoding deeper than FC's, whose object is streamed as-is.
+            return not self._fc_object_tool_input
         return False
 
     def _emit_decoded(self, source: str, step: str) -> None:

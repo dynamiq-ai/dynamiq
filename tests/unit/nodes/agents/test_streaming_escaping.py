@@ -135,11 +135,45 @@ def test_fc_tool_arguments_stay_valid_json(min_chunk_chars):
     assert json.loads(_streamed(cb, StreamingState.TOOL_INPUT)) == {"query": QUERY}
 
 
-def test_structured_output_tool_input_keeps_its_escapes():
+def test_structured_output_tool_input_is_unwrapped_to_parseable_json():
+    """SO types ``action_input`` as a string, so the tool's arguments are JSON-encoded a
+    second time to fit. That wrapper is not part of the payload and the client cannot strip
+    it — the top-level object never reaches it — so it comes off here, leaving the JSON the
+    client parses with its own escapes intact."""
+    args = {"brief": "notes.md", "content": 'a "quoted" line'}
     cb = _make_callback(InferenceMode.STRUCTURED_OUTPUT)
-    _feed_text(cb, json.dumps({"thought": "t", "action": "search", "action_input": 'a "b"\nc'}))
+    _feed_text(cb, json.dumps({"thought": "t", "action": "file_write", "action_input": json.dumps(args)}))
 
-    assert _streamed(cb, StreamingState.TOOL_INPUT) == 'a \\"b\\"\\nc'
+    streamed = _streamed(cb, StreamingState.TOOL_INPUT)
+    assert json.loads(streamed) == args
+    assert '\\"' in streamed, "the payload's own escaping must survive"
+
+
+def test_structured_output_plain_text_tool_input_is_decoded():
+    """Not every ``action_input`` is JSON — a bare query is rendered, so it needs the
+    wrapper off too."""
+    cb = _make_callback(InferenceMode.STRUCTURED_OUTPUT)
+    _feed_text(cb, json.dumps({"thought": "t", "action": "search", "action_input": 'find "weather"'}))
+
+    assert _streamed(cb, StreamingState.TOOL_INPUT) == 'find "weather"'
+
+
+def test_tool_input_parses_identically_in_both_modes():
+    """The invariant that pins the whole rule: the same logical tool call must reach the
+    client as the same arguments, whichever mode produced it. FC nests the arguments
+    structurally and SO nests them textually, but that is transport, not payload."""
+    args = {"brief": "notes.md", "content": 'a "quoted" line'}
+
+    fc = _make_callback(InferenceMode.FUNCTION_CALLING)
+    _feed_fc(fc, "file_write", json.dumps({"thought": THOUGHT, **args}))
+
+    so = _make_callback(InferenceMode.STRUCTURED_OUTPUT)
+    _feed_text(so, json.dumps({"thought": THOUGHT, "action": "file_write", "action_input": json.dumps(args)}))
+
+    fc_input = json.loads(_streamed(fc, StreamingState.TOOL_INPUT))
+    so_input = json.loads(_streamed(so, StreamingState.TOOL_INPUT))
+    assert fc_input == so_input == args
+    assert _streamed(fc, StreamingState.REASONING) == _streamed(so, StreamingState.REASONING) == THOUGHT
 
 
 def test_fc_object_answer_is_not_decoded():
