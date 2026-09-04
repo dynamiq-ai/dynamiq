@@ -204,6 +204,26 @@ def test_basellm_video_input_model_info_override_takes_priority():
     assert llm.is_video_input_supported is True
 
 
+@pytest.mark.parametrize(
+    ("litellm_flag", "expected", "registry_consulted"),
+    [
+        (None, True, True),
+        (False, False, False),
+    ],
+)
+def test_video_input_litellm_vs_registry_priority(litellm_flag, expected, registry_consulted):
+    from dynamiq.connections import TogetherAI as TogetherAIConnection
+    from dynamiq.nodes.llms.togetherai import TogetherAI
+
+    with (
+        patch("dynamiq.nodes.llms.base.litellm_video_input_flag", return_value=litellm_flag),
+        patch.object(model_registry, "supports_video_input", return_value=True) as mock_reg,
+    ):
+        llm = TogetherAI(model=MODEL_A, connection=TogetherAIConnection(api_key="test-key"))
+        assert llm.is_video_input_supported is expected
+        assert mock_reg.called is registry_consulted
+
+
 @pytest.mark.usefixtures("_litellm_unknown", "_patch_registry")
 def test_model_info_none_falls_through():
     """When model_info is None, the existing lookup chain is used."""
