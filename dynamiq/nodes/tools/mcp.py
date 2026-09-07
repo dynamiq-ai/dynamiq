@@ -343,6 +343,20 @@ class _SchemaModelBuilder:
         return root
 
 
+def resolve_root_object_schema(
+    schema_dict: dict[str, Any], definitions: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Resolve a root defined purely through $ref/allOf composition to the object schema it stands for.
+
+    This is the same resolution `create_input_schema_from_json_schema` applies before building the
+    model, exposed for callers that need to inspect or rewrite the properties the model is built
+    from. The result carries no `$defs` of its own, so pass the original definitions alongside it.
+    """
+    builder = _SchemaModelBuilder(dict(definitions or {}))
+    builder._definitions = {**builder._definitions, **get_json_schema_definitions(schema_dict)}
+    return builder._resolve_to_object_schema(schema_dict)
+
+
 def create_input_schema_from_json_schema(
     schema_dict: dict[str, Any], model_name: str = "MCPToolSchema", definitions: dict[str, Any] | None = None
 ) -> type[BaseModel]:
