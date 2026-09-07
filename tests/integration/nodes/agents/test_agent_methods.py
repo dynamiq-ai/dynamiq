@@ -742,6 +742,39 @@ def test_clear_todos_file_deletes_file_and_resets_agent_state_todos():
     assert state.todos == []
 
 
+def test_todo_write_merge_inserts_unknown_ids():
+    """merge defaults to True, so the first write of a run has nothing to merge into and
+    mid-run discoveries carry ids the store has never seen. Both used to raise
+    "Todo ids not found"; an unknown id is an insert, a known id keeps its stored content."""
+    import json
+
+    from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH, TodoStatus, TodoWriteTool
+    from dynamiq.storages.file.in_memory import InMemoryFileStore
+
+    backend = InMemoryFileStore()
+    tool = TodoWriteTool(file_store=backend)
+
+    def write(todos):
+        tool.execute(tool.input_schema.model_validate({"todos": todos}))
+        return json.loads(backend.retrieve(TODOS_FILE_PATH).decode("utf-8"))["todos"]
+
+    # First write of the run: merge=True against an empty store creates the list.
+    todos = write([{"id": "1", "content": "Review module", "status": "in_progress"}])
+    assert [(t["id"], t["status"]) for t in todos] == [("1", TodoStatus.IN_PROGRESS)]
+
+    # Update a known id and add a newly discovered one in the same call.
+    todos = write(
+        [
+            {"id": "1", "content": "reworded, must be ignored", "status": "completed"},
+            {"id": "2", "content": "Fix rate limiting", "status": "pending"},
+        ]
+    )
+    assert [(t["id"], t["content"], t["status"]) for t in todos] == [
+        ("1", "Review module", TodoStatus.COMPLETED),
+        ("2", "Fix rate limiting", TodoStatus.PENDING),
+    ]
+
+
 def test_execute_file_store_file_upload_flow(openai_node, mocker):
     """Regression: full execute() with file store — deduplicates batch and pre-existing
     names, stores files correctly, and injects saved paths into the LLM message."""

@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
-from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.tools.file_tools import RESERVED_AGENT_PATH_PREFIX
 from dynamiq.runnables import RunnableConfig
@@ -62,9 +61,9 @@ class TodoWriteInputSchema(BaseModel):
     )
     merge: bool = Field(
         default=True,
-        description="If true, update status of existing todos by id (content you send is ignored, "
-        "original is preserved). "
-        "If false, replace all todos with the provided list.",
+        description="If true, apply the items by id: an existing id has its status updated "
+        "(content you send is ignored, original is preserved), an id that does not exist yet "
+        "is added. If false, replace all todos with the provided list.",
     )
 
 
@@ -91,9 +90,13 @@ UPDATE (merge=true, default): Change status only. Content is required but ignore
   {"todos": [{"id": "1", "content": "ignored", "status": "completed"},
   {"id": "2", "content": "ignored", "status": "in_progress"}], "merge": true}
 
+ADD (merge=true): An id that does not exist yet is appended, using the content you send.
+  {"todos": [{"id": "3", "content": "Fix rate limiting", "status": "pending"}], "merge": true}
+
 RULES:
 - Use merge=false ONLY for initial list creation. First task should be "in_progress", rest "pending".
-- Use merge=true for ALL subsequent updates — only status is applied, content stays unchanged.
+- Use merge=true for ALL subsequent updates — only status is applied to existing todos, content stays unchanged.
+- Use merge=true to add newly discovered work; never resend the whole list just to add one item.
 - Do NOT restructure, reword, or reorder todos when updating status.
 """
 
@@ -176,15 +179,15 @@ RULES:
             existing = self._load_todos()
             existing_by_id = {t.get("id"): t for t in existing if t.get("id")}
 
-            unknown_ids = [t["id"] for t in new_todos if t["id"] not in existing_by_id]
-            if unknown_ids:
-                raise ToolExecutionException(
-                    f"Todo ids not found: {unknown_ids}. Existing ids: {list(existing_by_id.keys())}",
-                    recoverable=True,
-                )
-
             for todo in new_todos:
-                existing_by_id[todo["id"]]["status"] = todo["status"]
+                stored = existing_by_id.get(todo["id"])
+                if stored is None:
+                    # Unknown id is an insert, not an error: the first write of a run has
+                    # nothing to merge into, and an agent that discovers work mid-run must
+                    # be able to add a task without resending (and rewording) the whole list.
+                    existing_by_id[todo["id"]] = todo
+                else:
+                    stored["status"] = todo["status"]
 
             final_todos = list(existing_by_id.values())
         else:
