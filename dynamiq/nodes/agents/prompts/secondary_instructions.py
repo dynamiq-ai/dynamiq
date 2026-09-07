@@ -45,14 +45,13 @@ TODO_REVISIT_TEMPLATE = (
 
 TODO_TOOLS_INSTRUCTIONS = """## Todo Management
 - Use the todo-write tool for complex 3+ step tasks; skip for simple requests
-- Your todo list starts EMPTY. The first todo-write of the session MUST use merge=false - this
-applies even when you are recording steps you have already completed
+- The list starts EMPTY: the first todo-write MUST use merge=false, including when recording work
+you have already finished
 - The todo-write result lists the full current todo list - re-read it there; if history is
 compacted, the list is restated in the summary
 - When creating initial list: first task "in_progress", rest "pending"
 - After initial creation, update status via merge=true - every id must already exist
-- To ADD newly discovered work, send merge=false with the complete list: the existing items with
-their current statuses, plus the new one. Never restructure, reword or reorder the existing items
+- To ADD newly discovered work, send merge=false with the complete list - do not restructure the plan
 - Mark completed IMMEDIATELY after finishing each step - don't batch
 - Only mark completed when FULLY done; if blocked, keep in_progress"""
 

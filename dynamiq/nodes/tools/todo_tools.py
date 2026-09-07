@@ -87,13 +87,9 @@ class TodoWriteTool(Node):
     name: str = "todo-write"
     description: str = """Save or update the todo list. Every item requires 'id', 'content', and 'status'.
 
-The list starts EMPTY every session. Your FIRST call MUST set merge=false — including when you are
-recording work you have already finished. Do not omit merge on that first call; it defaults to true,
-which means "merge into the existing list", and there is no existing list yet.
-
 Two modes:
 
-CREATE (merge=false): Build the full todo list. REQUIRED for your first call of the session.
+CREATE (merge=false): Build the full todo list.
   {"todos": [{"id": "1", "content": "Implement auth", "status": "in_progress"},
   {"id": "2", "content": "Add tests", "status": "pending"}], "merge": false}
 
@@ -102,10 +98,10 @@ UPDATE (merge=true, default): Change status only. Content is required but ignore
   {"id": "2", "content": "ignored", "status": "in_progress"}], "merge": true}
 
 RULES:
-- FIRST call of the session: merge=false, always. Never merge=true against a list you have not created.
-- Use merge=true for ALL subsequent status updates — every id you send must already exist.
-- To ADD newly discovered work, send merge=false with the complete list: the existing items with
-  their current statuses, plus the new one. Keep existing ids, content and order exactly as they are.
+- Use merge=false to create the list. First task should be "in_progress", rest "pending".
+- Use merge=true for status updates — every id you send must already exist.
+- To ADD newly discovered work, send merge=false with the complete list: existing items with their
+  current statuses, plus the new one.
 - Do NOT restructure, reword, or reorder todos.
 """
 
