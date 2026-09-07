@@ -4,8 +4,13 @@ import json
 
 from litellm import token_counter
 
-from dynamiq.nodes.agents.prompts.secondary_instructions import AGENT_NOTES_FILENAME, NOTES_REVISIT_INSTRUCTION_TEMPLATE
+from dynamiq.nodes.agents.prompts.secondary_instructions import (
+    AGENT_NOTES_FILENAME,
+    NOTES_REVISIT_INSTRUCTION_TEMPLATE,
+    TODO_REVISIT_TEMPLATE,
+)
 from dynamiq.nodes.agents.utils import extract_message_text
+from dynamiq.nodes.tools.todo_tools import format_todo_list
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.utils.logger import logger
 
@@ -177,6 +182,11 @@ class HistoryManagerMixin:
 
             if notes_path := self.get_notes_file_path():
                 summary = f"{summary}\n\n{NOTES_REVISIT_INSTRUCTION_TEMPLATE.format(notes_path=notes_path)}"
+
+            # The todo-write result carrying the list is itself summarized away, and there is no
+            # read tool - so restate the list here or the agent loses track of its own plan.
+            if todos := getattr(getattr(self, "state", None), "todos", None):
+                summary = f"{summary}\n\n{TODO_REVISIT_TEMPLATE.format(todo_list=format_todo_list(todos))}"
 
             self._prompt.messages.append(
                 Message(role=MessageRole.USER, content=f"Observation: {summary}\n", static=True)

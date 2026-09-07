@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.tools.file_tools import RESERVED_AGENT_PATH_PREFIX
 from dynamiq.runnables import RunnableConfig
@@ -49,6 +50,11 @@ class TodoItem(BaseModel):
         return f"{icon} {self.id}: {self.content}"
 
 
+def format_todo_list(todos: list[TodoItem]) -> str:
+    """Render todos one per line, for restating the list outside a tool result."""
+    return "\n".join(todo.to_display_string() for todo in todos)
+
+
 class TodoWriteInputSchema(BaseModel):
     """Input schema for writing todos."""
 
@@ -61,9 +67,10 @@ class TodoWriteInputSchema(BaseModel):
     )
     merge: bool = Field(
         default=True,
-        description="If true, apply the items by id: an existing id has its status updated "
-        "(content you send is ignored, original is preserved), an id that does not exist yet "
-        "is added. If false, replace all todos with the provided list.",
+        description="MUST be false on your first todo-write of the session — there is no list yet, "
+        "so there is nothing to merge into. If true, update the status of existing todos by id "
+        "(content you send is ignored, the original is preserved); every id must already exist. "
+        "If false, replace all todos with the provided list.",
     )
 
 
@@ -80,9 +87,13 @@ class TodoWriteTool(Node):
     name: str = "todo-write"
     description: str = """Save or update the todo list. Every item requires 'id', 'content', and 'status'.
 
+The list starts EMPTY every session. Your FIRST call MUST set merge=false — including when you are
+recording work you have already finished. Do not omit merge on that first call; it defaults to true,
+which means "merge into the existing list", and there is no existing list yet.
+
 Two modes:
 
-CREATE (merge=false): Build the full todo list.
+CREATE (merge=false): Build the full todo list. REQUIRED for your first call of the session.
   {"todos": [{"id": "1", "content": "Implement auth", "status": "in_progress"},
   {"id": "2", "content": "Add tests", "status": "pending"}], "merge": false}
 
@@ -90,14 +101,12 @@ UPDATE (merge=true, default): Change status only. Content is required but ignore
   {"todos": [{"id": "1", "content": "ignored", "status": "completed"},
   {"id": "2", "content": "ignored", "status": "in_progress"}], "merge": true}
 
-ADD (merge=true): An id that does not exist yet is appended, using the content you send.
-  {"todos": [{"id": "3", "content": "Fix rate limiting", "status": "pending"}], "merge": true}
-
 RULES:
-- Use merge=false ONLY for initial list creation. First task should be "in_progress", rest "pending".
-- Use merge=true for ALL subsequent updates — only status is applied to existing todos, content stays unchanged.
-- Use merge=true to add newly discovered work; never resend the whole list just to add one item.
-- Do NOT restructure, reword, or reorder todos when updating status.
+- FIRST call of the session: merge=false, always. Never merge=true against a list you have not created.
+- Use merge=true for ALL subsequent status updates — every id you send must already exist.
+- To ADD newly discovered work, send merge=false with the complete list: the existing items with
+  their current statuses, plus the new one. Keep existing ids, content and order exactly as they are.
+- Do NOT restructure, reword, or reorder todos.
 """
 
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=30))
@@ -179,15 +188,21 @@ RULES:
             existing = self._load_todos()
             existing_by_id = {t.get("id"): t for t in existing if t.get("id")}
 
+            unknown_ids = [t["id"] for t in new_todos if t["id"] not in existing_by_id]
+            if unknown_ids:
+                if not existing_by_id:
+                    raise ToolExecutionException(
+                        "No todo list exists yet. Create it first with merge=false, "
+                        "passing every item you want tracked.",
+                        recoverable=True,
+                    )
+                raise ToolExecutionException(
+                    f"Todo ids not found: {unknown_ids}. Existing ids: {list(existing_by_id.keys())}",
+                    recoverable=True,
+                )
+
             for todo in new_todos:
-                stored = existing_by_id.get(todo["id"])
-                if stored is None:
-                    # Unknown id is an insert, not an error: the first write of a run has
-                    # nothing to merge into, and an agent that discovers work mid-run must
-                    # be able to add a task without resending (and rewording) the whole list.
-                    existing_by_id[todo["id"]] = todo
-                else:
-                    stored["status"] = todo["status"]
+                existing_by_id[todo["id"]]["status"] = todo["status"]
 
             final_todos = list(existing_by_id.values())
         else:

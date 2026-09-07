@@ -7,6 +7,7 @@ from unittest.mock import patch
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.prompts.secondary_instructions import AGENT_NOTES_FILENAME
 from dynamiq.nodes.agents.utils import SummarizationConfig
+from dynamiq.nodes.tools.todo_tools import TodoItem, TodoStatus
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.prompts.prompts import Prompt
 
@@ -311,6 +312,66 @@ class TestPersistentNotes:
         agent._compact_history(summary="A summary.")
 
         assert all(AGENT_NOTES_FILENAME not in m.content for m in agent._prompt.messages)
+
+
+class TestTodoSurvivesCompaction:
+    """The todo list must outlive the tool result that carried it into history."""
+
+    @staticmethod
+    def _agent_with_todos(todos):
+        """History holding a todo-write echo big enough to be summarized away."""
+        msgs = [
+            _system(),
+            _user("ship the auth module"),
+            _user("Observation: Current Todo List:\n[~] 1: Ship auth " + "padding " * 1000),
+            _assistant("old response " * 1000),
+            _user("recent"),
+        ]
+        agent = FakeAgent(messages=msgs, max_preserved_tokens=500)
+        agent.state = SimpleNamespace(todos=todos)
+        return agent
+
+    def test_todos_restated_in_summary_after_compaction(self):
+        """The echo is dropped by compaction; without this the agent loses its own plan."""
+        agent = self._agent_with_todos(
+            [
+                TodoItem(id="1", content="Ship the auth module", status=TodoStatus.COMPLETED),
+                TodoItem(id="2", content="Fix rate limiting", status=TodoStatus.IN_PROGRESS),
+            ]
+        )
+        # The echo is present before compaction and must not survive on its own.
+        assert any("[~] 1: Ship auth" in m.content for m in agent._prompt.messages)
+
+        # A summary that says nothing about the todos — the realistic bad case.
+        agent._compact_history(summary="The user asked to ship the auth module. Work is underway.")
+
+        summary_msg = agent._prompt.messages[1]
+        assert "Ship the auth module" in summary_msg.content
+        assert "Fix rate limiting" in summary_msg.content
+        assert "[+] 1:" in summary_msg.content, "completed todo keeps its status icon"
+        assert "[~] 2:" in summary_msg.content, "in-progress todo keeps its status icon"
+
+    def test_no_todos_injects_nothing(self):
+        agent = self._agent_with_todos([])
+
+        agent._compact_history(summary="A summary.")
+
+        assert all("todo list survived" not in m.content for m in agent._prompt.messages)
+
+    def test_agent_without_state_attribute_does_not_crash(self):
+        """HistoryManagerMixin is used by objects that carry no AgentState."""
+        msgs = [
+            _system(),
+            _user("old message " * 1000),
+            _assistant("old response " * 1000),
+            _user("recent"),
+        ]
+        agent = FakeAgent(messages=msgs, max_preserved_tokens=500)
+        assert not hasattr(agent, "state"), "precondition: no state on the bare mixin host"
+
+        agent._compact_history(summary="A summary.")
+
+        assert agent._prompt.messages[1].content.startswith("Observation: A summary.")
 
 
 def _assistant_tc(content: str, tool_calls: list[dict]) -> Message:

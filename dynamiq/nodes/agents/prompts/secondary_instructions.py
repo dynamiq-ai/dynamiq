@@ -38,9 +38,17 @@ NOTES_REVISIT_INSTRUCTION_TEMPLATE = (
     "that the summary above may have dropped."
 )
 
+TODO_REVISIT_TEMPLATE = (
+    "Your todo list survived the compaction and is restated below with its current statuses. "
+    "Continue from it - keep using these exact ids with todo-write.\n{todo_list}"
+)
+
 TODO_TOOLS_INSTRUCTIONS = """## Todo Management
 - Use the todo-write tool for complex 3+ step tasks; skip for simple requests
-- The todo-write result lists the full current todo list - re-read it there
+- Your todo list starts EMPTY. The first todo-write of the session MUST use merge=false - this
+applies even when you are recording steps you have already completed
+- The todo-write result lists the full current todo list - re-read it there; if history is
+compacted, the list is restated in the summary
 - When creating initial list: first task "in_progress", rest "pending"
 - After initial creation, ONLY update status via merge=true - do not restructure the plan
 - Mark completed IMMEDIATELY after finishing each step - don't batch
