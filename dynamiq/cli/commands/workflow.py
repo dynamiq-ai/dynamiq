@@ -583,11 +583,11 @@ def test_workflow(
     # which routinely outlasts the default 30s; retrying a POST the server already accepted
     # executes the flow again, tools really acting each time.
     response = api.post("/v1/workflows/test", files={k: (None, v) for k, v in form.items()},
-                        timeout=EXECUTION_TIMEOUT, retry=False)
+                        timeout=EXECUTION_TIMEOUT)
     if response.status_code == 415:
         click.echo("note: multipart rejected (415); retrying form-urlencoded.", err=True)
         response = api.post("/v1/workflows/test", data=form,
-                            timeout=EXECUTION_TIMEOUT, retry=False)
+                            timeout=EXECUTION_TIMEOUT)
     echo_response(response)
 
 

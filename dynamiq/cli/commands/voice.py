@@ -149,7 +149,7 @@ def simulate(*, api: ApiClient, settings: Settings, agent_id: str, payload: str)
     # Each attempt creates a simulation. A retry after a timed-out response leaves a second
     # record behind, and there is no idempotency key to tell them apart.
     echo_response(api.post(f"{BASE}/agents/{agent_id}/simulations", json=read_json_arg(payload),
-                           timeout=EXECUTION_TIMEOUT, retry=False))
+                           timeout=EXECUTION_TIMEOUT))
 
 
 @voice.command("simulations")

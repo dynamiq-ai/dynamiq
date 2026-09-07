@@ -226,7 +226,6 @@ def test_inference(*, api: ApiClient, settings: Settings, inference_id: str, pro
             # A completion on a large model outlasts the default timeout, and a retry starts a
             # second generation on the deployment's GPU rather than waiting for the first.
             timeout=EXECUTION_TIMEOUT,
-            retry=False,
         )
     )
 

@@ -84,15 +84,18 @@ class ApiClient:
         data: dict[str, Any] | None = None,
         files: dict[str, Any] | None = None,
         timeout: float | None = None,
-        retry: bool = True,
+        retry: bool = False,
     ) -> Any:
-        """`retry=False` for anything that is not safe to repeat.
+        """POST does not retry unless you ask. `retry=True` only when repeating is harmless.
 
-        The retry below re-sends on a ReadTimeout, and a POST that already reached the server
-        is not undone by the client giving up on the response: a workflow test would execute
-        up to five times, tools really acting each time. An upload is worse than useless on a
-        retry - requests has read the file handles to EOF and nothing rewinds them, so the
-        repeat sends empty parts and the API answers 2xx.
+        A POST that already reached the server is not undone by the client giving up on the
+        response, and almost every POST here creates or runs something: a fine-tuning job, an
+        evaluation, a deployment, a trigger run. Retrying one of those on a timeout bills for
+        it twice, and none of these endpoints takes an idempotency key to tell the duplicate
+        apart. GET, PUT and DELETE keep the retry - they are safe to repeat by definition.
+
+        Opting back in is for calls where a second one costs nothing: minting a short-lived
+        token, a search, a status transition that is already where it is going.
         """
         send = self._request if retry else self._request_once
         return send("POST", path, headers=headers, json=json, data=data, files=files,

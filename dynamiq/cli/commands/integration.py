@@ -131,7 +131,8 @@ def connect_project(*, api: ApiClient, settings: Settings, app_slug: str):
     Give the printed link to the user to open, then poll `dynamiq integration accounts`
     until the account shows up. Never open or reuse the link yourself.
     """
-    response = api.post("/v1/pipedream/connect/tokens", json={"project_id": require_project(settings)})
+    response = api.post("/v1/pipedream/connect/tokens", json={"project_id": require_project(settings)},
+                        retry=True)   # a spare short-lived token costs nothing
     if not ok(response):
         raise click.ClickException(f"HTTP {response.status_code}: {response.text.strip()[:2000]}")
     payload = response.json()
@@ -158,7 +159,8 @@ def pipedream_token(api: ApiClient, settings: Settings) -> str:
     accept one on the command line, where it would end up in shell history and in an agent's
     streamed transcript.
     """
-    response = api.post("/v1/pipedream/connect/tokens", json={"project_id": require_project(settings)})
+    response = api.post("/v1/pipedream/connect/tokens", json={"project_id": require_project(settings)},
+                        retry=True)   # a spare short-lived token costs nothing
     if not ok(response):
         raise click.ClickException(f"HTTP {response.status_code}: {response.text.strip()[:2000]}")
     payload = response.json()
