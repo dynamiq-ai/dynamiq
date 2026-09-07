@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Iterator
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.callbacks.base import get_run_id
 from dynamiq.callbacks.inner_thoughts_extractor import JSONInnerThoughtsExtractor
+from dynamiq.callbacks.json_string_decoder import JSONStringDecoder
 from dynamiq.types.streaming import (
     AgentToolData,
     AgentToolInputDeltaData,
@@ -373,6 +374,11 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         # FC inline thought extractor + per-chunk delta.
         self._fc_extractor: JSONInnerThoughtsExtractor | None = None
         self._latest_fc_args_delta: str = ""
+        # Decodes JSON string bodies for steps the client renders verbatim. Carries its own
+        # step: the FC extractor path never sets `_current_state`, so the residue's
+        # destination cannot be inferred at flush time.
+        self._text_decoder: JSONStringDecoder | None = None
+        self._text_decoder_step: str | None = None
         self._brace_depth: int = 0
         self._brace_scan_index: int = 0
         self._so_action_emitted: bool = False
@@ -474,8 +480,15 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
     def _flush_buffer(self) -> None:
         """Flush the remaining buffer content by streaming it as one chunk."""
+        # Order matters: the decoder must see the remaining slice before it is closed, and
+        # its residue must land in the chunk buffer before that buffer is drained.
+        self._flush_remaining_buffer()
+        self._reset_text_decoder()
+        self._flush_chunk_buffer()
+
+    def _flush_remaining_buffer(self) -> None:
+        """Emit whatever of the buffer has not been streamed yet."""
         if not self._buffer:
-            self._flush_chunk_buffer()
             return
 
         # FC fallback: drain extractor's held buffer when thought was missing.
@@ -488,21 +501,19 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         ):
             held = self._fc_extractor.held_main_buffer
             if held:
+                # Raw tool-args JSON the client re-parses — never decoded.
                 self._emit(held, step=StreamingState.TOOL_INPUT)
                 self._state_last_emit_index = len(self._buffer)
-                self._flush_chunk_buffer()
                 return
 
         if len(self._buffer) <= self._state_last_emit_index:
-            self._flush_chunk_buffer()
             return
 
         if self._current_state in (StreamingState.REASONING, StreamingState.ANSWER, StreamingState.TOOL_INPUT):
             remaining_content = self._buffer[self._state_last_emit_index :]
             if remaining_content.strip():
-                self._emit(remaining_content, step=self._current_state)
+                self._emit_field_slice(remaining_content, self._current_state)
                 self._state_last_emit_index = len(self._buffer)
-        self._flush_chunk_buffer()
 
     def _reset_tool_call_state(self) -> None:
         """Reset parser state for a new tool call in parallel function calling."""
@@ -518,6 +529,10 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._fc_object_answer = False
         self._fc_extractor = None
         self._latest_fc_args_delta = ""
+        # `_flush_buffer` above already flushed any residue; this only guards against a
+        # stale held escape leaking into the next tool call.
+        self._text_decoder = None
+        self._text_decoder_step = None
         self._brace_depth = 0
         self._brace_scan_index = 0
         self._state_has_emitted = {
@@ -596,6 +611,63 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             self._emit(self._chunk_buffer, step=self._chunk_buffer_step, force=True)
         self._chunk_buffer = ""
         self._chunk_buffer_step = None
+
+    def _step_is_decoded(self, step: str) -> bool:
+        """Whether ``step``'s value reaches this emit path as a JSON *string body*.
+
+        A string body carries one layer of encoding that only exists to fit the value into a
+        JSON string, and the client cannot remove it: the top-level object is split across
+        streams here, so the client never sees it to parse. Strip exactly that layer. What
+        remains depends on the payload, not on the operation — a thought becomes the plain
+        text the client renders, while a stringified ``action_input`` becomes the JSON source
+        the client parses, escapes inside its own string values intact.
+
+        Values arriving as raw JSON *source* carry no such layer: an FC arguments object, or a
+        brace-delimited answer or tool input. Decoding those would unescape their interior
+        quotes and break the client's parse. XML and DEFAULT carry no JSON encoding at all.
+        """
+        if self.mode_name not in (InferenceMode.FUNCTION_CALLING.value, InferenceMode.STRUCTURED_OUTPUT.value):
+            return False
+        if step == StreamingState.REASONING:
+            return True
+        if step == StreamingState.ANSWER:
+            return not self._fc_object_answer
+        if step == StreamingState.TOOL_INPUT:
+            # SO stuffs the tool's arguments into a string-typed `action_input`, so they
+            # arrive one encoding deeper than FC's, whose object is streamed as-is.
+            return not self._fc_object_tool_input
+        return False
+
+    def _emit_decoded(self, source: str, step: str) -> None:
+        """Decode a JSON string-body fragment and emit it.
+
+        The decoder is stateful across fragments, so every byte of a field must reach it
+        exactly once and in order.
+        """
+        if self._text_decoder is not None and self._text_decoder_step != step:
+            self._reset_text_decoder()
+        if self._text_decoder is None:
+            self._text_decoder = JSONStringDecoder()
+            self._text_decoder_step = step
+        self._emit(self._text_decoder.feed(source), step=step)
+
+    def _reset_text_decoder(self) -> None:
+        """Finish the current string body, surfacing whatever the decoder still holds."""
+        decoder, step = self._text_decoder, self._text_decoder_step
+        self._text_decoder = None
+        self._text_decoder_step = None
+        if decoder is None or step is None:
+            return
+        residue = decoder.flush()
+        if residue:
+            self._emit(residue, step=step)
+
+    def _emit_field_slice(self, source: str, step: str) -> None:
+        """Emit a raw slice of the JSON buffer, decoding it only where the client renders it."""
+        if self._step_is_decoded(step):
+            self._emit_decoded(source, step)
+        else:
+            self._emit(source, step=step)
 
     def _emit(self, content: str, step: str, force: bool = False) -> None:
         """Emit the parsed content using the agent's stream_content method.
@@ -966,9 +1038,12 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
 
         main_delta, thought_delta = self._fc_extractor.process_fragment(delta)
         if thought_delta and not final_answer_only:
-            self._emit(thought_delta, step=StreamingState.REASONING)
+            self._emit_decoded(thought_delta, StreamingState.REASONING)
         if main_delta:
+            # Tool args stay raw JSON — the client re-parses them.
             self._emit(main_delta, step=StreamingState.TOOL_INPUT)
+        if self._fc_extractor.thought_complete:
+            self._reset_text_decoder()
 
     def _find_unescaped_quote_end(self, input_string: str, start_quote_index: int) -> int:
         """
@@ -1086,6 +1161,9 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             self._current_state = state
             self._state_start_index = field_start
             self._state_last_emit_index = max(self._state_last_emit_index, field_start)
+            # A new string body starts here: no escape may be held over from the last one.
+            self._text_decoder = None
+            self._text_decoder_step = None
             return True
         return False
 
@@ -1118,6 +1196,8 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                 self._fc_object_tool_input = True
             self._brace_depth = 1
             self._brace_scan_index = field_start + 1
+            self._text_decoder = None
+            self._text_decoder_step = None
             return True
         return False
 
@@ -1202,9 +1282,11 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                 segment_start = self._state_last_emit_index
                 while segment_start < end_quote:
                     segment_end = min(end_quote, segment_start + STREAMING_SEGMENT_SIZE)
-                    self._emit(buf[segment_start:segment_end], step=step)
+                    self._emit_field_slice(buf[segment_start:segment_end], step)
                     segment_start = segment_end
                 self._state_last_emit_index = end_quote
+            # Close the string body while the step context is still current.
+            self._reset_text_decoder()
             # Mark the field as emitted and reset the state
             if step in self._state_has_emitted:
                 self._state_has_emitted[step] = True
@@ -1217,7 +1299,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             segment_end_target = len(buf)
             while segment_start < segment_end_target:
                 segment_end = min(segment_end_target, segment_start + STREAMING_SEGMENT_SIZE)
-                self._emit(buf[segment_start:segment_end], step=step)
+                self._emit_field_slice(buf[segment_start:segment_end], step)
                 segment_start = segment_end
             self._state_last_emit_index = segment_end_target
         return False
@@ -1257,6 +1339,8 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
                             segment_start = segment_end
                         self._state_last_emit_index = end_pos
                     self._current_state = None
+                    self._text_decoder = None
+                    self._text_decoder_step = None
                     self._brace_scan_index = end_pos
                     return True
             i += 1

@@ -152,6 +152,45 @@ class TestEscapeSequences:
         assert thought == "line1\\nline2"
 
 
+class TestInsignificantWhitespace:
+    """Whitespace between a top-level `:` and its value is padding, not content."""
+
+    def test_space_after_colon_not_in_thought(self):
+        main, thought = _drive('{"thought": "hi", "q": "x"}')
+        assert thought == "hi"
+        assert json.loads(main) == {"q": "x"}
+
+    def test_space_after_colon_not_in_main(self):
+        main, _ = _drive('{"thought":"hi","q": "x"}')
+        # The stray space would land inside action_input, before the opening quote.
+        assert main == '{"q":"x"}'
+
+    def test_whitespace_around_unquoted_scalars(self):
+        main, thought = _drive('{"thought": "hi", "n" : 5 , "b": true , "z": null }')
+        assert thought == "hi"
+        assert json.loads(main) == {"n": 5, "b": True, "z": None}
+
+    @pytest.mark.parametrize("char_by_char", [False, True], ids=["whole", "char"])
+    def test_pretty_printed_json(self, char_by_char):
+        raw = json.dumps({"thought": "hi", "n": 5, "q": "x"}, indent=2)
+        main, thought = _drive(raw, char_by_char=char_by_char)
+        assert thought == "hi"
+        assert json.loads(main) == {"n": 5, "q": "x"}
+
+    def test_nested_whitespace_passes_through(self):
+        # Only top-level padding is dropped. At depth >= 2 the extractor is a byte-for-byte
+        # passthrough — it has no key/value state machine there to tell padding from content.
+        main, thought = _drive('{"thought":"hi","cfg":{"a": 1, "b": [1, 2]}}')
+        assert thought == "hi"
+        assert main == '{"cfg":{"a": 1, "b": [1, 2]}}'
+
+    def test_whitespace_inside_strings_is_never_dropped(self):
+        # `in_string` is checked before both the depth and the value-padding branches.
+        main, thought = _drive('{"thought": "a  b", "note": "hello   world"}')
+        assert thought == "a  b"
+        assert main == '{"note":"hello   world"}'
+
+
 class TestChunkedFeeding:
     @pytest.mark.parametrize(
         "raw",
@@ -206,6 +245,7 @@ class TestDeltaBufferInvariant:
         '{"a":"x","b":"y"}',  # no thought
         '{"thought":"hi","config":{"a":1,"b":2}}',
         '{"a":"x","items":[1,2,3],"thought":"hi"}',
+        '{"thought": "hi", "q": "x", "n" : 5 }',  # padded — insignificant whitespace is dropped
     ]
 
     @pytest.mark.parametrize("raw", RAWS)
