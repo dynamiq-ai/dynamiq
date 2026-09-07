@@ -1,5 +1,4 @@
 import json
-import uuid
 
 import click
 import requests
@@ -20,19 +19,14 @@ integration = click.Group(
     help="Connect third-party apps (Pipedream/MCP/Composio) and inspect connected accounts",
 )
 
-# Pipedream's hosted connect page. `POST /v1/pipedream/connect/tokens` returns only
-# {token, expires_at} - the backend drops Pipedream's own connect_link_url - so the link
-# is assembled here exactly the way the platform does it (connect link + ?app=<slug>).
+# The backend returns only {token, expires_at}, dropping Pipedream's connect_link_url, so the
+# hosted page URL is assembled here the way the platform does it.
 PIPEDREAM_CONNECT_PAGE = "https://pipedream.com/_static/connect.html"
 
-# Pipedream's own REST API. The platform UI talks to it DIRECTLY from the browser - Dynamiq
-# only mints the token - so every lookup below is the same request the workflow builder makes,
-# and the answers are therefore identical to what the builder would have stored.
-#
-# Component reads are connect-scoped, so they sit under /v1/connect and are authorized with a
-# connect token. The APP record is the exception and does NOT come from here at all - the
-# builder takes it from the platform's own catalogue (`integration app` below), because that
-# entry carries the action and trigger lists Pipedream's /v1/apps/<slug> does not.
+# Pipedream's own REST API, which the UI calls directly from the browser - Dynamiq only mints
+# the token - so these lookups return exactly what the workflow builder stores. The app record
+# is the exception: `integration app` reads the platform catalogue instead, because that entry
+# carries the action and trigger lists /v1/apps/<slug> does not.
 PIPEDREAM_CONNECT_API = "https://api.pipedream.com/v1/connect"
 PIPEDREAM_NODE_TYPE = "dynamiq.nodes.tools.Pipedream"
 

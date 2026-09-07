@@ -59,6 +59,8 @@ def call_app(url: str, key: str, *, method: str = "POST", json_body: dict | None
         click.echo(json.dumps(result.json(), indent=2, ensure_ascii=False))
     except ValueError:
         click.echo(result.text)
+
+
 DEPLOYMENT_TYPES = ("serverless", "server_based")
 
 

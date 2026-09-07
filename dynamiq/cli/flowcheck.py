@@ -64,6 +64,12 @@ def walk_strings(value, path="$"):
         yield path, value
 
 
+def slug_for(name) -> str:
+    """The id-shaped form of a name, for the "use this instead" hint."""
+    slug = re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9]+", "-", str(name).lower()).strip("-"))
+    return slug or "my-node"
+
+
 def named_parts(node):
     """Everything in a node that carries its own API-validated `name`."""
     label = node.get("id", "?")
@@ -145,11 +151,10 @@ def validate(flow):
             continue
         text = str(node_type)
         parts = text.split(".")
-        # Every type is a fully qualified dotted path. A short label like "llm", "pipedream"
-        # or "exa-search" is the single most expensive mistake here: the API answers it with a
-        # bare `"type": "must be a valid value"` that names neither the node nor the fix.
+        # A short label like "llm" or "exa-search" gets a bare `"type": "must be a valid
+        # value"` from the API, naming neither the node nor the fix.
         if not text.startswith("dynamiq.nodes.") or len(parts) < 4:
-            hint = f" Did you mean a `dynamiq.nodes.<group>.<Class>` path?" if "." not in text else ""
+            hint = " Did you mean a `dynamiq.nodes.<group>.<Class>` path?" if "." not in text else ""
             errors.append(
                 f"type {node_type!r} is not a node type. Types are fully qualified dotted paths "
                 f"like `dynamiq.nodes.agents.Agent`, `dynamiq.nodes.llms.OpenAI` or "
@@ -232,7 +237,7 @@ def validate(flow):
                 errors.append(
                     f"{part_label}: name {name!r} must be in a valid format - the API validates `name` "
                     "like an id (lowercase letters, digits, single hyphens). Use e.g. "
-                    f"{re.sub(r'-{2,}', '-', re.sub(r'[^a-z0-9]+', '-', str(name).lower()).strip('-')) or 'my-node'!r}. "
+                    f"{slug_for(name)!r}. "
                     "Human-readable text belongs in `role`/`description`."
                 )
 
@@ -253,8 +258,7 @@ def validate(flow):
                     "Intentional for a plain Q&A agent."
                 )
 
-            # `memory` is accepted, saved and deployed even when it can never switch on,
-            # so a flow that silently forgets everything otherwise looks perfectly valid.
+            # `memory` saves and deploys even when it can never switch on.
             memory = node.get("memory")
             if memory is not None:
                 if not isinstance(memory, dict):
@@ -336,8 +340,7 @@ def validate(flow):
                     "Run `dynamiq connection list`."
                 )
 
-        # A standalone LLM node needs its own credentials; the API reports these as
-        # `connection: cannot be blank` / `model: cannot be blank` with no node name.
+        # The API reports these as `cannot be blank` with no node name.
         if node_type.startswith("dynamiq.nodes.llms."):
             if not UUID_RE.match(str(node.get("connection") or "")):
                 errors.append(
@@ -374,9 +377,8 @@ def validate(flow):
     return errors, warnings
 
 
-# Memory backends the PLATFORM will save. Shorter than the SDK's list on purpose: InMemory and
-# SQLite run fine locally and are rejected by `workflow save`, which is a confusing place to
-# find out.
+# What `workflow save` accepts. Shorter than the SDK's list: InMemory and SQLite run locally
+# and are rejected on save.
 MEMORY_BACKENDS = {
     "dynamiq.memory.backends.Dynamiq",
     "dynamiq.memory.backends.PostgreSQL",
@@ -386,8 +388,7 @@ MEMORY_BACKENDS = {
     "dynamiq.memory.backends.DynamoDB",
 }
 
-# A Pipedream tool's own fields, as declared by dynamiq/nodes/tools/pipedream.py. `props` is
-# a component schema, NOT a field on the node.
+# Declared by dynamiq/nodes/tools/pipedream.py. `props` is a component schema, not a field.
 PIPEDREAM_FIELDS = {
     "id", "name", "type", "action_id", "external_user_id", "input_props", "configurable_props",
     "dynamic_props_id", "stash_id",
@@ -460,10 +461,8 @@ def check_pipedream(tool, where):
     elif not external_user:
         problems.append(f"{where}: needs `external_user_id` (the project id). The CLI fills this in on save.")
 
-    # The declaration half. A tool whose schema was hand-written usually gets this wrong in one
-    # of two ways: it is missing outright, or its props carry `type` where the SDK reads `type_`
-    # (rename_keys_recursive(input_props, {"type": "type_"})), so every prop is silently ignored
-    # and the agent is handed a tool it cannot call.
+    # A hand-written schema is either missing or carries `type` where the SDK reads `type_`,
+    # in which case every prop is ignored and the agent gets a tool it cannot call.
     declared = tool.get("input_props")
     declared_props = declared.get("configurableProps") if isinstance(declared, dict) else None
     if not isinstance(declared_props, list) or not declared_props:

@@ -1,4 +1,3 @@
-import json
 import click
 
 from dynamiq.cli.client import ApiClient

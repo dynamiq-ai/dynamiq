@@ -74,11 +74,9 @@ class Settings(BaseModel):
             except json.JSONDecodeError as exc:
                 raise SystemExit(f"❌ Corrupted credentials file at {_CREDS_FILE_PATH}: {exc}") from exc
 
-        # Explicit env always beats the stored files (catalyst injects env into sandboxes).
-        # This is the documented precedence, so it is NOT worth a warning: printing one on
-        # every invocation put a scary "warning:" line above every command's real output and
-        # sent agents chasing credential problems that did not exist. `dynamiq config show`
-        # reports the values actually in effect when someone needs to check.
+        # Env beats the stored files (catalyst injects env into sandboxes). Documented
+        # precedence, so it is not worth warning about on every invocation; `config show`
+        # reports what is actually in effect.
         stored = {**disk, **creds}
         merged = {**stored, **env}
         try:
