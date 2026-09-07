@@ -265,6 +265,8 @@ def warn_tool_chained_after_agent(flow: dict) -> None:
 
 
 PIPEDREAM_TYPE = "dynamiq.nodes.tools.Pipedream"
+# A flow run is an agent doing LLM and tool calls; 30s is not enough.
+EXECUTION_TIMEOUT = 600.0
 
 
 def _is_uuid(value: str) -> bool:
@@ -312,7 +314,7 @@ def nested_custom_entries(node: dict, into: dict) -> None:
             nested_custom_entries(child, into)
 
 
-def flow_ui_for(flow: dict) -> dict:
+def flow_ui_for(flow: dict, custom: dict | None = None) -> dict:
     """Canvas entries for a flow's nodes, in the exact shape the platform UI renders.
 
     `flow_ui` is required by create/save/release, so one is generated whenever the caller does
@@ -327,7 +329,7 @@ def flow_ui_for(flow: dict) -> dict:
 
     What CANNOT be generated here is a Pipedream tool's `pipedreamApp` / `pipedreamComponent`:
     those come from Pipedream, not from the flow. Build such a tool with the skill's
-    `pipedream_node` and pass the result via `--flow-ui`, or the tool saves and then draws
+    the skill's `pipedream_node` and pass the result via `--flow-ui`, or the tool draws
     with no logo, no account picker and no configuration form.
     """
     input_type = "dynamiq.nodes.utils.Input"
@@ -400,6 +402,13 @@ def flow_ui_for(flow: dict) -> dict:
                     "is_choice_option": False,
                 }
             )
+    # A top-level node is keyed by the canvas uuid minted above, and a caller cannot predict
+    # that - so an entry supplied under the flow node's id is resolved here. Nested nodes keep
+    # their own id and fall through unchanged.
+    for node_id, entry in (custom or {}).items():
+        key = ui_ids.get(node_id, node_id)
+        custom_node_data[key] = {**custom_node_data.get(key, {}), **entry}
+
     return {"nodes": nodes, "edges": edges, "custom_node_data": custom_node_data}
 
 
@@ -520,10 +529,15 @@ def test_workflow(
     if last_node_output:
         form["last_node_output"] = "true"
     # This endpoint takes multipart; a urlencoded body is answered with 415.
-    response = api.post("/v1/workflows/test", files={k: (None, v) for k, v in form.items()})
+    # Not retried, and given room to finish. A real run is an agent doing LLM and tool calls,
+    # which routinely outlasts the default 30s; retrying a POST the server already accepted
+    # executes the flow again, tools really acting each time.
+    response = api.post("/v1/workflows/test", files={k: (None, v) for k, v in form.items()},
+                        timeout=EXECUTION_TIMEOUT, retry=False)
     if response.status_code == 415:
         click.echo("note: multipart rejected (415); retrying form-urlencoded.", err=True)
-        response = api.post("/v1/workflows/test", data=form)
+        response = api.post("/v1/workflows/test", data=form,
+                            timeout=EXECUTION_TIMEOUT, retry=False)
     echo_response(response)
 
 
@@ -685,7 +699,7 @@ def validate_flow_command(*, api: ApiClient, settings: Settings, flow: str):
     "custom_paths",
     multiple=True,
     help="JSON of extra custom_node_data entries (repeatable). Accepts the output of "
-    "`integration tool-node`, or a bare {node_id: entry} mapping.",
+    "the skill's `pipedream_node`, or a bare {node_id: entry} mapping.",
 )
 @with_api_and_settings
 def build_flow_ui(*, api: ApiClient, settings: Settings, flow: str, out_path, custom_paths):
@@ -693,8 +707,8 @@ def build_flow_ui(*, api: ApiClient, settings: Settings, flow: str, out_path, cu
 
     `save` and `release` build one for you when you do not pass `--flow-ui`. Use this when
     you need to inspect it, or to merge in data the flow cannot carry - a Pipedream tool's
-    app and component records live only in `custom_node_data`, and `integration tool-node`
-    emits them in the shape this accepts.
+    app and component records live only in `custom_node_data`, and the skill's
+    `pipedream_node` emits them in the shape this accepts.
     """
     flow_body = normalize_flow(read_json_arg(flow))
     custom: dict = {}
@@ -705,9 +719,7 @@ def build_flow_ui(*, api: ApiClient, settings: Settings, flow: str, out_path, cu
             raise click.ClickException(f"{path}: expected an object of node id -> entry.")
         custom.update(entries)
 
-    flow_ui = flow_ui_for(flow_body)
-    for node_id, entry in custom.items():
-        flow_ui["custom_node_data"][node_id] = {**flow_ui["custom_node_data"].get(node_id, {}), **entry}
+    flow_ui = flow_ui_for(flow_body, custom)
 
     undepicted = [
         entry.get("name") or node_id
@@ -718,7 +730,7 @@ def build_flow_ui(*, api: ApiClient, settings: Settings, flow: str, out_path, cu
         click.echo(
             "warning: no component record for " + ", ".join(map(str, undepicted)) + " - these tools "
             "will save and then draw with no logo, no account picker and no configuration form. "
-            "Build each with `integration tool-node` and pass it via --custom.",
+            "Build each with the skill's `pipedream_node` and pass it via --custom.",
             err=True,
         )
 

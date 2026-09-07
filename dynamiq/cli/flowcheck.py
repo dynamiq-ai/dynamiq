@@ -25,32 +25,47 @@ WRONG_SHAPE_KEYS = {
     "data": "a full API response - pass `data.flow`, not the whole body",
 }
 
-PLACEHOLDER_HINTS = ("<", "your-", "example-", "desired-", "target-page", "-id-here")
+PLACEHOLDER_HINTS = ("your-", "example-", "desired-", "target-page", "-id-here")
+# A slot name: `<PAGE_ID>`, `<your page id>`. Not a Slack mention (`<@U123>`, `<#C1>`, which
+# do not start with a letter) and not markup (`<b>`, `<div>`, which are lowercase and unspaced).
+PLACEHOLDER_TEMPLATE = re.compile(r"<[A-Za-z_][\w .-]*>")
 # Free text: a "<" or a word ending in "-id" here is prose, not an unfilled template.
 PROSE_KEYS = frozenset({"role", "description", "label", "instructions", "prompt", "content", "system_prompt"})
 
 
-def node_groups():
-    """`<group>` in `dynamiq.nodes.<group>.<Class>`, read from the SDK when it is importable.
+def node_groups() -> set:
+    """Module names under `dynamiq.nodes`.
 
-    Not a list of valid types - the backend owns that. It only catches a namespace the SDK
-    has no module for at all, e.g. `dynamiq.nodes.notion.*`.
+    Node.type is built from the module path, not from the node's group, so the taxonomy in
+    NodeGroup is the wrong list: knowledgebases and knowledge_graphs are real modules whose
+    classes declare TOOLS or RETRIEVERS, and checking against groups called their own emitted
+    types invalid.
     """
     try:
-        from dynamiq.nodes import NodeGroup
+        import pkgutil
 
-        return {g.value for g in NodeGroup}
-    except Exception:
-        return set()
+        import dynamiq.nodes
+
+        found = {m.name for m in pkgutil.iter_modules(dynamiq.nodes.__path__)}
+        if found:
+            return found
+    except Exception:                                          # noqa: BLE001
+        pass
+    return set()
 
 
-def looks_like_placeholder(value):
-    if not isinstance(value, str):
+def looks_like_placeholder(value) -> bool:
+    """Whether a string is an unfilled template rather than real content."""
+    if not isinstance(value, str) or len(value) >= 200:
         return False
-    low = value.lower()
-    if any(hint in low for hint in PLACEHOLDER_HINTS):
+    text = value.strip().lower()
+    if any(hint in text for hint in PLACEHOLDER_HINTS):
         return True
-    return low.endswith("-id") and "/" not in low and " " not in low
+    for match in PLACEHOLDER_TEMPLATE.findall(value):
+        inner = match[1:-1]
+        if " " in inner or "_" in inner or inner.isupper():
+            return True
+    return False
 
 
 def walk_strings(value, path="$"):
@@ -80,6 +95,21 @@ def named_parts(node):
     for tool in node.get("tools") or []:
         if isinstance(tool, dict):
             yield f"tool {tool.get('name') or tool.get('type', '?')} on node {label!r}", tool
+
+
+def coerce_depends(value) -> list:
+    """`depends` shorthand, matching what `normalize_flow` accepts on save.
+
+    A bare string is one dependency, not a sequence of characters: iterating it produced one
+    invented error per letter and buried the real problems under them.
+    """
+    if isinstance(value, str):
+        return [{"node": value}]
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, list):
+        return [{"node": d} if isinstance(d, str) else d for d in value]
+    return []
 
 
 def validate(flow):
@@ -186,7 +216,7 @@ def validate(flow):
         label = node.get("id", "?")
         node_type = str(node.get("type") or "")
 
-        for dependency in node.get("depends") or []:
+        for dependency in coerce_depends(node.get("depends")):
             target = dependency.get("node") if isinstance(dependency, dict) else dependency
             if isinstance(target, dict):
                 target = target.get("id")
@@ -197,7 +227,15 @@ def validate(flow):
         if node_type != INPUT_TYPE and not node.get("depends"):
             errors.append(f"node {label!r} has no `depends`, so it never runs. Wire it to an upstream node.")
 
-        selector = (node.get("input_transformer") or {}).get("selector") or {}
+        transformer = node.get("input_transformer") or {}
+        if not isinstance(transformer, dict):
+            errors.append(
+                f"node {label!r}: `input_transformer` must be an object like "
+                f'{{"selector": {{"field": "$.node.output.x"}}}}, got {type(transformer).__name__}. '
+                "The JSONPath goes inside `selector`, not on `input_transformer` itself."
+            )
+            transformer = {}
+        selector = transformer.get("selector") or {}
         if not isinstance(selector, dict):
             errors.append(f"node {label!r}: input_transformer.selector must be an object of field -> JSONPath.")
             selector = {}
@@ -245,6 +283,8 @@ def validate(flow):
             llm = node.get("llm")
             if not isinstance(llm, dict):
                 errors.append(f"agent {label!r} has no `llm` object.")
+            elif requirement_problems(llm.get("connection"), f"agent {label!r}: llm.connection") is not None:
+                errors.extend(requirement_problems(llm.get("connection"), f"agent {label!r}: llm.connection"))
             elif not UUID_RE.match(str(llm.get("connection") or "")):
                 errors.append(
                     f"agent {label!r}: llm.connection {llm.get('connection')!r} is not a connection UUID. "
@@ -333,7 +373,12 @@ def validate(flow):
                 continue
             where = f"tool {tool.get('name') or tool.get('type', '?')} on node {label!r}"
             if tool.get("type") == "dynamiq.nodes.tools.Pipedream":
-                errors.extend(check_pipedream(tool, where))
+                tool_errors, tool_advisory = check_pipedream(tool, where)
+                errors.extend(tool_errors)
+                warnings.extend(tool_advisory)
+            elif (tool.get("connection") is not None
+                    and requirement_problems(tool.get("connection"), f"{where}: connection") is not None):
+                errors.extend(requirement_problems(tool.get("connection"), f"{where}: connection"))
             elif tool.get("connection") is not None and not UUID_RE.match(str(tool.get("connection"))):
                 errors.append(
                     f"{where}: connection {tool.get('connection')!r} is not a UUID. "
@@ -342,7 +387,10 @@ def validate(flow):
 
         # The API reports these as `cannot be blank` with no node name.
         if node_type.startswith("dynamiq.nodes.llms."):
-            if not UUID_RE.match(str(node.get("connection") or "")):
+            from_requirement = requirement_problems(node.get("connection"), f"node {label!r}: connection")
+            if from_requirement is not None:
+                errors.extend(from_requirement)
+            elif not UUID_RE.match(str(node.get("connection") or "")):
                 errors.append(
                     f"node {label!r}: connection {node.get('connection')!r} is not a connection UUID. "
                     "An LLM node carries its own `connection`. Run `dynamiq connection list`."
@@ -354,11 +402,13 @@ def validate(flow):
 
         # A Pipedream node placed in the DAG is validated exactly like one inside an agent.
         if node_type == "dynamiq.nodes.tools.Pipedream":
-            errors.extend(check_pipedream(node, f"node {label!r}"))
+            node_errors, node_advisory = check_pipedream(node, f"node {label!r}")
+            errors.extend(node_errors)
+            warnings.extend(node_advisory)
 
         if node_type.startswith("dynamiq.nodes.tools."):
             after = [
-                d.get("node") for d in node.get("depends") or []
+                d.get("node") for d in coerce_depends(node.get("depends"))
                 if isinstance(d, dict) and d.get("node") in agent_ids
             ]
             if after:
@@ -391,7 +441,7 @@ MEMORY_BACKENDS = {
 # Declared by dynamiq/nodes/tools/pipedream.py. `props` is a component schema, not a field.
 PIPEDREAM_FIELDS = {
     "id", "name", "type", "action_id", "external_user_id", "input_props", "configurable_props",
-    "dynamic_props_id", "stash_id",
+    "dynamic_props_id", "stash_id", "connection", "timeout",
     "is_optimized_for_agents", "input_transformer", "output_transformer", "streaming",
     "error_handling", "approval", "description",
     # also legal when the same object sits in the DAG as its own node rather than in tools[]
@@ -432,8 +482,10 @@ def requirement_problems(value, where):
 
 
 def check_pipedream(tool, where):
-    """Pipedream tools bind through Pipedream's vault, not through a `connection`."""
-    problems = []
+    """-> (problems, advisory). An unknown key is dropped by the API rather than rejected, so
+    it is worth reporting and never worth blocking a save over."""
+    problems: list = []
+    advisory: list = []
 
     unknown = sorted(set(tool) - PIPEDREAM_FIELDS)
     if unknown:
@@ -447,7 +499,7 @@ def check_pipedream(tool, where):
                 "fixed target the user named). They overlap on purpose - a pinned prop stays in "
                 "input_props and becomes an overridable default."
             )
-        problems.append(f"{where}: unknown field(s) {', '.join(unknown)} - they are ignored." + detail)
+        advisory.append(f"{where}: unknown field(s) {', '.join(unknown)} - they are ignored." + detail)
 
     if not tool.get("action_id"):
         problems.append(
@@ -498,7 +550,7 @@ def check_pipedream(tool, where):
                 '{"notion": {"authProvisionId": "apn_..."}}. Run `dynamiq integration accounts`. '
                 f"Present fields: {', '.join(sorted(tool)) or '(none)'}."
             )
-        return problems
+        return problems, advisory
 
     bound = False
     for key, value in props.items():
@@ -520,4 +572,4 @@ def check_pipedream(tool, where):
             f'{where}: no account binding in configurable_props. Add {{"<app>": '
             '{"authProvisionId": "apn_..."}} from `dynamiq integration accounts`.'
         )
-    return problems
+    return problems, advisory

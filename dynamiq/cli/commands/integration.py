@@ -28,7 +28,6 @@ PIPEDREAM_CONNECT_PAGE = "https://pipedream.com/_static/connect.html"
 # is the exception: `integration app` reads the platform catalogue instead, because that entry
 # carries the action and trigger lists /v1/apps/<slug> does not.
 PIPEDREAM_CONNECT_API = "https://api.pipedream.com/v1/connect"
-PIPEDREAM_NODE_TYPE = "dynamiq.nodes.tools.Pipedream"
 
 # Fields a connector's connect response may carry the user-facing URL in.
 URL_FIELDS = ("connect_link_url", "url", "connect_url", "authorization_url", "redirect_url", "link")
@@ -342,41 +341,3 @@ def pipedream_component_options(
     if dynamic_props_id:
         body["dynamic_props_id"] = dynamic_props_id
     pipedream_call(f"{PIPEDREAM_CONNECT_API}/components/configure", pipedream_token(api, settings), json_body=body)
-
-
-def pipedream_fetch(url: str, token: str, *, params: dict | None = None, json_body: dict | None = None):
-    """Same call as `pipedream_call`, returning the payload instead of printing it."""
-    method = "POST" if json_body is not None else "GET"
-    try:
-        response = requests.request(
-            method,
-            url,
-            params=params,
-            json=json_body,
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            timeout=30,
-        )
-    except requests.RequestException as exc:
-        raise click.ClickException(f"Pipedream request failed: {exc}") from exc
-    if not ok(response):
-        raise click.ClickException(f"HTTP {response.status_code}: {response.text.strip()[:2000]}")
-    payload = response.json()
-    return payload.get("data", payload) if isinstance(payload, dict) else payload
-
-
-def map_configurable_props(props: list) -> list:
-    """`type` becomes `type_`, and `alert` props are dropped.
-
-    Not cosmetic: the SDK renames it back on load, so a prop sent as `type` is not
-    recognised and the tool is handed to the agent without it.
-    """
-    mapped = []
-    for prop in props or []:
-        if not isinstance(prop, dict):
-            continue
-        rest = {k: v for k, v in prop.items() if k != "type"}
-        rest["type_"] = prop.get("type")
-        if rest["type_"] == "alert":
-            continue
-        mapped.append(rest)
-    return mapped

@@ -46,8 +46,20 @@ class ApiClient:
         json: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
         files: dict[str, Any] | None = None,
+        timeout: float | None = None,
+        retry: bool = True,
     ) -> Any:
-        return self._request("POST", path, headers=headers, json=json, data=data, files=files)
+        """`retry=False` for anything that is not safe to repeat.
+
+        The retry below re-sends on a ReadTimeout, and a POST that already reached the server
+        is not undone by the client giving up on the response: a workflow test would execute
+        up to five times, tools really acting each time. An upload is worse than useless on a
+        retry - requests has read the file handles to EOF and nothing rewinds them, so the
+        repeat sends empty parts and the API answers 2xx.
+        """
+        send = self._request if retry else self._request_once
+        return send("POST", path, headers=headers, json=json, data=data, files=files,
+                    **({"timeout": timeout} if timeout is not None else {}))
 
     def put(
         self,
@@ -69,6 +81,10 @@ class ApiClient:
         data: dict[str, Any] | None = None,
     ) -> Any:
         return self._request("DELETE", path, headers=headers, json=json, data=data)
+
+    def _request_once(self, method, path, **kwargs):
+        """One attempt, no retry. Same request, same error handling."""
+        return self._request.retry_with(stop=stop_after_attempt(1))(self, method, path, **kwargs)
 
     @retry(
         stop=stop_after_attempt(5),
