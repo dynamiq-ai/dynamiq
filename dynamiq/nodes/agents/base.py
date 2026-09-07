@@ -1658,9 +1658,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     self._apply_parameters(merged_input, global_params, "global", debug_info)
 
                 # 2. Apply parameters by tool name (medium priority)
+                owner = getattr(tool, "_owner_server", None)
                 name_params_any = (
                     tool_params.by_name_params.get(tool.name)
                     or tool_params.by_name_params.get(self.sanitize_tool_name(tool.name))
+                    or (owner and tool_params.by_name_params.get(owner.name))
+                    or (owner and owner.name and tool_params.by_name_params.get(self.sanitize_tool_name(owner.name)))
                     or (resolved_agent and tool_params.by_name_params.get(resolved_agent.name))
                     or (resolved_agent and tool_params.by_name_params.get(self.sanitize_tool_name(resolved_agent.name)))
                 )
@@ -1673,8 +1676,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                         self._apply_parameters(merged_input, name_params_any, f"name:{tool.name}", debug_info)
 
                 # 3. Apply parameters by tool ID (highest priority)
-                id_params_any = tool_params.by_id_params.get(tool.id) or (
-                    resolved_agent and tool_params.by_id_params.get(resolved_agent.id)
+                id_params_any = (
+                    tool_params.by_id_params.get(tool.id)
+                    or (owner and tool_params.by_id_params.get(owner.id))
+                    or (resolved_agent and tool_params.by_id_params.get(resolved_agent.id))
                 )
                 if id_params_any:
                     if isinstance(id_params_any, ToolParams):

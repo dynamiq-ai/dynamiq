@@ -2,18 +2,28 @@ import contextlib
 import os
 import uuid
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp.types import CallToolResult, ImageContent, TextContent
 from pydantic import Field, ValidationError, create_model
 
 from dynamiq import connections
+from dynamiq.connections.connections import merge_mcp_http_headers
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents.base import ToolParams
+from dynamiq.nodes.agents.components import schema_generator
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools import FileListTool, FileReadTool
-from dynamiq.nodes.tools.mcp import MCPServer, MCPSse, MCPTool, extract_text_from_mcp_content
+from dynamiq.nodes.tools.mcp import (
+    MCPServer,
+    MCPSse,
+    MCPStreamableHTTP,
+    MCPTool,
+    extract_text_from_mcp_content,
+    split_mcp_http_headers,
+)
 
 
 def assert_tool_matches(tool, expected, connection):
@@ -303,7 +313,9 @@ def test_get_input_schema_handles_reserved_and_invalid_field_names():
 
     instance = model_cls.model_validate({"model_config": "cfg", "schema": 5, "weird-name": True, "normal": "ok"})
 
-    assert instance.model_dump(by_alias=True) == {
+    dumped = instance.model_dump(by_alias=True)
+    dumped.pop("headers", None)
+    assert dumped == {
         "model_config": "cfg",
         "schema": 5,
         "weird-name": True,
@@ -407,7 +419,8 @@ def test_get_input_schema_handles_root_ref_composition():
         }
     )
 
-    assert list(model_cls.model_fields) == ["q"]
+    assert "q" in model_cls.model_fields
+    assert "headers" in model_cls.model_fields
     assert model_cls.model_validate({"q": "x"}).q == "x"
     with pytest.raises(ValidationError):
         model_cls.model_validate({})
@@ -456,7 +469,7 @@ def _patch_session_with_result(result: CallToolResult):
     """Patch the connection + ClientSession so call_tool yields `result`."""
 
     @contextlib.asynccontextmanager
-    async def fake_connect(self):
+    async def fake_connect(self, headers=None):
         yield (object(), object())
 
     class FakeSession:
@@ -552,7 +565,7 @@ async def test_execute_async_unwraps_task_group_exception_group(mcp_server_tool)
     tool = mcp_server_tool._mcp_tools["add"]
 
     @contextlib.asynccontextmanager
-    async def failing_connect(self):
+    async def failing_connect(self, headers=None):
         raise ExceptionGroup(
             "unhandled errors in a TaskGroup",
             [ConnectionRefusedError("[Errno 61] Connection refused")],
@@ -622,3 +635,153 @@ def test_map_node_errors_when_mcp_server_resolves_to_multiple_tools(sse_server_c
 
     assert result.status == RunnableStatus.FAILURE
     assert "exactly one tool" in str(result.error).lower()
+
+
+def test_merge_mcp_http_headers_per_call_wins_and_does_not_mutate():
+    base = {"Authorization": "Bearer svc"}
+    extra = {"Authorization": "Bearer user", "X-User-Id": "u1"}
+    merged = merge_mcp_http_headers(base, extra)
+    assert merged == {"Authorization": "Bearer user", "X-User-Id": "u1"}
+    assert base == {"Authorization": "Bearer svc"}
+    assert extra == {"Authorization": "Bearer user", "X-User-Id": "u1"}
+    assert merge_mcp_http_headers(None, None) is None
+
+
+def test_mcp_sse_connect_merges_headers_without_mutating_connection():
+    connection = MCPSse(url="https://example.com/", headers={"Authorization": "Bearer svc"})
+    with patch("mcp.client.sse.sse_client") as sse_client:
+        sse_client.return_value = MagicMock()
+        connection.connect(headers={"X-User-Id": "u1"})
+        assert sse_client.call_args.kwargs["headers"] == {
+            "Authorization": "Bearer svc",
+            "X-User-Id": "u1",
+        }
+    assert connection.headers == {"Authorization": "Bearer svc"}
+
+
+def test_mcp_streamable_http_connect_merges_headers_without_mutating_connection():
+    connection = MCPStreamableHTTP(url="https://example.com/mcp", headers={"Authorization": "Bearer svc"})
+    with patch("mcp.client.streamable_http.streamablehttp_client") as http_client:
+        http_client.return_value = MagicMock()
+        connection.connect(headers={"X-User-Id": "u1"})
+        assert http_client.call_args.kwargs["headers"] == {
+            "Authorization": "Bearer svc",
+            "X-User-Id": "u1",
+        }
+    assert connection.headers == {"Authorization": "Bearer svc"}
+
+
+def test_get_input_schema_adds_hidden_headers_field():
+    model_cls = MCPTool.get_input_schema({"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]})
+    field = model_cls.model_fields["headers"]
+    assert field.json_schema_extra["is_accessible_to_agent"] is False
+    instance = model_cls(q="x", headers={"X-User-Id": "u1"})
+    assert instance.q == "x"
+    assert instance.headers == {"X-User-Id": "u1"}
+
+
+def test_get_input_schema_keeps_tool_defined_headers_as_arguments():
+    model_cls = MCPTool.get_input_schema(
+        {
+            "type": "object",
+            "properties": {"headers": {"type": "object"}, "q": {"type": "string"}},
+            "required": ["headers"],
+        }
+    )
+    field = model_cls.model_fields["headers"]
+    extra = field.json_schema_extra or {}
+    assert extra.get("is_accessible_to_agent", True) is True
+    instance = model_cls(headers={"Accept": "text/plain"}, q="x")
+    args, http_headers = split_mcp_http_headers(instance)
+    assert args["headers"] == {"Accept": "text/plain"}
+    assert http_headers is None
+
+
+def test_agent_schema_omits_mcp_http_headers(sse_server_connection):
+    tool = MCPTool(
+        name="add",
+        description="Add two numbers",
+        json_input_schema={
+            "type": "object",
+            "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+            "required": ["a", "b"],
+        },
+        connection=sse_server_connection,
+    )
+    schemas = schema_generator.generate_function_calling_schemas([tool], False, lambda name: name)
+    add_schema = next(s for s in schemas if s["function"]["name"] == "add")
+    assert "headers" not in add_schema["function"]["parameters"]["properties"]
+    assert "a" in add_schema["function"]["parameters"]["properties"]
+
+
+@pytest.mark.asyncio
+async def test_execute_async_sends_headers_on_connect_not_as_tool_args():
+    connection = MCPSse(url="https://example.com/", headers={"Authorization": "Bearer svc"})
+    tool = MCPTool(
+        name="add",
+        description="Add two numbers",
+        json_input_schema={
+            "type": "object",
+            "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+            "required": ["a", "b"],
+        },
+        connection=connection,
+    )
+    captured: dict[str, Any] = {}
+
+    @contextlib.asynccontextmanager
+    async def fake_connect(self, headers=None):
+        captured["connect_headers"] = headers
+        yield (object(), object())
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def initialize(self):
+            return None
+
+        async def call_tool(self, name, args):
+            captured["call_args"] = args
+            return CallToolResult(content=[TextContent(type="text", text="3")])
+
+    with (
+        patch.object(MCPSse, "connect", new=fake_connect),
+        patch("dynamiq.nodes.tools.mcp.ClientSession", return_value=FakeSession()),
+    ):
+        await tool.execute_async(tool.input_schema(a=1, b=2, headers={"X-User-Id": "user-7"}))
+
+    assert captured["connect_headers"] == {"X-User-Id": "user-7"}
+    assert captured["call_args"] == {"a": 1, "b": 2}
+    assert connection.headers == {"Authorization": "Bearer svc"}
+
+
+def test_agent_applies_mcp_server_headers_from_tool_params(llm_model):
+    connection = MCPSse(url="https://example.com/")
+    server = MCPServer(name="github-mcp", id="srv-1", connection=connection)
+    tool = MCPTool(
+        name="create_issue",
+        description="Opens a GitHub issue.",
+        json_input_schema={"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]},
+        connection=connection,
+    )
+    tool._owner_server = server
+    captured: dict[str, Any] = {}
+
+    def fake_execute(self, input_data, config=None, **kwargs):
+        captured["headers"] = getattr(input_data, "headers", None)
+        return {"content": "ok"}
+
+    agent = Agent(name="support", llm=llm_model, tools=[tool])
+    with patch.object(MCPTool, "execute", fake_execute):
+        agent._run_tool(
+            tool=tool,
+            tool_input={"title": "bug"},
+            config=None,
+            tool_params=ToolParams(by_name={"github-mcp": {"headers": {"X-User-Id": "u1"}}}),
+        )
+
+    assert captured["headers"] == {"X-User-Id": "u1"}
