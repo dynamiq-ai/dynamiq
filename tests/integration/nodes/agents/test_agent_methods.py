@@ -742,6 +742,43 @@ def test_clear_todos_file_deletes_file_and_resets_agent_state_todos():
     assert state.todos == []
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"todos": [{"id": "1", "status": "pending"}]},  # item missing required 'content'
+        {"todos": {"1": {"id": "1", "content": "x", "status": "pending"}}},  # not a list
+        {"todos": ["just a string"]},  # item is not a mapping
+    ],
+    ids=["missing-content", "not-a-list", "item-not-mapping"],
+)
+def test_malformed_todos_file_degrades_instead_of_ending_the_run(openai_node, payload):
+    """A readable but invalid todos file must not raise: _refresh_agent_state is unguarded
+    at both call sites, so a ValidationError there would end the whole run."""
+    import json
+
+    from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH
+
+    backend = InMemoryFileStore()
+    backend.store(
+        file_path=TODOS_FILE_PATH,
+        content=json.dumps(payload),
+        content_type="application/json",
+        overwrite=True,
+    )
+    agent = Agent(
+        name="Todo Agent",
+        llm=openai_node,
+        tools=[],
+        file_store=FileStoreConfig(enabled=True, backend=backend, todo_enabled=True),
+        inference_mode=InferenceMode.DEFAULT,
+    )
+
+    agent._refresh_agent_state(1)
+
+    assert agent.state.todos == []
+    assert agent.load_current_todos() in ([], None)
+
+
 def test_execute_file_store_file_upload_flow(openai_node, mocker):
     """Regression: full execute() with file store — deduplicates batch and pre-existing
     names, stores files correctly, and injects saved paths into the LLM message."""

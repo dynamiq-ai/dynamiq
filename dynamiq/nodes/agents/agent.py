@@ -2150,10 +2150,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if todos is not None:
             self.state.update_todos(todos)
 
-    def load_current_todos(self) -> list[dict] | None:
+    def load_current_todos(self) -> list[TodoItem] | None:
         """Read the todo list from its backend, bypassing the loop-start ``state.todos``
         snapshot. Mid-loop callers need this: a ``todo-write`` made during the loop only
         reaches ``state.todos`` on the next iteration. None means disabled or unreadable.
+
+        Parsing happens here so a malformed file degrades rather than ending the run;
+        individual invalid items are skipped, as in ``TodoWriteTool._load_todos``.
         """
         todo_backend = None
         if self.sandbox_backend:
@@ -2167,9 +2170,22 @@ class Agent(HistoryManagerMixin, BaseAgent):
         try:
             from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH
 
-            if todo_backend.exists(TODOS_FILE_PATH):
-                content = todo_backend.retrieve(TODOS_FILE_PATH)
-                return json.loads(content.decode("utf-8")).get("todos", [])
+            if not todo_backend.exists(TODOS_FILE_PATH):
+                return None
+
+            content = todo_backend.retrieve(TODOS_FILE_PATH)
+            todos = json.loads(content.decode("utf-8")).get("todos")
+            if not isinstance(todos, list):
+                logger.warning("Invalid todos format (expected list, got %s)", type(todos).__name__)
+                return None
+
+            validated = []
+            for todo in todos:
+                try:
+                    validated.append(TodoItem.model_validate(todo))
+                except Exception as e:
+                    logger.warning("Skipping invalid todo item: %s", e)
+            return validated
         except Exception as e:
             logger.debug("Failed to load todo state (none or invalid): %s", e)
         return None

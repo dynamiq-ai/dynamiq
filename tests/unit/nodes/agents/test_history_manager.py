@@ -334,7 +334,7 @@ class TestTodoSurvivesCompaction:
         agent = FakeAgent(messages=msgs, max_preserved_tokens=500)
         # Deliberately stale, as it is in a real run: proves the injection ignores it.
         agent.state = SimpleNamespace(todos=[])
-        agent.load_current_todos = lambda: [t.model_dump() for t in todos]
+        agent.load_current_todos = lambda: list(todos)
         return agent
 
     def test_todos_restated_in_summary_after_compaction(self):

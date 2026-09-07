@@ -10,7 +10,7 @@ from dynamiq.nodes.agents.prompts.secondary_instructions import (
     TODO_REVISIT_TEMPLATE,
 )
 from dynamiq.nodes.agents.utils import extract_message_text
-from dynamiq.nodes.tools.todo_tools import TodoItem, format_todo_list
+from dynamiq.nodes.tools.todo_tools import format_todo_list
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.utils.logger import logger
 
@@ -190,7 +190,7 @@ class HistoryManagerMixin:
             if load_todos is not None:
                 todos = load_todos()
                 if todos:
-                    rendered = format_todo_list([t if isinstance(t, TodoItem) else TodoItem(**t) for t in todos])
+                    rendered = format_todo_list(todos)
                     summary = f"{summary}\n\n{TODO_REVISIT_TEMPLATE.format(todo_list=rendered)}"
 
             self._prompt.messages.append(
