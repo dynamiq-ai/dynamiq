@@ -265,6 +265,37 @@ def warn_tool_chained_after_agent(flow: dict) -> None:
 
 
 PIPEDREAM_TYPE = "dynamiq.nodes.tools.Pipedream"
+
+
+def platform_node_types(api: ApiClient) -> set | None:
+    """Every node type the PLATFORM accepts, from GET /v1/agent-builder/nodes.
+
+    The authority on this is the API, not the SDK's package layout: which folder a class sits
+    in is a different question from what the deployment will take, and they disagree. None on
+    any failure, so the caller skips the check rather than inventing an answer.
+    """
+    try:
+        response = api.get("/v1/agent-builder/nodes")
+    except Exception:                                          # noqa: BLE001 - offline is fine
+        return None
+    if not ok(response):
+        return None
+
+    found: set = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            value = node.get("type")
+            if isinstance(value, str) and value.startswith("dynamiq.nodes."):
+                found.add(value)
+            for item in node.values():
+                walk(item)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(response.json())
+    return found or None
 # A flow run is an agent doing LLM and tool calls; 30s is not enough.
 EXECUTION_TIMEOUT = 600.0
 
@@ -670,8 +701,9 @@ def list_workflow_versions(*, api: ApiClient, settings: Settings, workflow_id: s
 
 @workflow.command("validate")
 @click.argument("flow")
+@click.option("--offline", is_flag=True, help="Skip the node-type check instead of asking the platform.")
 @with_api_and_settings
-def validate_flow_command(*, api: ApiClient, settings: Settings, flow: str):
+def validate_flow_command(*, api: ApiClient, settings: Settings, flow: str, offline: bool):
     """Check a flow JSON locally, before it is saved. Exits non-zero on any error.
 
     FLOW is inline JSON or @file. Nothing is sent anywhere; this is a read of the file.
@@ -680,7 +712,10 @@ def validate_flow_command(*, api: ApiClient, settings: Settings, flow: str):
     so a misplaced selector yields empty output instead of an error, and a tool with the
     wrong schema is simply never callable. This catches those before they are persisted.
     """
-    errors, warnings = flowcheck.validate(read_json_arg(flow))
+    known = None if offline else platform_node_types(api)
+    if known is None and not offline:
+        click.echo("note: could not reach /v1/agent-builder/nodes; node types were not checked.", err=True)
+    errors, warnings = flowcheck.validate(read_json_arg(flow), known_types=known)
     for warning in warnings:
         click.echo(f"warning: {warning}", err=True)
     if errors:
@@ -759,7 +794,7 @@ def verify_workflow_command(*, api: ApiClient, settings: Settings, workflow_id: 
     data = response.json().get("data", {})
     flow = data.get("flow") or {}
     nodes = flow.get("nodes") or []
-    errors, _ = flowcheck.validate(flow)
+    errors, _ = flowcheck.validate(flow, known_types=platform_node_types(api))
 
     summary = {
         "id": data.get("id"),

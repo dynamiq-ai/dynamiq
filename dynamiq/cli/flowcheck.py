@@ -5,7 +5,13 @@ than rejected, so a misplaced selector yields empty output instead of an error,
 and a tool whose schema is wrong is simply never callable. Everything here is a
 rule learned from a flow that saved cleanly and then did not work.
 
-`validate(flow) -> (errors, warnings)`; errors block a save, warnings do not.
+`validate(flow, known_types=None) -> (errors, warnings)`; errors block a save, warnings do not.
+
+`known_types` is the platform's own list of node types, from GET /v1/agent-builder/nodes.
+Nothing here reads the SDK's package layout to guess it: the folder a class happens to live
+in is not the same question as what the API accepts, and reading one to answer the other made
+this reject the SDK's own emitted types for knowledge-base nodes. Omit it and the type check
+is skipped rather than guessed at.
 """
 from __future__ import annotations
 
@@ -31,24 +37,6 @@ PLACEHOLDER_HINTS = ("your-", "example-", "desired-", "target-page", "-id-here")
 PLACEHOLDER_TEMPLATE = re.compile(r"<[A-Za-z_][\w .-]*>")
 # Free text: a "<" or a word ending in "-id" here is prose, not an unfilled template.
 PROSE_KEYS = frozenset({"role", "description", "label", "instructions", "prompt", "content", "system_prompt"})
-
-
-def node_groups() -> set:
-    """Module names under `dynamiq.nodes`.
-
-    Node.type is built from the module path, not from the node's group, so the taxonomy in
-    NodeGroup is the wrong list: knowledgebases and knowledge_graphs are real modules whose
-    classes declare TOOLS or RETRIEVERS, and checking against groups called their own emitted
-    types invalid.
-    """
-    import pkgutil
-
-    import dynamiq.nodes
-
-    # Imported here rather than at module scope to keep `--help` off the node package. An
-    # install that yields nothing here returns an empty set, and the caller skips the check
-    # rather than calling every type invalid.
-    return {module.name for module in pkgutil.iter_modules(dynamiq.nodes.__path__)}
 
 
 def looks_like_placeholder(value) -> bool:
@@ -109,7 +97,7 @@ def coerce_depends(value) -> list:
     return []
 
 
-def validate(flow):
+def validate(flow, known_types: set | None = None):
     """Return (errors, warnings)."""
     errors, warnings = [], []
 
@@ -172,7 +160,6 @@ def validate(flow):
             f"{OUTPUT_TYPE} that depends on the last working node and selects its output."
         )
 
-    groups = node_groups()
     for node_type in types:
         if not node_type:
             continue
@@ -189,12 +176,12 @@ def validate(flow):
                 "Copy the exact string from `dynamiq workflow get <id>` on a workflow that works."
             )
             continue
-        if groups and parts[2] not in groups:
+        if known_types and text not in known_types:
             errors.append(
-                f"type {node_type!r} is not a real namespace - the SDK has no "
-                f"`dynamiq.nodes.{parts[2]}` module. Third-party apps (Notion, Slack, GitHub) are "
-                "NOT their own node types: they are `dynamiq.nodes.tools.Pipedream` tools placed "
-                "inside an agent's `tools` array."
+                f"type {node_type!r} is not a type the platform accepts. Third-party apps "
+                "(Notion, Slack, GitHub) are NOT their own node types: they are "
+                "`dynamiq.nodes.tools.Pipedream` tools placed inside an agent's `tools` array. "
+                "Run `dynamiq workflow node-types` for the real list."
             )
 
     agent_ids = {
