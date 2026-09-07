@@ -296,6 +296,8 @@ def platform_node_types(api: ApiClient) -> set | None:
 
     walk(response.json())
     return found or None
+
+
 # A flow run is an agent doing LLM and tool calls; 30s is not enough.
 EXECUTION_TIMEOUT = 600.0
 
