@@ -442,12 +442,32 @@ PIPEDREAM_FIELDS = {
 
 
 def find_nested(obj, key, path="tool"):
-    """Where a key actually lives, when it is not where it should be."""
+    """Where a key actually lives, when it is not where it should be.
+
+    Only BELOW the top level. Matching at the top too reported a key that was already in the
+    right place as misplaced - "`configurable_props` exists but at tool.configurable_props" -
+    an instruction nobody can follow, in place of the message that says what is actually wrong.
+    """
+    if not isinstance(obj, dict):
+        return None
+    for k, v in obj.items():
+        found = _find_below(v, key, f"{path}.{k}")
+        if found:
+            return found
+    return None
+
+
+def _find_below(obj, key, path):
     if isinstance(obj, dict):
         for k, v in obj.items():
             if k == key:
                 return f"{path}.{k}"
-            found = find_nested(v, key, f"{path}.{k}")
+            found = _find_below(v, key, f"{path}.{k}")
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for i, item in enumerate(obj):
+            found = _find_below(item, key, f"{path}[{i}]")
             if found:
                 return found
     return None

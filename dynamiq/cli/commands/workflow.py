@@ -149,10 +149,16 @@ def require_project(settings: Settings) -> str:
 def check_connection(value, where: str) -> None:
     """A connection is a UUID, or a requirement reference standing in for one.
 
+    No connection at all is normal - Input, Output and Pipedream nodes have none - so a
+    missing value returns early. Folding it into the UUID branch failed every flow with an
+    Input node, which is every flow.
+
     `requirement-add` documents {"$type": "requirement", "$id": ...} as the way a caller brings
     their own credential, and the validator accepts it - but this raised on anything that was
     not a UUID string, so a flow that passed `validate` could not be saved.
     """
+    if value is None:
+        return                       # Input, Output and Pipedream nodes carry no connection
     if isinstance(value, dict) and value.get("$type") == "requirement":
         if not value.get("$id"):
             raise click.ClickException(
