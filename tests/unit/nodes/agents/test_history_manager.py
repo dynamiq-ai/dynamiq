@@ -319,7 +319,11 @@ class TestTodoSurvivesCompaction:
 
     @staticmethod
     def _agent_with_todos(todos):
-        """History holding a todo-write echo big enough to be summarized away."""
+        """History holding a todo-write echo big enough to be summarized away.
+
+        Todos are exposed the way the agent does it — read from the backend, not from the
+        loop-start ``state.todos`` snapshot, which is stale by the time compaction runs.
+        """
         msgs = [
             _system(),
             _user("ship the auth module"),
@@ -328,7 +332,9 @@ class TestTodoSurvivesCompaction:
             _user("recent"),
         ]
         agent = FakeAgent(messages=msgs, max_preserved_tokens=500)
-        agent.state = SimpleNamespace(todos=todos)
+        # Deliberately stale, as it is in a real run: proves the injection ignores it.
+        agent.state = SimpleNamespace(todos=[])
+        agent.load_current_todos = lambda: [t.model_dump() for t in todos]
         return agent
 
     def test_todos_restated_in_summary_after_compaction(self):
@@ -358,8 +364,8 @@ class TestTodoSurvivesCompaction:
 
         assert all("todo list survived" not in m.content for m in agent._prompt.messages)
 
-    def test_agent_without_state_attribute_does_not_crash(self):
-        """HistoryManagerMixin is used by objects that carry no AgentState."""
+    def test_host_without_todo_loader_does_not_crash(self):
+        """HistoryManagerMixin is also used by hosts that have no todo support."""
         msgs = [
             _system(),
             _user("old message " * 1000),
@@ -367,11 +373,20 @@ class TestTodoSurvivesCompaction:
             _user("recent"),
         ]
         agent = FakeAgent(messages=msgs, max_preserved_tokens=500)
-        assert not hasattr(agent, "state"), "precondition: no state on the bare mixin host"
+        assert not hasattr(agent, "load_current_todos"), "precondition: bare mixin host"
 
         agent._compact_history(summary="A summary.")
 
         assert agent._prompt.messages[1].content.startswith("Observation: A summary.")
+
+    def test_stale_state_todos_are_not_used(self):
+        """Regression: reading state.todos silently no-ops on the loop that created the list."""
+        agent = self._agent_with_todos([TodoItem(id="1", content="Ship auth", status=TodoStatus.IN_PROGRESS)])
+        assert agent.state.todos == [], "precondition: the loop-start snapshot is still empty"
+
+        agent._compact_history(summary="Work is underway.")
+
+        assert "Ship auth" in agent._prompt.messages[1].content
 
 
 def _assistant_tc(content: str, tool_calls: list[dict]) -> Message:

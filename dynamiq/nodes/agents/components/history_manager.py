@@ -10,7 +10,7 @@ from dynamiq.nodes.agents.prompts.secondary_instructions import (
     TODO_REVISIT_TEMPLATE,
 )
 from dynamiq.nodes.agents.utils import extract_message_text
-from dynamiq.nodes.tools.todo_tools import format_todo_list
+from dynamiq.nodes.tools.todo_tools import TodoItem, format_todo_list
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.utils.logger import logger
 
@@ -183,10 +183,15 @@ class HistoryManagerMixin:
             if notes_path := self.get_notes_file_path():
                 summary = f"{summary}\n\n{NOTES_REVISIT_INSTRUCTION_TEMPLATE.format(notes_path=notes_path)}"
 
-            # The todo-write result carrying the list is itself summarized away, and there is no
-            # read tool - so restate the list here or the agent loses track of its own plan.
-            if todos := getattr(getattr(self, "state", None), "todos", None):
-                summary = f"{summary}\n\n{TODO_REVISIT_TEMPLATE.format(todo_list=format_todo_list(todos))}"
+            # Compaction drops the todo-write result carrying the list, and there is no read
+            # tool - restate it or the agent loses the ids. Read the backend, not state.todos:
+            # that snapshot is taken at the top of the loop, before this loop's todo-write.
+            load_todos = getattr(self, "load_current_todos", None)
+            if load_todos is not None:
+                todos = load_todos()
+                if todos:
+                    rendered = format_todo_list([t if isinstance(t, TodoItem) else TodoItem(**t) for t in todos])
+                    summary = f"{summary}\n\n{TODO_REVISIT_TEMPLATE.format(todo_list=rendered)}"
 
             self._prompt.messages.append(
                 Message(role=MessageRole.USER, content=f"Observation: {summary}\n", static=True)

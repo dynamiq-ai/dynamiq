@@ -2146,22 +2146,33 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         self.state.update_loop(loop_num)
 
+        todos = self.load_current_todos()
+        if todos is not None:
+            self.state.update_todos(todos)
+
+    def load_current_todos(self) -> list[dict] | None:
+        """Read the todo list from its backend, bypassing the loop-start ``state.todos``
+        snapshot. Mid-loop callers need this: a ``todo-write`` made during the loop only
+        reaches ``state.todos`` on the next iteration. None means disabled or unreadable.
+        """
         todo_backend = None
         if self.sandbox_backend:
             todo_backend = self.sandbox_backend
         elif self.file_store.enabled and self.file_store.todo_enabled:
             todo_backend = self.file_store.backend
 
-        if todo_backend:
-            try:
-                from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH
+        if not todo_backend:
+            return None
 
-                if todo_backend.exists(TODOS_FILE_PATH):
-                    content = todo_backend.retrieve(TODOS_FILE_PATH)
-                    data = json.loads(content.decode("utf-8"))
-                    self.state.update_todos(data.get("todos", []))
-            except Exception as e:
-                logger.debug("Failed to load todo state (none or invalid): %s", e)
+        try:
+            from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH
+
+            if todo_backend.exists(TODOS_FILE_PATH):
+                content = todo_backend.retrieve(TODOS_FILE_PATH)
+                return json.loads(content.decode("utf-8")).get("todos", [])
+        except Exception as e:
+            logger.debug("Failed to load todo state (none or invalid): %s", e)
+        return None
 
     def _build_inference_schemas(self, tools: list) -> tuple:
         """Build (function_calling_tools, response_format) for the given tool list.
