@@ -1,0 +1,73 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+nodes:
+  parent-agent:
+    type: dynamiq.nodes.agents.Agent
+    name: Video Delegation Orchestrator
+    role: |
+      You are an orchestrator. You cannot see video or image content yourself -- you only
+      ever get a file reference for it. Whenever the user's request involves understanding,
+      describing, or extracting text from a video or image, you MUST delegate to the
+      video_analyzer tool rather than guessing; pass along the file path/reference you were
+      given. Relay its findings faithfully.
+    llm:
+      id: parent-llm
+      type: dynamiq.nodes.llms.OpenAI
+      name: ParentLLM
+      connection: openai-conn
+      model: gpt-5.6-luna
+    inference_mode: FUNCTION_CALLING
+    response_format:
+      type: object
+      properties:
+        answer:
+          type: string
+          description: What's happening in the video/image, any problem shown, and the
+            answer to the user's specific question.
+        delegated_to_video_analyzer:
+          type: boolean
+          description: Whether video_analyzer was actually called to produce this answer.
+      required: [answer, delegated_to_video_analyzer]
+      additionalProperties: false
+    tools:
+      - type: dynamiq.nodes.tools.agent_tool.SubAgentTool
+        name: video_analyzer
+        description: >-
+          Analyzes video and image files: describes what is happening, extracts any visible
+          on-screen text, identifies problems or issues shown, and answers specific questions
+          about the visual content. Pass the file path(s) you were given in `files`.
+        agent_factory:
+          name: VideoAnalyzer
+          role: >-
+            You analyze attached video and image files. Describe what is happening, extract
+            any visible on-screen text verbatim, and call out any problem, error, or issue
+            shown. Be precise and literal -- report only what you actually see, never
+            speculate beyond the visual evidence.
+          llm:
+            type: dynamiq.nodes.llms.Gemini
+            name: SubAgentLLM
+            connection:
+              type: dynamiq.connections.Gemini
+              api_key: ${oc.env:GEMINI_API_KEY}
+            model: gemini/gemini-3.8-flash
+          inference_mode: FUNCTION_CALLING
+          max_loops: 3
+    file_store:
+      enabled: true
+      backend:
+        type: dynamiq.storages.file.InMemoryFileStore
+    max_loops: 5
+
+flows:
+  video-subagent-delegation-flow:
+    name: Video Subagent Delegation Flow
+    nodes:
+      - parent-agent
+
+workflows:
+  video-subagent-delegation-workflow:
+    flow: video-subagent-delegation-flow
+    version: 1
