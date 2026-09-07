@@ -1658,6 +1658,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     self._apply_parameters(merged_input, global_params, "global", debug_info)
 
                 # 2. Apply parameters by tool name (medium priority)
+                # MCPServer is replaced by the tools it discovers, so match by_name/by_id against
+                # the owning server as well. Callers can key headers (and other params) once by
+                # server name/id instead of listing every remote tool.
                 owner = getattr(tool, "_owner_server", None)
                 name_params_any = (
                     tool_params.by_name_params.get(tool.name)
