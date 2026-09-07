@@ -66,7 +66,6 @@ def upload_skill(*, api: ApiClient, settings: Settings, zip_path: str):
                 "/v1/skills/upload",
                 data={"project_id": require_project(settings)},
                 files={"file": (zip_path.rsplit("/", 1)[-1], handle)},
-                retry=False,   # the handle is at EOF after the first attempt
             )
         )
 
@@ -126,7 +125,6 @@ def upload_version(*, api: ApiClient, settings: Settings, skill_id: str, zip_pat
             api.post(
                 f"/v1/skills/{skill_id}/versions/upload",
                 files={"file": (zip_path.rsplit("/", 1)[-1], handle)},
-                retry=False,   # the handle is at EOF after the first attempt
             )
         )
 

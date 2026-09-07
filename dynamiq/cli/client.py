@@ -19,6 +19,30 @@ class HTTPError(RuntimeError):
 _RETRY_STATUS = {502, 503, 504}
 
 
+def rewind(files) -> None:
+    """Seek every file handle in a multipart payload back to the start.
+
+    requests reads each handle to EOF while building the body, and a retry re-enters with the
+    same objects. Without this, attempt 2 onwards sends zero-byte parts - and the API answers
+    2xx, so an upload that hit exactly the gateway error the retry exists for reports success
+    over an empty file. Ingestion is asynchronous, so it surfaces much later as an indexed
+    item with no content.
+    """
+    if not files:
+        return
+    entries = files.values() if isinstance(files, dict) else files
+    for entry in entries:
+        value = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else entry
+        handle = value[1] if isinstance(value, (tuple, list)) and len(value) > 1 else value
+        if hasattr(handle, "seek"):
+            try:
+                handle.seek(0)
+            except (OSError, ValueError):
+                # A non-seekable stream cannot be replayed; let the request fail loudly
+                # rather than silently uploading nothing.
+                raise
+
+
 def ok(response) -> bool:
     """True for any 2xx.
 
@@ -111,6 +135,7 @@ class ApiClient:
         if headers is None:
             headers = {}
         headers["Authorization"] = f"Bearer {self._settings.api_key}"
+        rewind(files)
         try:
             response = self._client.request(
                 method,

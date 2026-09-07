@@ -72,10 +72,7 @@ def upload_files(*, api: ApiClient, settings: Settings, knowledgebase_id: str, p
     handles = [open(path, "rb") for path in paths]  # noqa: SIM115 - closed below
     try:
         files = [("files", (path.rsplit("/", 1)[-1], handle)) for path, handle in zip(paths, handles)]
-        # Not retried: requests reads the handles to EOF, and nothing rewinds them, so a
-        # retried upload sends empty parts and the API answers 2xx over an empty file.
-        echo_response(api.post(f"/v1/knowledgebases/{knowledgebase_id}/upload",
-                               files=files, retry=False))
+        echo_response(api.post(f"/v1/knowledgebases/{knowledgebase_id}/upload", files=files))
     finally:
         for handle in handles:
             handle.close()
