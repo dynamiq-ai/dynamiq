@@ -3,7 +3,8 @@ import uuid
 
 import click
 
-from dynamiq.cli.client import ApiClient
+from dynamiq.cli import flowcheck
+from dynamiq.cli.client import ApiClient, ok
 from dynamiq.cli.commands.context import with_api_and_settings
 from dynamiq.cli.config import Settings
 
@@ -26,7 +27,7 @@ def read_json_arg(value: str):
 def echo_response(response, success_message: str | None = None) -> None:
     """Print the JSON body; non-200 exits with the body as the error."""
     body = response.text.strip()
-    if response.status_code != 200:
+    if not ok(response):
         raise click.ClickException(f"HTTP {response.status_code}: {body[:2000]}")
     if success_message:
         click.echo(success_message)
@@ -62,6 +63,16 @@ def compact_items(items: list) -> list:
             out.append(item)
             continue
         row = {k: item[k] for k in COMPACT_FIELDS if k in item}
+
+        # A Pipedream account carries its app in a nested object, and its `name` is the
+        # connected user's email - so several accounts for different apps list identically and
+        # the one field that tells them apart is the one a flat field list drops. Lift it.
+        app = item.get("app")
+        if isinstance(app, dict):
+            slug = app.get("name_slug") or app.get("name")
+            if slug:
+                row.setdefault("app_slug", slug)
+
         out.append(row or item)
     return out
 
@@ -84,7 +95,7 @@ def echo_list(
         if page_size:
             params["page_size"] = page_size
         response = api.get(path, params=params or None)
-        if response.status_code != 200:
+        if not ok(response):
             raise click.ClickException(f"HTTP {response.status_code}: {response.text.strip()[:2000]}")
         body = response.json()
         pagination = body.get("pagination") or {}
@@ -108,7 +119,7 @@ def echo_list(
     current = 1
     while True:
         response = api.get(path, params={**params, "page": current, "page_size": page_size or 500})
-        if response.status_code != 200:
+        if not ok(response):
             raise click.ClickException(f"HTTP {response.status_code}: {response.text.strip()[:2000]}")
         body = response.json()
         batch = body.get("data") or []
@@ -253,6 +264,9 @@ def warn_tool_chained_after_agent(flow: dict) -> None:
             )
 
 
+PIPEDREAM_TYPE = "dynamiq.nodes.tools.Pipedream"
+
+
 def _is_uuid(value: str) -> bool:
     try:
         uuid.UUID(value)
@@ -276,52 +290,117 @@ def starter_flow() -> dict:
     }
 
 
-def flow_ui_for(flow: dict) -> dict:
-    """Canvas entries for a flow's nodes, laid out left to right.
+def nested_custom_entries(node: dict, into: dict) -> None:
+    """Record every node nested inside NODE, keyed by its own flow id.
 
-    `flow_ui` is required by create/save/release, so generate a usable one whenever the
-    caller does not supply their own.
+    A tool or llm nested in an agent never appears on the canvas, so `flow_ui.nodes` has no
+    entry for it and the editor addresses it by the `id` it carries in the flow.
     """
-    ui_ids = {}
+    children = []
+    tools = node.get("tools")
+    if isinstance(tools, list):
+        children.extend(child for child in tools if isinstance(child, dict))
+    for key in ("llm", "embedder", "memory"):
+        child = node.get(key)
+        if isinstance(child, dict):
+            children.append(child)
+
+    for child in children:
+        child_id = child.get("id")
+        if child_id and child_id not in into:
+            into[child_id] = dict(child)
+            nested_custom_entries(child, into)
+
+
+def flow_ui_for(flow: dict) -> dict:
+    """Canvas entries for a flow's nodes, in the exact shape the platform UI renders.
+
+    `flow_ui` is required by create/save/release, so one is generated whenever the caller does
+    not supply their own. The UI keys its rendering off fields a minimal payload does not have
+    (`type`, `title`, `data.metadata_ui`, `data.custom_content`), and off `data.metadata.id`
+    being the CANVAS node's uuid rather than the flow node's slug - a flow_ui missing those
+    saves fine and then draws nothing. Shape verified against a platform-authored workflow.
+
+    `custom_node_data` is the third key, and it is where the editor keeps everything the
+    backend node model has no field for. It is keyed by the id the editor looks a node up by:
+    the canvas uuid for a top-level node, and the flow `id` for a node nested inside an agent.
+
+    What CANNOT be generated here is a Pipedream tool's `pipedreamApp` / `pipedreamComponent`:
+    those come from Pipedream, not from the flow. Build such a tool with the skill's
+    `pipedream_node` and pass the result via `--flow-ui`, or the tool saves and then draws
+    with no logo, no account picker and no configuration form.
+    """
+    input_type = "dynamiq.nodes.utils.Input"
+    output_type = "dynamiq.nodes.utils.Output"
+
+    ui_ids: dict = {}
     nodes = []
+    custom_node_data: dict = {}
     for i, node in enumerate(flow.get("nodes", [])):
         ui_id = str(uuid.uuid4())
-        ui_ids[node.get("id")] = ui_id
+        slug = node.get("id")
+        ui_ids[slug] = ui_id
+        node_type = node.get("type")
+        position = {"x": i * 378, "y": 245.5}
+        label = str(node.get("name") or slug or "").replace("-", " ").title()
+
         nodes.append(
             {
                 "id": ui_id,
                 "data": {
-                    "metadata": {
-                        "id": node.get("id"),
-                        "name": node.get("name"),
-                        "type": node.get("type"),
-                        "depends": node.get("depends", []),
-                    }
+                    # metadata.id is the CANVAS id, not the flow node slug; the slug is `name`.
+                    "metadata": {"id": ui_id, "name": slug, "type": node_type, "depends": []},
+                    "metadata_ui": {"title": slug, "position": dict(position)},
+                    "custom_content": {
+                        "key": None,
+                        "ref": None,
+                        "type": "div",
+                        "owner": None,
+                        "props": {"children": label},
+                    },
                 },
-                "position": {"x": i * 378, "y": 245.5},
+                "desc": f"{slug} Node",
+                "type": node_type,
+                "title": slug,
                 "width": 150,
                 "height": 60,
-                "node_name": node.get("id"),
+                "dragging": False,
+                "position": dict(position),
+                "selected": False,
+                # Input/Output are the fixed ends of a flow and the UI does not let you delete them.
+                "deletable": node_type not in (input_type, output_type),
+                "node_name": slug,
+                "selectable": True,
+                "position_absolute": dict(position),
             }
         )
+        # A top-level node is looked up by its canvas uuid, and carries that uuid as its `id`.
+        custom_node_data[ui_id] = {**node, "id": ui_id, "name": slug}
+        nested_custom_entries(node, custom_node_data)
 
     edges = []
     for node in flow.get("nodes", []):
+        target = ui_ids.get(node.get("id"))
         for dep in node.get("depends", []) or []:
             source = ui_ids.get(dep.get("node") if isinstance(dep, dict) else dep)
-            target = ui_ids.get(node.get("id"))
-            if source and target:
-                edges.append(
-                    {
-                        "id": str(uuid.uuid4()),
-                        "type": "smoothstep",
-                        "source": source,
-                        "target": target,
-                        "source_handle": "source",
-                        "target_handle": "target",
-                    }
-                )
-    return {"nodes": nodes, "edges": edges}
+            if not source or not target:
+                continue
+            edges.append(
+                {
+                    "id": f"reactflow__edge-{source}source-{target}target",
+                    "type": "smoothstep",
+                    "label": None,
+                    "style": {"stroke": "#96A1B8", "opacity": 1, "stroke_width": 2},
+                    "source": source,
+                    "target": target,
+                    "animated": True,
+                    "marker_end": {"type": "arrow", "color": "#96A1B8", "opacity": 1},
+                    "source_handle": "source",
+                    "target_handle": "target",
+                    "is_choice_option": False,
+                }
+            )
+    return {"nodes": nodes, "edges": edges, "custom_node_data": custom_node_data}
 
 
 @workflow.command("list")
@@ -362,6 +441,13 @@ def create_workflow(*, api: ApiClient, settings: Settings, payload: str):
     are generated. Pass your own `flow` to create it fully formed. Name must be lowercase
     letters/digits/hyphens.
     """
+    # A bare name is the overwhelmingly common mistake here, and `read_json_arg` answers it
+    # with a JSON parse error that names neither the problem nor the fix.
+    if not payload.lstrip().startswith(("{", "@")):
+        raise click.ClickException(
+            f"`workflow create` takes a JSON payload, not a bare name. You passed {payload!r}. "
+            f'Use: dynamiq workflow create \'{{"name": "{payload}"}}\''
+        )
     body = read_json_arg(payload)
     body.setdefault("project_id", require_project(settings))
     body.setdefault("flow", starter_flow())
@@ -403,16 +489,26 @@ def save_workflow(
 @workflow.command("test")
 @click.argument("flow")
 @click.argument("input_data")
-@click.option("--dry-run", is_flag=True, help="Validate and plan without executing nodes.")
+@click.option(
+    "--dry-run/--no-dry-run",
+    default=True,
+    help="Sent as dry_run. On by default: without it the endpoint answers 400 bad_input. "
+    "It does NOT stop nodes executing - tools really act.",
+)
 @click.option("--last-node-output", is_flag=True, help="Return only the last node's output.")
 @with_api_and_settings
 def test_workflow(
     *, api: ApiClient, settings: Settings, flow: str, input_data: str, dry_run: bool, last_node_output: bool
 ):
-    """Dry-run a flow with the given input, without saving or releasing.
+    """Run a flow with the given input, without saving or releasing.
 
     This endpoint takes a FORM (not a JSON body): `flow` and `input` are sent as
     JSON-encoded strings. FLOW/INPUT_DATA are inline JSON or @file. No project_id needed.
+
+    `dry_run` is on by default because it is the only form the endpoint accepts - without it
+    the answer is `400 bad_input` with an empty details object. Despite the name it is NOT a
+    simulation: the flow executes and its tools really act, so a Notion tool creates a real
+    page. Choose an obviously-test input.
     """
     form = {
         "flow": json.dumps(normalize_flow(read_json_arg(flow))),
@@ -423,7 +519,84 @@ def test_workflow(
         form["dry_run"] = "true"
     if last_node_output:
         form["last_node_output"] = "true"
-    echo_response(api.post("/v1/workflows/test", data=form))
+    # This endpoint takes multipart; a urlencoded body is answered with 415.
+    response = api.post("/v1/workflows/test", files={k: (None, v) for k, v in form.items()})
+    if response.status_code == 415:
+        click.echo("note: multipart rejected (415); retrying form-urlencoded.", err=True)
+        response = api.post("/v1/workflows/test", data=form)
+    echo_response(response)
+
+
+@workflow.command("node-types")
+@click.argument("group", required=False)
+@with_api_and_settings
+def list_node_types(*, api: ApiClient, settings: Settings, group: str | None):
+    """List the node types the PLATFORM accepts, optionally filtered by GROUP.
+
+    GET /v1/agent-builder/nodes. GROUP is a family such as agents, tools, llms, utils.
+    These strings are the only valid values for a node's `type`; there is no local list to
+    fall back on, so run this before writing a flow rather than guessing a type.
+    """
+    echo_response(api.get("/v1/agent-builder/nodes", params={"group": group} if group else None))
+
+
+@workflow.command("requirements")
+@click.argument("workflow_id")
+@with_api_and_settings
+def list_requirements(*, api: ApiClient, settings: Settings, workflow_id: str):
+    """List a workflow's requirements - the credentials each end user supplies at run time."""
+    echo_response(api.get(f"/v1/workflows/{workflow_id}/requirements"))
+
+
+@workflow.command("requirement-add")
+@click.argument("workflow_id")
+@click.argument("payload")
+@with_api_and_settings
+def add_requirement(*, api: ApiClient, settings: Settings, workflow_id: str, payload: str):
+    """Declare a requirement so each caller brings their OWN account instead of a pinned one.
+
+    REQUIRED: `name`, `type`, `form` {title, description}, `spec`.
+      type "pipedream_account" -> spec {"app_slug": "notion"}
+      type "connection"        -> spec {"type": "dynamiq.connections.<X>"}
+
+    `form.title` is what the end user reads on the connect screen, so write it for them.
+    Reference the returned id from the flow as
+    {"$type": "requirement", "$id": "<id>", "value_path": "$.account_id"}.
+    """
+    echo_response(api.post(f"/v1/workflows/{workflow_id}/requirements", json=read_json_arg(payload)))
+
+
+@workflow.command("requirement-get")
+@click.argument("workflow_id")
+@click.argument("requirement_id")
+@with_api_and_settings
+def get_requirement(*, api: ApiClient, settings: Settings, workflow_id: str, requirement_id: str):
+    """Fetch one requirement, including the spec a flow placeholder resolves against."""
+    echo_response(api.get(f"/v1/workflows/{workflow_id}/requirements/{requirement_id}"))
+
+
+@workflow.command("requirement-update")
+@click.argument("workflow_id")
+@click.argument("requirement_id")
+@click.argument("payload")
+@with_api_and_settings
+def update_requirement(
+    *, api: ApiClient, settings: Settings, workflow_id: str, requirement_id: str, payload: str
+):
+    """Change a requirement's `form` (its title/description). Body: {"form": {...}}."""
+    echo_response(
+        api.put(f"/v1/workflows/{workflow_id}/requirements/{requirement_id}", json=read_json_arg(payload))
+    )
+
+
+@workflow.command("requirement-delete")
+@click.argument("workflow_id")
+@click.argument("requirement_id")
+@click.confirmation_option(prompt="Delete this requirement?")
+@with_api_and_settings
+def delete_requirement(*, api: ApiClient, settings: Settings, workflow_id: str, requirement_id: str):
+    """Delete a requirement. Any flow placeholder still pointing at it will fail to resolve."""
+    echo_response(api.delete(f"/v1/workflows/{workflow_id}/requirements/{requirement_id}"))
 
 
 @workflow.command("release")
@@ -431,21 +604,40 @@ def test_workflow(
 @click.option("--name", default=None, help="New name for the released version (defaults to the current name).")
 @click.option("--flow", default=None, help="Flow JSON to release (inline or @file); defaults to the saved flow.")
 @click.option("--flow-ui", default=None, help="Canvas layout JSON; defaults to the saved flow_ui.")
+@click.option("--allow-starter", is_flag=True, help="Permit releasing a workflow that has only the starter Input node.")
 @with_api_and_settings
 def release_workflow(
-    *, api: ApiClient, settings: Settings, workflow_id: str, name: str | None, flow: str | None, flow_ui: str | None
+    *,
+    api: ApiClient,
+    settings: Settings,
+    workflow_id: str,
+    name: str | None,
+    flow: str | None,
+    flow_ui: str | None,
+    allow_starter: bool,
 ):
     """Release a new version. The API requires name, flow and flow_ui in the body, so the
     workflow's current values are fetched and re-sent unless overridden by the options.
     """
     current = api.get(f"/v1/workflows/{workflow_id}")
-    if current.status_code != 200:
+    if not ok(current):
         raise click.ClickException(f"HTTP {current.status_code}: {current.text.strip()[:2000]}")
     data = current.json().get("data", {})
 
     flow_body = normalize_flow(read_json_arg(flow)) if flow else data.get("flow")
     if not flow_body:
         raise click.ClickException("Workflow has no saved flow to release. Run `workflow save` first.")
+
+    nodes = flow_body.get("nodes") or []
+    if not allow_starter and (
+        not nodes or (len(nodes) == 1 and nodes[0].get("type") == "dynamiq.nodes.utils.Input")
+    ):
+        raise click.ClickException(
+            f"Workflow {workflow_id} still holds only the starter Input node, so releasing it would "
+            "publish an empty workflow. `workflow create` seeds that starter and only `workflow save` "
+            "replaces it - save the real DAG, confirm it with `workflow get`, then release. Pass "
+            "--allow-starter to override."
+        )
     body = {
         "name": name or data.get("name"),
         "flow": flow_body,
@@ -460,3 +652,118 @@ def release_workflow(
 def list_workflow_versions(*, api: ApiClient, settings: Settings, workflow_id: str):
     """List released versions of a workflow (newest first)."""
     echo_response(api.get(f"/v1/workflows/{workflow_id}/versions"))
+
+
+@workflow.command("validate")
+@click.argument("flow")
+@with_api_and_settings
+def validate_flow_command(*, api: ApiClient, settings: Settings, flow: str):
+    """Check a flow JSON locally, before it is saved. Exits non-zero on any error.
+
+    FLOW is inline JSON or @file. Nothing is sent anywhere; this is a read of the file.
+
+    The API accepts a flow it cannot run - unknown keys are dropped rather than rejected -
+    so a misplaced selector yields empty output instead of an error, and a tool with the
+    wrong schema is simply never callable. This catches those before they are persisted.
+    """
+    errors, warnings = flowcheck.validate(read_json_arg(flow))
+    for warning in warnings:
+        click.echo(f"warning: {warning}", err=True)
+    if errors:
+        click.echo("", err=True)
+        for i, error in enumerate(errors, 1):
+            click.echo(f"  {i}. {error}", err=True)
+        raise click.ClickException(f"{len(errors)} problem(s); fix them before saving.")
+    click.echo(json.dumps({"valid": True, "nodes": len(read_json_arg(flow).get("nodes") or [])}, indent=2))
+
+
+@workflow.command("flow-ui")
+@click.argument("flow")
+@click.option("--out", "out_path", default=None, help="Write here instead of stdout.")
+@click.option(
+    "--custom",
+    "custom_paths",
+    multiple=True,
+    help="JSON of extra custom_node_data entries (repeatable). Accepts the output of "
+    "`integration tool-node`, or a bare {node_id: entry} mapping.",
+)
+@with_api_and_settings
+def build_flow_ui(*, api: ApiClient, settings: Settings, flow: str, out_path, custom_paths):
+    """Generate the canvas payload for a FLOW, without saving anything.
+
+    `save` and `release` build one for you when you do not pass `--flow-ui`. Use this when
+    you need to inspect it, or to merge in data the flow cannot carry - a Pipedream tool's
+    app and component records live only in `custom_node_data`, and `integration tool-node`
+    emits them in the shape this accepts.
+    """
+    flow_body = normalize_flow(read_json_arg(flow))
+    custom: dict = {}
+    for path in custom_paths:
+        payload = read_json_arg(path)
+        entries = payload.get("custom_node_data", payload) if isinstance(payload, dict) else None
+        if not isinstance(entries, dict):
+            raise click.ClickException(f"{path}: expected an object of node id -> entry.")
+        custom.update(entries)
+
+    flow_ui = flow_ui_for(flow_body)
+    for node_id, entry in custom.items():
+        flow_ui["custom_node_data"][node_id] = {**flow_ui["custom_node_data"].get(node_id, {}), **entry}
+
+    undepicted = [
+        entry.get("name") or node_id
+        for node_id, entry in flow_ui["custom_node_data"].items()
+        if entry.get("type") == PIPEDREAM_TYPE and not entry.get("pipedreamComponent")
+    ]
+    if undepicted:
+        click.echo(
+            "warning: no component record for " + ", ".join(map(str, undepicted)) + " - these tools "
+            "will save and then draw with no logo, no account picker and no configuration form. "
+            "Build each with `integration tool-node` and pass it via --custom.",
+            err=True,
+        )
+
+    text = json.dumps(flow_ui, indent=2)
+    if out_path:
+        with open(out_path, "w") as handle:
+            handle.write(text + "\n")
+        click.echo(json.dumps({"wrote": out_path, "nodes": len(flow_ui["nodes"])}, indent=2))
+    else:
+        click.echo(text)
+
+
+@workflow.command("verify")
+@click.argument("workflow_id")
+@with_api_and_settings
+def verify_workflow_command(*, api: ApiClient, settings: Settings, workflow_id: str):
+    """Read a SAVED workflow back and check the DAG actually persisted.
+
+    `save` answering 200 does not mean the flow was stored as written: a payload the API
+    could not read leaves the workflow holding its starter Input node, and nothing says so.
+    This fetches it and reports what is really there.
+    """
+    response = api.get(f"/v1/workflows/{workflow_id}")
+    if not ok(response):
+        raise click.ClickException(f"HTTP {response.status_code}: {response.text.strip()[:2000]}")
+    data = response.json().get("data", {})
+    flow = data.get("flow") or {}
+    nodes = flow.get("nodes") or []
+    errors, _ = flowcheck.validate(flow)
+
+    summary = {
+        "id": data.get("id"),
+        "name": data.get("name"),
+        "node_count": len(nodes),
+        "nodes": compact_items(nodes),
+        "has_flow_ui": bool(data.get("flow_ui")),
+        "custom_node_data": len((data.get("flow_ui") or {}).get("custom_node_data") or {}),
+        "problems": errors,
+    }
+    click.echo(json.dumps(summary, indent=2, ensure_ascii=False))
+
+    if len(nodes) <= 1:
+        raise click.ClickException(
+            "the workflow holds only the starter node - the save did not persist. Re-check the "
+            "flow with `workflow validate`, then save again."
+        )
+    if errors:
+        raise click.ClickException(f"{len(errors)} problem(s) in the saved flow.")

@@ -1,6 +1,5 @@
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -76,16 +75,11 @@ class Settings(BaseModel):
                 raise SystemExit(f"❌ Corrupted credentials file at {_CREDS_FILE_PATH}: {exc}") from exc
 
         # Explicit env always beats the stored files (catalyst injects env into sandboxes).
-        # Warn when they disagree so the switch is never silent.
+        # This is the documented precedence, so it is NOT worth a warning: printing one on
+        # every invocation put a scary "warning:" line above every command's real output and
+        # sent agents chasing credential problems that did not exist. `dynamiq config show`
+        # reports the values actually in effect when someone needs to check.
         stored = {**disk, **creds}
-        for key, value in env.items():
-            if key in stored and stored[key] != value:
-                source = "DYNAMIQ_API_TOKEN/KEY" if key == "api_key" else f"DYNAMIQ_{key.upper()}"
-                print(
-                    f"warning: {key} from the environment ({source}) overrides the value stored in "
-                    f"{_CONFIG_FILE_PATH.parent}. Unset it to use the stored one.",
-                    file=sys.stderr,
-                )
         merged = {**stored, **env}
         try:
             return cls.model_validate(merged)

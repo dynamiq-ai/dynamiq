@@ -1,0 +1,524 @@
+"""Local checks on a flow JSON, before anything is saved.
+
+The platform accepts a flow that cannot run: an unknown key is dropped rather
+than rejected, so a misplaced selector yields empty output instead of an error,
+and a tool whose schema is wrong is simply never callable. Everything here is a
+rule learned from a flow that saved cleanly and then did not work.
+
+`validate(flow) -> (errors, warnings)`; errors block a save, warnings do not.
+"""
+from __future__ import annotations
+
+import re
+
+NODE_ID_RE = re.compile(r"^[a-z0-9]([a-z0-9]|-[a-z0-9])*$")
+UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+INPUT_TYPE = "dynamiq.nodes.utils.Input"
+OUTPUT_TYPE = "dynamiq.nodes.utils.Output"
+
+# Shapes people write when they think a flow is something else.
+WRONG_SHAPE_KEYS = {
+    "actions": "a Pipedream component list",
+    "steps": "a step/pipeline config",
+    "workflow": "a wrapper around the flow - pass the flow itself",
+    "data": "a full API response - pass `data.flow`, not the whole body",
+}
+
+PLACEHOLDER_HINTS = ("<", "your-", "example-", "desired-", "target-page", "-id-here")
+# Free text: a "<" or a word ending in "-id" here is prose, not an unfilled template.
+PROSE_KEYS = frozenset({"role", "description", "label", "instructions", "prompt", "content", "system_prompt"})
+
+
+def node_groups():
+    """`<group>` in `dynamiq.nodes.<group>.<Class>`, read from the SDK when it is importable.
+
+    Not a list of valid types - the backend owns that. It only catches a namespace the SDK
+    has no module for at all, e.g. `dynamiq.nodes.notion.*`.
+    """
+    try:
+        from dynamiq.nodes import NodeGroup
+
+        return {g.value for g in NodeGroup}
+    except Exception:
+        return set()
+
+
+def looks_like_placeholder(value):
+    if not isinstance(value, str):
+        return False
+    low = value.lower()
+    if any(hint in low for hint in PLACEHOLDER_HINTS):
+        return True
+    return low.endswith("-id") and "/" not in low and " " not in low
+
+
+def walk_strings(value, path="$"):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield from walk_strings(item, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from walk_strings(item, f"{path}[{index}]")
+    elif isinstance(value, str):
+        yield path, value
+
+
+def named_parts(node):
+    """Everything in a node that carries its own API-validated `name`."""
+    label = node.get("id", "?")
+    yield f"node {label!r}", node
+    llm = node.get("llm")
+    if isinstance(llm, dict):
+        yield f"llm on node {label!r}", llm
+    for tool in node.get("tools") or []:
+        if isinstance(tool, dict):
+            yield f"tool {tool.get('name') or tool.get('type', '?')} on node {label!r}", tool
+
+
+def validate(flow):
+    """Return (errors, warnings)."""
+    errors, warnings = [], []
+
+    if not isinstance(flow, dict):
+        return [f"flow must be a JSON object, got {type(flow).__name__}."], warnings
+
+    nodes = flow.get("nodes")
+    if not isinstance(nodes, list) or not nodes:
+        hint = next((why for key, why in WRONG_SHAPE_KEYS.items() if key in flow), None)
+        detail = f" This looks like {hint}." if hint else ""
+        return [
+            "flow has no `nodes` list." + detail + ' A flow is {"id": "<uuid>", "nodes": [...]} '
+            "where each node has id/name/type - copy the template in SKILL.md, or run "
+            "`dynamiq workflow get <id>` on a workflow that works."
+        ], warnings
+
+    flow_id = flow.get("id")
+    if flow_id is not None and not UUID_RE.match(str(flow_id)):
+        warnings.append(f"flow.id {flow_id!r} is not a UUID; the CLI will generate one.")
+
+    ids = []
+    for index, node in enumerate(nodes):
+        if not isinstance(node, dict):
+            errors.append(f"nodes[{index}] is not an object.")
+            continue
+        node_id = node.get("id")
+        if not node_id:
+            errors.append(f"nodes[{index}] has no `id`.")
+        else:
+            if not NODE_ID_RE.match(str(node_id)):
+                errors.append(
+                    f"node id {node_id!r} is not a valid slug - lowercase letters, digits and "
+                    "single hyphens only (e.g. 'notion-agent')."
+                )
+            ids.append(node_id)
+        if not node.get("type"):
+            errors.append(f"node {node_id or index!r} has no `type` (e.g. {INPUT_TYPE}).")
+
+    duplicates = sorted({i for i in ids if ids.count(i) > 1})
+    if duplicates:
+        errors.append(f"duplicate node ids: {', '.join(duplicates)}. Node ids must be unique.")
+    known = set(ids)
+
+    types = [n.get("type") for n in nodes if isinstance(n, dict)]
+    inputs = types.count(INPUT_TYPE)
+    if inputs == 0:
+        errors.append(f"no Input node. Every flow starts with one node of type {INPUT_TYPE}.")
+    elif inputs > 1:
+        errors.append(f"{inputs} Input nodes; a flow has exactly one.")
+
+    if not [t for t in types if t not in (INPUT_TYPE, OUTPUT_TYPE)]:
+        errors.append(
+            "this flow only has Input/Output nodes, so it does nothing. Add the agent or tool "
+            "node that does the work."
+        )
+
+    if types.count(OUTPUT_TYPE) == 0:
+        errors.append(
+            f"no Output node, so this flow returns nothing to the caller. Add a node of type "
+            f"{OUTPUT_TYPE} that depends on the last working node and selects its output."
+        )
+
+    groups = node_groups()
+    for node_type in types:
+        if not node_type:
+            continue
+        text = str(node_type)
+        parts = text.split(".")
+        # Every type is a fully qualified dotted path. A short label like "llm", "pipedream"
+        # or "exa-search" is the single most expensive mistake here: the API answers it with a
+        # bare `"type": "must be a valid value"` that names neither the node nor the fix.
+        if not text.startswith("dynamiq.nodes.") or len(parts) < 4:
+            hint = f" Did you mean a `dynamiq.nodes.<group>.<Class>` path?" if "." not in text else ""
+            errors.append(
+                f"type {node_type!r} is not a node type. Types are fully qualified dotted paths "
+                f"like `dynamiq.nodes.agents.Agent`, `dynamiq.nodes.llms.OpenAI` or "
+                f"`dynamiq.nodes.tools.Pipedream` - never a short label.{hint} "
+                "Copy the exact string from `dynamiq workflow get <id>` on a workflow that works."
+            )
+            continue
+        if groups and parts[2] not in groups:
+            errors.append(
+                f"type {node_type!r} is not a real namespace - the SDK has no "
+                f"`dynamiq.nodes.{parts[2]}` module. Third-party apps (Notion, Slack, GitHub) are "
+                "NOT their own node types: they are `dynamiq.nodes.tools.Pipedream` tools placed "
+                "inside an agent's `tools` array."
+            )
+
+    agent_ids = {
+        n.get("id") for n in nodes
+        if isinstance(n, dict) and str(n.get("type", "")).startswith("dynamiq.nodes.agents.")
+    }
+    if not agent_ids:
+        warnings.append(
+            "this flow has no Agent node - it is a fixed pipeline, not an agent. If the user asked "
+            "for an agent, add a dynamiq.nodes.agents.Agent node and put the tools inside it."
+        )
+
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        label = node.get("id", "?")
+        node_type = str(node.get("type") or "")
+
+        for dependency in node.get("depends") or []:
+            target = dependency.get("node") if isinstance(dependency, dict) else dependency
+            if isinstance(target, dict):
+                target = target.get("id")
+            if target not in known:
+                errors.append(f"node {label!r} depends on {target!r}, which is not a node in this flow.")
+        if node_type == INPUT_TYPE and node.get("depends"):
+            errors.append(f"Input node {label!r} must not depend on anything.")
+        if node_type != INPUT_TYPE and not node.get("depends"):
+            errors.append(f"node {label!r} has no `depends`, so it never runs. Wire it to an upstream node.")
+
+        selector = (node.get("input_transformer") or {}).get("selector") or {}
+        if not isinstance(selector, dict):
+            errors.append(f"node {label!r}: input_transformer.selector must be an object of field -> JSONPath.")
+            selector = {}
+        for field, expression in selector.items():
+            if not isinstance(expression, str) or not expression.startswith("$."):
+                errors.append(
+                    f"node {label!r}: selector {field!r} must be a JSONPath string like "
+                    f'"$.<node-id>.output.<field>", got {expression!r}.'
+                )
+                continue
+            pieces = expression.split(".")
+            source = pieces[1] if len(pieces) > 1 else ""
+            if source and source not in known:
+                errors.append(
+                    f"node {label!r}: selector {field!r} reads from {source!r}, which is not a node in "
+                    "this flow. An agent's tools are NOT nodes - read the agent's own output instead."
+                )
+
+        if "selector" in node:
+            errors.append(
+                f"node {label!r} has a top-level `selector`. The API ignores it silently - move it to "
+                "`input_transformer.selector`."
+            )
+
+        for part_label, part in named_parts(node):
+            sub_type = part.get("type")
+            if part is not node and sub_type is not None:
+                text = str(sub_type)
+                if not text.startswith("dynamiq.nodes.") or len(text.split(".")) < 4:
+                    errors.append(
+                        f"{part_label}: type {sub_type!r} is not a node type. Use the fully "
+                        "qualified path, e.g. `dynamiq.nodes.llms.OpenAI` or "
+                        "`dynamiq.nodes.tools.Pipedream`."
+                    )
+            name = part.get("name")
+            if name is not None and not NODE_ID_RE.match(str(name)):
+                errors.append(
+                    f"{part_label}: name {name!r} must be in a valid format - the API validates `name` "
+                    "like an id (lowercase letters, digits, single hyphens). Use e.g. "
+                    f"{re.sub(r'-{2,}', '-', re.sub(r'[^a-z0-9]+', '-', str(name).lower()).strip('-')) or 'my-node'!r}. "
+                    "Human-readable text belongs in `role`/`description`."
+                )
+
+        if node_type.startswith("dynamiq.nodes.agents."):
+            llm = node.get("llm")
+            if not isinstance(llm, dict):
+                errors.append(f"agent {label!r} has no `llm` object.")
+            elif not UUID_RE.match(str(llm.get("connection") or "")):
+                errors.append(
+                    f"agent {label!r}: llm.connection {llm.get('connection')!r} is not a connection UUID. "
+                    "Run `dynamiq connection list --type dynamiq.connections.OpenAI`."
+                )
+            if not str(node.get("role") or "").strip():
+                warnings.append(f"agent {label!r} has no `role`, so it has no instructions.")
+            if not node.get("tools"):
+                warnings.append(
+                    f"agent {label!r} has an empty `tools` array - it can only talk, not act. "
+                    "Intentional for a plain Q&A agent."
+                )
+
+            # `memory` is accepted, saved and deployed even when it can never switch on,
+            # so a flow that silently forgets everything otherwise looks perfectly valid.
+            memory = node.get("memory")
+            if memory is not None:
+                if not isinstance(memory, dict):
+                    errors.append(f"agent {label!r}: `memory` must be an object, got {type(memory).__name__}.")
+                else:
+                    backend = memory.get("backend")
+                    backend_ref = memory.get("backend_ref")
+                    if backend and backend_ref:
+                        errors.append(
+                            f"agent {label!r}: `memory` has both `backend` and `backend_ref`. They are "
+                            "alternatives - keep exactly one."
+                        )
+                    elif not backend and not backend_ref:
+                        errors.append(
+                            f"agent {label!r}: `memory` needs a `backend` (or a `backend_ref` to a saved "
+                            'one), e.g. {"type": "dynamiq.memory.backends.Dynamiq", "memory_id": "<uuid>"}.'
+                        )
+                    elif isinstance(backend, dict):
+                        backend_type = str(backend.get("type") or "")
+                        if backend_type not in MEMORY_BACKENDS:
+                            errors.append(
+                                f"agent {label!r}: memory.backend.type {backend.get('type')!r} is not a "
+                                "backend the PLATFORM accepts, so `workflow save` will reject this flow "
+                                "even if the SDK runs it (InMemory and SQLite are SDK-only). Use one of: "
+                                + ", ".join(sorted(MEMORY_BACKENDS))
+                                + "."
+                            )
+                        elif backend_type.endswith(".Dynamiq") and not UUID_RE.match(
+                            str(backend.get("memory_id") or "")
+                        ):
+                            errors.append(
+                                f"agent {label!r}: memory.backend.memory_id "
+                                f"{backend.get('memory_id')!r} is not a UUID. Create one with "
+                                "`POST /v1/memories` and use the id it returns."
+                            )
+                    if memory.get("save_mode") not in (None, "full", "input_output"):
+                        errors.append(
+                            f"agent {label!r}: memory.save_mode {memory.get('save_mode')!r} is not valid. "
+                            'Use "full" or "input_output".'
+                        )
+                    if not ({"user_id", "session_id"} & set(selector)):
+                        errors.append(
+                            f"agent {label!r} has `memory` but its selector maps neither `user_id` nor "
+                            "`session_id`, so memory can never switch on - it is ignored at runtime with "
+                            "no error. Declare them on the Input node and add "
+                            '"user_id": "$.input.output.user_id" to this selector.'
+                        )
+
+            # STRUCTURED_OUTPUT without a schema is the mode change without the guarantee.
+            response_format = node.get("response_format")
+            if response_format is not None and not isinstance(response_format, dict):
+                errors.append(
+                    f"agent {label!r}: `response_format` must be a JSON Schema object, got "
+                    f"{type(response_format).__name__}."
+                )
+            elif isinstance(response_format, dict) and not response_format.get("properties"):
+                errors.append(
+                    f"agent {label!r}: `response_format` has no `properties`, so it constrains nothing. "
+                    'Use e.g. {"type": "object", "properties": {"answer": {"type": "string"}}, '
+                    '"required": ["answer"]}.'
+                )
+            if isinstance(llm, dict) and llm.get("response_format") is not None and response_format is None:
+                warnings.append(
+                    f"agent {label!r}: `response_format` is on the `llm` sub-object, which shapes a raw "
+                    "model call, not the agent's answer. Move it onto the agent node to fix the shape "
+                    "of `output.content`."
+                )
+
+        for tool in node.get("tools") or []:
+            if not isinstance(tool, dict):
+                errors.append(f"node {label!r}: every entry in `tools` must be an object.")
+                continue
+            where = f"tool {tool.get('name') or tool.get('type', '?')} on node {label!r}"
+            if tool.get("type") == "dynamiq.nodes.tools.Pipedream":
+                errors.extend(check_pipedream(tool, where))
+            elif tool.get("connection") is not None and not UUID_RE.match(str(tool.get("connection"))):
+                errors.append(
+                    f"{where}: connection {tool.get('connection')!r} is not a UUID. "
+                    "Run `dynamiq connection list`."
+                )
+
+        # A standalone LLM node needs its own credentials; the API reports these as
+        # `connection: cannot be blank` / `model: cannot be blank` with no node name.
+        if node_type.startswith("dynamiq.nodes.llms."):
+            if not UUID_RE.match(str(node.get("connection") or "")):
+                errors.append(
+                    f"node {label!r}: connection {node.get('connection')!r} is not a connection UUID. "
+                    "An LLM node carries its own `connection`. Run `dynamiq connection list`."
+                )
+            if not str(node.get("model") or "").strip():
+                errors.append(
+                    f"node {label!r}: an LLM node needs `model` (e.g. \"gpt-4o\")."
+                )
+
+        # A Pipedream node placed in the DAG is validated exactly like one inside an agent.
+        if node_type == "dynamiq.nodes.tools.Pipedream":
+            errors.extend(check_pipedream(node, f"node {label!r}"))
+
+        if node_type.startswith("dynamiq.nodes.tools."):
+            after = [
+                d.get("node") for d in node.get("depends") or []
+                if isinstance(d, dict) and d.get("node") in agent_ids
+            ]
+            if after:
+                warnings.append(
+                    f"node {label!r} is a standalone step that runs AFTER agent {after[0]!r} and receives "
+                    'its finished prose. To give the agent a tool it can call, move this into that '
+                    "agent's \"tools\" array instead."
+                )
+
+    for path, text in walk_strings(flow):
+        if path.rsplit(".", 1)[-1] in PROSE_KEYS or len(text) > 200:
+            continue
+        if looks_like_placeholder(text):
+            errors.append(f"{path} is still the placeholder {text!r} - replace it with a real value.")
+
+    return errors, warnings
+
+
+# Memory backends the PLATFORM will save. Shorter than the SDK's list on purpose: InMemory and
+# SQLite run fine locally and are rejected by `workflow save`, which is a confusing place to
+# find out.
+MEMORY_BACKENDS = {
+    "dynamiq.memory.backends.Dynamiq",
+    "dynamiq.memory.backends.PostgreSQL",
+    "dynamiq.memory.backends.Pinecone",
+    "dynamiq.memory.backends.Qdrant",
+    "dynamiq.memory.backends.Weaviate",
+    "dynamiq.memory.backends.DynamoDB",
+}
+
+# A Pipedream tool's own fields, as declared by dynamiq/nodes/tools/pipedream.py. `props` is
+# a component schema, NOT a field on the node.
+PIPEDREAM_FIELDS = {
+    "id", "name", "type", "action_id", "external_user_id", "input_props", "configurable_props",
+    "dynamic_props_id", "stash_id",
+    "is_optimized_for_agents", "input_transformer", "output_transformer", "streaming",
+    "error_handling", "approval", "description",
+    # also legal when the same object sits in the DAG as its own node rather than in tools[]
+    "depends", "schema", "caching", "flows",
+}
+
+
+def find_nested(obj, key, path="tool"):
+    """Where a key actually lives, when it is not where it should be."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == key:
+                return f"{path}.{k}"
+            found = find_nested(v, key, f"{path}.{k}")
+            if found:
+                return found
+    return None
+
+
+def requirement_problems(value, where):
+    """A `{"$type": "requirement", "$id": ...}` placeholder is a legal value ANYWHERE.
+
+    It is how a multi-user workflow lets each caller bring their own account, so a checker
+    that insists on a literal `apn_...` would reject exactly the flows that are done right.
+    Returns None when `value` is not a placeholder, otherwise a (possibly empty) problem list.
+    """
+    if not (isinstance(value, dict) and value.get("$type") == "requirement"):
+        return None
+    problems = []
+    if not str(value.get("$id") or "").strip():
+        problems.append(f"{where}: a requirement placeholder needs `$id` - the id returned by "
+                        "POST /v1/workflows/<id>/requirements.")
+    path = value.get("value_path")
+    if path is not None and (not isinstance(path, str) or not path.startswith("$.")):
+        problems.append(f"{where}: requirement value_path {path!r} must be a JSONPath like "
+                        '"$.account_id". It has to match exactly one value.')
+    return problems
+
+
+def check_pipedream(tool, where):
+    """Pipedream tools bind through Pipedream's vault, not through a `connection`."""
+    problems = []
+
+    unknown = sorted(set(tool) - PIPEDREAM_FIELDS)
+    if unknown:
+        detail = ""
+        if "props" in unknown:
+            detail = (
+                " `props` is a component schema, not a field on the tool. Rebuild the tool with "
+                "`pipedream_node <app> <key> --out tool.json`: EVERY prop is declared in "
+                '`input_props.configurableProps` as [{"name": "title", "type_": "string"}, ...], '
+                "and `configurable_props` holds only the values you pin (the account, and any "
+                "fixed target the user named). They overlap on purpose - a pinned prop stays in "
+                "input_props and becomes an overridable default."
+            )
+        problems.append(f"{where}: unknown field(s) {', '.join(unknown)} - they are ignored." + detail)
+
+    if not tool.get("action_id"):
+        problems.append(
+            f'{where}: a Pipedream tool needs `action_id` (e.g. "notion-create-page"). '
+            "List the real keys with `dynamiq integration components <app_slug>`."
+        )
+    external_user = tool.get("external_user_id")
+    from_requirement = requirement_problems(external_user, f"{where}: external_user_id")
+    if from_requirement is not None:
+        problems.extend(from_requirement)
+    elif not external_user:
+        problems.append(f"{where}: needs `external_user_id` (the project id). The CLI fills this in on save.")
+
+    # The declaration half. A tool whose schema was hand-written usually gets this wrong in one
+    # of two ways: it is missing outright, or its props carry `type` where the SDK reads `type_`
+    # (rename_keys_recursive(input_props, {"type": "type_"})), so every prop is silently ignored
+    # and the agent is handed a tool it cannot call.
+    declared = tool.get("input_props")
+    declared_props = declared.get("configurableProps") if isinstance(declared, dict) else None
+    if not isinstance(declared_props, list) or not declared_props:
+        problems.append(
+            f"{where}: needs `input_props.configurableProps` - the FULL prop list from the "
+            f"component, not a subset. Build it with `pipedream_node <app> {tool.get('action_id') or '<key>'} "
+            "--out tool.json`, which fetches the real record instead of reconstructing it."
+        )
+    else:
+        mistyped = [
+            prop.get("name")
+            for prop in declared_props
+            if isinstance(prop, dict) and "type_" not in prop and "type" in prop
+        ]
+        if mistyped:
+            problems.append(
+                f"{where}: input_props prop(s) {', '.join(map(str, mistyped))} use `type` where the "
+                "SDK reads `type_`. Rename the key on every prop, or rebuild with `pipedream_node`."
+            )
+
+    props = tool.get("configurable_props")
+    if not isinstance(props, dict) or not props:
+        nested = find_nested(tool, "configurable_props")
+        if nested:
+            problems.append(
+                f"{where}: `configurable_props` exists but at {nested} - it belongs at the TOP level "
+                "of the tool object, a sibling of `action_id`, not nested inside another key. "
+                "Move it up one level."
+            )
+        else:
+            problems.append(
+                f"{where}: needs `configurable_props` binding the account, e.g. "
+                '{"notion": {"authProvisionId": "apn_..."}}. Run `dynamiq integration accounts`. '
+                f"Present fields: {', '.join(sorted(tool)) or '(none)'}."
+            )
+        return problems
+
+    bound = False
+    for key, value in props.items():
+        if isinstance(value, dict) and "authProvisionId" in value:
+            bound = True
+            apn = value["authProvisionId"]
+            from_requirement = requirement_problems(apn, f"{where}: authProvisionId")
+            if from_requirement is not None:
+                problems.extend(from_requirement)
+            elif not isinstance(apn, str) or not apn.startswith("apn_"):
+                problems.append(
+                    f"{where}: authProvisionId {apn!r} is not a real connected account. Use the "
+                    "`account_id` (apn_...) from `dynamiq integration accounts`, or a requirement "
+                    'placeholder {"$type": "requirement", "$id": "...", "value_path": "$.account_id"} '
+                    "so each caller brings their own."
+                )
+    if not bound:
+        problems.append(
+            f'{where}: no account binding in configurable_props. Add {{"<app>": '
+            '{"authProvisionId": "apn_..."}} from `dynamiq integration accounts`.'
+        )
+    return problems

@@ -19,6 +19,16 @@ class HTTPError(RuntimeError):
 _RETRY_STATUS = {502, 503, 504}
 
 
+def ok(response) -> bool:
+    """True for any 2xx.
+
+    Checking `status_code == 200` alone reports a created resource as a failure: `POST /v1/apps`
+    answers 201 and the app is deployed, but the caller sees `HTTP 201: {...}` raised as an
+    error and cannot tell it apart from a real one.
+    """
+    return 200 <= response.status_code < 300
+
+
 class ApiClient:
 
     def __init__(self, settings: Settings) -> None:
