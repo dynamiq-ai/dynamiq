@@ -1,5 +1,4 @@
 import re
-import uuid
 from typing import Any, ClassVar, Literal
 from uuid import uuid4
 
@@ -8,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 import dynamiq.utils.jsonpath as jsonpath
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes import Behavior, Node, NodeGroup
+from dynamiq.nodes.cloning import carry_mock_exclusions, regenerate_node_ids
 from dynamiq.nodes.node import Transformer, ensure_config
 from dynamiq.nodes.tools.mcp import resolve_mcp_node
 from dynamiq.nodes.types import ChoiceCondition, ConditionOperator
@@ -198,37 +198,14 @@ class Map(Node):
         data["node"] = self.node.to_dict(**kwargs)
         return data
 
-    def regenerate_ids(self, obj):
-        if isinstance(obj, BaseModel):
-            if hasattr(obj, "id"):
-                setattr(obj, "id", str(uuid.uuid4()))
-
-            for field_name in obj.model_fields:
-                value = getattr(obj, field_name)
-                if isinstance(value, list):
-                    new_list = [self.regenerate_ids(item) for item in value]
-                    setattr(obj, field_name, new_list)
-                elif isinstance(value, dict):
-                    new_dict = {k: self.regenerate_ids(v) for k, v in value.items()}
-                    setattr(obj, field_name, new_dict)
-                else:
-                    setattr(obj, field_name, self.regenerate_ids(value))
-            return obj
-        elif isinstance(obj, list):
-            return [self.regenerate_ids(item) for item in obj]
-        elif isinstance(obj, dict):
-            return {k: self.regenerate_ids(v) for k, v in obj.items()}
-        else:
-            return obj
-
     def dry_run_cleanup(self, dry_run_config: DryRunConfig | None = None) -> None:
         """Clean up resources created during dry run."""
         self.node.dry_run_cleanup(dry_run_config)
 
     def execute_workflow(self, index, data, config, merged_kwargs, node):
         """Execute a single workflow and handle errors."""
-        node_copy = node.clone()
-        node_copy = self.regenerate_ids(node_copy)
+        id_map: dict[str, set[str]] = {}
+        node_copy = regenerate_node_ids(node.clone(), id_map)
 
         # Create an isolated config per iteration with unique streaming override for the cloned node
         local_config = config
@@ -236,6 +213,7 @@ class Map(Node):
             local_config = config.model_copy(deep=False) if config is not None else RunnableConfig()
             if node_config := local_config.nodes_override.get(self.node.id):
                 local_config.nodes_override[node_copy.id] = node_config
+            local_config = carry_mock_exclusions(local_config, id_map)
         except Exception as e:
             logger.warning(f"Map: failed to prepare isolated streaming config for iteration {index}: {e}")
 

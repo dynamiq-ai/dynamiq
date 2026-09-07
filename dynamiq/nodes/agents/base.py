@@ -40,6 +40,7 @@ from dynamiq.nodes.agents.utils import (
     is_video_file,
     process_tool_output_with_sandbox_persistence,
 )
+from dynamiq.nodes.cloning import carry_mock_exclusions, regenerate_node_ids
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.schema_utils import strip_inaccessible_fields
@@ -1456,27 +1457,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 merged_input[key] = value
                 debug_info.append(f"  - From {source}: Set {key}={value}")
 
-    def _regenerate_node_ids(self, obj: Any) -> Any:
-        """Recursively assign new IDs to cloned nodes and nested models."""
-        if isinstance(obj, BaseModel):
-            if hasattr(obj, "id"):
-                setattr(obj, "id", str(uuid4()))
-
-            for field_name in getattr(obj, "model_fields", {}):
-                value = getattr(obj, field_name)
-                if isinstance(value, list):
-                    setattr(obj, field_name, [self._regenerate_node_ids(item) for item in value])
-                elif isinstance(value, dict):
-                    setattr(obj, field_name, {k: self._regenerate_node_ids(v) for k, v in value.items()})
-                else:
-                    setattr(obj, field_name, self._regenerate_node_ids(value))
-            return obj
-        if isinstance(obj, list):
-            return [self._regenerate_node_ids(item) for item in obj]
-        if isinstance(obj, dict):
-            return {k: self._regenerate_node_ids(v) for k, v in obj.items()}
-        return obj
-
     def _clone_tool_for_execution(
         self,
         tool: Node,
@@ -1488,16 +1468,20 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     ) -> tuple[Node, RunnableConfig]:
         """Prepare a tool for isolated execution: optionally clone, regenerate IDs, align config overrides."""
         base_config = ensure_config(config)
+        if tool is None:
+            logger.warning(f"Agent {self.name} - {self.id}: no tool to clone for execution.")
+            return tool, base_config
         original_id = tool.id
+        id_map: dict[str, set[str]] = {}
         if clone:
             try:
-                tool = self._regenerate_node_ids(tool.clone())
+                tool = regenerate_node_ids(tool.clone(), id_map)
             except Exception as e:
                 logger.warning(f"Agent {self.name} - {self.id}: failed to clone tool {tool.name}: {e}")
                 return tool, base_config
         else:
             try:
-                self._regenerate_node_ids(tool)
+                regenerate_node_ids(tool, id_map)
             except Exception as e:
                 logger.warning(f"Agent {self.name} - {self.id}: failed to regenerate IDs for tool {tool.name}: {e}")
                 return tool, base_config
@@ -1515,6 +1499,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if override and tool.id != original_id:
                 base_config = base_config.model_copy(deep=False)
                 base_config.nodes_override[tool.id] = override
+
+            if target_id and original_id in id_map:
+                id_map[original_id] = {target_id}
+            base_config = carry_mock_exclusions(base_config, id_map)
         except Exception as e:
             logger.warning(f"Agent {self.name} - {self.id}: failed to align config override for tool {tool.name}: {e}")
 
@@ -1634,9 +1622,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         )
 
         is_child_agent = isinstance(tool, SubAgentTool)
+        # Resolved before the sub-agent is built: a mocked delegation suppresses the whole
+        # sub-agent, so constructing it (LLM clients, tools, factory blueprints) just to throw
+        # it away would be wasted work on every suppressed call.
+        is_delegation_mocked = is_child_agent and tool.resolve_mock(ensure_config(config)) is not None
         resolved_agent = None
         try:
-            resolved_agent = tool.get_or_create_agent() if is_child_agent else None
+            resolved_agent = tool.get_or_create_agent() if is_child_agent and not is_delegation_mocked else None
 
             if resolved_agent is not None:
                 merged_input, stripped_fields = strip_inaccessible_fields(
@@ -1701,7 +1693,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 # replace semantics and throw the model's arguments away.
                 child_kwargs["use_input_transformer"] = False
 
-            if is_child_agent and self._current_call_context:
+            # Not when mocked: no sub-agent consumes these, so they would only surface in the
+            # suppressed-call description, i.e. in a transcript a real delegation never puts them in.
+            if is_child_agent and self._current_call_context and not is_delegation_mocked:
                 child_context = self._build_child_agent_context(resolved_agent)
                 for ctx_key in ("user_id", "session_id"):
                     if ctx_key not in merged_input and child_context.get(ctx_key):
@@ -1732,11 +1726,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if is_child_agent and isinstance(merged_input, dict) and "delegate_final" in merged_input:
                 effective_delegate_final = effective_delegate_final or bool(merged_input.pop("delegate_final"))
 
+            # When the delegation is mocked, resolved_agent was never built, so this is the
+            # wrapper — which short-circuits, keeping the sub-agent's LLM and tools from running.
             tool_to_run = resolved_agent if resolved_agent is not None else tool
             tool_config = ensure_config(config)
             if is_parallel and not is_child_agent and tool_to_run.is_clone_safe_for_parallel():
                 tool_to_run, tool_config = self._clone_tool_for_execution(tool_to_run, tool_config)
-            if is_child_agent and tool.is_factory_mode:
+            if is_child_agent and tool.is_factory_mode and not is_delegation_mocked:
                 tool_to_run, tool_config = self._clone_tool_for_execution(
                     resolved_agent,
                     tool_config,

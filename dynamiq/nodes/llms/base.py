@@ -1319,6 +1319,12 @@ class BaseLLM(ConnectionNode):
         if not self._should_trigger_fallback(result.error.type, result.error.message):
             return result
 
+        if self.resolve_mock(config) is not None:
+            # The failure was injected by a mock, so there is nothing to fall back from.
+            # Running the fallback would make a real, billed call from a dry run.
+            logger.info(f"LLM {self.name} - {self.id}: fallback skipped, failure was simulated by a mock.")
+            return result
+
         fallback_llm, fallback_kwargs = self._prepare_fallback_run(kwargs)
         logger.warning(
             f"LLM {self.name} - {self.id}: Primary LLM ({self.model}) failed. "
@@ -1389,6 +1395,12 @@ class BaseLLM(ConnectionNode):
             return result
 
         if not self._should_trigger_fallback(result.error.type, result.error.message):
+            return result
+
+        if self.resolve_mock(config) is not None:
+            # The failure was injected by a mock, so there is nothing to fall back from.
+            # Running the fallback would make a real, billed call from a dry run.
+            logger.info(f"LLM {self.name} - {self.id}: fallback skipped, failure was simulated by a mock.")
             return result
 
         fallback_llm, fallback_kwargs = self._prepare_fallback_run(kwargs)

@@ -10,6 +10,7 @@ from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.checkpoints.config import CheckpointConfig
 from dynamiq.types.cancellation import CancellationConfig
 from dynamiq.types.dry_run import DryRunConfig
+from dynamiq.types.mocking import RunMockConfig
 from dynamiq.types.streaming import StreamingConfig
 from dynamiq.utils import format_value, generate_uuid, is_called_from_async_context
 
@@ -34,6 +35,14 @@ class RunnableConfig(BaseModel):
     max_node_workers: int | None = None
     nodes_override: dict[str, NodeRunnableConfig] = {}
     dry_run: DryRunConfig | None = None
+    mock: RunMockConfig | None = Field(
+        default=None,
+        description=(
+            "Run-level mock (dry run) policy. None honours each node's own `mock` config; set a "
+            "policy to mock a whole run, or to suppress configured mocks for a real run. Distinct "
+            "from `dry_run`, which governs cleanup of documents ingested during RAG runs."
+        ),
+    )
     checkpoint: CheckpointConfig | None = Field(default=None, description="Per-run checkpoint config overrides")
     cancellation: CancellationConfig = Field(
         default_factory=CancellationConfig,
