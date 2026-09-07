@@ -41,17 +41,14 @@ def node_groups() -> set:
     classes declare TOOLS or RETRIEVERS, and checking against groups called their own emitted
     types invalid.
     """
-    try:
-        import pkgutil
+    import pkgutil
 
-        import dynamiq.nodes
+    import dynamiq.nodes
 
-        found = {m.name for m in pkgutil.iter_modules(dynamiq.nodes.__path__)}
-        if found:
-            return found
-    except Exception:                                          # noqa: BLE001
-        pass
-    return set()
+    # Imported here rather than at module scope to keep `--help` off the node package. An
+    # install that yields nothing here returns an empty set, and the caller skips the check
+    # rather than calling every type invalid.
+    return {module.name for module in pkgutil.iter_modules(dynamiq.nodes.__path__)}
 
 
 def looks_like_placeholder(value) -> bool:
