@@ -8,6 +8,7 @@ from dynamiq.cli.commands.context import with_api_and_settings
 from dynamiq.cli.commands.workflow import (
     echo_list,
     echo_response,
+    iter_pages,
     pagination_options,
     read_json_arg,
     require_project,
@@ -201,7 +202,7 @@ def pipedream_call(url: str, token: str, *, params: dict | None = None, json_bod
 def pipedream_app(*, api: ApiClient, settings: Settings, app_slug: str):
     """The app record for APP_SLUG (notion, slack, github, ...) as the BUILDER stores it.
 
-    GET /v1/pipedream/connect/apps, filtered to one entry. This is the platform's own
+    Walks GET /v1/pipedream/connect/apps to find one entry. This is the platform's own
     catalogue, and it is deliberately not Pipedream's `/v1/apps/<slug>`: the catalogue entry
     carries `actions[]` and `triggers[]` alongside `id`, `name`, `name_slug`, `img_src` and
     `description`, and the whole entry is what the editor keeps as a node's `pipedreamApp`.
@@ -210,31 +211,28 @@ def pipedream_app(*, api: ApiClient, settings: Settings, app_slug: str):
     Verified against a builder-authored workflow: its stored `pipedreamApp` has this shape,
     down to the nested action and trigger lists.
     """
-    response = api.get("/v1/pipedream/connect/apps", params={"page_size": 500})
-    if not ok(response):
-        raise click.ClickException(f"HTTP {response.status_code}: {response.text.strip()[:2000]}")
-    payload = response.json()
-    apps = payload.get("data", payload) if isinstance(payload, dict) else payload
-    if not isinstance(apps, list):
-        raise click.ClickException(f"unexpected /v1/pipedream/connect/apps response: {json.dumps(payload)[:500]}")
-
     wanted = app_slug.lower()
-    match = next(
-        (
-            entry
-            for entry in apps
-            if isinstance(entry, dict)
-            and wanted in {str(entry.get(field, "")).lower() for field in ("name_slug", "id", "name")}
-        ),
-        None,
-    )
+    near: list = []
+    match = None
+    # Walked, not read once: the catalogue runs to thousands and a page caps at 500, so a
+    # single request reported every app past the first page as not existing - including the
+    # "did you mean" hint, which was scanning the same truncated page.
+    for batch in iter_pages(api, "/v1/pipedream/connect/apps"):
+        for entry in batch:
+            if not isinstance(entry, dict):
+                continue
+            names = {str(entry.get(field, "")).lower() for field in ("name_slug", "id", "name")}
+            if wanted in names:
+                match = entry
+                break
+            label = str(entry.get("name_slug") or entry.get("name") or "")
+            if wanted in label.lower():
+                near.append(label)
+        if match:
+            break
+
     if match is None:
-        near = sorted(
-            str(entry.get("name_slug") or entry.get("name"))
-            for entry in apps
-            if isinstance(entry, dict) and wanted in str(entry.get("name_slug") or entry.get("name") or "").lower()
-        )[:10]
-        hint = f" Did you mean: {', '.join(near)}?" if near else ""
+        hint = f" Did you mean: {', '.join(sorted(set(near))[:10])}?" if near else ""
         raise click.ClickException(f"no app matching {app_slug!r} in the catalogue.{hint}")
 
     click.echo(json.dumps(match, indent=2, ensure_ascii=False))

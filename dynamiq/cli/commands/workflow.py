@@ -77,6 +77,35 @@ def compact_items(items: list) -> list:
     return out
 
 
+def iter_pages(api: ApiClient, path: str, params: dict | None = None, page_size: int = 500):
+    """Yield each page of a list endpoint until the last one.
+
+    page_size caps at 500, so a single request is not the catalogue - it is the first 500 of
+    it. Anything that reads one page and treats the result as complete reports whatever falls
+    beyond it as not existing.
+    """
+    params = dict(params or {})
+    seen, current = 0, 1
+    while True:
+        response = api.get(path, params={**params, "page": current, "page_size": page_size})
+        if not ok(response):
+            raise click.ClickException(f"HTTP {response.status_code}: {response.text.strip()[:2000]}")
+        body = response.json()
+        batch = body.get("data") or []
+        if not batch:
+            return
+        yield batch
+        seen += len(batch)
+        pagination = body.get("pagination") or {}
+        page_count = pagination.get("page_count")
+        total = pagination.get("total_count")
+        if page_count and current >= page_count:
+            return
+        if total is not None and seen >= total:
+            return
+        current += 1
+
+
 def echo_list(
     api: ApiClient,
     path: str,
@@ -116,24 +145,8 @@ def echo_list(
         return
 
     items: list = []
-    current = 1
-    while True:
-        response = api.get(path, params={**params, "page": current, "page_size": page_size or 500})
-        if not ok(response):
-            raise click.ClickException(f"HTTP {response.status_code}: {response.text.strip()[:2000]}")
-        body = response.json()
-        batch = body.get("data") or []
+    for batch in iter_pages(api, path, params, page_size or 500):
         items.extend(batch)
-        pagination = body.get("pagination") or {}
-        page_count = pagination.get("page_count")
-        total = pagination.get("total_count")
-        if not batch:
-            break
-        if page_count and current >= page_count:
-            break
-        if total is not None and len(items) >= total:
-            break
-        current += 1
 
     payload = {"count": len(items), "items": compact_items(items)} if compact else {"count": len(items), "data": items}
     click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -291,13 +304,6 @@ def platform_node_types(api: ApiClient) -> set | None:
     in is a different question from what the deployment will take, and they disagree. None on
     any failure, so the caller skips the check rather than inventing an answer.
     """
-    try:
-        response = api.get("/v1/agent-builder/nodes")
-    except Exception:                                          # noqa: BLE001 - offline is fine
-        return None
-    if not ok(response):
-        return None
-
     found: set = set()
 
     def walk(node):
@@ -311,7 +317,11 @@ def platform_node_types(api: ApiClient) -> set | None:
             for item in node:
                 walk(item)
 
-    walk(response.json())
+    try:
+        for batch in iter_pages(api, "/v1/agent-builder/nodes"):
+            walk(batch)
+    except Exception:                                          # noqa: BLE001 - offline is fine
+        return None
     return found or None
 
 
