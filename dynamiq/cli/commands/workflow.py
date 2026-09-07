@@ -147,13 +147,24 @@ def require_project(settings: Settings) -> str:
 
 
 def check_connection(value, where: str) -> None:
-    """A `connection` must be a real connection UUID, not a placeholder."""
-    if value is None:
+    """A connection is a UUID, or a requirement reference standing in for one.
+
+    `requirement-add` documents {"$type": "requirement", "$id": ...} as the way a caller brings
+    their own credential, and the validator accepts it - but this raised on anything that was
+    not a UUID string, so a flow that passed `validate` could not be saved.
+    """
+    if isinstance(value, dict) and value.get("$type") == "requirement":
+        if not value.get("$id"):
+            raise click.ClickException(
+                f"requirement reference on {where} has no `$id`. Declare it with "
+                "`workflow requirement-add` and reference the id it returns."
+            )
         return
-    if not isinstance(value, str) or not _is_uuid(value):
+    if not _is_uuid(str(value or "")):
         raise click.ClickException(
-            f"connection {value!r} on {where} is not a connection UUID. "
-            "Run `dynamiq connection list` and use the `id` of the connection you want."
+            f"connection {value!r} on {where} is not a connection UUID. Run "
+            "`dynamiq connection list` and use the `id` of the one you want, or reference a "
+            'requirement as {"$type": "requirement", "$id": "<id>"}.'
         )
 
 

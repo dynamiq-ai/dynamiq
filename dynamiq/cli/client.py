@@ -19,6 +19,19 @@ class HTTPError(RuntimeError):
 _RETRY_STATUS = {502, 503, 504}
 
 
+def _last_response(retry_state):
+    """What to hand back when the retries are used up.
+
+    A gateway error is a result, not an exception, so `reraise=True` has nothing to re-raise
+    and tenacity would raise RetryError naming a Future - hiding the status and body the
+    caller needs to report. Return the last response and let them handle it.
+    """
+    outcome = retry_state.outcome
+    if outcome is not None and not outcome.failed:
+        return outcome.result()
+    raise outcome.exception() if outcome is not None else RuntimeError("no attempt was made")
+
+
 def rewind(files) -> None:
     """Seek every file handle in a multipart payload back to the start.
 
@@ -107,8 +120,15 @@ class ApiClient:
         return self._request("DELETE", path, headers=headers, json=json, data=data)
 
     def _request_once(self, method, path, **kwargs):
-        """One attempt, no retry. Same request, same error handling."""
-        return self._request.retry_with(stop=stop_after_attempt(1))(self, method, path, **kwargs)
+        """One attempt, no retry - the undecorated call.
+
+        Not `retry_with(stop=...)`: that narrows the stop condition and keeps the result
+        predicate, so a 502/503/504 still matches "retry" while the stop says "stop", and
+        tenacity raises RetryError over a perfectly good response. `reraise=True` does not help
+        - there is no exception to re-raise. The caller would get a traceback naming a Future
+        instead of the gateway's status and body.
+        """
+        return self._request.__wrapped__(self, method, path, **kwargs)
 
     @retry(
         stop=stop_after_attempt(5),
@@ -117,6 +137,7 @@ class ApiClient:
             retry_if_exception_type(requests.RequestException)
             | retry_if_result(lambda r: r is not None and r.status_code in _RETRY_STATUS)
         ),
+        retry_error_callback=_last_response,
         reraise=True,
     )
     def _request(

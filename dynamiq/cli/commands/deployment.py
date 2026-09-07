@@ -12,6 +12,9 @@ from dynamiq.cli.commands.context import with_api_and_settings
 from dynamiq.cli.commands.workflow import echo_list, echo_response, pagination_options, read_json_arg, require_project
 from dynamiq.cli.config import Settings
 
+# Generation and training calls run far past the default 30s.
+EXECUTION_TIMEOUT = 600.0
+
 finetuning = click.Group(name="fine-tuning", help="Fine-tuning jobs and the adapters they produce")
 inference = click.Group(name="inference", help="Deploy and call self-hosted models")
 database = click.Group(name="database", help="Deploy vector databases")
@@ -220,6 +223,10 @@ def test_inference(*, api: ApiClient, settings: Settings, inference_id: str, pro
         api.post(
             f"/v1/inferences/{inference_id}/chat/completions",
             json={"messages": [{"role": "user", "content": prompt}]},
+            # A completion on a large model outlasts the default timeout, and a retry starts a
+            # second generation on the deployment's GPU rather than waiting for the first.
+            timeout=EXECUTION_TIMEOUT,
+            retry=False,
         )
     )
 

@@ -223,16 +223,24 @@ def validate(flow, known_types: set | None = None):
         if not isinstance(selector, dict):
             errors.append(f"node {label!r}: input_transformer.selector must be an object of field -> JSONPath.")
             selector = {}
+        # The runtime resolves more than `$.<node-id>...`: `input_transformer.path` selects a
+        # sub-tree first, so a selector under it is relative and names no node at all; bracket
+        # notation addresses the same thing as dotted; and a literal is a legal constant.
+        # Checking the node name is only meaningful for an absolute, dotted, path-less selector.
+        relative = bool(transformer.get("path"))
         for field, expression in selector.items():
-            if not isinstance(expression, str) or not expression.startswith("$."):
-                errors.append(
-                    f"node {label!r}: selector {field!r} must be a JSONPath string like "
-                    f'"$.<node-id>.output.<field>", got {expression!r}.'
-                )
-                continue
-            pieces = expression.split(".")
-            source = pieces[1] if len(pieces) > 1 else ""
-            if source and source not in known:
+            if not isinstance(expression, str):
+                continue                      # a literal constant is legal
+            if not expression.startswith("$"):
+                continue                      # so is a plain string value
+            if relative:
+                continue                      # resolved against `path`, not against a node
+            match = re.match(r"^\$\.([A-Za-z0-9_-]+)\b", expression) or \
+                re.match(r"^\$\[[\"']([^\"']+)[\"']\]", expression)
+            if not match:
+                continue                      # a shape this checker does not model
+            source = match.group(1)
+            if source not in known:
                 errors.append(
                     f"node {label!r}: selector {field!r} reads from {source!r}, which is not a node in "
                     "this flow. An agent's tools are NOT nodes - read the agent's own output instead."
@@ -508,15 +516,16 @@ def check_pipedream(tool, where):
             "--out tool.json`, which fetches the real record instead of reconstructing it."
         )
     else:
-        mistyped = [
+        missing = [
             prop.get("name")
             for prop in declared_props
-            if isinstance(prop, dict) and "type_" not in prop and "type" in prop
+            if isinstance(prop, dict) and "type_" not in prop and "type" not in prop
         ]
-        if mistyped:
+        if missing:
             problems.append(
-                f"{where}: input_props prop(s) {', '.join(map(str, mistyped))} use `type` where the "
-                "SDK reads `type_`. Rename the key on every prop, or rebuild with `pipedream_node`."
+                f"{where}: input_props prop(s) {', '.join(map(str, missing))} declare no type. "
+                'Each needs `type_` (or `type`, which the SDK renames): {"name": "title", '
+                '"type_": "string"}.'
             )
 
     props = tool.get("configurable_props")

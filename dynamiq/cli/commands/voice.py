@@ -5,6 +5,9 @@ from dynamiq.cli.commands.context import with_api_and_settings
 from dynamiq.cli.commands.workflow import echo_list, echo_response, pagination_options, read_json_arg, require_project
 from dynamiq.cli.config import Settings
 
+# A simulation runs a whole conversation; the default 30s is not enough.
+EXECUTION_TIMEOUT = 600.0
+
 voice = click.Group(name="voice", help="Voice agents: build, deploy, inspect calls")
 
 BASE = "/v1/agents/voice"
@@ -143,7 +146,10 @@ def simulate(*, api: ApiClient, settings: Settings, agent_id: str, payload: str)
 
     Use this as the "does it work" gate before telling anyone the agent is ready.
     """
-    echo_response(api.post(f"{BASE}/agents/{agent_id}/simulations", json=read_json_arg(payload)))
+    # Each attempt creates a simulation. A retry after a timed-out response leaves a second
+    # record behind, and there is no idempotency key to tell them apart.
+    echo_response(api.post(f"{BASE}/agents/{agent_id}/simulations", json=read_json_arg(payload),
+                           timeout=EXECUTION_TIMEOUT, retry=False))
 
 
 @voice.command("simulations")
