@@ -357,14 +357,15 @@ def resolve_root_object_schema(
     return builder._resolve_to_object_schema(schema_dict)
 
 
-MCP_HTTP_HEADERS_FIELD = "headers"
-MCP_HTTP_HEADERS_SCHEMA_EXTRA = {"is_accessible_to_agent": False}
+MCP_HTTP_HEADERS_FIELD = "mcp_http_headers"
+MCP_HTTP_HEADERS_EXTRA_KEY = "is_mcp_http_headers"
+MCP_HTTP_HEADERS_SCHEMA_EXTRA = {"is_accessible_to_agent": False, MCP_HTTP_HEADERS_EXTRA_KEY: True}
 
 
 def is_mcp_http_headers_field(field: Any) -> bool:
-    """True when ``headers`` is Dynamiq's hidden per-call HTTP header field, not a tool argument."""
+    """True when this is Dynamiq's hidden per-call HTTP header field, not a tool argument."""
     extra = getattr(field, "json_schema_extra", None)
-    return isinstance(extra, dict) and extra.get("is_accessible_to_agent") is False
+    return isinstance(extra, dict) and extra.get(MCP_HTTP_HEADERS_EXTRA_KEY) is True
 
 
 def split_mcp_http_headers(input_data: BaseModel) -> tuple[dict[str, Any], dict[str, Any] | None]:
@@ -378,18 +379,18 @@ def split_mcp_http_headers(input_data: BaseModel) -> tuple[dict[str, Any], dict[
 
 
 def attach_mcp_http_headers_field(model: type[BaseModel]) -> type[BaseModel]:
-    """Add a hidden ``headers`` field unless the MCP tool already declares that name."""
+    """Add a hidden ``mcp_http_headers`` field unless the MCP tool already declares that name."""
     if MCP_HTTP_HEADERS_FIELD in model.model_fields:
         return model
     return create_model(
         model.__name__,
         __base__=model,
-        headers=(
+        mcp_http_headers=(
             dict[str, Any] | None,
             Field(
                 default=None,
                 description="HTTP headers for this MCP request. Not forwarded as a tool argument.",
-                json_schema_extra=MCP_HTTP_HEADERS_SCHEMA_EXTRA,
+                json_schema_extra=dict(MCP_HTTP_HEADERS_SCHEMA_EXTRA),
             ),
         ),
     )
@@ -422,8 +423,9 @@ class MCPTool(ConnectionNode):
       connection (MCPSse | MCPStdio | MCPStreamableHTTP): Connection module for the MCP server.
       server_metadata (ServerMetadata): Server metadata for tracing.
 
-    Per-run HTTP headers can be passed via agent ``tool_params`` on the hidden ``headers``
-    field. They are sent on the HTTP connection and are not forwarded as MCP tool arguments.
+    Per-run HTTP headers can be passed via agent ``tool_params`` on the hidden
+    ``mcp_http_headers`` field. They are sent on the HTTP connection and are not forwarded as
+    MCP tool arguments.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
