@@ -187,7 +187,7 @@ def check_connection(value, where: str) -> None:
         )
 
 
-def normalize_flow(flow):
+def normalize_flow(flow, project_id: str | None = None):
     """Make a hand-written flow acceptable to the API without changing its meaning.
 
     The API is strict about a handful of shapes that are easy to get wrong by hand, and
@@ -199,6 +199,7 @@ def normalize_flow(flow):
     * node-level `selector`                   -> `input_transformer.selector`
     * missing node `name`                     -> the node id
     * `llm` / `tools[]` without an `id`       -> a fresh UUID each
+    * Pipedream tool without `external_user_id` -> the current project id
     """
     if not isinstance(flow, dict):
         return flow
@@ -258,9 +259,28 @@ def normalize_flow(flow):
             if isinstance(tool, dict) and not tool.get("id"):
                 tool["id"] = str(uuid.uuid4())
                 note(f"node {label!r}: generated an id for tool {tool.get('type', '?')}")
+            fill_external_user_id(tool, project_id, note, f"node {label!r}: tool")
+
+        fill_external_user_id(node, project_id, note, "node")
 
     warn_tool_chained_after_agent(flow)
     return flow
+
+
+def fill_external_user_id(node, project_id: str | None, note, where: str) -> None:
+    """Give a Pipedream node the project id it binds accounts through.
+
+    `external_user_id` has no default on the node model and the action-run payload sends it,
+    so a tool without one cannot be constructed. Connections are bound to the project rather
+    than to a person, so the value is never ambiguous - which is why the validator says the
+    CLI supplies it. It has to actually do so.
+    """
+    if not isinstance(node, dict) or node.get("type") != PIPEDREAM_TYPE:
+        return
+    if node.get("external_user_id") or not project_id:
+        return
+    node["external_user_id"] = project_id
+    note(f"{where} {node.get('name') or node.get('id') or '?'}: set external_user_id to the project id")
 
 
 def warn_tool_chained_after_agent(flow: dict) -> None:
@@ -520,7 +540,7 @@ def create_workflow(*, api: ApiClient, settings: Settings, payload: str):
     body = read_json_arg(payload)
     body.setdefault("project_id", require_project(settings))
     body.setdefault("flow", starter_flow())
-    body["flow"] = normalize_flow(body["flow"])
+    body["flow"] = normalize_flow(body["flow"], settings.project_id)
     body.setdefault("flow_ui", flow_ui_for(body["flow"]))
     echo_response(api.post("/v1/workflows", json=body))
 
@@ -540,7 +560,7 @@ def save_workflow(
     The API requires BOTH flow and flow_ui; a canvas layout is generated from the flow
     when --flow-ui is omitted. Always `workflow get` afterwards to verify it persisted.
     """
-    flow_body = normalize_flow(read_json_arg(flow))
+    flow_body = normalize_flow(read_json_arg(flow), settings.project_id)
     nodes = flow_body.get("nodes") or []
     if not allow_starter and len(nodes) == 1 and nodes[0].get("type") == "dynamiq.nodes.utils.Input":
         raise click.ClickException(
@@ -580,7 +600,7 @@ def test_workflow(
     page. Choose an obviously-test input.
     """
     form = {
-        "flow": json.dumps(normalize_flow(read_json_arg(flow))),
+        "flow": json.dumps(normalize_flow(read_json_arg(flow), settings.project_id)),
         "input": json.dumps(read_json_arg(input_data)),
         "stream": "false",
     }
@@ -698,7 +718,7 @@ def release_workflow(
         raise click.ClickException(f"HTTP {current.status_code}: {current.text.strip()[:2000]}")
     data = current.json().get("data", {})
 
-    flow_body = normalize_flow(read_json_arg(flow)) if flow else data.get("flow")
+    flow_body = normalize_flow(read_json_arg(flow), settings.project_id) if flow else data.get("flow")
     if not flow_body:
         raise click.ClickException("Workflow has no saved flow to release. Run `workflow save` first.")
 
@@ -774,7 +794,7 @@ def build_flow_ui(*, api: ApiClient, settings: Settings, flow: str, out_path, cu
     app and component records live only in `custom_node_data`, and the skill's
     `pipedream_node` emits them in the shape this accepts.
     """
-    flow_body = normalize_flow(read_json_arg(flow))
+    flow_body = normalize_flow(read_json_arg(flow), settings.project_id)
     custom: dict = {}
     for path in custom_paths:
         payload = read_json_arg(path)

@@ -532,7 +532,12 @@ def check_pipedream(tool, where):
     if from_requirement is not None:
         problems.extend(from_requirement)
     elif not external_user:
-        problems.append(f"{where}: needs `external_user_id` (the project id). The CLI fills this in on save.")
+        problems.append(
+            f"{where}: needs `external_user_id` - the project id, because Pipedream accounts are "
+            "bound to the project rather than to a person. `workflow save` and `create` fill it in "
+            "from the current project; set it yourself with the id from `dynamiq config show` if you "
+            "are building the flow for somewhere else."
+        )
 
     # A hand-written schema is either missing or carries `type` where the SDK reads `type_`,
     # in which case every prop is ignored and the agent gets a tool it cannot call.
