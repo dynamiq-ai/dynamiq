@@ -1458,6 +1458,33 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 merged_input[key] = value
                 debug_info.append(f"  - From {source}: Set {key}={logged_value}")
 
+    def _apply_tool_param_lookups(
+        self,
+        merged_input: dict,
+        lookups: list[tuple[str, Any]],
+        is_child_agent: bool,
+        debug_info: list,
+    ) -> None:
+        """Apply matching tool_params dicts in order so later entries win on the same key.
+
+        Server-level and tool-level entries both apply: owner first, then the tool. Nested
+        ``ToolParams`` are left for the child-agent path and are not merged into this tool's input.
+        """
+        seen: set[int] = set()
+        for source, value in lookups:
+            if value is None:
+                continue
+            value_id = id(value)
+            if value_id in seen:
+                continue
+            seen.add(value_id)
+            if isinstance(value, ToolParams):
+                if self.verbose:
+                    detail = "will apply to child agent" if is_child_agent else "ignored for non-agent tool"
+                    debug_info.append(f"  - From {source}: encountered nested ToolParams ({detail})")
+            elif isinstance(value, dict):
+                self._apply_parameters(merged_input, value, source, debug_info)
+
     def _clone_tool_for_execution(
         self,
         tool: Node,
@@ -1661,37 +1688,40 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 # 2. Apply parameters by tool name (medium priority)
                 # MCPServer is replaced by the tools it discovers, so match by_name/by_id against
                 # the owning server as well. Callers can key mcp_http_headers (and other params)
-                # once by server name/id instead of listing every remote tool.
+                # once by server name/id instead of listing every remote tool. Server-level dicts
+                # are applied first, then the tool's own entry, so the two merge rather than one
+                # short-circuiting the other.
                 owner = getattr(tool, "_owner_server", None)
-                name_params_any = (
-                    tool_params.by_name_params.get(tool.name)
-                    or tool_params.by_name_params.get(self.sanitize_tool_name(tool.name))
-                    or (owner and tool_params.by_name_params.get(owner.name))
-                    or (owner and owner.name and tool_params.by_name_params.get(self.sanitize_tool_name(owner.name)))
-                    or (resolved_agent and tool_params.by_name_params.get(resolved_agent.name))
-                    or (resolved_agent and tool_params.by_name_params.get(self.sanitize_tool_name(resolved_agent.name)))
+                name_lookups: list[tuple[str, Any]] = []
+                if owner and owner.name:
+                    name_lookups.append((f"name:{owner.name}", tool_params.by_name_params.get(owner.name)))
+                    name_lookups.append(
+                        (f"name:{owner.name}", tool_params.by_name_params.get(self.sanitize_tool_name(owner.name)))
+                    )
+                if resolved_agent:
+                    name_lookups.append(
+                        (f"name:{resolved_agent.name}", tool_params.by_name_params.get(resolved_agent.name))
+                    )
+                    name_lookups.append(
+                        (
+                            f"name:{resolved_agent.name}",
+                            tool_params.by_name_params.get(self.sanitize_tool_name(resolved_agent.name)),
+                        )
+                    )
+                name_lookups.append((f"name:{tool.name}", tool_params.by_name_params.get(tool.name)))
+                name_lookups.append(
+                    (f"name:{tool.name}", tool_params.by_name_params.get(self.sanitize_tool_name(tool.name)))
                 )
-                if name_params_any:
-                    if isinstance(name_params_any, ToolParams):
-                        if self.verbose:
-                            detail = "will apply to child agent" if is_child_agent else "ignored for non-agent tool"
-                            debug_info.append(f"  - From name:{tool.name}: encountered nested ToolParams ({detail})")
-                    elif isinstance(name_params_any, dict):
-                        self._apply_parameters(merged_input, name_params_any, f"name:{tool.name}", debug_info)
+                self._apply_tool_param_lookups(merged_input, name_lookups, is_child_agent, debug_info)
 
                 # 3. Apply parameters by tool ID (highest priority)
-                id_params_any = (
-                    tool_params.by_id_params.get(tool.id)
-                    or (owner and tool_params.by_id_params.get(owner.id))
-                    or (resolved_agent and tool_params.by_id_params.get(resolved_agent.id))
-                )
-                if id_params_any:
-                    if isinstance(id_params_any, ToolParams):
-                        if self.verbose:
-                            detail = "will apply to child agent" if is_child_agent else "ignored for non-agent tool"
-                            debug_info.append(f"  - From id:{tool.id}: encountered nested ToolParams ({detail})")
-                    elif isinstance(id_params_any, dict):
-                        self._apply_parameters(merged_input, id_params_any, f"id:{tool.id}", debug_info)
+                id_lookups: list[tuple[str, Any]] = []
+                if owner:
+                    id_lookups.append((f"id:{owner.id}", tool_params.by_id_params.get(owner.id)))
+                if resolved_agent:
+                    id_lookups.append((f"id:{resolved_agent.id}", tool_params.by_id_params.get(resolved_agent.id)))
+                id_lookups.append((f"id:{tool.id}", tool_params.by_id_params.get(tool.id)))
+                self._apply_tool_param_lookups(merged_input, id_lookups, is_child_agent, debug_info)
 
                 if self.verbose and debug_info:
                     logger.debug("\n".join(debug_info))

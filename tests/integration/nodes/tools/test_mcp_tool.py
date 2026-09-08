@@ -948,3 +948,38 @@ def test_agent_tool_params_headers_stay_off_tool_args_when_tool_declares_headers
 
     assert captured["headers"] == {"Accept": "text/plain"}
     assert captured["mcp_http_headers"] == {"Authorization": "Bearer user-token"}
+
+
+def test_agent_merges_server_and_tool_keyed_tool_params(llm_model):
+    connection = MCPSse(url="https://example.com/")
+    server = MCPServer(name="github-mcp", id="srv-1", connection=connection)
+    tool = MCPTool(
+        name="create_issue",
+        description="Opens a GitHub issue.",
+        json_input_schema={"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]},
+        connection=connection,
+    )
+    tool._owner_server = server
+    captured: dict[str, Any] = {}
+
+    def fake_execute(self, input_data, config=None, **kwargs):
+        captured["title"] = getattr(input_data, "title", None)
+        captured["mcp_http_headers"] = getattr(input_data, "mcp_http_headers", None)
+        return {"content": "ok"}
+
+    agent = Agent(name="support", llm=llm_model, tools=[tool])
+    with patch.object(MCPTool, "execute", fake_execute):
+        agent._run_tool(
+            tool=tool,
+            tool_input={"title": "from-llm"},
+            config=None,
+            tool_params=ToolParams(
+                by_name={
+                    "github-mcp": {"mcp_http_headers": {"Authorization": "Bearer user-token"}},
+                    "create_issue": {"title": "from-tool"},
+                }
+            ),
+        )
+
+    assert captured["title"] == "from-tool"
+    assert captured["mcp_http_headers"] == {"Authorization": "Bearer user-token"}
