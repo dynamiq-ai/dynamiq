@@ -23,6 +23,7 @@ from dynamiq.connections import BaseConnection, HttpApiKey
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.llms._fc_sanitization import sanitize_fc_messages
 from dynamiq.nodes.llms.registry import model_registry
+from dynamiq.nodes.llms.utils import litellm_video_input_flag
 from dynamiq.nodes.node import ConnectionNode, NodeDependency, ensure_config
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Prompt
@@ -501,14 +502,15 @@ class BaseLLM(ConnectionNode):
     def is_video_input_supported(self) -> bool:
         """Check if the LLM supports native video input.
 
-        Unlike vision/PDF, litellm exposes no video-input capability signal (its `video_*`
-        APIs are for generation, not describing input support), so this skips the litellm
-        tier entirely: it checks the model_info override, then the custom registry. A model
-        needs an explicit `supports_video_input` entry in model_registry.json to resolve here,
-        even if litellm already recognizes the model for other purposes.
+        Resolution order: ``model_info`` override, litellm's raw per-model flag (see
+        ``litellm_video_input_flag`` in ``utils.py`` -- only when explicitly set),
+        ``model_registry.json``, then ``False``.
         """
         if self.model_info and self.model_info.supports_video_input is not None:
             return self.model_info.supports_video_input
+        litellm_flag = litellm_video_input_flag(self.model)
+        if litellm_flag is not None:
+            return litellm_flag
         custom = model_registry.supports_video_input(self.model)
         return custom if custom is not None else False
 
