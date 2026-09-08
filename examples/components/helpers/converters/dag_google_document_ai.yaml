@@ -14,7 +14,7 @@ nodes:
     connection: google-document-ai-conn
     processor_id: ${oc.env:GOOGLE_DOCUMENT_AI_PROCESSOR_ID}
     enable_native_pdf_parsing: true
-    imageless_mode: true
+    enabled_imageless_mode: true
     document_creation_mode: one-doc-per-file
     error_handling:
       timeout_seconds: 300

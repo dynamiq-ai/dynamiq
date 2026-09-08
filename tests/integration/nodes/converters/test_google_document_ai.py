@@ -230,4 +230,5 @@ def test_node_is_serializable_without_its_component(document_ai_node):
     assert "file_converter" not in data
     assert data["type"] == "dynamiq.nodes.converters.GoogleDocumentAIFileConverter"
     assert data["processor_id"] == "abc123"
+    assert data["enabled_imageless_mode"] is True
     assert data["connection"]["location"] == "eu"

@@ -75,7 +75,7 @@ class GoogleDocumentAIFileConverter(BaseConverter):
             instead of OCR-ing their rendered pages. Faster and more accurate for born-digital
             PDFs. Defaults to None, which omits OCR-specific options so non-OCR processors remain
             supported.
-        imageless_mode (bool): Whether to omit page images from the response. Halves the payload
+        enabled_imageless_mode (bool): Whether to omit page images from the response. Halves the payload
             and doubles the online page limit to 30. Defaults to True.
         page_separator (str): The separator inserted between page texts in
             `ONE_DOC_PER_FILE` mode. Defaults to "\\n\\n".
@@ -120,7 +120,7 @@ class GoogleDocumentAIFileConverter(BaseConverter):
             "When unset, OCR-specific process options are omitted."
         ),
     )
-    imageless_mode: bool = Field(
+    enabled_imageless_mode: bool = Field(
         default=True,
         description="Omit page images from the response, which also doubles the online page limit.",
     )
@@ -147,7 +147,7 @@ class GoogleDocumentAIFileConverter(BaseConverter):
         Returns:
             int: 30 in imageless mode, 15 otherwise.
         """
-        return MAX_PAGES_PER_REQUEST_IMAGELESS if self.imageless_mode else MAX_PAGES_PER_REQUEST_WITH_IMAGES
+        return MAX_PAGES_PER_REQUEST_IMAGELESS if self.enabled_imageless_mode else MAX_PAGES_PER_REQUEST_WITH_IMAGES
 
     @property
     def processor_name(self) -> str:
@@ -356,7 +356,7 @@ class GoogleDocumentAIFileConverter(BaseConverter):
             name=self.processor_name,
             raw_document=documentai.RawDocument(content=content, mime_type=mime_type),
             process_options=process_options,
-            imageless_mode=self.imageless_mode,
+            imageless_mode=self.enabled_imageless_mode,
         )
 
         return self.documentai_client.process_document(request=request).document

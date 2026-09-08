@@ -220,7 +220,7 @@ class TestRequestOptions:
             client=client,
             processor_id="abc123",
             enable_native_pdf_parsing=enable_native_pdf_parsing,
-            imageless_mode=False,
+            enabled_imageless_mode=False,
         )
 
         converter.run(files=[build_pdf(1)])
@@ -286,13 +286,18 @@ class TestMimeTypes:
 
 class TestPageLimitSplitting:
     @pytest.mark.parametrize(
-        ("imageless_mode", "expected_limit"),
+        ("enabled_imageless_mode", "expected_limit"),
         [(True, MAX_PAGES_PER_REQUEST_IMAGELESS), (False, MAX_PAGES_PER_REQUEST_WITH_IMAGES)],
         ids=["imageless", "with_images"],
     )
-    def test_page_limit_depends_on_imageless_mode(self, connection, client, imageless_mode, expected_limit):
+    def test_page_limit_depends_on_enabled_imageless_mode(
+        self, connection, client, enabled_imageless_mode, expected_limit
+    ):
         converter = GoogleDocumentAIFileConverter(
-            connection=connection, client=client, processor_id="abc123", imageless_mode=imageless_mode
+            connection=connection,
+            client=client,
+            processor_id="abc123",
+            enabled_imageless_mode=enabled_imageless_mode,
         )
 
         assert converter.max_pages_per_request == expected_limit

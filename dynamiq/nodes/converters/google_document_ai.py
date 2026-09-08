@@ -75,7 +75,7 @@ class GoogleDocumentAIFileConverter(ConnectionNode):
             "When unset, OCR-specific process options are omitted."
         ),
     )
-    imageless_mode: bool = Field(
+    enabled_imageless_mode: bool = Field(
         default=True,
         description="Omit page images from the response, which also doubles the online page limit.",
     )
@@ -108,7 +108,7 @@ class GoogleDocumentAIFileConverter(ConnectionNode):
                 processor_version=self.processor_version,
                 document_creation_mode=self.document_creation_mode,
                 enable_native_pdf_parsing=self.enable_native_pdf_parsing,
-                imageless_mode=self.imageless_mode,
+                enabled_imageless_mode=self.enabled_imageless_mode,
                 page_separator=self.page_separator,
             )
 
