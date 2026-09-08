@@ -171,7 +171,7 @@ class ApiClient:
                 headers=headers,
                 timeout=timeout,
             )
-            if response.status_code != 200:
+            if not ok(response):
                 logging.error(f"{method} {path} failed with {response.status_code}: {response.text.strip()}")
             return response
         except Exception as e:
