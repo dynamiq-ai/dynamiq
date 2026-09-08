@@ -30,7 +30,7 @@ def patch_discovery(*tool_names):
     """Patch the connection and session so `initialize_tools` discovers `tool_names`."""
 
     @contextlib.asynccontextmanager
-    async def fake_connect(self):
+    async def fake_connect(self, headers=None):
         yield (object(), object())
 
     class FakeToolList:

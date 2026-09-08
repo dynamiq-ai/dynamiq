@@ -357,10 +357,54 @@ def resolve_root_object_schema(
     return builder._resolve_to_object_schema(schema_dict)
 
 
+MCP_HTTP_HEADERS_FIELD = "mcp_http_headers"
+MCP_HTTP_HEADERS_EXTRA_KEY = "is_mcp_http_headers"
+MCP_HTTP_HEADERS_SCHEMA_EXTRA = {"is_accessible_to_agent": False, MCP_HTTP_HEADERS_EXTRA_KEY: True}
+
+
+def is_mcp_http_headers_field(field: Any) -> bool:
+    """True when this is Dynamiq's hidden per-call HTTP header field, not a tool argument."""
+    extra = getattr(field, "json_schema_extra", None)
+    return isinstance(extra, dict) and extra.get(MCP_HTTP_HEADERS_EXTRA_KEY) is True
+
+
+def split_mcp_http_headers(input_data: BaseModel) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Split Dynamiq HTTP headers off the payload that will be sent as MCP tool arguments."""
+    input_dict = input_data.model_dump(by_alias=True)
+    field = type(input_data).model_fields.get(MCP_HTTP_HEADERS_FIELD)
+    if field is None or not is_mcp_http_headers_field(field):
+        return input_dict, None
+    headers = input_dict.pop(MCP_HTTP_HEADERS_FIELD, None)
+    return input_dict, headers or None
+
+
+def attach_mcp_http_headers_field(model: type[BaseModel]) -> type[BaseModel]:
+    """Add a hidden ``mcp_http_headers`` field unless the MCP tool already declares that name."""
+    if MCP_HTTP_HEADERS_FIELD in model.model_fields:
+        return model
+    return create_model(
+        model.__name__,
+        __base__=model,
+        mcp_http_headers=(
+            dict[str, Any] | None,
+            Field(
+                default=None,
+                description="HTTP headers for this MCP request. Not forwarded as a tool argument.",
+                json_schema_extra=dict(MCP_HTTP_HEADERS_SCHEMA_EXTRA),
+            ),
+        ),
+    )
+
+
 def create_input_schema_from_json_schema(
     schema_dict: dict[str, Any], model_name: str = "MCPToolSchema", definitions: dict[str, Any] | None = None
 ) -> type[BaseModel]:
-    """Create a Pydantic input-schema model from an MCP tool's JSON Schema."""
+    """Create a Pydantic input-schema model from an MCP tool's JSON Schema.
+
+    The builder is shared with non-MCP tools (Composio builds its schemas here too), so the
+    hidden ``mcp_http_headers`` field is attached by ``MCPTool.get_input_schema`` instead of
+    here: only MCP tools have a transport that honours it.
+    """
     return _SchemaModelBuilder(dict(definitions or {})).build(schema_dict, model_name)
 
 
@@ -383,6 +427,10 @@ class MCPTool(ConnectionNode):
       input_schema (ClassVar[type[BaseModel]]): The schema that defines the expected structure of tool's input.
       connection (MCPSse | MCPStdio | MCPStreamableHTTP): Connection module for the MCP server.
       server_metadata (ServerMetadata): Server metadata for tracing.
+
+    Per-run HTTP headers can be passed via agent ``tool_params`` on the hidden
+    ``mcp_http_headers`` field. They are sent on the HTTP connection and are not forwarded as
+    MCP tool arguments.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -426,9 +474,11 @@ class MCPTool(ConnectionNode):
             schema_dict (dict[str, Any]): A JSON schema dictionary describing the tool's expected input.
         """
         schema_dict = rename_keys_recursive(schema_dict, {"type_": "type"})
-        return create_input_schema_from_json_schema(
-            schema_dict,
-            "MCPToolSchema",
+        return attach_mcp_http_headers_field(
+            create_input_schema_from_json_schema(
+                schema_dict,
+                "MCPToolSchema",
+            )
         )
 
     @property
@@ -494,10 +544,10 @@ class MCPTool(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        input_dict = input_data.model_dump(by_alias=True)
+        input_dict, http_headers = split_mcp_http_headers(input_data)
 
         try:
-            async with self.connection.connect() as result:
+            async with self.connection.connect(headers=http_headers) as result:
                 read, write = result[:2]
                 async with ClientSession(read, write) as session:
                     await session.initialize()
