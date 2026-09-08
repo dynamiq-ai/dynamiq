@@ -1485,6 +1485,22 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             elif isinstance(value, dict):
                 self._apply_parameters(merged_input, value, source, debug_info)
 
+    def _owner_server_name_is_unambiguous(self, owner: Any) -> bool:
+        """Whether ``owner.name`` identifies exactly one MCP server among this run's tools.
+
+        ``MCPServer.name`` defaults to ``"mcp"`` and nothing enforces uniqueness, so two servers
+        left unrenamed answer to the same ``by_name`` key. Params keyed by that name would reach
+        both — and ``mcp_http_headers`` carries a credential, so a header meant for one server
+        would be sent to the other server's host. The name match is refused in that case; the
+        server's id still selects it unambiguously.
+        """
+        owner_ids = {
+            other.id
+            for tool in self._runtime_tools
+            if (other := getattr(tool, "_owner_server", None)) is not None and other.name == owner.name
+        }
+        return len(owner_ids) <= 1
+
     def _clone_tool_for_execution(
         self,
         tool: Node,
@@ -1688,16 +1704,28 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 # 2. Apply parameters by tool name (medium priority)
                 # MCPServer is replaced by the tools it discovers, so match by_name/by_id against
                 # the owning server as well. Callers can key mcp_http_headers (and other params)
-                # once by server name/id instead of listing every remote tool. Server-level dicts
+                # once by server name/id instead of listing every remote tool. The owner's *name*
+                # only counts when it picks out a single server; ids always do. Server-level dicts
                 # are applied first, then the tool's own entry, so the two merge rather than one
                 # short-circuiting the other.
                 owner = getattr(tool, "_owner_server", None)
                 name_lookups: list[tuple[str, Any]] = []
                 if owner and owner.name:
-                    name_lookups.append((f"name:{owner.name}", tool_params.by_name_params.get(owner.name)))
-                    name_lookups.append(
-                        (f"name:{owner.name}", tool_params.by_name_params.get(self.sanitize_tool_name(owner.name)))
-                    )
+                    if self._owner_server_name_is_unambiguous(owner):
+                        name_lookups.append((f"name:{owner.name}", tool_params.by_name_params.get(owner.name)))
+                        name_lookups.append(
+                            (f"name:{owner.name}", tool_params.by_name_params.get(self.sanitize_tool_name(owner.name)))
+                        )
+                    elif tool_params.by_name_params.get(owner.name) or tool_params.by_name_params.get(
+                        self.sanitize_tool_name(owner.name)
+                    ):
+                        # Dropped rather than applied: the entry may carry a credential, and there is
+                        # no way to tell which of the same-named servers it was meant for.
+                        logger.warning(
+                            f"Agent {self.name} - {self.id}: tool_params entry by_name[{owner.name!r}] is ambiguous - "
+                            f"more than one MCP server is named {owner.name!r}, so it is not applied to "
+                            f"tool '{tool.name}'. Rename the servers, or key the params by server id instead."
+                        )
                 if resolved_agent:
                     name_lookups.append(
                         (f"name:{resolved_agent.name}", tool_params.by_name_params.get(resolved_agent.name))

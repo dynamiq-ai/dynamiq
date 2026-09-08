@@ -993,3 +993,92 @@ def test_agent_merges_server_and_tool_keyed_tool_params(llm_model):
 
     assert captured["title"] == "from-tool"
     assert captured["mcp_http_headers"] == {"Authorization": "Bearer user-token"}
+
+
+def _mcp_server_tool(server_name: str, server_id: str, url: str, tool_name: str):
+    """An MCPTool as `initialize_tools` leaves it: owned by the server it was discovered from."""
+    connection = MCPSse(url=url)
+    server = MCPServer(name=server_name, id=server_id, connection=connection)
+    tool = MCPTool(
+        name=tool_name,
+        description="Searches.",
+        json_input_schema={"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]},
+        connection=connection,
+    )
+    tool._owner_server = server
+    return tool
+
+
+def test_server_keyed_headers_are_not_applied_when_two_servers_share_a_name(llm_model):
+    """`MCPServer.name` defaults to "mcp" — a credential must not reach the wrong host."""
+    tool_a = _mcp_server_tool("mcp", "srv-a", "https://tenant-a.example.com/sse", "search_a")
+    tool_b = _mcp_server_tool("mcp", "srv-b", "https://tenant-b.example.com/sse", "search_b")
+    agent = Agent(name="support", llm=llm_model, tools=[tool_a, tool_b])
+    captured: dict[str, Any] = {}
+
+    def fake_execute(self, input_data, config=None, **kwargs):
+        captured[self.name] = getattr(input_data, "mcp_http_headers", None)
+        return {"content": "ok"}
+
+    with (
+        patch.object(MCPTool, "execute", fake_execute),
+        patch("dynamiq.nodes.agents.base.logger.warning") as warning,
+    ):
+        for tool in (tool_a, tool_b):
+            agent._run_tool(
+                tool=tool,
+                tool_input={"q": "x"},
+                config=None,
+                tool_params=ToolParams(by_name={"mcp": {"mcp_http_headers": {"Authorization": "Bearer user-token"}}}),
+            )
+
+    assert captured == {"search_a": None, "search_b": None}
+    assert any("ambiguous" in str(call.args[0]) for call in warning.call_args_list if call.args)
+
+
+def test_server_keyed_headers_by_id_still_reach_the_right_server(llm_model):
+    """The id is unique even when the names collide, so it stays a usable key."""
+    tool_a = _mcp_server_tool("mcp", "srv-a", "https://tenant-a.example.com/sse", "search_a")
+    tool_b = _mcp_server_tool("mcp", "srv-b", "https://tenant-b.example.com/sse", "search_b")
+    agent = Agent(name="support", llm=llm_model, tools=[tool_a, tool_b])
+    captured: dict[str, Any] = {}
+
+    def fake_execute(self, input_data, config=None, **kwargs):
+        captured[self.name] = getattr(input_data, "mcp_http_headers", None)
+        return {"content": "ok"}
+
+    with patch.object(MCPTool, "execute", fake_execute):
+        for tool in (tool_a, tool_b):
+            agent._run_tool(
+                tool=tool,
+                tool_input={"q": "x"},
+                config=None,
+                tool_params=ToolParams(by_id={"srv-a": {"mcp_http_headers": {"Authorization": "Bearer user-token"}}}),
+            )
+
+    assert captured == {"search_a": {"Authorization": "Bearer user-token"}, "search_b": None}
+
+
+def test_server_keyed_headers_apply_when_the_server_name_is_unique(llm_model):
+    """The documented convenience keeps working when the names actually distinguish servers."""
+    tool_a = _mcp_server_tool("github-mcp", "srv-a", "https://a.example.com/sse", "search_a")
+    tool_b = _mcp_server_tool("slack-mcp", "srv-b", "https://b.example.com/sse", "search_b")
+    agent = Agent(name="support", llm=llm_model, tools=[tool_a, tool_b])
+    captured: dict[str, Any] = {}
+
+    def fake_execute(self, input_data, config=None, **kwargs):
+        captured[self.name] = getattr(input_data, "mcp_http_headers", None)
+        return {"content": "ok"}
+
+    with patch.object(MCPTool, "execute", fake_execute):
+        for tool in (tool_a, tool_b):
+            agent._run_tool(
+                tool=tool,
+                tool_input={"q": "x"},
+                config=None,
+                tool_params=ToolParams(
+                    by_name={"github-mcp": {"mcp_http_headers": {"Authorization": "Bearer user-token"}}}
+                ),
+            )
+
+    assert captured == {"search_a": {"Authorization": "Bearer user-token"}, "search_b": None}
