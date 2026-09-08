@@ -21,6 +21,24 @@ TRACING_REDACTED_KEYS = frozenset({"mcp_http_headers"})
 TRACING_REDACTED_PLACEHOLDER = "***"
 
 
+def redact_tracing_keys(value: Any) -> Any:
+    """Replace the values of ``TRACING_REDACTED_KEYS`` at any depth, leaving the rest untouched.
+
+    ``format_value`` redacts as it walks a plain dict, but the model and ``to_dict`` branches
+    return an already-serialized structure it does not descend into. A per-run credential
+    reaches tracing that way - ``tool_params`` is a ``ToolParams`` model, so the header dict sits
+    nested inside a single ``model_dump()`` - so those branches redact their result with this.
+    """
+    if isinstance(value, dict):
+        return {
+            key: TRACING_REDACTED_PLACEHOLDER if key in TRACING_REDACTED_KEYS else redact_tracing_keys(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple, set)):
+        return type(value)(redact_tracing_keys(item) for item in value)
+    return value
+
+
 class TruncationMethod(str, Enum):
     """Enum for text truncation methods."""
 
@@ -422,7 +440,10 @@ def format_value(
         return type(value)(formatted_list)
 
     if isinstance(value, (RunnableResult, *python_input_schema_types)):
-        return value.to_dict(skip_format_types=skip_format_types, force_format_types=force_format_types)
+        formatted = value.to_dict(skip_format_types=skip_format_types, force_format_types=force_format_types)
+        # `to_dict` formats its own members without `for_tracing`, so redaction has to be reapplied
+        # to what it returns - a result carries the node input that may hold the credentials.
+        return redact_tracing_keys(formatted) if for_tracing else formatted
     if isinstance(value, BaseModel):
         dict_kwargs = {"for_tracing": for_tracing} if for_tracing else {}
         if hasattr(value, "to_dict"):
@@ -433,10 +454,8 @@ def format_value(
         else:
             base_dict = value.model_dump()
 
-        if for_tracing and isinstance(base_dict, dict):
-            base_dict = {
-                k: TRACING_REDACTED_PLACEHOLDER if k in TRACING_REDACTED_KEYS else v for k, v in base_dict.items()
-            }
+        if for_tracing:
+            base_dict = redact_tracing_keys(base_dict)
 
         return base_dict
     if isinstance(value, Exception):

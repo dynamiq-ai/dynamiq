@@ -18,10 +18,12 @@ from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.schema_utils import apply_param_modes
 from dynamiq.nodes.tools import FileListTool, FileReadTool
 from dynamiq.nodes.tools.mcp import (
+    MCP_HTTP_HEADERS_FIELD,
     MCPServer,
     MCPSse,
     MCPStreamableHTTP,
     MCPTool,
+    create_input_schema_from_json_schema,
     extract_text_from_mcp_content,
     split_mcp_http_headers,
 )
@@ -681,6 +683,14 @@ def test_get_input_schema_adds_hidden_mcp_http_headers_field():
     instance = model_cls(q="x", mcp_http_headers={"X-User-Id": "u1"})
     assert instance.q == "x"
     assert instance.mcp_http_headers == {"X-User-Id": "u1"}
+
+
+def test_shared_schema_builder_does_not_add_mcp_http_headers():
+    """Composio builds its schemas with the same helper and has no transport that honours it."""
+    model_cls = create_input_schema_from_json_schema(
+        {"type": "object", "properties": {"q": {"type": "string"}}}, "ComposioToolSchema"
+    )
+    assert MCP_HTTP_HEADERS_FIELD not in model_cls.model_fields
 
 
 def test_get_input_schema_keeps_tool_defined_headers_as_arguments():

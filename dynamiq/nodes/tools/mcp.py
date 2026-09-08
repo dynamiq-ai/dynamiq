@@ -399,8 +399,13 @@ def attach_mcp_http_headers_field(model: type[BaseModel]) -> type[BaseModel]:
 def create_input_schema_from_json_schema(
     schema_dict: dict[str, Any], model_name: str = "MCPToolSchema", definitions: dict[str, Any] | None = None
 ) -> type[BaseModel]:
-    """Create a Pydantic input-schema model from an MCP tool's JSON Schema."""
-    return attach_mcp_http_headers_field(_SchemaModelBuilder(dict(definitions or {})).build(schema_dict, model_name))
+    """Create a Pydantic input-schema model from an MCP tool's JSON Schema.
+
+    The builder is shared with non-MCP tools (Composio builds its schemas here too), so the
+    hidden ``mcp_http_headers`` field is attached by ``MCPTool.get_input_schema`` instead of
+    here: only MCP tools have a transport that honours it.
+    """
+    return _SchemaModelBuilder(dict(definitions or {})).build(schema_dict, model_name)
 
 
 class ServerMetadata(BaseModel):
@@ -469,9 +474,11 @@ class MCPTool(ConnectionNode):
             schema_dict (dict[str, Any]): A JSON schema dictionary describing the tool's expected input.
         """
         schema_dict = rename_keys_recursive(schema_dict, {"type_": "type"})
-        return create_input_schema_from_json_schema(
-            schema_dict,
-            "MCPToolSchema",
+        return attach_mcp_http_headers_field(
+            create_input_schema_from_json_schema(
+                schema_dict,
+                "MCPToolSchema",
+            )
         )
 
     @property
