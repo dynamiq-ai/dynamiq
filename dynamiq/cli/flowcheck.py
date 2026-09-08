@@ -39,6 +39,24 @@ PLACEHOLDER_TEMPLATE = re.compile(r"<[A-Za-z_][\w .-]*>")
 PROSE_KEYS = frozenset({"role", "description", "label", "instructions", "prompt", "content", "system_prompt"})
 
 
+def unwrap_response_format(value: dict) -> dict:
+    """The raw schema inside a response_format, however it was written.
+
+    Agent.response_format normalizes on the way in - a `mode="before"` validator routes every
+    value through `unwrap_response_format`, which strips litellm's
+    `{"type": "json_schema", "json_schema": {"schema": ...}}` wrapper. Reading `properties` off
+    the value as written therefore rejects the wrapped form, whose top-level keys are `type`
+    and `json_schema`, even though it constrains the answer perfectly well - and the repo's own
+    examples are written that way.
+    """
+    if value.get("type") == "json_schema" and "json_schema" in value:
+        inner = value["json_schema"]
+        if isinstance(inner, dict):
+            schema = inner.get("schema")
+            return schema if isinstance(schema, dict) else inner
+    return value
+
+
 def looks_like_placeholder(value) -> bool:
     """Whether a string is an unfilled template rather than real content."""
     if not isinstance(value, str) or len(value) >= 200:
@@ -355,11 +373,14 @@ def validate(flow, known_types: set | None = None):
                     f"agent {label!r}: `response_format` must be a JSON Schema object, got "
                     f"{type(response_format).__name__}."
                 )
-            elif isinstance(response_format, dict) and not response_format.get("properties"):
+            elif isinstance(response_format, dict) and not unwrap_response_format(
+                response_format
+            ).get("properties"):
                 errors.append(
                     f"agent {label!r}: `response_format` has no `properties`, so it constrains nothing. "
                     'Use e.g. {"type": "object", "properties": {"answer": {"type": "string"}}, '
-                    '"required": ["answer"]}.'
+                    '"required": ["answer"]}, or the litellm-wrapped form with the same schema '
+                    'under json_schema.schema.'
                 )
             if isinstance(llm, dict) and llm.get("response_format") is not None and response_format is None:
                 warnings.append(
