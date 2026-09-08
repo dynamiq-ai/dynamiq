@@ -884,6 +884,36 @@ def test_agent_applies_mcp_server_headers_from_tool_params(llm_model):
     assert captured["mcp_http_headers"] == {"X-User-Id": "u1"}
 
 
+def test_verbose_tool_params_log_redacts_mcp_http_headers(llm_model):
+    connection = MCPSse(url="https://example.com/")
+    server = MCPServer(name="github-mcp", id="srv-1", connection=connection)
+    tool = MCPTool(
+        name="create_issue",
+        description="Opens a GitHub issue.",
+        json_input_schema={"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]},
+        connection=connection,
+    )
+    tool._owner_server = server
+    agent = Agent(name="support", llm=llm_model, tools=[tool], verbose=True)
+
+    with (
+        patch.object(MCPTool, "execute", lambda self, input_data, config=None, **kwargs: {"content": "ok"}),
+        patch("dynamiq.nodes.agents.base.logger.debug") as debug,
+    ):
+        agent._run_tool(
+            tool=tool,
+            tool_input={"title": "bug"},
+            config=None,
+            tool_params=ToolParams(
+                by_name={"github-mcp": {"mcp_http_headers": {"Authorization": "Bearer user-token"}}}
+            ),
+        )
+
+    logged = "\n".join(str(call.args[0]) for call in debug.call_args_list if call.args)
+    assert "Bearer user-token" not in logged
+    assert "mcp_http_headers=***" in logged
+
+
 def test_agent_tool_params_headers_stay_off_tool_args_when_tool_declares_headers(llm_model):
     connection = MCPSse(url="https://example.com/")
     server = MCPServer(name="github-mcp", id="srv-1", connection=connection)

@@ -16,6 +16,10 @@ TRUNCATE_LIST_LIMIT = 50
 
 CHARS_PER_TOKEN = 4
 
+# Values for these keys are credentials; traces must not persist them in cleartext.
+TRACING_REDACTED_KEYS = frozenset({"mcp_http_headers"})
+TRACING_REDACTED_PLACEHOLDER = "***"
+
 
 class TruncationMethod(str, Enum):
     """Enum for text truncation methods."""
@@ -383,6 +387,9 @@ def format_value(
     if isinstance(value, dict):
         formatted_dict = {}
         for k, v in value.items():
+            if for_tracing and k in TRACING_REDACTED_KEYS:
+                formatted_dict[k] = TRACING_REDACTED_PLACEHOLDER
+                continue
             new_path = f"{path}.{k}" if path else k
             formatted_v = format_value(
                 v,
@@ -425,6 +432,11 @@ def format_value(
                 base_dict = value.to_dict()
         else:
             base_dict = value.model_dump()
+
+        if for_tracing and isinstance(base_dict, dict):
+            base_dict = {
+                k: TRACING_REDACTED_PLACEHOLDER if k in TRACING_REDACTED_KEYS else v for k, v in base_dict.items()
+            }
 
         return base_dict
     if isinstance(value, Exception):

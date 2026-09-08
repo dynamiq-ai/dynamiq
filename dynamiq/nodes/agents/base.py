@@ -74,7 +74,7 @@ from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.utils.logger import logger
-from dynamiq.utils.utils import deep_merge
+from dynamiq.utils.utils import TRACING_REDACTED_KEYS, TRACING_REDACTED_PLACEHOLDER, deep_merge
 
 # Per-call tool overlay (e.g. LTM tools bound to a request's user_id); isolated
 # per thread / per asyncio task via ContextVar.
@@ -1454,8 +1454,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 merged_input[key] = deep_merge(value, merged_nested)
                 debug_info.append(f"  - From {source}: Merged nested {key}")
             else:
+                logged_value = TRACING_REDACTED_PLACEHOLDER if key in TRACING_REDACTED_KEYS else value
                 merged_input[key] = value
-                debug_info.append(f"  - From {source}: Set {key}={value}")
+                debug_info.append(f"  - From {source}: Set {key}={logged_value}")
 
     def _clone_tool_for_execution(
         self,
