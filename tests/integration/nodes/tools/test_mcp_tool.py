@@ -15,6 +15,7 @@ from dynamiq.nodes.agents.base import ToolParams
 from dynamiq.nodes.agents.components import schema_generator
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.schema_utils import apply_param_modes
 from dynamiq.nodes.tools import FileListTool, FileReadTool
 from dynamiq.nodes.tools.mcp import (
     MCPServer,
@@ -24,6 +25,7 @@ from dynamiq.nodes.tools.mcp import (
     extract_text_from_mcp_content,
     split_mcp_http_headers,
 )
+from dynamiq.nodes.types import InputParamMode
 
 
 def assert_tool_matches(tool, expected, connection):
@@ -720,6 +722,24 @@ def test_get_input_schema_skips_attach_when_tool_declares_mcp_http_headers():
     instance = model_cls(mcp_http_headers={"Accept": "text/plain"}, q="x")
     args, http_headers = split_mcp_http_headers(instance)
     assert args["mcp_http_headers"] == {"Accept": "text/plain"}
+    assert http_headers is None
+
+
+def test_hidden_tool_headers_argument_is_not_diverted_to_http():
+    model_cls = MCPTool.get_input_schema(
+        {
+            "type": "object",
+            "properties": {"url": {"type": "string"}, "headers": {"type": "object"}},
+            "required": ["url"],
+        }
+    )
+    hidden_cls = apply_param_modes(model_cls, {"headers": InputParamMode.HIDDEN})
+    extra = hidden_cls.model_fields["headers"].json_schema_extra or {}
+    assert extra.get("is_accessible_to_agent") is False
+    assert extra.get("is_mcp_http_headers") is not True
+    instance = hidden_cls(url="http://x", headers={"Accept": "text/plain"})
+    args, http_headers = split_mcp_http_headers(instance)
+    assert args["headers"] == {"Accept": "text/plain"}
     assert http_headers is None
 
 
