@@ -16,7 +16,7 @@ TRUNCATE_LIST_LIMIT = 50
 
 CHARS_PER_TOKEN = 4
 
-# Values for these keys are credentials; traces must not persist them in cleartext.
+# Values for these keys are credentials; traces and logs must not persist them in cleartext.
 TRACING_REDACTED_KEYS = frozenset({"mcp_http_headers"})
 TRACING_REDACTED_PLACEHOLDER = "***"
 
@@ -185,18 +185,29 @@ def _file_name_for_log(file_obj: Any, index: int | None = None) -> str:
     return "<unnamed file>"
 
 
+def _log_value_or_redaction(key: str, value: Any) -> Any:
+    """The formatted value, or the placeholder when the key names a credential."""
+    if key in TRACING_REDACTED_KEYS:
+        return TRACING_REDACTED_PLACEHOLDER
+    return format_value_for_log(value)
+
+
 def format_value_for_log(value: Any) -> Any:
     """Recursively replace BytesIO/bytes with file names for safe logging.
 
     Mirrors :func:`serialize_files_in_value` structure but never embeds file content —
     only ``name`` (or a ``file_{i}`` / ``<unnamed file>`` placeholder).
+
+    Values of :data:`TRACING_REDACTED_KEYS` are replaced too: the node lifecycle logs render
+    a validated input instance through here at DEBUG, and that instance carries the same
+    credentials the trace redacts.
     """
     if isinstance(value, BytesIO):
         return _file_name_for_log(value)
     if isinstance(value, bytes):
         return f"<bytes len={len(value)}>"
     if isinstance(value, dict):
-        return {k: format_value_for_log(v) for k, v in value.items()}
+        return {k: _log_value_or_redaction(k, v) for k, v in value.items()}
     if isinstance(value, list):
         return [
             _file_name_for_log(item, i) if isinstance(item, BytesIO) else format_value_for_log(item)
@@ -208,9 +219,9 @@ def format_value_for_log(value: Any) -> Any:
             for i, item in enumerate(value)
         )
     if isinstance(value, BaseModel):
-        data = {k: format_value_for_log(getattr(value, k)) for k in type(value).model_fields}
+        data = {k: _log_value_or_redaction(k, getattr(value, k)) for k in type(value).model_fields}
         if value.model_extra:
-            data.update({k: format_value_for_log(v) for k, v in value.model_extra.items()})
+            data.update({k: _log_value_or_redaction(k, v) for k, v in value.model_extra.items()})
         return data
     return value
 

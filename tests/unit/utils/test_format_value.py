@@ -1,6 +1,7 @@
 from dynamiq.nodes.agents.base import ToolParams
+from dynamiq.nodes.tools.mcp import MCPTool
 from dynamiq.runnables import RunnableResult, RunnableStatus
-from dynamiq.utils.utils import TRACING_REDACTED_PLACEHOLDER, format_value
+from dynamiq.utils.utils import TRACING_REDACTED_PLACEHOLDER, format_value, format_value_for_log
 
 
 def test_format_value_redacts_mcp_http_headers_for_tracing():
@@ -43,3 +44,16 @@ def test_format_value_redacts_mcp_http_headers_carried_by_a_runnable_result():
     assert traced["input"]["mcp_http_headers"] == TRACING_REDACTED_PLACEHOLDER
     assert traced["input"]["q"] == "x"
     assert traced["output"] == {"content": "ok"}
+
+
+def test_format_value_for_log_redacts_mcp_http_headers():
+    """The node lifecycle logs render the validated input instance through this at DEBUG."""
+    schema = MCPTool.get_input_schema({"type": "object", "properties": {"query": {"type": "string"}}})
+    instance = schema(query="hi", mcp_http_headers={"Authorization": "Bearer user-token"})
+
+    logged = format_value_for_log(instance)
+    assert logged["mcp_http_headers"] == TRACING_REDACTED_PLACEHOLDER
+    assert logged["query"] == "hi"
+
+    nested = format_value_for_log({"tool_params": {"github-mcp": {"mcp_http_headers": {"Authorization": "Bearer t"}}}})
+    assert nested["tool_params"]["github-mcp"]["mcp_http_headers"] == TRACING_REDACTED_PLACEHOLDER
