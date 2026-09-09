@@ -38,6 +38,7 @@ from dynamiq.nodes.agents.prompts.secondary_instructions import (
 )
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.storages.file.base import PersistentStoreConfig, describe_memory_namespaces
 from dynamiq.utils.logger import logger
 
 
@@ -64,12 +65,21 @@ def _build_persistent_store_instructions(config: "ReactPromptConfig") -> str:
         if config.persistent_store_writable
         else PERSISTENT_STORE_READONLY_INSTRUCTIONS_TEMPLATE
     )
-    return template.format(
+    block = template.format(
         path=config.persistent_store_path,
         read_tool=read_tool,
         write_tool=write_tool,
         list_tool=list_tool,
     )
+
+    # Several memories, or one the caller bothered to name: say what each holds, or the model has no
+    # way to choose between them.
+    listing = describe_memory_namespaces(config.persistent_store_namespaces)
+    if listing:
+        block += f"\n\nYour memories, each holding something different:\n{listing}"
+        if len(config.persistent_store_namespaces) > 1:
+            block += "\nPut each fact in the one it belongs to. When two disagree, the later one wins."
+    return block
 
 
 class ReactPromptConfig(BaseModel):
@@ -84,6 +94,7 @@ class ReactPromptConfig(BaseModel):
     todo_management_enabled: bool = False
     persistent_store_enabled: bool = False
     persistent_store_path: str = "memories/"
+    persistent_store_namespaces: list[PersistentStoreConfig] = []
     persistent_store_writable: bool = True
     persistent_store_dedicated_tools: bool = False
     sandbox_base_path: str | None = None

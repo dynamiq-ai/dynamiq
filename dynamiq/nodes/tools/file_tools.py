@@ -27,7 +27,7 @@ from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox
-from dynamiq.storages.file.base import FileStore
+from dynamiq.storages.file.base import FileStore, PersistentStoreConfig, describe_memory_namespaces, memory_root
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.file_types import EXTENSION_MAP, FileType
 
@@ -1891,14 +1891,16 @@ class FileListTool(Node):
 
 PERSISTENT_READ_DESCRIPTION_TEMPLATE = (
     "Reads a file from your persistent store - knowledge you have kept from earlier conversations. "
-    "Paths are addressed under '{prefix}'. Use '{list_tool}' first if you do not know the exact path.\n\n"
+    "Paths are addressed under '{prefix}'. Use '{list_tool}' first if you do not know the exact path."
+    "{namespaces}\n\n"
     "Usage Examples:\n"
     "- Read a memory: {{'file_path': '{prefix}preferences.md'}}\n"
 )
 
 PERSISTENT_WRITE_DESCRIPTION_TEMPLATE = (
     "Creates or edits a file in your persistent store, so the knowledge survives this conversation. "
-    "Paths are addressed under '{prefix}'.\n\n"
+    "Paths are addressed under '{prefix}'. Put each fact in the memory it belongs to."
+    "{namespaces}\n\n"
     "Call this proactively, in the same step as the work, whenever the user:\n"
     "1. states a preference, a standing rule, or how they want things done;\n"
     "2. tells you something lasting about themselves, their team, their project or their setup;\n"
@@ -1919,7 +1921,8 @@ PERSISTENT_WRITE_DESCRIPTION_TEMPLATE = (
 
 PERSISTENT_LIST_DESCRIPTION_TEMPLATE = (
     "Lists the files in your persistent store - knowledge kept from earlier conversations, addressed "
-    "under '{prefix}'. Check this before starting a task to see what you already know.\n\n"
+    "under '{prefix}'. Check this before starting a task to see what you already know."
+    "{namespaces}\n\n"
     "Usage Examples:\n"
     "- List everything: {{'file_path': '{prefix}', 'recursive': true}}\n"
 )
@@ -1930,6 +1933,7 @@ def build_persistent_file_tools(
     backend: FileStore,
     llm: BaseLLM,
     write_enabled: bool = True,
+    namespaces: list[PersistentStoreConfig] | None = None,
     path_prefix: str = "memories/",
 ) -> list[Node]:
     """Build a dedicated tool set bound to a persistent, cross-conversation store.
@@ -1943,28 +1947,40 @@ def build_persistent_file_tools(
     a ``FileStore``, prefer routing a prefix through ``CompositeFileStore`` instead, which keeps a
     single set of file tools.
 
+    One set serves every memory: the path decides which store answers, so a second or third costs no
+    extra tools, only an extra line in each description saying what it holds.
+
     Args:
-        backend: The persistent store (``DynamiqFileStore`` in practice).
+        backend: The persistent store - ``DynamiqFileStore`` for a single memory, or the
+            ``CompositeFileStore`` spanning several.
         llm: LLM used by the read tool to process non-text files.
         write_enabled: Whether to include the write tool.
-        path_prefix: Prefix the agent uses to address persistent files.
+        namespaces: The declared memories, listed in the descriptions so the model can tell them
+            apart. Defaults to a single memory at ``path_prefix``.
+        path_prefix: Prefix used in the usage examples. Taken from the memories when given.
 
     Returns:
         The persistent-store tools: read, list, and optionally write.
     """
-    prefix = path_prefix if path_prefix.endswith("/") else f"{path_prefix}/"
+    namespaces = namespaces or []
+    prefix = memory_root(namespaces) if namespaces else path_prefix
+    prefix = prefix if prefix.endswith("/") else f"{prefix}/"
+    listing = describe_memory_namespaces(namespaces)
+    listing = f"\n\nYour memories:\n{listing}" if listing else ""
 
     tools: list[Node] = [
         FileReadTool(
             file_store=backend,
             llm=llm,
             name="memory-read",
-            description=PERSISTENT_READ_DESCRIPTION_TEMPLATE.format(prefix=prefix, list_tool="memory-list"),
+            description=PERSISTENT_READ_DESCRIPTION_TEMPLATE.format(
+                prefix=prefix, list_tool="memory-list", namespaces=listing
+            ),
         ),
         FileListTool(
             file_store=backend,
             name="memory-list",
-            description=PERSISTENT_LIST_DESCRIPTION_TEMPLATE.format(prefix=prefix),
+            description=PERSISTENT_LIST_DESCRIPTION_TEMPLATE.format(prefix=prefix, namespaces=listing),
         ),
     ]
 
@@ -1973,7 +1989,7 @@ def build_persistent_file_tools(
             FileWriteTool(
                 file_store=backend,
                 name="memory-write",
-                description=PERSISTENT_WRITE_DESCRIPTION_TEMPLATE.format(prefix=prefix),
+                description=PERSISTENT_WRITE_DESCRIPTION_TEMPLATE.format(prefix=prefix, namespaces=listing),
             )
         )
 

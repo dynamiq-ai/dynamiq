@@ -103,6 +103,24 @@ def test_list_files_in_a_routed_directory_delegates(store):
     assert paths == {"memories/notes.md"}
 
 
+def test_list_files_above_several_routes_merges_them(workspace):
+    """A directory holding more than one route belongs to none of them, so all of them answer."""
+    handbook, personal = InMemoryFileStore(), InMemoryFileStore()
+    store = CompositeFileStore(
+        default=workspace,
+        routes={"memories/handbook/": handbook, "memories/me/": personal},
+    )
+    store.store("scratch.md", "a")
+    store.store("memories/handbook/deploys.md", "b")
+    store.store("memories/me/style.md", "c")
+
+    paths = {info.path for info in store.list_files(directory="memories/", recursive=True)}
+
+    assert paths == {"memories/handbook/deploys.md", "memories/me/style.md"}
+    assert handbook.exists("memories/handbook/deploys.md")
+    assert personal.exists("memories/me/style.md")
+
+
 def test_list_files_tolerates_a_backend_without_pattern_support(store):
     """InMemoryFileStore drops the `pattern` argument the base class declares."""
     store.store("memories/notes.md", "b")

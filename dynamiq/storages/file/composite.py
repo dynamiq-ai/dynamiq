@@ -97,10 +97,20 @@ class CompositeFileStore(FileStore):
         if not normalized:
             return None
         candidate = f"{normalized}/"
+
+        # Inside a route: the longest matching prefix owns it, as in `_resolve`.
+        owner, match = None, ""
         for prefix, store in self.routes.items():
-            if candidate.startswith(prefix) or prefix.startswith(candidate):
-                return store, normalized
-        return None
+            if candidate.startswith(prefix) and len(prefix) > len(match):
+                owner, match = store, prefix
+        if owner is not None:
+            return owner, normalized
+
+        # A directory above routes belongs to a single store only when it holds exactly one. Above
+        # several - `memories/` over `memories/handbook/` and `memories/me/` - it belongs to none of
+        # them, and the caller merges instead of picking whichever route happened to come first.
+        below = [store for prefix, store in self.routes.items() if prefix.startswith(candidate)]
+        return (below[0], normalized) if len(below) == 1 else None
 
     @staticmethod
     def _list_files(store: FileStore, directory: str, recursive: bool, pattern: str | None) -> list[FileInfo]:
@@ -171,8 +181,12 @@ class CompositeFileStore(FileStore):
             if not any(normalize_path(info.path).startswith(prefix) for prefix in self.routes)
         ]
 
-        if not normalized:
-            for prefix, store in self.routes.items():
+        # Every route nested under the requested directory answers too, so listing the root the
+        # memory protocol names sees all of them. At the store root that is every route, which is
+        # the behaviour this generalises.
+        scope = f"{normalized}/" if normalized else ""
+        for prefix, store in self.routes.items():
+            if prefix.startswith(scope):
                 results.extend(self._list_files(store, prefix.rstrip("/"), recursive, pattern))
 
         return results

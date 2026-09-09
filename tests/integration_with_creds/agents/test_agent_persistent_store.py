@@ -29,7 +29,8 @@ So ``test_store_crud_against_the_api`` doubles as a conformance suite — it pin
 and validates the real server the day it ships. The simulator is also the clearest statement of what
 the endpoints must do; read it alongside the spec.
 
-Each run works inside its own prefix (``memories/it-<run id>/``) and deletes it afterwards, so
+Each run works inside its own namespace (``it-<run id>``, resolving to ``memories/it-<run id>/``)
+and deletes it afterwards, so
 concurrent or repeated runs never collide and nothing is left behind in a shared store.
 """
 
@@ -60,6 +61,7 @@ from dynamiq.storages.file import (
     InMemoryFileStore,
     PersistentStoreConfig,
 )
+from dynamiq.storages.file.base import MEMORY_ROOT
 
 # One request carrying both kinds of thing: a one-off deliverable and a standing preference.
 # Memory must take the preference and leave the code behind — that split is what these tests check.
@@ -223,14 +225,19 @@ def e2b_connection():
 
 @pytest.fixture
 def persistent_store(monkeypatch):
-    """A store scoped to a throwaway prefix: the live API when configured, else the simulator."""
-    prefix = f"memories/it-{uuid.uuid4().hex[:8]}/"
+    """A store scoped to a throwaway namespace: the live API when configured, else the simulator.
+
+    Yields the namespace as a caller writes it — a plain name — alongside the path it resolves to,
+    so the tests exercise the appending rather than restating it.
+    """
+    namespace = f"it-{uuid.uuid4().hex[:8]}"
+    prefix = f"{MEMORY_ROOT}{namespace}/"
     store_id = os.getenv("DYNAMIQ_MEMORY_STORE_ID")
     user = os.getenv("DYNAMIQ_USER_ID", "integration-test-user")
 
     if store_id:
         store = DynamiqFileStore(connection=DynamiqConnection(), memory_store_id=store_id, user=user)
-        yield store, prefix
+        yield store, namespace, prefix
         for info in store.list_files(directory=prefix, recursive=True):
             store.delete(info.path)
         return
@@ -242,7 +249,7 @@ def persistent_store(monkeypatch):
         memory_store_id="ms-simulated",
         user=user,
     )
-    yield store, prefix
+    yield store, namespace, prefix
 
 
 TRACE_DIR = "/Users/mihajlobulesnij/Documents/work/dynamiq/trace/"
@@ -277,7 +284,7 @@ def traced_run(trace_file, run_config, persistent_store):
     Store changes are captured as a before/after diff of the prefix rather than as HTTP, so the
     trace reads the same whether the run went to the simulator or a live server.
     """
-    store, prefix = persistent_store
+    store, namespace, prefix = persistent_store
 
     def snapshot():
         return {i.path: store.retrieve(i.path) for i in store.list_files(directory=prefix, recursive=True)}
@@ -413,7 +420,7 @@ def test_store_crud_against_the_api(persistent_store):
     Run this first when bringing a server up: it isolates the HTTP contract from agent behaviour,
     so a failure here is the server's, not the model's.
     """
-    store, prefix = persistent_store
+    store, namespace, prefix = persistent_store
     path = f"{prefix}probe.md"
 
     info = store.store(path, "probe body", content_type="text/markdown", overwrite=True)
@@ -436,7 +443,7 @@ def test_store_error_branches(persistent_store):
     """The parts of the contract a server is most likely to leave out."""
     from dynamiq.storages.file.base import FileExistsError, FileNotFoundError
 
-    store, prefix = persistent_store
+    store, namespace, prefix = persistent_store
     path = f"{prefix}guard.md"
 
     with pytest.raises(FileNotFoundError):
@@ -454,7 +461,7 @@ def test_store_error_branches(persistent_store):
 @pytest.mark.integration
 def test_composite_memories_survive_into_a_new_conversation(openai_llm, run_config, persistent_store, traced_run):
     """Mode 1: the preference lands in memory, the code does not, and a fresh agent recalls it."""
-    store, prefix = persistent_store
+    store, namespace, prefix = persistent_store
 
     def build_agent(name):
         return Agent(
@@ -471,7 +478,7 @@ def test_composite_memories_survive_into_a_new_conversation(openai_llm, run_conf
                 backend=CompositeFileStore(default=InMemoryFileStore(), routes={prefix: store}),
                 agent_file_write_enabled=True,
             ),
-            persistent_store=PersistentStoreConfig(enabled=True, backend=store, path_prefix=prefix),
+            persistent_store=PersistentStoreConfig(enabled=True, backend=store, path_prefix=namespace),
         )
 
     traced_run(build_agent("PersistentWriter"), CODE_TASK, "Composite · conversation A · code plus a preference")
@@ -494,7 +501,7 @@ def test_e2b_sandbox_keeps_memories_out_of_the_sandbox(
 
     from dynamiq.sandboxes.e2b import E2BSandbox
 
-    store, prefix = persistent_store
+    store, namespace, prefix = persistent_store
     sandbox = E2BSandbox(connection=e2b_connection, timeout=300)
     try:
         agent = Agent(
@@ -504,7 +511,7 @@ def test_e2b_sandbox_keeps_memories_out_of_the_sandbox(
             inference_mode=InferenceMode.FUNCTION_CALLING,
             max_loops=8,
             sandbox=SandboxConfig(enabled=True, backend=sandbox),
-            persistent_store=PersistentStoreConfig(enabled=True, backend=store, path_prefix=prefix),
+            persistent_store=PersistentStoreConfig(enabled=True, backend=store, path_prefix=namespace),
         )
         tool_names = {t.name for t in agent.tools}
         assert {"memory-read", "memory-list", "memory-write"} <= tool_names, tool_names
@@ -520,9 +527,76 @@ def test_e2b_sandbox_keeps_memories_out_of_the_sandbox(
             role=ROLE,
             inference_mode=InferenceMode.FUNCTION_CALLING,
             max_loops=6,
-            persistent_store=PersistentStoreConfig(enabled=True, backend=store, path_prefix=prefix),
+            persistent_store=PersistentStoreConfig(enabled=True, backend=store, path_prefix=namespace),
         )
         answer = _answer(traced_run(reader, STYLE_QUESTION, "Sandbox · new conversation, never told the preference"))
         assert "docstring" in answer.lower(), f"Agent failed to recall the preference. Answer: {answer[:500]}"
     finally:
         sandbox.close(kill=True)
+
+
+# A naming rule no model can produce by chance, planted in the team memory and mentioned nowhere in
+# the request. Code that follows it can only have come from the agent reading that memory.
+TEAM_CONVENTION = "Every function name must start with the prefix `zx_`, e.g. `zx_parse_config`."
+
+
+@pytest.mark.flaky(reruns=2)
+@pytest.mark.integration
+def test_two_memories_are_told_apart(openai_llm, run_config, persistent_store, traced_run):
+    """Mode 3: two memories at once — the shared team one and the user's own.
+
+    The task is the same as everywhere else, so nothing in it points at either memory. Telling them
+    apart is the whole test: the team convention is *read* and applied to the code, while the
+    preference the user volunteers is *written* to the user memory and not to the team's. Only the
+    per-memory `name` and `description` distinguish them.
+    """
+    store, run_namespace, run_prefix = persistent_store
+    # Namespaces as a caller writes them; the fixed root turns each into its addressed path.
+    team_namespace, user_namespace = f"{run_namespace}/team", f"{run_namespace}/me"
+    team_prefix, user_prefix = f"{run_prefix}team/", f"{run_prefix}me/"
+    store.store(f"{team_prefix}naming.md", TEAM_CONVENTION, content_type="text/markdown", overwrite=True)
+
+    agent = Agent(
+        name="TwoMemories",
+        llm=openai_llm,
+        role=ROLE,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
+        max_loops=8,
+        # A plain workspace for the deliverable; both memories are routed under it by the agent.
+        file_store=FileStoreConfig(enabled=True, backend=InMemoryFileStore(), agent_file_write_enabled=True),
+        persistent_store=[
+            PersistentStoreConfig(
+                enabled=True,
+                backend=store,
+                path_prefix=team_namespace,
+                write_enabled=False,
+                name="team",
+                description="Conventions the whole team follows. Shared and curated elsewhere.",
+            ),
+            PersistentStoreConfig(
+                enabled=True,
+                backend=store,
+                path_prefix=user_namespace,
+                name="user",
+                description="What you learn about this specific user.",
+            ),
+        ],
+    )
+
+    traced_run(agent, CODE_TASK, "Two memories · team convention applied, user preference recorded")
+
+    workspace = "\n".join(
+        agent.file_store_backend.retrieve(info.path).decode(errors="replace")
+        for info in agent.file_store_backend.list_files(recursive=True)
+        if not info.path.startswith(run_prefix)
+    )
+    assert "zx_" in workspace, f"Team convention was not read or not applied. Workspace holds: {workspace[:500]}"
+
+    user_paths = [info.path for info in store.list_files(directory=user_prefix, recursive=True)]
+    assert user_paths, f"Nothing recorded in the user memory under {user_prefix}."
+    recorded = b"".join(store.retrieve(path) for path in user_paths).decode()
+    assert "docstring" in recorded.lower(), f"Preference not recorded. User memory holds: {recorded[:500]}"
+
+    team_paths = [info.path for info in store.list_files(directory=team_prefix, recursive=True)]
+    assert team_paths == [f"{team_prefix}naming.md"], f"The shared team memory was written to: {team_paths}"
+    assert store.retrieve(f"{team_prefix}naming.md").decode() == TEAM_CONVENTION

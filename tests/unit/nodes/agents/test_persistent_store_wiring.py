@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from dynamiq.connections import E2B, Dynamiq
 from dynamiq.connections import OpenAI as OpenAIConnection
@@ -9,7 +10,7 @@ from dynamiq.nodes.llms import OpenAI
 from dynamiq.sandboxes.base import SandboxConfig
 from dynamiq.sandboxes.e2b import E2BSandbox
 from dynamiq.storages.file import CompositeFileStore, DynamiqFileStore, InMemoryFileStore
-from dynamiq.storages.file.base import FileStoreConfig, PersistentStoreConfig
+from dynamiq.storages.file.base import FileStoreConfig, PersistentStoreConfig, memory_root
 
 
 @pytest.fixture
@@ -188,15 +189,53 @@ def test_file_store_mode_is_read_only_without_agent_file_write(llm, persistent_b
 
 
 def test_custom_path_prefix_is_used_everywhere(llm, persistent_backend):
+    """`path_prefix` names a namespace; the root is fixed, so it can only ever land under it."""
     agent = Agent(
         name="a",
         llm=llm,
         file_store=FileStoreConfig(enabled=True, backend=InMemoryFileStore(), agent_file_write_enabled=True),
-        persistent_store=_persistent(persistent_backend, path_prefix="knowledge/"),
+        persistent_store=_persistent(persistent_backend, path_prefix="knowledge"),
     )
 
-    assert list(agent.file_store_backend.routes) == ["knowledge/"]
-    assert "knowledge/" in _ops_block(agent)
+    assert list(agent.file_store_backend.routes) == ["memories/knowledge/"]
+    assert "memories/knowledge/" in _ops_block(agent)
+
+
+@pytest.mark.parametrize(
+    "supplied",
+    ["knowledge", "knowledge/", "memories/knowledge", "memories/knowledge/", "/memories/knowledge/"],
+)
+def test_every_spelling_of_a_namespace_addresses_the_same_place(llm, persistent_backend, supplied):
+    """The root is fixed and prepended, so a caller cannot land outside it or double it up."""
+    agent = Agent(
+        name="a",
+        llm=llm,
+        file_store=FileStoreConfig(enabled=True, backend=InMemoryFileStore(), agent_file_write_enabled=True),
+        persistent_store=_persistent(persistent_backend, path_prefix=supplied),
+    )
+
+    assert list(agent.file_store_backend.routes) == ["memories/knowledge/"]
+
+
+def test_a_namespace_cannot_escape_the_root(persistent_backend):
+    with pytest.raises(ValidationError):
+        _persistent(persistent_backend, path_prefix="../escape")
+
+
+def test_memories_always_share_one_listable_root(llm, persistent_backend):
+    """Sibling-looking namespaces still sit under the root, so one listing reaches them all."""
+    other = InMemoryFileStore()
+    agent = Agent(
+        name="a",
+        llm=llm,
+        persistent_store=[
+            _persistent(persistent_backend, path_prefix="user"),
+            _persistent(other, path_prefix="company"),
+        ],
+    )
+
+    assert memory_root(agent.persistent_stores) == "memories/"
+    assert [c.normalized_prefix for c in agent.persistent_stores] == ["memories/user/", "memories/company/"]
 
 
 def test_yaml_round_trip_rebuilds_the_store_and_its_tools(llm, persistent_backend, tmp_path):
@@ -277,3 +316,128 @@ def test_a_different_route_target_still_composes(llm, persistent_backend):
     assert agent.file_store_backend is not composite
     assert agent.file_store_backend.routes["memories/"] is persistent_backend
 
+
+def _two_memories():
+    """Two memories with nothing in common but the root they hang off."""
+    handbook, personal = InMemoryFileStore(), InMemoryFileStore()
+    return (
+        handbook,
+        personal,
+        [
+            PersistentStoreConfig(
+                enabled=True,
+                backend=handbook,
+                path_prefix="memories/handbook/",
+                write_enabled=False,
+                name="handbook",
+                description="Team conventions and runbooks.",
+            ),
+            PersistentStoreConfig(
+                enabled=True,
+                backend=personal,
+                path_prefix="memories/me/",
+                name="user",
+                description="What you learn about this specific user.",
+            ),
+        ],
+    )
+
+
+def test_several_memories_share_one_tool_set(llm):
+    """The path picks the memory, so a second one costs no extra tools."""
+    handbook, personal, namespaces = _two_memories()
+    handbook.store("memories/handbook/deploys.md", b"Deploys are frozen on Fridays.")
+
+    agent = Agent(name="a", llm=llm, persistent_store=namespaces)
+
+    assert _tool_names(agent) == ["memory-read", "memory-list", "memory-write"]
+    read, listing, write = (
+        next(t for t in agent.tools if t.name == name) for name in ("memory-read", "memory-list", "memory-write")
+    )
+
+    assert "frozen on Fridays" in read.run(input_data={"file_path": "memories/handbook/deploys.md"}).output["content"]
+
+    write.run(input_data={"action": "write", "file_path": "memories/me/style.md", "content": "3-line docstrings."})
+    assert personal.exists("memories/me/style.md")
+    assert not handbook.exists("memories/me/style.md"), "A write leaked into the wrong memory."
+
+    # The agent is told to list the root first, so that one call has to reach every memory.
+    everything = listing.run(input_data={"file_path": "memories/", "recursive": True}).output["content"]
+    assert "memories/handbook/deploys.md" in everything and "memories/me/style.md" in everything
+
+
+def test_several_memories_route_under_a_file_store(llm):
+    """With a workspace the memories become routes on the composite the file tools already use."""
+    workspace = InMemoryFileStore()
+    handbook, personal, namespaces = _two_memories()
+    agent = Agent(
+        name="a",
+        llm=llm,
+        file_store=FileStoreConfig(enabled=True, backend=workspace, agent_file_write_enabled=True),
+        persistent_store=namespaces,
+    )
+
+    backend = agent.file_store_backend
+    assert isinstance(backend, CompositeFileStore)
+    assert sorted(backend.routes) == ["memories/handbook/", "memories/me/"]
+    assert all(tool.file_store is backend for tool in agent.tools)
+
+    backend.store("memories/me/style.md", "3-line docstrings.")
+    backend.store("scratch.md", "ephemeral")
+
+    assert personal.retrieve("memories/me/style.md") == b"3-line docstrings."
+    assert workspace.retrieve("scratch.md") == b"ephemeral"
+    assert not workspace.exists("memories/me/style.md")
+    assert not handbook.exists("memories/me/style.md")
+
+
+def test_each_memory_is_described_to_the_model(llm):
+    """Names and descriptions are the only way the model can tell one memory from another."""
+    _, _, namespaces = _two_memories()
+    agent = Agent(name="a", llm=llm, persistent_store=namespaces)
+
+    ops = _ops_block(agent)
+    write_description = next(t for t in agent.tools if t.name == "memory-write").description
+
+    for text in (ops, write_description):
+        assert "handbook: Team conventions and runbooks." in text
+        assert "user: What you learn about this specific user." in text
+        assert "memories/handbook/" in text and "memories/me/" in text
+
+    assert "Read-only." in ops, "A memory that refuses writes must say so."
+    assert "the later one wins" in ops, "Several memories need a stated precedence."
+    # The protocol sends the agent to the directory holding both, not to either one of them.
+    assert "`memory-list` memories/ BEFORE" in ops
+
+
+def test_a_single_memory_is_unchanged(llm, persistent_backend):
+    """An unnamed lone memory renders and binds exactly as it did before memories could be plural."""
+    one = Agent(name="a", llm=llm, persistent_store=_persistent(persistent_backend))
+    listed = Agent(name="a", llm=llm, persistent_store=[_persistent(persistent_backend)])
+
+    assert _ops_block(one) == _ops_block(listed), "A list of one is the same agent."
+    assert "Your memories" not in _ops_block(one)
+    assert all(tool.file_store is persistent_backend for tool in one.tools), "A lone memory needs no composite."
+
+
+def test_several_memories_survive_a_yaml_round_trip(llm, tmp_path):
+    from dynamiq import Workflow
+    from dynamiq.flows import Flow
+
+    _, _, namespaces = _two_memories()
+    namespaces[0].backend = DynamiqFileStore(
+        connection=Dynamiq(url="https://api.example.ai/", api_key="secret-token"),
+        memory_store_id="ms-handbook",
+    )
+    path = str(tmp_path / "wf.yaml")
+    Workflow(flow=Flow(nodes=[Agent(name="a", llm=llm, persistent_store=namespaces)])).to_yaml_file(path)
+
+    reloaded = Workflow.from_yaml_file(path, init_components=True).flow.nodes[0]
+
+    assert [config.name for config in reloaded.persistent_stores] == ["handbook", "user"]
+    assert [config.path_prefix for config in reloaded.persistent_stores] == ["handbook", "me"]
+    assert [c.normalized_prefix for c in reloaded.persistent_stores] == ["memories/handbook/", "memories/me/"]
+    assert reloaded.persistent_stores[0].description == "Team conventions and runbooks."
+    assert reloaded.persistent_stores[0].write_enabled is False
+    assert reloaded.persistent_stores[0].backend.memory_store_id == "ms-handbook"
+    assert _tool_names(reloaded) == ["memory-read", "memory-list", "memory-write"]

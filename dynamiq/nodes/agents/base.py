@@ -77,7 +77,7 @@ from dynamiq.skills.registries.dynamiq import Dynamiq
 from dynamiq.skills.types import SkillMetadata
 from dynamiq.skills.utils import ingest_skills_into_sandbox, normalize_sandbox_skills_base_path
 from dynamiq.storages.file.base import FileStore, FileStoreConfig, PersistentStoreConfig
-from dynamiq.storages.file.composite import CompositeFileStore, normalize_path
+from dynamiq.storages.file.composite import CompositeFileStore
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.utils.logger import logger
@@ -291,11 +291,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
         description="Configuration for file storage used by the agent.",
     )
-    persistent_store: PersistentStoreConfig | None = Field(
+    persistent_store: PersistentStoreConfig | list[PersistentStoreConfig] | None = Field(
         default=None,
         description=(
             "Configuration for a persistent, cross-conversation file namespace. Kept separate from "
-            "`file_store` so it remains available to sandbox-backed agents, which cannot enable a file store."
+            "`file_store` so it remains available to sandbox-backed agents, which cannot enable a file store. "
+            "Pass a list to give the agent several memories, each under its own `path_prefix`."
         ),
     )
     sandbox: SandboxConfig | None = Field(default=None, description="Configuration for sandbox used by the agent.")
@@ -460,15 +461,15 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if self.file_store.agent_file_write_enabled:
                 self.tools.append(FileWriteTool(file_store=file_backend))
 
-        if self.persistent_store_backend and not self.file_store_backend:
+        if self.persistent_stores and not self.file_store_backend:
             # No FileStore workspace to merge into - either a sandbox owns an absolute filesystem
             # that cannot share one namespace, or there is no workspace at all. Give the persistent
             # store its own `memory-*` tools. Not serialized; rebuilt from `persistent_store`.
             persistent_tools = build_persistent_file_tools(
-                backend=self.persistent_store_backend,
+                backend=self._compose_file_store_backend(),
                 llm=self.llm,
-                write_enabled=self.persistent_store.write_enabled,
-                path_prefix=self.persistent_store.path_prefix,
+                write_enabled=self._persistent_store_writable,
+                namespaces=self.persistent_stores,
             )
             self._excluded_tool_ids.update(t.id for t in persistent_tools)
             self.tools.extend(persistent_tools)
@@ -542,7 +543,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             data["videos"] = [{"name": getattr(f, "name", f"video_{i}")} for i, f in enumerate(self.videos)]
 
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
-        data["persistent_store"] = self.persistent_store.to_dict(**kwargs) if self.persistent_store else None
+        if isinstance(self.persistent_store, list):
+            # Round-trips as a list, so a multi-memory agent reloads with the same namespaces.
+            data["persistent_store"] = [config.to_dict(**kwargs) for config in self.persistent_store]
+        else:
+            data["persistent_store"] = self.persistent_store.to_dict(**kwargs) if self.persistent_store else None
         data["sandbox"] = self.sandbox.to_dict(**kwargs) if self.sandbox else None
         data["skills"] = self.skills.to_dict(**kwargs)
 
@@ -2296,9 +2301,26 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         return self.file_store.backend if self.file_store.enabled else None
 
     @property
+    def persistent_stores(self) -> list[PersistentStoreConfig]:
+        """The enabled memories, however `persistent_store` was declared.
+
+        One config and a list of one are the same agent, so everything downstream reads this rather
+        than reaching into `persistent_store` directly.
+        """
+        if not self.persistent_store:
+            return []
+        configs = self.persistent_store if isinstance(self.persistent_store, list) else [self.persistent_store]
+        return [config for config in configs if config.enabled]
+
+    @property
     def persistent_store_backend(self) -> FileStore | None:
-        """Get the persistent store backend from the configuration if enabled."""
-        return self.persistent_store.backend if self.persistent_store and self.persistent_store.enabled else None
+        """The declared persistent backend when a single memory is configured, else None.
+
+        With several there is no one declared backend: `persistent_stores` holds the namespaces and
+        `_compose_file_store_backend` builds the store that spans them.
+        """
+        stores = self.persistent_stores
+        return stores[0].backend if len(stores) == 1 else None
 
     @property
     def _persistent_store_writable(self) -> bool:
@@ -2309,38 +2331,52 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         carries its own ``write_enabled`` - which is how a sandbox agent gets writable memory over a
         read-only workspace.
         """
-        if not self.persistent_store_backend:
+        if not self.persistent_stores:
             return False
         if self.file_store_backend:
             return self.file_store.agent_file_write_enabled
-        return self.persistent_store.write_enabled
+        # One writable memory is enough to justify the tool; the prompt says which accept writes.
+        return any(config.write_enabled for config in self.persistent_stores)
 
     def _compose_file_store_backend(self) -> FileStore:
-        """Route the persistent store under the file store, so both share one path namespace.
+        """Build the one store spanning the workspace and every declared memory.
 
-        The composite replaces ``file_store.backend`` outright rather than being handed only to the
-        tools, so uploads, attachment injection and output collection all resolve paths the same way
-        the agent does. Returns the plain workspace backend when no persistent store is configured.
+        This is where memories are composed, whichever mode the agent is in - each one becomes a
+        route at its own ``path_prefix``, so the path an agent writes decides which memory answers
+        and a second or third costs no extra tools.
+
+        With a workspace, the composite replaces ``file_store.backend`` outright rather than being
+        handed only to the tools, so uploads, attachment injection and output collection all resolve
+        paths the same way the agent does.
+
+        Without one - standalone, or beside a sandbox that owns an absolute filesystem - the
+        composite is returned for the ``memory-*`` tools to bind to and deliberately *not* written
+        back, since ``file_store`` is disabled there and would carry the memory backends into its
+        serialized form. A lone memory needs no composite at all and is handed back untouched.
 
         Composing is idempotent: a caller may build the ``CompositeFileStore`` themselves and still
         declare ``persistent_store`` (which is what turns on the prompt protocol) without ending up
         with one composite nested inside another.
         """
-        persistent_backend = self.persistent_store_backend
-        if not persistent_backend:
+        stores = self.persistent_stores
+        if not stores:
             return self.file_store.backend
 
+        routes = {config.normalized_prefix: config.backend for config in stores}
+
+        if not self.file_store_backend:
+            if len(stores) == 1:
+                return stores[0].backend
+            # Paths outside every memory resolve into scratch that ends with the conversation.
+            return CompositeFileStore(default=InMemoryFileStore(), routes=routes)
+
         backend = self.file_store.backend
-        prefix = self.persistent_store.path_prefix
-        if isinstance(backend, CompositeFileStore) and backend.routes.get(normalize_path(prefix) + "/") is (
-            persistent_backend
+        if isinstance(backend, CompositeFileStore) and all(
+            backend.routes.get(prefix) is store for prefix, store in routes.items()
         ):
             return backend
 
-        self.file_store.backend = CompositeFileStore(
-            default=self.file_store.backend,
-            routes={self.persistent_store.path_prefix: persistent_backend},
-        )
+        self.file_store.backend = CompositeFileStore(default=backend, routes=routes)
         return self.file_store.backend
 
     @property

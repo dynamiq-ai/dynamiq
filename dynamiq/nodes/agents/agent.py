@@ -39,6 +39,7 @@ from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
 from dynamiq.nodes.types import ActionType, Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.storages.file.base import memory_root
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import (
@@ -2237,8 +2238,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
             notes_file_path=self.get_notes_file_path(),
             todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
             or bool(self.sandbox_backend),
-            persistent_store_enabled=bool(self.persistent_store_backend),
-            persistent_store_path=self.persistent_store.path_prefix if self.persistent_store else "memories/",
+            persistent_store_enabled=bool(self.persistent_stores),
+            # The path the protocol tells the agent to list first: the directory holding every
+            # memory, not any one of them.
+            persistent_store_path=memory_root(self.persistent_stores),
+            persistent_store_namespaces=self.persistent_stores,
             persistent_store_writable=self._persistent_store_writable,
             # Routed under a file store the agent uses `file-*`; standalone or beside a sandbox it
             # gets its own `memory-*` set.
