@@ -144,6 +144,13 @@ def get_telephony(*, api: ApiClient, settings: Settings, agent_id: str):
 def simulate(*, api: ApiClient, settings: Settings, agent_id: str, payload: str):
     """Run a simulated call against the agent - a test that needs no phone.
 
+    PAYLOAD REQUIRES `simulation_set_id`: a run replays the scenarios of a saved set, so the
+    set exists first. List them with `voice simulation-sets`, or make one with
+    `voice simulation-set-create`. Sets are project-scoped, not per agent, so one set tests
+    many agents.
+
+    Optional: `mode` ("text" default), `concurrency`.
+
     Use this as the "does it work" gate before telling anyone the agent is ready.
     """
     # Each attempt creates a simulation. A retry after a timed-out response leaves a second
@@ -159,6 +166,105 @@ def simulate(*, api: ApiClient, settings: Settings, agent_id: str, payload: str)
 def list_simulations(*, api: ApiClient, settings: Settings, agent_id: str, page, page_size, fetch_all, compact):
     """Simulation runs and their results."""
     echo_list(api, f"{BASE}/agents/{agent_id}/simulations", None, page, page_size, fetch_all, compact)
+
+
+@voice.command("simulation-sets")
+@pagination_options
+@with_api_and_settings
+def list_simulation_sets(*, api: ApiClient, settings: Settings, page, page_size, fetch_all, compact):
+    """Saved scenario sets, which `voice simulate` runs against an agent.
+
+    GET /v1/agents/voice/simulations/sets. Project-scoped, not per agent - the `id` here is
+    the `simulation_set_id` a run needs.
+    """
+    echo_list(api, f"{BASE}/simulations/sets", {"project_id": require_project(settings)},
+              page, page_size, fetch_all, compact)
+
+
+@voice.command("simulation-set")
+@click.argument("set_id")
+@with_api_and_settings
+def get_simulation_set(*, api: ApiClient, settings: Settings, set_id: str):
+    """One scenario set, including the scenarios it will replay."""
+    echo_response(api.get(f"{BASE}/simulations/sets/{set_id}",
+                          params={"project_id": require_project(settings)}))
+
+
+@voice.command("simulation-set-create")
+@click.argument("payload")
+@with_api_and_settings
+def create_simulation_set(*, api: ApiClient, settings: Settings, payload: str):
+    """Create a scenario set. REQUIRED: `name`, `scenarios`; `project_id` is filled in.
+
+    `scenarios` is the list a run replays - each one a conversation to put the agent through.
+    Nothing can be simulated until a set exists, so this comes before `voice simulate`.
+    """
+    body = read_json_arg(payload)
+    body.setdefault("project_id", require_project(settings))
+    echo_response(api.post(f"{BASE}/simulations/sets", json=body))
+
+
+@voice.command("simulation-set-update")
+@click.argument("set_id")
+@click.argument("payload")
+@with_api_and_settings
+def update_simulation_set(*, api: ApiClient, settings: Settings, set_id: str, payload: str):
+    """Change a scenario set. The body is a full replacement - read it with
+    `simulation-set` first and edit that, or a field you omit is cleared."""
+    body = read_json_arg(payload)
+    body.setdefault("project_id", require_project(settings))
+    echo_response(api.put(f"{BASE}/simulations/sets/{set_id}", json=body))
+
+
+@voice.command("simulation-set-delete")
+@click.argument("set_id")
+@click.confirmation_option(prompt="Delete this simulation set?")
+@with_api_and_settings
+def delete_simulation_set(*, api: ApiClient, settings: Settings, set_id: str):
+    """Delete a scenario set. Runs that used it keep their results."""
+    echo_response(api.delete(f"{BASE}/simulations/sets/{set_id}",
+                             params={"project_id": require_project(settings)}))
+
+
+@voice.command("simulation-scenarios")
+@click.argument("agent_id")
+@click.argument("payload", required=False)
+@with_api_and_settings
+def generate_scenarios(*, api: ApiClient, settings: Settings, agent_id: str, payload: str | None):
+    """Have the platform draft scenarios for this agent, from its own instructions.
+
+    POST .../simulations/generate-scenarios. The quickest way to fill a set without writing
+    conversations by hand - take the output, and save it with `simulation-set-create`.
+    """
+    echo_response(api.post(f"{BASE}/agents/{agent_id}/simulations/generate-scenarios",
+                           json=read_json_arg(payload) if payload else {},
+                           timeout=EXECUTION_TIMEOUT))
+
+
+@voice.command("simulation")
+@click.argument("agent_id")
+@click.argument("run_id")
+@with_api_and_settings
+def get_simulation(*, api: ApiClient, settings: Settings, agent_id: str, run_id: str):
+    """One simulation run - status, per-scenario pass/fail and transcripts."""
+    echo_response(api.get(f"{BASE}/agents/{agent_id}/simulations/{run_id}"))
+
+
+@voice.command("simulation-cancel")
+@click.argument("agent_id")
+@click.argument("run_id")
+@with_api_and_settings
+def cancel_simulation(*, api: ApiClient, settings: Settings, agent_id: str, run_id: str):
+    """Stop a run that is still going."""
+    echo_response(api.post(f"{BASE}/agents/{agent_id}/simulations/{run_id}/cancel"))
+
+
+@voice.command("simulation-status")
+@with_api_and_settings
+def simulation_status(*, api: ApiClient, settings: Settings):
+    """Whether the simulation service is available for this project."""
+    echo_response(api.get(f"{BASE}/simulations/status",
+                          params={"project_id": require_project(settings)}))
 
 
 @voice.command("duplicate")
