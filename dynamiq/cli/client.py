@@ -112,6 +112,17 @@ class ApiClient:
     ) -> Any:
         return self._request("PUT", path, headers=headers, json=json, data=data, files=files)
 
+    def patch(
+        self,
+        path: str,
+        *,
+        headers: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
+    ) -> Any:
+        return self._request("PATCH", path, headers=headers, json=json, data=data, files=files)
+
     def delete(
         self,
         path: str,

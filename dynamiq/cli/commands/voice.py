@@ -67,8 +67,13 @@ def get_voice_agent(*, api: ApiClient, settings: Settings, agent_id: str):
 @click.argument("payload")
 @with_api_and_settings
 def update_voice_agent(*, api: ApiClient, settings: Settings, agent_id: str, payload: str):
-    """Update name, description or config. A deployed agent needs redeploying to pick it up."""
-    echo_response(api.put(f"{BASE}/agents/{agent_id}", json=read_json_arg(payload)))
+    """Update name, description or config. PATCH, and `config` is a FULL replacement.
+
+    A deployed agent does NOT pick this up on its own, and deploying again over a live one is
+    refused - the cycle is `voice undeploy <id>` then `voice deploy <id>`, then poll `get`
+    until `status` is deployed again.
+    """
+    echo_response(api.patch(f"{BASE}/agents/{agent_id}", json=read_json_arg(payload)))
 
 
 @voice.command("deploy")
