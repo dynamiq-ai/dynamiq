@@ -2237,6 +2237,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
             notes_file_path=self.get_notes_file_path(),
             todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
             or bool(self.sandbox_backend),
+            persistent_store_enabled=bool(self.persistent_store_backend),
+            persistent_store_path=self.persistent_store.path_prefix if self.persistent_store else "memories/",
+            persistent_store_writable=self._persistent_store_writable,
+            # Routed under a file store the agent uses `file-*`; standalone or beside a sandbox it
+            # gets its own `memory-*` set.
+            persistent_store_dedicated_tools=not self.file_store_backend,
             sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
             has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in tools),
             role=self.role,

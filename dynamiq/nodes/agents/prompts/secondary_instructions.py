@@ -47,6 +47,29 @@ TODO_TOOLS_INSTRUCTIONS = """## Todo Management
 - Only mark completed when FULLY done; if blocked, keep in_progress"""
 
 
+PERSISTENT_STORE_INSTRUCTIONS_TEMPLATE = """## Memory
+{path} is the ONLY thing that survives this conversation. Everything else — this chat, your working \
+files, your answer — is discarded, and the user will not tell you twice.
+
+1. ALWAYS `{list_tool}` {path} BEFORE ANYTHING ELSE, and `{read_tool}` what looks relevant.
+2. `{write_tool}` a durable fact THE SAME STEP you learn it — alongside the work, never after it.
+
+Durable facts arrive in passing, while the user is asking for something else: preferences, standing \
+rules, corrections, anything lasting about them, their team or their setup. THAT is the trigger — \
+being asked to remember is the rare case, not the rule.
+Never write the deliverable, working state, or secrets.
+One topic per file, descriptive name; edit rather than duplicate, delete what is wrong."""
+
+SANDBOX_VS_PERSISTENT_STORE_TEMPLATE = """The sandbox above is scratch space for THIS conversation \
+— it is NOT your long-term memory, whatever the Persistence section says. {path} is, and only \
+`{write_tool}` reaches it."""
+
+PERSISTENT_STORE_READONLY_INSTRUCTIONS_TEMPLATE = """## Persistent Store
+- {path} holds knowledge kept from EARLIER conversations, and is read-only for you.
+- BEFORE starting a task, use `{list_tool}` on {path} to see what is available, and \
+`{read_tool}` anything relevant. Do not ask the user for something already recorded there."""
+
+
 SANDBOX_INSTRUCTIONS_TEMPLATE = """## Sandbox Environment
 - You operate inside a persistent sandbox filesystem.
 - The sandbox directory is your working memory.

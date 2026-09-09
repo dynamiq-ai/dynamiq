@@ -102,6 +102,17 @@ class FileStore(abc.ABC, BaseModel):
         data["type"] = self.type
         return data
 
+    def supports_extracted_text_cache(self, file_path: str | Path = "") -> bool:
+        """Whether ``FileReadTool`` may cache extracted text beside ``file_path``.
+
+        Reading a file that needs conversion (PDF, DOCX, ...) writes the extracted text back as
+        ``<path>.extracted.txt`` so later reads and searches skip the converter. That trade is only
+        worth it when writes are cheap and the namespace is private to the run. A remote or durable
+        store should decline: it would pay an extra write request per read and leave derived files
+        sitting in a namespace the user curates.
+        """
+        return True
+
     @abc.abstractmethod
     def list_files_bytes(self, file_paths: list[str] | None = None) -> list[BytesIO]:
         """Return stored files as BytesIO objects.
@@ -200,6 +211,53 @@ class FileStore(abc.ABC, BaseModel):
             List of FileInfo objects
         """
         pass
+
+
+class PersistentStoreConfig(BaseModel):
+    """Configuration for a persistent, cross-conversation file namespace.
+
+    This is deliberately a separate config from ``FileStoreConfig`` rather than a field on it: an
+    Agent refuses to enable a file store and a sandbox at the same time, so anything nested under
+    ``file_store`` would be unreachable for sandbox-backed agents - precisely the agents that need
+    only this persistent route and already have a workspace.
+
+    Attributes:
+        enabled: Whether the persistent store is active.
+        backend: The store holding persistent files (``DynamiqFileStore`` in practice).
+        path_prefix: Path prefix the agent uses to address persistent files.
+        write_enabled: Whether the agent may create and edit persistent files.
+    """
+
+    enabled: bool = False
+    backend: FileStore = Field(..., description="Store holding persistent files.")
+    path_prefix: str = Field(
+        default="memories/",
+        description="Path prefix under which persistent files are addressed.",
+    )
+    write_enabled: bool = Field(
+        default=True,
+        description="Whether the agent is permitted to write persistent files.",
+    )
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @property
+    def to_dict_exclude_params(self) -> dict[str, bool]:
+        """Define parameters to exclude during serialization."""
+        return {"backend": True}
+
+    def to_dict(self, **kwargs) -> dict[str, Any]:
+        """Convert the PersistentStoreConfig instance to a dictionary."""
+        for_tracing = kwargs.pop("for_tracing", False)
+        if for_tracing and not self.enabled:
+            return {"enabled": False}
+        include_secure_params = kwargs.pop("include_secure_params", False)
+        exclude = kwargs.pop("exclude", self.to_dict_exclude_params)
+        config_data = self.model_dump(exclude=exclude, **kwargs)
+        config_data["backend"] = self.backend.to_dict(
+            for_tracing=for_tracing, include_secure_params=include_secure_params
+        )
+        return config_data
 
 
 class FileStoreConfig(BaseModel):

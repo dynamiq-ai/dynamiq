@@ -760,6 +760,7 @@ class FileReadTool(Node):
         preview_limit = input_data.max_preview_bytes or chunk_size
         preview_limit = max(preview_limit, 1)
         allow_cache = input_data.instructions is None and input_data.document_mode == "file"
+        allow_cache = allow_cache and self._extracted_text_cache_enabled(input_data.file_path)
 
         try:
             if not self.file_store.exists(input_data.file_path):
@@ -772,7 +773,7 @@ class FileReadTool(Node):
             file_info = self._build_file_info(input_data.file_path, content)
 
             cached_text, cached_path = (None, None)
-            if allow_cache and not isinstance(self.file_store, Sandbox):
+            if allow_cache:
                 cached_text, cached_path = self._load_cached_text(input_data.file_path)
 
             if cached_text:
@@ -826,7 +827,7 @@ class FileReadTool(Node):
 
                         cached_path = None
                         hint_enabled = False
-                        if allow_cache and not isinstance(self.file_store, Sandbox):
+                        if allow_cache:
                             cached_path = self._persist_extracted_text(input_data.file_path, text_content)
                             hint_enabled = detected_type not in {FileType.TEXT, FileType.MARKDOWN}
 
@@ -1102,6 +1103,16 @@ class FileReadTool(Node):
             f"Preview of {file_path} ({descriptor}, showing {len(preview):,} of {len(content):,} bytes):\n"
             f"{preview_text}{suffix}"
         )
+
+    def _extracted_text_cache_enabled(self, file_path: str) -> bool:
+        """Whether extracted text may be cached beside ``file_path``.
+
+        A sandbox owns a real filesystem the user works in, and a store may decline for its own
+        reasons - a remote one pays a write request per read and would litter a durable namespace.
+        """
+        if isinstance(self.file_store, Sandbox):
+            return False
+        return self.file_store.supports_extracted_text_cache(file_path)
 
     def _persist_extracted_text(self, original_path: str, text_content: str) -> str | None:
         """Persist extracted text so future reads/searches can reuse it."""
@@ -1876,3 +1887,94 @@ class FileListTool(Node):
                 f"Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
+
+
+PERSISTENT_READ_DESCRIPTION_TEMPLATE = (
+    "Reads a file from your persistent store - knowledge you have kept from earlier conversations. "
+    "Paths are addressed under '{prefix}'. Use '{list_tool}' first if you do not know the exact path.\n\n"
+    "Usage Examples:\n"
+    "- Read a memory: {{'file_path': '{prefix}preferences.md'}}\n"
+)
+
+PERSISTENT_WRITE_DESCRIPTION_TEMPLATE = (
+    "Creates or edits a file in your persistent store, so the knowledge survives this conversation. "
+    "Paths are addressed under '{prefix}'.\n\n"
+    "Call this proactively, in the same step as the work, whenever the user:\n"
+    "1. states a preference, a standing rule, or how they want things done;\n"
+    "2. tells you something lasting about themselves, their team, their project or their setup;\n"
+    "3. corrects you or overturns an earlier decision;\n"
+    "4. asks you to remember something.\n"
+    "Do not wait to be asked - (4) is the rare case, not the trigger. Nothing you learn survives "
+    "this conversation unless you write it here.\n\n"
+    "Actions:\n"
+    "- write: Create or overwrite a memory. Requires 'content'. Set 'append: true' to append.\n"
+    "- edit: Atomic find-and-replace on an existing memory. Requires an 'edits' list of 'find'/'replace' "
+    "pairs. Each 'find' must match exactly one place in the file, so include enough surrounding text to "
+    "make it unique, or set 'replace_all': true.\n"
+    "Record durable facts, preferences and decisions - not transient working notes.\n\n"
+    "Usage Examples:\n"
+    "- Save a memory: {{'action': 'write', 'file_path': '{prefix}preferences.md', "
+    "'content': 'Prefers concise answers.', 'brief': 'Record a user preference'}}\n"
+)
+
+PERSISTENT_LIST_DESCRIPTION_TEMPLATE = (
+    "Lists the files in your persistent store - knowledge kept from earlier conversations, addressed "
+    "under '{prefix}'. Check this before starting a task to see what you already know.\n\n"
+    "Usage Examples:\n"
+    "- List everything: {{'file_path': '{prefix}', 'recursive': true}}\n"
+)
+
+
+def build_persistent_file_tools(
+    *,
+    backend: FileStore,
+    llm: BaseLLM,
+    write_enabled: bool = True,
+    path_prefix: str = "memories/",
+) -> list[Node]:
+    """Build a dedicated tool set bound to a persistent, cross-conversation store.
+
+    These are the ordinary file tools with ``name`` and ``description`` overridden - no new tool
+    classes - mirroring how ``build_long_term_memory_tools`` assembles its pair.
+
+    This set is for the case where the agent's workspace is served by something that is not a
+    ``FileStore``: a sandbox owns an absolute filesystem that cannot be merged into one namespace,
+    so the persistent store gets its own ``memory-*`` vocabulary alongside it. When the workspace is
+    a ``FileStore``, prefer routing a prefix through ``CompositeFileStore`` instead, which keeps a
+    single set of file tools.
+
+    Args:
+        backend: The persistent store (``DynamiqFileStore`` in practice).
+        llm: LLM used by the read tool to process non-text files.
+        write_enabled: Whether to include the write tool.
+        path_prefix: Prefix the agent uses to address persistent files.
+
+    Returns:
+        The persistent-store tools: read, list, and optionally write.
+    """
+    prefix = path_prefix if path_prefix.endswith("/") else f"{path_prefix}/"
+
+    tools: list[Node] = [
+        FileReadTool(
+            file_store=backend,
+            llm=llm,
+            name="memory-read",
+            description=PERSISTENT_READ_DESCRIPTION_TEMPLATE.format(prefix=prefix, list_tool="memory-list"),
+        ),
+        FileListTool(
+            file_store=backend,
+            name="memory-list",
+            description=PERSISTENT_LIST_DESCRIPTION_TEMPLATE.format(prefix=prefix),
+        ),
+    ]
+
+    if write_enabled:
+        tools.append(
+            FileWriteTool(
+                file_store=backend,
+                name="memory-write",
+                description=PERSISTENT_WRITE_DESCRIPTION_TEMPLATE.format(prefix=prefix),
+            )
+        )
+
+    return tools
