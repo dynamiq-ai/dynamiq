@@ -51,7 +51,7 @@ def test_write_sends_plain_text_and_user_id(store, client):
     verb, url = client.request.call_args.args
     body = client.request.call_args.kwargs["json"]
     assert verb == "PUT"
-    assert url == "https://api.example.ai/v1/memory-stores/ms-123/memories"
+    assert url == "https://api.example.ai/v1/memory-stores/ms-123/files"
     assert body == {"path": "prefs.md", "content": "Prefers British English.", "user_id": "u-42"}
     assert client.request.call_args.kwargs["headers"]["Authorization"] == "Bearer secret-token"
     assert entry.path == "prefs.md"
@@ -64,7 +64,7 @@ def test_read_returns_text_from_the_data_envelope(store, client):
 
     verb, url = client.request.call_args.args
     assert verb == "GET"
-    assert url.endswith("/v1/memory-stores/ms-123/memories/content")
+    assert url.endswith("/v1/memory-stores/ms-123/files/content")
     assert client.request.call_args.kwargs["params"] == {"path": "prefs.md", "user_id": "u-42"}
 
 
@@ -93,14 +93,14 @@ def test_list_parses_entries(store, client):
     assert entries[0].size == 24
     assert entries[0].updated_at.year == 2026
     assert entries[1].updated_at is None
-    assert client.request.call_args.kwargs["params"] == {"prefix": "", "user_id": "u-42"}
+    assert client.request.call_args.kwargs["params"] == {"path": "", "user_id": "u-42"}
 
 
-def test_list_forwards_the_prefix(store, client):
+def test_list_forwards_the_prefix_as_path(store, client):
     client.request.return_value = _mock_response({"data": []})
 
     assert store.list("team/") == []
-    assert client.request.call_args.kwargs["params"] == {"prefix": "team/", "user_id": "u-42"}
+    assert client.request.call_args.kwargs["params"] == {"path": "team/", "user_id": "u-42"}
 
 
 def test_delete_returns_true(store, client):

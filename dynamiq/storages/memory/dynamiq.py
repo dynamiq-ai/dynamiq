@@ -15,7 +15,7 @@ from .base import MemoryEntry, MemoryNotFoundError, MemoryPermissionError, Memor
 class DynamiqMemoryStore(MemoryStore):
     """Memories held by the Dynamiq platform API.
 
-    Every operation is an API call to ``{connection.url}/v1/memory-stores/{memory_store_id}/memories``;
+    Every operation is an API call to ``{connection.url}/v1/memory-stores/{memory_store_id}/files``;
     this class never touches storage directly. Access control is enforced server-side from the
     connection credentials together with ``user_id``, which is sent on every request and is never
     supplied by the agent.
@@ -59,7 +59,7 @@ class DynamiqMemoryStore(MemoryStore):
         return (self.type, self.connection.url, self.memory_store_id, self.user_id)
 
     def _base_path(self) -> str:
-        return f"/v1/memory-stores/{self.memory_store_id}/memories"
+        return f"/v1/memory-stores/{self.memory_store_id}/files"
 
     def _request(
         self,
@@ -128,7 +128,9 @@ class DynamiqMemoryStore(MemoryStore):
         """List memories under ``prefix``."""
         data = self._request(
             HTTPMethod.GET,
-            params={"prefix": prefix, "user_id": self.user_id},
+            # `path` on the wire, `prefix` here: the API keeps the file vocabulary, while the
+            # interface names what it actually is - a key prefix, not a directory.
+            params={"path": prefix, "user_id": self.user_id},
             operation="list",
             memory_path=prefix,
         )

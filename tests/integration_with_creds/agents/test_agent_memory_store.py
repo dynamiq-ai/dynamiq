@@ -116,13 +116,13 @@ class MemoryStoreAPISimulator:
             return _Response(400, {"message": f"illegal path: {path!r}"})
 
         scope = (url.split("/memory-stores/")[1].split("/")[0], source["user_id"])
-        if url.endswith("/memories/content"):
+        if url.endswith("/files/content"):
             return self._read(scope, path)
         if verb == "PUT":
             return self._write(scope, body)
         if verb == "DELETE":
             return self._delete(scope, path)
-        return self._list(scope, params.get("prefix") or "")
+        return self._list(scope, params.get("path") or "")
 
     # -- endpoints ---------------------------------------------------------
     def _read(self, scope, path):
