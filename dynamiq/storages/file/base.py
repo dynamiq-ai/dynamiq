@@ -8,7 +8,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_serializer
 
 
 class FileInfo(BaseModel):
@@ -101,17 +101,6 @@ class FileStore(abc.ABC, BaseModel):
         data = self.model_dump(**kwargs)
         data["type"] = self.type
         return data
-
-    def supports_extracted_text_cache(self, file_path: str | Path = "") -> bool:
-        """Whether ``FileReadTool`` may cache extracted text beside ``file_path``.
-
-        Reading a file that needs conversion (PDF, DOCX, ...) writes the extracted text back as
-        ``<path>.extracted.txt`` so later reads and searches skip the converter. That trade is only
-        worth it when writes are cheap and the namespace is private to the run. A remote or durable
-        store should decline: it would pay an extra write request per read and leave derived files
-        sitting in a namespace the user curates.
-        """
-        return True
 
     @abc.abstractmethod
     def list_files_bytes(self, file_paths: list[str] | None = None) -> list[BytesIO]:
@@ -211,138 +200,6 @@ class FileStore(abc.ABC, BaseModel):
             List of FileInfo objects
         """
         pass
-
-
-MEMORY_ROOT = "memories/"
-
-
-class PersistentStoreConfig(BaseModel):
-    """Configuration for a persistent, cross-conversation file namespace.
-
-    This is deliberately a separate config from ``FileStoreConfig`` rather than a field on it: an
-    Agent refuses to enable a file store and a sandbox at the same time, so anything nested under
-    ``file_store`` would be unreachable for sandbox-backed agents - precisely the agents that need
-    only this persistent route and already have a workspace.
-
-    An Agent takes one of these or a list of them. Each entry is one memory, addressed under its own
-    ``path_prefix``; ``name`` and ``description`` are what the model is told about it, so it can tell
-    one memory from another and file a fact in the right one.
-
-    Attributes:
-        enabled: Whether the persistent store is active.
-        backend: The store holding persistent files (``DynamiqFileStore`` in practice).
-        path_prefix: Path prefix the agent uses to address persistent files.
-        write_enabled: Whether the agent may create and edit persistent files.
-        name: Short identifier for this memory, shown to the model.
-        description: What this memory holds, shown to the model.
-    """
-
-    enabled: bool = False
-    backend: FileStore = Field(..., description="Store holding persistent files.")
-    path_prefix: str = Field(
-        default="",
-        description=(
-            f"Namespace for this memory, addressed under the fixed '{MEMORY_ROOT}' root. Give a "
-            "name like 'user' or 'company'; leave empty to hold the root itself. A leading "
-            f"'{MEMORY_ROOT}' is accepted and stripped, so both forms mean the same thing."
-        ),
-    )
-    write_enabled: bool = Field(
-        default=True,
-        description="Whether the agent is permitted to write persistent files.",
-    )
-    name: str | None = Field(
-        default=None,
-        description="Short identifier for this memory, shown to the model.",
-    )
-    description: str | None = Field(
-        default=None,
-        description="What this memory holds, shown to the model so it can tell memories apart.",
-    )
-
-    @field_validator("path_prefix")
-    @classmethod
-    def clean_namespace(cls, value: str) -> str:
-        """Reduce ``path_prefix`` to a namespace under the root, or reject it.
-
-        Every memory lives under ``MEMORY_ROOT``; what a caller supplies only names a place inside
-        it. Accepting the root spelled out means the two natural ways of writing it agree instead of
-        producing ``memories/memories/...``.
-        """
-        namespace = value.strip().strip("/")
-        if namespace == MEMORY_ROOT.strip("/"):
-            namespace = ""
-        elif namespace.startswith(MEMORY_ROOT):
-            namespace = namespace[len(MEMORY_ROOT) :].strip("/")
-
-        if ".." in namespace.split("/") or ":" in namespace:
-            raise ValueError(f"path_prefix must be a plain namespace under '{MEMORY_ROOT}', got {value!r}")
-        return namespace
-
-    @property
-    def normalized_prefix(self) -> str:
-        """The full path this memory is addressed by: the fixed root plus its namespace."""
-        return f"{MEMORY_ROOT}{self.path_prefix}/" if self.path_prefix else MEMORY_ROOT
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    @property
-    def to_dict_exclude_params(self) -> dict[str, bool]:
-        """Define parameters to exclude during serialization."""
-        return {"backend": True}
-
-    def to_dict(self, **kwargs) -> dict[str, Any]:
-        """Convert the PersistentStoreConfig instance to a dictionary."""
-        for_tracing = kwargs.pop("for_tracing", False)
-        if for_tracing and not self.enabled:
-            return {"enabled": False}
-        include_secure_params = kwargs.pop("include_secure_params", False)
-        exclude = kwargs.pop("exclude", self.to_dict_exclude_params)
-        config_data = self.model_dump(exclude=exclude, **kwargs)
-        config_data["backend"] = self.backend.to_dict(
-            for_tracing=for_tracing, include_secure_params=include_secure_params
-        )
-        return config_data
-
-
-def describe_memory_namespaces(configs: "list[PersistentStoreConfig]") -> str:
-    """One line per memory, for the prompt and the ``memory-*`` tool descriptions.
-
-    Empty only when there is nothing to tell apart *and* nothing to locate: a lone, unnamed memory
-    sitting at the root is fully described by the surrounding wording, which is what agents
-    configured before memories could be plural still render.
-
-    A namespaced memory is always listed even when unnamed. The protocol points the agent at the
-    root, so without this line it would never learn the one path its writes must go under - and a
-    write to the root would fall through to the workspace and quietly not persist.
-    """
-    if len(configs) <= 1 and not any(
-        config.name or config.description or config.normalized_prefix != MEMORY_ROOT for config in configs
-    ):
-        return ""
-
-    lines = []
-    for config in configs:
-        detail = " ".join(
-            part
-            for part in (
-                f"{config.name}:" if config.name else "",
-                config.description or "",
-                "" if config.write_enabled else "Read-only.",
-            )
-            if part
-        )
-        lines.append(f"- {config.normalized_prefix} - {detail}" if detail else f"- {config.normalized_prefix}")
-    return "\n".join(lines)
-
-
-def memory_root(configs: "list[PersistentStoreConfig]") -> str:
-    """The path the agent lists to see every memory at once.
-
-    Always the fixed root: memories are namespaces beneath it, so one listing reaches all of them.
-    Taking ``configs`` keeps the call sites unchanged and the intent readable.
-    """
-    return MEMORY_ROOT
 
 
 class FileStoreConfig(BaseModel):
