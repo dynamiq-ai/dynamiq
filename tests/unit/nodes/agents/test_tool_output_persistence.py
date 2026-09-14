@@ -211,3 +211,18 @@ def test_binary_tool_output_is_summarized_with_the_file_it_produced():
 
 def test_binary_tool_output_summary_copes_with_no_file_and_no_type():
     assert summarize_binary_tool_output({"content": b"\x00\x01"}) == "Produced 2 bytes of binary data."
+
+
+def test_a_text_body_that_happens_to_be_bytes_is_still_readable():
+    """HttpApiCall leaves `content` as bytes for anything but an exact application/json header,
+    so most JSON, HTML and XML bodies arrive here as bytes and the agent has to be able to read
+    them."""
+    body = b'{"answer": 42, "detail": "what the agent needed"}'
+
+    assert process_tool_output_for_agent(body) == '{"answer": 42, "detail": "what the agent needed"}'
+    assert process_tool_output_for_agent({"content": body}) == '{"answer": 42, "detail": "what the agent needed"}'
+
+
+def test_genuine_binary_is_still_summarized():
+    assert process_tool_output_for_agent(b"\xff\xfb\x90\x64" * 10) == "<40 bytes of binary data>"
+    assert process_tool_output_for_agent(b"RIFF\x24\x00\x00\x00WAVE") == "<12 bytes of binary data>"

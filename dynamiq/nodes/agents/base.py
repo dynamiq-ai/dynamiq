@@ -35,6 +35,7 @@ from dynamiq.nodes.agents.utils import (
     ToolOutputSandboxPersistenceConfig,
     bytes_to_data_url,
     convert_bytesio_to_file_info,
+    decode_text_payload,
     extract_message_text,
     is_image_file,
     is_video_file,
@@ -1850,9 +1851,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
             )
 
-            if isinstance(tool_result_output_content, (bytes, bytearray)):
+            if isinstance(tool_result_output_content, (bytes, bytearray)) and not decode_text_payload(
+                tool_result_output_content
+            ):
                 # Audio, images and archives come back as raw bytes; describe them instead of
-                # spending the model's context on escape sequences it cannot read anyway.
+                # spending the model's context on escape sequences it cannot read anyway. A body
+                # that decodes as text is left alone — an HTTP tool's JSON arrives as bytes too.
                 tool_result_content_processed = summarize_binary_tool_output(tool_result.output)
 
             if saved_files:

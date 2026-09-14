@@ -148,6 +148,7 @@ class SpeechToText(ConnectionNode):
             speakers=self.speakers,
             prompt=self.prompt,
             language=self.language,
+            model=self.model,
         )
         if not adapter_cls.capabilities.audio_url_input:
             # An agent offered a field the provider cannot honour would spend a turn discovering

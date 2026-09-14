@@ -24,9 +24,15 @@ class MistralSTTAdapter(BaseSTTAdapter):
         speakers: SpeakerHints | None,
         prompt: str | None,
         language: str | None = None,
+        model: str | None = None,
     ) -> None:
         super().check_config(
-            diarize=diarize, timestamps=timestamps, speakers=speakers, prompt=prompt, language=language
+            diarize=diarize,
+            timestamps=timestamps,
+            speakers=speakers,
+            prompt=prompt,
+            language=language,
+            model=model,
         )
         if diarize and timestamps == TimestampGranularity.WORD:
             raise ValueError("Mistral diarization returns segment timings only; use timestamps='segment' with diarize.")

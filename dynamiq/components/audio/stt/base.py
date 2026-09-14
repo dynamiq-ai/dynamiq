@@ -61,8 +61,13 @@ class BaseSTTAdapter(ABC):
         speakers: SpeakerHints | None,
         prompt: str | None,
         language: str | None = None,
+        model: str | None = None,
     ) -> None:
-        """Reject node configuration the provider cannot honour, before any audio is sent."""
+        """Reject node configuration the provider cannot honour, before any audio is sent.
+
+        ``model`` is the model the node resolved, for providers whose capabilities are per-model
+        rather than per-provider.
+        """
         capabilities = cls.capabilities
         if diarize and not capabilities.diarization:
             raise ValueError(f"{cls.provider} does not support speaker diarization.")

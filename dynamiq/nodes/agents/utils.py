@@ -1034,6 +1034,21 @@ def bytes_to_data_url(image_bytes: bytes) -> str:
         raise ValueError(f"Failed to convert image to data URL: {str(e)}")
 
 
+def decode_text_payload(value: bytes | bytearray) -> str | None:
+    """The text a byte string holds, or ``None`` when it is genuinely binary.
+
+    Tools hand back `bytes` for both: `HttpApiCall` leaves any body that is not exactly
+    ``application/json`` as bytes, so most JSON, HTML and XML answers arrive this way and the model
+    has to be able to read them. A NUL byte or a failed UTF-8 decode is what separates those from
+    audio, images and archives.
+    """
+    try:
+        text = bytes(value).decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    return None if "\x00" in text else text
+
+
 def describe_binary(value: bytes | bytearray) -> str:
     """Stand-in for binary a tool returned (audio, images, archives).
 
@@ -1063,7 +1078,7 @@ def summarize_binary_tool_output(output: dict) -> str:
 def _json_fallback(value: Any) -> str:
     """Render what ``json.dumps`` refuses, so one binary field cannot fail a whole tool result."""
     if isinstance(value, (bytes, bytearray)):
-        return describe_binary(value)
+        return decode_text_payload(value) or describe_binary(value)
     return str(value)
 
 
@@ -1087,7 +1102,7 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
     """
     if not isinstance(content, str):
         if isinstance(content, (bytes, bytearray)):
-            content = describe_binary(content)
+            content = decode_text_payload(content) or describe_binary(content)
         elif isinstance(content, dict):
             filtered_content = {k: v for k, v in content.items() if k != "files"}
 
@@ -1096,7 +1111,7 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
                 if isinstance(inner_content, str):
                     content = inner_content
                 elif isinstance(inner_content, (bytes, bytearray)):
-                    content = describe_binary(inner_content)
+                    content = decode_text_payload(inner_content) or describe_binary(inner_content)
                 else:
                     content = json.dumps(inner_content, indent=2, default=_json_fallback)
             else:

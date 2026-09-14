@@ -3,7 +3,7 @@ from typing import Any
 from dynamiq.components.audio.openai_client import resolve_openai_client
 from dynamiq.components.audio.stt.base import BaseSTTAdapter, STTCapabilities, TranscriptionRequest
 from dynamiq.components.audio.stt.normalize import build_transcript, optional_str
-from dynamiq.types.audio import TimestampGranularity, Transcript, TranscriptSegment, TranscriptWord
+from dynamiq.types.audio import SpeakerHints, TimestampGranularity, Transcript, TranscriptSegment, TranscriptWord
 from dynamiq.utils.logger import logger
 
 # The gpt-4o-transcribe family only returns plain JSON; verbose_json (segments, words) is a Whisper feature.
@@ -88,13 +88,39 @@ class OpenAISTTAdapter(OpenAICompatibleSTTAdapter):
     default_model = "gpt-4o-transcribe"
     DIARIZATION_MODEL = "gpt-4o-transcribe-diarize"
 
+    @classmethod
+    def check_model_options(cls, model: str, diarize: bool, timestamps: TimestampGranularity) -> None:
+        """Reject what this particular model cannot do, whatever the provider as a whole can."""
+        if diarize and cls.DIARIZATION_MODEL not in model:
+            raise ValueError(f"OpenAI diarization requires model '{cls.DIARIZATION_MODEL}', got '{model}'.")
+        if timestamps == TimestampGranularity.WORD and JSON_ONLY_MODEL_MARKER in model:
+            raise ValueError(f"Word timestamps are only returned by whisper-1 on OpenAI; '{model}' returns text only.")
+
+    @classmethod
+    def check_config(
+        cls,
+        *,
+        diarize: bool,
+        timestamps: TimestampGranularity,
+        speakers: SpeakerHints | None,
+        prompt: str | None,
+        language: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        super().check_config(
+            diarize=diarize,
+            timestamps=timestamps,
+            speakers=speakers,
+            prompt=prompt,
+            language=language,
+            model=model,
+        )
+        if model:
+            cls.check_model_options(model, diarize, timestamps)
+
     def build_params(self, request: TranscriptionRequest) -> dict[str, Any]:
-        if request.diarize and self.DIARIZATION_MODEL not in request.model:
-            raise ValueError(f"OpenAI diarization requires model '{self.DIARIZATION_MODEL}', got '{request.model}'.")
-        if request.timestamps == TimestampGranularity.WORD and JSON_ONLY_MODEL_MARKER in request.model:
-            raise ValueError(
-                f"Word timestamps are only returned by whisper-1 on OpenAI; '{request.model}' returns text only."
-            )
+        # Kept as well as the construction-time check: a request can reach an adapter directly.
+        self.check_model_options(request.model, request.diarize, request.timestamps)
         if request.prompt and self.DIARIZATION_MODEL in request.model:
             logger.warning(f"{self.DIARIZATION_MODEL} does not accept a prompt; it is ignored for this run.")
             request = request.model_copy(update={"prompt": None})

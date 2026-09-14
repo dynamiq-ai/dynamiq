@@ -461,9 +461,8 @@ def test_unsupported_input_fails_at_execution():
     with pytest.raises(ValueError, match="does not accept audio by URL"):
         node.execute(SpeechToTextInputSchema(audio_url="https://files.example.com/a.mp3"))
 
-    node = SpeechToText(connection=connections.OpenAI(api_key="k"), diarize=True)
-    with pytest.raises(ValueError, match="requires model 'gpt-4o-transcribe-diarize'"):
-        node.execute(SpeechToTextInputSchema(audio=b"abc"))
+    # Diarization on a model that cannot do it is now refused at construction; see
+    # test_openai_diarization_is_refused_at_construction_not_at_run_time.
 
     with pytest.raises(ValueError, match="Either `audio` or `audio_url`"):
         SpeechToTextInputSchema()
@@ -546,3 +545,20 @@ def test_an_agent_without_diarization_still_gets_plain_text(requests_mock):
     output = run_node(node, {"audio": b"abc"})
 
     assert output["content"].startswith("Hi, this is Ana")
+
+
+def test_openai_diarization_is_refused_at_construction_not_at_run_time():
+    """The node's contract is that an unsupported combination fails when the workflow is built.
+    OpenAI diarization belongs to one model, so the default cannot honour it."""
+    with pytest.raises(ValueError, match="requires model 'gpt-4o-transcribe-diarize'"):
+        SpeechToText(connection=connections.OpenAI(api_key="k"), diarize=True)
+
+
+def test_openai_word_timestamps_are_refused_at_construction_for_a_transcribe_model():
+    with pytest.raises(ValueError, match="Word timestamps are only returned by whisper-1"):
+        SpeechToText(connection=connections.OpenAI(api_key="k"), timestamps="word")
+
+
+def test_the_models_that_do_support_those_options_still_build():
+    SpeechToText(connection=connections.OpenAI(api_key="k"), model="gpt-4o-transcribe-diarize", diarize=True)
+    SpeechToText(connection=connections.OpenAI(api_key="k"), model="whisper-1", timestamps="word")
