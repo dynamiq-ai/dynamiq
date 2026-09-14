@@ -4,7 +4,7 @@ Requires real credentials in ``.env`` at the repository root. Each test skips on
 provider's key, so a partial set still runs what it can:
 
 * ``OPENAI_API_KEY``     — the agent's LLM, text-to-speech, transcription and diarization
-* ``MISTRAL_API_KEY``    — Voxtral transcription and its language/timestamp rule
+* ``MISTRAL_API_KEY``    — Voxtral transcription and its diarization/granularity rule
 * ``ELEVENLABS_API_KEY`` — Scribe diarization
 
 Run with: ``uv run pytest tests/integration_with_creds/nodes/audio -q -s``
@@ -155,39 +155,34 @@ def test_voxtral_diarization_live(conversation_wav):
 
 
 @requires_mistral
-def test_voxtral_accepts_a_language_hint_now_that_timestamps_are_dropped(conversation_wav):
-    """The node used to send `language` and `timestamp_granularities` together, which Voxtral
-    rejects outright. It now drops the timings, so the request goes through."""
-    node = SpeechToText(connection=connections.Mistral(), language="en", timestamps="segment")
+def test_voxtral_diarizes_with_a_language_hint_too(conversation_wav):
+    """Voxtral's only rule is that diarization carries segment granularity — a language hint
+    alongside it is fine. Guards against re-introducing a restriction the API does not have."""
+    node = SpeechToText(connection=connections.Mistral(), diarize=True, language="en")
 
     output = node.execute(node.input_schema(audio=conversation_wav))
 
-    assert "invoice" in output["content"].lower()
+    print("\nVOXTRAL (language + diarize):\n", output["transcript"])
+    assert len({speaker["id"] for speaker in output["speakers"]}) >= 2
 
 
 @requires_mistral
-def test_voxtral_really_does_reject_language_with_timestamps(conversation_wav):
-    """The control for the test above: the combination the node no longer sends is genuinely
-    refused by the API, rather than being a limitation we invented from the docs."""
+def test_voxtral_really_does_require_segment_granularity_to_diarize(conversation_wav):
+    """The control for the adapter always pairing `diarize` with segment granularity: drop it and
+    the API refuses the request outright."""
     response = requests.post(
         "https://api.mistral.ai/v1/audio/transcriptions",
         headers={"Authorization": f"Bearer {os.environ['MISTRAL_API_KEY']}"},
         files=[
             ("model", (None, "voxtral-mini-latest")),
-            ("language", (None, "en")),
-            ("timestamp_granularities", (None, "segment")),
+            ("diarize", (None, "true")),
             ("file", ("meeting.wav", io.BytesIO(conversation_wav.getvalue()), "audio/wav")),
         ],
     )
 
-    print("\nMISTRAL CONTROL:", response.status_code, response.text[:300])
+    print("\nMISTRAL CONTROL:", response.status_code, response.text[:200])
     assert response.status_code >= 400
-
-
-@requires_mistral
-def test_voxtral_refuses_diarization_with_a_language_hint_before_any_request():
-    with pytest.raises(ValueError, match="Mistral cannot diarize with a language hint"):
-        SpeechToText(connection=connections.Mistral(), language="en", diarize=True)
+    assert "diarize" in response.text
 
 
 @requires_elevenlabs

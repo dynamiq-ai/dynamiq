@@ -212,7 +212,7 @@ def test_deepgram_prefers_diarize_model_when_provided(requests_mock):
 
 
 def test_mistral_diarized_transcription(requests_mock):
-    node = SpeechToText(connection=connections.Mistral(api_key="m-key"), diarize=True, prompt="Dynamiq")
+    node = SpeechToText(connection=connections.Mistral(api_key="m-key"), diarize=True, language="fr", prompt="Dynamiq")
     call = requests_mock.post("https://api.mistral.ai/v1/audio/transcriptions", json=MISTRAL_RESPONSE)
     audio = BytesIO(b"abc")
     audio.name = "call.mp3"
@@ -232,6 +232,7 @@ def test_mistral_diarized_transcription(requests_mock):
     body = call.last_request.body
     assert b'name="model"\r\n\r\nvoxtral-mini-latest' in body
     assert b'name="diarize"\r\n\r\ntrue' in body
+    assert b'name="language"\r\n\r\nfr' in body
     assert b'name="context_bias"\r\n\r\nDynamiq' in body
     # Diarization is refused without segment granularity, so it is always sent alongside.
     assert b'name="timestamp_granularities"\r\n\r\nsegment' in body
@@ -490,33 +491,13 @@ def test_speech_to_text_yaml_round_trip(tmp_path):
     assert loaded.provider_options == {"smart_format": False}
 
 
-def test_mistral_language_hint_drops_the_timestamps_it_cannot_be_sent_with(requests_mock, caplog):
-    """Voxtral rejects `timestamp_granularities` together with `language`. Sending both fails the
-    whole call, so the language the caller asked for wins and the timings are given up."""
-    node = SpeechToText(connection=connections.Mistral(api_key="m-key"), language="fr", timestamps="word")
-    call = requests_mock.post("https://api.mistral.ai/v1/audio/transcriptions", json=MISTRAL_RESPONSE)
-
-    output = run_node(node, {"audio": b"abc"})
-
-    body = call.last_request.body
-    assert b'name="language"\r\n\r\nfr' in body
-    assert b"timestamp_granularities" not in body
-    assert "does not return timestamps when a language is set" in caplog.text
-    assert output["content"].startswith("Bonjour")
-
-
-def test_mistral_refuses_a_language_hint_with_diarization():
-    """Diarization needs segment timestamps, which the same limitation rules out. Dropping either
-    one silently would change what the node returns, so the caller picks."""
-    with pytest.raises(ValueError, match="Mistral cannot diarize with a language hint"):
-        SpeechToText(connection=connections.Mistral(api_key="m-key"), language="fr", diarize=True)
-
-
-def test_mistral_language_hint_is_fine_without_timestamps(requests_mock):
-    node = SpeechToText(connection=connections.Mistral(api_key="m-key"), language="fr", timestamps="none")
+def test_mistral_sends_a_language_hint_alongside_timestamps(requests_mock):
+    """Voxtral takes both: its only rule is that diarization comes with segment granularity."""
+    node = SpeechToText(connection=connections.Mistral(api_key="m-key"), language="fr", timestamps="segment")
     call = requests_mock.post("https://api.mistral.ai/v1/audio/transcriptions", json=MISTRAL_RESPONSE)
 
     run_node(node, {"audio": b"abc"})
 
-    assert b'name="language"\r\n\r\nfr' in call.last_request.body
-    assert b"timestamp_granularities" not in call.last_request.body
+    body = call.last_request.body
+    assert b'name="language"\r\n\r\nfr' in body
+    assert b'name="timestamp_granularities"\r\n\r\nsegment' in body
