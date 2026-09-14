@@ -501,3 +501,48 @@ def test_mistral_sends_a_language_hint_alongside_timestamps(requests_mock):
     body = call.last_request.body
     assert b'name="language"\r\n\r\nfr' in body
     assert b'name="timestamp_granularities"\r\n\r\nsegment' in body
+
+
+def test_a_url_transcription_ignores_whatever_the_agent_injected():
+    """An agent fills `audio` with the whole store; with a URL given, `execute` uses the URL, so
+    the files are beside the point and must not fail validation."""
+    document = BytesIO(b"%PDF-1.4")
+    document.name = "contract.pdf"
+    document.content_type = "application/pdf"
+
+    schema = SpeechToTextInputSchema(audio=[document], audio_url="https://cdn.example.com/call.wav")
+
+    assert schema.audio_url == "https://cdn.example.com/call.wav"
+
+
+def test_an_agent_is_given_the_speaker_labelled_transcript(requests_mock):
+    """`process_tool_output_for_agent` shows the model `content` and drops the rest, so with
+    diarization on that is the only place the speaker labels can survive."""
+    node = SpeechToText(connection=connections.Deepgram(api_key="dg-key"), diarize=True)
+    node.is_optimized_for_agents = True
+    requests_mock.post("https://api.deepgram.com/v1/listen", json=DEEPGRAM_RESPONSE)
+
+    output = run_node(node, {"audio": b"abc"})
+
+    assert output["content"].startswith("Speaker 0: Hi, this is Ana")
+    assert output["transcript"] == output["content"]
+
+
+def test_a_workflow_still_gets_the_plain_transcript(requests_mock):
+    node = SpeechToText(connection=connections.Deepgram(api_key="dg-key"), diarize=True)
+    requests_mock.post("https://api.deepgram.com/v1/listen", json=DEEPGRAM_RESPONSE)
+
+    output = run_node(node, {"audio": b"abc"})
+
+    assert output["content"].startswith("Hi, this is Ana")
+    assert output["transcript"].startswith("Speaker 0:")
+
+
+def test_an_agent_without_diarization_still_gets_plain_text(requests_mock):
+    node = SpeechToText(connection=connections.Deepgram(api_key="dg-key"), timestamps="none")
+    node.is_optimized_for_agents = True
+    requests_mock.post("https://api.deepgram.com/v1/listen", json=DEEPGRAM_RESPONSE)
+
+    output = run_node(node, {"audio": b"abc"})
+
+    assert output["content"].startswith("Hi, this is Ana")

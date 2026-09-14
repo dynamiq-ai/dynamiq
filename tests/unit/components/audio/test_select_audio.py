@@ -69,3 +69,24 @@ def test_unnamed_bytes_among_files_are_accepted_as_a_last_resort():
 def test_empty_selection_is_none():
     assert select_audio_file([]) is None
     assert select_audio_file(None) is None
+
+
+def test_the_store_stamping_octet_stream_does_not_hide_the_audio():
+    """The agent's upload path stores files as application/octet-stream whenever the caller's
+    BytesIO had no content type, which is the ordinary case. The name still says what it is."""
+    recording = named("meeting.mp3", "application/octet-stream")
+
+    assert select_audio_file([recording]) is recording
+
+
+def test_a_generic_content_type_still_loses_to_a_named_recording():
+    document = named("contract.pdf", "application/octet-stream")
+    recording = named("meeting.wav", "application/octet-stream")
+
+    assert select_audio_file([document, recording]) is recording
+
+
+def test_a_generic_content_type_with_no_usable_name_is_a_last_resort():
+    blob = named("blob", "application/octet-stream")
+
+    assert select_audio_file([named("contract.pdf", "application/pdf"), blob]) is blob

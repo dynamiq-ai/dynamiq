@@ -87,6 +87,16 @@ def _agent(tools: list, store: InMemoryFileStore | None = None) -> Agent:
     )
 
 
+def _store_the_way_an_agent_does(audio: bytes | None = None) -> InMemoryFileStore:
+    """The agent's own upload path never sets a content type, so the store stamps every uploaded
+    file `application/octet-stream`. Storing them any other way hides the case that matters."""
+    store = InMemoryFileStore()
+    store.store("contract.pdf", CONTRACT_PDF, content_type="application/octet-stream")
+    if audio is not None:
+        store.store("meeting.wav", audio, content_type="application/octet-stream")
+    return store
+
+
 def _observations(agent: Agent) -> list[str]:
     """What the agent actually showed its model after each tool call."""
     return [
@@ -99,9 +109,7 @@ def _observations(agent: Agent) -> list[str]:
 @requires_openai
 def test_an_agent_transcribes_the_recording_and_not_the_other_upload(conversation_wav):
     """The fix under test: an agent injects every stored file, and the node has to choose."""
-    store = InMemoryFileStore()
-    store.store("contract.pdf", CONTRACT_PDF, content_type="application/pdf")
-    store.store("meeting.wav", conversation_wav.getvalue(), content_type="audio/wav")
+    store = _store_the_way_an_agent_does(conversation_wav.getvalue())
     tool = SpeechToText(connection=connections.OpenAI(), model="gpt-4o-transcribe", timestamps="none")
     agent = _agent([tool], store)
 
@@ -193,3 +201,21 @@ def test_elevenlabs_diarization_live(conversation_wav):
 
     print("\nSCRIBE TRANSCRIPT:\n", output["transcript"])
     assert len({speaker["id"] for speaker in output["speakers"]}) >= 2
+
+
+@requires_openai
+def test_an_agent_can_say_who_said_what(conversation_wav):
+    """Diarization is only useful to an agent if the speaker labels survive into the observation."""
+    store = _store_the_way_an_agent_does(conversation_wav.getvalue())
+    tool = SpeechToText(
+        connection=connections.OpenAI(), model="gpt-4o-transcribe-diarize", diarize=True, timestamps="segment"
+    )
+    agent = _agent([tool], store)
+
+    result = agent.run(input_data={"input": "Who says the invoice is overdue, and who approves it? Name the speakers."})
+
+    assert result.status.value == "success", result.output
+    answer = result.output["content"]
+    print("\nWHO SAID WHAT:", answer)
+    observation = next(text for text in _observations(agent) if "overdue" in text)
+    assert observation.startswith("Speaker "), observation[:200]

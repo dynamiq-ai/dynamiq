@@ -44,6 +44,10 @@ class SpeechToTextInputSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_source(self):
+        if self.audio_url:
+            # `execute` transcribes the URL and ignores the files, so whatever an agent injected
+            # alongside it is beside the point.
+            return self
         # Agent file injection hands over every stored file; the node transcribes one recording.
         self.audio = select_audio_file(self.audio)
         if isinstance(self.audio, str):
@@ -196,4 +200,9 @@ class SpeechToText(ConnectionNode):
         )
         self._adapter.check_request(request)
         transcript = self._adapter.transcribe(request)
-        return transcript.model_dump(exclude=None if self.include_raw_response else {"raw"})
+        result = transcript.model_dump(exclude=None if self.include_raw_response else {"raw"})
+        if self.is_optimized_for_agents and self.diarize and transcript.speakers:
+            # An agent observation is built from `content` alone, so plain text would throw away
+            # the diarization it just paid for. Workflows keep the unlabelled transcript.
+            result["content"] = transcript.transcript
+        return result

@@ -11,6 +11,10 @@ from dynamiq.utils.logger import logger
 # Providers take speech out of video containers too, so both count as a recording.
 AUDIO_CONTENT_TYPE_PREFIXES = ("audio/", "video/")
 
+# What a store writes when nobody told it the type. It says "bytes", not "not audio", so the file
+# name gets the final word: the agent's own upload path stamps this on every file it stores.
+GENERIC_CONTENT_TYPES = ("application/octet-stream", "binary/octet-stream")
+
 
 def resolve_http_client(client: Any | None) -> Any:
     """Pick the object used for HTTP calls.
@@ -38,9 +42,9 @@ def raise_for_status(response: requests.Response, provider: str) -> None:
 def _looks_like_audio(file: Any) -> bool | None:
     """Whether a file is a recording. ``None`` when it carries nothing to judge by."""
     content_type = getattr(file, "content_type", None)
-    if not content_type:
+    if not content_type or content_type in GENERIC_CONTENT_TYPES:
         name = getattr(file, "name", None)
-        content_type = mimetypes.guess_type(name)[0] if name else None
+        content_type = (mimetypes.guess_type(name)[0] if name else None) or None
     if not content_type:
         return None
     return content_type.startswith(AUDIO_CONTENT_TYPE_PREFIXES)
