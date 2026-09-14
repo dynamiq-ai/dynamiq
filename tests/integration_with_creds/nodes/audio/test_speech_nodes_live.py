@@ -219,3 +219,23 @@ def test_an_agent_can_say_who_said_what(conversation_wav):
     print("\nWHO SAID WHAT:", answer)
     observation = next(text for text in _observations(agent) if "overdue" in text)
     assert observation.startswith("Speaker "), observation[:200]
+
+
+@requires_openai
+def test_an_agent_transcribes_a_recording_handed_over_as_raw_bytes(conversation_wav):
+    """`AgentInputSchema.files` accepts raw bytes, which the agent renames `file_0.bin` and stores
+    as application/octet-stream — a name and a type that both say "binary" and nothing more."""
+    tool = SpeechToText(connection=connections.OpenAI(), model="gpt-4o-transcribe", timestamps="none")
+    agent = _agent([tool], InMemoryFileStore())
+
+    result = agent.run(
+        input_data={
+            "input": "Transcribe the attached recording and quote the invoice number in it.",
+            "files": [conversation_wav.getvalue()],
+        }
+    )
+
+    assert result.status.value == "success", result.output
+    answer = result.output["content"]
+    print("\nRAW BYTES ANSWER:", answer)
+    assert "4471" in answer.replace(" ", "") or "four four seven one" in answer.lower()

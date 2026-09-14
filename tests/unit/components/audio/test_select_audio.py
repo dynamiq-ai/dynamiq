@@ -90,3 +90,41 @@ def test_a_generic_content_type_with_no_usable_name_is_a_last_resort():
     blob = named("blob", "application/octet-stream")
 
     assert select_audio_file([named("contract.pdf", "application/pdf"), blob]) is blob
+
+
+def test_a_guessed_generic_type_is_no_more_informative_than_a_stamped_one():
+    """`file_0.bin` is what the agent renames raw `bytes` uploads to, and it guesses
+    application/octet-stream — a verdict of "binary", not of "not audio"."""
+    raw_upload = named("file_0.bin", "application/octet-stream")
+
+    assert select_audio_file([raw_upload]) is raw_upload
+
+
+def test_a_named_recording_still_beats_a_nameless_binary_upload():
+    raw_upload = named("file_0.bin", "application/octet-stream")
+    recording = named("meeting.wav", "application/octet-stream")
+
+    assert select_audio_file([raw_upload, recording]) is recording
+
+
+def test_a_binary_upload_does_not_rescue_a_set_of_documents():
+    with pytest.raises(ValueError, match="none of them look like audio"):
+        select_audio_file([named("contract.pdf", "application/pdf"), named("notes.txt", "text/plain")])
+
+
+def test_the_bytes_identify_a_recording_the_name_and_type_cannot():
+    """`file_0.bin` stamped application/octet-stream is what an agent makes of raw bytes."""
+    recording = io.BytesIO(b"RIFF\x24\x00\x00\x00WAVEfmt ")
+    recording.name = "file_0.bin"
+    recording.content_type = "application/octet-stream"
+
+    assert select_audio_file([named("contract.pdf", "application/pdf"), recording]) is recording
+
+
+def test_sniffing_leaves_the_stream_where_it_found_it():
+    recording = io.BytesIO(b"RIFF\x24\x00\x00\x00WAVEfmt ")
+    recording.name = "file_0.bin"
+
+    select_audio_file([recording])
+
+    assert recording.tell() == 0

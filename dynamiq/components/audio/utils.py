@@ -2,6 +2,7 @@ import io
 import mimetypes
 import re
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -14,6 +15,9 @@ AUDIO_CONTENT_TYPE_PREFIXES = ("audio/", "video/")
 # What a store writes when nobody told it the type. It says "bytes", not "not audio", so the file
 # name gets the final word: the agent's own upload path stamps this on every file it stores.
 GENERIC_CONTENT_TYPES = ("application/octet-stream", "binary/octet-stream")
+
+# Extensions a speech provider recognizes. Anything else on a file name is worth second-guessing.
+AUDIO_EXTENSIONS = frozenset({"wav", "mp3", "flac", "ogg", "oga", "opus", "m4a", "mp4", "mpeg", "mpga", "webm", "aac"})
 
 
 def resolve_http_client(client: Any | None) -> Any:
@@ -39,14 +43,58 @@ def raise_for_status(response: requests.Response, provider: str) -> None:
     )
 
 
+# What the first bytes of each container a speech provider accepts look like. Providers validate
+# the file name's extension, so a recording that arrives unnamed has to be identified by content.
+AUDIO_SIGNATURES: tuple[tuple[bytes, int, str], ...] = (
+    (b"RIFF", 0, "wav"),
+    (b"ID3", 0, "mp3"),
+    (b"fLaC", 0, "flac"),
+    (b"OggS", 0, "ogg"),
+    (b"ftyp", 4, "m4a"),
+    (b"\x1a\x45\xdf\xa3", 0, "webm"),
+)
+# An MP3 frame with no ID3 tag: 11 set bits, then a version and layer that are not the reserved values.
+MP3_FRAME_PREFIXES = (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2", b"\xff\xfa")
+
+
+def sniff_audio_extension(data: bytes) -> str | None:
+    """The file extension for whatever container ``data`` holds, or ``None`` if unrecognized."""
+    header = bytes(data[:16])
+    if not header:
+        return None
+    for signature, offset, extension in AUDIO_SIGNATURES:
+        if header[offset : offset + len(signature)] == signature:
+            return extension
+    if header.startswith(MP3_FRAME_PREFIXES):
+        return "mp3"
+    return None
+
+
+def peek_audio_extension(file: Any) -> str | None:
+    """``sniff_audio_extension`` for bytes or a stream, leaving the stream's position alone."""
+    if isinstance(file, (bytes, bytearray)):
+        return sniff_audio_extension(bytes(file))
+    if not (callable(getattr(file, "read", None)) and callable(getattr(file, "seek", None))):
+        return None
+    position = file.tell()
+    try:
+        header = file.read(16)
+    finally:
+        file.seek(position)
+    return sniff_audio_extension(header) if isinstance(header, (bytes, bytearray)) else None
+
+
 def _looks_like_audio(file: Any) -> bool | None:
     """Whether a file is a recording. ``None`` when it carries nothing to judge by."""
     content_type = getattr(file, "content_type", None)
     if not content_type or content_type in GENERIC_CONTENT_TYPES:
         name = getattr(file, "name", None)
-        content_type = (mimetypes.guess_type(name)[0] if name else None) or None
-    if not content_type:
-        return None
+        content_type = mimetypes.guess_type(name)[0] if name else None
+    # The same test again, because a guess is as capable of landing on the generic type as a store
+    # is: `file_0.bin` — what the agent renames raw `bytes` uploads to — guesses octet-stream.
+    if not content_type or content_type in GENERIC_CONTENT_TYPES:
+        # Nothing outside the file says what it is, so ask the bytes.
+        return True if peek_audio_extension(file) else None
     return content_type.startswith(AUDIO_CONTENT_TYPE_PREFIXES)
 
 
@@ -86,8 +134,16 @@ def prepare_audio_file(audio: io.BytesIO | bytes, default_name: str, default_con
         audio = io.BytesIO(audio)
     if not isinstance(audio, io.BytesIO):
         raise ValueError("Audio must be a BytesIO object or bytes.")
-    if not getattr(audio, "name", None):
-        audio.name = default_name
+    name = getattr(audio, "name", None)
+    extension = Path(name).suffix.lstrip(".").lower() if name else None
+    if extension not in AUDIO_EXTENSIONS:
+        # Providers read the format off the file name, and reject `file_0.bin` outright. The bytes
+        # know better than a name the agent invented for an unnamed upload.
+        sniffed = peek_audio_extension(audio)
+        if sniffed:
+            audio.name = f"{Path(name).stem}.{sniffed}" if name else f"{Path(default_name).stem}.{sniffed}"
+        elif not name:
+            audio.name = default_name
     if not getattr(audio, "content_type", None):
         audio.content_type = default_content_type
     audio.seek(0)
