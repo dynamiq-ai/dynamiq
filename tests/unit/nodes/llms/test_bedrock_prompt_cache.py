@@ -7,7 +7,7 @@ higher -- so these assert the exact payload rather than "something was set".
 import pytest
 
 from dynamiq.connections import AWS as AWSConnection
-from dynamiq.nodes.llms.bedrock import Bedrock, BedrockCacheControl
+from dynamiq.nodes.llms import Bedrock, BedrockCacheControl
 
 MODEL = "bedrock/us.anthropic.claude-sonnet-4-6"
 TOOLS = [{"type": "function", "function": {"name": "search", "parameters": {}}}]
@@ -79,6 +79,50 @@ class TestInjectionPoints:
 
         for point in points:
             assert set(point["control"]) <= {"type", "ttl"}
+
+
+class TestInvokeRouteIsNotBroken:
+    """Only the Converse transform pops `cache_control_injection_points`. On the Invoke
+    route a leftover tool_config point is spread into the request body and Bedrock 400s --
+    turning a call that would have succeeded into a failure."""
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "bedrock/eu.anthropic.claude-some-future-model",  # unknown -> invoke fallback
+            "bedrock/invoke/us.anthropic.claude-sonnet-4-6",  # explicit invoke
+        ],
+    )
+    def test_no_tool_point_off_converse(self, model):
+        llm = Bedrock(
+            connection=AWSConnection(access_key_id="k", secret_access_key="s", region="us-east-1"),
+            model=model,
+            cache_control=BedrockCacheControl(),
+            is_postponed_component_init=True,
+        )
+        points = llm.update_completion_params({"model": model, "tools": TOOLS})[
+            "cache_control_injection_points"
+        ]
+
+        assert [p["location"] for p in points] == ["message"]
+
+    def test_message_point_still_applied_off_converse(self):
+        """The hook consumes message points on any route, and Anthropic-on-Bedrock
+        invoke accepts cache_control on messages natively -- so don't drop it."""
+        model = "bedrock/invoke/us.anthropic.claude-sonnet-4-6"
+        llm = Bedrock(
+            connection=AWSConnection(access_key_id="k", secret_access_key="s", region="us-east-1"),
+            model=model,
+            cache_control=BedrockCacheControl(),
+            is_postponed_component_init=True,
+        )
+
+        assert llm.update_completion_params({"model": model, "tools": TOOLS})[
+            "cache_control_injection_points"
+        ] == [{"location": "message", "index": -1, "control": {"type": "ephemeral", "ttl": "5m"}}]
+
+    def test_tool_point_kept_on_converse(self):
+        assert _points(_llm(cache_control=BedrockCacheControl()), tools=TOOLS)[0]["location"] == "tool_config"
 
 
 class TestBreakpointBudget:

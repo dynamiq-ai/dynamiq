@@ -1,5 +1,6 @@
 from typing import Any, Literal
 
+from litellm.llms.bedrock.common_utils import BedrockModelInfo
 from pydantic import BaseModel
 
 from dynamiq.connections import AWS as AWSConnection
@@ -10,6 +11,16 @@ _BEDROCK_STOP_UNSUPPORTED_INDICATORS = (
     "doesn't support the stopSequences field",
     "does not support the stopSequences field",
 )
+
+
+def _routes_to_converse(model: str) -> bool:
+    """Whether LiteLLM sends this model through the Converse API.
+
+    Only the Converse transform pops ``cache_control_injection_points``. On the
+    Invoke route the leftover ``tool_config`` point is spread into the request
+    body and Bedrock 400s, so the tool breakpoint is Converse-only.
+    """
+    return BedrockModelInfo.get_bedrock_route(model) == "converse"
 
 
 class BedrockCacheControl(BaseModel):
@@ -65,7 +76,15 @@ class Bedrock(BaseLLM):
         # Bedrock allows 4 breakpoints, so don't spend one when there are no
         # tools to cache.
         if self.cache_control.cache_tools and params.get("tools"):
-            points.append({"location": "tool_config", "control": control})
+            if _routes_to_converse(self.model):
+                points.append({"location": "tool_config", "control": control})
+            else:
+                logger.debug(
+                    "LLM '%s': model '%s' routes to Bedrock Invoke, which has no toolConfig section; "
+                    "caching the conversation prefix only.",
+                    self.name,
+                    self.model,
+                )
 
         points.append(
             {
