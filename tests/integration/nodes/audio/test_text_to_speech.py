@@ -230,3 +230,24 @@ def test_text_to_speech_yaml_round_trip(tmp_path):
     assert loaded.output_format == AudioFormat.PCM
     assert loaded.sample_rate == 24000
     assert loaded.provider_options == {"voice_settings": {"stability": 0.3}}
+
+
+def test_an_agent_sees_a_description_of_the_audio_not_the_bytes(requests_mock):
+    """Speech is returned as raw bytes; str() on those fills an agent's context with escapes."""
+    from dynamiq.connections import OpenAI as OpenAIConnection
+    from dynamiq.nodes.agents import Agent
+    from dynamiq.nodes.llms import OpenAI
+
+    node = TextToSpeech(connection=connections.ElevenLabs(api_key="xi-key"), voice="voice-123")
+    requests_mock.post("https://api.elevenlabs.io/v1/text-to-speech/voice-123", content=b"\xff\xfb\x90\x64" * 2000)
+    agent = Agent(
+        name="Agent",
+        llm=OpenAI(connection=OpenAIConnection(api_key="k"), model="gpt-4o"),
+        role="r",
+        tools=[node],
+    )
+
+    observation, files, _ = agent._run_tool(node, {"text": "Hello", "output_file_name": "hello.mp3"}, config=None)
+
+    assert observation == "Produced audio/mpeg (8000 bytes), returned as file 'hello.mp3'."
+    assert files[0].read() == b"\xff\xfb\x90\x64" * 2000

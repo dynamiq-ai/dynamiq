@@ -1,9 +1,15 @@
 import io
+import mimetypes
 import re
 from enum import Enum
 from typing import Any
 
 import requests
+
+from dynamiq.utils.logger import logger
+
+# Providers take speech out of video containers too, so both count as a recording.
+AUDIO_CONTENT_TYPE_PREFIXES = ("audio/", "video/")
 
 
 def resolve_http_client(client: Any | None) -> Any:
@@ -27,6 +33,47 @@ def raise_for_status(response: requests.Response, provider: str) -> None:
     raise requests.HTTPError(
         f"{provider} request failed with status {response.status_code}: {detail}", response=response
     )
+
+
+def _looks_like_audio(file: Any) -> bool | None:
+    """Whether a file is a recording. ``None`` when it carries nothing to judge by."""
+    content_type = getattr(file, "content_type", None)
+    if not content_type:
+        name = getattr(file, "name", None)
+        content_type = mimetypes.guess_type(name)[0] if name else None
+    if not content_type:
+        return None
+    return content_type.startswith(AUDIO_CONTENT_TYPE_PREFIXES)
+
+
+def select_audio_file(audio: Any) -> Any:
+    """Pick the recording out of whatever was handed to a transcription node.
+
+    Agents inject every file their store holds, so the node is routinely given a contract and a
+    call recording together and has to choose. A file that identifies itself as audio or video
+    wins; raw bytes with nothing to judge by are taken as a last resort; a set of files that are
+    all provably something else is an error rather than a transcription of a PDF.
+    """
+    if not isinstance(audio, (list, tuple)):
+        return audio
+    if not audio:
+        return None
+
+    unidentified = []
+    for item in audio:
+        verdict = _looks_like_audio(item)
+        if verdict is True:
+            if len(audio) > 1:
+                logger.debug(f"Transcribing {getattr(item, 'name', 'the audio file')} out of {len(audio)} files.")
+            return item
+        if verdict is None:
+            unidentified.append(item)
+
+    if unidentified:
+        return unidentified[0]
+
+    names = ", ".join(str(getattr(item, "name", "unnamed file")) for item in audio)
+    raise ValueError(f"Received {len(audio)} file(s) but none of them look like audio: {names}.")
 
 
 def prepare_audio_file(audio: io.BytesIO | bytes, default_name: str, default_content_type: str) -> io.BytesIO:

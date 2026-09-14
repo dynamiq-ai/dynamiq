@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from dynamiq.components.audio.registry import resolve_stt_adapter
 from dynamiq.components.audio.stt import BaseSTTAdapter, TranscriptionRequest
-from dynamiq.components.audio.utils import prepare_audio_file
+from dynamiq.components.audio.utils import prepare_audio_file, select_audio_file
 from dynamiq.connections import Deepgram as DeepgramConnection
 from dynamiq.connections import ElevenLabs as ElevenLabsConnection
 from dynamiq.connections import Groq as GroqConnection
@@ -16,21 +16,26 @@ from dynamiq.connections import Whisper as WhisperConnection
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
+from dynamiq.nodes.types import InputParamMode
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.audio import SpeakerHints, TimestampGranularity
 from dynamiq.types.cancellation import check_cancellation
-from dynamiq.utils.logger import logger
 
 DEFAULT_FILE_NAME = "audio.wav"
 DEFAULT_CONTENT_TYPE = "audio/wav"
 
 
 class SpeechToTextInputSchema(BaseModel):
-    audio: io.BytesIO | bytes | list[io.BytesIO | bytes] | None = Field(
+    audio: io.BytesIO | bytes | str | list[io.BytesIO | bytes | str] | None = Field(
         default=None,
-        description="Audio file to transcribe, as bytes or a file object.",
-        # Agents fill this field from their file store; the LLM must not be asked to type raw audio.
-        json_schema_extra={"map_from_storage": True, "is_accessible_to_agent": False},
+        description=(
+            "Audio file to transcribe. Name the stored file to transcribe, e.g. 'meeting.wav'; the "
+            "file itself is fetched for you."
+        ),
+        # Agents fill this field from their file store or sandbox: the LLM names the recording and the
+        # agent swaps the name for the bytes. Naming it is how the right file gets picked when several
+        # are available, so the field stays visible to the LLM (raw audio is never typed by hand).
+        json_schema_extra={"map_from_storage": True},
     )
     audio_url: str | None = Field(
         default=None, description="Public URL of the audio, for providers that download it themselves."
@@ -39,11 +44,13 @@ class SpeechToTextInputSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_source(self):
-        if isinstance(self.audio, list):
-            # Agent file injection hands over every stored file; the node transcribes one recording.
-            if len(self.audio) > 1:
-                logger.warning("SpeechToText received several files; transcribing the first one.")
-            self.audio = self.audio[0] if self.audio else None
+        # Agent file injection hands over every stored file; the node transcribes one recording.
+        self.audio = select_audio_file(self.audio)
+        if isinstance(self.audio, str):
+            raise ValueError(
+                f"No file named {self.audio!r} is available to transcribe. Provide the audio itself, "
+                "or name a file that is in the file store."
+            )
         if self.audio is None and not self.audio_url:
             raise ValueError("Either `audio` or `audio_url` must be provided.")
         return self
@@ -138,6 +145,10 @@ class SpeechToText(ConnectionNode):
             prompt=self.prompt,
             language=self.language,
         )
+        if not adapter_cls.capabilities.audio_url_input:
+            # An agent offered a field the provider cannot honour would spend a turn discovering
+            # that; hide it instead. Direct callers still get the explicit error from check_request.
+            self.input_param_modes.setdefault("audio_url", InputParamMode.HIDDEN)
         return self
 
     @property

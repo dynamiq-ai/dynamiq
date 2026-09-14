@@ -212,7 +212,7 @@ def test_deepgram_prefers_diarize_model_when_provided(requests_mock):
 
 
 def test_mistral_diarized_transcription(requests_mock):
-    node = SpeechToText(connection=connections.Mistral(api_key="m-key"), diarize=True, language="fr", prompt="Dynamiq")
+    node = SpeechToText(connection=connections.Mistral(api_key="m-key"), diarize=True, prompt="Dynamiq")
     call = requests_mock.post("https://api.mistral.ai/v1/audio/transcriptions", json=MISTRAL_RESPONSE)
     audio = BytesIO(b"abc")
     audio.name = "call.mp3"
@@ -232,7 +232,6 @@ def test_mistral_diarized_transcription(requests_mock):
     body = call.last_request.body
     assert b'name="model"\r\n\r\nvoxtral-mini-latest' in body
     assert b'name="diarize"\r\n\r\ntrue' in body
-    assert b'name="language"\r\n\r\nfr' in body
     assert b'name="context_bias"\r\n\r\nDynamiq' in body
     # Diarization is refused without segment granularity, so it is always sent alongside.
     assert b'name="timestamp_granularities"\r\n\r\nsegment' in body
@@ -404,17 +403,47 @@ def test_unsupported_options_fail_at_construction():
 
 
 def test_agent_file_injection_contract(requests_mock):
-    # Agents fill map_from_storage fields with every stored file and must not show raw audio to the LLM.
+    # Agents fill map_from_storage fields with every stored file, and the LLM names the one to use.
     field = SpeechToText.input_schema.model_fields["audio"]
-    assert field.json_schema_extra == {"map_from_storage": True, "is_accessible_to_agent": False}
+    assert field.json_schema_extra == {"map_from_storage": True}
 
     node = SpeechToText(connection=connections.Deepgram(api_key="dg-key"), timestamps="none")
     call = requests_mock.post("https://api.deepgram.com/v1/listen", json=DEEPGRAM_RESPONSE)
 
+    # Nothing identifies these as audio, so the first is the best guess available.
     output = run_node(node, {"audio": [b"\x00\x01", b"\x02\x03"]})
 
     assert call.last_request.body == b"\x00\x01"
     assert output["content"].startswith("Hi, this is Ana")
+
+
+def test_the_recording_is_picked_out_of_everything_the_agent_injected(requests_mock):
+    node = SpeechToText(connection=connections.Deepgram(api_key="dg-key"), timestamps="none")
+    call = requests_mock.post("https://api.deepgram.com/v1/listen", json=DEEPGRAM_RESPONSE)
+    document = BytesIO(b"%PDF-1.4")
+    document.name = "contract.pdf"
+    document.content_type = "application/pdf"
+    recording = BytesIO(b"RIFF")
+    recording.name = "meeting.wav"
+    recording.content_type = "audio/wav"
+
+    run_node(node, {"audio": [document, recording]})
+
+    assert call.last_request.body == b"RIFF"
+
+
+def test_transcribing_a_file_that_is_not_audio_fails_with_a_useful_message():
+    document = BytesIO(b"%PDF-1.4")
+    document.name = "contract.pdf"
+    document.content_type = "application/pdf"
+
+    with pytest.raises(ValueError, match="none of them look like audio: contract.pdf"):
+        SpeechToTextInputSchema(audio=[document])
+
+
+def test_naming_a_file_that_never_arrived_says_so():
+    with pytest.raises(ValueError, match="No file named 'meeting.wav' is available"):
+        SpeechToTextInputSchema(audio="meeting.wav")
 
 
 def test_audio_url_wins_over_injected_files(requests_mock):
@@ -459,3 +488,35 @@ def test_speech_to_text_yaml_round_trip(tmp_path):
     assert loaded.timestamps == TimestampGranularity.WORD
     assert loaded.speakers.max == 4
     assert loaded.provider_options == {"smart_format": False}
+
+
+def test_mistral_language_hint_drops_the_timestamps_it_cannot_be_sent_with(requests_mock, caplog):
+    """Voxtral rejects `timestamp_granularities` together with `language`. Sending both fails the
+    whole call, so the language the caller asked for wins and the timings are given up."""
+    node = SpeechToText(connection=connections.Mistral(api_key="m-key"), language="fr", timestamps="word")
+    call = requests_mock.post("https://api.mistral.ai/v1/audio/transcriptions", json=MISTRAL_RESPONSE)
+
+    output = run_node(node, {"audio": b"abc"})
+
+    body = call.last_request.body
+    assert b'name="language"\r\n\r\nfr' in body
+    assert b"timestamp_granularities" not in body
+    assert "does not return timestamps when a language is set" in caplog.text
+    assert output["content"].startswith("Bonjour")
+
+
+def test_mistral_refuses_a_language_hint_with_diarization():
+    """Diarization needs segment timestamps, which the same limitation rules out. Dropping either
+    one silently would change what the node returns, so the caller picks."""
+    with pytest.raises(ValueError, match="Mistral cannot diarize with a language hint"):
+        SpeechToText(connection=connections.Mistral(api_key="m-key"), language="fr", diarize=True)
+
+
+def test_mistral_language_hint_is_fine_without_timestamps(requests_mock):
+    node = SpeechToText(connection=connections.Mistral(api_key="m-key"), language="fr", timestamps="none")
+    call = requests_mock.post("https://api.mistral.ai/v1/audio/transcriptions", json=MISTRAL_RESPONSE)
+
+    run_node(node, {"audio": b"abc"})
+
+    assert b'name="language"\r\n\r\nfr' in call.last_request.body
+    assert b"timestamp_granularities" not in call.last_request.body

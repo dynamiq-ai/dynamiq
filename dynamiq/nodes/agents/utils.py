@@ -1034,6 +1034,39 @@ def bytes_to_data_url(image_bytes: bytes) -> str:
         raise ValueError(f"Failed to convert image to data URL: {str(e)}")
 
 
+def describe_binary(value: bytes | bytearray) -> str:
+    """Stand-in for binary a tool returned (audio, images, archives).
+
+    The model cannot read bytes, and rendering them with ``str()`` spends thousands of tokens on
+    escape sequences. The file itself still reaches the agent through the tool's ``files`` output.
+    """
+    return f"<{len(value)} bytes of binary data>"
+
+
+def summarize_binary_tool_output(output: dict) -> str:
+    """One line describing binary a tool produced, for the agent's observation.
+
+    Names the file the tool returned, because that is what the model needs to refer to it later
+    (to attach it, to hand it to another tool, to tell the user where it is).
+    """
+    content = output.get("content") or b""
+    mime_type = output.get("mime_type")
+    files = output.get("files") or []
+    name = next((getattr(file, "name", None) for file in files if getattr(file, "name", None)), None)
+
+    produced = f"{mime_type} ({len(content)} bytes)" if mime_type else f"{len(content)} bytes of binary data"
+    if name:
+        return f"Produced {produced}, returned as file '{name}'."
+    return f"Produced {produced}."
+
+
+def _json_fallback(value: Any) -> str:
+    """Render what ``json.dumps`` refuses, so one binary field cannot fail a whole tool result."""
+    if isinstance(value, (bytes, bytearray)):
+        return describe_binary(value)
+    return str(value)
+
+
 def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKENS, truncate: bool = True) -> str:
     """
     Process tool output for agent consumption.
@@ -1053,14 +1086,21 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
         A processed string suitable for agent consumption.
     """
     if not isinstance(content, str):
-        if isinstance(content, dict):
+        if isinstance(content, (bytes, bytearray)):
+            content = describe_binary(content)
+        elif isinstance(content, dict):
             filtered_content = {k: v for k, v in content.items() if k != "files"}
 
             if "content" in filtered_content:
                 inner_content = filtered_content["content"]
-                content = inner_content if isinstance(inner_content, str) else json.dumps(inner_content, indent=2)
+                if isinstance(inner_content, str):
+                    content = inner_content
+                elif isinstance(inner_content, (bytes, bytearray)):
+                    content = describe_binary(inner_content)
+                else:
+                    content = json.dumps(inner_content, indent=2, default=_json_fallback)
             else:
-                content = json.dumps(filtered_content, indent=2) if filtered_content else ""
+                content = json.dumps(filtered_content, indent=2, default=_json_fallback) if filtered_content else ""
         elif isinstance(content, (list, tuple)):
             content = "\n".join(str(item) for item in content)
         else:

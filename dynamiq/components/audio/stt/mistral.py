@@ -4,6 +4,7 @@ from dynamiq.components.audio.stt.base import BaseSTTAdapter, STTCapabilities, T
 from dynamiq.components.audio.stt.normalize import build_transcript, optional_str
 from dynamiq.components.audio.utils import multipart_fields, raise_for_status, resolve_http_client, split_terms
 from dynamiq.types.audio import SpeakerHints, TimestampGranularity, Transcript, TranscriptSegment, TranscriptWord
+from dynamiq.utils.logger import logger
 
 MISTRAL_API_BASE_URL = "https://api.mistral.ai/v1"
 
@@ -30,6 +31,14 @@ class MistralSTTAdapter(BaseSTTAdapter):
         )
         if diarize and timestamps == TimestampGranularity.WORD:
             raise ValueError("Mistral diarization returns segment timings only; use timestamps='segment' with diarize.")
+        if diarize and language:
+            # Voxtral refuses timestamp_granularities alongside language, and diarization is only
+            # returned on timed segments, so the two cannot both be honoured in one request.
+            raise ValueError(
+                "Mistral cannot diarize with a language hint: speaker labels arrive on timed segments, "
+                "which Voxtral does not return when a language is set. Drop `language` (Voxtral detects "
+                "it) or turn off `diarize`."
+            )
 
     def build_fields(self, request: TranscriptionRequest) -> dict[str, Any]:
         fields: dict[str, Any] = {"model": request.model}
@@ -41,7 +50,14 @@ class MistralSTTAdapter(BaseSTTAdapter):
             # node asked for: the timed segments are what carries the speaker labels.
             fields["timestamp_granularities"] = ["segment"]
         elif request.timestamps != TimestampGranularity.NONE:
-            fields["timestamp_granularities"] = [request.timestamps.value]
+            if request.language:
+                # Sending both fails the request outright, so the explicit language hint wins.
+                logger.warning(
+                    f"Mistral does not return timestamps when a language is set; "
+                    f"transcribing '{request.language}' without {request.timestamps.value} timings."
+                )
+            else:
+                fields["timestamp_granularities"] = [request.timestamps.value]
         if request.prompt:
             fields["context_bias"] = split_terms(request.prompt)
         if request.audio_url:

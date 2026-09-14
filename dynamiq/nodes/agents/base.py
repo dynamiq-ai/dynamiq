@@ -39,6 +39,7 @@ from dynamiq.nodes.agents.utils import (
     is_image_file,
     is_video_file,
     process_tool_output_with_sandbox_persistence,
+    summarize_binary_tool_output,
 )
 from dynamiq.nodes.cloning import carry_mock_exclusions, regenerate_node_ids
 from dynamiq.nodes.llms import BaseLLM
@@ -1848,6 +1849,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 max_tokens=self.tool_output_max_length,
                 truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
             )
+
+            if isinstance(tool_result_output_content, (bytes, bytearray)):
+                # Audio, images and archives come back as raw bytes; describe them instead of
+                # spending the model's context on escape sequences it cannot read anyway.
+                tool_result_content_processed = summarize_binary_tool_output(tool_result.output)
 
             if saved_files:
                 paths = ", ".join(saved_files)

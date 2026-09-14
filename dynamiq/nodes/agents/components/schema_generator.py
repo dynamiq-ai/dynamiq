@@ -143,10 +143,12 @@ def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str]
         for name, field in _reorder_fields(tool.resolved_input_schema.model_fields):
             if _is_accessible_to_agent(field):
                 args = get_args(field.annotation)
-                if get_origin(field.annotation) in (Union, types.UnionType):
-                    type_str = str(field.annotation)
-                elif field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
+                # Checked before the union branch: a stored-file field accepts whatever the tool
+                # needs at execution (bytes, BytesIO, a mapping), but the LLM only ever names files.
+                if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
                     type_str = "tuple[str, ...]"
+                elif get_origin(field.annotation) in (Union, types.UnionType):
+                    type_str = str(field.annotation)
                 elif args and hasattr(args[0], "model_fields") and get_origin(field.annotation) is list:
                     nested_fields = [
                         f"{fn}: {getattr(fi.annotation, '__name__', str(fi.annotation))} - {fi.description or ''}"
