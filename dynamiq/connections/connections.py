@@ -750,6 +750,53 @@ class Whisper(Http):
         return self
 
 
+class Deepgram(BaseApiKeyConnection):
+    """
+    Represents a connection to the Deepgram speech API (transcription and Aura text-to-speech).
+
+    Attributes:
+        api_key (str): API key for authentication, fetched from the environment variable "DEEPGRAM_API_KEY".
+        url (str): Base API URL, fetched from the environment variable "DEEPGRAM_URL".
+    """
+
+    api_key: str = Field(default_factory=partial(get_env_var, "DEEPGRAM_API_KEY"))
+    url: str = Field(default_factory=partial(get_env_var, "DEEPGRAM_URL", "https://api.deepgram.com/v1"))
+
+    def connect(self):
+        """
+        Connects to the API.
+
+        Returns:
+            requests: A requests module for making HTTP requests to the API.
+        """
+        import requests
+
+        return requests
+
+    async def connect_async(self):
+        """Build an httpx.AsyncClient mirroring requests defaults."""
+        import httpx
+
+        return httpx.AsyncClient(  # nosec B113 - timeout=None is intentional; matches requests defaults
+            follow_redirects=True,
+            trust_env=True,
+            timeout=httpx.Timeout(None),
+        )
+
+    @property
+    def conn_params(self) -> dict:
+        """
+        Returns the parameters required for connection.
+
+        Returns:
+            dict: A dictionary containing the API key with the key 'api_key' and base url with the key 'api_base'.
+        """
+        return {
+            "api_base": self.url,
+            "api_key": self.api_key,
+        }
+
+
 class ElevenLabs(Http):
     """
     Represents a connection to the ElevenLabs API using an HTTP request.
