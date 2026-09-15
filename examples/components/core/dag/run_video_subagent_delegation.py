@@ -25,7 +25,7 @@ def make_tracer() -> TracingCallbackHandler:
     access_key = os.environ.get("DYNAMIQ_TRACE_ACCESS_KEY")
     if not access_key:
         return TracingCallbackHandler()
-    base_url = os.environ.get("DYNAMIQ_TRACE_BASE_URL", "https://collector.sandbox.getdynamiq.ai")
+    base_url = os.environ.get("DYNAMIQ_TRACE_BASE_URL", "https://collector.getdynamiq.ai")
     logger.info("DYNAMIQ_TRACE_ACCESS_KEY set -- streaming trace to %s", base_url)
     return DynamiqTracingCallbackHandler(base_url=base_url, access_key=access_key)
 

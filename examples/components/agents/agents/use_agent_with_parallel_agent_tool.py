@@ -118,7 +118,7 @@ def run_workflow(callbacks: list | None = None):
 
 
 def run_workflow_with_ui_tracing(
-    base_url: str = os.environ.get("DYNAMIQ_TRACE_BASE_URL", "https://collector.sandbox.getdynamiq.ai"),
+    base_url: str = os.environ.get("DYNAMIQ_TRACE_BASE_URL", "https://collector.getdynamiq.ai"),
     access_key: str | None = os.environ.get("DYNAMIQ_TRACE_ACCESS_KEY"),
     **handler_kwargs,
 ):
