@@ -119,6 +119,12 @@ def _is_accessible_to_agent(field: Any) -> bool:
     return not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True)
 
 
+def _holds_many_files(annotation: Any) -> bool:
+    """Whether a stored-file field can hold more than one file."""
+    members = get_args(annotation) if get_origin(annotation) in (Union, types.UnionType) else (annotation,)
+    return any((get_origin(member) or member) in (list, tuple, set, dict) for member in members)
+
+
 def _reorder_fields(fields: dict) -> list[tuple[str, Any]]:
     """Reorder fields so that priority fields (e.g. brief) come first."""
     priority = [(k, v) for k, v in fields.items() if k in PRIORITY_FIELDS]
@@ -143,10 +149,13 @@ def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str]
         for name, field in _reorder_fields(tool.resolved_input_schema.model_fields):
             if _is_accessible_to_agent(field):
                 args = get_args(field.annotation)
-                if get_origin(field.annotation) in (Union, types.UnionType):
+                # Checked before the union branch: a stored-file field accepts whatever the tool
+                # needs at execution (bytes, BytesIO, a mapping), but the LLM only ever names files.
+                # The arity still has to match, or the model sends a list to a field holding one file.
+                if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
+                    type_str = "tuple[str, ...]" if _holds_many_files(field.annotation) else "str"
+                elif get_origin(field.annotation) in (Union, types.UnionType):
                     type_str = str(field.annotation)
-                elif field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
-                    type_str = "tuple[str, ...]"
                 elif args and hasattr(args[0], "model_fields") and get_origin(field.annotation) is list:
                     nested_fields = [
                         f"{fn}: {getattr(fi.annotation, '__name__', str(fi.annotation))} - {fi.description or ''}"

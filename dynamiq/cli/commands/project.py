@@ -1,6 +1,6 @@
 import click
 
-from dynamiq.cli.client import ApiClient
+from dynamiq.cli.client import ApiClient, ok
 from dynamiq.cli.commands.context import with_api_and_settings
 from dynamiq.cli.config import Settings
 
@@ -15,7 +15,7 @@ def list_projects(*, api: ApiClient, settings: Settings):
         click.echo("No organization ID found. Please set the current organization ID.")
         return
     response = api.get(f"/v1/projects?org_id={org_id}")
-    if response.status_code == 200:
+    if ok(response):
         projects = response.json().get("data", [])
         click.echo(f"{'ID':<40} {'Name'}")
         for project in projects:
@@ -34,7 +34,7 @@ def set_project(*, api: ApiClient, settings: Settings, proj_id: str):
         return
 
     response = api.get(f"/v1/projects/{proj_id}?org_id={org_id}")
-    if response.status_code == 200:
+    if ok(response):
         settings.project_id = proj_id
         settings.save_settings()
         click.echo(f"Current project set to: {proj_id}")

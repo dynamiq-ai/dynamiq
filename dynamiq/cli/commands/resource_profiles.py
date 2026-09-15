@@ -1,6 +1,6 @@
 import click
 
-from dynamiq.cli.client import ApiClient
+from dynamiq.cli.client import ApiClient, ok
 from dynamiq.cli.commands.context import with_api_and_settings
 from dynamiq.cli.config import Settings
 
@@ -24,7 +24,7 @@ profile = click.Group(name="resource-profiles", help="Manage profiles")
 @with_api_and_settings
 def list_resource_profiles(*, api: ApiClient, settings: Settings, purpose: str, sort_by: str, page_size: int):
     response = api.get(f"/v1/resource-profiles?purpose={purpose}&page_size={page_size}&sort={sort_by}")
-    if response.status_code == 200:
+    if ok(response):
         profiles = response.json().get("data", [])
         click.echo(f"{len(profiles)} resource(s) found.")
         max_name_len = max(len(p["name"]) for p in profiles) + 2 if profiles else 40

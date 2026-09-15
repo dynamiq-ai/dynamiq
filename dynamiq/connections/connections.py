@@ -750,6 +750,53 @@ class Whisper(Http):
         return self
 
 
+class Deepgram(BaseApiKeyConnection):
+    """
+    Represents a connection to the Deepgram speech API (transcription and Aura text-to-speech).
+
+    Attributes:
+        api_key (str): API key for authentication, fetched from the environment variable "DEEPGRAM_API_KEY".
+        url (str): Base API URL, fetched from the environment variable "DEEPGRAM_URL".
+    """
+
+    api_key: str = Field(default_factory=partial(get_env_var, "DEEPGRAM_API_KEY"))
+    url: str = Field(default_factory=partial(get_env_var, "DEEPGRAM_URL", "https://api.deepgram.com/v1"))
+
+    def connect(self):
+        """
+        Connects to the API.
+
+        Returns:
+            requests: A requests module for making HTTP requests to the API.
+        """
+        import requests
+
+        return requests
+
+    async def connect_async(self):
+        """Build an httpx.AsyncClient mirroring requests defaults."""
+        import httpx
+
+        return httpx.AsyncClient(  # nosec B113 - timeout=None is intentional; matches requests defaults
+            follow_redirects=True,
+            trust_env=True,
+            timeout=httpx.Timeout(None),
+        )
+
+    @property
+    def conn_params(self) -> dict:
+        """
+        Returns the parameters required for connection.
+
+        Returns:
+            dict: A dictionary containing the API key with the key 'api_key' and base url with the key 'api_base'.
+        """
+        return {
+            "api_base": self.url,
+            "api_key": self.api_key,
+        }
+
+
 class ElevenLabs(Http):
     """
     Represents a connection to the ElevenLabs API using an HTTP request.
@@ -1762,15 +1809,29 @@ class Databricks(BaseApiKeyConnection):
         }
 
 
+def merge_mcp_http_headers(base: dict[str, Any] | None, extra: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Merge connection-level and per-call MCP HTTP headers without mutating either dict.
+
+    Per-call values win on duplicate keys. An empty merge returns ``None`` so the MCP client
+    keeps its default (no extra headers) rather than sending ``{}``.
+    """
+    merged = {**(base or {}), **(extra or {})}
+    return merged or None
+
+
 class MCPSse(BaseConnection):
     url: str = Field(..., description="The SSE endpoint URL to connect to.")
     headers: dict[str, Any] | None = Field(default=None, description="Optional headers to include in the SSE request.")
     timeout: float = Field(default=5.0, description="Timeout in seconds for establishing the initial connection.")
     sse_read_timeout: float = Field(default=60 * 5, description="Timeout for reading SSE messages (in seconds).")
 
-    def connect(self):
+    def connect(self, headers: dict[str, Any] | None = None):
         """
         Establishes an SSE connection.
+
+        Args:
+            headers: Optional per-call headers merged over ``self.headers``. The connection's
+                stored headers are not mutated, so concurrent runs can pass different values.
 
         Returns:
             Async context manager for the SSE client.
@@ -1779,7 +1840,7 @@ class MCPSse(BaseConnection):
 
         return sse_client(
             url=self.url,
-            headers=self.headers,
+            headers=merge_mcp_http_headers(self.headers, headers),
             timeout=self.timeout,
             sse_read_timeout=self.sse_read_timeout,
         )
@@ -1791,9 +1852,13 @@ class MCPStreamableHTTP(BaseConnection):
     timeout: float = Field(default=30.0, description="Timeout in seconds for establishing the initial connection.")
     sse_read_timeout: float = Field(default=60 * 5, description="Timeout for reading messages (in seconds).")
 
-    def connect(self):
+    def connect(self, headers: dict[str, Any] | None = None):
         """
         Establishes a streamable HTTP connection.
+
+        Args:
+            headers: Optional per-call headers merged over ``self.headers``. The connection's
+                stored headers are not mutated, so concurrent runs can pass different values.
 
         Returns:
             Async context manager for the streamable HTTP client.
@@ -1802,7 +1867,7 @@ class MCPStreamableHTTP(BaseConnection):
 
         return streamablehttp_client(
             url=self.url,
-            headers=self.headers,
+            headers=merge_mcp_http_headers(self.headers, headers),
             timeout=timedelta(seconds=self.timeout),
             sse_read_timeout=timedelta(seconds=self.sse_read_timeout),
         )
@@ -1824,9 +1889,13 @@ class MCPStdio(BaseConnection):
         default=MCPEncodingErrorHandler.STRICT, description="Strategy for handling encoding errors."
     )
 
-    def connect(self):
+    def connect(self, headers: dict[str, Any] | None = None):
         """
         Establishes a STDIO connection using a subprocess.
+
+        Args:
+            headers: Ignored. Present so MCP tools can pass per-call HTTP headers uniformly;
+                stdio has no HTTP layer.
 
         Returns:
             Async context manager for the STDIO client.

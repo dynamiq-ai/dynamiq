@@ -1,6 +1,6 @@
 import click
 
-from dynamiq.cli.client import ApiClient
+from dynamiq.cli.client import ApiClient, ok
 from dynamiq.cli.commands.context import with_api_and_settings
 from dynamiq.cli.config import Settings
 
@@ -11,7 +11,7 @@ org = click.Group(name="org", help="Manage organizations")
 @with_api_and_settings
 def list_orgs(*, api: ApiClient, **__):
     response = api.get("/v1/orgs")
-    if response.status_code == 200:
+    if ok(response):
         orgs = response.json().get("data", [])
         click.echo(f"{'ID':<40} {'Name'}")
         for organization in orgs:
@@ -25,7 +25,7 @@ def list_orgs(*, api: ApiClient, **__):
 @with_api_and_settings
 def set_org(*, api: ApiClient, settings: Settings, org_id: str):
     response = api.get(f"/v1/orgs/{org_id}")
-    if response.status_code == 200:
+    if ok(response):
         settings.org_id = org_id
         settings.save_settings()
         click.echo(f"Current organization set to: {org_id}")
