@@ -49,6 +49,7 @@ from dynamiq.nodes.schema_utils import strip_inaccessible_fields
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileSearchTool, FileWriteTool
 from dynamiq.nodes.tools.mcp import MCPServer
+from dynamiq.nodes.tools.memory_store_tool import MemoryStoreTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
@@ -74,6 +75,7 @@ from dynamiq.skills.types import SkillMetadata
 from dynamiq.skills.utils import ingest_skills_into_sandbox, normalize_sandbox_skills_base_path
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
+from dynamiq.storages.memory.base import MemoryStore, MemoryStoreConfig
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import TRACING_REDACTED_KEYS, TRACING_REDACTED_PLACEHOLDER, deep_merge
@@ -286,6 +288,14 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
         description="Configuration for file storage used by the agent.",
     )
+    memory_store: MemoryStoreConfig | None = Field(
+        default=None,
+        description=(
+            "The agent's memory: notes it keeps across conversations, reached through its own tool. "
+            "Kept separate from `file_store` so it stays available to sandbox-backed agents, which "
+            "cannot enable a file store. Pass a `CompositeMemoryStore` backend for several memories."
+        ),
+    )
     sandbox: SandboxConfig | None = Field(default=None, description="Configuration for sandbox used by the agent.")
     share_sandbox_with_subagents: bool = Field(
         default=False,
@@ -445,6 +455,16 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if self.file_store.agent_file_write_enabled:
                 self.tools.append(FileWriteTool(file_store=self.file_store_backend))
 
+        if self.memory_store_backend:
+            # Memory is independent of the workspace: same single tool whether the agent has a file
+            # store, a sandbox, or neither. Not serialized; rebuilt from `memory_store` on load.
+            memory_tool = MemoryStoreTool(
+                backend=self.memory_store_backend,
+                write_enabled=self.memory_store.write_enabled,
+            )
+            self._excluded_tool_ids.add(memory_tool.id)
+            self.tools.append(memory_tool)
+
         if self._skills_should_init():
             self._init_skills()
 
@@ -489,6 +509,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             "images": True,
             "videos": True,
             "file_store": True,
+            "memory_store": True,
             "skills": True,
             "sandbox": True,
             "system_prompt_manager": True,  # Runtime state container, not serializable
@@ -513,6 +534,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             data["videos"] = [{"name": getattr(f, "name", f"video_{i}")} for i, f in enumerate(self.videos)]
 
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
+        data["memory_store"] = self.memory_store.to_dict(**kwargs) if self.memory_store else None
         data["sandbox"] = self.sandbox.to_dict(**kwargs) if self.sandbox else None
         data["skills"] = self.skills.to_dict(**kwargs)
 
@@ -2339,6 +2361,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     def file_store_backend(self) -> FileStore | None:
         """Get the file store backend from the configuration if enabled."""
         return self.file_store.backend if self.file_store.enabled else None
+
+    @property
+    def memory_store_backend(self) -> MemoryStore | None:
+        """The agent's memory backend when one is enabled."""
+        return self.memory_store.backend if self.memory_store and self.memory_store.enabled else None
 
     @property
     def sandbox_backend(self) -> Sandbox | None:

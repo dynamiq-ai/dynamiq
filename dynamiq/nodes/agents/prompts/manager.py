@@ -27,15 +27,42 @@ from dynamiq.nodes.agents.prompts.secondary_instructions import (
     CONTEXT_MANAGER_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS_XML,
+    MEMORY_STORE_INSTRUCTIONS_TEMPLATE,
+    MEMORY_STORE_READONLY_INSTRUCTIONS_TEMPLATE,
     PERSISTENT_NOTES_INSTRUCTIONS_TEMPLATE,
     REACT_BLOCK_MULTI_TOOL_PLANNING,
     SANDBOX_INSTRUCTIONS_TEMPLATE,
+    SANDBOX_VS_MEMORY_STORE_TEMPLATE,
     SUB_AGENT_INSTRUCTIONS,
     TODO_TOOLS_INSTRUCTIONS,
 )
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.storages.memory.base import render_namespaces
 from dynamiq.utils.logger import logger
+
+
+def _build_memory_store_instructions(config: "ReactPromptConfig") -> str:
+    """Render the memory protocol.
+
+    One tool in every configuration, so unlike the previous design there is no tool-name branch —
+    only whether the memory accepts writes.
+    """
+    template = (
+        MEMORY_STORE_INSTRUCTIONS_TEMPLATE
+        if config.memory_store_writable
+        else MEMORY_STORE_READONLY_INSTRUCTIONS_TEMPLATE
+    )
+    block = template.format(tool=config.memory_store_tool_name)
+
+    # Several memories, or one the caller bothered to describe: say what each holds, or the model
+    # has no way to choose between them.
+    listing = render_namespaces(config.memory_store_namespaces)
+    if listing:
+        block += f"\n\nYour memories, each holding something different:\n{listing}"
+        if len(config.memory_store_namespaces) > 1:
+            block += "\nPut each fact in the one it belongs to. When two disagree, the later one wins."
+    return block
 
 
 class ReactPromptConfig(BaseModel):
@@ -48,6 +75,10 @@ class ReactPromptConfig(BaseModel):
     context_compaction_enabled: bool = False
     notes_file_path: str | None = None
     todo_management_enabled: bool = False
+    memory_store_enabled: bool = False
+    memory_store_tool_name: str = "memory-store"
+    memory_store_namespaces: dict[str, str] = {}
+    memory_store_writable: bool = True
     sandbox_base_path: str | None = None
     has_sub_agent_tools: bool = False
     role: str | None = None
@@ -321,6 +352,13 @@ class AgentPromptManager:
                 ops_parts.append(PERSISTENT_NOTES_INSTRUCTIONS_TEMPLATE.format(notes_path=config.notes_file_path))
         if config.todo_management_enabled:
             ops_parts.append(TODO_TOOLS_INSTRUCTIONS)
+        if config.memory_store_enabled:
+            # The environment block renders before this one (see AGENT_PROMPT_TEMPLATE), and it
+            # calls the sandbox the agent's long-term memory. Contradict it here, immediately
+            # above the protocol, so the correction is the later of the two.
+            if config.sandbox_base_path:
+                ops_parts.append(SANDBOX_VS_MEMORY_STORE_TEMPLATE.format(tool=config.memory_store_tool_name))
+            ops_parts.append(_build_memory_store_instructions(config))
         if config.has_sub_agent_tools:
             ops_parts.append(SUB_AGENT_INSTRUCTIONS)
 
