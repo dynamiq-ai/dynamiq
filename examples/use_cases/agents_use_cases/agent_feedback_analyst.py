@@ -124,7 +124,7 @@ def run_workflow(
 def run_workflow_with_ui_tracing(
     prompt: str,
     files_to_upload: list[io.BytesIO],
-    base_url: str = os.environ.get("DYNAMIQ_TRACE_BASE_URL", "https://ui.sandbox.getdynamiq.ai"),
+    base_url: str = os.environ.get("DYNAMIQ_TRACE_BASE_URL", "https://collector.sandbox.getdynamiq.ai"),
     access_key: str | None = os.environ.get("DYNAMIQ_TRACE_ACCESS_KEY"),
     handler_kwargs: dict | None = None,
     user_id: str | None = None,
