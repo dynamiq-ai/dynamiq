@@ -53,16 +53,25 @@ class CompositeMemoryStore(MemoryStore):
     @field_validator("routes")
     @classmethod
     def normalize_route_prefixes(cls, routes: dict[str, MemoryStore]) -> dict[str, MemoryStore]:
-        """Normalize prefixes, reject an empty set, and refuse two routes over one store."""
+        """Normalize prefixes, reject an empty set, and refuse two routes over one prefix or one store."""
         if not routes:
             raise ValueError("CompositeMemoryStore needs at least one route.")
 
         normalized: dict[str, MemoryStore] = {}
+        mounted_as: dict[str, str] = {}
         for prefix, store in routes.items():
             key = normalize_path(prefix)
             if not key:
                 raise ValueError("Route prefix must not be empty: every memory is addressed by a prefix.")
-            normalized[f"{key}/"] = store
+            mount = f"{key}/"
+            if mount in normalized:
+                # Two spellings of one prefix: keying on the normalized form keeps only the last.
+                raise ValueError(
+                    f"Routes '{mounted_as[mount]}' and '{prefix}' both mount at '{mount}'. Give each store "
+                    "its own prefix: only one of them would be reachable."
+                )
+            normalized[mount] = store
+            mounted_as[mount] = prefix
 
         seen: dict[Any, str] = {}
         for prefix, store in normalized.items():
@@ -127,20 +136,29 @@ class CompositeMemoryStore(MemoryStore):
         return [entry.model_copy(update={"path": f"{route}{entry.path}"}) for entry in entries]
 
     def list(self, prefix: str = "") -> list[MemoryEntry]:
-        """List memories, delegating into one route or merging every route at or below ``prefix``."""
+        """List memories under ``prefix``: the route it falls inside, plus every route at or below it.
+
+        Both must answer, or a nested route's memories are missing from a listing of their own
+        directory. They never overlap: an enclosing route is no longer than ``prefix``, one at or
+        below it is strictly longer.
+        """
         normalized = normalize_path(prefix)
+        scope = f"{normalized}/" if normalized else ""
+        entries: list[MemoryEntry] = []
+
         if normalized:
             for route in sorted(self.routes, key=len, reverse=True):
                 if normalized.startswith(route):
-                    return self._mounted(route, self.routes[route].list(normalized[len(route) :]))
+                    entries.extend(self._mounted(route, self.routes[route].list(normalized[len(route) :])))
+                    break
 
-        scope = f"{normalized}/" if normalized else ""
-        return [
+        entries.extend(
             entry
             for route, store in self.routes.items()
             if route.startswith(scope)
             for entry in self._mounted(route, store.list())
-        ]
+        )
+        return entries
 
     def read(self, path: str) -> str:
         """Read from the memory owning the path."""

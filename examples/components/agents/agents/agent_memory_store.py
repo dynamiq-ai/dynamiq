@@ -22,6 +22,7 @@ from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
 MEMORY_STORE_ID = os.getenv("DYNAMIQ_MEMORY_STORE_ID", "ms-123")
+TEAM_MEMORY_STORE_ID = os.getenv("DYNAMIQ_TEAM_MEMORY_STORE_ID", "ms-456")
 USER_ID = os.getenv("DYNAMIQ_USER_ID", "u-42")
 
 ROLE = "You are a helpful engineering assistant."
@@ -66,10 +67,13 @@ def agent_with_two_memories() -> Agent:
 
     There is no catch-all: a path matching no prefix is refused, naming the prefixes that exist, so
     a memory never lands somewhere arbitrary. The agent still gets exactly one tool.
+
+    Each route needs its own store - the prefix is stripped before the store is called, so two
+    routes over one store would write to the same keys.
     """
     team = DynamiqMemoryStore(
         connection=DynamiqConnection(),
-        memory_store_id=os.getenv("DYNAMIQ_TEAM_MEMORY_STORE_ID", MEMORY_STORE_ID),
+        memory_store_id=TEAM_MEMORY_STORE_ID,
         user_id=USER_ID,
         description="Conventions the whole team follows. Shared and curated elsewhere.",
     )

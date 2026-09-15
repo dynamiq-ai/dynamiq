@@ -132,6 +132,19 @@ def test_list_with_a_prefix_delegates(store):
     assert [entry.path for entry in store.list("team/")] == ["team/naming.md"]
 
 
+@pytest.mark.parametrize("prefix", ["team", "team/", "team/private", "team/private/"])
+def test_list_inside_a_route_still_sees_nested_routes(team, prefix):
+    """A path that routes to the nested memory must also be listed under it."""
+    deep = FakeMemoryStore()
+    store = CompositeMemoryStore(routes={"team/": team, "team/private/": deep})
+    store.write("team/naming.md", "shallow")
+    store.write("team/private/pay.md", "deep")
+
+    listed = {entry.path for entry in store.list(prefix)}
+
+    assert "team/private/pay.md" in listed
+
+
 def test_describe_namespaces_composes_the_routes(store):
     assert store.describe_namespaces() == {
         "user/": "What you learn about this user.",
@@ -173,6 +186,15 @@ def test_to_dict_serializes_routes_and_hides_credentials(user):
     assert data["type"] == "dynamiq.storages.memory.CompositeMemoryStore"
     assert data["routes"]["team/"]["type"] == "dynamiq.storages.memory.DynamiqMemoryStore"
     assert "secret-token" not in json.dumps(data)
+
+
+@pytest.mark.parametrize("duplicate", ["team", "/team/", "./team", "team//"])
+def test_two_stores_over_one_prefix_are_refused(user, team, duplicate):
+    """Spellings of one prefix collapse to a single mount, leaving a store unreachable."""
+    with pytest.raises(ValueError) as excinfo:
+        CompositeMemoryStore(routes={"team/": team, duplicate: user})
+
+    assert "both mount at 'team/'" in str(excinfo.value)
 
 
 def test_two_routes_over_one_store_are_refused(user):

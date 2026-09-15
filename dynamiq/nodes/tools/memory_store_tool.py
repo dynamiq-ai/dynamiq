@@ -74,8 +74,9 @@ class MemoryStoreToolInputSchema(BaseModel):
             raise ValueError(f"'path' is required for action '{self.action.value}'")
         if self.action == MemoryStoreAction.WRITE and self.content is None:
             raise ValueError("'content' is required for action 'write'")
-        if self.action == MemoryStoreAction.EDIT and (self.find is None or self.replace is None):
-            raise ValueError("'find' and 'replace' are required for action 'edit'")
+        # An empty `find` matches between every character; `replace` may be empty.
+        if self.action == MemoryStoreAction.EDIT and (not self.find or self.replace is None):
+            raise ValueError("'find' (non-empty) and 'replace' are required for action 'edit'")
         return self
 
 

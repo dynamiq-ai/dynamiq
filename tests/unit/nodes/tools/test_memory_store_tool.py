@@ -86,6 +86,26 @@ def test_edit_reports_missing_text(tool):
     assert "does not appear" in str(result.error)
 
 
+@pytest.mark.parametrize("replace_all", [True, False])
+def test_edit_refuses_an_empty_find(tool, backend, replace_all):
+    """It matches between every character, so replace_all would interleave the replacement."""
+    content(tool, action="write", path="preferences.md", content="Prefers British English.")
+
+    result = run(tool, action="edit", path="preferences.md", find="", replace="X", replace_all=replace_all)
+
+    assert result.status == RunnableStatus.FAILURE
+    assert backend.read("preferences.md") == "Prefers British English."
+
+
+def test_edit_accepts_an_empty_replace(tool, backend):
+    """Emptying a match is a real edit: only 'find' is constrained."""
+    content(tool, action="write", path="notes.md", content="tabs and spaces")
+
+    content(tool, action="edit", path="notes.md", find=" and spaces", replace="")
+
+    assert backend.read("notes.md") == "tabs"
+
+
 def test_edit_on_a_missing_memory_points_at_write(tool):
     result = run(tool, action="edit", path="nope.md", find="a", replace="b")
 
