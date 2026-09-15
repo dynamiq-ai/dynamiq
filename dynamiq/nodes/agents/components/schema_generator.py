@@ -1,8 +1,9 @@
 """Schema generation for Agent function calling and structured output modes."""
 
 import types
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, Literal, Union, get_args, get_origin
+from typing import Any, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -17,6 +18,16 @@ TYPE_MAPPING = {
     dict: "object",
 }
 
+THOUGHT_DESCRIPTION_TOOL_CALL = (
+    "Your first-person reasoning for this step, written before you decide the arguments below: "
+    "what you already know, why this specific tool is the right one right now (not a restatement "
+    "of the original task), and what you expect it to return. 1-3 concrete sentences."
+)
+THOUGHT_DESCRIPTION_FINAL_ANSWER = (
+    "Your first-person reasoning for why you can answer now: which findings or tool results "
+    "support the answer below. 1-3 concrete sentences, not a restatement of the original task."
+)
+
 FINAL_ANSWER_FUNCTION_SCHEMA = {
     "type": "function",
     "function": {
@@ -28,7 +39,7 @@ FINAL_ANSWER_FUNCTION_SCHEMA = {
             "properties": {
                 "thought": {
                     "type": "string",
-                    "description": "Your reasoning about why you can answer original question.",
+                    "description": THOUGHT_DESCRIPTION_FINAL_ANSWER,
                 },
                 "answer": {"type": "string", "description": "Answer on initial request."},
                 "output_files": {
@@ -81,7 +92,7 @@ def build_final_answer_function_schema(response_format: dict | type[BaseModel] |
         "properties": {
             "thought": {
                 "type": "string",
-                "description": "Your reasoning about why you can answer original question.",
+                "description": THOUGHT_DESCRIPTION_FINAL_ANSWER,
             },
             "answer": answer_schema,
             "output_files": {
@@ -208,7 +219,7 @@ def generate_structured_output_schemas(
                 "properties": {
                     "thought": {
                         "type": "string",
-                        "description": "Your reasoning about the next step.",
+                        "description": THOUGHT_DESCRIPTION_TOOL_CALL,
                     },
                     "action": {
                         "type": "string",
@@ -427,7 +438,7 @@ def generate_function_calling_schemas(
 
             # Flat-args: prepend `thought` so it streams first and the model sees it before tool params.
             properties = {
-                "thought": {"type": "string", "description": "Your reasoning about using this tool."},
+                "thought": {"type": "string", "description": THOUGHT_DESCRIPTION_TOOL_CALL},
                 **properties,
             }
             # Only genuinely-required fields are required here. Strict mode (which
@@ -463,7 +474,7 @@ def generate_function_calling_schemas(
                         "properties": {
                             "thought": {
                                 "type": "string",
-                                "description": "Your reasoning about using this tool.",
+                                "description": THOUGHT_DESCRIPTION_TOOL_CALL,
                             },
                         },
                         "additionalProperties": allows_extra,
