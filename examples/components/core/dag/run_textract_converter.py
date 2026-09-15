@@ -48,7 +48,7 @@ def build_tracing() -> TracingCallbackHandler:
         return TracingCallbackHandler()
 
     return DynamiqTracingCallbackHandler(
-        base_url=os.environ.get("DYNAMIQ_TRACE_BASE_URL", "https://collector.sandbox.getdynamiq.ai"),
+        base_url=os.environ.get("DYNAMIQ_TRACE_BASE_URL", "https://collector.getdynamiq.ai"),
         access_key=access_key,
     )
 
