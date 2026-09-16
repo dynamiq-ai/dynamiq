@@ -780,3 +780,136 @@ def test_workflow_with_string_operator_edge_cases(
     expected_output = {choice_node.id: expected_result_choice_node}
 
     assert response == RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=expected_output)
+
+
+@pytest.mark.parametrize(
+    ("operator", "input_data", "expected"),
+    [
+        (operators.ConditionOperator.BOOLEAN_EQUALS_PATH, {"a": True, "b": True}, True),
+        (operators.ConditionOperator.BOOLEAN_EQUALS_PATH, {"a": True, "b": False}, False),
+        (operators.ConditionOperator.NUMERIC_EQUALS_PATH, {"a": 4, "b": 4}, True),
+        (operators.ConditionOperator.NUMERIC_EQUALS_PATH, {"a": 4, "b": 5}, False),
+        (operators.ConditionOperator.NUMERIC_GREATER_THAN_PATH, {"a": 5, "b": 4}, True),
+        (operators.ConditionOperator.NUMERIC_GREATER_THAN_PATH, {"a": 4, "b": 4}, False),
+        (operators.ConditionOperator.NUMERIC_GREATER_THAN_OR_EQUALS_PATH, {"a": 4, "b": 4}, True),
+        (operators.ConditionOperator.NUMERIC_GREATER_THAN_OR_EQUALS_PATH, {"a": 3, "b": 4}, False),
+        (operators.ConditionOperator.NUMERIC_LESS_THAN_PATH, {"a": 3, "b": 4}, True),
+        (operators.ConditionOperator.NUMERIC_LESS_THAN_PATH, {"a": 4, "b": 4}, False),
+        (operators.ConditionOperator.NUMERIC_LESS_THAN_OR_EQUALS_PATH, {"a": 4, "b": 4}, True),
+        (operators.ConditionOperator.NUMERIC_LESS_THAN_OR_EQUALS_PATH, {"a": 5, "b": 4}, False),
+        (operators.ConditionOperator.STRING_EQUALS_PATH, {"a": "x", "b": "x"}, True),
+        (operators.ConditionOperator.STRING_EQUALS_PATH, {"a": "x", "b": "y"}, False),
+        (operators.ConditionOperator.STRING_GREATER_THAN_PATH, {"a": "b", "b": "a"}, True),
+        (operators.ConditionOperator.STRING_GREATER_THAN_PATH, {"a": "a", "b": "a"}, False),
+        (operators.ConditionOperator.STRING_GREATER_THAN_OR_EQUALS_PATH, {"a": "a", "b": "a"}, True),
+        (operators.ConditionOperator.STRING_GREATER_THAN_OR_EQUALS_PATH, {"a": "a", "b": "b"}, False),
+        (operators.ConditionOperator.STRING_LESS_THAN_PATH, {"a": "a", "b": "b"}, True),
+        (operators.ConditionOperator.STRING_LESS_THAN_PATH, {"a": "a", "b": "a"}, False),
+        (operators.ConditionOperator.STRING_LESS_THAN_OR_EQUALS_PATH, {"a": "a", "b": "a"}, True),
+        (operators.ConditionOperator.STRING_LESS_THAN_OR_EQUALS_PATH, {"a": "b", "b": "a"}, False),
+    ],
+)
+def test_evaluate_path_operators(operator, input_data, expected):
+    """Path operators compare the variable against the value another JSONPath resolves to."""
+    condition = operators.ChoiceCondition(operator=operator, variable="$.a", value="$.b")
+    assert operators.Choice.evaluate(condition, input_data) is expected
+
+    negated = operators.ChoiceCondition(operator=operator, variable="$.a", value="$.b", is_not=True)
+    assert operators.Choice.evaluate(negated, input_data) is (not expected)
+
+
+def test_every_path_operator_is_evaluable():
+    path_operators = {operator for operator in operators.ConditionOperator if operator.value.endswith("-path")}
+    assert path_operators == set(operators.PATH_OPERATORS)
+
+
+def test_evaluate_path_operator_requires_jsonpath_value():
+    condition = operators.ChoiceCondition(
+        operator=operators.ConditionOperator.NUMERIC_EQUALS_PATH,
+        variable="$.a",
+        value=4,
+    )
+    with pytest.raises(ValueError, match="requires a JSONPath"):
+        operators.Choice.evaluate(condition, {"a": 4})
+
+
+def test_evaluate_path_operator_inside_group_uses_group_scope():
+    """Operands of a group resolve both paths against the data its variable selects."""
+    condition = operators.ChoiceCondition(
+        operator=operators.ConditionOperator.AND,
+        variable="$.order",
+        operands=[
+            operators.ChoiceCondition(
+                operator=operators.ConditionOperator.NUMERIC_GREATER_THAN_PATH,
+                variable="$.total",
+                value="$.limit",
+            ),
+            operators.ChoiceCondition(
+                operator=operators.ConditionOperator.STRING_EQUALS_PATH,
+                variable="$.currency",
+                value="$.account_currency",
+            ),
+        ],
+    )
+
+    within_limit = {"order": {"total": 10, "limit": 5, "currency": "USD", "account_currency": "USD"}}
+    assert operators.Choice.evaluate(condition, within_limit) is True
+
+    over_limit = {"order": {"total": 10, "limit": 50, "currency": "USD", "account_currency": "USD"}}
+    assert operators.Choice.evaluate(condition, over_limit) is False
+
+
+@pytest.mark.parametrize(
+    ("operator", "input_data", "expected"),
+    [
+        (operators.ConditionOperator.OR, {"a": 1, "b": 0}, True),
+        (operators.ConditionOperator.OR, {"a": 0, "b": 0}, False),
+        (operators.ConditionOperator.AND, {"a": 1, "b": 2}, True),
+        (operators.ConditionOperator.AND, {"a": 1, "b": 0}, False),
+    ],
+)
+def test_evaluate_negated_group(operator, input_data, expected):
+    """is_not on an AND/OR group negates the group instead of forcing it to False."""
+    operands = [
+        operators.ChoiceCondition(operator=operators.ConditionOperator.NUMERIC_EQUALS, variable="$.a", value=1),
+        operators.ChoiceCondition(operator=operators.ConditionOperator.NUMERIC_EQUALS, variable="$.b", value=2),
+    ]
+    group = operators.ChoiceCondition(operator=operator, operands=operands)
+    assert operators.Choice.evaluate(group, input_data) is expected
+
+    negated_group = operators.ChoiceCondition(operator=operator, operands=operands, is_not=True)
+    assert operators.Choice.evaluate(negated_group, input_data) is (not expected)
+
+
+@pytest.mark.parametrize(
+    ("input_data", "expected_statuses"),
+    [
+        ({"a": 4, "b": 4}, [RunnableStatus.SUCCESS, RunnableStatus.SKIP]),
+        ({"a": 4, "b": 5}, [RunnableStatus.FAILURE, RunnableStatus.SUCCESS]),
+    ],
+)
+def test_workflow_with_path_operator(input_data, expected_statuses):
+    """A variable-to-variable branch, in the shape the platform UI serializes it."""
+    choice_node = operators.Choice(
+        name="PathChoice",
+        options=[
+            {
+                "id": "equal",
+                "name": "equal",
+                "condition": {
+                    "operator": "numeric-equals-path",
+                    "variable": "$.a",
+                    "value": "$.b",
+                    "is_not": False,
+                },
+            },
+            {"id": "default", "name": "default", "condition": None},
+        ],
+    )
+    wf_path_operator = Workflow(id=str(uuid.uuid4()), flow=Flow(nodes=[choice_node]))
+
+    response = wf_path_operator.run(input_data=input_data)
+
+    assert response.status == RunnableStatus.SUCCESS
+    option_results = response.output[choice_node.id]["output"]
+    assert [option_results[option.id]["status"] for option in choice_node.options] == expected_statuses
