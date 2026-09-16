@@ -17,6 +17,22 @@ from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
 
+# Operators whose value is a JSONPath into the input instead of a literal, so a variable can be
+# compared against another variable. Each maps to the literal operator that does the comparison.
+PATH_OPERATORS: dict[ConditionOperator, ConditionOperator] = {
+    ConditionOperator.BOOLEAN_EQUALS_PATH: ConditionOperator.BOOLEAN_EQUALS,
+    ConditionOperator.NUMERIC_EQUALS_PATH: ConditionOperator.NUMERIC_EQUALS,
+    ConditionOperator.NUMERIC_GREATER_THAN_PATH: ConditionOperator.NUMERIC_GREATER_THAN,
+    ConditionOperator.NUMERIC_GREATER_THAN_OR_EQUALS_PATH: ConditionOperator.NUMERIC_GREATER_THAN_OR_EQUALS,
+    ConditionOperator.NUMERIC_LESS_THAN_PATH: ConditionOperator.NUMERIC_LESS_THAN,
+    ConditionOperator.NUMERIC_LESS_THAN_OR_EQUALS_PATH: ConditionOperator.NUMERIC_LESS_THAN_OR_EQUALS,
+    ConditionOperator.STRING_EQUALS_PATH: ConditionOperator.STRING_EQUALS,
+    ConditionOperator.STRING_GREATER_THAN_PATH: ConditionOperator.STRING_GREATER_THAN,
+    ConditionOperator.STRING_GREATER_THAN_OR_EQUALS_PATH: ConditionOperator.STRING_GREATER_THAN_OR_EQUALS,
+    ConditionOperator.STRING_LESS_THAN_PATH: ConditionOperator.STRING_LESS_THAN,
+    ConditionOperator.STRING_LESS_THAN_OR_EQUALS_PATH: ConditionOperator.STRING_LESS_THAN_OR_EQUALS,
+}
+
 
 class ChoiceOption(BaseModel):
     """Represents an option for a choice node."""
@@ -110,22 +126,39 @@ class Choice(Node):
             A boolean indicating whether the condition is met.
 
         Raises:
-            ValueError: If the operator is not supported.
+            ValueError: If the operator is not supported, or a path operator's value is not a JSONPath
+                or does not select exactly one value.
         """
         value = jsonpath.filter(input_data, cond.variable)
 
         if cond.operator == ConditionOperator.OR:
-            return (
-                any(Choice.evaluate(cond, value) for cond in cond.operands)
-                and not cond.is_not
-            )
+            return any(Choice.evaluate(operand, value) for operand in cond.operands) == (not cond.is_not)
         elif cond.operator == ConditionOperator.AND:
-            return (
-                all(Choice.evaluate(cond, value) for cond in cond.operands)
-                and not cond.is_not
-            )
+            return all(Choice.evaluate(operand, value) for operand in cond.operands) == (not cond.is_not)
+
+        # Resolve the value of a path operator against the same input as the variable, then compare
+        # with the literal operator. Both refusals are loud on purpose: a branch that cannot read one
+        # of its operands must fail rather than route on it, which comparing `None` would do silently.
+        if cond.operator in PATH_OPERATORS:
+            # A bare word parses as a JSONPath, so a literal left in the value field would otherwise
+            # read the input field of that name instead of being refused.
+            if not jsonpath.is_expression(cond.value):
+                raise ValueError(
+                    f"Operator {cond.operator} requires a JSONPath as value, got {cond.value!r}. "
+                    "A path operator compares the variable with the value another path selects."
+                )
+            # `filter` cannot tell a path that matched nothing from one that matched a null, and gives
+            # a list for a path matching several values; both would compare rather than fail.
+            matches = jsonpath.filter_all(input_data, cond.value)
+            if len(matches) != 1:
+                raise ValueError(
+                    f"Value path {cond.value!r} of operator {cond.operator} selected {len(matches)} values, "
+                    "expected exactly one."
+                )
+            cond = cond.model_copy(update={"operator": PATH_OPERATORS[cond.operator], "value": matches[0]})
+
         # boolean
-        elif cond.operator == ConditionOperator.BOOLEAN_EQUALS:
+        if cond.operator == ConditionOperator.BOOLEAN_EQUALS:
             return (value == cond.value) == (not cond.is_not)
         # numeric
         if cond.operator == ConditionOperator.NUMERIC_EQUALS:
