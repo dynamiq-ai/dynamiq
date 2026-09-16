@@ -1,5 +1,6 @@
 import asyncio
 import builtins
+import threading
 import time
 from datetime import datetime
 from functools import cached_property
@@ -16,7 +17,7 @@ from dynamiq.executors.base import BaseExecutor
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.executors.pool import ThreadExecutor
 from dynamiq.flows.base import BaseFlow
-from dynamiq.nodes.node import Node, NodeReadyToRun
+from dynamiq.nodes.node import Node, NodeOutputReference, NodeReadyToRun
 from dynamiq.nodes.types import Behavior
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableFailedNodeInfo, RunnableResultError
@@ -25,6 +26,9 @@ from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.types.mocking import RunMockConfig
 from dynamiq.utils.duration import format_duration
 from dynamiq.utils.logger import logger
+
+# The flows being copied on this thread, so a flow that holds itself is copied once.
+_cloning = threading.local()
 
 
 class FlowNodeFailureException(Exception):
@@ -295,8 +299,53 @@ class Flow(CheckpointFlowMixin, BaseFlow):
             f"{len(checkpoint.pending_node_ids)} nodes pending"
         )
 
+    def clone(self) -> "Flow":
+        """A copy with its own nodes and run state, the dependencies between the copied nodes intact.
+
+        Each node is cloned without its dependencies and output references, which would otherwise
+        clone their own copies of the nodes they point at, and both are then re-linked to the
+        copies. A flow reached again while it is being copied, which is what a workflow calling
+        itself looks like, resolves to the copy in progress instead of an endless chain of copies.
+        """
+        memo = getattr(_cloning, "memo", None)
+        is_outermost = memo is None
+        if is_outermost:
+            memo = _cloning.memo = {}
+        elif (clone := memo.get(id(self))) is not None:
+            return clone
+        try:
+            fields = {name: getattr(self, name) for name in type(self).model_fields if name != "nodes"}
+            clone = type(self)(**fields, nodes=[])
+            memo[id(self)] = clone
+            node_clones = {
+                id(node): node.model_copy(update={"depends": [], "input_mapping": {}}).clone() for node in self.nodes
+            }
+            for node in self.nodes:
+                node_clone = node_clones[id(node)]
+                node_clone.depends = [
+                    dependency.model_copy(update={"node": node_clones.get(id(dependency.node), dependency.node)})
+                    for dependency in node.depends
+                ]
+                node_clone.input_mapping = {
+                    key: (
+                        value.model_copy(update={"node": node_clones.get(id(value.node), value.node)})
+                        if isinstance(value, NodeOutputReference)
+                        else value
+                    )
+                    for key, value in node.input_mapping.items()
+                }
+            clone.nodes = list(node_clones.values())
+            clone.reset_run_state()
+            return clone
+        finally:
+            if is_outermost:
+                del _cloning.memo
+
     def reset_run_state(self):
         """Resets the run state of the flow and clears stale resumed flags on all nodes."""
+        # A cloned flow may have had its node ids regenerated since it was built, so the index is
+        # derived from the nodes as they are now, like the results and the sorter.
+        self._node_by_id = {node.id: node for node in self.nodes}
         self._results = {
             node.id: RunnableResult(status=RunnableStatus.UNDEFINED)
             for node in self.nodes

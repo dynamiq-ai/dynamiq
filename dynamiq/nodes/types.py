@@ -1,7 +1,9 @@
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from dynamiq.utils import generate_uuid
 
 
 class NodeGroup(str, Enum):
@@ -120,3 +122,60 @@ class ChoiceCondition(BaseModel):
     value: Any = None
     is_not: bool = False
     operands: list["ChoiceCondition"] | None = None
+
+
+class ChoiceHitPolicy(str, Enum):
+    """Which options of a Choice run: the first whose condition holds, or every one that holds."""
+
+    FIRST = "first"
+    ALL = "all"
+
+
+class DecisionHitPolicy(str, Enum):
+    """Which matching rules of a DecisionTable produce its output."""
+
+    FIRST = "first"
+    UNIQUE = "unique"
+    COLLECT = "collect"
+
+
+class DecisionAggregation(str, Enum):
+    """How a collect DecisionTable folds the outputs of every matching rule."""
+
+    LIST = "list"
+    SUM = "sum"
+    MIN = "min"
+    MAX = "max"
+    COUNT = "count"
+
+
+class NamedField(BaseModel):
+    """A field the user defines by name. `type` uses the Input node vocabulary: string, int, float, bool, Any."""
+
+    id: str = Field(default_factory=generate_uuid)
+    name: str
+    type: str = "Any"
+
+
+class SubWorkflowField(NamedField):
+    """An Input or Output field of the flow a SubWorkflow runs, as captured when the flow was chosen."""
+
+    required: bool = False
+
+
+class DecisionRule(BaseModel):
+    """One row of a DecisionTable: a condition cell per input column and a value cell per output column."""
+
+    id: str = Field(default_factory=generate_uuid)
+    name: str = ""
+    when: list[str | int | float | bool | None] = []
+    then: list[str | int | float | bool | None] = []
+    enabled: bool = True
+
+
+class ExpressionItem(BaseModel):
+    """One output of an Expression node: the key it is returned under and the expression that computes it."""
+
+    id: str = Field(default_factory=generate_uuid)
+    key: str
+    expression: str

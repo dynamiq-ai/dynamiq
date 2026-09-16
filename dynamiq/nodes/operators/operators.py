@@ -10,7 +10,7 @@ from dynamiq.nodes import Behavior, Node, NodeGroup
 from dynamiq.nodes.cloning import carry_mock_exclusions, regenerate_node_ids
 from dynamiq.nodes.node import Transformer, ensure_config
 from dynamiq.nodes.tools.mcp import resolve_mcp_node
-from dynamiq.nodes.types import ChoiceCondition, ConditionOperator
+from dynamiq.nodes.types import ChoiceCondition, ChoiceHitPolicy, ConditionOperator
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.dry_run import DryRunConfig
@@ -36,6 +36,7 @@ class Choice(Node):
     name: str | None = "choice"
     group: Literal[NodeGroup.OPERATORS] = NodeGroup.OPERATORS
     options: list[ChoiceOption] = []
+    hit_policy: ChoiceHitPolicy = ChoiceHitPolicy.FIRST
     input_schema: ClassVar[type[ChoiceInputSchema]] = ChoiceInputSchema
 
     @property
@@ -76,7 +77,9 @@ class Choice(Node):
 
             is_success_evaluation = False
             for option in self.options:
-                if is_success_evaluation:
+                # Under "first" every option after a match is skipped; under "all" only an option without a
+                # condition is, since it is the fallback for when nothing before it held.
+                if is_success_evaluation and (self.hit_policy == ChoiceHitPolicy.FIRST or not option.condition):
                     results[option.id] = RunnableResult(
                         status=RunnableStatus.SKIP, input=input_data.model_dump(), output=None
                     )

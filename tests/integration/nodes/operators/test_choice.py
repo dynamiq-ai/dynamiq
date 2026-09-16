@@ -780,3 +780,28 @@ def test_workflow_with_string_operator_edge_cases(
     expected_output = {choice_node.id: expected_result_choice_node}
 
     assert response == RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=expected_output)
+
+
+@pytest.mark.parametrize(
+    ("input_data", "statuses"),
+    [
+        ({"a": 4, "b": "test"}, [RunnableStatus.SUCCESS, RunnableStatus.SUCCESS, RunnableStatus.SKIP]),
+        ({"a": 4, "b": "other"}, [RunnableStatus.SUCCESS, RunnableStatus.FAILURE, RunnableStatus.SKIP]),
+        ({"a": 1, "b": "other"}, [RunnableStatus.FAILURE, RunnableStatus.FAILURE, RunnableStatus.SUCCESS]),
+    ],
+)
+def test_all_hit_policy_runs_every_matching_branch_and_the_fallback_only_when_none_did(
+    choice_condition_a_str_eq, choice_condition_b_str_eq, input_data, statuses
+):
+    choice_node = operators.Choice(
+        hit_policy="all",
+        options=[
+            operators.ChoiceOption(id="a", condition=choice_condition_a_str_eq),
+            operators.ChoiceOption(id="b", condition=choice_condition_b_str_eq),
+            operators.ChoiceOption(id="fallback"),
+        ],
+    )
+
+    result = choice_node.run(input_data=input_data, config=RunnableConfig(callbacks=[]))
+
+    assert [result.output[option].status for option in ("a", "b", "fallback")] == statuses
