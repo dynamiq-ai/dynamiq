@@ -833,6 +833,15 @@ class BaseLLM(ConnectionNode):
                 params.pop(param, None)
         return params
 
+    def _apply_cache_control(self, params: dict[str, Any], cache_control: Any) -> dict[str, Any]:
+        """Attach provider-specific prompt-caching breakpoints.
+
+        A no-op by default: providers that cache automatically (OpenAI, Gemini, DeepSeek)
+        reject or strip these markers, and providers with no caching have nothing to attach.
+        Overridden by the Anthropic-family nodes, which cache nothing without one.
+        """
+        return params
+
     # Per-request cap on strict tools. ``None`` means no cap. Providers with a
     # hard limit (e.g. Anthropic) override this.
     MAX_STRICT_TOOLS: ClassVar[int | None] = None
@@ -929,6 +938,7 @@ class BaseLLM(ConnectionNode):
         response_format: dict[str, Any] | None = None,
         parallel_tool_calls: bool | None = None,
         tool_choice: str | None = None,
+        cache_control: Any = None,
         include_sync_client: bool = True,
     ) -> dict[str, Any]:
         """Build the common parameter dict for litellm completion/acompletion calls.
@@ -940,6 +950,9 @@ class BaseLLM(ConnectionNode):
             tools: Explicit tool list override.
             response_format: Explicit response format override.
             parallel_tool_calls: Whether to allow parallel tool calls.
+            cache_control: Per-call prompt-caching config, used when the node itself has
+                none. Passing it per call rather than setting it on the node keeps a shared
+                LLM instance safe to use from several callers at once.
             include_sync_client: If True and self.client exists, include it in params.
                 Set to False for async calls that should not receive the sync client.
 
@@ -997,7 +1010,12 @@ class BaseLLM(ConnectionNode):
         if not tools and common_params.get("tool_choice") is not None:
             common_params.pop("tool_choice")
 
-        return self.update_completion_params(common_params)
+        params = self.update_completion_params(common_params)
+        # `update_completion_params` already applied the node's own config; a per-call one
+        # only fills in when the node has none, so the two can never double up.
+        if cache_control is not None and getattr(self, "cache_control", None) is None:
+            params = self._apply_cache_control(params, cache_control)
+        return params
 
     def _recover_completion_params(self, exc: BaseException, common_params: dict) -> dict | None:
         """Provider-specific recovery hook for known-bad completion params.
@@ -1066,6 +1084,7 @@ class BaseLLM(ConnectionNode):
         response_format: dict[str, Any] | None = None,
         parallel_tool_calls: bool | None = None,
         tool_choice: str | None = None,
+        cache_control: Any = None,
         **kwargs,
     ):
         """Execute the LLM node.
@@ -1100,6 +1119,7 @@ class BaseLLM(ConnectionNode):
             response_format=response_format,
             parallel_tool_calls=parallel_tool_calls,
             tool_choice=tool_choice,
+            cache_control=cache_control,
             include_sync_client=True,
         )
 
@@ -1142,6 +1162,7 @@ class BaseLLM(ConnectionNode):
         response_format: dict[str, Any] | None = None,
         parallel_tool_calls: bool | None = None,
         tool_choice: str | None = None,
+        cache_control: Any = None,
         **kwargs,
     ):
         """Execute the LLM node asynchronously using litellm.acompletion.
@@ -1176,6 +1197,7 @@ class BaseLLM(ConnectionNode):
             response_format=response_format,
             parallel_tool_calls=parallel_tool_calls,
             tool_choice=tool_choice,
+            cache_control=cache_control,
             include_sync_client=False,
         )
 

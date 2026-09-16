@@ -62,12 +62,16 @@ class Bedrock(BaseLLM):
     cache_control: BedrockCacheControl | None = None
 
     def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Attach Bedrock prompt caching configuration to completion params."""
+        """Attach the node's own prompt caching configuration to completion params."""
         params = super().update_completion_params(params)
-        if not self.cache_control:
+        return self._apply_cache_control(params, self.cache_control)
+
+    def _apply_cache_control(self, params: dict[str, Any], cache_control: Any) -> dict[str, Any]:
+        """Attach Bedrock cache points for the given configuration."""
+        if not cache_control:
             return params
 
-        control = self.cache_control.model_dump(
+        control = cache_control.model_dump(
             exclude_none=True,
             exclude={"cache_injection_point_index", "cache_tools"},
         )
@@ -75,7 +79,7 @@ class Bedrock(BaseLLM):
 
         # Bedrock allows 4 breakpoints, so don't spend one when there are no
         # tools to cache.
-        if self.cache_control.cache_tools and params.get("tools"):
+        if cache_control.cache_tools and params.get("tools"):
             if _routes_to_converse(self.model):
                 points.append({"location": "tool_config", "control": control})
             else:
@@ -89,7 +93,7 @@ class Bedrock(BaseLLM):
         points.append(
             {
                 "location": "message",
-                "index": self.cache_control.cache_injection_point_index,
+                "index": cache_control.cache_injection_point_index,
                 "control": control,
             }
         )

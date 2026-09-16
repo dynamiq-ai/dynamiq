@@ -4,6 +4,7 @@ from concurrent.futures import as_completed
 from typing import Any, Callable, Literal, Mapping, Union, get_args, get_origin
 
 from litellm import get_supported_openai_params, supports_response_schema
+from litellm.utils import supports_prompt_caching
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from pydantic_core import from_json
 
@@ -188,6 +189,36 @@ def mark_tool_failure(content: str, success: Any) -> str:
     return content
 
 
+def default_cache_control(llm: Node) -> BaseModel | None:
+    """Prompt caching config for providers that cache nothing without a breakpoint.
+
+    Anthropic-family models (including on Bedrock) read back no cached prefix unless the
+    request carries an explicit breakpoint, unlike OpenAI/Gemini which cache automatically.
+    The field is discovered by annotation, so a node that gains one is picked up here.
+
+    Returns None when the node has no ``cache_control`` field, when the model does not
+    support caching, or when the caller set it themselves -- an explicit
+    ``cache_control=None`` is how you opt out.
+    """
+    field = type(llm).model_fields.get("cache_control")
+    if field is None or "cache_control" in llm.model_fields_set:
+        return None
+
+    # The `Bedrock` node serves far more than Claude, and a model that does not support
+    # cachePoint rejects the request outright ("You invoked an unsupported model") rather
+    # than ignoring it -- so never enable this by default without checking.
+    try:
+        if not supports_prompt_caching(llm.model):
+            return None
+    except Exception:
+        return None
+    config_cls = next(
+        (arg for arg in get_args(field.annotation) if isinstance(arg, type) and issubclass(arg, BaseModel)),
+        None,
+    )
+    return config_cls() if config_cls else None
+
+
 class ReactStep(BaseModel):
     """Outcome of one ReAct reasoning step, in one of three shapes:
 
@@ -241,6 +272,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
     # Raw text of the most recent LLM call; kept so loop-level recovery
     # handlers can echo it back to the model after a parsing failure.
     _last_llm_output: str = PrivateAttr(default="")
+    # Resolved once at construction: assigning to `llm.cache_control` marks the field as
+    # caller-set, so the decision cannot be re-derived after the first loop.
+    _cache_control: BaseModel | None = PrivateAttr(default=None)
 
     @field_validator("response_format", mode="before")
     @classmethod
@@ -513,6 +547,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return bool(action_input.get("delegate_final"))
 
         return False
+
+    @model_validator(mode="after")
+    def _resolve_cache_control(self):
+        """Decide once whether to enable prompt caching for the agent's own LLM calls."""
+        self._cache_control = default_cache_control(self.llm)
+        return self
 
     @model_validator(mode="after")
     def _ensure_context_manager_tool(self):
@@ -1752,6 +1792,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 messages=self._prompt.messages,
                 tools=fc_tools,
                 response_format=response_format,
+                # Per-call, never set on the node: tools share this llm instance, and
+                # parallel subagents may be using it at the same time.
+                cache_control=self._cache_control,
                 config=llm_config,
                 parallel_tool_calls=True if native_parallel else None,
                 **({"tool_choice": forced_tool_choice} if forced_tool_choice else {}),
