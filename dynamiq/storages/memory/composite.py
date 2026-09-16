@@ -135,7 +135,7 @@ class CompositeMemoryStore(MemoryStore):
         """Put the mount point back on paths coming out of a store."""
         return [entry.model_copy(update={"path": f"{route}{entry.path}"}) for entry in entries]
 
-    def list(self, prefix: str = "") -> list[MemoryEntry]:
+    def list(self, prefix: str = "", user_id: str | None = None) -> list[MemoryEntry]:
         """List memories under ``prefix``: the route it falls inside, plus every route at or below it.
 
         Both must answer, or a nested route's memories are missing from a listing of their own
@@ -149,33 +149,35 @@ class CompositeMemoryStore(MemoryStore):
         if normalized:
             for route in sorted(self.routes, key=len, reverse=True):
                 if normalized.startswith(route):
-                    entries.extend(self._mounted(route, self.routes[route].list(normalized[len(route) :])))
+                    entries.extend(
+                        self._mounted(route, self.routes[route].list(normalized[len(route) :], user_id))
+                    )
                     break
 
         entries.extend(
             entry
             for route, store in self.routes.items()
             if route.startswith(scope)
-            for entry in self._mounted(route, store.list())
+            for entry in self._mounted(route, store.list(user_id=user_id))
         )
         return entries
 
-    def read(self, path: str) -> str:
+    def read(self, path: str, user_id: str | None = None) -> str:
         """Read from the memory owning the path."""
         store, inner, route = self._resolve(path)
         try:
-            return store.read(inner)
+            return store.read(inner, user_id)
         except MemoryNotFoundError:
             # Name the path the caller used, not the one inside the store.
             raise MemoryNotFoundError(f"Memory '{route}{inner}' not found", operation="read", path=path) from None
 
-    def write(self, path: str, content: str) -> MemoryEntry:
+    def write(self, path: str, content: str, user_id: str | None = None) -> MemoryEntry:
         """Write to the memory owning the path."""
         store, inner, route = self._resolve(path)
-        entry = store.write(inner, content)
+        entry = store.write(inner, content, user_id)
         return entry.model_copy(update={"path": f"{route}{entry.path}"})
 
-    def delete(self, path: str) -> bool:
+    def delete(self, path: str, user_id: str | None = None) -> bool:
         """Delete from the memory owning the path."""
         store, inner, _route = self._resolve(path)
-        return store.delete(inner)
+        return store.delete(inner, user_id)

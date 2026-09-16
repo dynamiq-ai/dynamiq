@@ -99,14 +99,15 @@ class MemoryStore(abc.ABC, BaseModel):
         return id(self)
 
     @abc.abstractmethod
-    def list(self, prefix: str = "") -> list[MemoryEntry]:
+    def list(self, prefix: str = "", user_id: str | None = None) -> list[MemoryEntry]:
         """List memories under ``prefix``. An empty prefix lists everything.
 
-        Returns metadata only — read a path to get its content.
+        Returns metadata only — read a path to get its content. ``user_id`` is the end user this
+        call is for; it overrides whatever default the store was configured with.
         """
 
     @abc.abstractmethod
-    def read(self, path: str) -> str:
+    def read(self, path: str, user_id: str | None = None) -> str:
         """Return the content of one memory.
 
         Raises:
@@ -114,11 +115,11 @@ class MemoryStore(abc.ABC, BaseModel):
         """
 
     @abc.abstractmethod
-    def write(self, path: str, content: str) -> MemoryEntry:
+    def write(self, path: str, content: str, user_id: str | None = None) -> MemoryEntry:
         """Create or replace one memory, returning its entry."""
 
     @abc.abstractmethod
-    def delete(self, path: str) -> bool:
+    def delete(self, path: str, user_id: str | None = None) -> bool:
         """Delete one memory. Returns False when it was not there."""
 
 

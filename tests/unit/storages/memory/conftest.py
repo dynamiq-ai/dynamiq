@@ -14,23 +14,23 @@ class FakeMemoryStore(MemoryStore):
         super().__init__(**kwargs)
         self._memories: dict[str, str] = {}
 
-    def list(self, prefix: str = "") -> list[MemoryEntry]:
+    def list(self, prefix: str = "", user_id: str | None = None) -> list[MemoryEntry]:
         return [
             MemoryEntry(path=path, size=len(content))
             for path, content in self._memories.items()
             if path.startswith(prefix)
         ]
 
-    def read(self, path: str) -> str:
+    def read(self, path: str, user_id: str | None = None) -> str:
         if path not in self._memories:
             raise MemoryNotFoundError(f"Memory '{path}' not found", operation="read", path=path)
         return self._memories[path]
 
-    def write(self, path: str, content: str) -> MemoryEntry:
+    def write(self, path: str, content: str, user_id: str | None = None) -> MemoryEntry:
         self._memories[path] = content
         return MemoryEntry(path=path, size=len(content))
 
-    def delete(self, path: str) -> bool:
+    def delete(self, path: str, user_id: str | None = None) -> bool:
         return self._memories.pop(path, None) is not None
 
 

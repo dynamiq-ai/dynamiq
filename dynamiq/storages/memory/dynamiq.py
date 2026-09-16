@@ -28,9 +28,10 @@ class DynamiqMemoryStore(MemoryStore):
 
     connection: DynamiqConnection = Field(default_factory=DynamiqConnection)
     memory_store_id: str = Field(min_length=1, description="Identifier of the remote memory store.")
-    user_id: str = Field(
-        min_length=1,
-        description="End user this memory belongs to. Sent with every request; never agent-supplied.",
+    user_id: str | None = Field(
+        default=None,
+        description="Default end user for this memory. A per-run user_id overrides it; one of the "
+        "two must be set. Sent with every request; never agent-supplied.",
     )
     timeout: float = Field(default=30, description="Timeout in seconds for API requests.")
 
@@ -60,6 +61,17 @@ class DynamiqMemoryStore(MemoryStore):
 
     def _base_path(self) -> str:
         return f"/v1/memory-stores/{self.memory_store_id}/files"
+
+    def _scope(self, user_id: str | None, operation: str, path: str) -> str:
+        """The tenant this call is for: the run's user, else the configured default."""
+        scope = user_id or self.user_id
+        if not scope:
+            raise MemoryStoreError(
+                "No user_id for this memory store: pass one on the run or set one on the store.",
+                operation=operation,
+                path=path,
+            )
+        return scope
 
     def _request(
         self,
@@ -124,24 +136,24 @@ class DynamiqMemoryStore(MemoryStore):
             path=memory_path,
         )
 
-    def list(self, prefix: str = "") -> list[MemoryEntry]:
+    def list(self, prefix: str = "", user_id: str | None = None) -> list[MemoryEntry]:
         """List memories under ``prefix``."""
         data = self._request(
             HTTPMethod.GET,
             # `path` on the wire, `prefix` here: the API keeps the file vocabulary, while the
             # interface names what it actually is - a key prefix, not a directory.
-            params={"path": prefix, "user_id": self.user_id},
+            params={"path": prefix, "user_id": self._scope(user_id, "list", prefix)},
             operation="list",
             memory_path=prefix,
         )
         return [self._to_entry(entry) for entry in (data or [])]
 
-    def read(self, path: str) -> str:
+    def read(self, path: str, user_id: str | None = None) -> str:
         """Read one memory's content."""
         data = self._request(
             HTTPMethod.GET,
             "/content",
-            params={"path": path, "user_id": self.user_id},
+            params={"path": path, "user_id": self._scope(user_id, "read", path)},
             operation="read",
             memory_path=path,
         )
@@ -149,22 +161,22 @@ class DynamiqMemoryStore(MemoryStore):
             raise MemoryNotFoundError(f"Memory '{path}' not found", operation="read", path=path)
         return data.get("content") or ""
 
-    def write(self, path: str, content: str) -> MemoryEntry:
+    def write(self, path: str, content: str, user_id: str | None = None) -> MemoryEntry:
         """Create or replace one memory."""
         data = self._request(
             HTTPMethod.PUT,
-            json={"path": path, "content": content, "user_id": self.user_id},
+            json={"path": path, "content": content, "user_id": self._scope(user_id, "write", path)},
             operation="write",
             memory_path=path,
         )
         return self._to_entry(data or {}, fallback_path=path, fallback_size=len(content))
 
-    def delete(self, path: str) -> bool:
+    def delete(self, path: str, user_id: str | None = None) -> bool:
         """Delete one memory. A 404 means it was not there, which is not an error."""
         try:
             data = self._request(
                 HTTPMethod.DELETE,
-                params={"path": path, "user_id": self.user_id},
+                params={"path": path, "user_id": self._scope(user_id, "delete", path)},
                 operation="delete",
                 memory_path=path,
             )

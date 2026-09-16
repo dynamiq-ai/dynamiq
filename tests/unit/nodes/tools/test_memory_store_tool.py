@@ -1,7 +1,18 @@
+import json
+from unittest.mock import MagicMock, patch
+
 import pytest
 
-from dynamiq.nodes.tools.memory_store_tool import MemoryStoreTool
-from dynamiq.runnables import RunnableStatus
+from dynamiq import Workflow
+from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.flows import Flow
+from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.node import InputTransformer, NodeDependency
+from dynamiq.nodes.tools.memory_store_tool import MemoryStoreTool, MemoryStoreToolInputSchema
+from dynamiq.nodes.types import InferenceMode
+from dynamiq.nodes.utils import Input
+from dynamiq.runnables import RunnableResult, RunnableStatus
 from dynamiq.storages.memory import CompositeMemoryStore
 from tests.unit.storages.memory.conftest import FakeMemoryStore
 
@@ -111,6 +122,98 @@ def test_edit_on_a_missing_memory_points_at_write(tool):
 
     assert result.status == RunnableStatus.FAILURE
     assert "'write'" in str(result.error)
+
+
+def test_user_id_is_hidden_from_agent_tool_schema():
+    from dynamiq.nodes.agents.components.schema_generator import generate_function_calling_schemas
+
+    tool_name = "memory-store"
+    tool = MagicMock()
+    tool.name = tool_name
+    tool.description = "test"
+    tool.input_schema = MemoryStoreToolInputSchema
+    tool.resolved_input_schema = MemoryStoreToolInputSchema
+
+    schema = next(
+        s
+        for s in generate_function_calling_schemas(
+            tools=[tool], delegation_allowed=False, sanitize_tool_name=lambda name: name
+        )
+        if s["function"]["name"] == tool_name
+    )
+    properties = schema["function"]["parameters"]["properties"]
+
+    assert "user_id" not in properties
+    assert "action" in properties
+    assert "path" in properties
+
+
+def test_a_caller_supplied_user_id_reaches_the_backend():
+    """The tenant arrives as tool input - from tool_params or a workflow mapping, not the model."""
+    seen = {}
+
+    class Recording(FakeMemoryStore):
+        def write(self, path, content, user_id=None):
+            seen["user_id"] = user_id
+            return super().write(path, content, user_id)
+
+    content(MemoryStoreTool(backend=Recording()), action="write", path="p.md", content="x", user_id="u-99")
+
+    assert seen["user_id"] == "u-99"
+
+
+def test_user_id_arrives_through_a_workflow_input_transformer():
+    """The real delivery path: a selector maps the flow's user_id onto the tool's hidden field.
+
+    The model supplies only the memory arguments; the tenant comes from the run, so one deployed
+    agent serves many users.
+    """
+    seen = {}
+
+    class Recording(FakeMemoryStore):
+        def write(self, path, content, user_id=None):
+            seen["user_id"] = user_id
+            return super().write(path, content, user_id)
+
+    start = Input(id="start")
+    tool = MemoryStoreTool(
+        backend=Recording(),
+        input_transformer=InputTransformer(selector={"user_id": "$.start.output.user_id"}),
+    )
+    agent = Agent(
+        id="agent",
+        name="assistant",
+        llm=OpenAI(connection=OpenAIConnection(api_key="test-api-key"), model="gpt-4o"),
+        role="remember things",
+        tools=[tool],
+        depends=[NodeDependency(start)],
+        inference_mode=InferenceMode.STRUCTURED_OUTPUT,
+    )
+    stream = iter(
+        [
+            json.dumps(
+                {
+                    "thought": "record it",
+                    "action": "memory-store",
+                    "action_input": {"action": "write", "path": "prefs.md", "content": "Prefers tabs."},
+                }
+            ),
+            json.dumps({"thought": "done", "action": "finish", "action_input": "Noted."}),
+        ]
+    )
+
+    def run(**kwargs):
+        result = MagicMock(spec=RunnableResult)
+        result.status = RunnableStatus.SUCCESS
+        result.output = {"content": next(stream)}
+        return result
+
+    workflow = Workflow(flow=Flow(nodes=[start, agent]))
+    with patch.object(agent.llm, "run", side_effect=run):
+        result = workflow.run(input_data={"input": "I like tabs.", "user_id": "u-42"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert seen["user_id"] == "u-42"
 
 
 def test_delete(tool):

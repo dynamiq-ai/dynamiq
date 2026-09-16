@@ -66,6 +66,11 @@ class MemoryStoreToolInputSchema(BaseModel):
         description="Replace every occurrence of 'find' instead of requiring it to be unique.",
     )
     brief: str = Field(default="Using memory", description="Short description of what you are doing.")
+    user_id: str | None = Field(
+        default=None,
+        description="End user this memory belongs to. Supplied by the caller, never by the agent.",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
 
     @model_validator(mode="after")
     def validate_action_fields(self):
@@ -133,15 +138,16 @@ class MemoryStoreTool(Node):
             )
 
         try:
+            user_id = input_data.user_id
             if action == MemoryStoreAction.LIST:
-                return self._list(input_data.path or "")
+                return self._list(input_data.path or "", user_id)
             if action == MemoryStoreAction.READ:
-                return self._read(input_data.path)
+                return self._read(input_data.path, user_id)
             if action == MemoryStoreAction.WRITE:
-                return self._write(input_data.path, input_data.content)
+                return self._write(input_data.path, input_data.content, user_id)
             if action == MemoryStoreAction.EDIT:
                 return self._edit(input_data)
-            return self._delete(input_data.path)
+            return self._delete(input_data.path, user_id)
         except ToolExecutionException:
             raise
         except MemoryStoreError as e:
@@ -154,14 +160,14 @@ class MemoryStoreTool(Node):
                 recoverable=True,
             ) from e
 
-    def _list(self, prefix: str) -> dict[str, Any]:
+    def _list(self, prefix: str, user_id: str | None = None) -> dict[str, Any]:
         """List memories, grouped under what each one holds.
 
         The grouping matters: a bare path like ``team/naming.md`` gives the model nothing to judge
         relevance by, so it lists and then reads nothing. Naming the memory the path belongs to puts
         that judgement where the decision is made, the same way the tool description does.
         """
-        entries = self.backend.list(prefix)
+        entries = self.backend.list(prefix, user_id)
         if not entries:
             where = f" under '{prefix}'" if prefix else ""
             return {"content": f"No memories{where} yet."}
@@ -182,22 +188,23 @@ class MemoryStoreTool(Node):
             sections.append(f"{heading}\n" + "\n".join(lines))
         return {"content": "\n".join(sections), "paths": [entry.path for entry in entries]}
 
-    def _read(self, path: str) -> dict[str, Any]:
+    def _read(self, path: str, user_id: str | None = None) -> dict[str, Any]:
         try:
-            return {"content": self.backend.read(path)}
+            return {"content": self.backend.read(path, user_id)}
         except MemoryNotFoundError:
             raise ToolExecutionException(
                 f"No memory at '{path}'. Use action 'list' to see what exists.", recoverable=True
             ) from None
 
-    def _write(self, path: str, content: str) -> dict[str, Any]:
-        entry = self.backend.write(path, content)
+    def _write(self, path: str, content: str, user_id: str | None = None) -> dict[str, Any]:
+        entry = self.backend.write(path, content, user_id)
         return {"content": f"Remembered in '{entry.path}'."}
 
     def _edit(self, input_data: MemoryStoreToolInputSchema) -> dict[str, Any]:
         path, find, replace = input_data.path, input_data.find, input_data.replace
+        user_id = input_data.user_id
         try:
-            current = self.backend.read(path)
+            current = self.backend.read(path, user_id)
         except MemoryNotFoundError:
             raise ToolExecutionException(
                 f"No memory at '{path}' to edit. Use action 'write' to create it.", recoverable=True
@@ -216,10 +223,10 @@ class MemoryStoreTool(Node):
             )
 
         updated = current.replace(find, replace) if input_data.replace_all else current.replace(find, replace, 1)
-        self.backend.write(path, updated)
+        self.backend.write(path, updated, user_id)
         changed = occurrences if input_data.replace_all else 1
         return {"content": f"Updated '{path}' ({changed} replacement{'s' if changed > 1 else ''})."}
 
-    def _delete(self, path: str) -> dict[str, Any]:
-        deleted = self.backend.delete(path)
+    def _delete(self, path: str, user_id: str | None = None) -> dict[str, Any]:
+        deleted = self.backend.delete(path, user_id)
         return {"content": f"Deleted '{path}'." if deleted else f"There was no memory at '{path}'."}

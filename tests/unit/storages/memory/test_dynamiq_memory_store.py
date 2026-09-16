@@ -34,9 +34,20 @@ def _mock_response(payload=None, status_code=200, content=b"{}"):
     return response
 
 
-def test_user_id_is_required(connection):
-    with pytest.raises(ValueError):
-        DynamiqMemoryStore(connection=connection, memory_store_id="ms-123")
+def test_a_per_call_user_id_overrides_the_configured_one(store, client):
+    client.request.return_value = _mock_response({"data": {"path": "prefs.md", "size": 1}})
+
+    store.write("prefs.md", "x", user_id="u-99")
+
+    assert client.request.call_args.kwargs["json"]["user_id"] == "u-99"
+
+
+def test_a_call_without_any_user_id_is_refused(connection):
+    """Optional on the store so one agent serves many users, but a call still needs a tenant."""
+    unscoped = DynamiqMemoryStore(connection=connection, memory_store_id="ms-123")
+
+    with pytest.raises(MemoryStoreError, match="user_id"):
+        unscoped.list()
 
 
 def test_type_is_package_path(store):
