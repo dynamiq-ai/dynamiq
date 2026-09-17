@@ -409,7 +409,7 @@ def test_file_read_tool_returns_text_formats_as_text(llm_model, file_path):
     assert not content.startswith("b'")
 
 
-@pytest.mark.parametrize("file_path", ["data/state.json", "logs/run.log"])
+@pytest.mark.parametrize("file_path", ["data/state.json", "logs/run.log", "notes/a.markdown", "notes/b.text"])
 def test_file_read_tool_plain_text_data_reread_after_write_is_fresh(llm_model, file_path):
     """Re-reading a plain-text data format after it changes on disk returns the new content.
 
@@ -447,7 +447,7 @@ def test_file_read_tool_plain_text_data_reread_after_append_is_fresh(llm_model):
     assert second.output["content"] == "start\nmore\n"
 
 
-@pytest.mark.parametrize("file_path", ["data/state.json", "logs/run.log"])
+@pytest.mark.parametrize("file_path", ["data/state.json", "logs/run.log", "notes/a.markdown", "notes/b.text"])
 def test_file_read_tool_plain_text_data_line_range_matches_file_on_disk(llm_model, file_path):
     """start_line/end_line and total_lines are computed against the file as written.
 

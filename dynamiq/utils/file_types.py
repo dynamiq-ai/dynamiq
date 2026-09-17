@@ -78,8 +78,8 @@ EXTENSION_MAP = {
     FileType.DATABASE: {"sqlite"},
     FileType.EBOOK: {"epub"},
     FileType.HTML: {"html"},
-    FileType.TEXT: {"txt", "text"},
-    FileType.MARKDOWN: {"md", "markdown"},
+    FileType.TEXT: {"txt"},
+    FileType.MARKDOWN: {"md"},
     # Plain-text *data* formats: known to be text, but read raw (decoded, not run through
     # TextFileConverter). Unlike FileType.TEXT/MARKDOWN, these are never routed through the
     # extracted-text cache: a converter pass would strip leading/trailing whitespace (breaking
@@ -97,5 +97,7 @@ EXTENSION_MAP = {
         "ini",
         "cfg",
         "conf",
+        "text",
+        "markdown",
     },
 }
