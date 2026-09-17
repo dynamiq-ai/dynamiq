@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
-from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.tools.file_tools import RESERVED_AGENT_PATH_PREFIX
 from dynamiq.runnables import RunnableConfig
@@ -57,13 +56,14 @@ class TodoWriteInputSchema(BaseModel):
         ...,
         description=(
             "List of todo items. Each item MUST have 'id', 'content', and 'status'. "
-            "When updating (merge=true), content is required but ignored — the original content is preserved."
+            "With merge=true, items whose id already exists only get their status updated (the original "
+            "content is preserved); items with a new id are added."
         ),
     )
     merge: bool = Field(
         default=True,
-        description="If true, update status of existing todos by id (content you send is ignored, "
-        "original is preserved). "
+        description="If true, update the status of existing todos by id (content you send is ignored, "
+        "original is preserved) and add items whose id does not exist yet. "
         "If false, replace all todos with the provided list.",
     )
 
@@ -87,13 +87,14 @@ CREATE (merge=false): Build the full todo list.
   {"todos": [{"id": "1", "content": "Implement auth", "status": "in_progress"},
   {"id": "2", "content": "Add tests", "status": "pending"}], "merge": false}
 
-UPDATE (merge=true, default): Change status only. Content is required but ignored — the original content is preserved.
+UPDATE (merge=true, default): Change status of existing items. Content is required but ignored for them —
+the original content is preserved. An item whose id does not exist yet is added with the content you send.
   {"todos": [{"id": "1", "content": "ignored", "status": "completed"},
   {"id": "2", "content": "ignored", "status": "in_progress"}], "merge": true}
 
 RULES:
-- Use merge=false ONLY for initial list creation. First task should be "in_progress", rest "pending".
-- Use merge=true for ALL subsequent updates — only status is applied, content stays unchanged.
+- Use merge=false for initial list creation. First task should be "in_progress", rest "pending".
+- Use merge=true for ALL subsequent updates — only status is applied to existing ids, content stays unchanged.
 - Do NOT restructure, reword, or reorder todos when updating status.
 """
 
@@ -123,7 +124,7 @@ RULES:
                 validated = []
                 for t in todos:
                     try:
-                        validated.append(TodoItem.model_validate(t).model_dump())
+                        validated.append(TodoItem.model_validate(t).model_dump(mode="json"))
                     except Exception as e:
                         logger.warning(f"TodoWriteTool: Skipping invalid todo item: {e}")
                 return validated
@@ -169,22 +170,21 @@ RULES:
         self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        # Convert TodoItem objects to dicts for storage
-        new_todos = [todo.model_dump() for todo in input_data.todos]
+        # mode="json" stores the status as its value; a plain dump keeps the enum, which
+        # renders as "TodoStatus.PENDING" in the listing below.
+        new_todos = [todo.model_dump(mode="json") for todo in input_data.todos]
 
         if input_data.merge:
             existing = self._load_todos()
             existing_by_id = {t.get("id"): t for t in existing if t.get("id")}
 
-            unknown_ids = [t["id"] for t in new_todos if t["id"] not in existing_by_id]
-            if unknown_ids:
-                raise ToolExecutionException(
-                    f"Todo ids not found: {unknown_ids}. Existing ids: {list(existing_by_id.keys())}",
-                    recoverable=True,
-                )
-
+            # Upsert: merge=true is the default, so models routinely create the first list
+            # with it. Every item carries id, content and status, which is enough to add it.
             for todo in new_todos:
-                existing_by_id[todo["id"]]["status"] = todo["status"]
+                if todo["id"] in existing_by_id:
+                    existing_by_id[todo["id"]]["status"] = todo["status"]
+                else:
+                    existing_by_id[todo["id"]] = todo
 
             final_todos = list(existing_by_id.values())
         else:
