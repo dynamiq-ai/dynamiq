@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.tools.file_tools import RESERVED_AGENT_PATH_PREFIX
 from dynamiq.runnables import RunnableConfig
@@ -56,14 +57,16 @@ class TodoWriteInputSchema(BaseModel):
         ...,
         description=(
             "List of todo items. Each item MUST have 'id', 'content', and 'status'. "
-            "With merge=true, items whose id already exists only get their status updated (the original "
-            "content is preserved); items with a new id are added."
+            "With merge=true on an empty store, the items are stored as the new list. "
+            "With merge=true on a non-empty store, every id must already exist — only status is updated "
+            "(the original content is preserved); an unknown id fails the whole call."
         ),
     )
     merge: bool = Field(
         default=True,
-        description="If true, update the status of existing todos by id (content you send is ignored, "
-        "original is preserved) and add items whose id does not exist yet. "
+        description="If true and no todo list exists yet, store the provided items as the new list. "
+        "If true and a list already exists, update the status of existing todos by id (content you send is "
+        "ignored, original is preserved) — every id must already exist, or the call fails. "
         "If false, replace all todos with the provided list.",
     )
 
@@ -83,19 +86,22 @@ class TodoWriteTool(Node):
 
 Two modes:
 
-CREATE (merge=false): Build the full todo list.
+CREATE (merge=false, or merge=true when no list exists yet): Build the full todo list.
   {"todos": [{"id": "1", "content": "Implement auth", "status": "in_progress"},
   {"id": "2", "content": "Add tests", "status": "pending"}], "merge": false}
 
-UPDATE (merge=true, default): Change status of existing items. Content is required but ignored for them —
-the original content is preserved. An item whose id does not exist yet is added with the content you send.
+UPDATE (merge=true on an existing list, default): Change status of existing items. Content is required but
+ignored for them — the original content is preserved. Every id you send must already exist; an unknown id
+fails the whole call — it does NOT create a new item.
   {"todos": [{"id": "1", "content": "ignored", "status": "completed"},
   {"id": "2", "content": "ignored", "status": "in_progress"}], "merge": true}
 
 RULES:
-- Use merge=false for initial list creation. First task should be "in_progress", rest "pending".
+- Use merge=false (or merge=true on the first call) for initial list creation. First task should be
+  "in_progress", rest "pending".
 - Use merge=true for ALL subsequent updates — only status is applied to existing ids, content stays unchanged.
 - Do NOT restructure, reword, or reorder todos when updating status.
+- Do NOT invent ids for the update call — send back the exact ids from the last todo-write result.
 """
 
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=30))
@@ -178,12 +184,25 @@ RULES:
             existing = self._load_todos()
             existing_by_id = {t.get("id"): t for t in existing if t.get("id")}
 
-            # Upsert: merge=true is the default, so models routinely create the first list
-            # with it. Every item carries id, content and status, which is enough to add it.
-            for todo in new_todos:
-                if todo["id"] in existing_by_id:
+            if existing_by_id:
+                # Store already has a plan: merge=true only updates statuses of known ids.
+                # An id the store doesn't have is a renumbered plan, a hallucinated id, or a
+                # typo — not a new todo — so the model needs a recoverable error naming the
+                # valid ids, not a silent insert of a placeholder ("ignored") item.
+                unknown_ids = [t["id"] for t in new_todos if t["id"] not in existing_by_id]
+                if unknown_ids:
+                    raise ToolExecutionException(
+                        f"Todo ids not found: {unknown_ids}. Existing ids: {list(existing_by_id.keys())}",
+                        recoverable=True,
+                    )
+
+                for todo in new_todos:
                     existing_by_id[todo["id"]]["status"] = todo["status"]
-                else:
+            else:
+                # merge=true is the default, so models routinely create the first list with
+                # it. There is nothing to conflict with an empty store, so treat this call as
+                # creating the list.
+                for todo in new_todos:
                     existing_by_id[todo["id"]] = todo
 
             final_todos = list(existing_by_id.values())

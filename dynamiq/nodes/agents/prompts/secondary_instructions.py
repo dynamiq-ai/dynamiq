@@ -42,7 +42,8 @@ TODO_TOOLS_INSTRUCTIONS = """## Todo Management
 - Use the todo-write tool for complex 3+ step tasks; skip for simple requests
 - The todo-write result lists the full current todo list - re-read it there
 - When creating initial list: first task "in_progress", rest "pending"
-- Create the initial list with merge=false; after that, ONLY update status via merge=true - do not restructure the plan
+- Create the initial list with merge=false (merge=true also works if no list exists yet); after that, ONLY \
+update status via merge=true, using the exact existing ids - do not restructure the plan or invent ids
 - Mark completed IMMEDIATELY after finishing each step - don't batch
 - Only mark completed when FULLY done; if blocked, keep in_progress"""
 

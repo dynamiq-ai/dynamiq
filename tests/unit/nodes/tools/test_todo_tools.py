@@ -56,7 +56,9 @@ def test_merge_updates_status_of_existing_ids_and_keeps_content():
     ]
 
 
-def test_merge_adds_new_ids_after_existing_ones():
+def test_merge_on_non_empty_store_with_unknown_id_fails_and_leaves_store_unchanged():
+    """A renumbered plan, a hallucinated id, or a typo must not be silently inserted as a
+    placeholder ("ignored") todo — the model needs a recoverable error naming the valid ids."""
     file_store = InMemoryFileStore()
     tool = TodoWriteTool(file_store=file_store)
     tool.run({"todos": _plan("in_progress"), "merge": False})
@@ -65,17 +67,16 @@ def test_merge_adds_new_ids_after_existing_ones():
         {
             "todos": [
                 {"id": "1", "content": "ignored", "status": "completed"},
-                {"id": "2", "content": "follow-up step", "status": "in_progress"},
+                {"id": "2", "content": "ignored", "status": "in_progress"},
             ],
             "merge": True,
         }
     )
 
-    assert result.status == RunnableStatus.SUCCESS
-    assert _stored_todos(file_store) == [
-        {"id": "1", "content": "step 1", "status": "completed"},
-        {"id": "2", "content": "follow-up step", "status": "in_progress"},
-    ]
+    assert result.status == RunnableStatus.FAILURE
+    assert "Todo ids not found: ['2']" in result.error.message
+    assert "Existing ids: ['1']" in result.error.message
+    assert _stored_todos(file_store) == _plan("in_progress")
 
 
 def test_state_persists_across_calls_on_the_same_store():
