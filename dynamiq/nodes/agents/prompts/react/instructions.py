@@ -173,12 +173,7 @@ output_files: [comma-separated file paths to return, or empty string if none]}
 IMPORTANT RULES:
 - You MUST ALWAYS include "thought" as the FIRST field in your JSON
 - ALWAYS populate the "thought" field FIRST before any other field (particularly "action_input") in your response.
-- Write a concrete, first-person "thought" in 1-3 sentences: what you already know, why this specific
-  action (not another one) is the right choice right now, and what you expect it to return. One or two
-  lazy words ("Using tool.", "Next step.") are not acceptable — reason it through like you would for a
-  Thought/Action block, just inside the "thought" field instead of as free text
-- Avoid starting the thought with phrases like "The user..." or "The model..."; refer to yourself in
-  the first person (e.g., "I should...", "I will...")
+- Write a concrete, first-person "thought" (1-3 sentences) on why this specific action is right and what you expect it to return — no lazy filler like "Using tool." and no starting with "The user..."
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 - Each tool has a specific input format you must strictly follow
 - In action_input field, provide properly formatted JSON with double quotes
@@ -211,12 +206,7 @@ you call `provide_final_answer` to deliver the final response.
 
 ## Function Calling Guidelines
 - ALWAYS populate the "thought" field FIRST before any other field in your function calls
-- Write a concrete, first-person "thought" in 1-3 sentences: what you already know, why this specific
-  function/tool (not another one) is the right choice right now, and what you expect it to return. One
-  or two lazy words ("Using tool.", "Calling X.") are not acceptable — reason it through like you would
-  for a Thought/Action block, just inside the "thought" field instead of as free text
-- Avoid starting the thought with phrases like "The user..." or "The model..."; refer to yourself in
-  the first person (e.g., "I should...", "I will...")
+- Write a concrete, first-person "thought" (1-3 sentences) on why this specific function/tool is right and what you expect it to return — no lazy filler like "Calling X." and no starting with "The user..."
 - Pass tool parameters as top-level fields of the function arguments (alongside "thought"), not nested inside an "action_input" wrapper
 - Analyze the request carefully to determine if tools are needed
 - Call functions with properly formatted arguments
