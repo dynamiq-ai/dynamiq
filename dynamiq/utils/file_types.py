@@ -19,6 +19,7 @@ class FileType(str, enum.Enum):
     HTML = "html"
     TEXT = "text"
     MARKDOWN = "markdown"
+    PLAIN_TEXT_DATA = "plain_text_data"
 
 
 EXTENSION_MAP = {
@@ -77,10 +78,14 @@ EXTENSION_MAP = {
     FileType.DATABASE: {"sqlite"},
     FileType.EBOOK: {"epub"},
     FileType.HTML: {"html"},
-    # Plain-text data formats: read as text rather than handed back as raw bytes.
-    FileType.TEXT: {
-        "txt",
-        "text",
+    FileType.TEXT: {"txt", "text"},
+    FileType.MARKDOWN: {"md", "markdown"},
+    # Plain-text *data* formats: known to be text, but read raw (decoded, not run through
+    # TextFileConverter). Unlike FileType.TEXT/MARKDOWN, these are never routed through the
+    # extracted-text cache: a converter pass would strip leading/trailing whitespace (breaking
+    # start_line/end_line accounting) and its cached ".extracted.txt" copy would go stale after
+    # any write/append to the source file, since re-reads prefer the cache unconditionally.
+    FileType.PLAIN_TEXT_DATA: {
         "log",
         "json",
         "jsonl",
@@ -93,5 +98,4 @@ EXTENSION_MAP = {
         "cfg",
         "conf",
     },
-    FileType.MARKDOWN: {"md", "markdown"},
 }

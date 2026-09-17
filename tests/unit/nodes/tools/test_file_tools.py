@@ -409,6 +409,84 @@ def test_file_read_tool_returns_text_formats_as_text(llm_model, file_path):
     assert not content.startswith("b'")
 
 
+@pytest.mark.parametrize("file_path", ["data/state.json", "logs/run.log"])
+def test_file_read_tool_plain_text_data_reread_after_write_is_fresh(llm_model, file_path):
+    """Re-reading a plain-text data format after it changes on disk returns the new content.
+
+    Before the fix these extensions were routed through the extracted-text converter/cache
+    path: a first read persisted "<path>.extracted.txt", and every later read returned that
+    stale cache unconditionally (no mtime/hash check), regardless of what was written since.
+    """
+    file_store = InMemoryFileStore()
+    file_store.store(file_path, b'{"v": 1}')
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    first = tool.run({"file_path": file_path, "brief": "Read v1"})
+    assert first.status == RunnableStatus.SUCCESS
+    assert first.output["content"] == '{"v": 1}'
+    assert not file_store.exists(f"{file_path}{EXTRACTED_TEXT_SUFFIX}")
+
+    file_store.store(file_path, b'{"v": 2}', overwrite=True)
+    second = tool.run({"file_path": file_path, "brief": "Read v2"})
+    assert second.status == RunnableStatus.SUCCESS
+    assert second.output["content"] == '{"v": 2}'
+    assert not file_store.exists(f"{file_path}{EXTRACTED_TEXT_SUFFIX}")
+
+
+def test_file_read_tool_plain_text_data_reread_after_append_is_fresh(llm_model):
+    """Appending to a .log file is reflected on the next read, not masked by a stale cache."""
+    file_store = InMemoryFileStore()
+    file_store.store("logs/run.log", b"start\n")
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    first = tool.run({"file_path": "logs/run.log", "brief": "Read"})
+    assert first.output["content"] == "start\n"
+
+    file_store.store("logs/run.log", b"start\nmore\n", overwrite=True)
+    second = tool.run({"file_path": "logs/run.log", "brief": "Read again"})
+    assert second.output["content"] == "start\nmore\n"
+
+
+@pytest.mark.parametrize("file_path", ["data/state.json", "logs/run.log"])
+def test_file_read_tool_plain_text_data_line_range_matches_file_on_disk(llm_model, file_path):
+    """start_line/end_line and total_lines are computed against the file as written.
+
+    Before the fix these extensions were routed through TextFileConverter, which strips the
+    content before slicing. Leading blank lines were silently dropped, shifting every line
+    number and under-reporting total_lines.
+    """
+    file_store = InMemoryFileStore()
+    file_store.store(file_path, b"\n\nline3\nline4\nline5\n")
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    result = tool.run({"file_path": file_path, "start_line": 3, "end_line": 3, "brief": "Read line 3"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["total_lines"] == 5
+    assert result.output["line_range"] == [3, 3]
+    assert "line3" in result.output["content"]
+    assert not file_store.exists(f"{file_path}{EXTRACTED_TEXT_SUFFIX}")
+
+
+def test_file_search_tool_plain_text_data_searches_fresh_content_after_write(file_store, llm_model):
+    """file-search over a plain-text data format is not stuck on a stale extracted-text cache."""
+    file_store.store("data/state.json", b'{"status": "pending"}')
+    read_tool = FileReadTool(file_store=file_store, llm=llm_model)
+    read_tool.run({"file_path": "data/state.json", "brief": "Read"})
+    assert not file_store.exists("data/state.json.extracted.txt")
+
+    file_store.store("data/state.json", b'{"status": "done"}', overwrite=True)
+
+    search_tool = FileSearchTool(file_store=file_store)
+    result = search_tool.run({"query": "done", "file_path": "data/state.json", "brief": "Search"})
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"]["total_matches"] == 1
+
+    stale = search_tool.run({"query": "pending", "file_path": "data/state.json", "brief": "Search stale"})
+    assert stale.status == RunnableStatus.SUCCESS
+    assert stale.output["content"]["total_matches"] == 0
+
+
 def test_file_read_tool_text_format_with_undecodable_bytes_is_still_text(file_store, llm_model):
     """A known text format with stray non-UTF-8 bytes is decoded leniently, not returned as bytes."""
     file_store.store("logs/run.log", b"started\n\xff\xfe broken byte\nfinished")

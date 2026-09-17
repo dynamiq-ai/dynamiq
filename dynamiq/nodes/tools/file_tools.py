@@ -35,6 +35,10 @@ logger = logging.getLogger(__name__)
 
 EXTRACTED_TEXT_SUFFIX = ".extracted.txt"
 RESERVED_AGENT_PATH_PREFIX = "._agent"
+# File types that are known to be text but are read raw (decoded, not run through a converter):
+# no extraction cache is written for them, and no content is stripped, so line ranges and
+# re-reads after a write always reflect the bytes actually on disk.
+RAW_TEXT_FILE_TYPES = {FileType.PLAIN_TEXT_DATA}
 
 
 def _find_positions(content: str, needle: str) -> list[int]:
@@ -801,13 +805,19 @@ class FileReadTool(Node):
                 result_payload["content"] = processed
                 return result_payload
 
+            detected_type = None
             try:
                 file_io = BytesIO(content)
                 filename = os.path.basename(input_data.file_path)
 
                 detected_type = self._detect_file_type(file_io, filename, config, **kwargs)
 
-                if detected_type:
+                if detected_type in RAW_TEXT_FILE_TYPES:
+                    logger.debug(
+                        f"Tool {self.name} - {self.id}: detected type {detected_type} is read raw, "
+                        "skipping converter/extraction cache"
+                    )
+                elif detected_type:
                     text_content, page_entries = self._process_file_with_converter(
                         file_io,
                         filename,
@@ -893,11 +903,16 @@ class FileReadTool(Node):
                 )
 
             # Bytes reach the agent as their Python repr (b'...' with escaped newlines),
-            # so anything that is valid UTF-8 is handed back as text.
+            # so anything that is valid UTF-8 is handed back as text. A recognized plain-text
+            # data format (e.g. .log, .json) is decoded leniently instead of falling back to
+            # bytes on a stray invalid byte, since the caller already knows it is text.
             try:
                 text_fallback = content.decode("utf-8")
             except UnicodeDecodeError:
-                text_fallback = None
+                if detected_type in RAW_TEXT_FILE_TYPES:
+                    text_fallback = content.decode("utf-8", errors="replace")
+                else:
+                    text_fallback = None
 
             if input_data.start_line is not None or input_data.end_line is not None:
                 if text_fallback is not None:
