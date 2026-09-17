@@ -892,12 +892,14 @@ class FileReadTool(Node):
                     f"Tool {self.name} - {self.id}: file processing failed: {str(e)}, falling back to raw content"
                 )
 
-            if input_data.start_line is not None or input_data.end_line is not None:
-                try:
-                    text_fallback = content.decode("utf-8")
-                except UnicodeDecodeError:
-                    text_fallback = None
+            # Bytes reach the agent as their Python repr (b'...' with escaped newlines),
+            # so anything that is valid UTF-8 is handed back as text.
+            try:
+                text_fallback = content.decode("utf-8")
+            except UnicodeDecodeError:
+                text_fallback = None
 
+            if input_data.start_line is not None or input_data.end_line is not None:
                 if text_fallback is not None:
                     sliced, total, a_start, a_end = self._slice_lines(
                         text_fallback, input_data.start_line, input_data.end_line, input_data.file_path
@@ -908,6 +910,16 @@ class FileReadTool(Node):
                         "total_lines": total,
                         "line_range": [a_start, a_end],
                     }
+
+            if text_fallback is not None:
+                rendered_text = self._render_text_content(
+                    text_content=text_fallback,
+                    mode=mode,
+                    chunk_size=chunk_size,
+                    preview_limit=preview_limit,
+                    file_path=input_data.file_path,
+                )
+                return {"content": rendered_text, "file_info": file_info}
 
             rendered_content = self._render_binary_content(
                 content=content,

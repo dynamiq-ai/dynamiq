@@ -77,6 +77,21 @@ EXTENSION_MAP = {
     FileType.DATABASE: {"sqlite"},
     FileType.EBOOK: {"epub"},
     FileType.HTML: {"html"},
-    FileType.TEXT: {"txt"},
-    FileType.MARKDOWN: {"md"},
+    # Plain-text data formats: read as text rather than handed back as raw bytes.
+    FileType.TEXT: {
+        "txt",
+        "text",
+        "log",
+        "json",
+        "jsonl",
+        "ndjson",
+        "yaml",
+        "yml",
+        "toml",
+        "xml",
+        "ini",
+        "cfg",
+        "conf",
+    },
+    FileType.MARKDOWN: {"md", "markdown"},
 }

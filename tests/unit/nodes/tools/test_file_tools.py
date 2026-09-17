@@ -379,6 +379,72 @@ def test_file_read_tool_with_sandbox_like_backend(llm_model):
     assert "Alice" in result.output["content"]
 
 
+@pytest.mark.parametrize(
+    "file_path",
+    [
+        "/home/user/traces/_manifest.json",
+        "data/events.jsonl",
+        "data/events.ndjson",
+        "config/settings.yaml",
+        "config/settings.yml",
+        "config/pyproject.toml",
+        "feeds/feed.xml",
+        "logs/run.log",
+        "notes/readme.markdown",
+    ],
+)
+def test_file_read_tool_returns_text_formats_as_text(llm_model, file_path):
+    """Text data formats come back as text, not as a ``b'...'`` bytes repr."""
+    file_store = InMemoryFileStore()
+    raw = '{\n  "window_start": "2026-09-10",\n  "note": "caf\u00e9"\n}'
+    file_store.store(file_path.lstrip("/"), raw.encode("utf-8"))
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    result = tool.run({"file_path": file_path.lstrip("/"), "brief": "Read"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = result.output["content"]
+    assert isinstance(content, str)
+    assert content == raw
+    assert not content.startswith("b'")
+
+
+def test_file_read_tool_text_format_with_undecodable_bytes_is_still_text(file_store, llm_model):
+    """A known text format with stray non-UTF-8 bytes is decoded leniently, not returned as bytes."""
+    file_store.store("logs/run.log", b"started\n\xff\xfe broken byte\nfinished")
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    result = tool.run({"file_path": "logs/run.log", "brief": "Read log"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = result.output["content"]
+    assert isinstance(content, str)
+    assert "started" in content and "finished" in content
+
+
+def test_file_read_tool_unknown_extension_utf8_falls_back_to_text(file_store, llm_model):
+    """An unrecognised extension holding UTF-8 is returned as text, not ``str(bytes)``."""
+    file_store.store("scripts/build.sh", b"#!/bin/sh\necho 'hi'\n")
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    result = tool.run({"file_path": "scripts/build.sh", "brief": "Read script"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == "#!/bin/sh\necho 'hi'\n"
+
+
+def test_file_read_tool_unknown_extension_binary_stays_bytes(file_store, llm_model):
+    """Non-UTF-8 content of an unknown type keeps the binary rendering."""
+    payload = b"\x00\x9f\x92\x96binary"
+    file_store.store("blobs/data.bin", payload)
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    result = tool.run({"file_path": "blobs/data.bin", "brief": "Read blob"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == payload
+
+
 # ---------------------------------------------------------------------------
 # FileWriteTool – edit mode tests
 # ---------------------------------------------------------------------------
