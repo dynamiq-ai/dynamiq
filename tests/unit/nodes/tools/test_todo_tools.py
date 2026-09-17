@@ -140,6 +140,7 @@ def test_merge_on_unreadable_store_fails_without_overwriting():
     result = tool.run({"todos": [{"id": "3", "content": "ignored", "status": "completed"}], "merge": True})
 
     assert result.status == RunnableStatus.FAILURE
+    assert "merge=false" in result.error.message
     file_store._fail_retrieve = False
     assert _stored_todos(file_store) == _plan("in_progress", "pending", "pending", "pending", "pending")
 
@@ -159,7 +160,36 @@ def test_merge_on_corrupt_store_fails_without_overwriting():
     result = tool.run({"todos": [{"id": "1", "content": "ignored", "status": "completed"}], "merge": True})
 
     assert result.status == RunnableStatus.FAILURE
+    assert "merge=false" in result.error.message
     assert _stored_todos(file_store) == "not-a-list"
+
+
+def test_merge_false_after_corrupt_store_replaces_it_and_later_merges_work():
+    """The corrupt-store error names merge=false as the escape hatch; confirm that path actually
+    works — merge=false overwrites the corrupt content, and merge=true against the fresh list
+    works normally afterward."""
+    file_store = FlakyFileStore()
+    file_store.store(
+        file_path=TODOS_FILE_PATH,
+        content=json.dumps({"todos": "not-a-list"}),
+        content_type="application/json",
+        overwrite=True,
+    )
+    tool = TodoWriteTool(file_store=file_store)
+
+    guard_result = tool.run({"todos": [{"id": "1", "content": "ignored", "status": "completed"}], "merge": True})
+    assert guard_result.status == RunnableStatus.FAILURE
+
+    recreate_result = tool.run({"todos": _plan("in_progress", "pending"), "merge": False})
+    assert recreate_result.status == RunnableStatus.SUCCESS
+    assert _stored_todos(file_store) == _plan("in_progress", "pending")
+
+    merge_result = tool.run({"todos": [{"id": "1", "content": "ignored", "status": "completed"}], "merge": True})
+    assert merge_result.status == RunnableStatus.SUCCESS
+    assert _stored_todos(file_store) == [
+        {"id": "1", "content": "step 1", "status": "completed"},
+        {"id": "2", "content": "step 2", "status": "pending"},
+    ]
 
 
 def test_merge_after_transient_missing_probe_does_not_recreate_over_existing_run_state():

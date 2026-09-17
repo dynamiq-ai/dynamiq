@@ -221,7 +221,9 @@ RULES:
                 # real plan with those. Fail without writing instead — the caller can retry.
                 raise ToolExecutionException(
                     "Could not read the current todo list (read failed or its content is "
-                    "corrupt). Not overwriting it — retry the call.",
+                    "corrupt). Not overwriting it. If this was a transient error, retry; if it "
+                    "keeps failing, recreate the full plan with merge=false instead (this "
+                    "replaces the stored list).",
                     recoverable=True,
                 )
 
