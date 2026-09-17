@@ -170,7 +170,6 @@ def _store(store_id: str, description: str) -> DynamiqMemoryStore:
     return DynamiqMemoryStore(
         connection=DynamiqConnection(url="https://memory-store.simulated", api_key="simulated-key"),
         memory_store_id=store_id,
-        user_id=USER_ID,
         description=description,
     )
 
@@ -264,7 +263,7 @@ def test_memories_are_recorded_then_applied(openai_llm, run_config, memory_store
             memory_store=MemoryStoreConfig(enabled=True, backend=backend),
         )
 
-    build_agent("MemoryWriter").run(input_data={"input": CODE_TASK}, config=run_config)
+    build_agent("MemoryWriter").run(input_data={"input": CODE_TASK, "user_id": USER_ID}, config=run_config)
     _assert_memory_holds_only_the_preference(personal)
 
     # The team memory is curated elsewhere: nothing the user volunteers belongs in it.
@@ -273,7 +272,7 @@ def test_memories_are_recorded_then_applied(openai_llm, run_config, memory_store
 
     # A brand-new agent and conversation; the only thing carried over is the store.
     applier = build_agent("MemoryApplier")
-    applier.run(input_data={"input": SECOND_CODE_TASK}, config=run_config)
+    applier.run(input_data={"input": SECOND_CODE_TASK, "user_id": USER_ID}, config=run_config)
 
     workspace = "\n".join(
         applier.file_store_backend.retrieve(info.path).decode(errors="replace")

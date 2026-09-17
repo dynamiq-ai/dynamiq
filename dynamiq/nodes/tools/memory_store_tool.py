@@ -102,6 +102,11 @@ class MemoryStoreTool(Node):
     description: str = DESCRIPTION
     backend: MemoryStore = Field(..., description="Store holding the agent's memories.")
     write_enabled: bool = Field(default=True, description="Whether the agent may change memories.")
+    user_id: str | None = Field(
+        default=None,
+        description="End user whose memories these are. An agent binds it from the run, so callers "
+        "only pass user_id to `agent.run(...)`. A per-call value still wins.",
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[MemoryStoreToolInputSchema]] = MemoryStoreToolInputSchema
@@ -139,7 +144,8 @@ class MemoryStoreTool(Node):
             )
 
         try:
-            user_id = input_data.user_id
+            # Per-call value wins; otherwise the one the agent bound for this run.
+            user_id = input_data.user_id or self.user_id
             if action == MemoryStoreAction.LIST:
                 return self._list(input_data.path or "", user_id)
             if action == MemoryStoreAction.READ:
@@ -147,7 +153,7 @@ class MemoryStoreTool(Node):
             if action == MemoryStoreAction.WRITE:
                 return self._write(input_data.path, input_data.content, user_id)
             if action == MemoryStoreAction.EDIT:
-                return self._edit(input_data)
+                return self._edit(input_data, user_id)
             return self._delete(input_data.path, user_id)
         except ToolExecutionException:
             raise
@@ -201,9 +207,8 @@ class MemoryStoreTool(Node):
         entry = self.backend.write(path, content, user_id)
         return {"content": f"Remembered in '{entry.path}'."}
 
-    def _edit(self, input_data: MemoryStoreToolInputSchema) -> dict[str, Any]:
+    def _edit(self, input_data: MemoryStoreToolInputSchema, user_id: str | None = None) -> dict[str, Any]:
         path, find, replace = input_data.path, input_data.find, input_data.replace
-        user_id = input_data.user_id
         try:
             current = self.backend.read(path, user_id)
         except MemoryNotFoundError:

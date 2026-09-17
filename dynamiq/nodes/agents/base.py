@@ -455,16 +455,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if self.file_store.agent_file_write_enabled:
                 self.tools.append(FileWriteTool(file_store=self.file_store_backend))
 
-        if self.memory_store_backend:
-            # Memory is independent of the workspace: same single tool whether the agent has a file
-            # store, a sandbox, or neither. Not serialized; rebuilt from `memory_store` on load.
-            memory_tool = MemoryStoreTool(
-                backend=self.memory_store_backend,
-                write_enabled=self.memory_store.write_enabled,
-            )
-            self._excluded_tool_ids.add(memory_tool.id)
-            self.tools.append(memory_tool)
-
         if self._skills_should_init():
             self._init_skills()
 
@@ -791,9 +781,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 len(ltm_tools),
                 ", ".join(t.name for t in ltm_tools),
             )
+        run_tools = ltm_tools + self._build_memory_store_tool(input_data)
         # Always set — a sub-agent without LTM would otherwise inherit the
         # parent's overlay via `ContextAwareThreadPoolExecutor`.
-        ltm_token = _run_extra_tools.set(ltm_tools)
+        ltm_token = _run_extra_tools.set(run_tools)
         my_run_key = f"{self.sanitize_tool_name(self.name) or 'agent'}-{uuid4().hex[:8]}"
         agent_run_token = _current_agent_run.set(my_run_key)
         # Session/borrow setup lives INSIDE the try so the finally always resets the ContextVars and
@@ -1074,6 +1065,23 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         for tool in tools:
             tool.is_optimized_for_agents = True
         return tools
+
+    def _build_memory_store_tool(self, input_data: "AgentInputSchema") -> list[Node]:
+        """Construct the per-run memory-store tool, or [] when no store is configured.
+
+        Per run like the LTM tools, so the run's ``user_id`` is bound into the instance -- one agent
+        object serves concurrent runs, and a shared tool would read the wrong tenant's memories.
+        A missing ``user_id`` is fine here: a single-tenant store has nothing to scope to.
+        """
+        if not self.memory_store_backend:
+            return []
+        return [
+            MemoryStoreTool(
+                backend=self.memory_store_backend,
+                write_enabled=self.memory_store.write_enabled,
+                user_id=getattr(input_data, "user_id", None),
+            )
+        ]
 
     def _is_input_output_trace_message(self, message: Message) -> bool:
         """Return True when a message is an internal ReAct/tool-trace entry."""

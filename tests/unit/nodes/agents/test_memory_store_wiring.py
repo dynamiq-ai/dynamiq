@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,8 +33,17 @@ def _memory(backend, **kwargs):
     return MemoryStoreConfig(enabled=True, backend=backend, **kwargs)
 
 
+def _run_tools(agent, user_id=None):
+    """Tools the agent runs with: its own, plus the memory tool it builds per run."""
+    return agent.tools + agent._build_memory_store_tool(SimpleNamespace(user_id=user_id))
+
+
 def _tool_names(agent):
-    return [tool.name for tool in agent.tools]
+    return [tool.name for tool in _run_tools(agent)]
+
+
+def _memory_tool(agent, user_id=None):
+    return next((t for t in _run_tools(agent, user_id) if t.name == "memory-store"), None)
 
 
 def _ops_block(agent):
@@ -48,7 +58,7 @@ def test_standalone_attaches_one_tool(llm, backend):
     agent = Agent(name="a", llm=llm, memory_store=_memory(backend))
 
     assert _tool_names(agent) == ["memory-store"]
-    assert agent.tools[0].backend is backend
+    assert _memory_tool(agent).backend is backend
 
 
 def test_a_file_store_agent_keeps_its_own_tools(llm, backend):
@@ -84,13 +94,13 @@ def test_every_workspace_gets_the_same_tool(llm, backend):
 
     for extra in configurations:
         agent = Agent(name="a", llm=llm, memory_store=_memory(backend), **extra)
-        assert [t.name for t in agent.tools if t.name == "memory-store"] == ["memory-store"]
+        assert [t.name for t in _run_tools(agent) if t.name == "memory-store"] == ["memory-store"]
 
 
 def test_write_disabled_is_passed_to_the_tool(llm, backend):
     agent = Agent(name="a", llm=llm, memory_store=_memory(backend, write_enabled=False))
 
-    assert agent.tools[0].write_enabled is False
+    assert _memory_tool(agent).write_enabled is False
     assert "read-only for you" in _ops_block(agent)
 
 
@@ -185,7 +195,7 @@ def test_yaml_round_trip_rebuilds_the_tool(llm, backend, tmp_path, with_sandbox)
     assert isinstance(reloaded.memory_store.backend, DynamiqMemoryStore)
     assert reloaded.memory_store.backend.memory_store_id == "ms-123"
     assert reloaded.memory_store.backend.user_id == "u-42"
-    assert [t.name for t in reloaded.tools if t.name == "memory-store"] == ["memory-store"]
+    assert [t.name for t in _run_tools(reloaded) if t.name == "memory-store"] == ["memory-store"]
 
 
 def test_several_memories_round_trip(llm, tmp_path):
@@ -221,3 +231,28 @@ def test_several_memories_round_trip(llm, tmp_path):
         "user/": "About this user.",
         "team/": "Team rules.",
     }
+
+
+def test_the_run_user_id_scopes_the_memory(llm, backend):
+    """`agent.run(user_id=...)` is enough, as it already is for conversation and long-term memory:
+    no input_transformer, no tool_params."""
+    agent = Agent(name="a", llm=llm, memory_store=_memory(backend))
+
+    assert _memory_tool(agent, user_id="u-7").user_id == "u-7"
+
+
+def test_a_single_tenant_store_needs_no_user_id(llm, backend):
+    """Unlike long-term memory, a missing user_id is not an error -- there is nothing to scope to."""
+    agent = Agent(name="a", llm=llm, memory_store=_memory(backend))
+
+    assert _memory_tool(agent).user_id is None
+
+
+def test_each_run_gets_its_own_tool(llm, backend):
+    """Built per run, so two users' runs never share one instance's bound user_id."""
+    agent = Agent(name="a", llm=llm, memory_store=_memory(backend))
+
+    alice, bob = _memory_tool(agent, user_id="alice"), _memory_tool(agent, user_id="bob")
+
+    assert (alice.user_id, bob.user_id) == ("alice", "bob")
+    assert alice is not bob

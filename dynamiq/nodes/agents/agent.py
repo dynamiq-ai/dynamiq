@@ -1649,7 +1649,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
             str | None: Final answer if delegation occurred, None to continue loop
         """
         check_cancellation(config)
-        if action and self.tools:
+        # `_runtime_tools`, not `self.tools`: per-run overlays (memory store, LTM) may be the only
+        # tools an agent has, and `tool_by_names` resolves against the overlay too.
+        if action and self._runtime_tools:
             tool_result = None
             skipped_tools: list[str] = []
 
