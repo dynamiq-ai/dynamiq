@@ -180,6 +180,87 @@ def test_merge_after_transient_missing_probe_does_not_recreate_over_existing_run
     assert _stored_todos(file_store) == _plan("in_progress", "pending", "pending")
 
 
+def test_empty_replace_save_clears_the_latch_so_the_next_merge_call_creates():
+    """An explicit merge=false save of an empty list (e.g. the agent clearing its own plan) must
+    not latch _list_created_this_run — otherwise every later merge=true call in the run would be
+    rejected by the "looks empty" guard forever, since the store really is empty."""
+    file_store = InMemoryFileStore()
+    tool = TodoWriteTool(file_store=file_store)
+    tool.run({"todos": _plan("in_progress", "pending"), "merge": False})
+
+    empty_result = tool.run({"todos": [], "merge": False})
+    assert empty_result.status == RunnableStatus.SUCCESS
+    assert _stored_todos(file_store) == []
+
+    result = tool.run({"todos": _plan("in_progress", "pending", "pending"), "merge": True})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert _stored_todos(file_store) == _plan("in_progress", "pending", "pending")
+
+
+def test_empty_store_guard_error_names_merge_false_as_the_escape_hatch():
+    """The recoverable error must not just say "retry" — a model that only ever retries with
+    merge=true against a genuinely empty store loops until it hits its iteration limit. It must
+    be told the concrete way out."""
+    file_store = FlakyFileStore()
+    tool = TodoWriteTool(file_store=file_store)
+    tool.run({"todos": _plan("in_progress", "pending", "pending"), "merge": False})
+
+    file_store._force_missing = True
+    result = tool.run({"todos": [{"id": "1", "content": "ignored", "status": "completed"}], "merge": True})
+    file_store._force_missing = False
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "merge=false" in result.error.message
+
+
+def test_after_guard_fires_merge_false_recreates_the_list_and_later_merges_work():
+    file_store = FlakyFileStore()
+    tool = TodoWriteTool(file_store=file_store)
+    tool.run({"todos": _plan("in_progress", "pending", "pending"), "merge": False})
+
+    file_store._force_missing = True
+    guard_result = tool.run({"todos": [{"id": "1", "content": "ignored", "status": "completed"}], "merge": True})
+    file_store._force_missing = False
+    assert guard_result.status == RunnableStatus.FAILURE
+
+    recreate_result = tool.run({"todos": _plan("in_progress", "pending"), "merge": False})
+    assert recreate_result.status == RunnableStatus.SUCCESS
+    assert _stored_todos(file_store) == _plan("in_progress", "pending")
+
+    merge_result = tool.run({"todos": [{"id": "1", "content": "ignored", "status": "completed"}], "merge": True})
+    assert merge_result.status == RunnableStatus.SUCCESS
+    assert _stored_todos(file_store) == [
+        {"id": "1", "content": "step 1", "status": "completed"},
+        {"id": "2", "content": "step 2", "status": "pending"},
+    ]
+
+
+def test_store_cleared_externally_mid_run_recovers_via_merge_false_without_looping():
+    """Simulates a sub-agent sharing this sandbox clearing the shared todos file (base.py's
+    _clear_todos_file, called from a sub-agent's own execute() finally) out from under a parent
+    agent's TodoWriteTool instance, whose _list_created_this_run stays latched because the two
+    are separate tool instances. The parent must be able to recover with merge=false rather than
+    being stuck retrying merge=true forever."""
+    file_store = InMemoryFileStore()
+    tool = TodoWriteTool(file_store=file_store)
+    tool.run({"todos": _plan("in_progress", "pending", "pending"), "merge": False})
+
+    # A sub-agent's own TodoWriteTool instance (over the same shared store) clears the file;
+    # this tool's own _list_created_this_run is untouched by that.
+    file_store.delete(TODOS_FILE_PATH)
+    assert tool._list_created_this_run is True
+
+    guard_result = tool.run({"todos": [{"id": "1", "content": "ignored", "status": "completed"}], "merge": True})
+    assert guard_result.status == RunnableStatus.FAILURE
+    assert "merge=false" in guard_result.error.message
+
+    recreate_result = tool.run({"todos": _plan("in_progress", "pending"), "merge": False})
+
+    assert recreate_result.status == RunnableStatus.SUCCESS
+    assert _stored_todos(file_store) == _plan("in_progress", "pending")
+
+
 def test_listing_shows_status_values_not_enum_reprs():
     tool = TodoWriteTool(file_store=InMemoryFileStore())
 

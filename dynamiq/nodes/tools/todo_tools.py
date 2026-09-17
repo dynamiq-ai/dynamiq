@@ -110,10 +110,12 @@ RULES:
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[TodoWriteInputSchema]] = TodoWriteInputSchema
 
-    # Set once this tool has written a todos file during the current agent run (reset by
-    # clear(), which runs at the end of every run). Used to tell a genuinely empty store apart
-    # from a store that merely *looks* empty because exists()/retrieve() failed transiently —
-    # see the comment in execute() for why exists() alone can't be trusted for that.
+    # Set after a save that left a NON-EMPTY list in the store (reset by clear(), and by any
+    # save that leaves the store empty). Used to tell a genuinely empty store apart from a
+    # store that merely *looks* empty because exists()/retrieve() failed transiently — see the
+    # comment in execute() for why exists() alone can't be trusted for that. Latching only on a
+    # non-empty save means an explicit merge=false empty save (or any other save that empties
+    # the store) is trusted at face value instead of poisoning the next merge=true call.
     _list_created_this_run: bool = PrivateAttr(default=False)
 
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
@@ -240,16 +242,21 @@ RULES:
                 for todo in new_todos:
                     existing_by_id[todo["id"]]["status"] = todo["status"]
             elif self._list_created_this_run:
-                # existing_by_id is empty, but this tool already wrote a list earlier in this
-                # run. exists()/retrieve() on network-backed sandboxes fail open (they catch
-                # every exception and report "missing") on a transient RPC error, so an "empty
-                # store" result here is not trustworthy — it's far more likely a flaky probe
-                # than the list we just created having vanished. Refuse rather than silently
-                # recreating over it with placeholder content.
+                # existing_by_id is empty, but this tool already wrote a non-empty list earlier
+                # in this run. exists()/retrieve() on network-backed sandboxes fail open (they
+                # catch every exception and report "missing") on a transient RPC error, so an
+                # "empty store" result here is not trustworthy on its own — it's plausibly a
+                # flaky probe rather than the list we just created having vanished. Refuse
+                # rather than silently recreating over it with placeholder content: the model
+                # is told exactly how to proceed if the store really is empty, so this is never
+                # an unrecoverable loop even though the guard never gives up on its own —
+                # merge=false always bypasses this check (see the `else` branch below).
                 raise ToolExecutionException(
                     "The todo store looks empty, but this run already has a todo list — this "
                     "looks like a transient read failure rather than a genuinely empty store. "
-                    "Retry the call.",
+                    "Retry the call. If the list is genuinely gone (for example another agent "
+                    "sharing this sandbox cleared it), recreate the full plan with merge=false "
+                    "instead of retrying merge=true.",
                     recoverable=True,
                 )
             else:
@@ -265,7 +272,12 @@ RULES:
             final_todos = new_todos
 
         self._save_todos(final_todos)
-        self._list_created_this_run = True
+        # Latch only on a save that leaves a non-empty list. An explicit merge=false save of an
+        # empty list (or any other save that empties the store) is a deliberate, trustworthy
+        # signal of the store's true state — not evidence of a flaky read — so it must clear the
+        # latch, or the very next merge=true call would hit the guard above against a store that
+        # is correctly empty.
+        self._list_created_this_run = bool(final_todos)
 
         # Calculate stats
         stats = {
