@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.tools.utils import find_positions
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.memory.base import MemoryNotFoundError, MemoryStore, MemoryStoreError, render_namespaces
@@ -210,21 +211,25 @@ class MemoryStoreTool(Node):
                 f"No memory at '{path}' to edit. Use action 'write' to create it.", recoverable=True
             ) from None
 
-        occurrences = current.count(find)
-        if occurrences == 0:
+        # Candidate positions, not str.count: overlapping matches ("---" in "-----") are what
+        # make a find string ambiguous, and counting only non-overlapping ones would let an
+        # ambiguous edit through and persist it.
+        positions = find_positions(current, find)
+        if not positions:
             raise ToolExecutionException(
                 f"'{find}' does not appear in '{path}', so nothing was changed.", recoverable=True
             )
-        if occurrences > 1 and not input_data.replace_all:
+        if len(positions) > 1 and not input_data.replace_all:
             raise ToolExecutionException(
-                f"'{find}' appears {occurrences} times in '{path}'. Include more surrounding text to "
+                f"'{find}' appears {len(positions)} times in '{path}'. Include more surrounding text to "
                 f"make it unique, or set 'replace_all' to change every occurrence.",
                 recoverable=True,
             )
 
         updated = current.replace(find, replace) if input_data.replace_all else current.replace(find, replace, 1)
         self.backend.write(path, updated, user_id)
-        changed = occurrences if input_data.replace_all else 1
+        # How many a replacement actually consumes is str.count's question, not the candidates'.
+        changed = current.count(find) if input_data.replace_all else 1
         return {"content": f"Updated '{path}' ({changed} replacement{'s' if changed > 1 else ''})."}
 
     def _delete(self, path: str, user_id: str | None = None) -> dict[str, Any]:

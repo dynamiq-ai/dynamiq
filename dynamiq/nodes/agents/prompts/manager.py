@@ -59,6 +59,12 @@ def _build_memory_store_instructions(config: "ReactPromptConfig") -> str:
     # has no way to choose between them.
     listing = render_namespaces(config.memory_store_namespaces)
     if listing:
+        # Descriptions are caller-supplied and the block is rendered through Jinja, so a
+        # `{{ ... }}` would be blanked and a `{% ... %}` would raise. Same guard role and
+        # user instructions already get, applied to the descriptions only -- the wording
+        # around them is ours.
+        if ("{% raw %}" not in listing) and ("{% endraw %}" not in listing):
+            listing = f"{{% raw %}}{listing}{{% endraw %}}"
         block += f"\n\nYour memories, each holding something different:\n{listing}"
         if len(config.memory_store_namespaces) > 1:
             block += "\nPut each fact in the one it belongs to. When two disagree, the later one wins."
