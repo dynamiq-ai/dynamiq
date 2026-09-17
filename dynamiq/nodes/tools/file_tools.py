@@ -10,6 +10,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationInfo, field_validator, model_validator
 
 from dynamiq.checkpoints.checkpoint import BaseCheckpointState
+from dynamiq.components.converters.text import decode_text_bytes
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -904,14 +905,19 @@ class FileReadTool(Node):
 
             # Bytes reach the agent as their Python repr (b'...' with escaped newlines),
             # so anything that is valid UTF-8 is handed back as text. A recognized plain-text
-            # data format (e.g. .log, .json) is decoded leniently instead of falling back to
-            # bytes on a stray invalid byte, since the caller already knows it is text.
-            try:
-                text_fallback = content.decode("utf-8")
-            except UnicodeDecodeError:
-                if detected_type in RAW_TEXT_FILE_TYPES:
-                    text_fallback = content.decode("utf-8", errors="replace")
-                else:
+            # data format (e.g. .log, .json) always goes through decode_text_bytes, which
+            # detects the actual encoding (BOM, then charset_normalizer) the same way
+            # TextFileConverter does for .txt, instead of assuming utf-8 and replacing
+            # whatever doesn't fit. Content is not stripped, so line numbers still match
+            # the file on disk. Other/unrecognized extensions keep the strict utf-8-only
+            # check: they fall back to the binary rendering below on any invalid byte,
+            # since nothing has told us they are text.
+            if detected_type in RAW_TEXT_FILE_TYPES:
+                text_fallback = decode_text_bytes(content)
+            else:
+                try:
+                    text_fallback = content.decode("utf-8")
+                except UnicodeDecodeError:
                     text_fallback = None
 
             if input_data.start_line is not None or input_data.end_line is not None:

@@ -500,6 +500,56 @@ def test_file_read_tool_text_format_with_undecodable_bytes_is_still_text(file_st
     assert "started" in content and "finished" in content
 
 
+def test_file_read_tool_plain_text_data_cp1252_log_is_decoded_not_replaced(file_store, llm_model):
+    """A cp1252-encoded .log is decoded via charset detection, not corrupted with a replacement char.
+
+    Before the fix this branch decoded with a hardcoded utf-8 plus errors="replace": byte
+    0xe9 is invalid utf-8, so "café" became "caf�". TextFileConverter's charset
+    detection (now shared) recognizes the codepage and decodes the accented character.
+    """
+    file_store.store("logs/run.log", b"start\ncaf\xe9 au lait\nend\n")
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    result = tool.run({"file_path": "logs/run.log", "brief": "Read log"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == "start\ncafé au lait\nend\n"
+    assert "�" not in result.output["content"]
+
+
+def test_file_read_tool_plain_text_data_utf16_bom_json_is_decoded(file_store, llm_model):
+    """A UTF-16 (with BOM) .json file decodes correctly, with no NULs or replacement chars.
+
+    Before the fix, strict utf-8 raised on the BOM bytes and errors="replace" turned the
+    whole file into a replacement character followed by NUL-interleaved text.
+    """
+    raw = '{"note": "café"}'
+    file_store.store("data/state.json", raw.encode("utf-16"))
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    result = tool.run({"file_path": "data/state.json", "brief": "Read"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = result.output["content"]
+    assert content == raw
+    assert "\x00" not in content
+    assert "�" not in content
+
+
+def test_file_read_tool_plain_text_data_utf8_bom_yaml_is_decoded_without_bom(file_store, llm_model):
+    """A UTF-8 file with a leading BOM decodes without the BOM character in the content."""
+    raw = "key: café\n"
+    file_store.store("config/settings.yaml", raw.encode("utf-8-sig"))
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    result = tool.run({"file_path": "config/settings.yaml", "brief": "Read config"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = result.output["content"]
+    assert content == raw
+    assert not content.startswith("﻿")
+
+
 def test_file_read_tool_unknown_extension_utf8_falls_back_to_text(file_store, llm_model):
     """An unrecognised extension holding UTF-8 is returned as text, not ``str(bytes)``."""
     file_store.store("scripts/build.sh", b"#!/bin/sh\necho 'hi'\n")
