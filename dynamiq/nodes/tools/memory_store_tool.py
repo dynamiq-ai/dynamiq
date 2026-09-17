@@ -67,11 +67,6 @@ class MemoryStoreToolInputSchema(BaseModel):
         description="Replace every occurrence of 'find' instead of requiring it to be unique.",
     )
     brief: str = Field(default="Using memory", description="Short description of what you are doing.")
-    user_id: str | None = Field(
-        default=None,
-        description="End user this memory belongs to. Supplied by the caller, never by the agent.",
-        json_schema_extra={"is_accessible_to_agent": False},
-    )
 
     @model_validator(mode="after")
     def validate_action_fields(self):
@@ -104,8 +99,8 @@ class MemoryStoreTool(Node):
     write_enabled: bool = Field(default=True, description="Whether the agent may change memories.")
     user_id: str | None = Field(
         default=None,
-        description="End user whose memories these are. An agent binds it from the run, so callers "
-        "only pass user_id to `agent.run(...)`. A per-call value still wins.",
+        description="End user whose memories these are, bound at construction. An agent rebuilds "
+        "the tool per run from the run's user_id, so callers only pass it to `agent.run(...)`.",
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -144,8 +139,7 @@ class MemoryStoreTool(Node):
             )
 
         try:
-            # Per-call value wins; otherwise the one the agent bound for this run.
-            user_id = input_data.user_id or self.user_id
+            user_id = self.user_id
             if action == MemoryStoreAction.LIST:
                 return self._list(input_data.path or "", user_id)
             if action == MemoryStoreAction.READ:
