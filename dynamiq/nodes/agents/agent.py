@@ -102,21 +102,30 @@ class FinalAnswerArguments(BaseModel):
 class FunctionCall(BaseModel):
     name: str
     arguments: dict = Field(default_factory=dict)
+    # True when `arguments` came from a partial parse of invalid JSON: whatever followed
+    # the cut-off or syntax error was dropped.
+    arguments_incomplete: bool = Field(default=False, exclude=True)
 
-    @field_validator("arguments", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def parse_arguments(cls, v: Any) -> Any:
+    def parse_arguments(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        v = data.get("arguments")
         if isinstance(v, str):
             try:
-                return json.loads(v, strict=False)
+                return {**data, "arguments": json.loads(v, strict=False), "arguments_incomplete": False}
             except json.JSONDecodeError:
-                # Truncated mid-emission (LLM stopped mid-tool-call): parse the
-                # partial document, dropping the incomplete trailing value.
+                # Truncated mid-emission (LLM stopped mid-tool-call) or malformed: parse the
+                # partial document, dropping the incomplete trailing value. pydantic_core
+                # also stops quietly at some syntax errors (e.g. an unescaped quote), so the
+                # result can silently miss everything after the error.
                 try:
-                    return from_json(v, allow_partial=True)
+                    parsed = from_json(v, allow_partial=True)
                 except ValueError as e:
                     raise ValueError(f"Tool call arguments are not valid JSON: {e}")
-        return v or {}
+                return {**data, "arguments": parsed, "arguments_incomplete": True}
+        return {**data, "arguments": v or {}}
 
     def parse_as_tool_call(self) -> ToolCallArguments:
         try:
@@ -130,6 +139,31 @@ class FunctionCall(BaseModel):
             )
 
     def parse_as_final_answer(self) -> FinalAnswerArguments:
+        # A partial final answer must not end the run: the part after the cut is lost
+        # and nothing downstream can tell. Tool calls keep the partial parse because
+        # the tool's own input validation rejects what is missing.
+        if self.arguments_incomplete:
+            raise ActionParsingException(
+                "Your 'provide_final_answer' call arguments were not valid JSON: they were cut off "
+                "or malformed (for example an unescaped quote inside 'answer'), so part of the answer "
+                "would be lost. Call 'provide_final_answer' again with the complete answer as valid JSON. "
+                "If the answer is too long to fit in one response, shorten it.",
+                recoverable=True,
+            )
+
+        # The schema forbids extra properties, but that is only enforced in strict mode.
+        # A model that breaks out of a JSON-in-string answer puts the rest of it in
+        # sibling keys, and validation would drop them without a trace.
+        unexpected = sorted(set(self.arguments) - set(FinalAnswerArguments.model_fields))
+        if unexpected:
+            raise ActionParsingException(
+                f"Your 'provide_final_answer' call has unexpected top-level fields: {unexpected}. "
+                "Only 'thought', 'answer' and 'output_files' are accepted, and anything else would be "
+                "discarded. Put the entire answer inside 'answer' (if 'answer' is a JSON string, escape "
+                "every quote inside it) and call 'provide_final_answer' again.",
+                recoverable=True,
+            )
+
         try:
             return FinalAnswerArguments.model_validate(self.arguments)
         except Exception:
