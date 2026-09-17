@@ -7,7 +7,8 @@ higher -- so these assert the exact payload rather than "something was set".
 import pytest
 
 from dynamiq.connections import AWS as AWSConnection
-from dynamiq.nodes.llms import Bedrock, BedrockCacheControl
+from dynamiq.connections import Anthropic as AnthropicConnection
+from dynamiq.nodes.llms import Anthropic, AnthropicCacheControl, Bedrock, BedrockCacheControl
 
 MODEL = "bedrock/us.anthropic.claude-sonnet-4-6"
 TOOLS = [{"type": "function", "function": {"name": "search", "parameters": {}}}]
@@ -38,23 +39,33 @@ class TestDisabledByDefault:
 
 
 class TestInjectionPoints:
-    def test_tools_and_rolling_message_point(self):
-        """Two breakpoints: the static tool schemas, then the rolling message tail."""
+    def test_system_and_rolling_message_point(self):
+        """Two breakpoints: the system prompt (tools render before it, so they are
+        covered too), then the rolling message tail."""
         assert _points(_llm(cache_control=BedrockCacheControl()), tools=TOOLS) == [
-            {"location": "tool_config", "control": {"type": "ephemeral", "ttl": "5m"}},
+            {"location": "message", "role": "system", "control": {"type": "ephemeral", "ttl": "5m"}},
             {"location": "message", "index": -1, "control": {"type": "ephemeral", "ttl": "5m"}},
         ]
 
-    def test_tool_point_skipped_without_tools(self):
-        """A tool_config point spends one of Bedrock's four breakpoints for nothing."""
+    def test_system_point_does_not_depend_on_tools(self):
+        """Pins the head with or without tools; resolves to nothing if there is no
+        system message, rather than erroring."""
         assert _points(_llm(cache_control=BedrockCacheControl())) == [
+            {"location": "message", "role": "system", "control": {"type": "ephemeral", "ttl": "5m"}},
             {"location": "message", "index": -1, "control": {"type": "ephemeral", "ttl": "5m"}},
         ]
 
-    def test_tool_point_can_be_disabled(self):
-        points = _points(_llm(cache_control=BedrockCacheControl(cache_tools=False)), tools=TOOLS)
+    def test_system_point_can_be_disabled(self):
+        points = _points(_llm(cache_control=BedrockCacheControl(cache_system=False)), tools=TOOLS)
 
-        assert [p["location"] for p in points] == ["message"]
+        assert points == [{"location": "message", "index": -1, "control": {"type": "ephemeral", "ttl": "5m"}}]
+
+    def test_cache_tools_is_accepted_as_a_deprecated_alias(self):
+        """`cache_tools` shipped in v0.64.0; existing configs must keep working."""
+        assert BedrockCacheControl(cache_tools=False).cache_system is False
+        assert _points(_llm(cache_control=BedrockCacheControl(cache_tools=False)), tools=TOOLS) == [
+            {"location": "message", "index": -1, "control": {"type": "ephemeral", "ttl": "5m"}},
+        ]
 
     @pytest.mark.parametrize("ttl", ["5m", "1h"])
     def test_ttl_is_forwarded(self, ttl):
@@ -74,26 +85,33 @@ class TestInjectionPoints:
         assert points[-1]["index"] == -2
 
     def test_control_carries_no_dynamiq_only_fields(self):
-        """`cache_tools`/`cache_injection_point_index` steer us, not the provider."""
+        """`cache_system`/`cache_injection_point_index` steer us, not the provider."""
         points = _points(_llm(cache_control=BedrockCacheControl()), tools=TOOLS)
 
         for point in points:
             assert set(point["control"]) <= {"type", "ttl"}
 
+    def test_points_do_not_share_a_control_dict(self):
+        """LiteLLM assigns the control into the message by reference, so two points
+        sharing one dict would have the same object land on two messages."""
+        points = _points(_llm(cache_control=BedrockCacheControl()), tools=TOOLS)
 
-class TestInvokeRouteIsNotBroken:
-    """Only the Converse transform pops `cache_control_injection_points`. On the Invoke
-    route a leftover tool_config point is spread into the request body and Bedrock 400s --
-    turning a call that would have succeeded into a failure."""
+        assert points[0]["control"] is not points[1]["control"]
+
+
+class TestEveryRouteIsSafe:
+    """A leftover non-message point is spread into the Invoke body and Bedrock 400s.
+    Message points are consumed by the hook on every route, so emitting only those is safe."""
 
     @pytest.mark.parametrize(
         "model",
         [
+            "bedrock/us.anthropic.claude-sonnet-4-6",  # converse
             "bedrock/eu.anthropic.claude-some-future-model",  # unknown -> invoke fallback
             "bedrock/invoke/us.anthropic.claude-sonnet-4-6",  # explicit invoke
         ],
     )
-    def test_no_tool_point_off_converse(self, model):
+    def test_only_message_points_are_emitted(self, model):
         llm = Bedrock(
             connection=AWSConnection(access_key_id="k", secret_access_key="s", region="us-east-1"),
             model=model,
@@ -104,25 +122,37 @@ class TestInvokeRouteIsNotBroken:
             "cache_control_injection_points"
         ]
 
-        assert [p["location"] for p in points] == ["message"]
+        assert [p["location"] for p in points] == ["message", "message"]
 
-    def test_message_point_still_applied_off_converse(self):
-        """The hook consumes message points on any route, and Anthropic-on-Bedrock
-        invoke accepts cache_control on messages natively -- so don't drop it."""
-        model = "bedrock/invoke/us.anthropic.claude-sonnet-4-6"
-        llm = Bedrock(
-            connection=AWSConnection(access_key_id="k", secret_access_key="s", region="us-east-1"),
-            model=model,
-            cache_control=BedrockCacheControl(),
+
+class TestCrossProviderFallback:
+    """`_prepare_fallback_run` forwards the per-call `cache_control` to a fallback node of
+    another provider, which reads its fields directly -- so a field only one class has is an
+    AttributeError, swallowed into a FAILURE result. Keep the two configs interchangeable.
+    """
+
+    def test_the_two_configs_expose_the_same_fields(self):
+        assert set(AnthropicCacheControl.model_fields) == set(BedrockCacheControl.model_fields)
+
+    @pytest.mark.parametrize("config", [AnthropicCacheControl, BedrockCacheControl])
+    def test_bedrock_accepts_either_providers_config(self, config):
+        assert _llm()._apply_cache_control({}, config())["cache_control_injection_points"] == [
+            {"location": "message", "role": "system", "control": {"type": "ephemeral", "ttl": "5m"}},
+            {"location": "message", "index": -1, "control": {"type": "ephemeral", "ttl": "5m"}},
+        ]
+
+    @pytest.mark.parametrize("config", [AnthropicCacheControl, BedrockCacheControl])
+    def test_anthropic_accepts_either_providers_config(self, config):
+        llm = Anthropic(
+            connection=AnthropicConnection(api_key="k"),
+            model="claude-sonnet-4-5",
             is_postponed_component_init=True,
         )
 
-        assert llm.update_completion_params({"model": model, "tools": TOOLS})[
-            "cache_control_injection_points"
-        ] == [{"location": "message", "index": -1, "control": {"type": "ephemeral", "ttl": "5m"}}]
-
-    def test_tool_point_kept_on_converse(self):
-        assert _points(_llm(cache_control=BedrockCacheControl()), tools=TOOLS)[0]["location"] == "tool_config"
+        assert llm._apply_cache_control({}, config())["cache_control_injection_points"] == [
+            {"location": "message", "role": "system", "control": {"type": "ephemeral", "ttl": "5m"}},
+            {"location": "message", "index": -1, "control": {"type": "ephemeral", "ttl": "5m"}},
+        ]
 
 
 class TestBreakpointBudget:

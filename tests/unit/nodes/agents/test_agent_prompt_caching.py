@@ -4,6 +4,8 @@ The caching config is applied only around the agent's own LLM call, so tools tha
 same llm instance keep making uncached one-shot calls.
 """
 
+import os
+import tempfile
 import threading
 import time
 import uuid
@@ -55,8 +57,13 @@ def test_unset_anthropic_gets_a_rolling_breakpoint_at_minus_one():
     assert control.cache_injection_point_index == -1
 
 
-def test_explicit_none_is_an_opt_out():
-    assert default_cache_control(_anthropic(cache_control=None)) is None
+def test_explicit_false_is_an_opt_out():
+    assert default_cache_control(_anthropic(cache_control=False)) is None
+
+
+def test_explicit_none_still_gets_the_default():
+    """``None`` is "nothing chosen", not "off" -- it is what a round trip leaves behind."""
+    assert default_cache_control(_anthropic(cache_control=None)) is not None
 
 
 def test_caller_supplied_config_is_left_alone():
@@ -143,8 +150,8 @@ def test_caller_ttl_survives(mock_llm_executor):
     assert all(point["control"]["ttl"] == "1h" for point in _points(mock_llm_executor))
 
 
-def test_explicit_none_sends_no_breakpoints(mock_llm_executor):
-    _run(_anthropic(cache_control=None))
+def test_explicit_false_sends_no_breakpoints(mock_llm_executor):
+    _run(_anthropic(cache_control=False))
 
     assert _points(mock_llm_executor) is None
 
@@ -208,6 +215,59 @@ def test_parallel_subagents_sharing_one_llm(mocker):
 
 def test_bare_node_outside_an_agent_still_sends_nothing():
     assert "cache_control_injection_points" not in _anthropic().update_completion_params({})
+
+
+def test_opted_out_node_outside_an_agent_still_sends_nothing():
+    assert "cache_control_injection_points" not in _anthropic(cache_control=False).update_completion_params({})
+
+
+# -- the decision has to survive serialization ----------------------------------------------
+
+
+def _roundtrip(llm) -> Agent:
+    """Dump an agent to YAML and load it back, the way a saved workflow is restored."""
+    from dynamiq import Workflow
+    from dynamiq.flows import Flow
+    from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
+
+    agent = Agent(name="a", id="agent_1", llm=llm, tools=[], is_postponed_component_init=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "wf.yaml")
+        Workflow(id="wf_1", flow=Flow(id="flow_1", nodes=[agent])).to_yaml_file(path)
+        data = WorkflowYAMLLoader.load(file_path=path, connection_manager=None, init_components=False)
+        return Workflow.from_yaml_file_data(file_data=data, wf_id="wf_1").flow.nodes[0]
+
+
+def _caches(agent: Agent) -> bool:
+    """Whether this agent's own calls carry breakpoints, from either source."""
+    return agent._cache_control is not None or agent.llm.cache_control not in (None, False)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        ({}, True),  # untouched -> the default, and it must survive the round trip
+        ({"cache_control": False}, False),  # opt-out, and it must survive too
+        ({"cache_control": AnthropicCacheControl(ttl="1h")}, True),  # caller's own config
+    ],
+    ids=["unset", "opted-out", "custom-config"],
+)
+def test_caching_intent_survives_a_yaml_round_trip(kwargs, expected):
+    """A dumped node is rebuilt field-by-field, so `model_fields_set` marks all of them
+    as set -- keying the default off that read a round trip as an opt-out."""
+    llm = _anthropic(**kwargs)
+    before = Agent(name="a", llm=llm, tools=[], is_postponed_component_init=True)
+
+    assert _caches(before) is expected, "in-process construction disagrees with the fixture"
+    assert _caches(_roundtrip(llm)) is expected
+
+
+def test_custom_ttl_survives_a_yaml_round_trip():
+    """Not just on/off: the caller's settings have to come back intact."""
+    restored = _roundtrip(_anthropic(cache_control=AnthropicCacheControl(ttl="1h", cache_system=False)))
+
+    assert restored.llm.cache_control.ttl == "1h"
+    assert restored.llm.cache_control.cache_system is False
 
 
 @pytest.mark.parametrize("messages", [[prompts.Message(role="user", content="no system message")]])

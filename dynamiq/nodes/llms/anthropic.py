@@ -104,7 +104,10 @@ class Anthropic(BaseLLM):
 
     Attributes:
         connection (AnthropicConnection | None): The connection to use for the Anthropic LLM.
-        cache_control (AnthropicCacheControl | None): The cache control configuration.
+        cache_control (AnthropicCacheControl | Literal[False] | None): Prompt caching config.
+            ``None`` (the default) chooses nothing, leaving an :class:`Agent` free to
+            enable caching for its own calls; ``False`` opts out. A bare node caches
+            only when given a config -- ``None`` and ``False`` both send no breakpoints.
         strict_tools: Inherited from :class:`BaseLLM`. False (default, or an empty
             list) ships every tool as-is with no strict guarantee; True cleans each
             tool's schema to Anthropic's strict subset and attaches ``strict: true``
@@ -118,7 +121,9 @@ class Anthropic(BaseLLM):
     connection: AnthropicConnection | None = None
     MODEL_PREFIX = "anthropic/"
     MAX_STRICT_TOOLS: ClassVar[int] = ANTHROPIC_MAX_STRICT_TOOLS
-    cache_control: AnthropicCacheControl | None = None
+    # ``None`` = nothing chosen (survives a YAML round trip, lets an Agent inject the
+    # default); ``False`` = opt out.
+    cache_control: AnthropicCacheControl | Literal[False] | None = None
 
     def __init__(self, **kwargs):
         """Initialize the Anthropic LLM node.
@@ -181,9 +186,8 @@ class Anthropic(BaseLLM):
         )
         points = params.setdefault("cache_control_injection_points", [])
 
-        # Head first: points are honored in config order, so the durable breakpoint
-        # wins if Anthropic's 4-block budget runs short. Each point gets its own copy --
-        # LiteLLM assigns the control into the message by reference, not by value.
+        # Head first: points are honored in order, so the durable one wins if the
+        # 4-block budget runs short. Separate copies -- LiteLLM assigns by reference.
         if cache_control.cache_system:
             points.append({"location": "message", "role": "system", "control": dict(control)})
 

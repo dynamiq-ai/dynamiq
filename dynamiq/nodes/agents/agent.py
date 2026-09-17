@@ -197,11 +197,14 @@ def default_cache_control(llm: Node) -> BaseModel | None:
     The field is discovered by annotation, so a node that gains one is picked up here.
 
     Returns None when the node has no ``cache_control`` field, when the model does not
-    support caching, or when the caller set it themselves -- an explicit
-    ``cache_control=None`` is how you opt out.
+    support caching, or when the caller set one themselves -- ``cache_control=False`` is
+    how you opt out.
+
+    Keyed on the field's value, not ``model_fields_set``: deserialization marks every
+    field as set, so that would read a YAML round trip as an opt-out.
     """
     field = type(llm).model_fields.get("cache_control")
-    if field is None or "cache_control" in llm.model_fields_set:
+    if field is None or llm.cache_control is not None:
         return None
 
     # The `Bedrock` node serves far more than Claude, and a model that does not support
