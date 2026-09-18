@@ -236,7 +236,10 @@ def test_distinct_stores_are_still_allowed():
 
 def test_same_id_on_a_different_deployment_is_allowed():
     composite = CompositeMemoryStore(
-        routes={"user/": _remote("a", url="https://one.example.ai/"), "team/": _remote("a", url="https://two.example.ai/")}
+        routes={
+            "user/": _remote("a", url="https://one.example.ai/"),
+            "team/": _remote("a", url="https://two.example.ai/"),
+        }
     )
 
     assert list(composite.routes) == ["user/", "team/"]
