@@ -20,7 +20,9 @@ class BedrockCacheControl(BaseModel):
     (measured: adding a ``tool_config`` point on top of it moves neither tokens nor cost).
 
     Attributes:
-        ttl: Cache lifetime for both breakpoints.
+        ttl: Cache lifetime. Reaches the wire only on the system breakpoint, and only for
+            models priced for extended TTL; the rolling message breakpoint always uses
+            Bedrock's default lifetime.
         cache_injection_point_index: Message index for the rolling breakpoint.
             ``-1`` marks the last message, which is what the next agent loop
             reads back, so each call writes only the delta.

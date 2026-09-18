@@ -15,6 +15,7 @@ from litellm.exceptions import (
     Timeout,
 )
 from litellm.utils import supports_pdf_input
+from litellm.utils import supports_prompt_caching as litellm_supports_prompt_caching
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from dynamiq.callbacks.streaming import BaseStreamingCallbackHandler
@@ -833,6 +834,25 @@ class BaseLLM(ConnectionNode):
                 params.pop(param, None)
         return params
 
+    # Allowlist: LiteLLM's flag means "caches", not "accepts our breakpoints". Nova rejects a
+    # cachePoint on a tool-call message; GPT-5.6 on Bedrock caches via the Responses API.
+    BREAKPOINT_MODEL_FAMILIES: ClassVar[tuple[str, ...]] = ("anthropic", "claude")
+
+    def supports_prompt_caching(self) -> bool:
+        """Whether this node's model accepts explicit cache breakpoints.
+
+        A model that does not rejects the request outright ("You invoked an unsupported
+        model") rather than ignoring the breakpoint -- verified live on Bedrock llama.
+        Unknown models answer False, so the failure direction is "no caching", never a
+        broken request.
+        """
+        if not any(family in self.model for family in self.BREAKPOINT_MODEL_FAMILIES):
+            return False
+        try:
+            return bool(litellm_supports_prompt_caching(self.model))
+        except Exception:
+            return False
+
     def _apply_cache_control(self, params: dict[str, Any], cache_control: Any) -> dict[str, Any]:
         """Attach provider-specific prompt-caching breakpoints.
 
@@ -1012,8 +1032,14 @@ class BaseLLM(ConnectionNode):
 
         params = self.update_completion_params(common_params)
         # `update_completion_params` already applied the node's own config; a per-call one
-        # only fills in when the node has none, so the two can never double up.
-        if cache_control is not None and getattr(self, "cache_control", None) is None:
+        # only fills in when the node has none, so the two can never double up. The model
+        # is re-checked here because a fallback run inherits the primary's config, so the
+        # node sending the request is not always the one the caller checked.
+        if (
+            cache_control is not None
+            and getattr(self, "cache_control", None) is None
+            and self.supports_prompt_caching()
+        ):
             params = self._apply_cache_control(params, cache_control)
         return params
 

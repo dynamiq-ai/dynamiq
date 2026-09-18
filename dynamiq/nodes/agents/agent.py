@@ -4,7 +4,6 @@ from concurrent.futures import as_completed
 from typing import Any, Callable, Literal, Mapping, Union, get_args, get_origin
 
 from litellm import get_supported_openai_params, supports_response_schema
-from litellm.utils import supports_prompt_caching
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from pydantic_core import from_json
 
@@ -209,11 +208,9 @@ def default_cache_control(llm: Node) -> BaseModel | None:
 
     # The `Bedrock` node serves far more than Claude, and a model that does not support
     # cachePoint rejects the request outright ("You invoked an unsupported model") rather
-    # than ignoring it -- so never enable this by default without checking.
-    try:
-        if not supports_prompt_caching(llm.model):
-            return None
-    except Exception:
+    # than ignoring it -- so never enable this by default without checking. The node
+    # re-checks before sending, since a fallback run inherits this config.
+    if not llm.supports_prompt_caching():
         return None
     config_cls = next(
         (arg for arg in get_args(field.annotation) if isinstance(arg, type) and issubclass(arg, BaseModel)),
