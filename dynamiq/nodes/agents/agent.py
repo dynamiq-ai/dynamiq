@@ -2232,7 +2232,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
         ltm_enabled = self.long_term_memory is not None and self.long_term_memory.enabled
         return ReactPromptConfig(
             inference_mode=self.inference_mode,
-            has_tools=bool(tools) or (self.skills.enabled and self.skills.source is not None) or ltm_enabled,
+            has_tools=bool(tools)
+            or (self.skills.enabled and self.skills.source is not None)
+            or ltm_enabled
+            or bool(self.memory_store_backend),
             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
             delegation_allowed=self.delegation_allowed,
             context_compaction_enabled=self.summarization_config.enabled,

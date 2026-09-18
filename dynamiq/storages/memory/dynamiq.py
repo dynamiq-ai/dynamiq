@@ -56,8 +56,11 @@ class DynamiqMemoryStore(MemoryStore):
         return data
 
     def identity(self):
-        """Which remote store this addresses: the same triple means the same data."""
-        return (self.type, self.connection.url, self.memory_store_id, self.user_id)
+        """Which remote store this addresses: the same triple means the same data.
+
+        No ``user_id``: the run overrides it, so it cannot identify the data.
+        """
+        return (self.type, self.connection.url, self.memory_store_id)
 
     def _base_path(self) -> str:
         return f"/v1/memory-stores/{self.memory_store_id}/files"

@@ -2221,25 +2221,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             from dynamiq.nodes.agents.agent import Agent
 
             if isinstance(self, Agent):
-                from dynamiq.nodes.agents.prompts.manager import ReactPromptConfig
-                from dynamiq.nodes.tools.agent_tool import SubAgentTool
-
-                self.system_prompt_manager.build_react_prompt(
-                    ReactPromptConfig(
-                        inference_mode=self.inference_mode,
-                        has_tools=True,
-                        parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
-                        delegation_allowed=self.delegation_allowed,
-                        context_compaction_enabled=self.summarization_config.enabled,
-                        notes_file_path=self.get_notes_file_path(),
-                        todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
-                        or bool(self.sandbox_backend),
-                        sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
-                        has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
-                        role=self.role,
-                        instructions=self.instructions,
-                    )
-                )
+                # The canonical config, not a second copy: the tools added above make
+                # `has_tools` true on their own, and fields added later cannot be missed here.
+                self.system_prompt_manager.build_react_prompt(self._react_prompt_config())
 
     def _inject_attached_files_into_message(
         self,

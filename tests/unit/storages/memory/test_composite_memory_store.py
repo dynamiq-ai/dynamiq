@@ -205,3 +205,38 @@ def test_two_routes_over_one_store_are_refused(user):
         CompositeMemoryStore(routes={"team/": shared, "me/": shared})
 
     assert "same memory store" in str(excinfo.value)
+
+
+def _remote(user_id, memory_store_id="ms-1", url="https://api.example.ai/"):
+    return DynamiqMemoryStore(
+        connection=Dynamiq(url=url, api_key="t"),
+        memory_store_id=memory_store_id,
+        user_id=user_id,
+        description="d",
+    )
+
+
+def test_same_store_with_different_default_users_is_refused():
+    """`user_id` is only a default -- the run overrides it, so both routes reach the same
+    keys under the run's tenant while looking distinct to the guard."""
+    with pytest.raises(ValueError) as excinfo:
+        CompositeMemoryStore(routes={"user/": _remote("default-a"), "team/": _remote("default-b")})
+
+    assert "same memory store" in str(excinfo.value)
+
+
+def test_distinct_stores_are_still_allowed():
+    """The stricter identity must not reject routes that address genuinely different data."""
+    composite = CompositeMemoryStore(
+        routes={"user/": _remote("a", memory_store_id="ms-1"), "team/": _remote("a", memory_store_id="ms-2")}
+    )
+
+    assert list(composite.routes) == ["user/", "team/"]
+
+
+def test_same_id_on_a_different_deployment_is_allowed():
+    composite = CompositeMemoryStore(
+        routes={"user/": _remote("a", url="https://one.example.ai/"), "team/": _remote("a", url="https://two.example.ai/")}
+    )
+
+    assert list(composite.routes) == ["user/", "team/"]

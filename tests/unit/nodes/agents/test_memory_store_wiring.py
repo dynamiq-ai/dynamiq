@@ -7,6 +7,7 @@ from dynamiq.connections import E2B, Dynamiq
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.sandboxes.base import SandboxConfig
 from dynamiq.sandboxes.e2b import E2BSandbox
 from dynamiq.storages.file import FileStoreConfig, InMemoryFileStore
@@ -256,3 +257,77 @@ def test_each_run_gets_its_own_tool(llm, backend):
 
     assert (alice.user_id, bob.user_id) == ("alice", "bob")
     assert alice is not bob
+
+
+class TestMemoryOnlyAgentIsToldItHasTools:
+    """The memory tool is a per-run overlay, never a member of `self.tools`, so an agent whose
+    only tool is the memory store used to evaluate `has_tools=False` -- getting the no-tools
+    instructions, which document no action syntax, while the memory protocol told it to call
+    that tool. Same reason `_handle_action` dispatches on `_runtime_tools`.
+    """
+
+    @pytest.mark.parametrize("mode", [InferenceMode.DEFAULT, InferenceMode.XML])
+    def test_tool_blocks_are_reserved(self, llm, backend, mode):
+        agent = Agent(name="a", llm=llm, tools=[], memory_store=_memory(backend), inference_mode=mode)
+
+        assert "{{ tool_description }}" in agent.system_prompt_manager._prompt_blocks.get("tools", "")
+
+    @pytest.mark.parametrize("mode", [InferenceMode.DEFAULT, InferenceMode.XML])
+    def test_instructions_describe_an_action_format(self, llm, backend, mode):
+        """Without this the model is told to use a tool and given no syntax to emit a call."""
+        agent = Agent(name="a", llm=llm, tools=[], memory_store=_memory(backend), inference_mode=mode)
+        instructions = agent.system_prompt_manager._prompt_blocks.get("instructions", "")
+
+        assert "Action:" in instructions or "<action>" in instructions
+
+    def test_disabled_store_does_not_flip_has_tools(self, llm, backend):
+        """Mirrors the LTM case: a disabled store must leave a tool-less agent tool-less."""
+        agent = Agent(
+            name="a",
+            llm=llm,
+            tools=[],
+            memory_store=MemoryStoreConfig(enabled=False, backend=backend),
+            inference_mode=InferenceMode.XML,
+        )
+
+        assert agent.system_prompt_manager._prompt_blocks.get("tools", "") == ""
+
+
+class TestUploadKeepsTheMemoryProtocol:
+    """Attaching a file rebuilds the ReAct prompt. That rebuild used to construct its own
+    ReactPromptConfig, which predated the memory store and so silently dropped the protocol
+    and the namespace listing -- leaving the tool attached but undocumented, for the life of
+    the agent. It now reuses `_react_prompt_config`, so it cannot drift again.
+
+    Every agent here sets `instructions`: the ops block is only overwritten when something
+    fills `ops_parts` (manager.py), so without them the stale block survives by accident and
+    these tests would pass against the bug.
+    """
+
+    def _upload(self, agent):
+        agent._setup_in_memory_file_store_and_tools()
+        return agent.system_prompt_manager._prompt_blocks
+
+    def test_memory_protocol_survives(self, llm, backend):
+        agent = Agent(name="a", llm=llm, memory_store=_memory(backend), instructions="Be terse.")
+        assert "## Memory" in (agent.system_prompt_manager._prompt_blocks.get("operational_instructions") or "")
+
+        blocks = self._upload(agent)
+
+        assert "## Memory" in (blocks.get("operational_instructions") or "")
+
+    def test_namespaces_survive(self, llm, backend):
+        """The protocol without its namespaces tells the agent to write to keys it never learns."""
+        agent = Agent(name="a", llm=llm, memory_store=_memory(backend), instructions="Be terse.")
+
+        ops = self._upload(agent).get("operational_instructions") or ""
+
+        assert backend.description in ops
+
+    def test_role_and_instructions_still_survive(self, llm, backend):
+        """The rebuild must keep doing what it already did correctly."""
+        agent = Agent(name="a", llm=llm, memory_store=_memory(backend), instructions="Be terse.")
+
+        blocks = self._upload(agent)
+
+        assert "Be terse." in "\n".join(str(v) for v in blocks.values())
