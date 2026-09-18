@@ -9,6 +9,27 @@ import filetype
 import requests
 
 
+def find_positions(content: str, needle: str) -> list[int]:
+    """Offsets of every position ``needle`` occurs at, overlapping ones included.
+
+    "aa" in "aaa" reports two candidate positions where ``str.count`` sees one. Either
+    could be the site the caller meant, which is what makes such a find string
+    ambiguous; how many a replacement would actually consume is a separate question,
+    answered by ``str.count``.
+
+    Shared by every find/replace tool: each one that reimplements the uniqueness check
+    with ``str.count`` silently applies ambiguous edits instead of refusing them.
+    """
+    if not needle:
+        return []
+    positions = []
+    start = 0
+    while (index := content.find(needle, start)) != -1:
+        positions.append(index)
+        start = index + 1
+    return positions
+
+
 def sanitize_filename(filename: str | None, default: str | None = None) -> str:
     """
     Sanitize a filename to prevent path traversal attacks.
