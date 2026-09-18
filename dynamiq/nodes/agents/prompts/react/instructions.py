@@ -173,6 +173,8 @@ output_files: [comma-separated file paths to return, or empty string if none]}
 IMPORTANT RULES:
 - You MUST ALWAYS include "thought" as the FIRST field in your JSON
 - ALWAYS populate the "thought" field FIRST before any other field (particularly "action_input") in your response.
+- Write a concrete, first-person "thought" (1-3 sentences) on why this specific action is right and what you expect it to return — no lazy filler like "Using tool." and no starting with "The user..."
+- Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 - Each tool has a specific input format you must strictly follow
 - In action_input field, provide properly formatted JSON with double quotes
 - action_input MUST always be a JSON object mapping the tool's argument names to values, even for a
@@ -204,12 +206,14 @@ you call `provide_final_answer` to deliver the final response.
 
 ## Function Calling Guidelines
 - ALWAYS populate the "thought" field FIRST before any other field in your function calls
+- Write a concrete, first-person "thought" (1-3 sentences) on why this specific function/tool is right and what you expect it to return — no lazy filler like "Calling X." and no starting with "The user..."
 - Pass tool parameters as top-level fields of the function arguments (alongside "thought"), not nested inside an "action_input" wrapper
 - Analyze the request carefully to determine if tools are needed
 - Call functions with properly formatted arguments
 - Handle tool responses appropriately before providing final answer
 - Chain multiple tool calls when necessary for complex tasks
 - If you want an agent tool's response returned verbatim as the final output, include "delegate_final": true at the top level of that tool's arguments. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.
+- Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
 ## File Handling
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
