@@ -90,6 +90,7 @@ def _bedrock(model):
     [
         "us.meta.llama3-3-70b-instruct-v1:0",  # verified live: rejects a cachePoint outright
         "mistral.mistral-large-2407-v1:0",
+        "amazon.nova-micro-v1:0",  # LiteLLM calls this cacheable, but it rejects our breakpoints
         "totally.made-up-model-v9",  # unknown to the registry -- must stay off, not guess
     ],
 )
@@ -99,10 +100,7 @@ def test_models_without_caching_support_are_left_alone(model):
     assert default_cache_control(_bedrock(model)) is None
 
 
-@pytest.mark.parametrize(
-    "model",
-    ["global.anthropic.claude-sonnet-5", "us.anthropic.claude-sonnet-4-6", "amazon.nova-micro-v1:0"],
-)
+@pytest.mark.parametrize("model", ["global.anthropic.claude-sonnet-5", "us.anthropic.claude-sonnet-4-6"])
 def test_models_with_caching_support_are_enabled(model):
     assert default_cache_control(_bedrock(model)) is not None
 
