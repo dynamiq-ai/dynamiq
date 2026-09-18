@@ -183,9 +183,10 @@ def memory_store(monkeypatch):
 
 
 def _stored_text(store):
-    paths = [entry.path for entry in store.list()]
+    # The store carries no default tenant, so every call outside an agent run names one itself.
+    paths = [entry.path for entry in store.list(user_id=USER_ID)]
     assert paths, "Agent recorded nothing."
-    return paths, "".join(store.read(path) for path in paths)
+    return paths, "".join(store.read(path, user_id=USER_ID) for path in paths)
 
 
 def _assert_memory_holds_only_the_preference(store):
@@ -206,17 +207,17 @@ def test_store_crud_against_the_api(memory_store):
     store = memory_store
     path = "probe.md"
 
-    entry = store.write(path, "probe body")
+    entry = store.write(path, "probe body", user_id=USER_ID)
     assert entry.path == path, f"Server returned a different path: {entry.path}"
 
-    assert store.read(path) == "probe body"
-    assert path in [e.path for e in store.list()]
+    assert store.read(path, user_id=USER_ID) == "probe body"
+    assert path in [e.path for e in store.list(user_id=USER_ID)]
 
-    store.write(path, "updated body")  # upsert: no overwrite flag, no 409
-    assert store.read(path) == "updated body"
+    store.write(path, "updated body", user_id=USER_ID)  # upsert: no overwrite flag, no 409
+    assert store.read(path, user_id=USER_ID) == "updated body"
 
-    assert store.delete(path) is True
-    assert store.delete(path) is False, "Deleting a missing memory must return False, not raise."
+    assert store.delete(path, user_id=USER_ID) is True
+    assert store.delete(path, user_id=USER_ID) is False, "Deleting a missing memory must return False, not raise."
 
 
 @pytest.mark.integration
@@ -225,13 +226,13 @@ def test_store_error_branches(memory_store):
     store = memory_store
 
     with pytest.raises(MemoryNotFoundError):
-        store.read("never-written.md")
+        store.read("never-written.md", user_id=USER_ID)
 
-    assert store.list("empty/") == []
+    assert store.list("empty/", user_id=USER_ID) == []
 
     # Mounted behind a prefix, a path outside every route is refused by name.
     with pytest.raises(MemoryStoreError) as excinfo:
-        CompositeMemoryStore(routes={"user/": store}).write("outside.md", "x")
+        CompositeMemoryStore(routes={"user/": store}).write("outside.md", "x", user_id=USER_ID)
     assert "user/" in str(excinfo.value)
 
 
@@ -247,7 +248,7 @@ def test_memories_are_recorded_then_applied(openai_llm, run_config, memory_store
     """
     personal = memory_store
     team = _store(TEAM_MEMORY_STORE_ID, "Conventions the whole team follows. Shared and curated elsewhere.")
-    team.write("naming.md", TEAM_CONVENTION)
+    team.write("naming.md", TEAM_CONVENTION, user_id=USER_ID)
 
     backend = CompositeMemoryStore(routes={"team/": team, "me/": personal})
 
@@ -267,8 +268,10 @@ def test_memories_are_recorded_then_applied(openai_llm, run_config, memory_store
     _assert_memory_holds_only_the_preference(personal)
 
     # The team memory is curated elsewhere: nothing the user volunteers belongs in it.
-    assert [entry.path for entry in team.list()] == ["naming.md"], "The shared team memory was written to."
-    assert team.read("naming.md") == TEAM_CONVENTION
+    assert [entry.path for entry in team.list(user_id=USER_ID)] == [
+        "naming.md"
+    ], "The shared team memory was written to."
+    assert team.read("naming.md", user_id=USER_ID) == TEAM_CONVENTION
 
     # A brand-new agent and conversation; the only thing carried over is the store.
     applier = build_agent("MemoryApplier")
