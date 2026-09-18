@@ -17,6 +17,22 @@ from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
 
+# Operators whose value is a JSONPath into the input instead of a literal, so a variable can be
+# compared against another variable. Each maps to the literal operator that does the comparison.
+PATH_OPERATORS: dict[ConditionOperator, ConditionOperator] = {
+    ConditionOperator.BOOLEAN_EQUALS_PATH: ConditionOperator.BOOLEAN_EQUALS,
+    ConditionOperator.NUMERIC_EQUALS_PATH: ConditionOperator.NUMERIC_EQUALS,
+    ConditionOperator.NUMERIC_GREATER_THAN_PATH: ConditionOperator.NUMERIC_GREATER_THAN,
+    ConditionOperator.NUMERIC_GREATER_THAN_OR_EQUALS_PATH: ConditionOperator.NUMERIC_GREATER_THAN_OR_EQUALS,
+    ConditionOperator.NUMERIC_LESS_THAN_PATH: ConditionOperator.NUMERIC_LESS_THAN,
+    ConditionOperator.NUMERIC_LESS_THAN_OR_EQUALS_PATH: ConditionOperator.NUMERIC_LESS_THAN_OR_EQUALS,
+    ConditionOperator.STRING_EQUALS_PATH: ConditionOperator.STRING_EQUALS,
+    ConditionOperator.STRING_GREATER_THAN_PATH: ConditionOperator.STRING_GREATER_THAN,
+    ConditionOperator.STRING_GREATER_THAN_OR_EQUALS_PATH: ConditionOperator.STRING_GREATER_THAN_OR_EQUALS,
+    ConditionOperator.STRING_LESS_THAN_PATH: ConditionOperator.STRING_LESS_THAN,
+    ConditionOperator.STRING_LESS_THAN_OR_EQUALS_PATH: ConditionOperator.STRING_LESS_THAN_OR_EQUALS,
+}
+
 
 class ChoiceOption(BaseModel):
     """Represents an option for a choice node."""
@@ -110,22 +126,26 @@ class Choice(Node):
             A boolean indicating whether the condition is met.
 
         Raises:
-            ValueError: If the operator is not supported.
+            ValueError: If the operator is not supported or a path operator has no JSONPath value.
         """
         value = jsonpath.filter(input_data, cond.variable)
 
         if cond.operator == ConditionOperator.OR:
-            return (
-                any(Choice.evaluate(cond, value) for cond in cond.operands)
-                and not cond.is_not
-            )
+            return any(Choice.evaluate(operand, value) for operand in cond.operands) == (not cond.is_not)
         elif cond.operator == ConditionOperator.AND:
-            return (
-                all(Choice.evaluate(cond, value) for cond in cond.operands)
-                and not cond.is_not
+            return all(Choice.evaluate(operand, value) for operand in cond.operands) == (not cond.is_not)
+
+        # Resolve the value of a path operator against the same input as the variable, then compare
+        # with the literal operator.
+        if cond.operator in PATH_OPERATORS:
+            if not isinstance(cond.value, str) or not cond.value:
+                raise ValueError(f"Operator {cond.operator} requires a JSONPath as value, got {cond.value!r}.")
+            cond = cond.model_copy(
+                update={"operator": PATH_OPERATORS[cond.operator], "value": jsonpath.filter(input_data, cond.value)}
             )
+
         # boolean
-        elif cond.operator == ConditionOperator.BOOLEAN_EQUALS:
+        if cond.operator == ConditionOperator.BOOLEAN_EQUALS:
             return (value == cond.value) == (not cond.is_not)
         # numeric
         if cond.operator == ConditionOperator.NUMERIC_EQUALS:
