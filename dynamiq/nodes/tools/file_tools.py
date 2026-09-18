@@ -26,6 +26,7 @@ from dynamiq.nodes.converters.pypdf import DocumentCreationMode as PyPDFDocument
 from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.types import ActionType
+from dynamiq.nodes.tools.utils import find_positions
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox
 from dynamiq.storages.file.base import FileStore
@@ -40,24 +41,6 @@ RESERVED_AGENT_PATH_PREFIX = "._agent"
 # no extraction cache is written for them, and no content is stripped, so line ranges and
 # re-reads after a write always reflect the bytes actually on disk.
 RAW_TEXT_FILE_TYPES = {FileType.PLAIN_TEXT_DATA}
-
-
-def _find_positions(content: str, needle: str) -> list[int]:
-    """Offsets of every position ``needle`` occurs at, overlapping ones included.
-
-    "aa" in "aaa" reports two candidate positions where ``str.count`` sees one. Either
-    could be the site the caller meant, which is what makes such a find string
-    ambiguous; how many a replacement would actually consume is a separate question,
-    answered by ``str.count``.
-    """
-    if not needle:
-        return []
-    positions = []
-    start = 0
-    while (index := content.find(needle, start)) != -1:
-        positions.append(index)
-        start = index + 1
-    return positions
 
 
 def _line_of(content: str, offset: int) -> int:
@@ -1472,7 +1455,7 @@ class FileWriteTool(Node):
         for edit in edits:
             # Located against current content, not the original: a prior edit can
             # add or remove candidate positions, and shift the lines they sit on.
-            positions = _find_positions(content, edit.find)
+            positions = find_positions(content, edit.find)
             if not positions:
                 skipped.append(edit.find)
                 continue
@@ -1498,7 +1481,7 @@ class FileWriteTool(Node):
             details = []
             duplicated_by_batch = False
             for find, count in ambiguous:
-                in_file = _find_positions(stored, find)
+                in_file = find_positions(stored, find)
                 if len(in_file) > 1:
                     lines = _format_lines([_line_of(stored, position) for position in in_file])
                     details.append(f"{repr(find[:80])} matches {len(in_file)} places (lines {lines})")
