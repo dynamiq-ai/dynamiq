@@ -1109,6 +1109,25 @@ class ScaleSerp(Http):
         return self
 
 
+class Serply(Http):
+    """
+    Connection class for Serply Search API.
+    """
+
+    url: str = "https://api.serply.io"
+    api_key: str = Field(default_factory=partial(get_env_var, "SERPLY_API_KEY"))
+    method: str = HTTPMethod.GET
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Setup headers after model validation."""
+        if self.api_key:
+            self.headers.update({"X-Api-Key": self.api_key, "User-Agent": "dynamiq"})
+        return self
+
+
 class ZenRows(Http):
     """
     Connection class for ZenRows Scrape API.
