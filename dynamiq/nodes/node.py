@@ -757,6 +757,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             if isinstance(value, Node):
                 return value.clone()
             elif isinstance(value, BaseModel):
+                # A model that knows how to copy itself, such as a Flow held by a SubWorkflow, keeps the
+                # links between its parts that a field-by-field copy would break.
+                if callable(getattr(value, "clone", None)):
+                    return value.clone()
                 try:
                     bm_copy = value.model_copy(deep=False)
                     for fname in getattr(value, "model_fields", {}):
