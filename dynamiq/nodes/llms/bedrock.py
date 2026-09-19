@@ -57,8 +57,8 @@ class Bedrock(BaseLLM):
         MODEL_PREFIX (str): The prefix for the Bedrock model name.
         cache_control (BedrockCacheControl | Literal[False] | None): Prompt caching config.
             ``None`` (the default) chooses nothing, leaving an :class:`Agent` free to
-            enable caching for its own calls; ``False`` opts out. A bare node caches
-            only when given a config -- ``None`` and ``False`` both send no breakpoints.
+            enable caching on this node at construction; ``False`` opts out. A bare node
+            caches only when given a config -- ``None`` and ``False`` send no breakpoints.
     """
     connection: AWSConnection | None = None
     MODEL_PREFIX = "bedrock/"

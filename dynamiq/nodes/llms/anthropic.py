@@ -106,8 +106,8 @@ class Anthropic(BaseLLM):
         connection (AnthropicConnection | None): The connection to use for the Anthropic LLM.
         cache_control (AnthropicCacheControl | Literal[False] | None): Prompt caching config.
             ``None`` (the default) chooses nothing, leaving an :class:`Agent` free to
-            enable caching for its own calls; ``False`` opts out. A bare node caches
-            only when given a config -- ``None`` and ``False`` both send no breakpoints.
+            enable caching on this node at construction; ``False`` opts out. A bare node
+            caches only when given a config -- ``None`` and ``False`` send no breakpoints.
         strict_tools: Inherited from :class:`BaseLLM`. False (default, or an empty
             list) ships every tool as-is with no strict guarantee; True cleans each
             tool's schema to Anthropic's strict subset and attaches ``strict: true``

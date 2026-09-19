@@ -125,10 +125,13 @@ class TestEveryRouteIsSafe:
         assert [p["location"] for p in points] == ["message", "message"]
 
 
-class TestCrossProviderFallback:
-    """`_prepare_fallback_run` forwards the per-call `cache_control` to a fallback node of
-    another provider, which reads its fields directly -- so a field only one class has is an
-    AttributeError, swallowed into a FAILURE result. Keep the two configs interchangeable.
+class TestTheTwoProviderConfigsStayInSync:
+    """Two duplicated `_apply_cache_control` implementations, one user-facing contract.
+
+    An agent now resolves each node in a fallback chain separately, so a config never crosses
+    providers -- but the two classes are still documented and configured identically, and a
+    field or payload that drifts between them is a silent behaviour difference between
+    `Anthropic` and `Bedrock`.
     """
 
     def test_the_two_configs_expose_the_same_fields(self):

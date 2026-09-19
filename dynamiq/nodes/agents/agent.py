@@ -191,13 +191,8 @@ def mark_tool_failure(content: str, success: Any) -> str:
 def default_cache_control(llm: Node) -> BaseModel | None:
     """Prompt caching config for providers that cache nothing without a breakpoint.
 
-    Anthropic-family models (including on Bedrock) read back no cached prefix unless the
-    request carries an explicit breakpoint, unlike OpenAI/Gemini which cache automatically.
-    The field is discovered by annotation, so a node that gains one is picked up here.
-
-    Returns None when the node has no ``cache_control`` field, when the model does not
-    support caching, or when the caller set one themselves -- ``cache_control=False`` is
-    how you opt out.
+    Returns None when the node has no ``cache_control`` field, the model does not support
+    caching, or the caller already chose -- ``cache_control=False`` is how you opt out.
 
     Keyed on the field's value, not ``model_fields_set``: deserialization marks every
     field as set, so that would read a YAML round trip as an opt-out.
@@ -206,10 +201,8 @@ def default_cache_control(llm: Node) -> BaseModel | None:
     if field is None or llm.cache_control is not None:
         return None
 
-    # The `Bedrock` node serves far more than Claude, and a model that does not support
-    # cachePoint rejects the request outright ("You invoked an unsupported model") rather
-    # than ignoring it -- so never enable this by default without checking. The node
-    # re-checks before sending, since a fallback run inherits this config.
+    # `Bedrock` serves far more than Claude, and an unsupporting model rejects the request
+    # outright rather than ignoring the breakpoint.
     if not llm.supports_prompt_caching():
         return None
     config_cls = next(
@@ -272,9 +265,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
     # Raw text of the most recent LLM call; kept so loop-level recovery
     # handlers can echo it back to the model after a parsing failure.
     _last_llm_output: str = PrivateAttr(default="")
-    # Resolved once at construction: assigning to `llm.cache_control` marks the field as
-    # caller-set, so the decision cannot be re-derived after the first loop.
-    _cache_control: BaseModel | None = PrivateAttr(default=None)
 
     @field_validator("response_format", mode="before")
     @classmethod
@@ -550,8 +540,21 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     @model_validator(mode="after")
     def _resolve_cache_control(self):
-        """Decide once whether to enable prompt caching for the agent's own LLM calls."""
-        self._cache_control = default_cache_control(self.llm)
+        """Turn on prompt caching for an LLM whose provider caches nothing without a breakpoint.
+
+        Written onto the node once, at construction, so every caller sharing the instance
+        inherits it -- including the summarizer. Each node in the fallback chain is asked
+        separately: a fallback may be another provider, or an unsupporting model.
+        """
+        seen: set[int] = set()
+        node = self.llm
+        while node is not None and id(node) not in seen:
+            seen.add(id(node))
+            # Only assign a real config: `BaseLLM` allows extra fields and spreads them into
+            # the request, so a `None` on a node without the field would be sent.
+            if (control := default_cache_control(node)) is not None:
+                node.cache_control = control
+            node = getattr(getattr(node, "fallback", None), "llm", None)
         return self
 
     @model_validator(mode="after")
@@ -1794,9 +1797,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 messages=self._prompt.messages,
                 tools=fc_tools,
                 response_format=response_format,
-                # Per-call, never set on the node: tools share this llm instance, and
-                # parallel subagents may be using it at the same time.
-                cache_control=self._cache_control,
                 config=llm_config,
                 parallel_tool_calls=True if native_parallel else None,
                 **({"tool_choice": forced_tool_choice} if forced_tool_choice else {}),

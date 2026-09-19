@@ -1,7 +1,8 @@
 """Agents turn on prompt caching for providers that cache nothing without a breakpoint.
 
-The caching config is applied only around the agent's own LLM call, so tools that share the
-same llm instance keep making uncached one-shot calls.
+The config is written onto the agent's LLM node once, at construction, so every caller
+sharing that instance inherits it -- including the ContextManagerTool. Summarization
+therefore caches too, which is cost-only and is the subject of a follow-up PR.
 """
 
 import os
@@ -16,7 +17,11 @@ from litellm import ModelResponse
 from dynamiq import connections, prompts
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.agent import default_cache_control
-from dynamiq.nodes.llms import Anthropic, AnthropicCacheControl, Bedrock, OpenAI
+from dynamiq.nodes.agents.utils import SummarizationConfig
+from dynamiq.nodes.llms import Anthropic, AnthropicCacheControl, Bedrock, BedrockCacheControl, OpenAI
+from dynamiq.nodes.llms.base import FallbackConfig
+from dynamiq.nodes.tools.context_manager import ContextManagerTool
+from dynamiq.runnables import RunnableConfig
 
 
 def _anthropic(**kwargs):
@@ -38,8 +43,12 @@ def _openai():
     )
 
 
+def _agent(llm, **kwargs):
+    return Agent(name="a", llm=llm, tools=[], max_loops=2, **kwargs)
+
+
 def _run(llm):
-    agent = Agent(name="a", llm=llm, tools=[], max_loops=2)
+    agent = _agent(llm)
     agent.run(input_data={"input": "hi"})
     return agent
 
@@ -90,7 +99,8 @@ def _bedrock(model):
     [
         "us.meta.llama3-3-70b-instruct-v1:0",  # verified live: rejects a cachePoint outright
         "mistral.mistral-large-2407-v1:0",
-        "amazon.nova-micro-v1:0",  # LiteLLM calls this cacheable, but it rejects our breakpoints
+        "amazon.nova-micro-v1:0",  # caches, but 400s on a cachePoint in a tool-call message
+        "us.openai.gpt-6-astra",  # LiteLLM flags it cacheable, but it caches implicitly
         "totally.made-up-model-v9",  # unknown to the registry -- must stay off, not guess
     ],
 )
@@ -163,26 +173,29 @@ def test_openai_agent_sends_no_breakpoints(mock_llm_executor):
 # -- isolation: the config must not outlive the call ----------------------------------------
 
 
-def test_the_llm_node_is_never_mutated(mocker):
-    """The config is delivered per call. Nothing is written to the shared node -- not even
-    for the duration of the call -- so tools and parallel subagents using the same instance
-    are unaffected."""
+def test_the_config_is_written_once_and_never_restored(mocker):
+    """No save/restore pair around the call, so no window exists in which a concurrent caller
+    sees the node without its config."""
     llm = _anthropic()
+    agent = _agent(llm)
+    written = llm.cache_control
+    assert written is not None, "construction must enable caching"
+
     during = {}
 
     def capture(self, **kwargs):
-        during["cache_control"] = self.cache_control
+        during.setdefault("controls", []).append(self.cache_control)
         during["points"] = kwargs.get("cache_control_injection_points")
         response = ModelResponse()
         response["choices"][0]["message"]["content"] = "mocked_response"
         return response
 
     mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", new=capture)
-    _run(llm)
+    agent.run(input_data={"input": "hi"})
 
     assert during["points"], "the caching config must still reach the request"
-    assert during["cache_control"] is None, "the node was mutated during the call"
-    assert llm.cache_control is None
+    assert all(c is written for c in during["controls"]), "the node was swapped mid-call"
+    assert llm.cache_control is written, "the node was restored after the call"
 
 
 def test_parallel_subagents_sharing_one_llm(mocker):
@@ -206,9 +219,97 @@ def test_parallel_subagents_sharing_one_llm(mocker):
         thread.join()
 
     assert seen, "both agents should have called the llm"
-    assert all(points for _, points in seen), "every call carries its own caching config"
-    assert all(control is None for control, _ in seen), "no call mutated the shared node"
-    assert llm.cache_control is None
+    assert all(points for _, points in seen), "every call carries the caching config"
+    assert all(control is not None for control, _ in seen), "a call saw the node with no config"
+    # By value, not identity: a construction race may write two equal instances, harmlessly.
+    assert len({control.model_dump_json() for control, _ in seen}) == 1
+    assert llm.cache_control is not None
+
+
+# -- what construction writes onto the node -------------------------------------------------
+
+
+def test_construction_writes_the_config_onto_the_node():
+    llm = _anthropic()
+    _agent(llm)
+
+    assert isinstance(llm.cache_control, AnthropicCacheControl)
+
+
+def test_opt_out_is_left_alone():
+    llm = _anthropic(cache_control=False)
+    _agent(llm)
+
+    assert llm.cache_control is False
+
+
+def test_a_node_without_the_field_gains_no_extra():
+    """`BaseLLM` spreads extra fields into the request, so a `None` here would be sent."""
+    llm = _openai()
+    _agent(llm)
+
+    assert "cache_control" not in (llm.__pydantic_extra__ or {})
+
+
+def test_a_second_agent_does_not_rewrite_the_config():
+    """Sub-agents and factory-rebuilt agents share one node; the decision is made once."""
+    llm = _anthropic()
+    _agent(llm)
+    written = llm.cache_control
+    _agent(llm)
+
+    assert llm.cache_control is written
+
+
+# -- the fallback chain ---------------------------------------------------------------------
+
+
+def test_fallback_llm_also_gets_the_default():
+    """A separate node, asked separately -- and the call that most needs the cache."""
+    fallback = _bedrock("global.anthropic.claude-sonnet-5")
+    llm = _anthropic(fallback=FallbackConfig(llm=fallback))
+    _agent(llm)
+
+    assert llm.cache_control is not None
+    # Its own provider's config class, never the primary's.
+    assert isinstance(fallback.cache_control, BedrockCacheControl)
+
+
+def test_unsupported_fallback_model_is_left_alone():
+    """The model check runs against the node that will send the request, so a Claude -> Nova
+    fallback gets nothing rather than a cachePoint Nova rejects."""
+    fallback = _bedrock("us.amazon.nova-lite-v1:0")
+    llm = _anthropic(fallback=FallbackConfig(llm=fallback))
+    _agent(llm)
+
+    assert llm.cache_control is not None
+    assert fallback.cache_control is None
+
+
+def test_a_cyclic_fallback_chain_terminates():
+    """Nothing forbids a node being its own fallback; the walk must not spin."""
+    llm = _anthropic()
+    llm.fallback = FallbackConfig(llm=llm)
+    _agent(llm)
+
+    assert llm.cache_control is not None
+
+
+# -- accepted: callers sharing the node inherit it ------------------------------------------
+
+
+def test_the_summarizer_shares_the_cached_llm(mock_llm_executor):
+    """The ContextManagerTool is built with `llm=self.llm`, so summarization now sends
+    breakpoints too. Cost-only (a one-shot prompt writes a cache nothing reads back), and
+    deliberately left for the follow-up summarization PR to address."""
+    llm = _anthropic()
+    agent = _agent(llm, summarization_config=SummarizationConfig(enabled=True))
+    summarizer = next(t for t in agent.tools if isinstance(t, ContextManagerTool))
+    assert summarizer.llm is llm, "the tool must share the agent's node for this to matter"
+
+    summarizer._call_llm_for_summary([prompts.Message(role="user", content="summarise this")], config=RunnableConfig())
+
+    assert _points(mock_llm_executor)
 
 
 def test_bare_node_outside_an_agent_still_sends_nothing():
@@ -237,8 +338,8 @@ def _roundtrip(llm) -> Agent:
 
 
 def _caches(agent: Agent) -> bool:
-    """Whether this agent's own calls carry breakpoints, from either source."""
-    return agent._cache_control is not None or agent.llm.cache_control not in (None, False)
+    """Whether this agent's calls carry breakpoints. A config is truthy, `False`/`None` are not."""
+    return bool(agent.llm.cache_control)
 
 
 @pytest.mark.parametrize(
@@ -253,11 +354,12 @@ def _caches(agent: Agent) -> bool:
 def test_caching_intent_survives_a_yaml_round_trip(kwargs, expected):
     """A dumped node is rebuilt field-by-field, so `model_fields_set` marks all of them
     as set -- keying the default off that read a round trip as an opt-out."""
-    llm = _anthropic(**kwargs)
-    before = Agent(name="a", llm=llm, tools=[], is_postponed_component_init=True)
-
+    before = Agent(name="a", llm=_anthropic(**kwargs), tools=[], is_postponed_component_init=True)
     assert _caches(before) is expected, "in-process construction disagrees with the fixture"
-    assert _caches(_roundtrip(llm)) is expected
+
+    # A *fresh* node: constructing the agent above already wrote the default onto its llm, so
+    # reusing it would dump a config in every case and prove nothing about the unset one.
+    assert _caches(_roundtrip(_anthropic(**kwargs))) is expected
 
 
 def test_custom_ttl_survives_a_yaml_round_trip():
