@@ -19,6 +19,7 @@ class FileType(str, enum.Enum):
     HTML = "html"
     TEXT = "text"
     MARKDOWN = "markdown"
+    PLAIN_TEXT_DATA = "plain_text_data"
 
 
 EXTENSION_MAP = {
@@ -79,4 +80,24 @@ EXTENSION_MAP = {
     FileType.HTML: {"html"},
     FileType.TEXT: {"txt"},
     FileType.MARKDOWN: {"md"},
+    # Plain-text *data* formats: known to be text, but read raw (decoded, not run through
+    # TextFileConverter). Unlike FileType.TEXT/MARKDOWN, these are never routed through the
+    # extracted-text cache: a converter pass would strip leading/trailing whitespace (breaking
+    # start_line/end_line accounting) and its cached ".extracted.txt" copy would go stale after
+    # any write/append to the source file, since re-reads prefer the cache unconditionally.
+    FileType.PLAIN_TEXT_DATA: {
+        "log",
+        "json",
+        "jsonl",
+        "ndjson",
+        "yaml",
+        "yml",
+        "toml",
+        "xml",
+        "ini",
+        "cfg",
+        "conf",
+        "text",
+        "markdown",
+    },
 }
