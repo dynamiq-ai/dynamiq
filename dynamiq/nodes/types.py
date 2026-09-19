@@ -179,3 +179,50 @@ class ExpressionItem(BaseModel):
     id: str = Field(default_factory=generate_uuid)
     key: str
     expression: str
+
+
+class RuleSeverity(str, Enum):
+    """What a check that does not hold means: `fail` blocks, `warn` flags for attention, `info` notes."""
+
+    FAIL = "fail"
+    WARN = "warn"
+    INFO = "info"
+
+
+class RuleMissingPolicy(str, Enum):
+    """What a rule reports when a value it reads is missing: a finding to review, or the rule's own severity."""
+
+    NOT_EVALUATED = "not_evaluated"
+    FAIL = "fail"
+
+
+class DerivedValue(BaseModel):
+    """A value a Rules node computes once per record, before its rules run, and exposes to them by name."""
+
+    id: str = Field(default_factory=generate_uuid)
+    name: str
+    expression: str
+
+
+class Rule(BaseModel):
+    """One check of a Rules node.
+
+    `check` is an expression that must hold for the rule to pass; `applies_when` is an optional precondition,
+    and a rule that does not apply reports `not_applicable`. `message` is a template rendered with the values
+    the check read when the check does not hold. `effective_from` and `effective_until` are ISO dates; outside
+    the window the rule is not applicable for the record's `as_of` date.
+    """
+
+    id: str = Field(default_factory=generate_uuid)
+    name: str = ""
+    category: str = ""
+    severity: RuleSeverity = RuleSeverity.FAIL
+    applies_when: str | None = None
+    check: str = ""
+    message: str | None = None
+    reason_code: str | None = None
+    references: list[str] = []
+    tags: list[str] = []
+    effective_from: str | None = None
+    effective_until: str | None = None
+    enabled: bool = True
