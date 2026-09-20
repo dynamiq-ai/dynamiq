@@ -1956,6 +1956,17 @@ class OpenRouter(BaseApiKeyConnection):
         }
 
 
+class TypeSafe(HttpApiKey):
+    """A connection to the TypeSafe System One API, the judge behind a Judgement node.
+
+    The API key can be provided explicitly or sourced from the ``TYPESAFE_API_KEY`` environment
+    variable. The URL is the API root; the node appends the endpoint path.
+    """
+
+    url: str = Field(default_factory=partial(get_env_var, "TYPESAFE_URL", "https://api.typesafe.ai"))
+    api_key: str = Field(default_factory=partial(get_env_var, "TYPESAFE_API_KEY"))
+
+
 class Lakera(BaseApiKeyConnection):
     url: Literal["https://api.lakera.ai/v2/"] = "https://api.lakera.ai/v2/"
     api_key: str = Field(default_factory=partial(get_env_var, "LAKERA_API_KEY"))

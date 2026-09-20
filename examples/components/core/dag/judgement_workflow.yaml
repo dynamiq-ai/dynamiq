@@ -1,0 +1,96 @@
+# Support triage as a decision chain: a Judgement reads the ticket and answers three typed questions, a
+# Decision Table turns the answers into a queue and a priority, and an uncertain verdict goes to a person.
+connections:
+  typesafe:
+    type: dynamiq.connections.TypeSafe
+    api_key: ${oc.env:TYPESAFE_API_KEY}
+
+nodes:
+  start:
+    type: dynamiq.nodes.utils.Input
+    name: start
+
+  triage:
+    type: dynamiq.nodes.tools.Judgement
+    name: triage
+    connection: typesafe
+    input_fields:
+      - { id: ticket, name: ticket }
+    min_confidence: 0.6
+    questions:
+      - id: q1
+        name: is_urgent
+        type: noul
+        instructions: The customer needs an answer today.
+        yes_when: A deadline, a blocked payment, a service that is down, or a request to act now.
+        no_when: A question, a suggestion, or a complaint with no time pressure.
+      - id: q2
+        name: team
+        type: choice
+        instructions: Which team should handle this ticket?
+        options:
+          - { id: o1, name: billing, description: Charges, invoices, refunds and subscriptions }
+          - { id: o2, name: technical, description: Errors, outages, integrations and data problems }
+          - { id: o3, name: sales, description: Pricing, plans, upgrades and new accounts }
+      - id: q3
+        name: anger
+        type: score
+        instructions: How upset is the customer?
+        options:
+          - { id: l1, name: calm, description: States the facts and asks for help }
+          - { id: l2, name: frustrated, description: Annoyed but civil; mentions repeated attempts or wasted time }
+          - { id: l3, name: furious, description: Threatens to leave, demands, insults or shouts }
+    depends:
+      - node: start
+    input_transformer:
+      selector:
+        ticket: $.start.output.ticket
+
+  route:
+    type: dynamiq.nodes.operators.DecisionTable
+    name: route
+    hit_policy: first
+    input_columns:
+      - { id: review, name: review, type: bool }
+      - { id: urgent, name: urgent, type: bool }
+      - { id: team, name: team, type: string }
+      - { id: anger, name: anger, type: string }
+    output_columns:
+      - { id: queue, name: queue, type: string }
+      - { id: priority, name: priority, type: string }
+    rules:
+      - { id: r1, name: uncertain verdict, when: ["true", "", "", ""], then: [human-review, high] }
+      - { id: r2, name: furious customer, when: ["", "", "", furious], then: [escalations, high] }
+      - { id: r3, name: urgent billing, when: ["", "true", billing, ""], then: [billing, high] }
+      - { id: r4, name: billing, when: ["", "", billing, ""], then: [billing, normal] }
+      - { id: r5, name: technical, when: ["", "", technical, ""], then: [technical, normal] }
+      - { id: r6, name: everything else, when: ["", "", "", ""], then: [sales, low] }
+    depends:
+      - node: triage
+    input_transformer:
+      selector:
+        review: $.triage.output.needs_review
+        urgent: $.triage.output.decisions.is_urgent
+        team: $.triage.output.decisions.team
+        anger: $.triage.output.decisions.anger
+
+  end:
+    type: dynamiq.nodes.utils.Output
+    name: end
+    depends:
+      - node: route
+      - node: triage
+    input_transformer:
+      selector:
+        queue: $.route.output.queue
+        priority: $.route.output.priority
+        answers: $.triage.output.answers
+
+flows:
+  triage:
+    name: Support triage
+    nodes: [start, triage, route, end]
+
+workflows:
+  support-triage:
+    flow: triage

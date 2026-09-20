@@ -291,3 +291,78 @@ def test_the_canvas_draws_a_branch_through_the_options_handle():
     assert plain["source_handle"] == "source"
     assert plain["label"] is None
     assert plain["is_choice_option"] is False
+
+
+JUDGEMENT = "dynamiq.nodes.tools.Judgement"
+
+
+def judgement(**overrides) -> dict:
+    node = {
+        "id": "triage",
+        "name": "triage",
+        "type": JUDGEMENT,
+        "depends": [{"node": "start"}],
+        "input_transformer": {"selector": {"ticket": "$.start.output.ticket"}},
+        "connection": str(uuid.uuid4()),
+        "input_fields": [{"id": "f1", "name": "ticket"}],
+        "questions": [
+            {"id": "q1", "name": "is_urgent", "type": "noul", "instructions": "The customer needs an answer today"},
+            {
+                "id": "q2",
+                "name": "team",
+                "type": "choice",
+                "instructions": "Which team handles this?",
+                "options": [{"id": "o1", "name": "billing"}, {"id": "o2", "name": "technical"}],
+            },
+        ],
+        "min_confidence": 0.7,
+    }
+    node.update(overrides)
+    return node
+
+
+def test_a_judgement_node_is_checked_the_way_the_platform_checks_it():
+    assert errors_of(flow_with(judgement())) == []
+    assert errors_of(flow_with(judgement(connection=None, judge={"type": "dynamiq.nodes.llms.OpenAI"}))) == []
+
+    found = errors_of(
+        flow_with(
+            judgement(
+                judge={"type": "dynamiq.nodes.tools.Python"},
+                questions=[
+                    {"id": "q1", "name": "is urgent", "type": "maybe", "instructions": " "},
+                    {
+                        "id": "q2",
+                        "name": "anger",
+                        "type": "score",
+                        "instructions": "How angry?",
+                        "options": [{"id": "o1", "name": "calm"}, {"id": "o2", "name": "calm"}],
+                    },
+                    {
+                        "id": "q3",
+                        "name": "anger",
+                        "type": "choice",
+                        "instructions": "x",
+                        "options": [{"id": "o1", "name": "a"}],
+                    },
+                ],
+                noul_threshold=1.5,
+                confidence_mode="sampling",
+                samples=1,
+            )
+        )
+    )
+
+    for fragment in (
+        "needs exactly one judge",
+        "`judge` must be an LLM or an agent node object, got 'dynamiq.nodes.tools.Python'",
+        "question 'is urgent' has a name that is not an identifier",
+        "type 'maybe' is not one of noul, choice, score",
+        "question 'is urgent' has no `instructions`",
+        "question 'anger' names a level twice",
+        "question 'anger' needs between 2 and 255 options, got 1",
+        "question names used more than once: anger",
+        "noul_threshold 1.5 is not a number between 0 and 1",
+        "sampling needs an LLM or agent judge",
+    ):
+        assert [e for e in found if fragment in e], fragment

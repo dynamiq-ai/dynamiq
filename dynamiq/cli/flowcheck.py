@@ -30,12 +30,21 @@ DECISION_TABLE_TYPE = "dynamiq.nodes.operators.DecisionTable"
 RULES_TYPE = "dynamiq.nodes.operators.Rules"
 EXPRESSION_TYPE = "dynamiq.nodes.operators.Expression"
 SUB_WORKFLOW_TYPE = "dynamiq.nodes.operators.SubWorkflow"
+# A tool by group, but a decision node by use: it feeds the operators above, and is checked with them.
+JUDGEMENT_TYPE = "dynamiq.nodes.tools.Judgement"
 
 CHOICE_HIT_POLICIES = ("first", "all")
 TABLE_HIT_POLICIES = ("first", "unique", "collect")
 TABLE_AGGREGATIONS = ("list", "sum", "min", "max", "count")
 RULE_SEVERITIES = ("fail", "warn", "info")
 RULE_MISSING_POLICIES = ("not_evaluated", "fail")
+QUESTION_TYPES = ("noul", "choice", "score")
+CONFIDENCE_MODES = ("verbalized", "sampling")
+# The judge behind a Judgement node is an LLM or an agent; anything else cannot answer a question.
+JUDGE_TYPE_PREFIXES = ("dynamiq.nodes.llms.", "dynamiq.nodes.agents.")
+MAX_CHOICE_OPTIONS = 255
+MAX_SCORE_LEVELS = 10
+MAX_SAMPLES = 10
 # The output a decision table adds beside its columns, so no column may take it.
 MATCHED_RULES_KEY = "matched_rules"
 # A name an expression can read: an input, a derived value or an output key.
@@ -463,7 +472,7 @@ def validate(flow, known_types: set | None = None):
                     "agent's \"tools\" array instead."
                 )
 
-        if node_type.startswith("dynamiq.nodes.operators."):
+        if node_type.startswith("dynamiq.nodes.operators.") or node_type == JUDGEMENT_TYPE:
             errors.extend(check_operator(node, label))
 
     for path, text in walk_strings(flow):
@@ -512,6 +521,8 @@ def check_operator(node, label) -> list:
         return check_expression(node, label)
     if node_type == SUB_WORKFLOW_TYPE:
         return check_sub_workflow(node, label)
+    if node_type == JUDGEMENT_TYPE:
+        return check_judgement(node, label)
     return []
 
 
@@ -661,6 +672,75 @@ def check_expression(node, label) -> list:
     if duplicates:
         errors.append(f"expression {label!r}: keys used more than once: {', '.join(duplicates)}.")
     return errors
+
+
+def check_judgement(node, label) -> list:
+    errors = []
+    has_connection = node.get("connection") is not None
+    judge = node.get("judge")
+    if has_connection == (judge is not None):
+        errors.append(
+            f"judgement {label!r} needs exactly one judge: a TypeSafe `connection`, or a `judge` node "
+            "(an LLM or an agent)."
+        )
+    if judge is not None:
+        judge_type = str(judge.get("type") or "") if isinstance(judge, dict) else ""
+        if not judge_type.startswith(JUDGE_TYPE_PREFIXES):
+            errors.append(
+                f"judgement {label!r}: `judge` must be an LLM or an agent node object, "
+                f"got {judge_type or type(judge).__name__!r}."
+            )
+    names = []
+    for index, question in enumerate(node.get("questions") or []):
+        if not isinstance(question, dict):
+            errors.append(f"judgement {label!r}: questions[{index}] is not an object.")
+            continue
+        name = str(question.get("name") or "")
+        where = f"judgement {label!r}: question {name or index!r}"
+        if not IDENTIFIER_RE.match(name):
+            errors.append(f"{where} has a name that is not an identifier, so no node could read its answer.")
+        names.append(name)
+        kind = question.get("type") or "noul"
+        if kind not in QUESTION_TYPES:
+            errors.append(f"{where}: type {kind!r} is not one of {', '.join(QUESTION_TYPES)}.")
+        if not str(question.get("instructions") or "").strip():
+            errors.append(f"{where} has no `instructions`.")
+        if kind in ("choice", "score"):
+            limit, what = (MAX_CHOICE_OPTIONS, "option") if kind == "choice" else (MAX_SCORE_LEVELS, "level")
+            options = [o for o in (question.get("options") or []) if isinstance(o, dict)]
+            option_names = [str(o.get("name") or "").strip() for o in options]
+            if not 2 <= len(options) <= limit:
+                errors.append(f"{where} needs between 2 and {limit} {what}s, got {len(options)}.")
+            if any(not option_name for option_name in option_names):
+                errors.append(f"{where} has a {what} without a name.")
+            if len(set(option_names)) != len(option_names):
+                errors.append(f"{where} names a {what} twice.")
+    duplicates = sorted({n for n in names if n and names.count(n) > 1})
+    if duplicates:
+        errors.append(f"judgement {label!r}: question names used more than once: {', '.join(duplicates)}.")
+    for key in ("noul_threshold", "min_confidence"):
+        value = node.get(key)
+        if value is not None and not (_is_number(value) and 0 <= value <= 1):
+            errors.append(f"judgement {label!r}: {key} {value!r} is not a number between 0 and 1.")
+    mode = node.get("confidence_mode")
+    if mode is not None and mode not in CONFIDENCE_MODES:
+        errors.append(f"judgement {label!r}: confidence_mode {mode!r} is not one of {', '.join(CONFIDENCE_MODES)}.")
+    samples = node.get("samples")
+    if samples is not None and not (_is_number(samples) and samples == int(samples) and 1 <= samples <= MAX_SAMPLES):
+        errors.append(f"judgement {label!r}: samples {samples!r} is not a whole number between 1 and {MAX_SAMPLES}.")
+    if mode == "sampling":
+        if has_connection:
+            errors.append(
+                f"judgement {label!r}: sampling needs an LLM or agent judge; "
+                "a System One connection returns calibrated probabilities in one call."
+            )
+        elif samples is not None and _is_number(samples) and samples < 2:
+            errors.append(f"judgement {label!r}: sampling needs at least 2 samples.")
+    return errors
+
+
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def check_sub_workflow(node, label) -> list:
