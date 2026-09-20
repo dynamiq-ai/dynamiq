@@ -1,7 +1,9 @@
 from enum import Enum
-from typing import Any
+from typing import Any, ClassVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from dynamiq.utils import generate_uuid
 
 
 class NodeGroup(str, Enum):
@@ -120,3 +122,117 @@ class ChoiceCondition(BaseModel):
     value: Any = None
     is_not: bool = False
     operands: list["ChoiceCondition"] | None = None
+
+
+class ChoiceHitPolicy(str, Enum):
+    """Which options of a Choice run: the first whose condition holds, or every one that holds."""
+
+    FIRST = "first"
+    ALL = "all"
+
+
+class DecisionHitPolicy(str, Enum):
+    """Which matching rules of a DecisionTable produce its output."""
+
+    FIRST = "first"
+    UNIQUE = "unique"
+    COLLECT = "collect"
+
+
+class DecisionAggregation(str, Enum):
+    """How a collect DecisionTable folds the outputs of every matching rule."""
+
+    LIST = "list"
+    SUM = "sum"
+    MIN = "min"
+    MAX = "max"
+    COUNT = "count"
+
+
+class Authored(BaseModel):
+    """A model whose id the user wrote: a rule code, a row id, a field id.
+
+    Findings, matched rules and test coverage are keyed by that id, so a clone keeps it where a node or a
+    Choice option gets a new one.
+    """
+
+    keeps_id: ClassVar[bool] = True
+
+
+class NamedField(Authored):
+    """A field the user defines by name. `type` uses the Input node vocabulary: string, int, float, bool, Any."""
+
+    id: str = Field(default_factory=generate_uuid)
+    name: str
+    type: str = "Any"
+
+
+class SubWorkflowField(NamedField):
+    """An Input or Output field of the flow a SubWorkflow runs, as captured when the flow was chosen."""
+
+    required: bool = False
+
+
+class DecisionRule(Authored):
+    """One row of a DecisionTable: a condition cell per input column and a value cell per output column."""
+
+    id: str = Field(default_factory=generate_uuid)
+    name: str = ""
+    when: list[str | int | float | bool | None] = []
+    then: list[str | int | float | bool | None] = []
+    enabled: bool = True
+
+
+class ExpressionItem(Authored):
+    """One output of an Expression node: the key it is returned under and the expression that computes it."""
+
+    id: str = Field(default_factory=generate_uuid)
+    key: str
+    expression: str
+
+
+class RuleSeverity(str, Enum):
+    """What a check that does not hold means: `fail` blocks, `warn` flags for attention, `info` notes."""
+
+    FAIL = "fail"
+    WARN = "warn"
+    INFO = "info"
+
+
+class RuleMissingPolicy(str, Enum):
+    """What a rule reports when a value it reads is missing: a finding to review, or the rule's own severity."""
+
+    NOT_EVALUATED = "not_evaluated"
+    FAIL = "fail"
+
+
+class DerivedValue(Authored):
+    """A value a Rules node computes once per record, before its rules run, and exposes to them by name."""
+
+    id: str = Field(default_factory=generate_uuid)
+    name: str
+    expression: str
+
+
+class Rule(Authored):
+    """One check of a Rules node.
+
+    `check` is an expression that must hold for the rule to pass; `applies_when` is an optional precondition,
+    and a rule that does not apply reports `not_applicable`. `message` is a template rendered with the whole
+    record when the check does not hold. `effective_from` and `effective_until` are ISO dates; outside the
+    window the rule is not applicable for the record's `as_of` date.
+    """
+
+    id: str = Field(default_factory=generate_uuid)
+    name: str = ""
+    category: str = ""
+    severity: RuleSeverity = RuleSeverity.FAIL
+    applies_when: str | None = None
+    check: str = ""
+    message: str | None = None
+    reason_code: str | None = None
+    references: list[str] = []
+    tags: list[str] = []
+    effective_from: str | None = None
+    effective_until: str | None = None
+    enabled: bool = True
