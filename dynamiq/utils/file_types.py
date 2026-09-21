@@ -80,11 +80,8 @@ EXTENSION_MAP = {
     FileType.HTML: {"html"},
     FileType.TEXT: {"txt"},
     FileType.MARKDOWN: {"md"},
-    # Plain-text *data* formats: known to be text, but read raw (decoded, not run through
-    # TextFileConverter). Unlike FileType.TEXT/MARKDOWN, these are never routed through the
-    # extracted-text cache: a converter pass would strip leading/trailing whitespace (breaking
-    # start_line/end_line accounting) and its cached ".extracted.txt" copy would go stale after
-    # any write/append to the source file, since re-reads prefer the cache unconditionally.
+    # Plain-text data formats: decoded and returned raw rather than run through
+    # TextFileConverter, which strips whitespace and caches its output.
     FileType.PLAIN_TEXT_DATA: {
         "log",
         "json",

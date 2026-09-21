@@ -411,12 +411,7 @@ def test_file_read_tool_returns_text_formats_as_text(llm_model, file_path):
 
 @pytest.mark.parametrize("file_path", ["data/state.json", "logs/run.log", "notes/a.markdown", "notes/b.text"])
 def test_file_read_tool_plain_text_data_reread_after_write_is_fresh(llm_model, file_path):
-    """Re-reading a plain-text data format after it changes on disk returns the new content.
-
-    Before the fix these extensions were routed through the extracted-text converter/cache
-    path: a first read persisted "<path>.extracted.txt", and every later read returned that
-    stale cache unconditionally (no mtime/hash check), regardless of what was written since.
-    """
+    """Re-reading a plain-text data format after it changes on disk returns the new content."""
     file_store = InMemoryFileStore()
     file_store.store(file_path, b'{"v": 1}')
     tool = FileReadTool(file_store=file_store, llm=llm_model)
@@ -449,12 +444,7 @@ def test_file_read_tool_plain_text_data_reread_after_append_is_fresh(llm_model):
 
 @pytest.mark.parametrize("file_path", ["data/state.json", "logs/run.log", "notes/a.markdown", "notes/b.text"])
 def test_file_read_tool_plain_text_data_line_range_matches_file_on_disk(llm_model, file_path):
-    """start_line/end_line and total_lines are computed against the file as written.
-
-    Before the fix these extensions were routed through TextFileConverter, which strips the
-    content before slicing. Leading blank lines were silently dropped, shifting every line
-    number and under-reporting total_lines.
-    """
+    """start_line/end_line and total_lines are computed against the file as written."""
     file_store = InMemoryFileStore()
     file_store.store(file_path, b"\n\nline3\nline4\nline5\n")
     tool = FileReadTool(file_store=file_store, llm=llm_model)
@@ -501,12 +491,7 @@ def test_file_read_tool_text_format_with_undecodable_bytes_is_still_text(file_st
 
 
 def test_file_read_tool_plain_text_data_cp1252_log_is_decoded_not_replaced(file_store, llm_model):
-    """A cp1252-encoded .log is decoded via charset detection, not corrupted with a replacement char.
-
-    Before the fix this branch decoded with a hardcoded utf-8 plus errors="replace": byte
-    0xe9 is invalid utf-8, so "café" became "caf�". TextFileConverter's charset
-    detection (now shared) recognizes the codepage and decodes the accented character.
-    """
+    """A cp1252-encoded .log is decoded via charset detection, not corrupted with replacement chars."""
     file_store.store("logs/run.log", b"start\ncaf\xe9 au lait\nend\n")
     tool = FileReadTool(file_store=file_store, llm=llm_model)
 
@@ -518,11 +503,7 @@ def test_file_read_tool_plain_text_data_cp1252_log_is_decoded_not_replaced(file_
 
 
 def test_file_read_tool_plain_text_data_utf16_bom_json_is_decoded(file_store, llm_model):
-    """A UTF-16 (with BOM) .json file decodes correctly, with no NULs or replacement chars.
-
-    Before the fix, strict utf-8 raised on the BOM bytes and errors="replace" turned the
-    whole file into a replacement character followed by NUL-interleaved text.
-    """
+    """A UTF-16 (with BOM) .json file decodes correctly, with no NULs or replacement chars."""
     raw = '{"note": "café"}'
     file_store.store("data/state.json", raw.encode("utf-16"))
     tool = FileReadTool(file_store=file_store, llm=llm_model)

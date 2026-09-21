@@ -36,9 +36,8 @@ logger = logging.getLogger(__name__)
 
 EXTRACTED_TEXT_SUFFIX = ".extracted.txt"
 RESERVED_AGENT_PATH_PREFIX = "._agent"
-# File types that are known to be text but are read raw (decoded, not run through a converter):
-# no extraction cache is written for them, and no content is stripped, so line ranges and
-# re-reads after a write always reflect the bytes actually on disk.
+# Types read raw instead of through a converter: no extracted-text cache (which would go stale
+# after a write) and no stripping, so line ranges match the bytes on disk.
 RAW_TEXT_FILE_TYPES = {FileType.PLAIN_TEXT_DATA}
 
 
@@ -903,15 +902,9 @@ class FileReadTool(Node):
                     f"Tool {self.name} - {self.id}: file processing failed: {str(e)}, falling back to raw content"
                 )
 
-            # Bytes reach the agent as their Python repr (b'...' with escaped newlines),
-            # so anything that is valid UTF-8 is handed back as text. A recognized plain-text
-            # data format (e.g. .log, .json) always goes through decode_text_bytes, which
-            # detects the actual encoding (BOM, then charset_normalizer) the same way
-            # TextFileConverter does for .txt, instead of assuming utf-8 and replacing
-            # whatever doesn't fit. Content is not stripped, so line numbers still match
-            # the file on disk. Other/unrecognized extensions keep the strict utf-8-only
-            # check: they fall back to the binary rendering below on any invalid byte,
-            # since nothing has told us they are text.
+            # A recognized plain-text type is known to be text, so it is decoded leniently.
+            # Anything else is only treated as text if it is valid UTF-8; otherwise it falls
+            # through to the binary rendering below, since nothing says it is text.
             if detected_type in RAW_TEXT_FILE_TYPES:
                 text_fallback = decode_text_bytes(content)
             else:
