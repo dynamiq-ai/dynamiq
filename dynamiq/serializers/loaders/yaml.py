@@ -903,7 +903,25 @@ class WorkflowYAMLLoader:
         return new_nodes
 
     @classmethod
-    def get_dependant_nodes(
+    def get_referenced_flow_ids(cls, node_data: dict) -> list[str]:
+        """The ids of the flows a node references, on itself or on a node nested in it.
+
+        A node holding a flow (a SubWorkflow) may sit inside another node's data, such as a Map's
+        `node`; that flow must exist before the outer node is built, like a top-level reference.
+        """
+        flow_ids = []
+        if isinstance(flow_id := node_data.get("flow"), str):
+            flow_ids.append(flow_id)
+        if isinstance(nested_flow_ids := node_data.get("flows"), list):
+            flow_ids.extend(flow_id for flow_id in nested_flow_ids if isinstance(flow_id, str))
+        for value in node_data.values():
+            for nested in value if isinstance(value, list) else [value]:
+                if isinstance(nested, dict) and cls.is_node_type(nested.get("type")):
+                    flow_ids.extend(cls.get_referenced_flow_ids(nested))
+        return flow_ids
+
+    @classmethod
+    def get_referenced_flows(
         cls,
         nodes_data: dict[str, dict],
         flows_data: dict[str, dict],
@@ -913,9 +931,12 @@ class WorkflowYAMLLoader:
         connection_manager: ConnectionManager | None = None,
         init_components: bool = False,
         max_workers: int | None = None,
-    ) -> dict[str, Node]:
+    ) -> tuple[dict[str, Node], dict[str, Flow]]:
         """
-        Get nodes that are dependent on flows.
+        Build the flows that nodes reference, with their nodes, innermost first.
+
+        A node holding a flow needs that flow built before the node is, and the flow's own nodes may
+        hold flows in turn, so every referenced flow is built after the flows its nodes reference.
 
         Args:
             nodes_data: Dictionary containing node data.
@@ -928,43 +949,54 @@ class WorkflowYAMLLoader:
             max_workers: Maximum number of worker threads for node parallel processing.
 
         Returns:
-            A dictionary of nodes that are dependent on flows.
+            The nodes and the flows built, keyed by id.
+
+        Raises:
+            WorkflowYAMLLoaderException: If a flow reaches itself through the flows its nodes hold.
         """
-        dependant_nodes, dependant_nodes_data = {}, {}
-        dependant_flow_ids = []
+        nodes: dict[str, Node] = {}
+        flows: dict[str, Flow] = {}
 
-        for node_id, node_data in nodes_data.items():
-            if "flow" in node_data:
-                dependant_nodes_data[node_id] = node_data
-                dependant_flow_ids.append(node_data["flow"])
-            if "flows" in node_data:
-                dependant_nodes_data[node_id] = node_data
-                dependant_flow_ids.extend(node_data["flows"])
-
-        # Get nodes from dependant flows
-        if dependant_flow_ids:
-            dependant_flows_nodes_ids = []
-            for flow_id, flow_data in flows_data.items():
-                if flow_id in dependant_flow_ids:
-                    dependant_flows_nodes_ids.extend(flow_data.get("nodes", []))
-
-            dependant_flows_nodes_data = {
-                node_id: node_data for node_id, node_data in nodes_data.items() if node_id in dependant_flows_nodes_ids
+        def build(flow_id: str, path: tuple[str, ...]) -> None:
+            # A reference to a flow the data does not have is reported by the node that holds it.
+            if flow_id in flows or flow_id not in flows_data:
+                return
+            if flow_id in path:
+                chain = " -> ".join(path + (flow_id,))
+                raise WorkflowYAMLLoaderException(f"Flow '{flow_id}' holds itself through {chain}")
+            flow_data = flows_data[flow_id]
+            flow_nodes_data = {
+                node_id: nodes_data[node_id]
+                for node_id in flow_data.get("nodes", [])
+                if node_id in nodes_data and node_id not in nodes
             }
-
-            dependant_nodes = cls.get_nodes(
-                nodes_data=dependant_flows_nodes_data,
-                nodes={},
-                flows={},
-                connections=connections,
-                prompts=prompts,
-                registry=registry,
-                connection_manager=connection_manager,
-                init_components=init_components,
-                max_workers=max_workers,
+            for node_data in flow_nodes_data.values():
+                for referenced_id in cls.get_referenced_flow_ids(node_data):
+                    build(referenced_id, path + (flow_id,))
+            nodes.update(
+                cls.get_nodes(
+                    nodes_data=flow_nodes_data,
+                    nodes=nodes,
+                    flows=flows,
+                    connections=connections,
+                    prompts=prompts,
+                    registry=registry,
+                    connection_manager=connection_manager,
+                    init_components=init_components,
+                    max_workers=max_workers,
+                )
+            )
+            flows.update(
+                cls.get_flows(
+                    data={flow_id: flow_data}, flows=flows, nodes=nodes, connection_manager=connection_manager
+                )
             )
 
-        return dependant_nodes
+        for node_data in nodes_data.values():
+            for flow_id in cls.get_referenced_flow_ids(node_data):
+                build(flow_id, ())
+
+        return nodes, flows
 
     @classmethod
     def get_flows(
@@ -1034,48 +1066,6 @@ class WorkflowYAMLLoader:
 
             new_flows[flow_id] = flow
         return new_flows
-
-    @classmethod
-    def get_dependant_flows(
-        cls,
-        nodes_data: dict[str, dict],
-        flows_data: dict[str, dict],
-        dependant_nodes: dict[str, Node],
-        connection_manager: ConnectionManager | None = None,
-    ) -> dict[str, Flow]:
-        """
-        Get flows that are dependent on nodes.
-
-        Args:
-            nodes_data: Dictionary containing node data.
-            flows_data: Dictionary containing flow data.
-            dependant_nodes: Dictionary of dependent nodes.
-            connection_manager: Optional connection manager.
-
-        Returns:
-            A dictionary of flows that are dependent on nodes.
-        """
-        dependant_flows = {}
-        dependant_flow_ids = []
-
-        for node_id, node_data in nodes_data.items():
-            if "flow" in node_data:
-                dependant_flow_ids.append(node_data["flow"])
-            if "flows" in node_data:
-                dependant_flow_ids.extend(node_data["flows"])
-
-        if dependant_flow_ids:
-            dependant_flows_data = {
-                flow_id: flow_data for flow_id, flow_data in flows_data.items() if flow_id in dependant_flow_ids
-            }
-            dependant_flows = cls.get_flows(
-                data=dependant_flows_data,
-                flows={},
-                nodes=dependant_nodes,
-                connection_manager=connection_manager,
-            )
-
-        return dependant_flows
 
     @classmethod
     def get_workflows(cls, data: dict, flows: dict[str, Flow]) -> dict[str, Workflow]:
@@ -1216,7 +1206,7 @@ class WorkflowYAMLLoader:
             nodes_data = data.get("nodes", {})
             flows_data = data.get("flows", {})
 
-            dependant_nodes = cls.get_dependant_nodes(
+            referenced_nodes, referenced_flows = cls.get_referenced_flows(
                 nodes_data=nodes_data,
                 flows_data=flows_data,
                 connections=connections,
@@ -1226,15 +1216,8 @@ class WorkflowYAMLLoader:
                 init_components=init_components,
                 max_workers=max_workers,
             )
-            nodes.update(dependant_nodes)
-
-            dependant_flows = cls.get_dependant_flows(
-                nodes_data=nodes_data,
-                flows_data=flows_data,
-                dependant_nodes=dependant_nodes,
-                connection_manager=connection_manager,
-            )
-            flows.update(dependant_flows)
+            nodes.update(referenced_nodes)
+            flows.update(referenced_flows)
 
             non_dependant_nodes = cls.get_nodes(
                 nodes_data=nodes_data,
