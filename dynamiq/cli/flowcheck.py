@@ -440,18 +440,7 @@ def validate(flow, known_types: set | None = None):
 
         # The API reports these as `cannot be blank` with no node name.
         if node_type.startswith("dynamiq.nodes.llms."):
-            from_requirement = requirement_problems(node.get("connection"), f"node {label!r}: connection")
-            if from_requirement is not None:
-                errors.extend(from_requirement)
-            elif not UUID_RE.match(str(node.get("connection") or "")):
-                errors.append(
-                    f"node {label!r}: connection {node.get('connection')!r} is not a connection UUID. "
-                    "An LLM node carries its own `connection`. Run `dynamiq connection list`."
-                )
-            if not str(node.get("model") or "").strip():
-                errors.append(
-                    f"node {label!r}: an LLM node needs `model` (e.g. \"gpt-4o\")."
-                )
+            errors.extend(llm_requirements(node, f"node {label!r}"))
 
         # A Pipedream node placed in the DAG is validated exactly like one inside an agent.
         if node_type == "dynamiq.nodes.tools.Pipedream":
@@ -690,6 +679,15 @@ def check_judgement(node, label) -> list:
                 f"judgement {label!r}: `judge` must be an LLM or an agent node object, "
                 f"got {judge_type or type(judge).__name__!r}."
             )
+        # The judge is loaded as a node of its own, so it needs what that class requires - the
+        # reason an agent's `llm` is checked here too.
+        elif judge_type.startswith("dynamiq.nodes.agents."):
+            if isinstance(judge.get("llm"), dict):
+                errors.extend(llm_requirements(judge["llm"], f"judgement {label!r}: judge.llm"))
+            else:
+                errors.append(f"judgement {label!r}: the agent judge has no `llm` object.")
+        else:
+            errors.extend(llm_requirements(judge, f"judgement {label!r}: judge"))
     names = []
     for index, question in enumerate(node.get("questions") or []):
         if not isinstance(question, dict):
@@ -838,6 +836,23 @@ def requirement_problems(value, where):
     if path is not None and (not isinstance(path, str) or not path.startswith("$.")):
         problems.append(f"{where}: requirement value_path {path!r} must be a JSONPath like "
                         '"$.account_id". It has to match exactly one value.')
+    return problems
+
+
+def llm_requirements(llm, where) -> list:
+    """`connection` and `model` have no defaults on an LLM node, so one missing either is refused
+    on load. Applies to a node in the DAG and to a judge nested inside a Judgement alike."""
+    problems = []
+    from_requirement = requirement_problems(llm.get("connection"), f"{where}: connection")
+    if from_requirement is not None:
+        problems.extend(from_requirement)
+    elif not UUID_RE.match(str(llm.get("connection") or "")):
+        problems.append(
+            f"{where}: connection {llm.get('connection')!r} is not a connection UUID. "
+            "An LLM node carries its own `connection`. Run `dynamiq connection list`."
+        )
+    if not str(llm.get("model") or "").strip():
+        problems.append(f'{where}: an LLM node needs `model` (e.g. "gpt-4o").')
     return problems
 
 

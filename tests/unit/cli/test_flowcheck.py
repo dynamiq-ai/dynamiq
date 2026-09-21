@@ -326,9 +326,15 @@ def judgement(**overrides) -> dict:
     return node
 
 
+def llm_judge(**overrides) -> dict:
+    judge = {"type": "dynamiq.nodes.llms.OpenAI", "model": "gpt-4o", "connection": str(uuid.uuid4())}
+    judge.update(overrides)
+    return judge
+
+
 def test_a_judgement_node_is_checked_the_way_the_platform_checks_it():
     assert errors_of(flow_with(judgement())) == []
-    assert errors_of(flow_with(judgement(connection=None, judge={"type": "dynamiq.nodes.llms.OpenAI"}))) == []
+    assert errors_of(flow_with(judgement(connection=None, judge=llm_judge()))) == []
 
     found = errors_of(
         flow_with(
@@ -373,9 +379,33 @@ def test_a_judgement_node_is_checked_the_way_the_platform_checks_it():
         assert [e for e in found if fragment in e], fragment
 
 
+def test_a_judge_missing_what_its_node_class_requires_is_caught_before_the_load_fails():
+    """The judge is loaded as a node of its own: `model` and `connection` have no defaults, so a
+    judge written with a bare `type` passes every other check and then fails to build."""
+    bare = errors_of(flow_with(judgement(connection=None, judge={"type": "dynamiq.nodes.llms.OpenAI"})))
+    assert [e for e in bare if "judge: an LLM node needs `model`" in e], bare
+    assert [e for e in bare if "judge: connection None is not a connection UUID" in e], bare
+
+    # An agent judge carries the same requirements one level down.
+    agent = errors_of(flow_with(judgement(connection=None, judge={"type": "dynamiq.nodes.agents.Agent"})))
+    assert [e for e in agent if "the agent judge has no `llm` object" in e], agent
+
+    named = errors_of(
+        flow_with(judgement(connection=None, judge={"type": "dynamiq.nodes.agents.Agent", "llm": llm_judge(model="")}))
+    )
+    assert [e for e in named if "judge.llm: an LLM node needs `model`" in e], named
+
+    assert (
+        errors_of(
+            flow_with(judgement(connection=None, judge={"type": "dynamiq.nodes.agents.Agent", "llm": llm_judge()}))
+        )
+        == []
+    )
+
+
 def test_sampling_without_samples_is_caught_the_way_the_node_defaults_it():
     """`samples` left out is the node's default of 1, which the node refuses on load."""
-    sampling = judgement(connection=None, judge={"type": "dynamiq.nodes.llms.OpenAI"}, confidence_mode="sampling")
+    sampling = judgement(connection=None, judge=llm_judge(), confidence_mode="sampling")
     found = errors_of(flow_with(sampling))
     assert [e for e in found if "sampling needs at least 2 samples" in e], found
 
