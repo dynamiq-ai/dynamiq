@@ -9,6 +9,7 @@ from dynamiq.connections import TypeSafe
 from dynamiq.flows import Flow
 from dynamiq.nodes import InputTransformer
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.detectors import SystemOne
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.operators import DecisionTable
@@ -143,7 +144,7 @@ def triage_workflow(judge: dict) -> Workflow:
 
 def test_a_judgement_feeds_a_decision_table_and_uncertain_verdicts_go_to_a_person(post, mock_tracing_client):
     tracing = TracingCallbackHandler(client=mock_tracing_client())
-    workflow = triage_workflow({"connection": TypeSafe(api_key="k")})
+    workflow = triage_workflow({"judge": SystemOne(connection=TypeSafe(api_key="k"))})
 
     result = workflow.run(
         input_data={"ticket": "Charged twice, fix it today"}, config=RunnableConfig(callbacks=[tracing])
@@ -172,7 +173,9 @@ def test_a_judgement_feeds_a_decision_table_and_uncertain_verdicts_go_to_a_perso
 
 def test_an_agent_calls_the_judgement_as_a_tool_with_questions_of_its_own(post):
     llm = OpenAI(connection=connections.OpenAI(api_key="k"), model="gpt-4o-mini", is_postponed_component_init=True)
-    tool = Judgement(id="judge", name="judgement", connection=TypeSafe(api_key="k"), questions=questions()[:2])
+    tool = Judgement(
+        id="judge", name="judgement", judge=SystemOne(connection=TypeSafe(api_key="k")), questions=questions()[:2]
+    )
     agent = Agent(llm=llm, tools=[tool])
     post.return_value = http(system_one_answers(refund={"type": "noul", "noul": 0.2}))
 
@@ -212,21 +215,24 @@ def test_yaml_round_trip_keeps_the_judge_and_the_questions(tmp_path, post):
     triage = next(node for node in reloaded.flow.nodes if node.id == "triage")
     assert isinstance(triage.judge, OpenAI)
     assert (triage.judge.model, triage.judge.connection.api_key) == ("openai/gpt-4o-mini", "k")
-    assert triage.connection is None
     assert triage.min_confidence == 0.6
     assert [question.model_dump() for question in triage.questions] == [
         question.model_dump() for question in questions()
     ]
     assert "yes_when: A deadline or a blocked payment" in second.read_text()
 
-    system_one = triage_workflow({"connection": TypeSafe(id="typesafe", api_key="k")})
+    system_one = triage_workflow({"judge": SystemOne(connection=TypeSafe(id="typesafe", api_key="k"))})
     path = tmp_path / "system_one.yaml"
     system_one.to_yaml_file(path)
     reloaded = Workflow.from_yaml_file(str(path), init_components=True)
 
     triage = next(node for node in reloaded.flow.nodes if node.id == "triage")
-    assert isinstance(triage.connection, TypeSafe)
-    assert (triage.connection.url, triage.connection.api_key, triage.judge) == ("https://api.typesafe.ai", "k", None)
+    assert isinstance(triage.judge, SystemOne)
+    assert (triage.judge.connection.url, triage.judge.connection.api_key, triage.judge.model) == (
+        "https://api.typesafe.ai",
+        "k",
+        "jev-latest",
+    )
     assert reloaded.run(input_data={"ticket": "Charged twice"}).output["end"]["output"] == {
         "queue": "billing",
         "priority": "high",

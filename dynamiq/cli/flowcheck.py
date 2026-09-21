@@ -39,6 +39,7 @@ RULE_SEVERITIES = ("fail", "warn", "info")
 RULE_MISSING_POLICIES = ("not_evaluated", "fail")
 QUESTION_TYPES = ("noul", "choice", "score")
 CONFIDENCE_MODES = ("verbalized", "sampling")
+SYSTEM_ONE_TYPE = "dynamiq.nodes.detectors.SystemOne"
 JUDGE_TYPE_PREFIXES = ("dynamiq.nodes.llms.", "dynamiq.nodes.agents.")
 MAX_CHOICE_OPTIONS = 255
 MAX_SCORE_LEVELS = 10
@@ -668,29 +669,33 @@ def check_expression(node, label) -> list:
 
 def check_judgement(node, label) -> list:
     errors = []
-    has_connection = node.get("connection") is not None
     judge = node.get("judge")
-    if has_connection == (judge is not None):
+    judge_type = str(judge.get("type") or "") if isinstance(judge, dict) else ""
+    if judge is None:
         errors.append(
-            f"judgement {label!r} needs exactly one judge: a TypeSafe `connection`, or a `judge` node "
-            "(an LLM or an agent)."
+            f"judgement {label!r} has no `judge`. It needs the node that answers: a "
+            f"{SYSTEM_ONE_TYPE!r}, an LLM or an agent."
         )
-    if judge is not None:
-        judge_type = str(judge.get("type") or "") if isinstance(judge, dict) else ""
-        if not judge_type.startswith(JUDGE_TYPE_PREFIXES):
-            errors.append(
-                f"judgement {label!r}: `judge` must be an LLM or an agent node object, "
-                f"got {judge_type or type(judge).__name__!r}."
+    elif not (judge_type == SYSTEM_ONE_TYPE or judge_type.startswith(JUDGE_TYPE_PREFIXES)):
+        errors.append(
+            f"judgement {label!r}: `judge` must be a System One, an LLM or an agent node object, "
+            f"got {judge_type or type(judge).__name__!r}."
+        )
+    # The judge is loaded as a node of its own, so it needs what that class requires - the
+    # reason an agent's `llm` is checked here too.
+    elif judge_type == SYSTEM_ONE_TYPE:
+        errors.extend(
+            connection_requirement(
+                judge, f"judgement {label!r}: judge", "A System One judge carries a TypeSafe `connection`."
             )
-        # The judge is loaded as a node of its own, so it needs what that class requires - the
-        # reason an agent's `llm` is checked here too.
-        elif judge_type.startswith("dynamiq.nodes.agents."):
-            if isinstance(judge.get("llm"), dict):
-                errors.extend(llm_requirements(judge["llm"], f"judgement {label!r}: judge.llm"))
-            else:
-                errors.append(f"judgement {label!r}: the agent judge has no `llm` object.")
+        )
+    elif judge_type.startswith("dynamiq.nodes.agents."):
+        if isinstance(judge.get("llm"), dict):
+            errors.extend(llm_requirements(judge["llm"], f"judgement {label!r}: judge.llm"))
         else:
-            errors.extend(llm_requirements(judge, f"judgement {label!r}: judge"))
+            errors.append(f"judgement {label!r}: the agent judge has no `llm` object.")
+    else:
+        errors.extend(llm_requirements(judge, f"judgement {label!r}: judge"))
     names = []
     for index, question in enumerate(node.get("questions") or []):
         if not isinstance(question, dict):
@@ -730,7 +735,7 @@ def check_judgement(node, label) -> list:
     if samples is not None and not (_is_number(samples) and samples == int(samples) and 1 <= samples <= MAX_SAMPLES):
         errors.append(f"judgement {label!r}: samples {samples!r} is not a whole number between 1 and {MAX_SAMPLES}.")
     if mode == "sampling":
-        if has_connection:
+        if judge_type == SYSTEM_ONE_TYPE:
             errors.append(
                 f"judgement {label!r}: sampling needs an LLM or agent judge; "
                 "a System One connection returns calibrated probabilities in one call."
@@ -842,18 +847,23 @@ def requirement_problems(value, where):
     return problems
 
 
+def connection_requirement(node, where, hint) -> list:
+    """A provider node carries its own `connection`, which the API resolves by id."""
+    from_requirement = requirement_problems(node.get("connection"), f"{where}: connection")
+    if from_requirement is not None:
+        return from_requirement
+    if not UUID_RE.match(str(node.get("connection") or "")):
+        return [
+            f"{where}: connection {node.get('connection')!r} is not a connection UUID. "
+            f"{hint} Run `dynamiq connection list`."
+        ]
+    return []
+
+
 def llm_requirements(llm, where) -> list:
     """`connection` and `model` have no defaults on an LLM node, so one missing either is refused
     on load. Applies to a node in the DAG and to a judge nested inside a Judgement alike."""
-    problems = []
-    from_requirement = requirement_problems(llm.get("connection"), f"{where}: connection")
-    if from_requirement is not None:
-        problems.extend(from_requirement)
-    elif not UUID_RE.match(str(llm.get("connection") or "")):
-        problems.append(
-            f"{where}: connection {llm.get('connection')!r} is not a connection UUID. "
-            "An LLM node carries its own `connection`. Run `dynamiq connection list`."
-        )
+    problems = connection_requirement(llm, where, "An LLM node carries its own `connection`.")
     if not str(llm.get("model") or "").strip():
         problems.append(f'{where}: an LLM node needs `model` (e.g. "gpt-4o").')
     return problems

@@ -308,7 +308,7 @@ def judgement(**overrides) -> dict:
         "type": JUDGEMENT,
         "depends": [{"node": "start"}],
         "input_transformer": {"selector": {"ticket": "$.start.output.ticket"}},
-        "connection": str(uuid.uuid4()),
+        "judge": system_one_judge(),
         "input_fields": [{"id": "f1", "name": "ticket"}],
         "questions": [
             {"id": "q1", "name": "is_urgent", "type": "noul", "instructions": "The customer needs an answer today"},
@@ -326,6 +326,12 @@ def judgement(**overrides) -> dict:
     return node
 
 
+def system_one_judge(**overrides) -> dict:
+    judge = {"type": "dynamiq.nodes.detectors.SystemOne", "connection": str(uuid.uuid4())}
+    judge.update(overrides)
+    return judge
+
+
 def llm_judge(**overrides) -> dict:
     judge = {"type": "dynamiq.nodes.llms.OpenAI", "model": "gpt-4o", "connection": str(uuid.uuid4())}
     judge.update(overrides)
@@ -334,7 +340,7 @@ def llm_judge(**overrides) -> dict:
 
 def test_a_judgement_node_is_checked_the_way_the_platform_checks_it():
     assert errors_of(flow_with(judgement())) == []
-    assert errors_of(flow_with(judgement(connection=None, judge=llm_judge()))) == []
+    assert errors_of(flow_with(judgement(judge=llm_judge()))) == []
 
     found = errors_of(
         flow_with(
@@ -364,9 +370,12 @@ def test_a_judgement_node_is_checked_the_way_the_platform_checks_it():
         )
     )
 
+    assert [e for e in errors_of(flow_with(judgement(judge=None))) if "has no `judge`" in e]
+    sampled = errors_of(flow_with(judgement(confidence_mode="sampling", samples=3)))
+    assert [e for e in sampled if "sampling needs an LLM or agent judge" in e], sampled
+
     for fragment in (
-        "needs exactly one judge",
-        "`judge` must be an LLM or an agent node object, got 'dynamiq.nodes.tools.Python'",
+        "`judge` must be a System One, an LLM or an agent node object, got 'dynamiq.nodes.tools.Python'",
         "question 'is urgent' has a name that is not an identifier",
         "type 'maybe' is not one of noul, choice, score",
         "question 'is urgent' has no `instructions`",
@@ -374,7 +383,6 @@ def test_a_judgement_node_is_checked_the_way_the_platform_checks_it():
         "question 'anger' needs between 2 and 255 options, got 1",
         "question names used more than once: anger",
         "noul_threshold 1.5 is not a number between 0 and 1",
-        "sampling needs an LLM or agent judge",
     ):
         assert [e for e in found if fragment in e], fragment
 
@@ -382,30 +390,23 @@ def test_a_judgement_node_is_checked_the_way_the_platform_checks_it():
 def test_a_judge_missing_what_its_node_class_requires_is_caught_before_the_load_fails():
     """The judge is loaded as a node of its own: `model` and `connection` have no defaults, so a
     judge written with a bare `type` passes every other check and then fails to build."""
-    bare = errors_of(flow_with(judgement(connection=None, judge={"type": "dynamiq.nodes.llms.OpenAI"})))
+    bare = errors_of(flow_with(judgement(judge={"type": "dynamiq.nodes.llms.OpenAI"})))
     assert [e for e in bare if "judge: an LLM node needs `model`" in e], bare
     assert [e for e in bare if "judge: connection None is not a connection UUID" in e], bare
 
     # An agent judge carries the same requirements one level down.
-    agent = errors_of(flow_with(judgement(connection=None, judge={"type": "dynamiq.nodes.agents.Agent"})))
+    agent = errors_of(flow_with(judgement(judge={"type": "dynamiq.nodes.agents.Agent"})))
     assert [e for e in agent if "the agent judge has no `llm` object" in e], agent
 
-    named = errors_of(
-        flow_with(judgement(connection=None, judge={"type": "dynamiq.nodes.agents.Agent", "llm": llm_judge(model="")}))
-    )
+    named = errors_of(flow_with(judgement(judge={"type": "dynamiq.nodes.agents.Agent", "llm": llm_judge(model="")})))
     assert [e for e in named if "judge.llm: an LLM node needs `model`" in e], named
 
-    assert (
-        errors_of(
-            flow_with(judgement(connection=None, judge={"type": "dynamiq.nodes.agents.Agent", "llm": llm_judge()}))
-        )
-        == []
-    )
+    assert errors_of(flow_with(judgement(judge={"type": "dynamiq.nodes.agents.Agent", "llm": llm_judge()}))) == []
 
 
 def test_sampling_without_samples_is_caught_the_way_the_node_defaults_it():
     """`samples` left out is the node's default of 1, which the node refuses on load."""
-    sampling = judgement(connection=None, judge=llm_judge(), confidence_mode="sampling")
+    sampling = judgement(judge=llm_judge(), confidence_mode="sampling")
     found = errors_of(flow_with(sampling))
     assert [e for e in found if "sampling needs at least 2 samples" in e], found
 
@@ -442,7 +443,7 @@ def test_a_judgement_used_as_an_agent_tool_is_checked_the_same_way():
     found = errors_of(flow_with(agent))
 
     for fragment in (
-        "needs exactly one judge",
+        "has no `judge`",
         "question names used more than once: urgent",
         "noul_threshold 1.5 is not a number between 0 and 1",
     ):
@@ -452,7 +453,7 @@ def test_a_judgement_used_as_an_agent_tool_is_checked_the_same_way():
     agent["tools"][0] = {
         "type": JUDGEMENT,
         "name": "triage",
-        "connection": str(uuid.uuid4()),
+        "judge": system_one_judge(),
         "questions": [{"id": "q1", "name": "urgent", "type": "noul", "instructions": "x"}],
     }
     assert errors_of(flow_with(agent)) == []

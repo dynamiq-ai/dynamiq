@@ -13,6 +13,7 @@ from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.connections import TypeSafe
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.detectors import SystemOne
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools import Judgement, JudgementOption, JudgementQuestion, Python
 from dynamiq.nodes.tools.judgement import confidence_of
@@ -107,7 +108,7 @@ def system_one() -> Judgement:
     return Judgement(
         id="triage",
         name="triage",
-        connection=TypeSafe(api_key="k"),
+        judge=SystemOne(connection=TypeSafe(api_key="k")),
         input_fields=[NamedField(name="ticket")],
         questions=questions(),
         min_confidence=0.7,
@@ -237,7 +238,7 @@ def test_the_state_is_the_named_inputs_unless_given_directly(system_one, post):
     system_one.run(input_data={})
     assert post.call_args.kwargs["json"]["state"] == {"ticket": None}
 
-    bare = Judgement(connection=TypeSafe(api_key="k"), questions=questions())
+    bare = Judgement(judge=SystemOne(connection=TypeSafe(api_key="k")), questions=questions())
     result = bare.run(input_data={})
     assert result.status == RunnableStatus.FAILURE
     assert result.error.recoverable is True
@@ -320,8 +321,10 @@ def test_a_state_beyond_the_context_limit_fails_before_the_request(system_one, p
 
 
 def test_agent_questions_can_be_hidden_from_the_tool_schema():
-    fixed = Judgement(connection=TypeSafe(api_key="k"), questions=questions(), allow_agent_questions=False)
-    open_ = Judgement(connection=TypeSafe(api_key="k"), questions=questions())
+    fixed = Judgement(
+        judge=SystemOne(connection=TypeSafe(api_key="k")), questions=questions(), allow_agent_questions=False
+    )
+    open_ = Judgement(judge=SystemOne(connection=TypeSafe(api_key="k")), questions=questions())
 
     assert fixed.resolved_input_schema.model_fields["questions"].json_schema_extra == {"is_accessible_to_agent": False}
     assert open_.resolved_input_schema.model_fields["questions"].json_schema_extra is None
@@ -334,11 +337,17 @@ def test_agent_questions_can_be_hidden_from_the_tool_schema():
 @pytest.mark.parametrize(
     ("fields", "fragment"),
     [
-        (lambda llm: {}, "needs exactly one judge"),
-        (lambda llm: {"connection": TypeSafe(api_key="k"), "judge": llm}, "needs exactly one judge"),
-        (lambda llm: {"judge": Python(code="def run(_):\n    return {}")}, "must be an LLM or an agent node"),
+        (lambda llm: {}, "Field required"),
         (
-            lambda llm: {"connection": TypeSafe(api_key="k"), "confidence_mode": "sampling", "samples": 3},
+            lambda llm: {"judge": Python(code="def run(_):\n    return {}")},
+            "must be a System One, an LLM or an agent node",
+        ),
+        (
+            lambda llm: {
+                "judge": SystemOne(connection=TypeSafe(api_key="k")),
+                "confidence_mode": "sampling",
+                "samples": 3,
+            },
             "sampling needs an LLM or agent judge",
         ),
         (lambda llm: {"judge": llm, "confidence_mode": "sampling"}, "sampling needs at least 2 samples"),
@@ -544,6 +553,28 @@ def test_a_state_the_transport_could_not_encode_is_rendered_the_way_the_size_che
     sent = post.call_args.kwargs["json"]
     assert sent["state"] == {"ticket": {"opened": "2026-09-21 14:30:00", "total": "42.50"}}
     json.dumps(sent)  # what requests does internally; a raw datetime raises here
+
+
+def test_the_system_one_judge_also_runs_on_its_own(post):
+    """It is a node, not a helper the Judgement reaches into: run standalone it sends the same request
+    and returns the service's answers unread, for the caller to interpret."""
+    node = SystemOne(connection=TypeSafe(api_key="k"))
+
+    result = node.run(input_data={"state": "Charged twice", "questions": {"is_urgent": {"type": "noul"}}})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert post.call_args.kwargs["json"] == {
+        "model": "jev-latest",
+        "state": "Charged twice",
+        "questions": {"is_urgent": {"type": "noul"}},
+    }
+    assert result.output["model"] == "jev-1.13.0"
+    assert result.output["answers"]["is_urgent"] == {"type": "noul", "noul": 0.92}
+    assert result.output["usage"] == {
+        "input_tokens": 1200,
+        "output_tokens": 0,
+        "cost_usd": pytest.approx(0.0000504),
+    }
 
 
 def test_a_judge_that_does_not_answer_with_json_is_a_recoverable_failure(llm, mocker):

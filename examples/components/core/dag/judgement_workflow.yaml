@@ -13,7 +13,10 @@ nodes:
   triage:
     type: dynamiq.nodes.tools.Judgement
     name: triage
-    connection: typesafe
+    judge:
+      type: dynamiq.nodes.detectors.SystemOne
+      name: system-one
+      connection: typesafe
     input_fields:
       - { id: ticket, name: ticket }
     min_confidence: 0.6

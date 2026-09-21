@@ -7,10 +7,10 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from dynamiq.callbacks.base import BaseCallbackHandler
-from dynamiq.connections import TypeSafe
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
+from dynamiq.nodes.detectors import SystemOne
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.schema_utils import apply_param_modes
@@ -43,14 +43,6 @@ Examples:
 - {"state": "My card was charged twice, fix it today", "questions": [{"name": "is_urgent", "type": "noul", "instructions": "The customer needs a response today"}]}
 - {"state": {"subject": "Refund", "body": "..."}, "questions": [{"name": "team", "type": "choice", "instructions": "Which team handles this?", "options": [{"name": "billing"}, {"name": "support"}]}]}"""  # noqa: E501
 
-SYSTEM_ONE_PATH = "/v1/systemone"
-# The documented context limit for the state and the longest question together; a rough estimate here
-# fails early with a clear message, and the API's own 422 stays the backstop.
-SYSTEM_ONE_STATE_MAX_TOKENS = 32_000
-# The API asks for a backoff on these; the platform's own retry has no way to read Retry-After.
-_TRANSIENT_STATUSES = frozenset({408, 429, 500, 502, 503, 504, 529})
-_MAX_ATTEMPTS = 3
-_MAX_WAIT_SECONDS = 10.0
 _MAX_OPTIONS = 255
 _MAX_LEVELS = 10
 _MAX_SAMPLES = 10
@@ -236,12 +228,11 @@ class _Verdict(BaseModel):
 class Judgement(Node):
     """Asks typed questions about a state and returns calibrated answers a workflow can route on.
 
-    The node is the contract; the judge behind it is pluggable. A `connection` to TypeSafe sends the questions
-    to a System One model, which answers every one in a single call with probabilities calibrated for that
-    purpose. A `judge` node instead asks an LLM, with a JSON schema built from the questions, or an agent,
-    which may use its tools before answering. Exactly one of the two is set. The three read the same questions
-    and produce the same output, so a flow can start on an LLM and move to System One, or the reverse,
-    without touching the nodes after it.
+    The node is the contract; the judge behind it is pluggable. `judge` holds the node that answers: a
+    `SystemOne`, which sends every question to a TypeSafe model in a single call and returns probabilities
+    calibrated for that purpose; an LLM, answering against a JSON schema built from the questions; or an
+    agent, which may use its tools first. All three read the same questions and produce the same output, so
+    a flow can start on an LLM and move to System One, or the reverse, without touching the nodes after it.
 
     The state is what the question is about: a text, an object or a list of messages. It comes in as `state`,
     or, when the node declares `input_fields`, as those fields by name, which is how a workflow wires a record
@@ -263,9 +254,7 @@ class Judgement(Node):
     action_type: ActionType = ActionType.JUDGEMENT
     is_parallel_execution_allowed: bool = True
 
-    connection: TypeSafe | None = None
-    judge: Node | None = Field(default=None, description="An LLM or an agent node that answers the questions.")
-    model: str = Field(default="jev-latest", description="The System One model; ignored by an LLM or agent judge.")
+    judge: Node = Field(description="Who answers the questions: a SystemOne, an LLM or an agent node.")
     input_fields: list[NamedField] = []
     questions: list[JudgementQuestion] = []
     noul_threshold: float = Field(default=0.5, ge=0, le=1, description="A yes/no probability at or above it is a yes.")
@@ -278,10 +267,6 @@ class Judgement(Node):
     confidence_mode: ConfidenceMode = ConfidenceMode.VERBALIZED
     samples: int = Field(default=1, ge=1, le=_MAX_SAMPLES, description="Answers averaged in sampling mode.")
     include_rationale: bool = Field(default=False, description="Ask an LLM or agent judge to explain each answer.")
-    timeout: float = Field(default=30, gt=0, description="Seconds to wait for a System One answer.")
-    input_cost_per_million_tokens: float = Field(
-        default=0.042, ge=0, description="What System One charges per million input tokens, for usage tracking."
-    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[JudgementInputSchema]] = JudgementInputSchema
@@ -295,18 +280,13 @@ class Judgement(Node):
 
     @model_validator(mode="after")
     def validate_judge(self):
-        if (self.connection is None) == (self.judge is None):
+        if not (isinstance(self.judge, (SystemOne, BaseLLM)) or self.judge.group == NodeGroup.AGENTS):
             raise ValueError(
-                f"Judgement '{self.name}' needs exactly one judge: a TypeSafe connection, or a judge node "
-                "(an LLM or an agent)"
-            )
-        if self.judge is not None and not (isinstance(self.judge, BaseLLM) or self.judge.group == NodeGroup.AGENTS):
-            raise ValueError(
-                f"Judgement '{self.name}': the judge must be an LLM or an agent node, "
+                f"Judgement '{self.name}': the judge must be a System One, an LLM or an agent node, "
                 f"not {type(self.judge).__name__}"
             )
         if self.confidence_mode == ConfidenceMode.SAMPLING:
-            if self.connection is not None:
+            if isinstance(self.judge, SystemOne):
                 raise ValueError(
                     f"Judgement '{self.name}': sampling needs an LLM or agent judge; "
                     "System One returns calibrated probabilities in one call"
@@ -321,7 +301,7 @@ class Judgement(Node):
     def init_components(self, connection_manager: ConnectionManager | None = None):
         connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
-        if self.judge is not None and self.judge.is_postponed_component_init:
+        if self.judge.is_postponed_component_init:
             self.judge.init_components(connection_manager)
 
     @property
@@ -330,19 +310,12 @@ class Judgement(Node):
 
     def to_dict(self, **kwargs) -> dict:
         data = super().to_dict(**kwargs)
-        # The judge that is not in use is left out rather than written as null: a YAML dump reads a connection
-        # entry by its id, and a flow reads better without the slot it does not fill.
-        if self.connection is None:
-            data.pop("connection", None)
-        if self.judge is None:
-            data.pop("judge", None)
-        else:
-            data["judge"] = self.judge.to_dict(**kwargs)
+        data["judge"] = self.judge.to_dict(**kwargs)
         return data
 
     @property
     def backend(self) -> str:
-        if self.connection is not None:
+        if isinstance(self.judge, SystemOne):
             return "system_one"
         return "llm" if isinstance(self.judge, BaseLLM) else "agent"
 
@@ -352,11 +325,9 @@ class Judgement(Node):
         questions = self._active_questions(input_data.questions)
         state = self._state_of(input_data)
 
-        if self.connection is not None:
-            data = self._send_system_one(self._system_one_payload(state, questions), config)
-            verdicts = self._read_system_one(data, questions)
-            self.run_on_node_execute_run(config.callbacks, usage_data=self._usage_of(data), **kwargs)
-            return self._output(verdicts, model=str(data.get("model") or self.model), usage=self._usage_summary(data))
+        if isinstance(self.judge, SystemOne):
+            data = self.judge.fetch(state, self._wire_questions(questions), config)
+            return self._system_one_output(data, questions, config, **kwargs)
 
         runs = [self._run_judge(state, questions, config, **kwargs) for _ in range(self._sample_count())]
         return self._judge_output(runs, questions)
@@ -369,11 +340,9 @@ class Judgement(Node):
         questions = self._active_questions(input_data.questions)
         state = self._state_of(input_data)
 
-        if self.connection is not None:
-            data = await self._send_system_one_async(self._system_one_payload(state, questions), config)
-            verdicts = self._read_system_one(data, questions)
-            self.run_on_node_execute_run(config.callbacks, usage_data=self._usage_of(data), **kwargs)
-            return self._output(verdicts, model=str(data.get("model") or self.model), usage=self._usage_summary(data))
+        if isinstance(self.judge, SystemOne):
+            data = await self.judge.fetch_async(state, self._wire_questions(questions), config)
+            return self._system_one_output(data, questions, config, **kwargs)
 
         runs = await asyncio.gather(
             *(self._run_judge_async(state, questions, config, **kwargs) for _ in range(self._sample_count()))
@@ -413,23 +382,16 @@ class Judgement(Node):
 
     # -- System One -------------------------------------------------------------------------------------------
 
-    def _system_one_payload(self, state: Any, questions: list[JudgementQuestion]) -> dict[str, Any]:
-        text = state if isinstance(state, str) else json.dumps(state, ensure_ascii=False, default=str)
-        if len(text) / CHARS_PER_TOKEN > SYSTEM_ONE_STATE_MAX_TOKENS:
-            raise ToolExecutionException(
-                f"Judgement '{self.name}': the state is about {len(text) // CHARS_PER_TOKEN:,} tokens; System One "
-                f"reads at most {SYSTEM_ONE_STATE_MAX_TOKENS:,} with a question. Judge a part of it, or summarize it "
-                "first.",
-                recoverable=True,
-            )
-        return {
-            "model": self.model,
-            # What was measured is what goes on the wire. `default=str` renders a datetime, a Decimal
-            # or a UUID that the transport's own encoder would refuse with a TypeError - which is
-            # neither a requests nor an httpx error, so it would escape the retry loop entirely.
-            "state": state if isinstance(state, str) else json.loads(text),
-            "questions": {question.name: self._wire_question(question) for question in questions},
-        }
+    def _system_one_output(
+        self, data: dict[str, Any], questions: list[JudgementQuestion], config: RunnableConfig, **kwargs
+    ) -> dict[str, Any]:
+        answer = self.judge.answer_of(data)
+        verdicts = self._read_system_one(answer, questions)
+        self.run_on_node_execute_run(config.callbacks, usage_data=self.judge.usage_of(data), **kwargs)
+        return self._output(verdicts, model=answer["model"], usage=answer["usage"])
+
+    def _wire_questions(self, questions: list[JudgementQuestion]) -> dict[str, Any]:
+        return {question.name: self._wire_question(question) for question in questions}
 
     @staticmethod
     def _wire_question(question: JudgementQuestion) -> dict[str, Any]:
@@ -444,106 +406,8 @@ class Judgement(Node):
             wire["criteria"] = [option.description or option.name for option in question.options]
         return wire
 
-    def _endpoint(self) -> tuple[str, dict[str, str]]:
-        url = self.connection.url.rstrip("/") + SYSTEM_ONE_PATH
-        return url, {"Authorization": f"Bearer {self.connection.api_key}"}
-
-    def _send_system_one(self, payload: dict[str, Any], config: RunnableConfig) -> dict[str, Any]:
-        requests = self.connection.connect()
-        url, headers = self._endpoint()
-        for attempt in range(_MAX_ATTEMPTS):
-            check_cancellation(config)
-            try:
-                response = requests.post(url, json=payload, headers=headers, timeout=self.timeout)
-            except requests.RequestException as e:
-                if attempt + 1 == _MAX_ATTEMPTS:
-                    raise self._transport_error(e)
-                time.sleep(self._wait_seconds(attempt, {}))
-                continue
-            if response.status_code in _TRANSIENT_STATUSES and attempt + 1 < _MAX_ATTEMPTS:
-                time.sleep(self._wait_seconds(attempt, response.headers))
-                continue
-            return self._read_response(response.status_code, response.text)
-        raise AssertionError("unreachable")
-
-    async def _send_system_one_async(self, payload: dict[str, Any], config: RunnableConfig) -> dict[str, Any]:
-        import httpx
-
-        url, headers = self._endpoint()
-        async with await self.connection.connect_async() as client:
-            for attempt in range(_MAX_ATTEMPTS):
-                check_cancellation(config)
-                try:
-                    response = await client.post(url, json=payload, headers=headers, timeout=self.timeout)
-                except httpx.HTTPError as e:
-                    if attempt + 1 == _MAX_ATTEMPTS:
-                        raise self._transport_error(e)
-                    await asyncio.sleep(self._wait_seconds(attempt, {}))
-                    continue
-                if response.status_code in _TRANSIENT_STATUSES and attempt + 1 < _MAX_ATTEMPTS:
-                    await asyncio.sleep(self._wait_seconds(attempt, response.headers))
-                    continue
-                return self._read_response(response.status_code, response.text)
-        raise AssertionError("unreachable")
-
-    @staticmethod
-    def _wait_seconds(attempt: int, headers: Any) -> float:
-        """How long to wait before the next attempt: what the server asked for, else a doubling backoff."""
-        wait = 0.5 * 2**attempt
-        for header, scale in (("retry-after-ms", 1000.0), ("Retry-After", 1.0)):
-            try:
-                wait = float(headers.get(header)) / scale
-                break
-            except (AttributeError, TypeError, ValueError):
-                continue
-        return max(0.0, min(wait, _MAX_WAIT_SECONDS))
-
-    def _transport_error(self, error: Exception) -> ToolExecutionException:
-        logger.error(f"Judgement '{self.name}': System One request failed. Error: {error}")
-        return ToolExecutionException(
-            f"Judgement '{self.name}': the System One request failed ({error}); retry later.", recoverable=True
-        )
-
-    def _read_response(self, status: int, text: str) -> dict[str, Any]:
-        if status == 200:
-            try:
-                data = json.loads(text)
-            except ValueError:
-                data = None
-            if not isinstance(data, dict):
-                raise ToolExecutionException(
-                    f"Judgement '{self.name}': System One returned a body that is not a JSON object.",
-                    recoverable=True,
-                )
-            return data
-        detail = self._error_detail(text)
-        if status in (401, 403):
-            # A credential problem does not go away by asking again.
-            raise ValueError(f"Judgement '{self.name}': System One rejected the API key (HTTP {status}): {detail}")
-        if status == 422:
-            message = f"System One rejected the request (HTTP 422): {detail}"
-        elif status in _TRANSIENT_STATUSES:
-            message = f"System One is rate limited or unavailable (HTTP {status}); retry later. {detail}".rstrip()
-        else:
-            message = f"System One answered HTTP {status}: {detail}"
-        logger.error(f"Judgement '{self.name}': {message}")
-        raise ToolExecutionException(f"Judgement '{self.name}': {message}", recoverable=True)
-
-    @staticmethod
-    def _error_detail(text: str) -> str:
-        try:
-            body = json.loads(text)
-        except ValueError:
-            body = None
-        if isinstance(body, dict):
-            error = body.get("error")
-            detail = error.get("message") if isinstance(error, dict) else body.get("detail") or body.get("message")
-            if detail:
-                return detail if isinstance(detail, str) else json.dumps(detail)
-        return text.strip()[:_EVIDENCE_CHARS]
-
-    def _read_system_one(self, data: dict[str, Any], questions: list[JudgementQuestion]) -> list[_Verdict]:
-        answers = data.get("answers")
+    def _read_system_one(self, answer: dict[str, Any], questions: list[JudgementQuestion]) -> list[_Verdict]:
+        answers = answer.get("answers")
         if not isinstance(answers, dict):
             raise ToolExecutionException(f"Judgement '{self.name}': System One returned no answers.", recoverable=True)
         verdicts = []
@@ -582,29 +446,6 @@ class Judgement(Node):
             confidence=confidence,
             score=float(score) if isinstance(score, (int, float)) else None,
         )
-
-    def _usage_of(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Usage in the shape LLM nodes report, so the platform's cost tracking needs no special case."""
-        usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
-        input_tokens = int(usage.get("input_tokens") or 0)
-        output_tokens = int(usage.get("output_tokens") or 0)
-        cost = input_tokens / 1_000_000 * self.input_cost_per_million_tokens
-        return {
-            "prompt_tokens": input_tokens,
-            "completion_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-            "prompt_tokens_cost_usd": cost,
-            "completion_tokens_cost_usd": 0.0,
-            "total_tokens_cost_usd": cost,
-        }
-
-    def _usage_summary(self, data: dict[str, Any]) -> dict[str, Any]:
-        usage = self._usage_of(data)
-        return {
-            "input_tokens": usage["prompt_tokens"],
-            "output_tokens": usage["completion_tokens"],
-            "cost_usd": usage["total_tokens_cost_usd"],
-        }
 
     # -- LLM and agent judges ---------------------------------------------------------------------------------
 
@@ -867,7 +708,7 @@ class Judgement(Node):
             "low_confidence": low_confidence,
             "model": model,
             "backend": self.backend,
-            "confidence_source": "model" if self.connection is not None else self.confidence_mode.value,
+            "confidence_source": "model" if self.backend == "system_one" else self.confidence_mode.value,
             "usage": usage,
             "rationale": rationale or None,
             "evidence": evidence,
