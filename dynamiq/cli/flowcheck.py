@@ -45,6 +45,8 @@ JUDGE_TYPE_PREFIXES = ("dynamiq.nodes.llms.", "dynamiq.nodes.agents.")
 MAX_CHOICE_OPTIONS = 255
 MAX_SCORE_LEVELS = 10
 MAX_SAMPLES = 10
+# Judgement.samples when the author leaves it out.
+DEFAULT_SAMPLES = 1
 # The output a decision table adds beside its columns, so no column may take it.
 MATCHED_RULES_KEY = "matched_rules"
 # A name an expression can read: an input, a derived value or an output key.
@@ -460,7 +462,8 @@ def validate(flow, known_types: set | None = None):
             errors.extend(node_errors)
             warnings.extend(node_advisory)
 
-        if node_type.startswith("dynamiq.nodes.tools."):
+        # A Judgement that depends on an agent judges that agent's answer; it belongs in the DAG, not in `tools`.
+        if node_type.startswith("dynamiq.nodes.tools.") and node_type != JUDGEMENT_TYPE:
             after = [
                 d.get("node") for d in coerce_depends(node.get("depends"))
                 if isinstance(d, dict) and d.get("node") in agent_ids
@@ -734,8 +737,12 @@ def check_judgement(node, label) -> list:
                 f"judgement {label!r}: sampling needs an LLM or agent judge; "
                 "a System One connection returns calibrated probabilities in one call."
             )
-        elif samples is not None and _is_number(samples) and samples < 2:
-            errors.append(f"judgement {label!r}: sampling needs at least 2 samples.")
+        # An omitted `samples` is the node's default of 1, which sampling refuses on load.
+        elif _is_number(effective := DEFAULT_SAMPLES if samples is None else samples) and effective < 2:
+            errors.append(
+                f"judgement {label!r}: sampling needs at least 2 samples, "
+                f"and `samples` is {'unset, so it defaults to 1' if samples is None else effective!r}."
+            )
     return errors
 
 

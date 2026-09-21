@@ -69,6 +69,11 @@ def errors_of(flow: dict) -> list[str]:
     return errors
 
 
+def warnings_of(flow: dict) -> list[str]:
+    _, warnings = flowcheck.validate(flow)
+    return warnings
+
+
 def test_a_well_formed_decision_flow_passes():
     choice = {
         "id": "route",
@@ -366,3 +371,27 @@ def test_a_judgement_node_is_checked_the_way_the_platform_checks_it():
         "sampling needs an LLM or agent judge",
     ):
         assert [e for e in found if fragment in e], fragment
+
+
+def test_sampling_without_samples_is_caught_the_way_the_node_defaults_it():
+    """`samples` left out is the node's default of 1, which the node refuses on load."""
+    sampling = judgement(connection=None, judge={"type": "dynamiq.nodes.llms.OpenAI"}, confidence_mode="sampling")
+    found = errors_of(flow_with(sampling))
+    assert [e for e in found if "sampling needs at least 2 samples" in e], found
+
+    assert errors_of(flow_with({**sampling, "samples": 3})) == []
+
+
+def test_a_judgement_that_judges_an_agent_answer_is_not_told_to_become_a_tool():
+    agent = {"id": "writer", "name": "writer", "type": "dynamiq.nodes.agents.Agent", "depends": [{"node": "start"}]}
+    judge = judgement(depends=[{"node": "writer"}], input_transformer={"selector": {"ticket": "$.writer.output"}})
+    assert [w for w in warnings_of(flow_with(agent, judge)) if "standalone step" in w] == []
+
+    # A real tool after an agent still gets the advice.
+    python = {
+        "id": "after",
+        "name": "after",
+        "type": "dynamiq.nodes.tools.Python",
+        "depends": [{"node": "writer"}],
+    }
+    assert [w for w in warnings_of(flow_with(agent, python)) if "standalone step" in w]
