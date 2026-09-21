@@ -429,6 +429,9 @@ def validate(flow, known_types: set | None = None):
                 tool_errors, tool_advisory = check_pipedream(tool, where)
                 errors.extend(tool_errors)
                 warnings.extend(tool_advisory)
+            # A Judgement is built to be an agent's tool, so it reaches the loader from here too.
+            elif tool.get("type") == JUDGEMENT_TYPE:
+                errors.extend(check_judgement(tool, f"{tool.get('name') or 'judgement'} on node {label}"))
             elif (tool.get("connection") is not None
                     and requirement_problems(tool.get("connection"), f"{where}: connection") is not None):
                 errors.extend(requirement_problems(tool.get("connection"), f"{where}: connection"))

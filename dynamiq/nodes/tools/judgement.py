@@ -424,7 +424,10 @@ class Judgement(Node):
             )
         return {
             "model": self.model,
-            "state": state,
+            # What was measured is what goes on the wire. `default=str` renders a datetime, a Decimal
+            # or a UUID that the transport's own encoder would refuse with a TypeError - which is
+            # neither a requests nor an httpx error, so it would escape the retry loop entirely.
+            "state": state if isinstance(state, str) else json.loads(text),
             "questions": {question.name: self._wire_question(question) for question in questions},
         }
 

@@ -412,6 +412,52 @@ def test_sampling_without_samples_is_caught_the_way_the_node_defaults_it():
     assert errors_of(flow_with({**sampling, "samples": 3})) == []
 
 
+def test_a_judgement_used_as_an_agent_tool_is_checked_the_same_way():
+    """The node is built to be an agent's tool, so it reaches the loader from `tools[]` too - where
+    nothing but Pipedream used to be inspected."""
+    agent = {
+        "id": "writer",
+        "name": "writer",
+        "type": "dynamiq.nodes.agents.Agent",
+        "depends": [{"node": "start"}],
+        "llm": llm_judge(),
+        "tools": [
+            {
+                "type": JUDGEMENT,
+                "name": "triage",
+                "questions": [
+                    {"id": "q1", "name": "urgent", "type": "noul", "instructions": "x"},
+                    {
+                        "id": "q2",
+                        "name": "urgent",
+                        "type": "choice",
+                        "instructions": "y",
+                        "options": [{"id": "o1", "name": "a"}, {"id": "o2", "name": "b"}],
+                    },
+                ],
+                "noul_threshold": 1.5,
+            }
+        ],
+    }
+    found = errors_of(flow_with(agent))
+
+    for fragment in (
+        "needs exactly one judge",
+        "question names used more than once: urgent",
+        "noul_threshold 1.5 is not a number between 0 and 1",
+    ):
+        assert [e for e in found if "triage on node writer" in e and fragment in e], (fragment, found)
+
+    # A well-formed one passes, so the check does not just reject every tool placement.
+    agent["tools"][0] = {
+        "type": JUDGEMENT,
+        "name": "triage",
+        "connection": str(uuid.uuid4()),
+        "questions": [{"id": "q1", "name": "urgent", "type": "noul", "instructions": "x"}],
+    }
+    assert errors_of(flow_with(agent)) == []
+
+
 def test_a_judgement_that_judges_an_agent_answer_is_not_told_to_become_a_tool():
     agent = {"id": "writer", "name": "writer", "type": "dynamiq.nodes.agents.Agent", "depends": [{"node": "start"}]}
     judge = judgement(depends=[{"node": "writer"}], input_transformer={"selector": {"ticket": "$.writer.output"}})

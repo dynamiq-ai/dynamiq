@@ -1,3 +1,5 @@
+import datetime
+import decimal
 import json
 import re
 from typing import Literal
@@ -528,6 +530,20 @@ def test_every_run_gets_its_own_judge_so_two_callers_cannot_share_one(llm, mocke
     assert judges[0] is not judges[1]
     assert all(judge is not node.judge for judge in judges)
     assert [judge.model for judge in judges] == [node.judge.model] * 2
+
+
+def test_a_state_the_transport_could_not_encode_is_rendered_the_way_the_size_check_measured_it(system_one, post):
+    """The size check serializes with `default=str`, so a datetime measures fine. Sending the raw
+    object would raise TypeError inside requests - neither a RequestException nor an httpx error,
+    so it would escape the retry loop and surface as an encoder traceback."""
+    result = system_one.run(
+        input_data={"ticket": {"opened": datetime.datetime(2026, 9, 21, 14, 30), "total": decimal.Decimal("42.50")}}
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+    sent = post.call_args.kwargs["json"]
+    assert sent["state"] == {"ticket": {"opened": "2026-09-21 14:30:00", "total": "42.50"}}
+    json.dumps(sent)  # what requests does internally; a raw datetime raises here
 
 
 def test_a_judge_that_does_not_answer_with_json_is_a_recoverable_failure(llm, mocker):
