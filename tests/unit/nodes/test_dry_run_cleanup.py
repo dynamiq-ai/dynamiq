@@ -9,7 +9,7 @@ from dynamiq.flows import Flow
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.nodes.node import ErrorHandling, NodeDependency
-from dynamiq.nodes.operators import Map, SubWorkflow
+from dynamiq.nodes.operators import Map, Pass, SubWorkflow
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.dry_run import DryRunConfig
 
@@ -190,3 +190,22 @@ def test_a_map_keeps_nothing_outside_a_dry_run():
 
     assert result.output["output"] == [{"written": True}, {"written": True}]
     assert batch._dry_run_nodes == []
+
+
+def test_a_map_keeps_no_clone_of_a_node_that_has_nothing_to_clean():
+    """A node leaving the base hook alone holds no writes, so retaining one clone per item would
+    cost a whole run's worth of nodes for nothing."""
+    batch = Map(id="batch", node=Pass(id="passthrough"))
+    config = dry_run_config()
+
+    result = batch.run({"input": [{"n": 1}, {"n": 2}, {"n": 3}]}, config)
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert batch._dry_run_nodes == []
+
+    # A node that does override it is still kept, so what the clones wrote is still cleaned up.
+    writers = Map(id="writers", node=Ingest(id="writer"))
+    assert writers.run({"input": [{"n": 1}, {"n": 2}]}, config).status == RunnableStatus.SUCCESS
+    assert len(writers._dry_run_nodes) == 2
+    writers.dry_run_cleanup(config.dry_run)
+    assert len(Ingest.cleanups) == 2 and writers._dry_run_nodes == []

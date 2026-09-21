@@ -252,7 +252,14 @@ class Map(Node):
         """Execute a single workflow and handle errors."""
         id_map: dict[str, set[str]] = {}
         node_copy = regenerate_node_ids(node.clone(), id_map)
-        if config is not None and config.dry_run and config.dry_run.enabled:
+        # Only a clone that overrides the base hook holds anything to clean; keeping the rest would
+        # retain one node per item for a whole run, and a dry run is the default.
+        if (
+            config is not None
+            and config.dry_run
+            and config.dry_run.enabled
+            and node_copy.dry_run_cleanup.__qualname__ != "Node.dry_run_cleanup"
+        ):
             self._dry_run_nodes.append(node_copy)
 
         # Create an isolated config per iteration with unique streaming override for the cloned node
