@@ -10,6 +10,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationInfo, field_validator, model_validator
 
 from dynamiq.checkpoints.checkpoint import BaseCheckpointState
+from dynamiq.components.converters.text import decode_text_bytes
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -36,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 EXTRACTED_TEXT_SUFFIX = ".extracted.txt"
 RESERVED_AGENT_PATH_PREFIX = "._agent"
+# Types read raw instead of through a converter: no extracted-text cache (which would go stale
+# after a write) and no stripping, so line ranges match the bytes on disk.
+RAW_TEXT_FILE_TYPES = {FileType.PLAIN_TEXT_DATA}
 
 
 def _line_of(content: str, offset: int) -> int:
@@ -784,13 +788,19 @@ class FileReadTool(Node):
                 result_payload["content"] = processed
                 return result_payload
 
+            detected_type = None
             try:
                 file_io = BytesIO(content)
                 filename = os.path.basename(input_data.file_path)
 
                 detected_type = self._detect_file_type(file_io, filename, config, **kwargs)
 
-                if detected_type:
+                if detected_type in RAW_TEXT_FILE_TYPES:
+                    logger.debug(
+                        f"Tool {self.name} - {self.id}: detected type {detected_type} is read raw, "
+                        "skipping converter/extraction cache"
+                    )
+                elif detected_type:
                     text_content, page_entries = self._process_file_with_converter(
                         file_io,
                         filename,
@@ -875,12 +885,18 @@ class FileReadTool(Node):
                     f"Tool {self.name} - {self.id}: file processing failed: {str(e)}, falling back to raw content"
                 )
 
-            if input_data.start_line is not None or input_data.end_line is not None:
+            # A recognized plain-text type is known to be text, so it is decoded leniently.
+            # Anything else is only treated as text if it is valid UTF-8; otherwise it falls
+            # through to the binary rendering below, since nothing says it is text.
+            if detected_type in RAW_TEXT_FILE_TYPES:
+                text_fallback = decode_text_bytes(content)
+            else:
                 try:
                     text_fallback = content.decode("utf-8")
                 except UnicodeDecodeError:
                     text_fallback = None
 
+            if input_data.start_line is not None or input_data.end_line is not None:
                 if text_fallback is not None:
                     sliced, total, a_start, a_end = self._slice_lines(
                         text_fallback, input_data.start_line, input_data.end_line, input_data.file_path
@@ -891,6 +907,16 @@ class FileReadTool(Node):
                         "total_lines": total,
                         "line_range": [a_start, a_end],
                     }
+
+            if text_fallback is not None:
+                rendered_text = self._render_text_content(
+                    text_content=text_fallback,
+                    mode=mode,
+                    chunk_size=chunk_size,
+                    preview_limit=preview_limit,
+                    file_path=input_data.file_path,
+                )
+                return {"content": rendered_text, "file_info": file_info}
 
             rendered_content = self._render_binary_content(
                 content=content,

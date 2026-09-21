@@ -1,3 +1,4 @@
+import codecs
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Literal
@@ -8,6 +9,68 @@ from dynamiq.components.converters.base import BaseConverter
 from dynamiq.components.converters.utils import build_source_metadata, get_filename_for_bytesio
 from dynamiq.types import Document, DocumentCreationMode
 from dynamiq.utils.logger import logger
+
+# Order matters: the UTF-32 BOMs start with the UTF-16 ones, so they must be matched first.
+_BOM_ENCODINGS: list[tuple[bytes, str]] = [
+    (codecs.BOM_UTF32_LE, "utf-32"),
+    (codecs.BOM_UTF32_BE, "utf-32"),
+    (codecs.BOM_UTF16_LE, "utf-16"),
+    (codecs.BOM_UTF16_BE, "utf-16"),
+    (codecs.BOM_UTF8, "utf-8-sig"),
+]
+
+
+def detect_encoding(data: bytes) -> str:
+    """
+    Detect the encoding of the data using charset_normalizer.
+    If detection fails, fallback to "utf-8".
+    """
+    try:
+        result = from_bytes(data)
+        best = result.best()
+
+        if best and best.encoding:
+            encoding = best.encoding
+
+            try:
+                data.decode(encoding)
+                return encoding
+            except UnicodeDecodeError:
+                logger.debug(f"Detected encoding '{encoding}' failed to decode. Falling back...")
+
+        else:
+            logger.debug("Encoding detection returned None. Falling back...")
+
+    except Exception as e:
+        logger.debug(f"Encoding detection error: {e}. Falling back...")
+
+    return "utf-8"
+
+
+def decode_text_bytes(data: bytes) -> str:
+    """
+    Decode raw bytes to text: BOM, then strict UTF-8, then charset detection, then UTF-8
+    with ``errors="replace"``. Always returns a string.
+    """
+    for bom, encoding in _BOM_ENCODINGS:
+        if data.startswith(bom):
+            try:
+                return data.decode(encoding)
+            except UnicodeDecodeError:
+                break
+
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+
+    encoding = detect_encoding(data)
+    try:
+        return data.decode(encoding)
+    except UnicodeDecodeError:
+        pass
+
+    return data.decode("utf-8", errors="replace")
 
 
 class TextFileConverter(BaseConverter):
@@ -95,23 +158,4 @@ class TextFileConverter(BaseConverter):
         Detect the encoding of the data using charset_normalizer.
         If detection fails, fallback to "utf-8".
         """
-        try:
-            result = from_bytes(data)
-            best = result.best()
-
-            if best and best.encoding:
-                encoding = best.encoding
-
-                try:
-                    data.decode(encoding)
-                    return encoding
-                except UnicodeDecodeError:
-                    logger.debug(f"Detected encoding '{encoding}' failed to decode. Falling back...")
-
-            else:
-                logger.debug("Encoding detection returned None. Falling back...")
-
-        except Exception as e:
-            logger.debug(f"Encoding detection error: {e}. Falling back...")
-
-        return "utf-8"
+        return detect_encoding(data)
