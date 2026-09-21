@@ -120,21 +120,40 @@ class RecordSandbox(ImmutableSandboxedEnvironment):
         return super().getattr(obj, attribute)
 
 
-# One sandbox for every Rules node; the expressions it compiles are stateless.
-_ENVIRONMENT = RecordSandbox(undefined=RuleUndefined)
+def _method_text(value: Any) -> str:
+    """A method as text: a path ending at one, `invoice.items.count`, names the method, never the data."""
+    return f"{getattr(value, '__name__', type(value).__name__)}(…)"
+
+
+def _rendered(value: Any) -> Any:
+    """A value as a message prints it.
+
+    A message is the one place a value is turned into text, so a method a template names would otherwise
+    print a repr carrying an address that differs on every run, against the determinism a finding promises.
+    An undefined is callable too, and keeps rendering as the empty string a message expects.
+    """
+    return _method_text(value) if callable(value) and not isinstance(value, Undefined) else value
+
+
+# One sandbox for every Rules node; the expressions it compiles are stateless. Only a rendered message
+# passes through `finalize`; a compiled expression does not, so a check keeps the value it read.
+_ENVIRONMENT = RecordSandbox(undefined=RuleUndefined, finalize=_rendered)
 
 
 def concrete(value: Any) -> Any:
-    """Returns the value with every undefined member replaced by None and every lazy iterable materialized.
+    """Returns the value with every undefined member or method replaced by None and every lazy iterable
+    materialized.
 
     Jinja turns a result into None only when the whole result is undefined. A list or a dict the expression
     builds keeps the undefined objects inside it, `map(attribute=...)` over items that lack the attribute above
     all, and such an object is not serializable and raises on its first use downstream. `map`, `select`,
     `selectattr`, `reject` and `rejectattr` return generators, which the first rule to read one exhausts for
     every rule after it, and which no encoder can record, so an iterator, a dict view, a range or a set becomes
-    a list; a string and an object that merely iterates, a document say, stay what they are.
+    a list; a string and an object that merely iterates, a document say, stay what they are. A path that ends
+    at a method reads the bound method, which no encoder can record and whose repr carries an address, so it
+    is no more a value than an undefined is.
     """
-    if isinstance(value, Undefined):
+    if isinstance(value, Undefined) or callable(value):
         return None
     if isinstance(value, dict):
         return {key: concrete(item) for key, item in value.items()}
@@ -151,10 +170,14 @@ def holds(value: Any) -> bool:
     """The truth of a check or a condition.
 
     A lazy result is judged by the list it yields, since a generator is true whatever it would yield; an
-    undefined result keeps raising, which is what makes a lookup that found nothing `not_evaluated`.
+    undefined result keeps raising, which is what makes a lookup that found nothing `not_evaluated`. A result
+    that is a method is no verdict either: every method is truthy, so a check left at one would clear the
+    record on a typo, and it raises into `not_evaluated` the way an undefined does.
     """
     if isinstance(value, Undefined):
         return bool(value)
+    if callable(value):
+        raise TypeError(f"read the method {_method_text(value)}, not a value")
     return bool(concrete(value))
 
 
@@ -377,7 +400,7 @@ def resolve_path(context: dict[str, Any], path: str) -> Any:
 
 
 def _shown(value: Any) -> Any:
-    """A value as a finding shows it: scalars as they are, containers as their size."""
+    """A value as a finding shows it: scalars as they are, containers as their size, a method as a call."""
     if _is_missing(value):
         return None
     if isinstance(value, dict):
@@ -386,6 +409,10 @@ def _shown(value: Any) -> Any:
         return f"[…{len(value)} items]"
     if isinstance(value, (date, datetime)):
         return value.isoformat()
+    # `invoice.items.count`, the ordinary slip of expecting a count property, resolves to the list's method:
+    # the finding names it rather than carrying a bound method the node output could not be serialized with.
+    if callable(value):
+        return _method_text(value)
     return value
 
 

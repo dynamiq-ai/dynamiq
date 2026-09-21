@@ -168,6 +168,16 @@ def test_concrete_replaces_an_undefined_member_at_any_depth():
     assert concrete({"a": 1, "b": [2, "x"]}) == {"a": 1, "b": [2, "x"]}
 
 
+def test_concrete_replaces_a_method_at_any_depth():
+    """A path ending at a method reads the bound method, which no encoder can record."""
+    items = [{"sku": "a"}]
+
+    assert concrete(items.count) is None
+    assert concrete([1, items.count]) == [1, None]
+    assert concrete({"a": {"b": items.append}}) == {"a": {"b": None}}
+    assert json.dumps(concrete({"counter": items.count}))
+
+
 @pytest.mark.parametrize(
     "expression, reserved",
     [

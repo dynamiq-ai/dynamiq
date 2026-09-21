@@ -63,6 +63,25 @@ def test_an_expression_left_lazy_returns_a_list():
     assert json.dumps(result.output)
 
 
+def test_an_expression_that_ends_at_a_method_reads_as_null():
+    """`items.count` names the list's method, which no encoder can record and whose repr carries an address."""
+    node = Expression(
+        id="calc",
+        input_fields=[NamedField(name="items")],
+        expressions=[
+            ExpressionItem(key="counter", expression="items.count"),
+            ExpressionItem(key="nested", expression="[items.count, items[0].get]"),
+            ExpressionItem(key="size", expression="items | length"),
+        ],
+    )
+
+    result = node.run(input_data={"items": [{"price": 60}]}, config=RunnableConfig(callbacks=[]))
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output == {"counter": None, "nested": [None, None], "size": 1}
+    assert json.dumps(result.output)
+
+
 def test_a_missing_input_on_its_own_is_none_but_fails_inside_arithmetic():
     bare = expression_node(expressions=[ExpressionItem(key="discount", expression="discount")])
     assert run_node(bare, {"price": 2.5}).output == {"discount": None}
