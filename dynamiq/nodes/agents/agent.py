@@ -188,6 +188,30 @@ def mark_tool_failure(content: str, success: Any) -> str:
     return content
 
 
+def default_cache_control(llm: Node) -> BaseModel | None:
+    """Prompt caching config for providers that cache nothing without a breakpoint.
+
+    Returns None when the node has no ``cache_control`` field, the model does not support
+    caching, or the caller already chose -- ``cache_control=False`` is how you opt out.
+
+    Keyed on the field's value, not ``model_fields_set``: deserialization marks every
+    field as set, so that would read a YAML round trip as an opt-out.
+    """
+    field = type(llm).model_fields.get("cache_control")
+    if field is None or llm.cache_control is not None:
+        return None
+
+    # `Bedrock` serves far more than Claude, and an unsupporting model rejects the request
+    # outright rather than ignoring the breakpoint.
+    if not llm.supports_prompt_caching():
+        return None
+    config_cls = next(
+        (arg for arg in get_args(field.annotation) if isinstance(arg, type) and issubclass(arg, BaseModel)),
+        None,
+    )
+    return config_cls() if config_cls else None
+
+
 class ReactStep(BaseModel):
     """Outcome of one ReAct reasoning step, in one of three shapes:
 
@@ -513,6 +537,25 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return bool(action_input.get("delegate_final"))
 
         return False
+
+    @model_validator(mode="after")
+    def _resolve_cache_control(self):
+        """Turn on prompt caching for an LLM whose provider caches nothing without a breakpoint.
+
+        Written onto the node once, at construction, so every caller sharing the instance
+        inherits it -- including the summarizer. Each node in the fallback chain is asked
+        separately: a fallback may be another provider, or an unsupporting model.
+        """
+        seen: set[int] = set()
+        node = self.llm
+        while node is not None and id(node) not in seen:
+            seen.add(id(node))
+            # Only assign a real config: `BaseLLM` allows extra fields and spreads them into
+            # the request, so a `None` on a node without the field would be sent.
+            if (control := default_cache_control(node)) is not None:
+                node.cache_control = control
+            node = getattr(getattr(node, "fallback", None), "llm", None)
+        return self
 
     @model_validator(mode="after")
     def _ensure_context_manager_tool(self):
@@ -1649,7 +1692,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
             str | None: Final answer if delegation occurred, None to continue loop
         """
         check_cancellation(config)
-        if action and self.tools:
+        # `_runtime_tools`, not `self.tools`: per-run overlays (memory store, LTM) may be the only
+        # tools an agent has, and `tool_by_names` resolves against the overlay too.
+        if action and self._runtime_tools:
             tool_result = None
             skipped_tools: list[str] = []
 
@@ -2230,13 +2275,21 @@ class Agent(HistoryManagerMixin, BaseAgent):
         ltm_enabled = self.long_term_memory is not None and self.long_term_memory.enabled
         return ReactPromptConfig(
             inference_mode=self.inference_mode,
-            has_tools=bool(tools) or (self.skills.enabled and self.skills.source is not None) or ltm_enabled,
+            has_tools=bool(tools)
+            or (self.skills.enabled and self.skills.source is not None)
+            or ltm_enabled
+            or bool(self.memory_store_backend),
             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
             delegation_allowed=self.delegation_allowed,
             context_compaction_enabled=self.summarization_config.enabled,
             notes_file_path=self.get_notes_file_path(),
             todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
             or bool(self.sandbox_backend),
+            memory_store_enabled=bool(self.memory_store_backend),
+            memory_store_namespaces=(
+                self.memory_store_backend.describe_namespaces() if self.memory_store_backend else {}
+            ),
+            memory_store_writable=bool(self.memory_store and self.memory_store.write_enabled),
             sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
             has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in tools),
             role=self.role,

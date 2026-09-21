@@ -42,9 +42,36 @@ TODO_TOOLS_INSTRUCTIONS = """## Todo Management
 - Use the todo-write tool for complex 3+ step tasks; skip for simple requests
 - The todo-write result lists the full current todo list - re-read it there
 - When creating initial list: first task "in_progress", rest "pending"
-- After initial creation, ONLY update status via merge=true - do not restructure the plan
+- Create the initial list with merge=false (merge=true also works if no list exists yet); after that, ONLY \
+update status via merge=true, using the exact existing ids - do not restructure the plan or invent ids
 - Mark completed IMMEDIATELY after finishing each step - don't batch
 - Only mark completed when FULLY done; if blocked, keep in_progress"""
+
+
+MEMORY_STORE_INSTRUCTIONS_TEMPLATE = """## Memory
+Your `{tool}` tool is the ONLY thing that survives this conversation. Everything else — this chat, \
+your working files, your answer — is discarded, and the user will not tell you twice.
+
+1. ALWAYS `{tool}` with action 'list' BEFORE ANYTHING ELSE, then 'read' anything that could govern \
+the work you are about to do — a convention, a rule, a preference. A title only tells you a memory \
+exists; listing it is not knowing what it says.
+2. `{tool}` with action 'write' a durable fact THE SAME STEP you learn it — alongside the work, \
+never after it.
+
+Durable facts arrive in passing, while the user is asking for something else: preferences, standing \
+rules, corrections, anything lasting about them, their team or their setup. THAT is the trigger — \
+being asked to remember is the rare case, not the rule.
+Never store the deliverable, working state, or secrets.
+One topic per memory, descriptive path; 'edit' rather than duplicate, 'delete' what is wrong."""
+
+SANDBOX_VS_MEMORY_STORE_TEMPLATE = """The sandbox above is scratch space for THIS conversation — \
+it is NOT your long-term memory, whatever the Persistence section says. Your `{tool}` tool is, and \
+only it reaches memory."""
+
+MEMORY_STORE_READONLY_INSTRUCTIONS_TEMPLATE = """## Memory
+Your `{tool}` tool holds knowledge kept from EARLIER conversations, and is read-only for you.
+BEFORE starting a task, use it with action 'list' to see what is available, and 'read' anything \
+relevant. Do not ask the user for something already recorded there."""
 
 
 SANDBOX_INSTRUCTIONS_TEMPLATE = """## Sandbox Environment

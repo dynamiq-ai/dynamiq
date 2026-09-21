@@ -142,8 +142,13 @@ def test_workflow_with_anthropic_llm_prompt_caching(mock_llm_response_text, mock
         cache_control_injection_points=[
             {
                 "location": "message",
-                "index": -2,
+                "role": "system",
                 "control": {"type": "ephemeral", "ttl": "5m"},
-            }
+            },
+            {
+                "location": "message",
+                "index": -1,
+                "control": {"type": "ephemeral", "ttl": "5m"},
+            },
         ],
     )

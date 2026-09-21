@@ -75,11 +75,26 @@ ANTHROPIC_MAX_STRICT_TOOLS = 20
 
 
 class AnthropicCacheControl(BaseModel):
-    """Anthropic prompt caching configuration."""
+    """Anthropic prompt caching configuration.
+
+    A breakpoint caches everything before it. Anthropic renders the request as
+    ``tools -> system -> messages``, so one point on the system message also
+    covers the tool schemas.
+
+    Attributes:
+        ttl: Cache lifetime for both breakpoints.
+        cache_injection_point_index: Message index for the rolling breakpoint.
+            ``-1`` marks the last message, which is what the next agent loop
+            reads back, so each call writes only the delta.
+        cache_system: Also pin a breakpoint on the system message, so the system
+            prompt and tool schemas stay cached when the message tail is rewritten
+            (history compaction). Resolves to nothing without a system message.
+    """
 
     type: Literal["ephemeral"] = "ephemeral"
     ttl: Literal["5m", "1h"] | None = "5m"
-    cache_injection_point_index: int = -2
+    cache_injection_point_index: int = -1
+    cache_system: bool = True
 
 
 class Anthropic(BaseLLM):
@@ -89,7 +104,10 @@ class Anthropic(BaseLLM):
 
     Attributes:
         connection (AnthropicConnection | None): The connection to use for the Anthropic LLM.
-        cache_control (AnthropicCacheControl | None): The cache control configuration.
+        cache_control (AnthropicCacheControl | Literal[False] | None): Prompt caching config.
+            ``None`` (the default) chooses nothing, leaving an :class:`Agent` free to
+            enable caching on this node at construction; ``False`` opts out. A bare node
+            caches only when given a config -- ``None`` and ``False`` send no breakpoints.
         strict_tools: Inherited from :class:`BaseLLM`. False (default, or an empty
             list) ships every tool as-is with no strict guarantee; True cleans each
             tool's schema to Anthropic's strict subset and attaches ``strict: true``
@@ -103,7 +121,9 @@ class Anthropic(BaseLLM):
     connection: AnthropicConnection | None = None
     MODEL_PREFIX = "anthropic/"
     MAX_STRICT_TOOLS: ClassVar[int] = ANTHROPIC_MAX_STRICT_TOOLS
-    cache_control: AnthropicCacheControl | None = None
+    # ``None`` = nothing chosen (survives a YAML round trip, lets an Agent inject the
+    # default); ``False`` = opt out.
+    cache_control: AnthropicCacheControl | Literal[False] | None = None
 
     def __init__(self, **kwargs):
         """Initialize the Anthropic LLM node.
@@ -151,19 +171,33 @@ class Anthropic(BaseLLM):
         return self._convert_non_image_to_file_content(messages)
 
     def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Attach Anthropic prompt caching configuration to completion params."""
+        """Attach the node's own prompt caching configuration to completion params."""
         params = super().update_completion_params(params)
-        if self.cache_control:
-            params.setdefault("cache_control_injection_points", []).append(
-                {
-                    "location": "message",
-                    "index": self.cache_control.cache_injection_point_index,
-                    "control": self.cache_control.model_dump(
-                        exclude_none=True,
-                        exclude={"cache_injection_point_index"},
-                    ),
-                }
-            )
+        return self._apply_cache_control(params, self.cache_control)
+
+    def _apply_cache_control(self, params: dict[str, Any], cache_control: Any) -> dict[str, Any]:
+        """Attach Anthropic prompt caching breakpoints for the given configuration."""
+        if not cache_control:
+            return params
+
+        control = cache_control.model_dump(
+            exclude_none=True,
+            exclude={"cache_injection_point_index", "cache_system"},
+        )
+        points = params.setdefault("cache_control_injection_points", [])
+
+        # Head first: points are honored in order, so the durable one wins if the
+        # 4-block budget runs short. Separate copies -- LiteLLM assigns by reference.
+        if cache_control.cache_system:
+            points.append({"location": "message", "role": "system", "control": dict(control)})
+
+        points.append(
+            {
+                "location": "message",
+                "index": cache_control.cache_injection_point_index,
+                "control": dict(control),
+            }
+        )
         return params
 
     def _to_strict_function(self, fn: dict) -> dict:

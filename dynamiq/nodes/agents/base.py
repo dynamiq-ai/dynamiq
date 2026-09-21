@@ -49,6 +49,7 @@ from dynamiq.nodes.schema_utils import strip_inaccessible_fields
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileSearchTool, FileWriteTool
 from dynamiq.nodes.tools.mcp import MCPServer
+from dynamiq.nodes.tools.memory_store_tool import MemoryStoreTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
@@ -74,6 +75,7 @@ from dynamiq.skills.types import SkillMetadata
 from dynamiq.skills.utils import ingest_skills_into_sandbox, normalize_sandbox_skills_base_path
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
+from dynamiq.storages.memory.base import MemoryStore, MemoryStoreConfig
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import TRACING_REDACTED_KEYS, TRACING_REDACTED_PLACEHOLDER, deep_merge
@@ -286,6 +288,14 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
         description="Configuration for file storage used by the agent.",
     )
+    memory_store: MemoryStoreConfig | None = Field(
+        default=None,
+        description=(
+            "The agent's memory: notes it keeps across conversations, reached through its own tool. "
+            "Kept separate from `file_store` so it stays available to sandbox-backed agents, which "
+            "cannot enable a file store. Pass a `CompositeMemoryStore` backend for several memories."
+        ),
+    )
     sandbox: SandboxConfig | None = Field(default=None, description="Configuration for sandbox used by the agent.")
     share_sandbox_with_subagents: bool = Field(
         default=False,
@@ -489,6 +499,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             "images": True,
             "videos": True,
             "file_store": True,
+            "memory_store": True,
             "skills": True,
             "sandbox": True,
             "system_prompt_manager": True,  # Runtime state container, not serializable
@@ -513,6 +524,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             data["videos"] = [{"name": getattr(f, "name", f"video_{i}")} for i, f in enumerate(self.videos)]
 
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
+        data["memory_store"] = self.memory_store.to_dict(**kwargs) if self.memory_store else None
         data["sandbox"] = self.sandbox.to_dict(**kwargs) if self.sandbox else None
         data["skills"] = self.skills.to_dict(**kwargs)
 
@@ -769,9 +781,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 len(ltm_tools),
                 ", ".join(t.name for t in ltm_tools),
             )
+        run_tools = ltm_tools + self._build_memory_store_tool(input_data)
         # Always set — a sub-agent without LTM would otherwise inherit the
         # parent's overlay via `ContextAwareThreadPoolExecutor`.
-        ltm_token = _run_extra_tools.set(ltm_tools)
+        ltm_token = _run_extra_tools.set(run_tools)
         my_run_key = f"{self.sanitize_tool_name(self.name) or 'agent'}-{uuid4().hex[:8]}"
         agent_run_token = _current_agent_run.set(my_run_key)
         # Session/borrow setup lives INSIDE the try so the finally always resets the ContextVars and
@@ -1052,6 +1065,23 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         for tool in tools:
             tool.is_optimized_for_agents = True
         return tools
+
+    def _build_memory_store_tool(self, input_data: "AgentInputSchema") -> list[Node]:
+        """Construct the per-run memory-store tool, or [] when no store is configured.
+
+        Per run like the LTM tools, so the run's ``user_id`` is bound into the instance -- one agent
+        object serves concurrent runs, and a shared tool would read the wrong tenant's memories.
+        A missing ``user_id`` is fine here: a single-tenant store has nothing to scope to.
+        """
+        if not self.memory_store_backend:
+            return []
+        return [
+            MemoryStoreTool(
+                backend=self.memory_store_backend,
+                write_enabled=self.memory_store.write_enabled,
+                user_id=getattr(input_data, "user_id", None),
+            )
+        ]
 
     def _is_input_output_trace_message(self, message: Message) -> bool:
         """Return True when a message is an internal ReAct/tool-trace entry."""
@@ -2191,25 +2221,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             from dynamiq.nodes.agents.agent import Agent
 
             if isinstance(self, Agent):
-                from dynamiq.nodes.agents.prompts.manager import ReactPromptConfig
-                from dynamiq.nodes.tools.agent_tool import SubAgentTool
-
-                self.system_prompt_manager.build_react_prompt(
-                    ReactPromptConfig(
-                        inference_mode=self.inference_mode,
-                        has_tools=True,
-                        parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
-                        delegation_allowed=self.delegation_allowed,
-                        context_compaction_enabled=self.summarization_config.enabled,
-                        notes_file_path=self.get_notes_file_path(),
-                        todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
-                        or bool(self.sandbox_backend),
-                        sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
-                        has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
-                        role=self.role,
-                        instructions=self.instructions,
-                    )
-                )
+                # The canonical config, not a second copy: the tools added above make
+                # `has_tools` true on their own, and fields added later cannot be missed here.
+                self.system_prompt_manager.build_react_prompt(self._react_prompt_config())
 
     def _inject_attached_files_into_message(
         self,
@@ -2339,6 +2353,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     def file_store_backend(self) -> FileStore | None:
         """Get the file store backend from the configuration if enabled."""
         return self.file_store.backend if self.file_store.enabled else None
+
+    @property
+    def memory_store_backend(self) -> MemoryStore | None:
+        """The agent's memory backend when one is enabled."""
+        return self.memory_store.backend if self.memory_store and self.memory_store.enabled else None
 
     @property
     def sandbox_backend(self) -> Sandbox | None:
