@@ -426,6 +426,61 @@ def test_an_llm_judge_gets_a_schema_built_from_the_questions_and_states_its_prob
     assert output["usage"] is None and output["evidence"] is None
 
 
+def test_a_verbalized_answer_stands_on_its_probabilities_when_the_judge_omits_or_rewords_it(llm, mocker):
+    """An agent judge answers the schema as prose, so `answer` may be missing or phrased its own way."""
+    mocker.patch(
+        "dynamiq.nodes.llms.base.BaseLLM._completion",
+        return_value=llm_reply(
+            {
+                "is_urgent": {"probability": 0.9},
+                "team": {"answer": "Billing.", "probabilities": {"billing": 0.7, "technical": 0.2, "sales": 0.1}},
+                "anger": {"probabilities": {"calm": 0.2, "frustrated": 0.7, "furious": 0.1}},
+            }
+        ),
+    )
+    node = Judgement(judge=llm, questions=questions())
+
+    result = node.run(input_data={"state": "Charged twice"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["decisions"] == {"is_urgent": True, "team": "billing", "anger": "frustrated"}
+
+
+def test_probability_keys_are_matched_the_way_the_answer_is(llm, mocker):
+    """A judge that capitalizes its keys states the same distribution, not a certain one."""
+    mocker.patch(
+        "dynamiq.nodes.llms.base.BaseLLM._completion",
+        return_value=llm_reply(
+            {"team": {"answer": "Billing", "probabilities": {"Billing": 0.55, " TECHNICAL ": 0.45, "Sales": 0}}}
+        ),
+    )
+    node = Judgement(judge=llm, questions=questions()[1:2])
+
+    output = node.run(input_data={"state": "Charged twice"}).output
+
+    assert output["decisions"] == {"team": "billing"}
+    assert output["answers"]["team"]["probabilities"] == {"billing": 0.55, "technical": 0.45, "sales": 0.0}
+    assert output["answers"]["team"]["confidence"] == pytest.approx(0.325)
+
+
+def test_a_verbalized_answer_is_still_needed_when_the_probabilities_cannot_stand_alone(llm, mocker):
+    replies = [
+        ({"team": {"answer": "Billing", "probabilities": {"billing": 0, "technical": 0, "sales": 0}}}, "billing"),
+        ({"team": {"probabilities": {"billing": 0, "technical": 0, "sales": 0}}}, "no usable probabilities"),
+        ({"team": {"answer": "Accounts", "probabilities": {}}}, "'Accounts' is not one of billing"),
+    ]
+    node = Judgement(judge=llm, questions=questions()[1:2])
+
+    for payload, expected in replies:
+        mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", return_value=llm_reply(payload))
+        result = node.run(input_data={"state": "Charged twice"})
+        if expected == "billing":
+            assert result.output["decisions"] == {"team": "billing"}
+        else:
+            assert result.status == RunnableStatus.FAILURE
+            assert expected in result.error.message
+
+
 def test_sampling_turns_repeated_answers_into_vote_shares(llm, mocker):
     votes = [("billing", True), ("billing", False), ("technical", True), ("billing", False)]
     completion = mocker.patch(

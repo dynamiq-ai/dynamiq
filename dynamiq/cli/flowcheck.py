@@ -30,7 +30,6 @@ DECISION_TABLE_TYPE = "dynamiq.nodes.operators.DecisionTable"
 RULES_TYPE = "dynamiq.nodes.operators.Rules"
 EXPRESSION_TYPE = "dynamiq.nodes.operators.Expression"
 SUB_WORKFLOW_TYPE = "dynamiq.nodes.operators.SubWorkflow"
-# A tool by group, but a decision node by use: it feeds the operators above, and is checked with them.
 JUDGEMENT_TYPE = "dynamiq.nodes.tools.Judgement"
 
 CHOICE_HIT_POLICIES = ("first", "all")
@@ -40,12 +39,10 @@ RULE_SEVERITIES = ("fail", "warn", "info")
 RULE_MISSING_POLICIES = ("not_evaluated", "fail")
 QUESTION_TYPES = ("noul", "choice", "score")
 CONFIDENCE_MODES = ("verbalized", "sampling")
-# The judge behind a Judgement node is an LLM or an agent; anything else cannot answer a question.
 JUDGE_TYPE_PREFIXES = ("dynamiq.nodes.llms.", "dynamiq.nodes.agents.")
 MAX_CHOICE_OPTIONS = 255
 MAX_SCORE_LEVELS = 10
 MAX_SAMPLES = 10
-# Judgement.samples when the author leaves it out.
 DEFAULT_SAMPLES = 1
 # The output a decision table adds beside its columns, so no column may take it.
 MATCHED_RULES_KEY = "matched_rules"

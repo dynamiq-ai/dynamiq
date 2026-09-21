@@ -180,15 +180,23 @@ def confidence_of(probabilities: list[float]) -> float:
     return max(0.0, min(1.0, (count * max(probabilities) - 1) / (count - 1)))
 
 
-def _distribution(names: list[str], raw: Any, anchor: str | None) -> dict[str, float]:
-    """A probability per name, normalized to sum to 1; a missing or unusable distribution becomes the anchor."""
+def _weights(names: list[str], raw: Any) -> dict[str, float]:
+    """A non-negative weight per name, tolerating the case and whitespace an LLM may change in its keys."""
+    raw = raw if isinstance(raw, dict) else {}
+    folded = {str(key).strip().lower(): value for key, value in raw.items()}
     values: dict[str, float] = {}
     for name in names:
         try:
-            value = float((raw or {}).get(name, 0)) if isinstance(raw, dict) else 0.0
+            value = float(raw[name] if name in raw else folded.get(name.strip().lower(), 0))
         except (TypeError, ValueError):
             value = 0.0
         values[name] = max(value, 0.0)
+    return values
+
+
+def _distribution(names: list[str], raw: Any, anchor: str | None) -> dict[str, float]:
+    """A probability per name, normalized to sum to 1; a missing or unusable distribution becomes the anchor."""
+    values = _weights(names, raw)
     total = sum(values.values())
     if total <= 0:
         if anchor not in names:
@@ -739,12 +747,20 @@ class Judgement(Node):
         names = ["yes", "no"] if question.type == QuestionType.NOUL else question.option_names
         if self._verbalized():
             answer = answers[0]
-            chosen = self._chosen(question, answer.get("answer"))
+            # The answer is what a distribution falls back on, so read it only when one cannot stand on its own.
             if question.type == QuestionType.NOUL:
-                probability = _probability(answer["probability"]) if "probability" in answer else float(chosen == "yes")
+                probability = (
+                    _probability(answer["probability"])
+                    if "probability" in answer
+                    else float(self._chosen(question, answer.get("answer")) == "yes")
+                )
                 distribution = {"yes": probability, "no": 1 - probability}
             else:
-                distribution = _distribution(names, answer.get("probabilities"), chosen)
+                raw = answer.get("probabilities")
+                anchor = None
+                if sum(_weights(names, raw).values()) <= 0 and "answer" in answer:
+                    anchor = self._chosen(question, answer["answer"])
+                distribution = _distribution(names, raw, anchor)
             rationale = answer.get("rationale")
         else:
             votes = {name: 0.0 for name in names}
