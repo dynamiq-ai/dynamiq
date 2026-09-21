@@ -271,7 +271,7 @@ def test_api_errors_say_what_happened_and_whether_asking_again_can_help(
 
 
 def test_rate_limits_are_retried_as_the_server_asks(system_one, post, mocker):
-    sleep = mocker.patch("dynamiq.nodes.tools.judgement.time.sleep")
+    sleep = mocker.patch("dynamiq.nodes.detectors.system_one.time.sleep")
     post.side_effect = [
         http(429, headers={"retry-after-ms": "250"}),
         http(529, headers={"Retry-After": "2"}),
@@ -286,7 +286,7 @@ def test_rate_limits_are_retried_as_the_server_asks(system_one, post, mocker):
 
 
 def test_an_outage_is_given_up_after_the_last_retry(system_one, post, mocker):
-    sleep = mocker.patch("dynamiq.nodes.tools.judgement.time.sleep")
+    sleep = mocker.patch("dynamiq.nodes.detectors.system_one.time.sleep")
     post.side_effect = [http(529), http(529), http(529)]
 
     result = system_one.run(input_data={"ticket": "x"})
@@ -650,7 +650,7 @@ class FakeAsyncClient:
 async def test_the_async_path_retries_and_answers_like_the_sync_one(system_one, post, mocker):
     client = FakeAsyncClient([http(429, headers={"retry-after-ms": "10"}), http(body=system_one_answers())])
     mocker.patch.object(TypeSafe, "connect_async", AsyncMock(return_value=client))
-    sleep = mocker.patch("dynamiq.nodes.tools.judgement.asyncio.sleep", AsyncMock())
+    sleep = mocker.patch("dynamiq.nodes.detectors.system_one.asyncio.sleep", AsyncMock())
 
     result = await system_one.run_async(input_data={"ticket": "Charged twice"})
 

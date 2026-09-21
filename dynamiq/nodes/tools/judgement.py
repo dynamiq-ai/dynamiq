@@ -1,6 +1,5 @@
 import asyncio
 import json
-import time
 from enum import Enum
 from typing import Any, ClassVar, Literal
 
@@ -21,7 +20,6 @@ from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.json_parser import parse_llm_json_output
 from dynamiq.utils.logger import logger
-from dynamiq.utils.utils import CHARS_PER_TOKEN
 
 DESCRIPTION_JUDGEMENT = """Answers typed judgement questions about a state and returns calibrated probabilities.
 
