@@ -671,8 +671,11 @@ class Judgement(Node):
         )
 
     def _judge_for_run(self) -> Node:
-        # Samples run concurrently on the async path, and an agent keeps per-run state.
-        return self.judge.clone() if self._sample_count() > 1 else self.judge
+        # Never the configured judge itself: samples run concurrently on the async path, and
+        # `is_parallel_execution_allowed` lets a calling agent invoke this node twice at once. A judge
+        # carries per-run state - an agent resets its loop state and rebuilds its prompt on every
+        # execute - so a shared instance would let one run wipe another's out from under it.
+        return self.judge.clone()
 
     def _judge_call(self, state: Any, questions: list[JudgementQuestion], **kwargs) -> tuple[dict, dict]:
         schema = self._response_schema(questions)

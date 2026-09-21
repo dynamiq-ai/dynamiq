@@ -506,6 +506,30 @@ def test_sampling_turns_repeated_answers_into_vote_shares(llm, mocker):
     assert output["confidence_source"] == "sampling"
 
 
+def test_every_run_gets_its_own_judge_so_two_callers_cannot_share_one(llm, mocker):
+    """`is_parallel_execution_allowed` lets a calling agent invoke this node twice at once, and a
+    judge resets its per-run state on every execute - an agent wipes its loop state and rebuilds its
+    prompt - so two calls sharing one judge would interleave into a single conversation."""
+    mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", return_value=llm_reply(LLM_VERDICT))
+    judges = []
+    run = OpenAI.run
+
+    def record(self, *args, **kwargs):
+        judges.append(self)
+        return run(self, *args, **kwargs)
+
+    mocker.patch.object(OpenAI, "run", record)
+    node = Judgement(judge=llm, questions=questions())
+
+    assert node.run(input_data={"state": "Charged twice"}).status == RunnableStatus.SUCCESS
+    assert node.run(input_data={"state": "Charged twice"}).status == RunnableStatus.SUCCESS
+
+    assert len(judges) == 2
+    assert judges[0] is not judges[1]
+    assert all(judge is not node.judge for judge in judges)
+    assert [judge.model for judge in judges] == [node.judge.model] * 2
+
+
 def test_a_judge_that_does_not_answer_with_json_is_a_recoverable_failure(llm, mocker):
     mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", return_value=llm_reply("I would rather not say."))
     node = Judgement(judge=llm, questions=questions())
