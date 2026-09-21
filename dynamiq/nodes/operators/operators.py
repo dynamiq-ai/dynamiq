@@ -1,8 +1,8 @@
 import re
-from typing import Any, ClassVar, Literal
+from typing import Any, Callable, ClassVar, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 import dynamiq.utils.jsonpath as jsonpath
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
@@ -10,7 +10,7 @@ from dynamiq.nodes import Behavior, Node, NodeGroup
 from dynamiq.nodes.cloning import carry_mock_exclusions, regenerate_node_ids
 from dynamiq.nodes.node import Transformer, ensure_config
 from dynamiq.nodes.tools.mcp import resolve_mcp_node
-from dynamiq.nodes.types import ChoiceCondition, ConditionOperator
+from dynamiq.nodes.types import ChoiceCondition, ChoiceHitPolicy, ConditionOperator
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.types.dry_run import DryRunConfig
@@ -36,6 +36,7 @@ class Choice(Node):
     name: str | None = "choice"
     group: Literal[NodeGroup.OPERATORS] = NodeGroup.OPERATORS
     options: list[ChoiceOption] = []
+    hit_policy: ChoiceHitPolicy = ChoiceHitPolicy.FIRST
     input_schema: ClassVar[type[ChoiceInputSchema]] = ChoiceInputSchema
 
     @property
@@ -74,8 +75,13 @@ class Choice(Node):
 
             self.run_on_node_execute_run(config.callbacks, **merged_kwargs)
 
+            if self.hit_policy == ChoiceHitPolicy.ALL:
+                return self._evaluate_all(input_data)
+
             is_success_evaluation = False
             for option in self.options:
+                # The first match ends the walk: every option after it is skipped, an option without a
+                # condition matching on its own.
                 if is_success_evaluation:
                     results[option.id] = RunnableResult(
                         status=RunnableStatus.SKIP, input=input_data.model_dump(), output=None
@@ -95,6 +101,32 @@ class Choice(Node):
                         status=RunnableStatus.FAILURE, input=input_data.model_dump(), output=False
                     )
 
+        return results
+
+    def _evaluate_all(self, input_data: ChoiceInputSchema) -> dict[str, RunnableResult]:
+        """Every conditioned option judged on its own; a fallback runs only when none of them held.
+
+        A fallback, an option without a condition, is decided over the whole list rather than over the
+        options before it, so it stays the branch for a record nothing routed wherever it sits.
+        """
+        values = input_data.model_dump()
+        held = [
+            (option, self.evaluate(option.condition, values) if option.condition else None) for option in self.options
+        ]
+        any_held = any(matched for _, matched in held)
+        results = {}
+        for option, matched in held:
+            if option.condition:
+                status = RunnableStatus.SUCCESS if matched else RunnableStatus.FAILURE
+                results[option.id] = RunnableResult(status=status, input=input_data.model_dump(), output=matched)
+            elif any_held:
+                results[option.id] = RunnableResult(
+                    status=RunnableStatus.SKIP, input=input_data.model_dump(), output=None
+                )
+            else:
+                results[option.id] = RunnableResult(
+                    status=RunnableStatus.SUCCESS, input=input_data.model_dump(), output=True
+                )
         return results
 
     @staticmethod
@@ -177,6 +209,7 @@ class Map(Node):
     behavior: Behavior | None = Behavior.RETURN
     input_schema: ClassVar[type[MapInputSchema]] = MapInputSchema
     max_workers: int = 1
+    _dry_run_nodes: list[Node] = PrivateAttr(default_factory=list)
 
     @property
     def to_dict_exclude_params(self):
@@ -198,14 +231,36 @@ class Map(Node):
         data["node"] = self.node.to_dict(**kwargs)
         return data
 
+    def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
+        # A shallow copy would share the list: the clones that ran on this node are its own to clean up.
+        return super().get_clone_attr_initializers() | {"_dry_run_nodes": lambda _: []}
+
     def dry_run_cleanup(self, dry_run_config: DryRunConfig | None = None) -> None:
-        """Clean up resources created during dry run."""
-        self.node.dry_run_cleanup(dry_run_config)
+        """Cleans up what the node and the clones that ran per item under a dry run wrote.
+
+        Each item runs on a clone, which is what holds the writes and, for a sub-workflow, the copies
+        of its flow waiting for this cleanup; one clone's failure stops no other.
+        """
+        nodes, self._dry_run_nodes = self._dry_run_nodes, []
+        for node in [self.node, *nodes]:
+            try:
+                node.dry_run_cleanup(dry_run_config)
+            except Exception as e:
+                logger.error(f"Map: failed to clean up dry run resources for node {node.id}: {e}")
 
     def execute_workflow(self, index, data, config, merged_kwargs, node):
         """Execute a single workflow and handle errors."""
         id_map: dict[str, set[str]] = {}
         node_copy = regenerate_node_ids(node.clone(), id_map)
+        # Only a clone that overrides the base hook holds anything to clean; keeping the rest would
+        # retain one node per item for a whole run, and a dry run is the default.
+        if (
+            config is not None
+            and config.dry_run
+            and config.dry_run.enabled
+            and node_copy.dry_run_cleanup.__qualname__ != "Node.dry_run_cleanup"
+        ):
+            self._dry_run_nodes.append(node_copy)
 
         # Create an isolated config per iteration with unique streaming override for the cloned node
         local_config = config

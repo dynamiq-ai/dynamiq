@@ -66,7 +66,10 @@ class DryRunMixin:
             try:
                 self.delete_documents(list(self._tracked_documents))
                 logger.info(f"Cleaned up {len(self._tracked_documents)} tracked documents")
-                self._tracked_documents = []
+                # Cleared in place: a store copied along with its node, for a Map item or a sub-workflow
+                # run, shares this list with the original, so every holder sees the cleanup and none
+                # deletes the same documents twice.
+                self._tracked_documents.clear()
             except Exception as e:
                 logger.error(f"Failed to clean up tracked documents: {e}")
 
