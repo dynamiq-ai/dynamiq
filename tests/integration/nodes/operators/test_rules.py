@@ -739,6 +739,44 @@ def test_a_record_key_named_like_a_dict_method_reads_as_the_data():
     assert result.output["findings"][0]["evaluated"] == {"invoice.items": "[…1 items]"}
 
 
+def test_a_path_that_ends_at_a_method_never_leaves_one_in_the_output():
+    node = Rules(
+        input_fields=[NamedField(name="invoice")],
+        derived_values=[DerivedValue(name="counter", expression="invoice.items.count")],
+        rules=[
+            Rule(id="r1", name="items", check="invoice.items.count > 0"),
+            Rule(id="r2", name="bare", check="invoice.items.count"),
+            Rule(id="r3", name="applies", applies_when="invoice.items.count", check="invoice.total > 0"),
+            Rule(id="r4", name="list", check="invoice.items"),
+            Rule(id="r5", name="message", check="invoice.total > 100", message="counter is {{ invoice.items.count }}"),
+        ],
+    )
+    record = {"invoice": {"items": [{"sku": "a"}], "total": 10}}
+
+    result = node.run(input_data=record, config=RunnableConfig(callbacks=[]))
+
+    assert result.status == RunnableStatus.SUCCESS
+    findings = {f["rule_id"]: f for f in result.output["findings"]}
+    # The finding names the method the path found instead of carrying the bound method itself.
+    assert findings["r1"]["evaluated"] == {"invoice.items.count": "count(…)"}
+    assert findings["r1"]["status"] == "not_evaluated"
+    # A check or a condition left at a method is no verdict: every method is truthy, so `invoice.items.count`,
+    # the ordinary slip of expecting a count property, would otherwise clear the record.
+    assert findings["r2"]["message"] == "check could not be evaluated: read the method count(…), not a value"
+    assert findings["r3"]["message"] == ("applies_when could not be evaluated: read the method count(…), not a value")
+    assert findings["r2"]["status"] == findings["r3"]["status"] == "not_evaluated"
+    assert findings["r4"]["status"] == "pass"  # A list is still judged by its truth.
+    assert findings["r5"]["message"] == "counter is count(…)"
+    assert result.output["derived"] == {"counter": None}
+    # A caller serializing the result with plain `json.dumps` gets no TypeError, and a trace records the
+    # values rather than `func: count`.
+    json.dumps(result.output)
+
+    # A method reads the same on every run, where its repr carries an address that does not.
+    again = node.run(input_data=record, config=RunnableConfig(callbacks=[]))
+    assert again.output["findings"] == result.output["findings"]
+
+
 def test_a_record_key_named_like_a_mutating_method_reads_and_a_refused_attribute_holds_only_its_rule():
     node = Rules(
         input_fields=[NamedField(name="ticket")],
