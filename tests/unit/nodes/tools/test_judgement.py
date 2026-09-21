@@ -235,14 +235,35 @@ def test_the_state_is_the_named_inputs_unless_given_directly(system_one, post):
     system_one.run(input_data={"state": ["Hi", "Charged twice"], "ticket": "ignored"})
     assert post.call_args.kwargs["json"]["state"] == ["Hi", "Charged twice"]
 
-    system_one.run(input_data={})
-    assert post.call_args.kwargs["json"]["state"] == {"ticket": None}
-
     bare = Judgement(judge=SystemOne(connection=TypeSafe(api_key="k")), questions=questions())
     result = bare.run(input_data={})
     assert result.status == RunnableStatus.FAILURE
     assert result.error.recoverable is True
     assert "nothing to judge" in result.error.message
+
+
+def test_input_fields_that_resolved_to_nothing_are_not_judged_as_null(post, caplog):
+    """An input transformer writes null for a selector that matched nothing, so an unresolved field
+    arrives as a present key. Judging it would return a verdict about a record that is not there."""
+    node = Judgement(
+        id="triage",
+        name="triage",
+        judge=SystemOne(connection=TypeSafe(api_key="k")),
+        input_fields=[NamedField(name="ticket"), NamedField(name="account")],
+        questions=questions(),
+    )
+
+    # Every field unresolved is the same nothing-to-judge case as no state at all.
+    result = node.run(input_data={"ticket": None, "account": None})
+    assert result.status == RunnableStatus.FAILURE
+    assert result.error.recoverable is True
+    assert "no input field resolved (ticket, account)" in result.error.message
+
+    # One of them still judges, and says which is missing rather than passing it off as a value.
+    result = node.run(input_data={"ticket": "Charged twice", "account": None})
+    assert result.status == RunnableStatus.SUCCESS
+    assert post.call_args.kwargs["json"]["state"] == {"ticket": "Charged twice", "account": None}
+    assert "did not resolve" in caplog.text and "account" in caplog.text
 
 
 @pytest.mark.parametrize(

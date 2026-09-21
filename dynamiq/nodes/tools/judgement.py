@@ -369,10 +369,24 @@ class Judgement(Node):
             )
         provided = input_data.model_extra or {}
         state: dict[str, Any] = {}
+        # An input transformer writes null for a selector that matched nothing, so an unresolved
+        # field arrives as a present key. Judging a null reads as a verdict about the record.
+        unresolved = []
         for field in self.input_fields:
-            if field.name not in provided:
-                logger.warning(f"Judgement '{self.name}': input field {field.name!r} was not provided")
             state[field.name] = provided.get(field.name)
+            if state[field.name] is None:
+                unresolved.append(field.name)
+        if len(unresolved) == len(self.input_fields):
+            raise ToolExecutionException(
+                f"Judgement '{self.name}' has nothing to judge: no input field resolved "
+                f"({', '.join(unresolved)}). Check the selectors that map them.",
+                recoverable=True,
+            )
+        if unresolved:
+            logger.warning(
+                f"Judgement '{self.name}': input fields did not resolve, so they are judged as null: "
+                f"{', '.join(unresolved)}"
+            )
         return state
 
     def _sample_count(self) -> int:
