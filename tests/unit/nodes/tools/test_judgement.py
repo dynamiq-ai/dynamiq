@@ -598,6 +598,31 @@ def test_the_system_one_judge_also_runs_on_its_own(post):
     }
 
 
+def test_a_probability_that_cannot_stand_on_its_own_falls_back_on_the_answer(llm, mocker):
+    """A judge that states 90 rather than 0.9 has still said which way it went. Failing the whole
+    run on it would be stricter than the choice branch, which renormalises the same mistake."""
+    mocker.patch(
+        "dynamiq.nodes.llms.base.BaseLLM._completion",
+        return_value=llm_reply(
+            {
+                "is_urgent": {"answer": True, "probability": 90},
+                "team": {"answer": "billing", "probabilities": {"billing": 55, "technical": 45, "sales": 0}},
+                "anger": {"answer": "calm"},
+            }
+        ),
+    )
+    node = Judgement(judge=llm, questions=questions())
+
+    result = node.run(input_data={"state": "Charged twice"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    # The percent scale is unusable, so the answer decides; the choice renormalises as it always did.
+    assert result.output["decisions"]["is_urgent"] is True
+    assert result.output["answers"]["team"]["probabilities"] == pytest.approx(
+        {"billing": 0.55, "technical": 0.45, "sales": 0.0}
+    )
+
+
 def test_a_judge_that_does_not_answer_with_json_is_a_recoverable_failure(llm, mocker):
     mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", return_value=llm_reply("I would rather not say."))
     node = Judgement(judge=llm, questions=questions())

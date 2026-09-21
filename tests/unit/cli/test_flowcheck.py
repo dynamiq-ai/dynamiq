@@ -413,6 +413,26 @@ def test_sampling_without_samples_is_caught_the_way_the_node_defaults_it():
     assert errors_of(flow_with({**sampling, "samples": 3})) == []
 
 
+def test_an_option_that_is_not_an_object_is_named_rather_than_filtered_away():
+    """Counting only what survived the isinstance filter let a mixed list report clean and then
+    fail to load, since `options` is `list[JudgementOption]` with no string coercion."""
+    mixed = judgement(
+        questions=[
+            {
+                "id": "q1",
+                "name": "team",
+                "type": "choice",
+                "instructions": "Which team?",
+                "options": [{"id": "o1", "name": "billing"}, {"id": "o2", "name": "sales"}, "refunds"],
+            }
+        ]
+    )
+    found = errors_of(flow_with(mixed))
+    assert [e for e in found if "has an option that is not an object (1 of 3)" in e], found
+    # The count now describes what was written, not what survived.
+    assert not [e for e in found if "got 2" in e]
+
+
 def test_a_judgement_used_as_an_agent_tool_is_checked_the_same_way():
     """The node is built to be an agent's tool, so it reaches the loader from `tools[]` too - where
     nothing but Pipedream used to be inspected."""

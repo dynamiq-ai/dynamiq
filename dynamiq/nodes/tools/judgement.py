@@ -205,6 +205,21 @@ def _probability(value: Any) -> float:
     return probability
 
 
+def _usable_probability(value: Any) -> float | None:
+    """The probability a judge stated, or None when it cannot stand on its own.
+
+    A percent scale or a stray string then falls back on the answer, the way an absent one does,
+    rather than failing every question in the run - which is what the choice branch already does
+    by renormalising a distribution it cannot read at face value.
+    """
+    if value is None:
+        return None
+    try:
+        return _probability(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _weighted_index(distribution: dict[str, float]) -> float:
     return sum(index * probability for index, probability in enumerate(distribution.values()))
 
@@ -608,11 +623,9 @@ class Judgement(Node):
             answer = answers[0]
             # The answer is what a distribution falls back on, so read it only when one cannot stand on its own.
             if question.type == QuestionType.NOUL:
-                probability = (
-                    _probability(answer["probability"])
-                    if "probability" in answer
-                    else float(self._chosen(question, answer.get("answer")) == "yes")
-                )
+                probability = _usable_probability(answer.get("probability"))
+                if probability is None:
+                    probability = float(self._chosen(question, answer.get("answer")) == "yes")
                 distribution = {"yes": probability, "no": 1 - probability}
             else:
                 raw = answer.get("probabilities")

@@ -713,14 +713,22 @@ def check_judgement(node, label) -> list:
             errors.append(f"{where} has no `instructions`.")
         if kind in ("choice", "score"):
             limit, what = (MAX_CHOICE_OPTIONS, "option") if kind == "choice" else (MAX_SCORE_LEVELS, "level")
-            options = [o for o in (question.get("options") or []) if isinstance(o, dict)]
+            a_what = f"{'an' if what == 'option' else 'a'} {what}"
+            written = question.get("options") if isinstance(question.get("options"), list) else []
+            options = [o for o in written if isinstance(o, dict)]
             option_names = [str(o.get("name") or "").strip() for o in options]
-            if not 2 <= len(options) <= limit:
-                errors.append(f"{where} needs between 2 and {limit} {what}s, got {len(options)}.")
+            # Counting what survived the filter would let a mixed list through and fail at load.
+            if not 2 <= len(written) <= limit:
+                errors.append(f"{where} needs between 2 and {limit} {what}s, got {len(written)}.")
+            if malformed := len(written) - len(options):
+                errors.append(
+                    f"{where} has {a_what} that is not an object ({malformed} of {len(written)}); "
+                    f"each one needs a `name`."
+                )
             if any(not option_name for option_name in option_names):
-                errors.append(f"{where} has a {what} without a name.")
+                errors.append(f"{where} has {a_what} without a name.")
             if len(set(option_names)) != len(option_names):
-                errors.append(f"{where} names a {what} twice.")
+                errors.append(f"{where} names {a_what} twice.")
     duplicates = sorted({n for n in names if n and names.count(n) > 1})
     if duplicates:
         errors.append(f"judgement {label!r}: question names used more than once: {', '.join(duplicates)}.")
