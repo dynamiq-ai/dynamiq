@@ -16,7 +16,7 @@ from dynamiq.nodes.schema_utils import apply_param_modes
 from dynamiq.nodes.types import ActionType, Authored, InputParamMode, NamedField
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
-from dynamiq.types.cancellation import check_cancellation
+from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.json_parser import parse_llm_json_output
 from dynamiq.utils.logger import logger
@@ -581,6 +581,11 @@ class Judgement(Node):
         return self._judge_answers(result, recorder)
 
     def _judge_answers(self, result: RunnableResult, recorder: "_EvidenceRecorder") -> dict:
+        # Cancellation is its own terminal status, as it is for an agent's LLM and a sub-workflow:
+        # folded into the failure below, a canceled run would report as failed and the flow would
+        # never learn to propagate it.
+        if result.status == RunnableStatus.CANCELED:
+            raise CanceledException()
         if result.status != RunnableStatus.SUCCESS:
             # Recoverable whatever the judge's own verdict on its error: an agent using the node as a tool can ask
             # again or judge a smaller state, where a hard failure would end its run.

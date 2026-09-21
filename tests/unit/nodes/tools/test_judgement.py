@@ -18,7 +18,7 @@ from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools import Judgement, JudgementOption, JudgementQuestion, Python
 from dynamiq.nodes.tools.judgement import confidence_of
 from dynamiq.nodes.types import NamedField
-from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 
 SYSTEM_ONE_URL = "https://api.typesafe.ai/v1/systemone"
 
@@ -621,6 +621,19 @@ def test_a_probability_that_cannot_stand_on_its_own_falls_back_on_the_answer(llm
     assert result.output["answers"]["team"]["probabilities"] == pytest.approx(
         {"billing": 0.55, "technical": 0.45, "sales": 0.0}
     )
+
+
+def test_a_canceled_judge_cancels_the_judgement_rather_than_failing_it(llm, mocker):
+    """Cancellation is its own terminal status. Reported as a failure it would never propagate, and
+    the run would end as failed with the judge's cancellation text as the reason."""
+    mocker.patch.object(
+        OpenAI, "run", return_value=RunnableResult(status=RunnableStatus.CANCELED, input={}, output=None)
+    )
+    node = Judgement(judge=llm, questions=questions())
+
+    result = node.run(input_data={"state": "Charged twice"})
+
+    assert result.status == RunnableStatus.CANCELED
 
 
 def test_a_judge_that_does_not_answer_with_json_is_a_recoverable_failure(llm, mocker):
