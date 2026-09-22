@@ -488,6 +488,104 @@ def test_sync_is_exception_safe_without_litellm(monkeypatch):
     reg.sync_to_litellm()  # must not raise
 
 
+PROVIDER_BANNER = "Provider List: https://docs.litellm.ai/docs/providers"
+
+
+def _assert_litellm_prints_banner(model: str, capsys) -> None:
+    """Sanity: prove litellm itself still prints the banner for ``model``, so a clean
+    capture below means the sync suppressed it, not that litellm stopped printing."""
+    import litellm
+
+    with pytest.raises(Exception):
+        litellm.get_model_info(model=model)
+    assert PROVIDER_BANNER in capsys.readouterr().out
+
+
+def test_sync_does_not_print_litellm_provider_banner(monkeypatch, capsys):
+    """Probing a key litellm can't map to a provider makes litellm print a "Provider List"
+    banner before raising. The sync expects that miss, so the banner must not reach stdout,
+    and the model must still be registered."""
+    import litellm
+
+    monkeypatch.setenv("DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM", "1")
+    monkeypatch.setattr(litellm, "suppress_debug_info", False)
+    _assert_litellm_prints_banner(MODEL_A.lower(), capsys)
+
+    reg = ModelRegistry()
+    reg._models = {MODEL_A.lower(): dict(TEST_REGISTRY_DATA[MODEL_A])}
+    reg.sync_to_litellm()
+
+    assert PROVIDER_BANNER not in capsys.readouterr().out
+    assert MODEL_A.lower() in litellm.model_cost
+
+
+@pytest.fixture()
+def _bundled_registry_unsynced():
+    """Undo the import-time sync of model_registry.json so a load hits litellm like a fresh
+    process: drop the bundled keys and litellm's lookup caches (``get_model_info`` is
+    lru-cached, so a hit from the import-time sync would otherwise mask the miss)."""
+    import litellm
+    from litellm.utils import _invalidate_model_cost_lowercase_map
+
+    from dynamiq.nodes.llms.registry import REGISTRY_FILE
+
+    for key in json.loads(REGISTRY_FILE.read_text()):
+        litellm.model_cost.pop(key.lower(), None)
+    _invalidate_model_cost_lowercase_map()
+    yield
+    # _restore_litellm_model_cost puts the entries back; drop lookups cached in between.
+    _invalidate_model_cost_lowercase_map()
+
+
+@pytest.mark.usefixtures("_bundled_registry_unsynced")
+def test_loading_bundled_registry_prints_nothing(monkeypatch, capsys):
+    """The real regression: importing dynamiq loads model_registry.json, whose provider-less
+    keys (e.g. gemini aliases, org/model ids) printed ~40 banner lines on every startup."""
+    import litellm
+
+    from dynamiq.nodes.llms.registry import REGISTRY_FILE
+
+    monkeypatch.setenv("DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM", "1")
+    monkeypatch.setattr(litellm, "suppress_debug_info", False)
+    _assert_litellm_prints_banner("gemini-flash-latest", capsys)
+
+    ModelRegistry(path=REGISTRY_FILE)
+
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("initial", [False, True])
+def test_sync_restores_litellm_suppress_debug_info(monkeypatch, initial):
+    """Suppression is scoped to the sync; the caller's litellm setting comes back unchanged."""
+    import litellm
+
+    monkeypatch.setenv("DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM", "1")
+    monkeypatch.setattr(litellm, "suppress_debug_info", initial)
+
+    reg = ModelRegistry()
+    reg._models = {MODEL_A.lower(): dict(TEST_REGISTRY_DATA[MODEL_A])}
+    reg.sync_to_litellm()
+
+    assert litellm.suppress_debug_info is initial
+
+
+def test_sync_restores_litellm_suppress_debug_info_when_interrupted(monkeypatch, mocker):
+    """An exception the sync doesn't swallow (e.g. KeyboardInterrupt) must not leave
+    litellm's debug output switched off for the rest of the process."""
+    import litellm
+
+    monkeypatch.setenv("DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM", "1")
+    monkeypatch.setattr(litellm, "suppress_debug_info", False)
+    mocker.patch.object(litellm, "get_model_info", side_effect=KeyboardInterrupt)
+
+    reg = ModelRegistry()
+    reg._models = {MODEL_A.lower(): dict(TEST_REGISTRY_DATA[MODEL_A])}
+    with pytest.raises(KeyboardInterrupt):
+        reg.sync_to_litellm()
+
+    assert litellm.suppress_debug_info is False
+
+
 @pytest.mark.parametrize(
     ("model_id", "expected"),
     [
