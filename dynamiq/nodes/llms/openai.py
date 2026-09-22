@@ -77,6 +77,7 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
     reasoning_effort: ReasoningEffort | None = ReasoningEffort.AUTO
     verbosity: Verbosity | None = Verbosity.MEDIUM
     O_SERIES_MODEL_PREFIXES: ClassVar[tuple[str, ...]] = ("o1", "o3", "o4")
+    GPT_REASONING_MODEL_PREFIXES: ClassVar[tuple[str, ...]] = ("gpt-5", "gpt-6")
     MODEL_PREFIX = "openai/"
 
     def __init__(self, **kwargs):
@@ -129,7 +130,7 @@ class OpenAI(OpenAIStrictToolsMixin, BaseLLM):
                 new_params.pop("stop", None)
             new_params.pop("max_tokens", None)
             new_params.pop("temperature", None)
-        elif model_lower.startswith("gpt-5"):
+        elif model_lower.startswith(self.GPT_REASONING_MODEL_PREFIXES):
             if "chat" not in model_lower:
                 new_params["verbosity"] = self.verbosity
                 if "pro" in model_lower:
