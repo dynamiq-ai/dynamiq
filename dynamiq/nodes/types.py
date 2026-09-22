@@ -74,6 +74,7 @@ class ActionType(str, Enum):
     COMPUTER_USE = "computer_use"
     SEMANTIC_SEARCH = "semantic_search"
     PARALLEL_EXECUTION = "parallel_execution"
+    JUDGEMENT = "judgement"
 
 
 class Behavior(str, Enum):
