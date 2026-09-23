@@ -256,6 +256,17 @@ def validate(flow, known_types: set | None = None):
             option = dependency.get("option") if isinstance(dependency, dict) else None
             if option is not None:
                 errors.extend(check_branch(by_id.get(target), target, option, label))
+            trigger = dependency.get("trigger") if isinstance(dependency, dict) else None
+            if trigger is not None and trigger not in ("success", "failure"):
+                errors.append(
+                    f"node {label!r} depends on {target!r} with trigger {trigger!r}; a trigger is 'success' or "
+                    "'failure'."
+                )
+            elif trigger == "failure" and option is not None:
+                errors.append(
+                    f"node {label!r} depends on option {option!r} of {target!r} on failure, but a Choice that fails "
+                    "takes no branch. Drop `option` to handle the failure, or `trigger` to follow the branch."
+                )
         if node_type == INPUT_TYPE and node.get("depends"):
             errors.append(f"Input node {label!r} must not depend on anything.")
         if node_type != INPUT_TYPE and not node.get("depends"):

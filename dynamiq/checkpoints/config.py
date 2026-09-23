@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 from typing import Callable
 
@@ -20,15 +21,18 @@ class CheckpointContext:
     Provides callbacks for:
     - Mid-loop: request a checkpoint save during long agent loops
     - Input timeout: request a checkpoint save when an input wait times out
+    - Pause: pause the run at a node until a time or until input arrives
     """
 
     def __init__(
         self,
         on_save_mid_run: Callable[[str], None] | None = None,
         on_input_timeout: Callable[[str], None] | None = None,
+        on_pause_run: Callable[[str, datetime | None], bool] | None = None,
     ):
         self._on_save_mid_run = on_save_mid_run
         self._on_input_timeout = on_input_timeout
+        self._on_pause_run = on_pause_run
 
     def save_mid_run(self, node_id: str) -> None:
         """Request a checkpoint save during a long-running node (e.g., agent loop iteration)."""
@@ -39,6 +43,17 @@ class CheckpointContext:
         """Request a checkpoint save when StreamingConfig input wait times out."""
         if self._on_input_timeout:
             self._on_input_timeout(node_id)
+
+    def pause_run(self, node_id: str, resume_at: datetime | None = None) -> bool:
+        """Ask the flow to pause the run at this node until ``resume_at``, or until input arrives when it is None.
+
+        Returns True when the flow recorded the wait, after which the node stops by raising
+        ``RunPausedException``. Returns False when the run cannot pause here: checkpointing is off, or the
+        node is not a top-level node of the flow and so has nothing to resume it.
+        """
+        if self._on_pause_run:
+            return self._on_pause_run(node_id, resume_at)
+        return False
 
 
 class CheckpointConfig(BaseModel):

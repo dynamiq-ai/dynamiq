@@ -4,6 +4,7 @@ from typing import IO, Any
 from dynamiq.connections import BaseConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes import Node
+from dynamiq.nodes.types import DependencyTrigger
 from dynamiq.serializers.types import WorkflowYamlData
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import encode
@@ -38,7 +39,7 @@ class WorkflowYAMLDumper:
         for param_name, param_data in node_data.items():
             if param_name == "depends":
                 updated_node_init_data[param_name] = [
-                    {"node": dep["node"]["id"], "option": dep["option"]} for dep in param_data
+                    cls.get_dependency_data(dep, connections_data=connections_data) for dep in param_data
                 ]
 
             elif param_name == "connection":
@@ -99,6 +100,18 @@ class WorkflowYAMLDumper:
                 updated_node_init_data[param_name] = param_data
 
         return updated_node_init_data
+
+    @classmethod
+    def get_dependency_data(cls, dependency: dict, connections_data: dict[str, dict]) -> dict:
+        """Dependency data for YAML: the node id and option, plus a condition or a failure trigger when set."""
+        dependency_data = {"node": dependency["node"]["id"], "option": dependency["option"]}
+        if (condition := dependency.get("condition")) is not None:
+            dependency_data["condition"] = cls.get_updated_node_data(
+                node_data={None: condition}, connections_data=connections_data
+            )[None]
+        if (trigger := dependency.get("trigger")) and trigger != DependencyTrigger.SUCCESS:
+            dependency_data["trigger"] = encode(trigger)
+        return dependency_data
 
     @classmethod
     def get_nodes_data_and_connections(

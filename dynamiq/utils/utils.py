@@ -2,6 +2,7 @@ import asyncio
 import base64
 import inspect
 from datetime import date, datetime
+from decimal import Decimal
 from enum import Enum
 from io import BytesIO
 from json import JSONEncoder, loads
@@ -277,9 +278,29 @@ def encode_reversible(value: Any) -> Any:
         }
     if isinstance(value, bytes):
         return {"__bytes__": base64.b64encode(value).decode("utf-8")}
+    if isinstance(value, Decimal):
+        return {"__decimal__": str(value)}
     if hasattr(value, "__dict__"):
         return value.__dict__
     return value
+
+
+# The keys `encode_reversible` and the checkpoint encoder mark a value with; `decode_reversible` turns them back.
+REVERSIBLE_MARKERS = frozenset(
+    {
+        "__bytesio__",
+        "__bytes__",
+        "__datetime__",
+        "__date__",
+        "__uuid__",
+        "__set__",
+        "__decimal__",
+        "__tuple__",
+        "__dict_items__",
+        "__int__",
+        "__float__",
+    }
+)
 
 
 def decode_reversible(dct: dict) -> Any:
@@ -311,6 +332,16 @@ def decode_reversible(dct: dict) -> Any:
         return UUID(dct["__uuid__"])
     if "__set__" in dct:
         return set(dct["__set__"])
+    if "__decimal__" in dct:
+        return Decimal(dct["__decimal__"])
+    if "__tuple__" in dct:
+        return tuple(dct["__tuple__"])
+    if "__dict_items__" in dct:
+        return dict(dct["__dict_items__"])
+    if "__int__" in dct:
+        return int(dct["__int__"])
+    if "__float__" in dct:
+        return float(dct["__float__"])
     return dct
 
 

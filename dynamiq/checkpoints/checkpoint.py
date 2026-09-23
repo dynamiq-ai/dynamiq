@@ -1,5 +1,5 @@
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -135,12 +135,15 @@ class NodeCheckpointState(BaseModel):
 
 
 class PendingInputContext(BaseModel):
-    """Context for a workflow waiting for human input (HITL)."""
+    """Context for a node the run waits on: for human input (HITL), or for a time to come."""
 
     node_id: str = Field(description="ID of the node waiting for input")
     prompt: str = Field(description="The question/prompt shown to user")
     timestamp: datetime = Field(description="When input was requested")
     metadata: dict = Field(default_factory=dict, description="Additional context (tool name, etc.)")
+    resume_at: datetime | None = Field(
+        default=None, description="When the wait ends on its own; None when it ends only when input arrives"
+    )
 
 
 class FlowCheckpoint(BaseModel):
@@ -184,13 +187,19 @@ class FlowCheckpoint(BaseModel):
             self.pending_node_ids.remove(node_id)
         self.updated_at = utc_now()
 
-    def mark_pending_input(self, node_id: str, prompt: str, metadata: dict | None = None) -> None:
-        """Mark a node as waiting for human input (HITL). Supports multiple parallel pending inputs."""
+    def mark_pending_input(
+        self, node_id: str, prompt: str, metadata: dict | None = None, resume_at: datetime | None = None
+    ) -> None:
+        """Mark a node as waiting for human input (HITL) or, with ``resume_at``, for a time to come.
+
+        Supports multiple parallel pending inputs.
+        """
         self.pending_inputs[node_id] = PendingInputContext(
             node_id=node_id,
             prompt=prompt,
             timestamp=utc_now(),
             metadata=metadata or {},
+            resume_at=resume_at,
         )
         self.status = CheckpointStatus.PENDING_INPUT
         self.updated_at = utc_now()
@@ -205,6 +214,11 @@ class FlowCheckpoint(BaseModel):
     def has_pending_inputs(self) -> bool:
         """Check if any nodes are waiting for human input."""
         return len(self.pending_inputs) > 0
+
+    @property
+    def resume_at(self) -> datetime | None:
+        """The earliest time a waiting node asked the run to resume at, or None when every wait is for input."""
+        return min((pending.resume_at for pending in self.pending_inputs.values() if pending.resume_at), default=None)
 
     def get_pending_input(self, node_id: str) -> PendingInputContext | None:
         """Get pending input context for a specific node."""
@@ -395,6 +409,16 @@ class CheckpointFlowMixin(BaseModel):
                     return top_id
             return node_id
 
+        def _mark_waiting_unlocked(node_id: str, metadata: dict, resume_at: datetime | None = None) -> bool:
+            """Record that the run waits on a node: its state snapshot plus a pending input.
+
+            Caller must hold ``self._checkpoint_lock``. Returns ``False`` when nothing could be recorded.
+            """
+            if not _snapshot_node_state_unlocked(node_id):
+                return False
+            self._checkpoint.mark_pending_input(node_id=node_id, prompt="", metadata=metadata, resume_at=resume_at)
+            return True
+
         def on_input_timeout(node_id: str) -> None:
             with self._checkpoint_lock:
                 cfg = self._effective_checkpoint_config or self.checkpoint
@@ -406,15 +430,8 @@ class CheckpointFlowMixin(BaseModel):
                         f"Flow {self.id}: input timeout from nested node {node_id} - "
                         f"snapshotting enclosing top-level node {effective_id}"
                     )
-                if _snapshot_node_state_unlocked(effective_id):
-                    self._checkpoint.mark_pending_input(
-                        node_id=effective_id,
-                        prompt="",
-                        metadata={
-                            "reason": "input_streaming_timeout",
-                            "source_node_id": node_id,
-                        },
-                    )
+                metadata = {"reason": "input_streaming_timeout", "source_node_id": node_id}
+                if _mark_waiting_unlocked(effective_id, metadata):
                     self._save_checkpoint_unlocked()
                     logger.info(
                         f"Flow {self.id}: checkpoint marked PENDING_INPUT on input streaming timeout for node {node_id}"
@@ -425,9 +442,27 @@ class CheckpointFlowMixin(BaseModel):
                         f"no checkpoint state captured (no live checkpoint or unknown node)"
                     )
 
+        def on_pause_run(node_id: str, resume_at: datetime | None) -> bool:
+            # Only a node of this flow can pause the run: a nested one (a Map item, an agent tool, a sub-workflow
+            # step) would be resumed through its owner, whose restore does not bring the nested node's state back.
+            if node_id not in self._node_by_id:
+                return False
+            if resume_at is not None and resume_at.tzinfo is None:
+                resume_at = resume_at.replace(tzinfo=timezone.utc)
+            with self._checkpoint_lock:
+                metadata = {"reason": "timer" if resume_at else "input"}
+                if not _mark_waiting_unlocked(node_id, metadata, resume_at=resume_at):
+                    return False
+            logger.info(
+                f"Flow {self.id}: run paused at node {node_id}"
+                + (f" until {resume_at.isoformat()}" if resume_at else " until input arrives")
+            )
+            return True
+
         checkpoint_context = CheckpointContext(
             on_save_mid_run=on_save_mid_run,
             on_input_timeout=on_input_timeout,
+            on_pause_run=on_pause_run,
         )
 
         if config is None:
@@ -450,7 +485,7 @@ class CheckpointFlowMixin(BaseModel):
 
         return None
 
-    def _save_checkpoint_unlocked(self) -> None:
+    def _save_checkpoint_unlocked(self, strict: bool = False) -> None:
         """Persist the current checkpoint without acquiring ``_checkpoint_lock``.
 
         Callers that already hold the lock (e.g. the context callbacks created by
@@ -461,6 +496,9 @@ class CheckpointFlowMixin(BaseModel):
         building a chain suitable for time-travel.  The very first save stores
         the checkpoint as-is (the chain root with no parent).
         In REPLACE mode the same checkpoint is overwritten in-place every time.
+
+        A failed save is logged and swallowed, except with ``strict``: a paused run exists only
+        through its checkpoint, so pausing re-raises rather than report a pause nothing can resume.
         """
         cfg = self._effective_checkpoint_config or self.checkpoint
         if not self._checkpoint or not cfg.backend:
@@ -488,6 +526,8 @@ class CheckpointFlowMixin(BaseModel):
                 logger.debug(f"Flow {self.id}: checkpoint saved - {self._checkpoint.id}")
         except Exception as e:
             logger.warning(f"Flow {self.id}: failed to save checkpoint - {e}")
+            if strict:
+                raise
 
     def _save_checkpoint(self) -> None:
         """Save current checkpoint to backend (thread-safe).
@@ -497,11 +537,13 @@ class CheckpointFlowMixin(BaseModel):
         with self._checkpoint_lock:
             self._save_checkpoint_unlocked()
 
-    def _update_checkpoint(self, new_results: dict[str, RunnableResult], status: CheckpointStatus) -> None:
+    def _update_checkpoint(
+        self, new_results: dict[str, RunnableResult], status: CheckpointStatus, strict: bool = False
+    ) -> None:
         """Update checkpoint with new node results (thread-safe).
 
         Holds ``_checkpoint_lock`` for the entire mutation+save so concurrent node-thread
-        callbacks cannot interleave with the update.
+        callbacks cannot interleave with the update. ``strict`` re-raises a failed save.
         """
         with self._checkpoint_lock:
             if not self._checkpoint:
@@ -537,7 +579,7 @@ class CheckpointFlowMixin(BaseModel):
                 self._checkpoint.mark_node_complete(node_id, node_state)
 
             self._checkpoint.status = status
-            self._save_checkpoint_unlocked()
+            self._save_checkpoint_unlocked(strict=strict)
 
     def _cleanup_old_checkpoints(self) -> None:
         """Remove old checkpoints beyond max_checkpoints."""
@@ -567,11 +609,11 @@ class CheckpointFlowMixin(BaseModel):
 
         return None
 
-    async def _save_checkpoint_async_unlocked(self) -> None:
+    async def _save_checkpoint_async_unlocked(self, strict: bool = False) -> None:
         """Async persist without acquiring ``_checkpoint_lock``.
 
         Callers that already hold the lock use this to avoid deadlocking.
-        Mirrors ``_save_checkpoint_unlocked`` but uses the backend's async API.
+        Mirrors ``_save_checkpoint_unlocked`` but uses the backend's async API, ``strict`` included.
         """
         cfg = self._effective_checkpoint_config or self.checkpoint
         if not self._checkpoint or not cfg.backend:
@@ -599,6 +641,8 @@ class CheckpointFlowMixin(BaseModel):
                 logger.debug(f"Flow {self.id}: checkpoint saved - {self._checkpoint.id}")
         except Exception as e:
             logger.warning(f"Flow {self.id}: failed to save checkpoint - {e}")
+            if strict:
+                raise
 
     async def _save_checkpoint_async(self) -> None:
         """Async save of the current checkpoint to backend.
@@ -609,12 +653,14 @@ class CheckpointFlowMixin(BaseModel):
         """
         await self._save_checkpoint_async_unlocked()
 
-    async def _update_checkpoint_async(self, new_results: dict[str, RunnableResult], status: CheckpointStatus) -> None:
+    async def _update_checkpoint_async(
+        self, new_results: dict[str, RunnableResult], status: CheckpointStatus, strict: bool = False
+    ) -> None:
         """Async update of checkpoint with new node results.
 
         Only called from the event loop after ``asyncio.gather`` returns (all node
         threads finished), so no thread-level contention exists. The event loop is
-        single-threaded so no additional lock is needed.
+        single-threaded so no additional lock is needed. ``strict`` re-raises a failed save.
         """
         if not self._checkpoint:
             return
@@ -649,7 +695,7 @@ class CheckpointFlowMixin(BaseModel):
             self._checkpoint.mark_node_complete(node_id, node_state)
 
         self._checkpoint.status = status
-        await self._save_checkpoint_async_unlocked()
+        await self._save_checkpoint_async_unlocked(strict=strict)
 
     async def _cleanup_old_checkpoints_async(self) -> None:
         """Async removal of old checkpoints beyond max_checkpoints."""
