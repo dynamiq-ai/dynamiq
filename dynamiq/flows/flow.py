@@ -3,7 +3,7 @@ import builtins
 import threading
 import time
 from datetime import datetime
-from functools import cached_property
+from functools import cache, cached_property
 from graphlib import CycleError, TopologicalSorter
 from io import BytesIO
 from typing import Any
@@ -12,13 +12,14 @@ from uuid import uuid4
 from pydantic import Field, PrivateAttr, computed_field, field_validator
 
 from dynamiq.checkpoints.checkpoint import CheckpointFlowMixin, CheckpointNodeMixin, CheckpointStatus, FlowCheckpoint
+from dynamiq.checkpoints.types import RunPausedException
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.executors.base import BaseExecutor
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.executors.pool import ThreadExecutor
 from dynamiq.flows.base import BaseFlow
 from dynamiq.nodes.node import Node, NodeOutputReference, NodeReadyToRun
-from dynamiq.nodes.types import Behavior
+from dynamiq.nodes.types import Behavior, DependencyTrigger
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableFailedNodeInfo, RunnableResultError
 from dynamiq.types.cancellation import CanceledException, check_cancellation
@@ -37,6 +38,18 @@ class FlowNodeFailureException(Exception):
     def __init__(self, message: str, failed_nodes: list[RunnableFailedNodeInfo] | None = None):
         super().__init__(message)
         self.failed_nodes = failed_nodes or []
+
+
+@cache
+def restored_error_type(name: str) -> type[Exception]:
+    """The exception type a checkpoint recorded by name: the builtin of that name, or a stand-in carrying it.
+
+    The stand-in keeps a restored failure's type name, which conditions on `$.error.type` route by.
+    """
+    builtin = getattr(builtins, name, None)
+    if isinstance(builtin, type) and issubclass(builtin, Exception):
+        return builtin
+    return type(name, (Exception,), {})
 
 
 class Flow(CheckpointFlowMixin, BaseFlow):
@@ -82,6 +95,8 @@ class Flow(CheckpointFlowMixin, BaseFlow):
     connection_manager: ConnectionManager = Field(default_factory=ConnectionManager)
 
     _original_input: Any = PrivateAttr(default=None)
+    # Nodes held back because a node they depend on waits: neither run nor skipped until the run resumes.
+    _deferred_node_ids: set[str] = PrivateAttr(default_factory=set)
 
     def __init__(self, **kwargs):
         """
@@ -215,16 +230,94 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         """
         Gets the list of nodes that failed with RAISE error behavior.
 
+        Nodes that wait, and failures an error edge took over, are not failures of the run.
+
         Returns:
             list[FailedNodeInfo]: List of failed node information.
         """
+        not_failing_the_run = self._waiting_node_ids() | self._handled_failure_node_ids()
         failed_nodes: list[RunnableFailedNodeInfo] = []
         for node_id, result in self._results.items():
+            if node_id in not_failing_the_run:
+                continue
             node = self._node_by_id.get(node_id)
             if node and result.status == RunnableStatus.FAILURE and node.error_handling.behavior == Behavior.RAISE:
                 error_message = result.error.message if result.error else None
                 failed_nodes.append(RunnableFailedNodeInfo(id=node_id, name=node.name, error_message=error_message))
         return failed_nodes
+
+    def _handled_failure_node_ids(self) -> set[str]:
+        """Failed nodes whose failure an error edge took over: a node depending on that failure ran, or runs
+        once the run resumes because it waits behind a paused node."""
+        handled = set()
+        for node in self.nodes:
+            result = self._results.get(node.id)
+            ran = result is not None and result.status in (RunnableStatus.SUCCESS, RunnableStatus.FAILURE)
+            if ran or node.id in self._deferred_node_ids:
+                handled.update(dep.node.id for dep in node.depends if dep.trigger == DependencyTrigger.FAILURE)
+        return handled
+
+    def _waiting_node_ids(self) -> set[str]:
+        """Nodes the run waits on: they asked the flow to pause the run, then stopped without completing."""
+        if not self._checkpoint:
+            return set()
+        with self._checkpoint_lock:
+            pending_node_ids = set(self._checkpoint.pending_inputs)
+        return {
+            node_id
+            for node_id in pending_node_ids
+            if (result := self._results.get(node_id)) is not None and result.status == RunnableStatus.FAILURE
+        }
+
+    def _defer_nodes_behind_waiting(self, ready_nodes: list[NodeReadyToRun]) -> list[NodeReadyToRun]:
+        """Hold back the ready nodes that depend on a waiting node, directly or through another held-back node.
+
+        They are marked done so the sorter moves on and independent branches finish, but they neither run nor
+        skip: their results stay undefined, the paused checkpoint leaves them out, and the resumed run runs them.
+        Skipping them instead would fire their error edges and lose the branch behind the wait.
+        """
+        blocked = self._waiting_node_ids() | self._deferred_node_ids
+        if not blocked:
+            return ready_nodes
+
+        deferred = [ready.node.id for ready in ready_nodes if any(dep.node.id in blocked for dep in ready.node.depends)]
+        if not deferred:
+            return ready_nodes
+
+        self._deferred_node_ids.update(deferred)
+        self._ts.done(*deferred)
+        return [ready for ready in ready_nodes if ready.node.id not in self._deferred_node_ids]
+
+    def _completed_results(self, results: dict[str, RunnableResult]) -> dict[str, RunnableResult]:
+        """The results of nodes that finished: what a resumed run restores instead of running again.
+
+        A waiting node has not finished: its pause saved the state the resumed run starts it from.
+        """
+        waiting_node_ids = self._waiting_node_ids()
+        return {
+            node_id: result
+            for node_id, result in results.items()
+            if result.status != RunnableStatus.UNDEFINED and node_id not in waiting_node_ids
+        }
+
+    def _drop_stale_pending_inputs(self, waiting_node_ids: set[str]) -> None:
+        """Forget pending inputs of nodes that completed anyway, so they neither pause the run nor stay recorded."""
+        if not self._checkpoint:
+            return
+        with self._checkpoint_lock:
+            for node_id in [node_id for node_id in self._checkpoint.pending_inputs if node_id not in waiting_node_ids]:
+                self._checkpoint.clear_pending_input(node_id)
+
+    def _mark_checkpoint_not_paused(self, status: CheckpointStatus) -> None:
+        """A run that fails or is canceled while a node waits is not paused: the checkpoint must not say it is."""
+        if self._checkpoint and self._checkpoint.status == CheckpointStatus.PENDING_INPUT:
+            self._checkpoint.status = status
+
+    def _pause_error(self, waiting_node_ids: set[str]) -> RunPausedException:
+        names = ", ".join(sorted(self._node_by_id[node_id].name or node_id for node_id in waiting_node_ids))
+        resume_at = self._checkpoint.resume_at if self._checkpoint else None
+        until = f" until {resume_at.isoformat()}" if resume_at else ""
+        return RunPausedException(f"Run paused: waiting on {names}{until}", resume_at=resume_at)
 
     @staticmethod
     def init_node_topological_sorter(nodes: list[Node]):
@@ -255,6 +348,9 @@ class Flow(CheckpointFlowMixin, BaseFlow):
     def _restore_from_checkpoint(self, checkpoint: FlowCheckpoint) -> None:
         """Restore flow execution state from a persisted checkpoint."""
         self._results = {}
+        self._deferred_node_ids = set()
+        # A node this checkpoint has no state for starts fresh, not with what another run restored into it.
+        self._reset_resumed_flags()
 
         for node_id, node_state in checkpoint.node_states.items():
             if node_state.status in (
@@ -267,7 +363,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                     error_data = dict(node_state.error)
                     error_type = error_data.get("type")
                     if isinstance(error_type, str):
-                        error_data["type"] = getattr(builtins, error_type, Exception)
+                        error_data["type"] = restored_error_type(error_type)
                     error = RunnableResultError(**error_data)
 
                 self._results[node_id] = RunnableResult(
@@ -287,8 +383,8 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         if checkpoint.has_pending_inputs():
             pending_node_ids = list(checkpoint.pending_inputs.keys())
             logger.info(
-                f"Flow {self.id}: checkpoint has {len(pending_node_ids)} nodes waiting for input: {pending_node_ids}. "
-                f"These nodes will re-request approval on resume."
+                f"Flow {self.id}: checkpoint has {len(pending_node_ids)} waiting nodes: {pending_node_ids}. "
+                f"They run again on resume, asking for their input or checking their time again."
             )
             for node_id in pending_node_ids:
                 checkpoint.clear_pending_input(node_id)
@@ -360,6 +456,10 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         }
         self._ts = self.init_node_topological_sorter(nodes=self.nodes)
         self._checkpoint_persisted = False
+        self._deferred_node_ids = set()
+        self._reset_resumed_flags()
+
+    def _reset_resumed_flags(self) -> None:
         for node in self.nodes:
             if isinstance(node, CheckpointNodeMixin) and node.is_resumed:
                 node.reset_resumed_flag()
@@ -571,6 +671,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                         if already_completed:
                             self._ts.done(*already_completed)
                         ready_nodes = [n for n in ready_nodes if n.node.id not in self._checkpoint.completed_node_ids]
+                    ready_nodes = self._defer_nodes_behind_waiting(ready_nodes)
 
                     results = run_executor.execute(
                         ready_nodes=ready_nodes,
@@ -586,14 +687,17 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                             raise CanceledException()
 
                     if self._is_checkpoint_after_node_enabled():
-                        self._update_checkpoint(results, CheckpointStatus.ACTIVE)
+                        self._update_checkpoint(self._completed_results(results), CheckpointStatus.ACTIVE)
 
                     time.sleep(0.001)
 
             output = self._get_output()
+            waiting_node_ids = self._waiting_node_ids()
+            self._drop_stale_pending_inputs(waiting_node_ids)
             failed_nodes = self._get_failed_nodes_with_raise_behavior()
 
             if failed_nodes:
+                self._mark_checkpoint_not_paused(CheckpointStatus.FAILED)
                 if self._checkpoint and self._is_checkpoint_on_failure_enabled():
                     self._update_checkpoint({}, CheckpointStatus.FAILED)
                     logger.info(f"Flow {self.id}: checkpoint saved on failure, checkpoint_id={self._checkpoint.id}")
@@ -610,6 +714,22 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                     error=RunnableResultError.from_exception(error, failed_nodes=failed_nodes),
                 )
 
+            if waiting_node_ids:
+                # One strict save holds everything the resumed run needs: the finished nodes' results, so
+                # nothing runs twice, and the waiting nodes' state.
+                self._update_checkpoint(
+                    self._completed_results(self._results), CheckpointStatus.PENDING_INPUT, strict=True
+                )
+                error = self._pause_error(waiting_node_ids)
+                self.run_on_flow_error(error, config, failed_nodes=[], **merged_kwargs)
+                logger.info(f"Flow {self.id}: {error}, after {format_duration(time_start, datetime.now())}.")
+                return RunnableResult(
+                    status=RunnableStatus.FAILURE,
+                    input=input_data,
+                    output=output,
+                    error=RunnableResultError.from_exception(error),
+                )
+
             if self._is_checkpoint_after_node_enabled():
                 self._update_checkpoint({}, CheckpointStatus.COMPLETED)
                 self._cleanup_old_checkpoints()
@@ -618,6 +738,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
             logger.info(f"Flow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
             return RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=output)
         except CanceledException:
+            self._mark_checkpoint_not_paused(CheckpointStatus.CANCELED)
             if self._checkpoint and self._is_checkpoint_on_cancel_enabled():
                 self._update_checkpoint({}, CheckpointStatus.CANCELED)
                 logger.info(f"Flow {self.id}: checkpoint saved on cancel, checkpoint_id={self._checkpoint.id}")
@@ -642,6 +763,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 error=canceled_error,
             )
         except Exception as e:
+            self._mark_checkpoint_not_paused(CheckpointStatus.FAILED)
             if self._checkpoint and self._is_checkpoint_on_failure_enabled():
                 self._update_checkpoint({}, CheckpointStatus.FAILED)
                 logger.info(f"Flow {self.id}: checkpoint saved on failure, checkpoint_id={self._checkpoint.id}")
@@ -776,6 +898,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                         if already_completed:
                             self._ts.done(*already_completed)
                         ready_nodes = [n for n in ready_nodes if n.node.id not in self._checkpoint.completed_node_ids]
+                    ready_nodes = self._defer_nodes_behind_waiting(ready_nodes)
 
                     nodes_to_run = [node for node in ready_nodes if node.is_ready]
 
@@ -804,15 +927,20 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                                 raise CanceledException()
 
                         if self._is_checkpoint_after_node_enabled():
-                            await self._update_checkpoint_async(results, CheckpointStatus.ACTIVE)
+                            await self._update_checkpoint_async(
+                                self._completed_results(results), CheckpointStatus.ACTIVE
+                            )
 
                     # Wait for ready nodes to be processed and reduce CPU usage by yielding control to the event loop
                     await asyncio.sleep(0.001)
 
             output = self._get_output()
+            waiting_node_ids = self._waiting_node_ids()
+            self._drop_stale_pending_inputs(waiting_node_ids)
             failed_nodes = self._get_failed_nodes_with_raise_behavior()
 
             if failed_nodes:
+                self._mark_checkpoint_not_paused(CheckpointStatus.FAILED)
                 if self._checkpoint and self._is_checkpoint_on_failure_enabled():
                     await self._update_checkpoint_async({}, CheckpointStatus.FAILED)
                     logger.info(f"Flow {self.id}: checkpoint saved on failure, checkpoint_id={self._checkpoint.id}")
@@ -827,6 +955,22 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                     input=input_data,
                     output=output,
                     error=RunnableResultError.from_exception(error, failed_nodes=failed_nodes),
+                )
+
+            if waiting_node_ids:
+                # One strict save holds everything the resumed run needs: the finished nodes' results, so
+                # nothing runs twice, and the waiting nodes' state.
+                await self._update_checkpoint_async(
+                    self._completed_results(self._results), CheckpointStatus.PENDING_INPUT, strict=True
+                )
+                error = self._pause_error(waiting_node_ids)
+                self.run_on_flow_error(error, config, failed_nodes=[], **merged_kwargs)
+                logger.info(f"Flow {self.id}: {error}, after {format_duration(time_start, datetime.now())}.")
+                return RunnableResult(
+                    status=RunnableStatus.FAILURE,
+                    input=input_data,
+                    output=output,
+                    error=RunnableResultError.from_exception(error),
                 )
 
             if self._is_checkpoint_after_node_enabled():
@@ -844,6 +988,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 if current is not None and hasattr(current, "uncancel"):
                     current.uncancel()
             self.run_on_flow_canceled(config, **merged_kwargs)
+            self._mark_checkpoint_not_paused(CheckpointStatus.CANCELED)
             if self._checkpoint and self._is_checkpoint_on_cancel_enabled():
                 try:
                     await self._update_checkpoint_async({}, CheckpointStatus.CANCELED)
@@ -868,6 +1013,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 error=canceled_error,
             )
         except Exception as e:
+            self._mark_checkpoint_not_paused(CheckpointStatus.FAILED)
             if self._checkpoint and self._is_checkpoint_on_failure_enabled():
                 await self._update_checkpoint_async({}, CheckpointStatus.FAILED)
                 logger.info(f"Flow {self.id}: checkpoint saved on failure, checkpoint_id={self._checkpoint.id}")

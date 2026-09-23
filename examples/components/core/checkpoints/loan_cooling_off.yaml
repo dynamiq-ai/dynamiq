@@ -1,0 +1,58 @@
+# A loan paid out after a statutory cooling-off period, with operations told when the payout fails.
+# The same flow as loan_cooling_off.py, as YAML; loan_cooling_off_yaml.py runs it the way the platform does.
+nodes:
+  application:
+    type: dynamiq.nodes.utils.Input
+
+  credit-check:
+    type: dynamiq.nodes.tools.Python
+    name: credit check
+    code: |
+      def run(input_data):
+          application = input_data["application"]["output"]
+          affordable = application["monthly_income"] * 12 >= application["amount"] / 2
+          return {"approved": affordable, "score": 712 if affordable else 540}
+    depends:
+      - node: application
+
+  cooling-off:
+    type: dynamiq.nodes.operators.Delay
+    name: cooling-off period
+    duration_seconds: 1209600 # 14 days: the run pauses, and resumes when the time comes
+    depends:
+      - node: credit-check
+
+  disburse:
+    type: dynamiq.nodes.tools.Python
+    name: disburse
+    code: |
+      def run(input_data):
+          amount = input_data["application"]["output"]["amount"]
+          if amount > 100000:
+              raise RuntimeError(f"payout rail rejected {amount}: above the 100000 limit")
+          return {"disbursed": amount}
+    error_handling:
+      max_retries: 1
+      retry_interval_seconds: 1
+    depends:
+      - node: application
+      - node: cooling-off
+
+  notify-ops:
+    type: dynamiq.nodes.tools.Python
+    name: notify operations
+    code: |
+      def run(input_data):
+          return {"ticket": "OPS-1", "reason": input_data["disburse"]["error"]["message"]}
+    depends:
+      - node: disburse
+        trigger: failure # runs only when the payout failed after its retries
+
+flows:
+  loan-disbursement:
+    nodes: [application, credit-check, cooling-off, disburse, notify-ops]
+
+workflows:
+  loan-disbursement:
+    flow: loan-disbursement
+    version: 1

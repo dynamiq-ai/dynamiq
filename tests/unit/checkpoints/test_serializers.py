@@ -2,11 +2,15 @@
 
 import base64
 import json
+import math
 from datetime import date, datetime
+from decimal import Decimal
 from io import BytesIO
 from uuid import uuid4
 
 from dynamiq.checkpoints.checkpoint import CheckpointStatus, FlowCheckpoint, NodeCheckpointState, PendingInputContext
+from dynamiq.runnables import RunnableResult, RunnableStatus
+from dynamiq.runnables.base import RunnableResultError
 from dynamiq.utils import decode_reversible, encode_reversible
 
 
@@ -405,6 +409,69 @@ class TestRoundTripSerialization:
         assert "agent-2" in restored.pending_inputs
         assert restored.pending_inputs["agent-1"].prompt == "Approve action A?"
         assert restored.pending_inputs["agent-2"].prompt == "Approve action B?"
+
+
+class TestValuesJsonCannotHold:
+    """A resumed run must see exactly what the run produced, including values JSON has no type for."""
+
+    OUTPUT = {
+        "principal": Decimal("250000.00"),
+        "schedule": {1: Decimal("1041.67"), 2: Decimal("1041.67")},
+        "balance_wei": 2**70,
+        "debt": -(2**64),
+        "rate": (Decimal("0.0495"), "fixed"),
+        "limits": [float("inf"), float("-inf")],
+        "flags": {True: "manual review", None: "unset", 1.5: "tier"},
+        "ledger": {2**70: "overflow bucket", float("inf"): "unbounded"},
+        "counterparties": {("GB", "sort-code"), ("DE", "iban")},
+        "raw_api_response": {"__int__": "n/a", "__set__": "tags"},
+    }
+
+    @staticmethod
+    def checkpoint() -> FlowCheckpoint:
+        checkpoint = FlowCheckpoint(flow_id="loan", run_id="run-1")
+        checkpoint.mark_node_complete(
+            "schedule",
+            NodeCheckpointState(
+                node_id="schedule", node_type="Python", status="success", output_data=TestValuesJsonCannotHold.OUTPUT
+            ),
+        )
+        return checkpoint
+
+    def assert_same(self, restored: FlowCheckpoint) -> None:
+        output = restored.node_states["schedule"].output_data
+        assert output == self.OUTPUT
+        assert isinstance(output["principal"], Decimal)
+        assert isinstance(output["rate"], tuple)
+        assert list(output["schedule"]) == [1, 2]
+
+    def test_orjson_round_trip(self):
+        self.assert_same(FlowCheckpoint.from_bytes(self.checkpoint().to_bytes()))
+
+    def test_json_round_trip_with_object_hook(self):
+        raw = json.dumps(self.checkpoint().to_dict(), default=encode_reversible)
+
+        self.assert_same(FlowCheckpoint(**json.loads(raw, object_hook=decode_reversible)))
+
+    def test_what_a_model_holds_comes_back_as_data_with_its_keys(self):
+        """A Choice keeps its options' results: models whose inputs hold whatever upstream nodes returned."""
+        option = RunnableResult(
+            status=RunnableStatus.FAILURE,
+            input={"totals_by_year": {2025: Decimal("10.50")}},
+            error=RunnableResultError.from_exception(ValueError("no route")),
+        )
+        checkpoint = self.checkpoint()
+        checkpoint.node_states["schedule"].output_data = {"route": option}
+
+        restored = FlowCheckpoint.from_bytes(checkpoint.to_bytes()).node_states["schedule"].output_data["route"]
+
+        assert restored["input"] == {"totals_by_year": {2025: Decimal("10.50")}}
+        assert restored["error"]["type"] == "ValueError"
+
+    def test_nan_is_restored_as_nan(self):
+        checkpoint = FlowCheckpoint(flow_id="loan", run_id="run-1", original_input={"ratio": float("nan")})
+
+        assert math.isnan(FlowCheckpoint.from_bytes(checkpoint.to_bytes()).original_input["ratio"])
 
 
 class TestByteSerialization:

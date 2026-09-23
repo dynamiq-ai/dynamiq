@@ -251,6 +251,43 @@ def test_a_branch_must_name_an_option_of_a_choice():
     assert not [e for e in found if "hit_policy" in e]
 
 
+def test_an_error_edge_names_a_known_trigger_and_no_branch():
+    route = {
+        "id": "route",
+        "name": "route",
+        "type": CHOICE,
+        "depends": [{"node": "start"}],
+        "options": [{"id": "approve", "name": "approve"}],
+    }
+    on_failure = {
+        "id": "refund",
+        "name": "refund",
+        "type": EXPRESSION,
+        "depends": [{"node": "route", "trigger": "failure"}],
+        "expressions": [{"key": "x", "expression": "1"}],
+    }
+    on_unknown_trigger = {
+        "id": "a",
+        "name": "a",
+        "type": EXPRESSION,
+        "depends": [{"node": "route", "trigger": "error"}],
+        "expressions": [{"key": "x", "expression": "1"}],
+    }
+    on_failed_branch = {
+        "id": "b",
+        "name": "b",
+        "type": EXPRESSION,
+        "depends": [{"node": "route", "option": "approve", "trigger": "failure"}],
+        "expressions": [{"key": "x", "expression": "1"}],
+    }
+
+    found = errors_of(flow_with(route, on_failure, on_unknown_trigger, on_failed_branch))
+
+    assert not [e for e in found if "'refund'" in e]
+    assert [e for e in found if "with trigger 'error'" in e]
+    assert [e for e in found if "a Choice that fails takes no branch" in e]
+
+
 def test_the_canvas_draws_a_branch_through_the_options_handle():
     choice = {
         "id": "route",

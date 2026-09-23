@@ -82,6 +82,17 @@ class Behavior(str, Enum):
     RETURN = "return"
 
 
+class DependencyTrigger(str, Enum):
+    """Which outcome of the upstream node lets a dependent node run.
+
+    `success` is the ordinary edge. `failure` is an error edge: the dependent runs only when the upstream
+    node failed after all its retries, and a failure that reached such a handler no longer fails the run.
+    """
+
+    SUCCESS = "success"
+    FAILURE = "failure"
+
+
 class ConditionOperator(str, Enum):
     """Enum representing various condition operators."""
 
