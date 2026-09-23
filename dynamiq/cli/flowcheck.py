@@ -23,6 +23,33 @@ UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 INPUT_TYPE = "dynamiq.nodes.utils.Input"
 OUTPUT_TYPE = "dynamiq.nodes.utils.Output"
 
+# The decision operators the platform runs a rules workflow with. Their shape is checked here
+# the way the platform checks it on save, so a flow written by hand fails before it is sent.
+CHOICE_TYPE = "dynamiq.nodes.operators.Choice"
+DECISION_TABLE_TYPE = "dynamiq.nodes.operators.DecisionTable"
+RULES_TYPE = "dynamiq.nodes.operators.Rules"
+EXPRESSION_TYPE = "dynamiq.nodes.operators.Expression"
+SUB_WORKFLOW_TYPE = "dynamiq.nodes.operators.SubWorkflow"
+JUDGEMENT_TYPE = "dynamiq.nodes.tools.Judgement"
+
+CHOICE_HIT_POLICIES = ("first", "all")
+TABLE_HIT_POLICIES = ("first", "unique", "collect")
+TABLE_AGGREGATIONS = ("list", "sum", "min", "max", "count")
+RULE_SEVERITIES = ("fail", "warn", "info")
+RULE_MISSING_POLICIES = ("not_evaluated", "fail")
+QUESTION_TYPES = ("noul", "choice", "score")
+CONFIDENCE_MODES = ("verbalized", "sampling")
+SYSTEM_ONE_TYPE = "dynamiq.nodes.detectors.SystemOne"
+JUDGE_TYPE_PREFIXES = ("dynamiq.nodes.llms.", "dynamiq.nodes.agents.")
+MAX_CHOICE_OPTIONS = 255
+MAX_SCORE_LEVELS = 10
+MAX_SAMPLES = 10
+DEFAULT_SAMPLES = 1
+# The output a decision table adds beside its columns, so no column may take it.
+MATCHED_RULES_KEY = "matched_rules"
+# A name an expression can read: an input, a derived value or an output key.
+IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 # Shapes people write when they think a flow is something else.
 WRONG_SHAPE_KEYS = {
     "actions": "a Pipedream component list",
@@ -158,6 +185,7 @@ def validate(flow, known_types: set | None = None):
     if duplicates:
         errors.append(f"duplicate node ids: {', '.join(duplicates)}. Node ids must be unique.")
     known = set(ids)
+    by_id = {node.get("id"): node for node in nodes if isinstance(node, dict)}
 
     types = [n.get("type") for n in nodes if isinstance(n, dict)]
     inputs = types.count(INPUT_TYPE)
@@ -224,6 +252,10 @@ def validate(flow, known_types: set | None = None):
                 target = target.get("id")
             if target not in known:
                 errors.append(f"node {label!r} depends on {target!r}, which is not a node in this flow.")
+                continue
+            option = dependency.get("option") if isinstance(dependency, dict) else None
+            if option is not None:
+                errors.extend(check_branch(by_id.get(target), target, option, label))
         if node_type == INPUT_TYPE and node.get("depends"):
             errors.append(f"Input node {label!r} must not depend on anything.")
         if node_type != INPUT_TYPE and not node.get("depends"):
@@ -398,6 +430,9 @@ def validate(flow, known_types: set | None = None):
                 tool_errors, tool_advisory = check_pipedream(tool, where)
                 errors.extend(tool_errors)
                 warnings.extend(tool_advisory)
+            # A Judgement is built to be an agent's tool, so it reaches the loader from here too.
+            elif tool.get("type") == JUDGEMENT_TYPE:
+                errors.extend(check_judgement(tool, f"{tool.get('name') or 'judgement'} on node {label}"))
             elif (tool.get("connection") is not None
                     and requirement_problems(tool.get("connection"), f"{where}: connection") is not None):
                 errors.extend(requirement_problems(tool.get("connection"), f"{where}: connection"))
@@ -409,18 +444,7 @@ def validate(flow, known_types: set | None = None):
 
         # The API reports these as `cannot be blank` with no node name.
         if node_type.startswith("dynamiq.nodes.llms."):
-            from_requirement = requirement_problems(node.get("connection"), f"node {label!r}: connection")
-            if from_requirement is not None:
-                errors.extend(from_requirement)
-            elif not UUID_RE.match(str(node.get("connection") or "")):
-                errors.append(
-                    f"node {label!r}: connection {node.get('connection')!r} is not a connection UUID. "
-                    "An LLM node carries its own `connection`. Run `dynamiq connection list`."
-                )
-            if not str(node.get("model") or "").strip():
-                errors.append(
-                    f"node {label!r}: an LLM node needs `model` (e.g. \"gpt-4o\")."
-                )
+            errors.extend(llm_requirements(node, f"node {label!r}"))
 
         # A Pipedream node placed in the DAG is validated exactly like one inside an agent.
         if node_type == "dynamiq.nodes.tools.Pipedream":
@@ -428,7 +452,8 @@ def validate(flow, known_types: set | None = None):
             errors.extend(node_errors)
             warnings.extend(node_advisory)
 
-        if node_type.startswith("dynamiq.nodes.tools."):
+        # A Judgement that depends on an agent judges that agent's answer; it belongs in the DAG, not in `tools`.
+        if node_type.startswith("dynamiq.nodes.tools.") and node_type != JUDGEMENT_TYPE:
             after = [
                 d.get("node") for d in coerce_depends(node.get("depends"))
                 if isinstance(d, dict) and d.get("node") in agent_ids
@@ -440,6 +465,9 @@ def validate(flow, known_types: set | None = None):
                     "agent's \"tools\" array instead."
                 )
 
+        if node_type.startswith("dynamiq.nodes.operators.") or node_type == JUDGEMENT_TYPE:
+            errors.extend(check_operator(node, label))
+
     for path, text in walk_strings(flow):
         if path.rsplit(".", 1)[-1] in PROSE_KEYS or len(text) > 200:
             continue
@@ -447,6 +475,310 @@ def validate(flow, known_types: set | None = None):
             errors.append(f"{path} is still the placeholder {text!r} - replace it with a real value.")
 
     return errors, warnings
+
+
+def check_branch(source, source_id, option, label) -> list:
+    """A dependency's `option` names a branch of a Choice: one of its options, by id."""
+    if not isinstance(source, dict) or source.get("type") != CHOICE_TYPE:
+        return [
+            f"node {label!r} depends on option {option!r} of {source_id!r}, which is not a Choice node. "
+            "Only a Choice has branches; drop `option` or point it at the Choice."
+        ]
+    options = [o for o in (source.get("options") or []) if isinstance(o, dict)]
+    if any(option == o.get("id") for o in options):
+        return []
+    # The runtime matches the option's id alone: a name would pass here and gate nothing there, so the
+    # branch's node would run whatever the Choice decided.
+    if by_name := next((o for o in options if option == o.get("name") and o.get("id")), None):
+        return [
+            f"node {label!r} depends on option {option!r} of choice {source_id!r} by its name; the runtime "
+            f"matches the option's id, so the branch would never gate it. Use {by_name['id']!r}."
+        ]
+    ids = ", ".join(str(o.get("id") or o.get("name")) for o in options) or "none"
+    return [
+        f"node {label!r} depends on option {option!r} of choice {source_id!r}, which has no such "
+        f"option (it has: {ids}). Use the option's id."
+    ]
+
+
+def check_operator(node, label) -> list:
+    """What the platform refuses on save for a decision operator, phrased for the author."""
+    node_type = node.get("type")
+    if node_type == CHOICE_TYPE:
+        return check_choice(node, label)
+    if node_type == DECISION_TABLE_TYPE:
+        return check_decision_table(node, label)
+    if node_type == RULES_TYPE:
+        return check_rules(node, label)
+    if node_type == EXPRESSION_TYPE:
+        return check_expression(node, label)
+    if node_type == SUB_WORKFLOW_TYPE:
+        return check_sub_workflow(node, label)
+    if node_type == JUDGEMENT_TYPE:
+        return check_judgement(node, label)
+    return []
+
+
+def check_choice(node, label) -> list:
+    errors = []
+    options = node.get("options")
+    if not isinstance(options, list) or not options:
+        errors.append(
+            f'choice {label!r} has no `options`. Each option is {{"id", "name", "condition"}}; '
+            "an option without a condition is the fallback that runs when no other holds."
+        )
+    else:
+        for index, option in enumerate(options):
+            if not isinstance(option, dict) or not option.get("id") or not option.get("name"):
+                errors.append(f"choice {label!r}: options[{index}] needs `id` and `name`.")
+    policy = node.get("hit_policy")
+    if policy is not None and policy not in CHOICE_HIT_POLICIES:
+        errors.append(
+            f"choice {label!r}: hit_policy {policy!r} is not one of {', '.join(CHOICE_HIT_POLICIES)}: "
+            "`first` runs the first branch whose condition holds, `all` runs every one."
+        )
+    return errors
+
+
+def check_decision_table(node, label) -> list:
+    errors = []
+    inputs = [c for c in (node.get("input_columns") or []) if isinstance(c, dict)]
+    outputs = [c for c in (node.get("output_columns") or []) if isinstance(c, dict)]
+    if not inputs:
+        errors.append(f'decision table {label!r} has no `input_columns` ({{"id", "name", "type"}} each).')
+    if not outputs:
+        errors.append(f"decision table {label!r} has no `output_columns`.")
+    for column in outputs:
+        if column.get("name") == MATCHED_RULES_KEY:
+            errors.append(
+                f"decision table {label!r}: {MATCHED_RULES_KEY!r} is reserved for the rules that fired; "
+                "name the output column differently."
+            )
+    for side, columns in (("input", inputs), ("output", outputs)):
+        names = [str(column.get("name") or "") for column in columns]
+        duplicates = sorted({name for name in names if name and names.count(name) > 1})
+        if duplicates:
+            errors.append(
+                f"decision table {label!r}: {side} column names used more than once: {', '.join(duplicates)}."
+            )
+    for index, rule in enumerate(node.get("rules") or []):
+        if not isinstance(rule, dict):
+            errors.append(f"decision table {label!r}: rules[{index}] is not an object.")
+            continue
+        rule_label = rule.get("id") or index
+        if not rule.get("id"):
+            errors.append(f"decision table {label!r}: rules[{index}] has no `id`.")
+        # A disabled row is never compiled, so a draft left short of cells loads and runs; only a row that
+        # is on has to fit the columns, the line the node itself draws.
+        if not rule.get("enabled", True):
+            continue
+        when, then = rule.get("when") or [], rule.get("then") or []
+        if inputs and len(when) != len(inputs):
+            errors.append(
+                f"decision table {label!r}: rule {rule_label!r} has {len(when)} `when` cells for "
+                f"{len(inputs)} input columns. Cells are positional, one per column; an empty cell is null."
+            )
+        if outputs and len(then) != len(outputs):
+            errors.append(
+                f"decision table {label!r}: rule {rule_label!r} has {len(then)} `then` cells for "
+                f"{len(outputs)} output columns."
+            )
+    policy = node.get("hit_policy")
+    if policy is not None and policy not in TABLE_HIT_POLICIES:
+        errors.append(f"decision table {label!r}: hit_policy {policy!r} is not one of {', '.join(TABLE_HIT_POLICIES)}.")
+    aggregation = node.get("aggregation")
+    if aggregation is not None and aggregation not in TABLE_AGGREGATIONS:
+        errors.append(
+            f"decision table {label!r}: aggregation {aggregation!r} is not one of {', '.join(TABLE_AGGREGATIONS)}."
+        )
+    return errors
+
+
+def check_rules(node, label) -> list:
+    errors = []
+    inputs = [f for f in (node.get("input_fields") or []) if isinstance(f, dict)]
+    if not inputs:
+        errors.append(f"rules {label!r} has no `input_fields`; a rule reads the record by the names declared here.")
+    taken = set()
+    for field in inputs:
+        name = str(field.get("name") or "")
+        if not IDENTIFIER_RE.match(name):
+            errors.append(
+                f"rules {label!r}: input name {name!r} is not an identifier (letters, digits and "
+                "underscores, not starting with a digit), so no check could read it."
+            )
+        taken.add(name)
+    for derived in node.get("derived_values") or []:
+        if not isinstance(derived, dict):
+            continue
+        name = str(derived.get("name") or "")
+        if not IDENTIFIER_RE.match(name):
+            errors.append(f"rules {label!r}: derived value name {name!r} is not an identifier.")
+        elif name in taken:
+            errors.append(
+                f"rules {label!r}: derived value {name!r} takes a name an input or another derived value has."
+            )
+        taken.add(name)
+        if not str(derived.get("expression") or "").strip():
+            errors.append(f"rules {label!r}: derived value {name!r} has no `expression`.")
+    ids = []
+    for index, rule in enumerate(node.get("rules") or []):
+        if not isinstance(rule, dict):
+            errors.append(f"rules {label!r}: rules[{index}] is not an object.")
+            continue
+        rule_label = rule.get("id") or index
+        if not rule.get("id"):
+            errors.append(f"rules {label!r}: rules[{index}] has no `id`.")
+        ids.append(rule.get("id"))
+        if rule.get("enabled", True) and not str(rule.get("check") or "").strip():
+            errors.append(f"rules {label!r}: rule {rule_label!r} is on but has no `check`.")
+        severity = rule.get("severity")
+        if severity is not None and severity not in RULE_SEVERITIES:
+            errors.append(f"rules {label!r}: rule {rule_label!r} severity {severity!r} is not fail, warn or info.")
+    duplicates = sorted({str(i) for i in ids if i and ids.count(i) > 1})
+    if duplicates:
+        errors.append(f"rules {label!r}: rule ids used more than once: {', '.join(duplicates)}.")
+    policy = node.get("on_missing")
+    if policy is not None and policy not in RULE_MISSING_POLICIES:
+        errors.append(f"rules {label!r}: on_missing {policy!r} is not one of {', '.join(RULE_MISSING_POLICIES)}.")
+    return errors
+
+
+def check_expression(node, label) -> list:
+    errors = []
+    items = node.get("expressions")
+    if not isinstance(items, list) or not items:
+        errors.append(f'expression {label!r} has no `expressions` ({{"key", "expression"}} each).')
+        return errors
+    keys = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            errors.append(f"expression {label!r}: expressions[{index}] is not an object.")
+            continue
+        key = str(item.get("key") or "")
+        if not IDENTIFIER_RE.match(key):
+            errors.append(f"expression {label!r}: key {key!r} is not an identifier.")
+        keys.append(key)
+        if not str(item.get("expression") or "").strip():
+            errors.append(f"expression {label!r}: key {key!r} has no `expression`.")
+    duplicates = sorted({k for k in keys if k and keys.count(k) > 1})
+    if duplicates:
+        errors.append(f"expression {label!r}: keys used more than once: {', '.join(duplicates)}.")
+    return errors
+
+
+def check_judgement(node, label) -> list:
+    errors = []
+    judge = node.get("judge")
+    judge_type = str(judge.get("type") or "") if isinstance(judge, dict) else ""
+    if judge is None:
+        errors.append(
+            f"judgement {label!r} has no `judge`. It needs the node that answers: a "
+            f"{SYSTEM_ONE_TYPE!r}, an LLM or an agent."
+        )
+    elif not (judge_type == SYSTEM_ONE_TYPE or judge_type.startswith(JUDGE_TYPE_PREFIXES)):
+        errors.append(
+            f"judgement {label!r}: `judge` must be a System One, an LLM or an agent node object, "
+            f"got {judge_type or type(judge).__name__!r}."
+        )
+    # The judge is loaded as a node of its own, so it needs what that class requires - the
+    # reason an agent's `llm` is checked here too.
+    elif judge_type == SYSTEM_ONE_TYPE:
+        errors.extend(
+            connection_requirement(
+                judge, f"judgement {label!r}: judge", "A System One judge carries a TypeSafe `connection`."
+            )
+        )
+    elif judge_type.startswith("dynamiq.nodes.agents."):
+        if isinstance(judge.get("llm"), dict):
+            errors.extend(llm_requirements(judge["llm"], f"judgement {label!r}: judge.llm"))
+        else:
+            errors.append(f"judgement {label!r}: the agent judge has no `llm` object.")
+    else:
+        errors.extend(llm_requirements(judge, f"judgement {label!r}: judge"))
+    names = []
+    for index, question in enumerate(node.get("questions") or []):
+        if not isinstance(question, dict):
+            errors.append(f"judgement {label!r}: questions[{index}] is not an object.")
+            continue
+        name = str(question.get("name") or "")
+        where = f"judgement {label!r}: question {name or index!r}"
+        if not IDENTIFIER_RE.match(name):
+            errors.append(f"{where} has a name that is not an identifier, so no node could read its answer.")
+        names.append(name)
+        kind = question.get("type") or "noul"
+        if kind not in QUESTION_TYPES:
+            errors.append(f"{where}: type {kind!r} is not one of {', '.join(QUESTION_TYPES)}.")
+        if not str(question.get("instructions") or "").strip():
+            errors.append(f"{where} has no `instructions`.")
+        if kind in ("choice", "score"):
+            limit, what = (MAX_CHOICE_OPTIONS, "option") if kind == "choice" else (MAX_SCORE_LEVELS, "level")
+            a_what = f"{'an' if what == 'option' else 'a'} {what}"
+            written = question.get("options") if isinstance(question.get("options"), list) else []
+            options = [o for o in written if isinstance(o, dict)]
+            option_names = [str(o.get("name") or "").strip() for o in options]
+            # Counting what survived the filter would let a mixed list through and fail at load.
+            if not 2 <= len(written) <= limit:
+                errors.append(f"{where} needs between 2 and {limit} {what}s, got {len(written)}.")
+            if malformed := len(written) - len(options):
+                errors.append(
+                    f"{where} has {a_what} that is not an object ({malformed} of {len(written)}); "
+                    f"each one needs a `name`."
+                )
+            if any(not option_name for option_name in option_names):
+                errors.append(f"{where} has {a_what} without a name.")
+            if len(set(option_names)) != len(option_names):
+                errors.append(f"{where} names {a_what} twice.")
+    duplicates = sorted({n for n in names if n and names.count(n) > 1})
+    if duplicates:
+        errors.append(f"judgement {label!r}: question names used more than once: {', '.join(duplicates)}.")
+    for key in ("noul_threshold", "min_confidence"):
+        value = node.get(key)
+        if value is not None and not (_is_number(value) and 0 <= value <= 1):
+            errors.append(f"judgement {label!r}: {key} {value!r} is not a number between 0 and 1.")
+    mode = node.get("confidence_mode")
+    if mode is not None and mode not in CONFIDENCE_MODES:
+        errors.append(f"judgement {label!r}: confidence_mode {mode!r} is not one of {', '.join(CONFIDENCE_MODES)}.")
+    samples = node.get("samples")
+    if samples is not None and not (_is_number(samples) and samples == int(samples) and 1 <= samples <= MAX_SAMPLES):
+        errors.append(f"judgement {label!r}: samples {samples!r} is not a whole number between 1 and {MAX_SAMPLES}.")
+    if mode == "sampling":
+        if judge_type == SYSTEM_ONE_TYPE:
+            errors.append(
+                f"judgement {label!r}: sampling needs an LLM or agent judge; "
+                "a System One connection returns calibrated probabilities in one call."
+            )
+        # An omitted `samples` is the node's default of 1, which sampling refuses on load.
+        elif _is_number(effective := DEFAULT_SAMPLES if samples is None else samples) and effective < 2:
+            errors.append(
+                f"judgement {label!r}: sampling needs at least 2 samples, "
+                f"and `samples` is {'unset, so it defaults to 1' if samples is None else effective!r}."
+            )
+    return errors
+
+
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def check_sub_workflow(node, label) -> list:
+    errors = []
+    if not UUID_RE.match(str(node.get("workflow_id") or "")):
+        errors.append(
+            f"sub-workflow {label!r}: workflow_id {node.get('workflow_id')!r} is not a workflow UUID. "
+            "Run `dynamiq workflow list`; the workflow must be in the same project and have a released version."
+        )
+    version = node.get("workflow_version_id")
+    if version is not None and not UUID_RE.match(str(version)):
+        errors.append(
+            f"sub-workflow {label!r}: workflow_version_id {version!r} is not a version UUID. "
+            "Omit it to run the newest released version, or pick one from `dynamiq workflow versions <id>`."
+        )
+    if node.get("flow") is not None:
+        errors.append(
+            f"sub-workflow {label!r} carries `flow`. The platform inlines the chosen version itself; leave it out."
+        )
+    return errors
 
 
 # What `workflow save` accepts. Shorter than the SDK's list: InMemory and SQLite run locally
@@ -520,6 +852,28 @@ def requirement_problems(value, where):
     if path is not None and (not isinstance(path, str) or not path.startswith("$.")):
         problems.append(f"{where}: requirement value_path {path!r} must be a JSONPath like "
                         '"$.account_id". It has to match exactly one value.')
+    return problems
+
+
+def connection_requirement(node, where, hint) -> list:
+    """A provider node carries its own `connection`, which the API resolves by id."""
+    from_requirement = requirement_problems(node.get("connection"), f"{where}: connection")
+    if from_requirement is not None:
+        return from_requirement
+    if not UUID_RE.match(str(node.get("connection") or "")):
+        return [
+            f"{where}: connection {node.get('connection')!r} is not a connection UUID. "
+            f"{hint} Run `dynamiq connection list`."
+        ]
+    return []
+
+
+def llm_requirements(llm, where) -> list:
+    """`connection` and `model` have no defaults on an LLM node, so one missing either is refused
+    on load. Applies to a node in the DAG and to a judge nested inside a Judgement alike."""
+    problems = connection_requirement(llm, where, "An LLM node carries its own `connection`.")
+    if not str(llm.get("model") or "").strip():
+        problems.append(f'{where}: an LLM node needs `model` (e.g. "gpt-4o").')
     return problems
 
 

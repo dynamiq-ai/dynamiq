@@ -15,6 +15,7 @@ from litellm.exceptions import (
     Timeout,
 )
 from litellm.utils import supports_pdf_input
+from litellm.utils import supports_prompt_caching as litellm_supports_prompt_caching
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from dynamiq.callbacks.streaming import BaseStreamingCallbackHandler
@@ -832,6 +833,24 @@ class BaseLLM(ConnectionNode):
             for param in SAMPLING_PARAMS:
                 params.pop(param, None)
         return params
+
+    # Allowlist: LiteLLM's flag means "caches", not "accepts our breakpoints". Nova caches but
+    # 400s on a cachePoint in a tool-call message (verified live); Bedrock's OpenAI/xAI models
+    # cache implicitly.
+    BREAKPOINT_MODEL_FAMILIES: ClassVar[tuple[str, ...]] = ("anthropic", "claude")
+
+    def supports_prompt_caching(self) -> bool:
+        """Whether this node's model accepts explicit cache breakpoints.
+
+        An unsupporting model rejects the request outright rather than ignoring the
+        breakpoint, so unknown models answer False.
+        """
+        if not any(family in self.model for family in self.BREAKPOINT_MODEL_FAMILIES):
+            return False
+        try:
+            return bool(litellm_supports_prompt_caching(self.model))
+        except Exception:
+            return False
 
     # Per-request cap on strict tools. ``None`` means no cap. Providers with a
     # hard limit (e.g. Anthropic) override this.

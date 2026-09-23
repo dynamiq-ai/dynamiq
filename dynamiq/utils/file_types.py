@@ -19,6 +19,7 @@ class FileType(str, enum.Enum):
     HTML = "html"
     TEXT = "text"
     MARKDOWN = "markdown"
+    PLAIN_TEXT_DATA = "plain_text_data"
 
 
 EXTENSION_MAP = {
@@ -79,4 +80,21 @@ EXTENSION_MAP = {
     FileType.HTML: {"html"},
     FileType.TEXT: {"txt"},
     FileType.MARKDOWN: {"md"},
+    # Plain-text data formats: decoded and returned raw rather than run through
+    # TextFileConverter, which strips whitespace and caches its output.
+    FileType.PLAIN_TEXT_DATA: {
+        "log",
+        "json",
+        "jsonl",
+        "ndjson",
+        "yaml",
+        "yml",
+        "toml",
+        "xml",
+        "ini",
+        "cfg",
+        "conf",
+        "text",
+        "markdown",
+    },
 }
