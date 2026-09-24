@@ -410,6 +410,9 @@ def failure(expression: str, **inputs) -> str:
         (" -£1,234,567.89 ", -1234567.89),
         ("€ 12", 12),
         ("+0.5", 0.5),
+        ("1 234", 1234),
+        ("1 234.56", 1234.56),
+        ("6.25 %", 6.25),
         (42, 42),
         (2.5, 2.5),
         (Decimal("586764.00"), 586764.0),
@@ -423,6 +426,9 @@ def failure(expression: str, **inputs) -> str:
         "negative-pounds",
         "euro-spaced",
         "signed",
+        "space-grouped",
+        "space-grouped-decimal",
+        "spaced-percent",
         "int",
         "float",
         "decimal",
@@ -452,6 +458,12 @@ def test_number_reads_an_amount_the_way_a_document_writes_it(raw, expected):
         "(-5)",
         "5.",
         "$",
+        "100, 200",
+        "5 10",
+        "12 5",
+        "1 23",
+        "1 234,56",
+        "12$5",
         True,
         float("nan"),
         float("inf"),
@@ -470,6 +482,12 @@ def test_number_reads_an_amount_the_way_a_document_writes_it(raw, expected):
         "double-negative",
         "trailing-point",
         "symbol-only",
+        "comma-then-space",
+        "spaced-short-group",
+        "spaced-decimal",
+        "spaced-group-of-two",
+        "spaced-with-decimal-comma",
+        "currency-between-digits",
         "true",
         "nan-float",
         "inf-float",
@@ -477,7 +495,8 @@ def test_number_reads_an_amount_the_way_a_document_writes_it(raw, expected):
 )
 def test_number_holds_a_value_it_cannot_read_rather_than_guessing(raw):
     """Each of these is there, so it is not missing, yet any reading of it is a guess: `12,5` is 12.5 or 125
-    depending on who wrote it, `| float` reads `TBD` as 0, and Python itself reads `1e5`, `1_000` and `١٢`."""
+    depending on who wrote it, and so is `12 5`; `100, 200` may be two amounts; `| float` reads `TBD` as 0; and
+    Python itself reads `1e5`, `1_000` and `١٢`."""
     node = rules(
         Rule(id="AMT-01", check="number(doc.amount) > 1000"),
         Rule(id="bare", check="number(doc.amount)"),
@@ -513,8 +532,15 @@ def test_a_rule_over_number_decides_on_an_amount_and_holds_one_it_cannot_read(am
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
-    [("1.234,56", 1234.56), ("12,5", 12.5), ("1.234", 1234), ("€ 1.234.567,89", 1234567.89)],
-    ids=["grouped", "decimal", "thousands", "euro"],
+    [
+        ("1.234,56", 1234.56),
+        ("12,5", 12.5),
+        ("1.234", 1234),
+        ("€ 1.234.567,89", 1234567.89),
+        ("12 345,67", 12345.67),
+        ("1 234,5", 1234.5),
+    ],
+    ids=["grouped", "decimal", "thousands", "euro", "space-grouped", "narrow-space-grouped"],
 )
 def test_number_reads_a_decimal_comma_when_the_rule_says_so(raw, expected):
     value = evaluate("number(raw, decimal=',')", raw=raw)
@@ -525,6 +551,7 @@ def test_number_reads_a_decimal_comma_when_the_rule_says_so(raw, expected):
 def test_a_decimal_comma_reader_holds_a_decimal_point_as_unreadable():
     assert "not a number: '1,234.56'" in failure("number(raw, decimal=',')", raw="1,234.56")
     assert "not a number: '1.5'" in failure("number(raw, decimal=',')", raw="1.5")
+    assert "not a number: '1 234.567,89'" in failure("number(raw, decimal=',')", raw="1 234.567,89")
 
 
 def test_a_float_or_int_filter_after_number_holds_the_rule_where_the_filter_alone_reads_zero():
@@ -737,6 +764,10 @@ def test_an_effective_window_and_as_of_read_the_new_formats():
         int,
         round,
         abs,
+        str,
+        lambda value: f"{value}",
+        lambda value: "%s" % value,
+        lambda value: format(value, ".2f"),
     ],
     ids=[
         "equal",
@@ -758,6 +789,10 @@ def test_an_effective_window_and_as_of_read_the_new_formats():
         "int",
         "round",
         "abs",
+        "str",
+        "f-string",
+        "percent-format",
+        "format-spec",
     ],
 )
 def test_an_unreadable_value_refuses_every_use_naming_why(use):
@@ -768,15 +803,64 @@ def test_an_unreadable_value_refuses_every_use_naming_why(use):
     assert raised.value.value == "TBD"
 
 
-def test_an_unreadable_value_shows_its_text_and_counts_as_present():
+def test_an_unreadable_value_counts_as_present_and_raises_no_error_a_filter_would_read_as_zero():
     unreadable = Unreadable("TBD", "not a number: 'TBD'")
 
-    assert str(unreadable) == "TBD"
     assert is_present(unreadable) and not is_blank(unreadable)
     # A runtime error, never a ValueError or a TypeError: Jinja's `| float` and `| int` read either as "no number"
     # and return 0.
     assert issubclass(UnreadableValue, TemplateRuntimeError)
     assert not issubclass(UnreadableValue, (ValueError, TypeError))
+
+
+@pytest.mark.parametrize(
+    ("check", "reason"),
+    [
+        ("date(app.opened) | string == '2026-10-01'", "not a date: 'March'"),
+        ("date(app.opened) | string != '2026-10-01'", "not a date: 'March'"),
+        ("date(app.opened) | lower == 'march'", "not a date: 'March'"),
+        ("(date(app.opened) ~ '') == 'March'", "not a date: 'March'"),
+        ("text(date(app.opened)) == 'March'", "not a date: 'March'"),
+        ("'2026' in date(app.opened) | string", "not a date: 'March'"),
+        ("[date(app.opened)] | join == 'March'", "not a date: 'March'"),
+        ("'%s' | format(date(app.opened)) == 'March'", "not a date: 'March'"),
+        ("number(app.amount) | string == '1000'", "not a number: 'TBD'"),
+        ("number(app.amount) | string != '1000'", "not a number: 'TBD'"),
+    ],
+    ids=[
+        "string-equal",
+        "string-unequal",
+        "lower",
+        "concatenated",
+        "text",
+        "in-string",
+        "joined",
+        "formatted",
+        "number-string-equal",
+        "number-string-unequal",
+    ],
+)
+def test_an_unreadable_value_never_becomes_text_a_check_could_compare(check, reason):
+    """`| string`, a text filter, `~` or `text()` would hand the check back the text the reader refused, and the
+    check would pass or fail on a date or an amount nobody could read."""
+    finding = by_id(run(rules(Rule(id="R1", check=check)), record(opened="March", amount="TBD")))["R1"]
+
+    assert (finding["status"], finding["message"]) == ("not_evaluated", f"check could not be evaluated: {reason}")
+
+
+def test_a_message_prints_an_unreadable_value_as_the_text_the_record_holds():
+    """Only a message turns an unreadable value into text, so a reviewer reads what the record says."""
+    node = rules(
+        Rule(
+            id="AMT-01",
+            check="number(app.amount) > 1000",
+            message="Amount {{ number(app.amount) }} for a file opened {{ date(app.opened) }}",
+        )
+    )
+
+    finding = by_id(run(node, record(amount="900", opened="March")))["AMT-01"]
+
+    assert (finding["status"], finding["message"]) == ("fail", "Amount 900 for a file opened March")
 
 
 def test_an_unreadable_value_has_no_members_a_rule_can_read():
@@ -807,10 +891,19 @@ def test_a_finding_shows_an_unreadable_value_with_its_reason():
 
 
 def test_an_expression_fails_its_run_on_a_value_it_cannot_read_and_reads_a_blank_as_none():
-    """`date('March')` has always failed the run; `number('TBD')` does too, through a filter or inside a list."""
-    for expression in ("number(raw)", "number(raw) | float", "[1, number(raw)]"):
+    """`date('March')` has always failed the run; `number('TBD')` does too, through a filter, as text or inside a
+    list."""
+    for expression in (
+        "number(raw)",
+        "number(raw) | float",
+        "[1, number(raw)]",
+        "number(raw) | string",
+        "text(number(raw))",
+        "number(raw) ~ ''",
+    ):
         assert "not a number: 'TBD'" in failure(expression, raw="TBD")
-    assert "not a date: 'March'" in failure("date(raw)", raw="March")
+    for expression in ("date(raw)", "date(raw) | string"):
+        assert "not a date: 'March'" in failure(expression, raw="March")
 
     assert evaluate("number(raw)", raw="  ") is None
     assert evaluate("date(raw)", raw="") is None

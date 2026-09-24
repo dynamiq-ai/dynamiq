@@ -63,7 +63,12 @@ _GROUPED_THOUSANDS = {
     ",": re.compile(r"[1-9][0-9]{0,2}(?:,[0-9]{3})+"),
     ".": re.compile(r"[1-9][0-9]{0,2}(?:\.[0-9]{3})+"),
 }
-_CURRENCY_AND_SPACE = re.compile(r"[\s$€£]")
+_CURRENCY = re.compile(r"[$€£]")
+# Whitespace beside a comma or a point: `100, 200` may be two amounts as much as one.
+_SPACE_BESIDE_SEPARATOR = re.compile(r"\s[.,]|[.,]\s")
+# Whitespace between two digits, which groups thousands the way a grouping separator does: `1 234`.
+_SPACE_BETWEEN_DIGITS = re.compile(r"(?<=[0-9])\s+(?=[0-9])")
+_SPACE = re.compile(r"\s+")
 _PLAIN_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # One path segment: a name, a numeric index, or a quoted key with escapes.
 _SEGMENT = re.compile(r"""\.?([^.\[\]]+)|\[(?:(-?\d+)|'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")\]""")
@@ -123,9 +128,10 @@ class Unreadable:
     """A value `number()` or `date()` could not read, with the reason: `TBD` where an amount goes.
 
     It is there, so it is present rather than missing, and `first_present` stops at it instead of letting a fallback
-    speak over it. It renders as the text it was, so a message still shows what the record says. Every other use
-    raises `UnreadableValue` with the reason: a comparison, arithmetic, a truth test, a count, a hash, a member or an
-    item, and the conversions behind `| float` and `| int`, which would otherwise read it as 0.
+    speak over it. Every use raises `UnreadableValue` with the reason: a comparison, arithmetic, a truth test, a count,
+    a hash, a member or an item, the conversions behind `| float` and `| int`, which would otherwise read it as 0, and
+    the conversion to text behind `| string`, the text filters, `~` and `join`, which would hand a check back the
+    text the reader refused. Only a rule's message prints it, as the text the record holds (`_rendered`).
     """
 
     __slots__ = ("value", "reason")
@@ -147,9 +153,7 @@ class Unreadable:
     __truediv__ = __rtruediv__ = __floordiv__ = __rfloordiv__ = __mod__ = __rmod__ = _refuse
     __divmod__ = __rdivmod__ = __neg__ = __pos__ = __abs__ = _refuse
     __int__ = __float__ = __complex__ = __index__ = __round__ = __trunc__ = __floor__ = __ceil__ = _refuse
-
-    def __str__(self) -> str:
-        return str(self.value)
+    __str__ = __format__ = _refuse
 
     def __repr__(self) -> str:
         return f"Unreadable({self.value!r}, {self.reason!r})"
@@ -241,9 +245,10 @@ def text(environment: "RecordSandbox", value: Any) -> Any:
     `app.purpose | trim == 'purchase'` fails a purpose nobody gave, since blank text trims to '' and a null reads as
     'None'; `text(app.purpose) == 'purchase'` holds the rule as missing instead. A value that is not there at all
     becomes a blank as well, so it stays missing through a text filter, which reads any other undefined as ''. A
-    blank passes through as it is.
+    blank passes through as it is, and so does a value `number()` or `date()` could not read: as text it would hand
+    a comparison the text the reader refused.
     """
-    if isinstance(value, Blank):
+    if isinstance(value, (Blank, Unreadable)):
         return value
     if is_blank(value):
         return environment.blank(hint="missing value: text() found no text", exc=MissingValue)
@@ -253,7 +258,18 @@ def text(environment: "RecordSandbox", value: Any) -> Any:
 def _read_number(written: str, decimal: str) -> int | float | None:
     """The number the text writes, or None when it writes none, or writes one only a guess could read."""
     grouping = "," if decimal == "." else "."
-    body = _CURRENCY_AND_SPACE.sub("", written)
+    # A currency sign says nothing about the amount; read as a space, it cannot join the digits on either side of it.
+    body = _CURRENCY.sub(" ", written)
+    if _SPACE_BESIDE_SEPARATOR.search(body):
+        return None
+    # Spaces group thousands in some documents, `1 234`, and count only where a grouping separator could stand; a
+    # number grouped both ways, `1 234,56`, is more likely written with a decimal comma than grouped twice.
+    if _SPACE_BETWEEN_DIGITS.search(body):
+        if grouping in body:
+            return None
+        body = _SPACE_BETWEEN_DIGITS.sub(grouping, body)
+    # Any other space, at either end or beside a sign, a parenthesis or `%`, says nothing about the amount either.
+    body = _SPACE.sub("", body)
     # An amount in parentheses is negative, as an account writes a debit.
     negative = body.startswith("(") and body.endswith(")")
     if negative:
@@ -303,12 +319,13 @@ def _number_of(value: Any, decimal: str) -> int | float | None:
 def number(environment: "RecordSandbox", value: Any, decimal: str = ".") -> Any:
     """The value as a number: an int when it has no decimal point, a float when it has one.
 
-    Text is read the way a document writes an amount. Currency signs (`$`, `€`, `£`) and spaces say nothing about it;
-    parentheses make it negative, `(1,200.50)`; a `%` after it is dropped, so `6.25%` is 6.25; commas group thousands,
-    `1,234,567.89`, and only there. `decimal=','` reads a decimal comma instead, `1.234,56`. Anything else is
-    unreadable rather than guessed at: `12,5`, `1e5`, `nan`, `TBD`, `true`. Where `| float` reads `TBD` as 0, a rule
-    that uses an unreadable number is not evaluated, naming the value. A blank value is missing, as in `text()`; a
-    value already missing or unreadable passes through as it is.
+    Text is read the way a document writes an amount. Currency signs (`$`, `€`, `£`) and the spaces around the
+    number say nothing about it; parentheses make it negative, `(1,200.50)`; a `%` after it is dropped, so `6.25%` is
+    6.25; commas group thousands, `1,234,567.89`, and so do spaces, `1 234 567`, but only where they group thousands.
+    `decimal=','` reads a decimal comma instead, `1.234,56` or `1 234,56`. Anything else is unreadable rather than
+    guessed at: `12,5`, `12 5`, `100, 200`, `1e5`, `nan`, `TBD`, `true`. Where `| float` reads `TBD` as 0, a rule that
+    uses an unreadable number is not evaluated, naming the value. A blank value is missing, as in `text()`; a value
+    already missing or unreadable passes through as it is.
     """
     if decimal not in (".", ","):
         raise ValueError(f"number() reads a decimal point '.' or a decimal comma ',', not {decimal!r}")
@@ -457,8 +474,12 @@ def _rendered(value: Any) -> Any:
 
     A message is the one place a value is turned into text, so a method a template names would otherwise
     print a repr carrying an address that differs on every run, against the determinism a finding promises.
-    An undefined is callable too, and keeps rendering as the empty string a message expects.
+    An undefined is callable too, and keeps rendering as the empty string a message expects. A value `number()`
+    or `date()` could not read, which refuses to become text anywhere else, prints as the text the record holds,
+    so a reviewer reads what the record says.
     """
+    if isinstance(value, Unreadable):
+        return value.value
     return _method_text(value) if callable(value) and not isinstance(value, Undefined) else value
 
 
