@@ -858,6 +858,18 @@ def _shown(value: Any) -> Any:
     return value
 
 
+class _Hold(NamedTuple):
+    """Why no rule may skip a missing value, and whether that is only a lookup that found nothing.
+
+    A lookup that found nothing holds a rule only where the rule needs the value: a fallback, `first_present(limit,
+    0)`, stands in for it as its author meant. Anything else is a defect of the expression itself, a typo, a name no
+    helper has or a value nobody could read, and holds the rule wherever the value is read.
+    """
+
+    reason: str
+    lookup: bool = False
+
+
 class CompiledRule(NamedTuple):
     rule: Rule
     applies: Callable[..., Any] | None
@@ -906,9 +918,11 @@ class Rules(Node):
     declares its inputs (a typo; `as_of` is declared with them); or needs a derived value a lookup found nothing
     for (`limits[loan.program]` for a program the table lacks), unless it only falls back on one
     (`first_present(limit, 500000)`). A derived value that came out missing counts as data the record lacks exactly
-    when the same expression, written in the check, would. Held under `not_applicable`, the rule's reason says why
-    it was not skipped, `missing value for loan.amount (not skipped: lon is not an input or a derived value)`,
-    unless the reason is already the error of a value nobody could read.
+    when the same expression, written in the check, would; one held for a defect of its own, a typo, a name no
+    helper has or a value nobody could read, holds a rule wherever the rule reads it, as a fallback too. Held
+    under `not_applicable`, the rule's reason says why it was not skipped, `missing value for loan.amount (not
+    skipped: lon is not an input or a derived value)`, unless the reason is already the error of a value nobody
+    could read.
 
     A rule skipped for a missing value cannot see an error its check would raise on the values that are there: a
     zero divisor, a misspelled method (`text(app.name).startwith('A')`), a value of the wrong type, a lookup inside
@@ -1075,7 +1089,7 @@ class Rules(Node):
         # The derived values missing for a reason other than data the record lacks, which no rule may skip, each with
         # the reason: a lookup that found nothing, a typo, a call of a name no helper has. They differ from record to
         # record. Only a rule that may skip a missing value needs them, so under the other policies nothing is judged.
-        unskippable: dict[str, str] = {}
+        unskippable: dict[str, _Hold] = {}
         judged = self._rules_skip or (self._rules_defer and self.on_missing == RuleMissingPolicy.NOT_APPLICABLE)
         # The derived values not computed yet, which a derived value can only read as missing.
         pending = {name for name, _, _ in self._derived} if judged else set()
@@ -1122,9 +1136,10 @@ class Rules(Node):
                 if (
                     judged
                     and value is None
-                    and (why := self._why_missing(name, reads, known, undefined, blank, pending, unskippable))
+                    and (hold := self._why_missing(name, reads, known, undefined, blank, pending, unskippable))
+                    is not None
                 ):
-                    unskippable[name] = why
+                    unskippable[name] = hold
             pending.discard(name)
         scope = {**context, **values}
 
@@ -1168,7 +1183,7 @@ class Rules(Node):
             raise ValueError(f"Rules: '{AS_OF_KEY}' is not a date: {value!r}") from e
 
     def _evaluate(
-        self, compiled: CompiledRule, scope: dict[str, Any], as_of: date, unskippable: Mapping[str, str]
+        self, compiled: CompiledRule, scope: dict[str, Any], as_of: date, unskippable: Mapping[str, _Hold]
     ) -> tuple[dict[str, Any], bool]:
         """The finding for one rule, and whether its check ran: a missing value or an error means it did not,
         unless the rule skips the missing value, which counts as a rule that did not apply."""
@@ -1212,7 +1227,7 @@ class Rules(Node):
         return f"from {rule.effective_from}" if rule.effective_from else f"until {rule.effective_until}"
 
     def _status(
-        self, compiled: CompiledRule, scope: dict[str, Any], unskippable: Mapping[str, str]
+        self, compiled: CompiledRule, scope: dict[str, Any], unskippable: Mapping[str, _Hold]
     ) -> tuple[str, str | None, bool]:
         """The rule's status, the reason when it did not run or did not apply, and whether its check ran.
 
@@ -1254,7 +1269,7 @@ class Rules(Node):
         where: str,
         reads: Reads,
         scope: dict[str, Any],
-        unskippable: Mapping[str, str],
+        unskippable: Mapping[str, _Hold],
         path: str | None,
         reason: str | None = None,
     ) -> tuple[str, str, bool]:
@@ -1279,12 +1294,12 @@ class Rules(Node):
             return compiled.rule.severity.value, reason, False
         if policy != RuleMissingPolicy.NOT_APPLICABLE:
             return STATUS_NOT_EVALUATED, reason, False
-        why = self._why_held(reads, scope, self._declared, unskippable)
-        if why is None and path is None:
-            why = "no field of the record is named"
-        if why is None:
+        hold = self._why_held(reads, scope, self._declared, unskippable)
+        if hold is None and path is None:
+            hold = _Hold("no field of the record is named")
+        if hold is None:
             return STATUS_NOT_APPLICABLE, f"does not apply: {reason}", True
-        return STATUS_NOT_EVALUATED, f"{reason} (not skipped: {why})", False
+        return STATUS_NOT_EVALUATED, f"{reason} (not skipped: {hold.reason})", False
 
     def _error_status(self, compiled: CompiledRule, reason: str) -> tuple[str, str, bool]:
         """The status of an expression that could not be evaluated: the rule's severity under `fail`, otherwise not
@@ -1298,10 +1313,10 @@ class Rules(Node):
         reads: Reads,
         scope: dict[str, Any],
         declared: Container[str] | None,
-        unskippable: Mapping[str, str],
+        unskippable: Mapping[str, _Hold],
         pending: Container[str] = frozenset(),
         reading: str | None = None,
-    ) -> str | None:
+    ) -> _Hold | None:
         """Why what an expression finds missing is not only data the record lacks, so no rule may skip it, or None
         when it is. The reason names the name or the path at fault.
 
@@ -1310,29 +1325,30 @@ class Rules(Node):
         earlier derived value, or text it reads through `number()` or `date()` (`number(doc.amount) > doc.limit`
         over an amount of `TBD`). A value it finds missing may sit under a name outside `declared`, a typo, where the
         node declares its inputs (None where it does not), or under a derived value in `pending`, one computed after
-        `reading`, the derived value this expression computes. And a value it needs, not one it only falls back on,
-        may sit under a derived value missing for any of these reasons, or because a lookup found nothing: a gap in a
-        table or in the node, never in the record.
+        `reading`, the derived value this expression computes. Or it may read a derived value held for any of these
+        defects, wherever it reads it, or one a lookup found nothing for, where it needs the value rather than falls
+        back on it: a gap in a table or in the node, never in the record.
         """
         if (callee := self._missing(list(reads.unknown_calls), scope)) is not None:
-            return f"{callee} is not a helper"
+            return _Hold(f"{callee} is not a helper")
         paths = reads.required + reads.optional
         found, unreadable = self._unreadable(paths, scope)
         if unreadable is not None:
-            return _unreadable_because(found, unreadable.reason)
+            return _Hold(_unreadable_because(found, unreadable.reason))
         if (misread := self._misread(reads.readers, scope)) is not None:
-            return misread
+            return _Hold(misread)
         for path in paths:
             if not is_blank(resolve_path(scope, path)):
                 continue
             root = _root(path)
             if root in pending:
-                return f"{root} is computed after {reading}"
+                return _Hold(f"{root} is computed after {reading}")
             if declared is not None and root not in declared:
-                return f"{root} is not an input or a derived value"
-            # A fallback stands in for a lookup that found nothing, as its author meant: `first_present(limit, 0)`.
-            if root in unskippable and path in reads.required:
-                return unskippable[root]
+                return _Hold(f"{root} is not an input or a derived value")
+            # A derived value's own defect holds wherever it is read; a fallback stands in for a lookup that found
+            # nothing, as its author meant (`first_present(limit, 0)`), so that holds only where the value is needed.
+            if (hold := unskippable.get(root)) is not None and (not hold.lookup or path in reads.required):
+                return hold
         return None
 
     def _why_missing(
@@ -1343,8 +1359,8 @@ class Rules(Node):
         undefined: bool,
         blank: bool,
         pending: Container[str],
-        unskippable: Mapping[str, str],
-    ) -> str | None:
+        unskippable: Mapping[str, _Hold],
+    ) -> _Hold | None:
         """Why a derived value that came out missing is not only data the record lacks, or None when it is, as the
         same expression written in a check would be; `pending` holds the derived values not computed yet.
 
@@ -1361,7 +1377,7 @@ class Rules(Node):
         else:
             accounted = True
         if not accounted:
-            return f"the lookup for {name} found nothing"
+            return _Hold(f"the lookup for {name} found nothing", lookup=True)
         return self._why_held(reads, known, self._declared, unskippable, pending, name)
 
     @staticmethod

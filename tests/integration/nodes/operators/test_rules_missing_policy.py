@@ -225,6 +225,17 @@ SKIPPED = {
         {"loan": {"closed": "2026-01-01"}},
         "as_of",
     ),
+    # A fallback stands in for a derived value whose lookup found nothing; the cap is what the record lacks.
+    "derived-lookup-in-a-fallback": Skipped(
+        lambda policy: screening(
+            "first_present(doubled, 0) < loan.cap",
+            policy,
+            inputs=LENDING,
+            derived=(("doubled", "limits[loan.program]"),),
+        ),
+        {"loan": {"program": "jumbo"}, "limits": LIMITS},
+        "loan.cap",
+    ),
 }
 
 
@@ -447,6 +458,38 @@ HELD = {
         {"loan": {"amount": 5}},
         "missing value for doubled",
         "lon is not an input or a derived value",
+    ),
+    # A derived value's own defect holds a rule wherever the rule reads it, a fallback included, beside a value the
+    # record does lack; only a lookup that found nothing gives way to a fallback.
+    "derived-typo-in-a-fallback": Held(
+        lambda **policy: screening(
+            "first_present(doubled, 0) < loan.cap", inputs=("loan",), derived=(("doubled", "lon.amount * 2"),), **policy
+        ),
+        {"loan": {"amount": 5}},
+        "missing value for loan.cap",
+        "lon is not an input or a derived value",
+    ),
+    "derived-mistyped-helper-in-a-fallback": Held(
+        lambda **policy: screening(
+            "first_present(code, 'NONE') == order.expected",
+            inputs=("order",),
+            derived=(("code", "firstpresent(order.coupon)"),),
+            **policy,
+        ),
+        {"order": {"coupon": "SPRING"}},
+        "missing value for order.expected",
+        "firstpresent is not a helper",
+    ),
+    "derived-unreadable-in-a-fallback": Held(
+        lambda **policy: screening(
+            "first_present(tax, 0) > doc.limit",
+            inputs=("doc",),
+            derived=(("tax", "doc.rate * number(doc.net)"),),
+            **policy,
+        ),
+        {"doc": {"net": "TBD"}},
+        "missing value for doc.limit",
+        "doc.net is not a number: 'TBD'",
     ),
     "derived-read-of-a-later-derived-value-without-inputs": Held(
         lambda **policy: screening(
