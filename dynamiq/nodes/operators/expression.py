@@ -7,24 +7,15 @@ from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.node import ensure_config
-from dynamiq.nodes.operators.rules import (
-    HELPERS,
-    Reads,
-    RecordSandbox,
-    concrete,
-    read_paths,
-    refuse_reserved_read,
-    scope_for,
-)
+from dynamiq.nodes.operators.rules import Reads, RecordSandbox, concrete, read_paths, refuse_reserved_read, scope_for
 from dynamiq.nodes.types import ExpressionItem, NamedField
 from dynamiq.runnables import RunnableConfig
 
 # One sandbox for every Expression node: it keeps no state, it refuses attribute access that would
 # reach Python internals, so an expression cannot escape into the process, and it reads a record's key
-# before a method of the same name, as a rule does. The Rules node's helpers serve an expression too: a
-# due date or an age is a date computation over the same inputs.
+# before a method of the same name, as a rule does. The sandbox carries the Rules node's helpers, which
+# serve an expression too: a due date or an age is a date computation over the same inputs.
 _ENVIRONMENT = RecordSandbox()
-_ENVIRONMENT.globals.update(HELPERS)
 
 
 class ExpressionInputSchema(BaseModel):
