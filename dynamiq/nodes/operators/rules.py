@@ -1,8 +1,11 @@
 import functools
+import math
+import numbers
 import re
 from collections.abc import Callable, ItemsView, Iterator, KeysView, Mapping, ValuesView
 from datetime import date, datetime
-from typing import Any, ClassVar, Literal, NamedTuple
+from decimal import Decimal
+from typing import Any, ClassVar, Literal, NamedTuple, NoReturn
 from uuid import uuid4
 
 from jinja2 import ChainableUndefined, Template, TemplateSyntaxError, Undefined, nodes, pass_environment
@@ -27,11 +30,40 @@ AS_OF_KEY = "as_of"
 
 # A check that reaches a missing value, a value of the wrong kind or a helper that refuses its input is a
 # finding to review, never a crash of the run: the record is what it is, and the rule says what it needs.
-# Jinja's own runtime errors count as well: an undefined value used, a filter given the wrong argument, and
-# an attribute the sandbox refuses, `append` on a list member say, whose use raises a SecurityError.
+# Jinja's own runtime errors count as well: an undefined value used, a filter given the wrong argument, an
+# attribute the sandbox refuses, `append` on a list member say, whose use raises a SecurityError, and a value
+# `number()` or `date()` could not read.
 EVALUATION_ERRORS = (TemplateRuntimeError, TypeError, ValueError, ArithmeticError, AttributeError, LookupError)
 _US_DATE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+_YEAR_FIRST_DATE = re.compile(r"^([0-9]{4})/([0-9]{1,2})/([0-9]{1,2})$")
+_NAMED_DATE = re.compile(r"^(?P<month>[A-Za-z]+)\.?\s+(?P<day>[0-9]{1,2})(?:,\s*|\s+)(?P<year>[0-9]{4})$")
+_MONTH_NAMES = (
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+)
+# English month names, in full or cut to three letters, whatever the process's locale: `%B` in `strptime` follows the
+# locale, and a rule must read the same date on every machine.
+_MONTHS = {name: index for index, full in enumerate(_MONTH_NAMES, start=1) for name in (full, full[:3])} | {"sept": 9}
+# The number `number()` accepts once the text is cleaned: ASCII digits, a sign and a decimal point with digits after
+# it. Python's own readers take more, `1e5`, `1_000`, `nan` and digits of any script, which no document means.
+_PLAIN_NUMBER = re.compile(r"[+-]?[0-9]+(?:\.[0-9]+)?")
+# Thousands grouped by the separator that is not the decimal one: `1,234,567` or, with a decimal comma, `1.234.567`.
+_GROUPED_THOUSANDS = {
+    ",": re.compile(r"[1-9][0-9]{0,2}(?:,[0-9]{3})+"),
+    ".": re.compile(r"[1-9][0-9]{0,2}(?:\.[0-9]{3})+"),
+}
+_CURRENCY_AND_SPACE = re.compile(r"[\s$€£]")
 _PLAIN_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # One path segment: a name, a numeric index, or a quoted key with escapes.
 _SEGMENT = re.compile(r"""\.?([^.\[\]]+)|\[(?:(-?\d+)|'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")\]""")
@@ -66,6 +98,62 @@ class Blank:
 
     __slots__ = ()
 
+    def _raise_missing(self, *args: Any, **kwargs: Any) -> NoReturn:
+        self._fail_with_undefined_error()  # type: ignore[attr-defined]
+
+    # The numeric hooks Jinja's undefined lacks, where Python would raise a type error instead: a blank `number()`
+    # rounded, `round(n, 2)` or `| abs`, is as missing as one added to.
+    __round__ = __abs__ = __trunc__ = __floor__ = __ceil__ = __index__ = _raise_missing
+
+
+class UnreadableValue(TemplateRuntimeError):
+    """A value is there but cannot be read as what the expression asks for: `number('TBD')`, `date('March')`.
+
+    A runtime error rather than a ValueError: Jinja's `| float` and `| int` take a ValueError or a TypeError for "no
+    number" and return 0, the silent answer this error exists to prevent. The value that could not be read comes with
+    the error, so whoever catches it can keep what the record said.
+    """
+
+    def __init__(self, message: str | None = None, *, value: Any = None) -> None:
+        super().__init__(message)
+        self.value = value
+
+
+class Unreadable:
+    """A value `number()` or `date()` could not read, with the reason: `TBD` where an amount goes.
+
+    It is there, so it is present rather than missing, and `first_present` stops at it instead of letting a fallback
+    speak over it. It renders as the text it was, so a message still shows what the record says. Every other use
+    raises `UnreadableValue` with the reason: a comparison, arithmetic, a truth test, a count, a hash, a member or an
+    item, and the conversions behind `| float` and `| int`, which would otherwise read it as 0.
+    """
+
+    __slots__ = ("value", "reason")
+
+    def __init__(self, value: Any, reason: str) -> None:
+        self.value = value
+        self.reason = reason
+
+    def error(self) -> UnreadableValue:
+        """The error every use of the value raises."""
+        return UnreadableValue(self.reason, value=self.value)
+
+    def _refuse(self, *args: Any, **kwargs: Any) -> NoReturn:
+        raise self.error()
+
+    __eq__ = __ne__ = __lt__ = __le__ = __gt__ = __ge__ = __hash__ = _refuse
+    __bool__ = __len__ = __iter__ = __contains__ = __getitem__ = _refuse
+    __add__ = __radd__ = __sub__ = __rsub__ = __mul__ = __rmul__ = __pow__ = __rpow__ = _refuse
+    __truediv__ = __rtruediv__ = __floordiv__ = __rfloordiv__ = __mod__ = __rmod__ = _refuse
+    __divmod__ = __rdivmod__ = __neg__ = __pos__ = __abs__ = _refuse
+    __int__ = __float__ = __complex__ = __index__ = __round__ = __trunc__ = __floor__ = __ceil__ = _refuse
+
+    def __str__(self) -> str:
+        return str(self.value)
+
+    def __repr__(self) -> str:
+        return f"Unreadable({self.value!r}, {self.reason!r})"
+
 
 def _is_missing(value: Any) -> bool:
     return value is None or value is _MISSING or isinstance(value, Undefined)
@@ -98,19 +186,42 @@ def is_present(value: Any) -> bool:
     return not is_blank(value)
 
 
-def to_date(value: Any) -> date:
-    """Reads a date from a date, a datetime, an ISO string or a US `MM/DD/YYYY` string."""
+def to_date(value: Any, format: str | None = None) -> date:
+    """Reads a date from a date, a datetime or text written the way documents write one.
+
+    The text may be ISO (`2026-08-07`, a time after it allowed), US month first (`08/07/2026`), year first with
+    slashes (`2026/08/07`) or an English month name (`Aug 7, 2026`, `August 7 2026`), read in English whatever the
+    process's locale. Given a `format`, the text is read as `datetime.strptime` reads that format, and nothing else.
+
+    Raises when there is no date to read: a value already missing raises its own undefined error and a value already
+    unreadable its own error, so `days_between(date(a), b)` reports what `date()` found; anything else raises a
+    ValueError naming the value.
+    """
+    if isinstance(value, Undefined):
+        value._fail_with_undefined_error()
+    if isinstance(value, Unreadable):
+        raise value.error()
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):
         return value
     if isinstance(value, str):
-        text = value.strip()
-        if _ISO_DATE.match(text):
-            return date.fromisoformat(text[:10])
-        if us := _US_DATE.match(text):
+        written = value.strip()
+        if format is not None:
+            try:
+                return datetime.strptime(written, format).date()
+            except ValueError as e:
+                raise ValueError(f"not a date: {value!r} (format {format!r})") from e
+        if _ISO_DATE.match(written):
+            return date.fromisoformat(written[:10])
+        if us := _US_DATE.match(written):
             month, day, year = (int(part) for part in us.groups())
             return date(year, month, day)
+        if year_first := _YEAR_FIRST_DATE.match(written):
+            year, month, day = (int(part) for part in year_first.groups())
+            return date(year, month, day)
+        if (named := _NAMED_DATE.match(written)) and (month := _MONTHS.get(named["month"].lower())):
+            return date(int(named["year"]), month, int(named["day"]))
     raise ValueError(f"not a date: {value!r}")
 
 
@@ -139,6 +250,93 @@ def text(environment: "RecordSandbox", value: Any) -> Any:
     return str(value).strip()
 
 
+def _read_number(written: str, decimal: str) -> int | float | None:
+    """The number the text writes, or None when it writes none, or writes one only a guess could read."""
+    grouping = "," if decimal == "." else "."
+    body = _CURRENCY_AND_SPACE.sub("", written)
+    # An amount in parentheses is negative, as an account writes a debit.
+    negative = body.startswith("(") and body.endswith(")")
+    if negative:
+        body = body[1:-1]
+    body = body.removesuffix("%")
+    sign = body[:1] if body[:1] in ("+", "-") else ""
+    if negative and sign:
+        return None
+    whole, point, fraction = body[len(sign) :].partition(decimal)
+    # `12,5` is 12.5 to one writer and 125 to another, so a grouping separator counts only where it groups thousands.
+    if grouping in whole:
+        if not _GROUPED_THOUSANDS[grouping].fullmatch(whole):
+            return None
+        whole = whole.replace(grouping, "")
+    plain = f"{sign}{whole}.{fraction}" if point else f"{sign}{whole}"
+    if not _PLAIN_NUMBER.fullmatch(plain):
+        return None
+    try:
+        read: int | float = float(plain) if point else int(plain)
+    except ValueError:  # more digits than Python converts to an int
+        return None
+    # More digits than a float holds read as infinity, which is no amount.
+    if isinstance(read, float) and not math.isfinite(read):
+        return None
+    return -read if negative else read
+
+
+def _number_of(value: Any, decimal: str) -> int | float | None:
+    """The number a present value holds, or None when it holds none that can be read without guessing."""
+    if isinstance(value, bool):
+        # True is an answer, not an amount, though Python counts it as 1.
+        return None
+    if isinstance(value, numbers.Integral):
+        return int(value)
+    if isinstance(value, numbers.Real):
+        read = float(value)
+        return read if math.isfinite(read) else None
+    if isinstance(value, Decimal):
+        # Written out in full, a Decimal reads like any amount: an int without a point, a float with one.
+        return _read_number(format(value, "f"), ".")
+    if isinstance(value, str):
+        return _read_number(value, decimal)
+    return None
+
+
+@pass_environment
+def number(environment: "RecordSandbox", value: Any, decimal: str = ".") -> Any:
+    """The value as a number: an int when it has no decimal point, a float when it has one.
+
+    Text is read the way a document writes an amount. Currency signs (`$`, `€`, `£`) and spaces say nothing about it;
+    parentheses make it negative, `(1,200.50)`; a `%` after it is dropped, so `6.25%` is 6.25; commas group thousands,
+    `1,234,567.89`, and only there. `decimal=','` reads a decimal comma instead, `1.234,56`. Anything else is
+    unreadable rather than guessed at: `12,5`, `1e5`, `nan`, `TBD`, `true`. Where `| float` reads `TBD` as 0, a rule
+    that uses an unreadable number is not evaluated, naming the value. A blank value is missing, as in `text()`; a
+    value already missing or unreadable passes through as it is.
+    """
+    if decimal not in (".", ","):
+        raise ValueError(f"number() reads a decimal point '.' or a decimal comma ',', not {decimal!r}")
+    if isinstance(value, (Blank, Unreadable)):
+        return value
+    if is_blank(value):
+        return environment.blank(hint="missing value: number() found no number", exc=MissingValue)
+    read = _number_of(value, decimal)
+    return Unreadable(value, f"not a number: {value!r}") if read is None else read
+
+
+@pass_environment
+def read_date(environment: "RecordSandbox", value: Any, format: str | None = None) -> Any:
+    """`date(x)` in an expression: the value as a date, read as `to_date` reads it (`date(x, format='%d.%m.%Y')`).
+
+    Text that is no date is unreadable, and a rule that uses it is not evaluated, naming the text. A blank value is
+    missing, as in `text()`; a value already missing or unreadable passes through as it is.
+    """
+    if isinstance(value, (Blank, Unreadable)):
+        return value
+    if is_blank(value):
+        return environment.blank(hint="missing value: date() found no date", exc=MissingValue)
+    try:
+        return to_date(value, format)
+    except ValueError as e:
+        return Unreadable(value, str(e))
+
+
 @pass_environment
 def first_present(environment: "RecordSandbox", *values: Any) -> Any:
     """The first of the values that is present, or a blank when none is.
@@ -156,7 +354,7 @@ def first_present(environment: "RecordSandbox", *values: Any) -> Any:
 HELPERS: dict[str, Callable[..., Any]] = {
     "has": has,
     "days_between": days_between,
-    "date": to_date,
+    "date": read_date,
     "today": today,
     "len": len,
     "abs": abs,
@@ -165,6 +363,7 @@ HELPERS: dict[str, Callable[..., Any]] = {
     "sum": sum,
     "round": round,
     "text": text,
+    "number": number,
     "first_present": first_present,
 }
 
@@ -176,8 +375,9 @@ RESERVED_NAMES = frozenset({"has", "days_between", "date", "today", "len", "abs"
 # The tests that ask about a value; like `is defined`, they may read one that is missing.
 TESTS: dict[str, Callable[[Any], bool]] = {"present": is_present, "blank": is_blank}
 
-# Jinja's text filters read an undefined value as '', which a comparison takes for an answer.
-_TEXT_FILTERS = ("lower", "upper", "trim", "title", "capitalize", "replace")
+# Jinja's text filters read an undefined value as '', which a comparison takes for an answer: `date(x) | string`
+# over a blank `x` as well.
+_TEXT_FILTERS = ("lower", "upper", "trim", "title", "capitalize", "replace", "string")
 
 
 def _keeps_blank(filter_: Callable[..., Any]) -> Callable[..., Any]:
@@ -241,6 +441,9 @@ class RecordSandbox(ImmutableSandboxedEnvironment):
                 return obj[attribute]
             except (TypeError, LookupError):
                 pass
+        # An unreadable value has no members: `date(x).year` over text that is no date raises why, as its use does.
+        elif isinstance(obj, Unreadable):
+            raise obj.error()
         return super().getattr(obj, attribute)
 
 
@@ -275,8 +478,11 @@ def concrete(value: Any) -> Any:
     every rule after it, and which no encoder can record, so an iterator, a dict view, a range or a set becomes
     a list; a string and an object that merely iterates, a document say, stay what they are. A path that ends
     at a method reads the bound method, which no encoder can record and whose repr carries an address, so it
-    is no more a value than an undefined is.
+    is no more a value than an undefined is. A value `number()` or `date()` could not read raises its error at
+    any depth instead: None would pass it off as missing, where the record says something nobody could read.
     """
+    if isinstance(value, Unreadable):
+        raise value.error()
     if isinstance(value, Undefined) or callable(value):
         return None
     if isinstance(value, dict):
@@ -550,7 +756,10 @@ def resolve_path(context: dict[str, Any], path: str) -> Any:
 
 
 def _shown(value: Any) -> Any:
-    """A value as a finding shows it: scalars as they are, containers as their size, a method as a call."""
+    """A value as a finding shows it: scalars as they are, containers as their size, a method as a call, and a
+    value nobody could read as the reason why."""
+    if isinstance(value, Unreadable):
+        return f"unreadable: {value.reason}"
     if _is_missing(value):
         return None
     if isinstance(value, dict):

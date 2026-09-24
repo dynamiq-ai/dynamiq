@@ -1,19 +1,38 @@
-"""The words a rule is written with: `is present` and `is blank`, `text()` and `first_present()`.
+"""The words a rule is written with: `is present` and `is blank`, `text()`, `number()`, `date()` and `first_present()`.
 
 A record from a form or an extraction says "no answer" in more ways than a missing key: a null, an empty string, a
 string of spaces, an empty list. `is present` and `is blank` answer the question outright; `text()` and
 `first_present()` read every one of these as missing, a key the record lacks included, so a comparison over them
 never passes or fails on a value nobody gave: `text(app.purpose) == 'purchase'` is not evaluated for a blank purpose,
 where `app.purpose | trim == 'purchase'` would fail it.
+
+A record also says things a rule cannot read: `TBD` where an amount goes, `March` where a date goes. `number()` and
+`date()` read what documents write, `$586,764.00` or `Oct 1, 2026`, and hold anything else as unreadable: the value is
+there, so it is present, but a rule that uses it is not evaluated, naming the value, where `| float` would read 0.
 """
 
+import json
+from datetime import date
+from decimal import Decimal
+from typing import Any
+
 import pytest
-from jinja2.exceptions import UndefinedError
+from jinja2.exceptions import TemplateRuntimeError, UndefinedError
 
 from dynamiq.nodes.operators import Expression, Rules
-from dynamiq.nodes.operators.rules import MissingValue, read_paths
+from dynamiq.nodes.operators.rules import (
+    MissingValue,
+    RuleUndefined,
+    Unreadable,
+    UnreadableValue,
+    is_blank,
+    is_present,
+    read_paths,
+    to_date,
+)
 from dynamiq.nodes.types import DerivedValue, ExpressionItem, NamedField, Rule
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.utils import JsonWorkflowEncoder
 
 # A key the record does not carry at all.
 ABSENT = object()
@@ -355,4 +374,479 @@ def test_an_expression_reads_a_blank_as_none_and_every_other_undefined_as_before
         "shown": " Ada ",
         "nothing": None,
         "asked": True,
+    }
+
+
+# --- number() ---------------------------------------------------------------------------------------------------
+
+
+def reader(expression: str, inputs: dict) -> Expression:
+    return Expression(
+        name="reader",
+        input_fields=[NamedField(name=name) for name in inputs],
+        expressions=[ExpressionItem(key="value", expression=expression)],
+    )
+
+
+def evaluate(expression: str, **inputs) -> Any:
+    """What one expression of an Expression node computes over `inputs`."""
+    return run(reader(expression, inputs), inputs)["value"]
+
+
+def failure(expression: str, **inputs) -> str:
+    """The error one expression of an Expression node fails its run with."""
+    result = reader(expression, inputs).run(input_data=inputs, config=RunnableConfig(callbacks=[]))
+    assert result.status == RunnableStatus.FAILURE
+    return result.error.message
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("$586,764.00", 586764.0),
+        ("1,234", 1234),
+        ("6.25%", 6.25),
+        ("(1,200.50)", -1200.5),
+        (" -£1,234,567.89 ", -1234567.89),
+        ("€ 12", 12),
+        ("+0.5", 0.5),
+        (42, 42),
+        (2.5, 2.5),
+        (Decimal("586764.00"), 586764.0),
+        (Decimal("1E+3"), 1000),
+    ],
+    ids=[
+        "currency",
+        "grouped",
+        "percent",
+        "parenthesised",
+        "negative-pounds",
+        "euro-spaced",
+        "signed",
+        "int",
+        "float",
+        "decimal",
+        "decimal-exponent",
+    ],
+)
+def test_number_reads_an_amount_the_way_a_document_writes_it(raw, expected):
+    value = evaluate("number(raw)", raw=raw)
+
+    # With a decimal point it is a float, without one an int, and never a Decimal, which a workflow's JSON cannot carry.
+    assert (value, type(value)) == (expected, type(expected))
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "TBD",
+        "12,5",
+        "1.234,56",
+        "1,23",
+        "0,125",
+        "nan",
+        "inf",
+        "1_000",
+        "1e5",
+        "١٢",
+        "(-5)",
+        "5.",
+        "$",
+        True,
+        float("nan"),
+        float("inf"),
+    ],
+    ids=[
+        "words",
+        "decimal-comma",
+        "european",
+        "short-group",
+        "zero-group",
+        "nan",
+        "inf",
+        "underscore",
+        "exponent",
+        "arabic-indic",
+        "double-negative",
+        "trailing-point",
+        "symbol-only",
+        "true",
+        "nan-float",
+        "inf-float",
+    ],
+)
+def test_number_holds_a_value_it_cannot_read_rather_than_guessing(raw):
+    """Each of these is there, so it is not missing, yet any reading of it is a guess: `12,5` is 12.5 or 125
+    depending on who wrote it, `| float` reads `TBD` as 0, and Python itself reads `1e5`, `1_000` and `١٢`."""
+    node = rules(
+        Rule(id="AMT-01", check="number(doc.amount) > 1000"),
+        Rule(id="bare", check="number(doc.amount)"),
+        member="doc",
+    )
+
+    output = run(node, record("doc", amount=raw))
+
+    reason = f"check could not be evaluated: not a number: {raw!r}"
+    assert {(finding["status"], finding["message"]) for finding in output["findings"]} == {("not_evaluated", reason)}
+
+
+@pytest.mark.parametrize(
+    ("amount", "status", "message"),
+    [
+        ("$1,500.00", "pass", None),
+        ("900", "fail", None),
+        ("TBD", "not_evaluated", "check could not be evaluated: not a number: 'TBD'"),
+        ("  ", "not_evaluated", "missing value for doc.amount"),
+        (ABSENT, "not_evaluated", "missing value for doc.amount"),
+    ],
+    ids=["over", "under", "unreadable", "blank", "absent"],
+)
+def test_a_rule_over_number_decides_on_an_amount_and_holds_one_it_cannot_read(amount, status, message):
+    node = rules(Rule(id="AMT-01", check="number(doc.amount) > 1000"), member="doc")
+
+    finding = by_id(run(node, record("doc", amount=amount)))["AMT-01"]
+
+    assert (finding["status"], finding["message"]) == (status, message)
+    # The finding shows what the record says, not what the reader made of it.
+    assert finding["evaluated"] == {"doc.amount": None if amount is ABSENT else amount}
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("1.234,56", 1234.56), ("12,5", 12.5), ("1.234", 1234), ("€ 1.234.567,89", 1234567.89)],
+    ids=["grouped", "decimal", "thousands", "euro"],
+)
+def test_number_reads_a_decimal_comma_when_the_rule_says_so(raw, expected):
+    value = evaluate("number(raw, decimal=',')", raw=raw)
+
+    assert (value, type(value)) == (expected, type(expected))
+
+
+def test_a_decimal_comma_reader_holds_a_decimal_point_as_unreadable():
+    assert "not a number: '1,234.56'" in failure("number(raw, decimal=',')", raw="1,234.56")
+    assert "not a number: '1.5'" in failure("number(raw, decimal=',')", raw="1.5")
+
+
+def test_a_float_or_int_filter_after_number_holds_the_rule_where_the_filter_alone_reads_zero():
+    node = rules(
+        Rule(id="filter", check="doc.amount | float == 0"),
+        Rule(id="float", check="number(doc.amount) | float == 0"),
+        Rule(id="int", check="number(doc.amount) | int == 0"),
+        member="doc",
+    )
+
+    output = run(node, record("doc", amount="TBD"))
+
+    # The filter alone passes a rule on an amount nobody gave.
+    assert statuses(output) == {"filter": "pass", "float": "not_evaluated", "int": "not_evaluated"}
+    assert by_id(output)["float"]["message"] == "check could not be evaluated: not a number: 'TBD'"
+
+
+def test_first_present_stops_at_an_unreadable_value_rather_than_skipping_it():
+    """A value nobody could read is there: skipping it would let a fallback decide over what the record says."""
+    assert evaluate("first_present(number('5'), number('TBD'))") == 5
+    assert evaluate("first_present(number(''), number('7'))") == 7
+
+    node = rules(Rule(id="NET-01", check="first_present(number(doc.net), number(doc.gross)) > 0"), member="doc")
+    finding = by_id(run(node, record("doc", net="TBD", gross="5")))["NET-01"]
+
+    assert (finding["status"], finding["message"]) == (
+        "not_evaluated",
+        "check could not be evaluated: not a number: 'TBD'",
+    )
+
+
+@pytest.mark.parametrize(
+    "check",
+    [
+        "number(doc.amount) | round(2) > 5",
+        "round(number(doc.amount)) > 5",
+        "abs(number(doc.amount)) > 5",
+        "number(doc.amount) | abs > 5",
+        "number(doc.amount) | int > 5",
+        "date(doc.issued) | string == '2026-10-01'",
+    ],
+    ids=["round-filter", "round", "abs", "abs-filter", "int-filter", "string-filter"],
+)
+def test_a_blank_read_stays_missing_through_the_helpers_and_filters_that_round_or_print_it(check):
+    """`round`, `abs` and `| string` would otherwise raise a type error or read a blank as '', a verdict on a value
+    nobody gave: a blank amount rounded is as missing as a blank amount compared."""
+    node = rules(Rule(id="R1", check=check), member="doc")
+
+    assert statuses(run(node, record("doc", amount="12.345", issued="Oct 1, 2026"))) == {"R1": "pass"}
+    finding = by_id(run(node, record("doc", amount="  ", issued="")))["R1"]
+    assert (finding["status"], finding["message"]) == (
+        "not_evaluated",
+        f"missing value for {read_paths(check).required[0]}",
+    )
+
+
+def test_a_reader_reads_its_argument_and_never_its_own_name():
+    reads = read_paths("number(doc.amount) > 1000 and date(doc.issued, format='%d.%m.%Y') < today()")
+    assert (reads.required, reads.optional) == (["doc.amount", "doc.issued"], [])
+
+    reads = read_paths("first_present(number(doc.net), number(doc.gross)) > 0")
+    assert (reads.required, reads.optional) == ([], ["doc.net", "doc.gross"])
+
+
+def test_a_rule_reading_and_calling_number_is_held_when_it_runs_not_refused_at_build():
+    """`number` is a name the vocabulary added, so an input of that name keeps building, as one called `text` does."""
+    node = Rules(
+        name="vocabulary",
+        input_fields=[NamedField(name="number")],
+        rules=[Rule(id="clash", name="clash", check="number(number) > 1")],
+    )
+
+    finding = by_id(run(node, {"number": "5"}))["clash"]
+
+    assert (finding["status"], finding["message"]) == (
+        "not_evaluated",
+        "check could not be evaluated: Rules 'vocabulary', rule 1 (clash): the check reads 'number' as a value and"
+        " calls it as a helper",
+    )
+    assert "reads 'number' as a value and calls it as a helper" in failure("number(number)", number="5")
+
+
+# --- date() -----------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("expression", "raw", "expected"),
+    [
+        ("date(raw)", "2026/08/07", date(2026, 8, 7)),
+        ("date(raw)", "Oct 1, 2026", date(2026, 10, 1)),
+        ("date(raw)", "October 1, 2026", date(2026, 10, 1)),
+        ("date(raw)", "Sept. 1 2026", date(2026, 9, 1)),
+        ("date(raw, format='%d.%m.%Y')", "17.07.2026", date(2026, 7, 17)),
+        # The shapes it read before.
+        ("date(raw)", "2026-08-07T10:15:00Z", date(2026, 8, 7)),
+        ("date(raw)", "08/07/2026", date(2026, 8, 7)),
+    ],
+    ids=["year-first-slashes", "short-month", "month", "sept-without-comma", "format", "iso", "us"],
+)
+def test_date_reads_the_shapes_a_document_writes_a_date_in(expression, raw, expected):
+    assert evaluate(expression, raw=raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("opened", "status", "message"),
+    [
+        ("Oct 1, 2026", "pass", None),
+        ("2027/01/05", "fail", None),
+        ("March", "not_evaluated", "check could not be evaluated: not a date: 'March'"),
+        ("", "not_evaluated", "missing value for app.opened"),
+        ("  ", "not_evaluated", "missing value for app.opened"),
+    ],
+    ids=["before", "after", "unreadable", "empty", "spaces"],
+)
+def test_a_rule_over_date_holds_text_that_is_no_date_and_reads_blank_text_as_missing(opened, status, message):
+    node = rules(Rule(id="DT-01", check="date(app.opened) < date('2026-12-31')"))
+
+    finding = by_id(run(node, record(opened=opened)))["DT-01"]
+
+    assert (finding["status"], finding["message"]) == (status, message)
+
+
+def test_a_date_that_does_not_match_the_format_given_is_unreadable_naming_the_format():
+    node = rules(Rule(id="DT-02", check="date(app.opened, format='%d.%m.%Y') < today()"))
+
+    finding = by_id(run(node, record(opened="2026-07-17")))["DT-02"]
+
+    assert (finding["status"], finding["message"]) == (
+        "not_evaluated",
+        "check could not be evaluated: not a date: '2026-07-17' (format '%d.%m.%Y')",
+    )
+
+
+@pytest.mark.parametrize(
+    ("closed", "raw", "read"),
+    [
+        ("Oct 1, 2026", ("pass", None), ("pass", None)),
+        (
+            "",
+            ("not_evaluated", "check could not be evaluated: not a date: ''"),
+            ("not_evaluated", "missing value for app.closed"),
+        ),
+        (
+            "March",
+            ("not_evaluated", "check could not be evaluated: not a date: 'March'"),
+            ("not_evaluated", "check could not be evaluated: not a date: 'March'"),
+        ),
+    ],
+    ids=["dated", "blank", "unreadable"],
+)
+def test_days_between_reads_the_new_formats_and_a_blank_read_through_date_is_missing(closed, raw, read):
+    """`days_between` reads raw values as it always has; read through `date()`, a blank one is missing instead."""
+    node = rules(
+        Rule(id="raw", check="days_between(app.opened, app.closed) == 55"),
+        Rule(id="read", check="days_between(date(app.opened), date(app.closed)) == 55"),
+    )
+
+    findings = by_id(run(node, record(opened="2026/08/07", closed=closed)))
+
+    assert (findings["raw"]["status"], findings["raw"]["message"]) == raw
+    assert (findings["read"]["status"], findings["read"]["message"]) == read
+
+
+def test_to_date_reads_the_new_formats_and_still_raises_on_what_it_cannot_read():
+    """`days_between`, an effective window and `as_of` read their dates through it."""
+    assert to_date("2026/8/7") == date(2026, 8, 7)
+    assert to_date(" oct 1, 2026 ") == date(2026, 10, 1)
+    assert to_date("17.07.2026", format="%d.%m.%Y") == date(2026, 7, 17)
+    for text in ("March", "Oct 12026", "Octember 1, 2026", "1 Oct 2026", ""):
+        with pytest.raises(ValueError, match=f"^not a date: {text!r}$"):
+            to_date(text)
+    with pytest.raises(ValueError):
+        to_date("2026/13/01")
+    # A value it is handed that is already missing or unreadable raises its own error.
+    with pytest.raises(UnreadableValue, match="^not a number: 'TBD'$"):
+        to_date(Unreadable("TBD", "not a number: 'TBD'"))
+    with pytest.raises(UndefinedError, match="^'opened' is undefined$"):
+        to_date(RuleUndefined(name="opened"))
+
+
+def test_an_effective_window_and_as_of_read_the_new_formats():
+    node = Rules(name="vocabulary", rules=[Rule(id="NEW-01", check="true", effective_from="2026/10/01")])
+
+    assert statuses(run(node, {"as_of": "Sep 30, 2026"})) == {"NEW-01": "not_applicable"}
+    assert statuses(run(node, {"as_of": "October 1, 2026"})) == {"NEW-01": "pass"}
+
+
+# --- unreadable values ------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "use",
+    [
+        lambda value: value == 5,
+        lambda value: value != 5,
+        lambda value: value < 5,
+        lambda value: 5 < value,
+        lambda value: value + 1,
+        lambda value: 1 - value,
+        lambda value: value * 2,
+        lambda value: 10 / value,
+        lambda value: -value,
+        lambda value: 5 in [value],
+        lambda value: value["cents"],
+        bool,
+        len,
+        hash,
+        iter,
+        float,
+        int,
+        round,
+        abs,
+    ],
+    ids=[
+        "equal",
+        "unequal",
+        "less",
+        "reflected",
+        "add",
+        "subtract-from",
+        "multiply",
+        "divide-into",
+        "negate",
+        "in",
+        "item",
+        "bool",
+        "len",
+        "hash",
+        "iter",
+        "float",
+        "int",
+        "round",
+        "abs",
+    ],
+)
+def test_an_unreadable_value_refuses_every_use_naming_why(use):
+    with pytest.raises(UnreadableValue, match="^not a number: 'TBD'$") as raised:
+        use(Unreadable("TBD", "not a number: 'TBD'"))
+
+    # The error carries the value, so whoever catches it can keep what the record said.
+    assert raised.value.value == "TBD"
+
+
+def test_an_unreadable_value_shows_its_text_and_counts_as_present():
+    unreadable = Unreadable("TBD", "not a number: 'TBD'")
+
+    assert str(unreadable) == "TBD"
+    assert is_present(unreadable) and not is_blank(unreadable)
+    # A runtime error, never a ValueError or a TypeError: Jinja's `| float` and `| int` read either as "no number"
+    # and return 0.
+    assert issubclass(UnreadableValue, TemplateRuntimeError)
+    assert not issubclass(UnreadableValue, (ValueError, TypeError))
+
+
+def test_an_unreadable_value_has_no_members_a_rule_can_read():
+    node = rules(
+        Rule(id="year", check="date(app.opened).year == 2026"),
+        Rule(id="value", check="number(app.amount).value == 'TBD'"),
+    )
+
+    output = run(node, record(opened="March", amount="TBD"))
+
+    assert {rule_id: finding["message"] for rule_id, finding in by_id(output).items()} == {
+        "year": "check could not be evaluated: not a date: 'March'",
+        "value": "check could not be evaluated: not a number: 'TBD'",
+    }
+
+
+def test_a_finding_shows_an_unreadable_value_with_its_reason():
+    """A record may carry a value an earlier step could not read; the finding says so rather than show the text."""
+    node = rules(Rule(id="AMT-01", check="doc.amount > 1000"), member="doc")
+
+    finding = by_id(run(node, {"doc": {"amount": Unreadable("TBD", "not a number: 'TBD'")}}))["AMT-01"]
+
+    assert (finding["status"], finding["message"]) == (
+        "not_evaluated",
+        "check could not be evaluated: not a number: 'TBD'",
+    )
+    assert finding["evaluated"] == {"doc.amount": "unreadable: not a number: 'TBD'"}
+
+
+def test_an_expression_fails_its_run_on_a_value_it_cannot_read_and_reads_a_blank_as_none():
+    """`date('March')` has always failed the run; `number('TBD')` does too, through a filter or inside a list."""
+    for expression in ("number(raw)", "number(raw) | float", "[1, number(raw)]"):
+        assert "not a number: 'TBD'" in failure(expression, raw="TBD")
+    assert "not a date: 'March'" in failure("date(raw)", raw="March")
+
+    assert evaluate("number(raw)", raw="  ") is None
+    assert evaluate("date(raw)", raw="") is None
+    assert evaluate("date(missing)") is None
+
+
+def test_the_readers_return_plain_values_a_workflow_can_serialise():
+    doc = {"count": "1,234", "amount": "$586,764.00", "stored": Decimal("12.50"), "issued": "Oct 1, 2026"}
+    expression = Expression(
+        name="readers",
+        input_fields=[NamedField(name="doc")],
+        expressions=[
+            ExpressionItem(key="count", expression="number(doc.count)"),
+            ExpressionItem(key="amount", expression="number(doc.amount)"),
+            ExpressionItem(key="stored", expression="number(doc.stored)"),
+            ExpressionItem(key="issued", expression="date(doc.issued)"),
+        ],
+    )
+    checks = Rules(
+        name="vocabulary",
+        input_fields=[NamedField(name="doc")],
+        derived_values=[
+            DerivedValue(name="amount", expression="number(doc.amount)"),
+            DerivedValue(name="issued", expression="date(doc.issued)"),
+        ],
+        rules=[Rule(id="AMT-01", check="amount > 1000 and issued < date('2027-01-01')")],
+    )
+
+    computed = run(expression, {"doc": doc})
+    checked = run(checks, {"doc": doc})
+
+    assert computed == {"count": 1234, "amount": 586764.0, "stored": 12.5, "issued": date(2026, 10, 1)}
+    assert [type(value) for value in computed.values()] == [int, float, float, date]
+    assert json.loads(json.dumps(computed, cls=JsonWorkflowEncoder))["issued"] == "2026-10-01"
+    assert statuses(checked) == {"AMT-01": "pass"}
+    assert json.loads(json.dumps(checked, cls=JsonWorkflowEncoder))["derived"] == {
+        "amount": 586764.0,
+        "issued": "2026-10-01",
     }
