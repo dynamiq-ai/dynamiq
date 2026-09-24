@@ -1,9 +1,10 @@
 """The words a rule is written with: `is present` and `is blank`, `text()` and `first_present()`.
 
 A record from a form or an extraction says "no answer" in more ways than a missing key: a null, an empty string, a
-string of spaces, an empty list. These words read every one of them as missing, so a rule stays as short as the
-policy it encodes and never passes or fails on a value nobody gave: `text(app.purpose) == 'purchase'` is not
-evaluated for a blank purpose, where `app.purpose | trim == 'purchase'` would fail it.
+string of spaces, an empty list. `is present` and `is blank` answer the question outright; `text()` and
+`first_present()` read every one of these as missing, a key the record lacks included, so a comparison over them
+never passes or fails on a value nobody gave: `text(app.purpose) == 'purchase'` is not evaluated for a blank purpose,
+where `app.purpose | trim == 'purchase'` would fail it.
 """
 
 import pytest
@@ -77,6 +78,25 @@ def test_is_present_fails_a_rule_whose_value_is_absent_rather_than_holding_it():
     assert output["status"] == "fail"
 
 
+def test_a_key_named_like_a_dict_method_is_blank_when_the_record_lacks_it():
+    """Without the key, `invoice.items` reaches the dict's method, which is no value: it is blank, as an absent key is,
+    and a fallback stands in for it."""
+    node = rules(
+        Rule(id="present", check="invoice.items is present"),
+        Rule(id="blank", check="invoice.items is blank"),
+        Rule(id="fallback", check="first_present(invoice.items, invoice.lines) == ['a']"),
+        Rule(id="counted", check="first_present(invoice.items, invoice.lines) | length > 0"),
+        member="invoice",
+    )
+
+    absent = run(node, record("invoice", lines=["a"]))
+    given = run(node, record("invoice", items=["a"], lines=[]))
+
+    assert statuses(absent) == {"present": "fail", "blank": "pass", "fallback": "pass", "counted": "pass"}
+    # With the key, the member is the data, as everywhere else.
+    assert statuses(given) == {"present": "pass", "blank": "fail", "fallback": "pass", "counted": "pass"}
+
+
 # --- text() -----------------------------------------------------------------------------------------------------
 
 
@@ -127,6 +147,33 @@ def test_a_text_filter_keeps_a_blank_value_missing_rather_than_failed(check, pur
     assert (blank["status"], blank["message"]) == ("not_evaluated", "missing value for app.purpose")
 
 
+@pytest.mark.parametrize("tags", [[], {}], ids=["empty-list", "empty-dict"])
+def test_the_reason_names_an_empty_list_or_mapping_as_the_missing_value(tags):
+    output = run(rules(Rule(id="TAG-01", check="text(app.tags) == 'priority'")), record(tags=tags))
+
+    finding = by_id(output)["TAG-01"]
+    assert (finding["status"], finding["message"]) == ("not_evaluated", "missing value for app.tags")
+
+
+@pytest.mark.parametrize(
+    ("address", "status", "message"),
+    [
+        ({"city": "Springfield", "state": "ca"}, "pass", None),
+        ({"city": "Springfield"}, "not_evaluated", "missing value for app.address.state"),
+        (ABSENT, "fail", None),
+    ],
+    ids=["given", "no-state", "no-address"],
+)
+def test_text_keeps_an_absent_value_missing_through_a_filter(address, status, message):
+    """A guard lets a value under it be missing; `| upper` alone would read the absent state as '' and fail the rule,
+    where `text()` keeps it missing. Without an address the guard decides, as it always has."""
+    node = rules(Rule(id="ST-01", check="has(app.address) and text(app.address.state) | upper == 'CA'"))
+
+    finding = by_id(run(node, record(address=address)))["ST-01"]
+
+    assert (finding["status"], finding["message"]) == (status, message)
+
+
 # --- first_present() --------------------------------------------------------------------------------------------
 
 
@@ -139,7 +186,7 @@ def test_first_present_reads_each_value_leniently_and_guards_no_other_read():
     reads = read_paths("first_present(a.b, c) == 1 and a.b > 0")
     assert (reads.required, reads.optional) == (["a.b"], ["c"])
 
-    # A helper inside the call reads leniently too, so `text()` can hand an absent value on to be skipped.
+    # A helper inside the call reads leniently too, so an absent value reaches `text()` and is skipped as blank.
     reads = read_paths("first_present(text(a.b), 'none') == 'x'")
     assert (reads.required, reads.optional) == ([], ["a.b"])
 
@@ -220,6 +267,51 @@ def test_a_derived_value_named_like_an_original_helper_is_still_refused(name):
         Rules(name="vocabulary", derived_values=[DerivedValue(name=name, expression="1")], rules=[])
 
 
+def test_a_rule_reading_and_calling_a_name_the_vocabulary_added_is_held_when_it_runs_not_refused_at_build():
+    """A workflow with an input called `text` and a check `text(text) == 'x'`, written before `text` was a helper,
+    keeps building. The clash holds that one rule as an error, whether or not the record carries `text`, and every
+    other rule runs."""
+    node = Rules(
+        name="vocabulary",
+        input_fields=[NamedField(name="text"), NamedField(name="app")],
+        derived_values=[DerivedValue(name="label", expression="text(text) | upper")],
+        rules=[
+            Rule(id="clash", name="clash", check="text(text) == 'x'"),
+            Rule(id="sibling", check="app.units > 0"),
+        ],
+    )
+
+    for data in ({"text": "x", "app": {"units": 3}}, {"app": {"units": 3}}):
+        output = run(node, data)
+
+        assert statuses(output) == {"clash": "not_evaluated", "sibling": "pass"}
+        assert by_id(output)["clash"]["message"] == (
+            "check could not be evaluated: Rules 'vocabulary', rule 1 (clash): the check reads 'text' as a value and"
+            " calls it as a helper"
+        )
+        assert output["derived"] == {"label": None}
+
+
+def test_an_expression_reading_and_calling_a_name_the_vocabulary_added_fails_its_run_not_its_build():
+    node = Expression(
+        name="labels",
+        input_fields=[NamedField(name="text")],
+        expressions=[ExpressionItem(key="label", expression="text(text)")],
+    )
+
+    result = node.run(input_data={"text": " a "}, config=RunnableConfig(callbacks=[]))
+
+    assert result.status == RunnableStatus.FAILURE
+    assert "Expression 'labels': 'label' reads 'text' as a value and calls it as a helper" in result.error.message
+
+
+def test_a_clash_on_an_original_helper_name_is_still_refused_at_build():
+    with pytest.raises(ValueError, match="rule 1: the check reads 'date' as a value and calls it as a helper"):
+        Rules(name="vocabulary", input_fields=[NamedField(name="date")], rules=[Rule(id="c", check="date(date)")])
+    with pytest.raises(ValueError, match="'due' reads 'date' as a value and calls it as a helper"):
+        Expression(name="due", expressions=[ExpressionItem(key="due", expression="date(date)")])
+
+
 def test_a_missing_value_error_names_its_path_when_the_raiser_knows_it():
     missing = MissingValue.for_path("app.purpose")
 
@@ -241,6 +333,7 @@ def test_an_expression_reads_a_blank_as_none_and_every_other_undefined_as_before
             ExpressionItem(key="trimmed", expression="text(name)"),
             ExpressionItem(key="zero", expression="text(count)"),
             ExpressionItem(key="blank_lowered", expression="text(nickname) | lower"),
+            ExpressionItem(key="absent_lowered", expression="text(missing) | lower"),
             ExpressionItem(key="missing_lowered", expression="missing | lower"),
             ExpressionItem(key="replaced", expression="name | replace('A', 'E')"),
             ExpressionItem(key="shown", expression="first_present(nickname, missing, name)"),
@@ -256,6 +349,7 @@ def test_an_expression_reads_a_blank_as_none_and_every_other_undefined_as_before
         "trimmed": "Ada",
         "zero": "0",
         "blank_lowered": None,
+        "absent_lowered": None,
         "missing_lowered": "",
         "replaced": " Eda ",
         "shown": " Ada ",

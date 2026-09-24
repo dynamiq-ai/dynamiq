@@ -80,10 +80,11 @@ def is_blank(value: Any) -> bool:
     """`x is blank`: missing or null, or holding nothing, as text of spaces only or an empty list or mapping does.
 
     A form or an extraction says "no answer" in each of these ways, and a rule should read them alike; `0` and
-    `false` are answers, so they are present. An undefined is never compared, counted or tested for truth here,
-    since a rule's undefined raises on each.
+    `false` are answers, so they are present. A path that ends at a method, `invoice.items` over a record without an
+    `items` key say, found the record's method rather than a value, so it is blank too. An undefined is never
+    compared, counted or tested for truth here, since a rule's undefined raises on each.
     """
-    if _is_missing(value):
+    if _is_missing(value) or callable(value):
         return True
     if isinstance(value, str):
         return not value.strip()
@@ -127,10 +128,11 @@ def text(environment: "RecordSandbox", value: Any) -> Any:
     """The value as text without the spaces around it, or a blank when there is no text.
 
     `app.purpose | trim == 'purchase'` fails a purpose nobody gave, since blank text trims to '' and a null reads as
-    'None'; `text(app.purpose) == 'purchase'` holds the rule as missing instead. An undefined value is missing
-    already and passes through as it is.
+    'None'; `text(app.purpose) == 'purchase'` holds the rule as missing instead. A value that is not there at all
+    becomes a blank as well, so it stays missing through a text filter, which reads any other undefined as ''. A
+    blank passes through as it is.
     """
-    if isinstance(value, Undefined):
+    if isinstance(value, Blank):
         return value
     if is_blank(value):
         return environment.blank(hint="missing value: text() found no text", exc=MissingValue)
@@ -473,6 +475,28 @@ def refuse_reserved_read(reads: Reads, where: str) -> None:
         )
 
 
+def refuse_clash(compiled: Callable[..., Any], reads: Reads, where: str) -> tuple[Callable[..., Any], Reads]:
+    """The compiled expression and its reads, refusing a name the expression both reads as a value and calls.
+
+    One name cannot be both: the record's member would shadow the helper, or the helper stand in for the member.
+    Such an expression is refused when the node is built, naming it, unless the name is one the vocabulary added
+    since: an expression over an input called `text`, written before `text` was a helper, must keep building. It
+    raises the clash whenever it is evaluated instead, an error rather than a missing value, so none of its reads is
+    required ahead of it: a missing one would otherwise report the rule as missing before the clash is reached.
+    """
+    clash = next((name for name in reads.helpers_read if name in reads.helpers_called), None)
+    if clash is None:
+        return compiled, reads
+    message = f"{where} reads {clash!r} as a value and calls it as a helper"
+    if clash in RESERVED_NAMES or clash not in HELPERS:
+        raise ValueError(message)
+
+    def clashing(*args: Any, **kwargs: Any) -> Any:
+        raise TypeError(message)
+
+    return clashing, reads._replace(required=[], optional=reads.required + reads.optional)
+
+
 def _private_segment(paths: list[str]) -> str | None:
     """The first path with a Python-internal segment (`__class__`), which the sandbox refuses on any object.
 
@@ -631,10 +655,7 @@ class Rules(Node):
         if private := _private_segment(reads.required + reads.optional):
             raise ValueError(f"{where} reads a private attribute ({private})")
         refuse_reserved_read(reads, where)
-        # One name cannot be both: the record's member would shadow the helper, or the helper stand in for the member.
-        if clash := next((name for name in reads.helpers_read if name in reads.helpers_called), None):
-            raise ValueError(f"{where} reads {clash!r} as a value and calls it as a helper")
-        return compiled, reads
+        return refuse_clash(compiled, reads, where)
 
     def _compile_derived(self) -> list[tuple[str, Callable[..., Any], Reads]]:
         taken = {field.name for field in self.input_fields}
@@ -850,8 +871,7 @@ class Rules(Node):
         a blank no read accounts for, one made from a literal say, keeps the error's own message.
         """
         for path in reads.required + reads.optional:
-            value = resolve_path(scope, path)
-            if _is_missing(value) or (isinstance(value, str) and not value.strip()):
+            if is_blank(resolve_path(scope, path)):
                 return f"missing value for {path}"
         return str(error)
 

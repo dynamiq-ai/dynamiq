@@ -7,7 +7,15 @@ from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.node import ensure_config
-from dynamiq.nodes.operators.rules import Reads, RecordSandbox, concrete, read_paths, refuse_reserved_read, scope_for
+from dynamiq.nodes.operators.rules import (
+    Reads,
+    RecordSandbox,
+    concrete,
+    read_paths,
+    refuse_clash,
+    refuse_reserved_read,
+    scope_for,
+)
 from dynamiq.nodes.types import ExpressionItem, NamedField
 from dynamiq.runnables import RunnableConfig
 
@@ -63,10 +71,7 @@ class Expression(Node):
                 expression = _ENVIRONMENT.compile_expression(item.expression, undefined_to_none=True)
             except TemplateSyntaxError as e:
                 raise ValueError(f"Expression '{self.name}': {item.key!r} is not a valid expression: {e}") from e
-            if clash := next((name for name in reads.helpers_read if name in reads.helpers_called), None):
-                raise ValueError(
-                    f"Expression '{self.name}': {item.key!r} reads {clash!r} as a value and calls it as a helper"
-                )
+            expression, reads = refuse_clash(expression, reads, f"Expression '{self.name}': {item.key!r}")
             refuse_reserved_read(reads, f"Expression '{self.name}': {item.key!r}")
             compiled.append((item.key, expression, reads))
         return compiled
