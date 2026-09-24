@@ -1327,7 +1327,8 @@ class Rules(Node):
         node declares its inputs (None where it does not), or under a derived value in `pending`, one computed after
         `reading`, the derived value this expression computes. Or it may read a derived value held for any of these
         defects, wherever it reads it, or one a lookup found nothing for, where it needs the value rather than falls
-        back on it: a gap in a table or in the node, never in the record.
+        back on it: a gap in a table or in the node, never in the record. A defect speaks over a lookup that found
+        nothing, whichever the expression reads first.
         """
         if (callee := self._missing(list(reads.unknown_calls), scope)) is not None:
             return _Hold(f"{callee} is not a helper")
@@ -1337,6 +1338,10 @@ class Rules(Node):
             return _Hold(_unreadable_because(found, unreadable.reason))
         if (misread := self._misread(reads.readers, scope)) is not None:
             return _Hold(misread)
+        # A defect holds wherever it is read and speaks over a lookup that found nothing, whichever the expression
+        # reads first; a fallback stands in for the lookup, as its author meant (`first_present(limit, 0)`), so that
+        # holds only where the value is needed.
+        lookup: _Hold | None = None
         for path in paths:
             if not is_blank(resolve_path(scope, path)):
                 continue
@@ -1345,11 +1350,13 @@ class Rules(Node):
                 return _Hold(f"{root} is computed after {reading}")
             if declared is not None and root not in declared:
                 return _Hold(f"{root} is not an input or a derived value")
-            # A derived value's own defect holds wherever it is read; a fallback stands in for a lookup that found
-            # nothing, as its author meant (`first_present(limit, 0)`), so that holds only where the value is needed.
-            if (hold := unskippable.get(root)) is not None and (not hold.lookup or path in reads.required):
+            if (hold := unskippable.get(root)) is None:
+                continue
+            if not hold.lookup:
                 return hold
-        return None
+            if lookup is None and path in reads.required:
+                lookup = hold
+        return lookup
 
     def _why_missing(
         self,
@@ -1367,18 +1374,21 @@ class Rules(Node):
         There, a blank from `text()`, `number()`, `date()` or `first_present()` is missing when a value it read is
         missing or blank, and an undefined result when a value it needs is missing. With every value it needs
         there, an undefined result is a lookup that found nothing, `limits[loan.program]` for a program the table
-        lacks, which a check reports as an error. A None the expression computes itself, with `else none` say, is
-        its author's answer, and counts as data the record lacks so long as the values it reads do (`_why_held`).
+        lacks, which a check reports as an error, unless the expression has a defect of its own, a call of a name no
+        helper has say (`firstpresent(x) | default(0)`), which is the cause instead. A None the expression computes
+        itself, with `else none` say, is its author's answer, and counts as data the record lacks so long as the
+        values it reads do (`_why_held`).
         """
+        hold = self._why_held(reads, known, self._declared, unskippable, pending, name)
+        if hold is not None and not hold.lookup:
+            return hold
         if blank:
             accounted = any(is_blank(resolve_path(known, path)) for path in reads.required + reads.optional)
         elif undefined:
             accounted = self._missing(reads.required, known) is not None
         else:
             accounted = True
-        if not accounted:
-            return _Hold(f"the lookup for {name} found nothing", lookup=True)
-        return self._why_held(reads, known, self._declared, unskippable, pending, name)
+        return hold if accounted else _Hold(f"the lookup for {name} found nothing", lookup=True)
 
     @staticmethod
     def _missing(paths: list[str], scope: dict[str, Any]) -> str | None:

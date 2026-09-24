@@ -225,6 +225,14 @@ SKIPPED = {
         {"loan": {"closed": "2026-01-01"}},
         "as_of",
     ),
+    # A derived value missing only because an earlier one's lookup found nothing is a lookup miss too.
+    "derived-lookup-miss-beside-good-data-in-a-fallback": Skipped(
+        lambda policy: screening(
+            "first_present(z, 0) < loan.cap", policy, inputs=LENDING, derived=(LIMIT, ("z", "limit + loan.amount"))
+        ),
+        {"loan": {"program": "jumbo", "amount": 5}, "limits": LIMITS},
+        "loan.cap",
+    ),
     # A fallback stands in for a derived value whose lookup found nothing; the cap is what the record lacks.
     "derived-lookup-in-a-fallback": Skipped(
         lambda policy: screening(
@@ -250,6 +258,20 @@ def test_data_the_record_lacks_is_skipped_by_a_rule_set_to_skip_it(case):
 
 
 # --- a mistake or a value nobody could read is never skipped -----------------------------------------------------
+
+
+# A loan whose program the limits table lacks, so `limit` is a lookup that found nothing; the cap is absent too.
+UNLISTED = {"loan": {"program": "jumbo", "amount": 5}, "limits": LIMITS}
+
+
+def falling_back_on_z(
+    z: str, *, before: tuple[tuple[str, str], ...] = (), after: tuple[tuple[str, str], ...] = ()
+) -> Callable[..., Rules]:
+    """A node computing `limit` and `z`, with derived values before and after `z`, and one rule that only falls
+    back on `z`, beside a cap the record lacks."""
+    return lambda **policy: screening(
+        "first_present(z, 0) < loan.cap", inputs=LENDING, derived=(LIMIT, *before, ("z", z), *after), **policy
+    )
 
 
 class Held(NamedTuple):
@@ -490,6 +512,91 @@ HELD = {
         {"doc": {"net": "TBD"}},
         "missing value for doc.limit",
         "doc.net is not a number: 'TBD'",
+    ),
+    # A defect of the derived value's own expression speaks over a lookup that found nothing in it, whichever the
+    # expression reads first, so a rule that only falls back on the value is still held.
+    "derived-typo-after-a-lookup-miss": Held(
+        falling_back_on_z("limit + lon.amount"),
+        UNLISTED,
+        "missing value for loan.cap",
+        "lon is not an input or a derived value",
+    ),
+    "derived-typo-before-a-lookup-miss": Held(
+        falling_back_on_z("lon.amount + limit"),
+        UNLISTED,
+        "missing value for loan.cap",
+        "lon is not an input or a derived value",
+    ),
+    "derived-fallback-typo-after-a-lookup-miss": Held(
+        falling_back_on_z("limit + first_present(lon.amount, 0)"),
+        UNLISTED,
+        "missing value for loan.cap",
+        "lon is not an input or a derived value",
+    ),
+    "derived-fallback-typo-before-a-lookup-miss": Held(
+        falling_back_on_z("first_present(lon.amount, 0) + limit"),
+        UNLISTED,
+        "missing value for loan.cap",
+        "lon is not an input or a derived value",
+    ),
+    "derived-defect-after-a-lookup-miss": Held(
+        falling_back_on_z("limit + doubled", before=(("doubled", "lon.amount * 2"),)),
+        UNLISTED,
+        "missing value for loan.cap",
+        "lon is not an input or a derived value",
+    ),
+    "derived-defect-before-a-lookup-miss": Held(
+        falling_back_on_z("doubled + limit", before=(("doubled", "lon.amount * 2"),)),
+        UNLISTED,
+        "missing value for loan.cap",
+        "lon is not an input or a derived value",
+    ),
+    "derived-later-value-after-a-lookup-miss": Held(
+        falling_back_on_z("limit + later", after=(("later", "loan.amount"),)),
+        UNLISTED,
+        "missing value for loan.cap",
+        "later is computed after z",
+    ),
+    "derived-later-value-before-a-lookup-miss": Held(
+        falling_back_on_z("later + limit", after=(("later", "loan.amount"),)),
+        UNLISTED,
+        "missing value for loan.cap",
+        "later is computed after z",
+    ),
+    # Nothing the derived value reads is missing, yet its expression calls a name no helper has: a defect, not a
+    # lookup that found nothing, wherever the call sits.
+    "derived-mistyped-helper-inside-its-own-fallback": Held(
+        lambda **policy: screening(
+            "first_present(code, 'X') == order.expected",
+            inputs=("order",),
+            derived=(("code", "first_present(firstpresent(order.coupon), 'NONE')"),),
+            **policy,
+        ),
+        {"order": {"coupon": "SPRING"}},
+        "missing value for order.expected",
+        "firstpresent is not a helper",
+    ),
+    "derived-mistyped-helper-under-default": Held(
+        lambda **policy: screening(
+            "first_present(code, 'X') == order.expected",
+            inputs=("order",),
+            derived=(("code", "firstpresent(order.coupon) | default('NONE')"),),
+            **policy,
+        ),
+        {"order": {"coupon": "SPRING"}},
+        "missing value for order.expected",
+        "firstpresent is not a helper",
+    ),
+    "derived-mistyped-helper-inside-its-own-fallback-needed": Held(
+        lambda **policy: screening(
+            "code == order.expected",
+            inputs=("order",),
+            derived=(("code", "first_present(firstpresent(order.coupon), 'NONE')"),),
+            **policy,
+        ),
+        {"order": {"coupon": "SPRING"}},
+        "missing value for code",
+        "firstpresent is not a helper",
     ),
     "derived-read-of-a-later-derived-value-without-inputs": Held(
         lambda **policy: screening(
