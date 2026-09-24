@@ -840,9 +840,13 @@ class Rules(Node):
     expression fails then, naming the rule.
 
     The output holds `findings` in rule order, a `summary` of statuses, `status`, the `derived` values and
-    `derived_errors`. A derived value computed from a missing value is missing, None under `derived`; one that
+    `derived_errors`. A derived value computed from a missing value is missing, None under `derived`. One that
     could not be computed from values that are there, a division by zero or `number()` of `TBD`, is None there
     too, with the reason under `derived_errors`, and a rule that reads it is not evaluated, naming the reason.
+    So is one that reads a value nobody could read, an earlier derived value say, even beside a missing one.
+    Where the missing value raises first, an unreadable value the expression makes itself with `number()` or
+    `date()`, or reaches only through `first_present()`, goes unseen and the result is missing: `doc.rate *
+    number(doc.net)` with the rate missing.
     The status is `fail` if any rule failed, else `warn` if any warned, else `not_evaluated` if any check
     did not run, else `pass`; a check that read a missing value did not run under either policy, so a record
     is never `pass` while a value was missing, whatever its finding reports. An optional `as_of` input, an
@@ -989,21 +993,29 @@ class Rules(Node):
                 # and the output stays serializable.
                 value = concrete(expression(scope_for(reads, known, RuleUndefined)))
             except UndefinedError:
-                # So is one it used: arithmetic on a key the record lacks, or on a blank `number()` read.
-                value = None
+                # So is one it used, arithmetic on a key the record lacks or on a blank `number()` read, unless
+                # it also reads a value nobody could read, which the missing one must not hide: `doc.rate * net`
+                # over a missing rate is as unreadable as `net`, for the same reason.
+                value = self._unreadable(reads.required, known)
+            except UnreadableValue as e:
+                # A value nobody could read makes what is computed from it unreadable, whatever else is missing.
+                value = Unreadable(e.value, str(e))
             except EVALUATION_ERRORS as e:
                 # A failure while a value the expression needs is missing, `amount / value` over a null `value`,
-                # is that value missing too. Any other failure is an error: as None it would read as a value
-                # nobody gave, one `first_present` or a guard skips. The rules read it as unreadable instead,
-                # keeping the value the error names, if any, for a message to print; the output reports None
-                # and the reason.
+                # is that value missing too, unless it also reads a value nobody could read. Any other failure
+                # is an error: as None it would read as a value nobody gave, one `first_present` or a guard skips.
                 if self._missing(reads.required, known):
-                    value = None
+                    value = self._unreadable(reads.required, known)
                 else:
-                    value = Unreadable(e.value if isinstance(e, UnreadableValue) else None, str(e))
-                    derived_errors[name] = value.reason
+                    value = Unreadable(None, str(e))
             values[name] = value
-            derived[name] = None if isinstance(value, Unreadable) else value
+            if isinstance(value, Unreadable):
+                # The rules read it as unreadable, keeping the value the error names, if any, for a message to
+                # print; the output reports None and the reason.
+                derived[name] = None
+                derived_errors[name] = value.reason
+            else:
+                derived[name] = value
         scope = {**context, **values}
 
         findings: list[dict[str, Any]] = []
@@ -1120,6 +1132,14 @@ class Rules(Node):
         for path in paths:
             if _is_missing(resolve_path(scope, path)):
                 return path
+        return None
+
+    @staticmethod
+    def _unreadable(paths: list[str], scope: dict[str, Any]) -> Unreadable | None:
+        """The first value the paths reach that nobody could read, with its reason, or None when there is none."""
+        for path in paths:
+            if isinstance(value := resolve_path(scope, path), Unreadable):
+                return value
         return None
 
     @staticmethod

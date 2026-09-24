@@ -5,7 +5,8 @@ appraisal.value` over a null appraisal is missing, as the appraisal is: None und
 `ltv` is not evaluated for a missing value. Over an appraisal of 0 nothing is missing, yet there is no ratio: the
 value is None under `derived` as well, with the reason under `derived_errors`, and a rule that reads it is not
 evaluated, naming the reason. The value is there, so `ltv is present` holds and `first_present` stops at it: a
-fallback never speaks over a figure the record gives but nobody could compute or read.
+fallback never speaks over a figure the record gives but nobody could compute or read. A value computed from one
+nobody could read is unreadable too, even where another value it reads is missing.
 """
 
 import json
@@ -215,6 +216,35 @@ def test_a_derived_value_computed_from_one_that_could_not_be_is_an_error_too_and
     assert missing["derived"] == {"net": None, "tax": None, "amounts": [None, 5], "gross": 5}
     assert missing["derived_errors"] == {}
     assert by_id(missing)["tax"]["message"] == "missing value for tax"
+
+
+@pytest.mark.parametrize(
+    ("tax", "rate"),
+    [
+        ("net * doc.rate", ABSENT),
+        ("doc.rate * net", ABSENT),
+        ("number(doc.rate) * net", "  "),
+        ("[doc.rate, net]", ABSENT),
+        ("number(doc.net) * doc.rate", ABSENT),
+    ],
+    ids=["unreadable-first", "missing-first", "blank-first", "in-a-list", "read-inline"],
+)
+def test_a_value_nobody_could_read_makes_a_derived_value_unreadable_even_beside_a_missing_one(tax, rate):
+    """Whichever raises first, the missing rate or the unreadable net, the tax is unreadable: the missing rate
+    does not hide a net amount the record gives but nobody could read."""
+    node = invoicing(
+        Rule(id="tax", name="tax is positive", check="tax > 0"),
+        derived=(DerivedValue(name="tax", expression=tax),),
+    )
+    doc = {"net": "TBD"} if rate is ABSENT else {"net": "TBD", "rate": rate}
+
+    output = run(node, {"doc": doc})
+
+    assert output["derived"] == {"net": None, "tax": None}
+    assert output["derived_errors"] == {"net": UNREADABLE_NET, "tax": UNREADABLE_NET}
+    assert statuses(output) == {"tax": "not_evaluated"}
+    assert by_id(output)["tax"]["message"] == f"check could not be evaluated: {UNREADABLE_NET}"
+    assert json.loads(json.dumps(output)) == output
 
 
 # --- paths and names ---------------------------------------------------------------------------------------------
