@@ -1,9 +1,10 @@
 from enum import Enum
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from dynamiq.utils import generate_uuid
+from dynamiq.utils.logger import logger
 
 
 class NodeGroup(str, Enum):
@@ -207,7 +208,7 @@ class RuleMissingPolicy(str, Enum):
     skips the rule for a record without the value, as `applies_when` would, so the rule needs no presence guard.
     Only data the record lacks is skipped. A value that is there but cannot be read, a lookup that found nothing, a
     name the node does not declare or a call of a name no helper has is still `not_evaluated`, or the severity
-    under `fail`, whatever the policy.
+    under `fail`, whatever the policy; under `not_applicable` the finding's reason says why it was not skipped.
     """
 
     NOT_EVALUATED = "not_evaluated"
@@ -230,7 +231,8 @@ class Rule(Authored):
     and a rule that does not apply reports `not_applicable`. `message` is a template rendered with the whole
     record when the check does not hold. `effective_from` and `effective_until` are ISO dates; outside the
     window the rule is not applicable for the record's `as_of` date. `on_missing` says what a missing value
-    means for this rule, overriding the node's policy; unset, or saved empty, it leaves that to the node.
+    means for this rule, overriding the node's policy; unset, or saved empty, it leaves that to the node, and so
+    does a value that is no policy, with a warning.
     """
 
     id: str = Field(default_factory=generate_uuid)
@@ -250,6 +252,20 @@ class Rule(Authored):
 
     @field_validator("on_missing", mode="before")
     @classmethod
-    def empty_policy_is_unset(cls, value: Any) -> Any:
-        """The editor saves a field left empty as '', which leaves the policy to the node, as None does."""
-        return None if isinstance(value, str) and not value.strip() else value
+    def unknown_policy_is_unset(cls, value: Any, info: ValidationInfo) -> Any:
+        """A policy left empty, as the editor saves it, leaves the choice to the node, as None does.
+
+        So does a value that is no policy, `skip` or a typo, with a warning naming it: before rules had a policy of
+        their own the key was ignored, and a rule that carries one must keep building.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        allowed = [policy.value for policy in RuleMissingPolicy]
+        # A member of the enum equals its value, so it passes here as well.
+        if value is None or value in allowed:
+            return value
+        logger.warning(
+            f"Rule {info.data.get('id')!r}: on_missing {value!r} is not one of {', '.join(allowed)}, "
+            "so the node's policy applies."
+        )
+        return None
