@@ -757,9 +757,16 @@ def _split_path(path: str) -> list[str | int]:
 
 
 def resolve_path(context: dict[str, Any], path: str) -> Any:
-    """The value at a dotted path in the context, or the missing marker when any step is absent."""
+    """The value at a dotted path in the context, or the missing marker when any step is absent.
+
+    A path that reaches a value nobody could read ends there: the marker's own members, `value` and `reason`,
+    are not the record's, and the path is no more missing than the value is, so a finding shows why the value
+    could not be read, and a rule that reads the path is not evaluated for that reason rather than as missing.
+    """
     current: Any = context
     for part in _split_path(path):
+        if isinstance(current, Unreadable):
+            return current
         if isinstance(part, int):
             if isinstance(current, (list, tuple)) and -len(current) <= part < len(current):
                 current = current[part]
@@ -832,7 +839,10 @@ class Rules(Node):
     carries the values the check read under `evaluated`. Rules compile when the node is built, so a malformed
     expression fails then, naming the rule.
 
-    The output holds `findings` in rule order, a `summary` of statuses, `status` and the `derived` values.
+    The output holds `findings` in rule order, a `summary` of statuses, `status`, the `derived` values and
+    `derived_errors`. A derived value computed from a missing value is missing, None under `derived`; one that
+    could not be computed from values that are there, a division by zero or `number()` of `TBD`, is None there
+    too, with the reason under `derived_errors`, and a rule that reads it is not evaluated, naming the reason.
     The status is `fail` if any rule failed, else `warn` if any warned, else `not_evaluated` if any check
     did not run, else `pass`; a check that read a missing value did not run under either policy, so a record
     is never `pass` while a value was missing, whatever its finding reports. An optional `as_of` input, an
@@ -964,19 +974,37 @@ class Rules(Node):
 
         context = input_data.model_dump()
         as_of = self._as_of(context.get(AS_OF_KEY))
+        # The derived values as the rules read them, as the output reports them, and why any could not be computed.
+        values: dict[str, Any] = {}
         derived: dict[str, Any] = {}
+        derived_errors: dict[str, str] = {}
         for name, expression, reads in self._derived:
             # One mapping, derived winning, passed positionally: an undeclared key the upstream payload carries
             # under a derived value's name would otherwise clash as a duplicate keyword argument, and a key
             # named `self` would collide with the compiled expression's own bound argument. Such a key is never
             # read: Jinja binds the name inside the expression, so a read of it is refused at build.
+            known = {**context, **values}
             try:
                 # A value the expression could not find is missing, inside a list or a dict it built as well,
                 # and the output stays serializable.
-                derived[name] = concrete(expression(scope_for(reads, {**context, **derived}, RuleUndefined)))
-            except EVALUATION_ERRORS:
-                derived[name] = None
-        scope = {**context, **derived}
+                value = concrete(expression(scope_for(reads, known, RuleUndefined)))
+            except UndefinedError:
+                # So is one it used: arithmetic on a key the record lacks, or on a blank `number()` read.
+                value = None
+            except EVALUATION_ERRORS as e:
+                # A failure while a value the expression needs is missing, `amount / value` over a null `value`,
+                # is that value missing too. Any other failure is an error: as None it would read as a value
+                # nobody gave, one `first_present` or a guard skips. The rules read it as unreadable instead,
+                # keeping the value the error names, if any, for a message to print; the output reports None
+                # and the reason.
+                if self._missing(reads.required, known):
+                    value = None
+                else:
+                    value = Unreadable(e.value if isinstance(e, UnreadableValue) else None, str(e))
+                    derived_errors[name] = value.reason
+            values[name] = value
+            derived[name] = None if isinstance(value, Unreadable) else value
+        scope = {**context, **values}
 
         findings: list[dict[str, Any]] = []
         screened = True
@@ -992,6 +1020,7 @@ class Rules(Node):
             "summary": summary,
             "findings": findings,
             "derived": derived,
+            "derived_errors": derived_errors,
         }
 
     @staticmethod
