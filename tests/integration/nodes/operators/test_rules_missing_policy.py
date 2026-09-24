@@ -4,13 +4,14 @@
 rule needs no presence guard: `shipment.weight_kg <= 30` does not apply to a shipment nobody weighed, and a record
 whose only unmet rules were skipped still passes. Only data the record lacks is skipped, and only where a read names
 it: a blank no read accounts for, from a lookup inside `text()` that found nothing say, is not. Nor is a check that
-reads a value nobody could read, calls a name no helper has, finds a value missing under a name the node does not
-declare (a typo), or reads a derived value a lookup found nothing for, whatever else the record lacks. Each is a
-problem to fix, not data to wait for: the rule is not evaluated, or reports its severity under `fail`, and a rule
-set to skip says why it did not ("… (not skipped: lon is not an input or a derived value)"). A derived value that
-came out missing counts as data the record lacks exactly when the same expression, written in the check, would. A
-rule's `on_missing` that is no policy at all leaves the choice to the node, with a warning, rather than refusing the
-build.
+reads a value nobody could read, calls a name no helper has, finds a value missing under a name a node with declared
+inputs does not declare (a typo), or needs a derived value a lookup found nothing for, whatever else the record
+lacks. Each is a problem to fix, not data to wait for: the rule is not evaluated, or reports its severity under
+`fail`, and a rule set to skip says why it did not ("… (not skipped: lon is not an input or a derived value)"). A
+derived value that came out missing counts as data the record lacks exactly when the same expression, written in the
+check, would. What a skipped rule cannot see is an error its check would raise on the values that are there; that
+surfaces on the records that carry the missing value. A rule's `on_missing` that is no policy at all leaves the
+choice to the node, with a warning, rather than refusing the build.
 """
 
 import logging
@@ -199,6 +200,30 @@ SKIPPED = {
         lambda policy: screening("number(doc.amount) > doc.limit", policy, inputs=("doc",)),
         {"doc": {"amount": "$1,500.00"}},
         "doc.limit",
+    ),
+    # Without declared inputs no name can be told from a typo, whatever derived values the node computes.
+    "derived-values-without-inputs": Skipped(
+        lambda policy: screening("order.total > 100", policy, derived=(("vip", "order.tier == 'gold'"),)),
+        {"order": {"tier": "gold"}},
+        "order.total",
+    ),
+    "derived-from-absent-data-without-inputs": Skipped(
+        lambda policy: screening("ltv <= 0.8", policy, derived=(LTV,)),
+        {"loan": {"amount": 300000}, "appraisal": {}},
+        "ltv",
+    ),
+    # The check only falls back on the lookup that found nothing, and it lacks the amount.
+    "a-lookup-it-only-falls-back-on": Skipped(
+        lambda policy: screening(
+            "loan.amount <= first_present(limit, 500000)", policy, inputs=LENDING, derived=(LIMIT,)
+        ),
+        {"loan": {"program": "jumbo"}, "limits": LIMITS},
+        "loan.amount",
+    ),
+    "as-of-not-supplied": Skipped(
+        lambda policy: screening("days_between(loan.closed, as_of) <= 30", policy, inputs=LENDING),
+        {"loan": {"closed": "2026-01-01"}},
+        "as_of",
     ),
 }
 
@@ -423,6 +448,14 @@ HELD = {
         "missing value for doubled",
         "lon is not an input or a derived value",
     ),
+    "derived-read-of-a-later-derived-value-without-inputs": Held(
+        lambda **policy: screening(
+            "doubled > 0", derived=(("doubled", "amount * 2"), ("amount", "loan.amount")), **policy
+        ),
+        {"loan": {"amount": 5}},
+        "missing value for doubled",
+        "amount is computed after doubled",
+    ),
     "derived-read-of-a-later-derived-value": Held(
         lambda **policy: screening(
             "doubled > 0",
@@ -495,6 +528,104 @@ def test_a_lookup_that_found_nothing_is_judged_record_by_record():
     # The output reports the value as missing either way: only whether a rule may skip it differs.
     assert unlisted["derived"] == unknown["derived"] == {"limit": None}
     assert unlisted["derived_errors"] == unknown["derived_errors"] == {}
+
+
+@pytest.mark.parametrize(
+    ("check", "inputs", "lacking", "carrying", "error"),
+    [
+        (
+            "loan.amount / appraisal.value <= appraisal.max_ltv",
+            LENDING,
+            {"loan": {"amount": 300000}, "appraisal": {"value": 0}},
+            {"loan": {"amount": 300000}, "appraisal": {"value": 0, "max_ltv": 0.8}},
+            "division by zero",
+        ),
+        (
+            "app.age >= 18 and text(app.name).startwith('A')",
+            ("app",),
+            {"app": {"name": "Ann"}},
+            {"app": {"name": "Ann", "age": 30}},
+            "'str object' has no attribute 'startwith'",
+        ),
+        (
+            "doc.total + doc.label > doc.limit",
+            ("doc",),
+            {"doc": {"total": 5, "label": "x"}},
+            {"doc": {"total": 5, "label": "x", "limit": 1}},
+            "unsupported operand type(s) for +: 'int' and 'str'",
+        ),
+    ],
+    ids=["zero-divisor", "misspelled-method", "wrong-type"],
+)
+def test_an_error_the_check_would_raise_on_the_values_there_shows_where_the_record_carries_the_missing_one(
+    check, inputs, lacking, carrying, error
+):
+    """A missing value stops the check before the values that are there are used, so the rule is skipped on a record
+    that lacks it; the error surfaces on the records that carry it."""
+    node = screening(check, "not_applicable", inputs=inputs)
+
+    skipped, missing = outcome(run(node, lacking))
+    assert skipped == "not_applicable" and missing.startswith("does not apply: missing value for ")
+    assert outcome(run(node, carrying)) == ("not_evaluated", f"check could not be evaluated: {error}")
+
+
+@pytest.fixture
+def judging(monkeypatch) -> list[str]:
+    """The derived values judged for a skip, in the order `Rules._why_missing` is asked about them."""
+    names: list[str] = []
+    why_missing = Rules._why_missing
+
+    def spy(self, name, *args):
+        names.append(name)
+        return why_missing(self, name, *args)
+
+    monkeypatch.setattr(Rules, "_why_missing", spy)
+    return names
+
+
+@pytest.mark.parametrize(
+    ("node_policy", "rule_policies", "judged"),
+    [
+        ("not_evaluated", (None, "fail"), False),
+        ("fail", (None, "not_evaluated"), False),
+        # The node would skip, but every rule sets a policy of its own that does not.
+        ("not_applicable", ("fail", "not_evaluated"), False),
+        ("not_applicable", (None, "fail"), True),
+        ("not_evaluated", ("not_applicable", None), True),
+    ],
+)
+def test_derived_values_are_judged_for_a_skip_only_where_some_rule_can_skip(
+    judging, node_policy, rule_policies, judged
+):
+    node = Rules(
+        name="lending",
+        input_fields=[NamedField(name=name) for name in LENDING],
+        derived_values=[DerivedValue(name="limit", expression="limits[loan.program]")],
+        on_missing=node_policy,
+        rules=[
+            Rule(id=f"r{index}", check="loan.amount <= limit", on_missing=policy)
+            for index, policy in enumerate(rule_policies)
+        ],
+    )
+
+    run(node, {"loan": {"amount": 300000, "program": "jumbo"}, "limits": LIMITS})
+
+    assert judging == (["limit"] if judged else [])
+
+
+def test_a_node_copied_with_a_policy_that_skips_judges_its_derived_values(judging):
+    holding = screening("loan.amount <= limit", inputs=LENDING, derived=(LIMIT,))
+    record = {"loan": {"amount": 300000, "program": "jumbo"}, "limits": LIMITS}
+
+    assert outcome(run(holding, record)) == ("not_evaluated", "missing value for limit")
+    assert judging == []
+
+    skipping = holding.model_copy(update={"on_missing": "not_applicable"})
+    assert outcome(run(skipping, record)) == (
+        "not_evaluated",
+        "missing value for limit (not skipped: the lookup for limit found nothing)",
+    )
+    assert judging == ["limit"]
 
 
 # --- the rule's policy and the node's ----------------------------------------------------------------------------
