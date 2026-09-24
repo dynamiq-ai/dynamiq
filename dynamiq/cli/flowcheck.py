@@ -12,10 +12,22 @@ Nothing here reads the SDK's package layout to guess it: the folder a class happ
 in is not the same question as what the API accepts, and reading one to answer the other made
 this reject the SDK's own emitted types for knowledge-base nodes. Omit it and the type check
 is skipped rather than guessed at.
+
+A Rules node's checks, `applies_when` and derived values, and an Expression node's expressions,
+are Jinja2 text and are parsed here too (`check_expressions`). This module stays free of an
+import of the SDK engine even so - that alone costs about 4.7s, which a `validate` call cannot
+spend - so `RULE_HELPERS` and `RULE_TESTS` below are a hand-kept copy of
+`dynamiq.nodes.operators.rules.HELPERS` and `.TESTS`; a drift test in the test file, which may
+import the engine, is the guard against the two falling out of step.
 """
 from __future__ import annotations
 
+import difflib
 import re
+
+from jinja2 import TemplateSyntaxError
+from jinja2 import nodes as jinja_nodes
+from jinja2.sandbox import ImmutableSandboxedEnvironment
 
 NODE_ID_RE = re.compile(r"^[a-z0-9]([a-z0-9]|-[a-z0-9])*$")
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
@@ -36,7 +48,7 @@ CHOICE_HIT_POLICIES = ("first", "all")
 TABLE_HIT_POLICIES = ("first", "unique", "collect")
 TABLE_AGGREGATIONS = ("list", "sum", "min", "max", "count")
 RULE_SEVERITIES = ("fail", "warn", "info")
-RULE_MISSING_POLICIES = ("not_evaluated", "fail")
+RULE_MISSING_POLICIES = ("not_evaluated", "fail", "not_applicable")
 QUESTION_TYPES = ("noul", "choice", "score")
 CONFIDENCE_MODES = ("verbalized", "sampling")
 SYSTEM_ONE_TYPE = "dynamiq.nodes.detectors.SystemOne"
@@ -49,6 +61,42 @@ DEFAULT_SAMPLES = 1
 MATCHED_RULES_KEY = "matched_rules"
 # A name an expression can read: an input, a derived value or an output key.
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Mirrors dynamiq.nodes.operators.rules.HELPERS - the callable names a Rules check, `applies_when`,
+# derived value or Expression item may call as `name(...)` - and .TESTS - the tests it adds to
+# Jinja's own (`is defined`, `is none`, ...). See the module docstring for why this is a hand-kept
+# copy rather than an import.
+RULE_HELPERS = frozenset(
+    {
+        "has",
+        "days_between",
+        "date",
+        "today",
+        "len",
+        "abs",
+        "min",
+        "max",
+        "sum",
+        "round",
+        "text",
+        "number",
+        "first_present",
+    }
+)
+RULE_TESTS = frozenset({"present", "blank"})
+# The Rules node's own input, an ISO date fixing the effective-window comparison. Never declared
+# in `input_fields`, but always readable, so it counts as a known root the way a declared input does.
+AS_OF_KEY = "as_of"
+
+# A jinja2-only environment (no SDK import) used only to `parse()` expression text into an AST and
+# look up names in it - never to compile or evaluate one, so a record never reaches it. Its
+# filters and tests are Jinja's own defaults, untouched by the engine's sandbox (RecordSandbox in
+# rules.py wraps a few filters without changing their names, so a plain environment's filter names
+# already match); RULE_HELPERS (as globals) and RULE_TESTS are the engine's own addition on top.
+_EXPRESSION_ENVIRONMENT = ImmutableSandboxedEnvironment()
+_FILTER_NAMES = frozenset(_EXPRESSION_ENVIRONMENT.filters)
+_TEST_NAMES = frozenset(_EXPRESSION_ENVIRONMENT.tests) | RULE_TESTS
+_GLOBAL_NAMES = frozenset(_EXPRESSION_ENVIRONMENT.globals) | RULE_HELPERS
 
 # Shapes people write when they think a flow is something else.
 WRONG_SHAPE_KEYS = {
@@ -467,6 +515,10 @@ def validate(flow, known_types: set | None = None):
 
         if node_type.startswith("dynamiq.nodes.operators.") or node_type == JUDGEMENT_TYPE:
             errors.extend(check_operator(node, label))
+        if node_type in (RULES_TYPE, EXPRESSION_TYPE):
+            expression_errors, expression_warnings = check_expressions(node, label)
+            errors.extend(expression_errors)
+            warnings.extend(expression_warnings)
 
     for path, text in walk_strings(flow):
         if path.rsplit(".", 1)[-1] in PROSE_KEYS or len(text) > 200:
@@ -635,6 +687,17 @@ def check_rules(node, label) -> list:
         severity = rule.get("severity")
         if severity is not None and severity not in RULE_SEVERITIES:
             errors.append(f"rules {label!r}: rule {rule_label!r} severity {severity!r} is not fail, warn or info.")
+        # The engine treats an unrecognized value the same as unset - a logged warning, and the
+        # node's own policy applies - so a typo here would keep building silently; validate is
+        # the place to be strict about it instead.
+        policy = rule.get("on_missing")
+        if isinstance(policy, str) and not policy.strip():
+            policy = None
+        if policy is not None and policy not in RULE_MISSING_POLICIES:
+            errors.append(
+                f"rules {label!r}: rule {rule_label!r} on_missing {policy!r} is not one of "
+                f"{', '.join(RULE_MISSING_POLICIES)}."
+            )
     duplicates = sorted({str(i) for i in ids if i and ids.count(i) > 1})
     if duplicates:
         errors.append(f"rules {label!r}: rule ids used more than once: {', '.join(duplicates)}.")
@@ -665,6 +728,164 @@ def check_expression(node, label) -> list:
     if duplicates:
         errors.append(f"expression {label!r}: keys used more than once: {', '.join(duplicates)}.")
     return errors
+
+
+def check_expressions(node, label) -> tuple[list, list]:
+    """Parses every Jinja2 expression on a Rules or Expression node: a Rules node's rule `check`,
+    `applies_when` and each derived value's `expression`; an Expression node's each
+    `expressions[].expression`. Returns (errors, warnings).
+
+    Compiling the text is not enough: Jinja only checks a filter or test used inside a
+    conditional expression (`x | lowr if a else b`) at RUN time, letting it stay undefined at
+    compile time so the branch not taken never has to resolve it. So this walks the parsed AST
+    instead, looking at every `Filter`, `Test` and `Call` node regardless of which branch it sits
+    in, plus every `Name` read as a record root.
+
+    A syntax error, an unknown filter, an unknown test and a call of a name no helper has are all
+    errors: none of them can ever be right, whatever the record turns out to hold - a record read
+    from JSON is never itself callable, so calling a bare name is always meant as a helper. A root
+    name this node's own declared shape does not vouch for is only a WARNING, and is skipped
+    where that shape cannot be known at all - a node with neither `input_fields` nor a selector,
+    or one whose `input_transformer` sets a `path`, so the record is a sub-tree whose keys nothing
+    here can see.
+
+    A disabled rule (`enabled: false`) is not parsed at all: it never compiles on the node either,
+    so a draft left broken while switched off must keep validating clean.
+    """
+    errors: list = []
+    warnings: list = []
+    node_type = node.get("type")
+    if node_type == RULES_TYPE:
+        _check_rules_expressions(node, label, errors, warnings)
+    elif node_type == EXPRESSION_TYPE:
+        _check_expression_items(node, label, errors, warnings)
+    return errors, warnings
+
+
+def _check_rules_expressions(node, label, errors: list, warnings: list) -> None:
+    declared, confident = _declared_roots(node)
+    known = (declared | _GLOBAL_NAMES | {AS_OF_KEY}) if confident else None
+
+    derived_items = [d for d in (node.get("derived_values") or []) if isinstance(d, dict)]
+    # Every derived value the node declares, valid name or not: a rule's check or applies_when can
+    # be checked against all of them regardless (see below), and whether one derived value's
+    # expression reaches for another defined after it is knowable from this list alone, whatever
+    # the node's own declared inputs look like.
+    derived_names = frozenset(name for d in derived_items if IDENTIFIER_RE.match(name := str(d.get("name") or "")))
+
+    computed: set[str] = set()
+    for derived in derived_items:
+        name = str(derived.get("name") or "?")
+        text = str(derived.get("expression") or "")
+        if text.strip():
+            where = f"rules {label!r}: derived value {name!r}"
+            reads_known = (known | computed) if known is not None else None
+            not_yet_computed = derived_names - computed
+            _parse_and_walk(text, reads_known, not_yet_computed, where, errors, warnings)
+        computed.add(name)
+
+    # Every derived value is computed before any rule runs, so all of them are fair game to a
+    # rule's check or applies_when - none is ever "not yet computed" from there.
+    rule_known = (known | derived_names) if known is not None else None
+    for index, rule in enumerate(node.get("rules") or []):
+        if not isinstance(rule, dict) or not rule.get("enabled", True):
+            continue
+        rule_label = rule.get("id") or index
+        for attr in ("check", "applies_when"):
+            text = str(rule.get(attr) or "")
+            if text.strip():
+                where = f"rules {label!r}: rule {rule_label!r} {attr}"
+                _parse_and_walk(text, rule_known, frozenset(), where, errors, warnings)
+
+
+def _check_expression_items(node, label, errors: list, warnings: list) -> None:
+    declared, confident = _declared_roots(node)
+    known = (declared | _GLOBAL_NAMES) if confident else None
+    for index, item in enumerate(node.get("expressions") or []):
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("expression") or "")
+        if not text.strip():
+            continue
+        key = item.get("key") or index
+        where = f"expression {label!r}: key {key!r}"
+        _parse_and_walk(text, known, frozenset(), where, errors, warnings)
+
+
+def _declared_roots(node) -> tuple[frozenset, bool]:
+    """The root names this node's own declared shape can vouch for - its `input_fields` and the
+    keys of `input_transformer.selector` - and whether that shape is trustworthy enough to warn
+    about a name outside it. The second value is False when the node declares neither, or
+    `input_transformer.path` is set: the record is then a sub-tree shaped by something this
+    checker cannot see, so any name might be legitimate.
+    """
+    inputs = {
+        str(field.get("name"))
+        for field in (node.get("input_fields") or [])
+        if isinstance(field, dict) and field.get("name")
+    }
+    transformer = node.get("input_transformer")
+    transformer = transformer if isinstance(transformer, dict) else {}
+    selector = transformer.get("selector")
+    selector_keys = {str(key) for key in selector} if isinstance(selector, dict) else set()
+    declared = inputs | selector_keys
+    return frozenset(declared), bool(declared) and not transformer.get("path")
+
+
+def _parse_and_walk(
+    text: str, known: frozenset | None, not_yet_computed: frozenset, where: str, errors: list, warnings: list
+) -> None:
+    try:
+        parsed = _EXPRESSION_ENVIRONMENT.parse("{{ " + text + " }}")
+    except TemplateSyntaxError as e:
+        errors.append(f"{where} is not a valid expression: {e}")
+        return
+    # Collected locally and de-duplicated before joining the caller's lists: the same typo read
+    # twice in one expression should be named once, not once per occurrence.
+    found_errors: list = []
+    found_warnings: list = []
+    _walk(parsed, known, not_yet_computed, where, found_errors, found_warnings)
+    errors.extend(dict.fromkeys(found_errors))
+    warnings.extend(dict.fromkeys(found_warnings))
+
+
+def _walk(node, known: frozenset | None, not_yet_computed: frozenset, where: str, errors: list, warnings: list) -> None:
+    """Visits every node of a parsed expression, whichever branch of a conditional it sits in -
+    see `check_expressions` for why compiling alone would miss a filter or test used inside one."""
+    exclude: tuple[str, ...] = ()
+    if isinstance(node, jinja_nodes.Filter):
+        if node.name not in _FILTER_NAMES:
+            errors.append(_unknown(where, "filter", node.name, _FILTER_NAMES))
+    elif isinstance(node, jinja_nodes.Test):
+        if node.name not in _TEST_NAMES:
+            errors.append(_unknown(where, "test", node.name, _TEST_NAMES))
+    elif isinstance(node, jinja_nodes.Call) and isinstance(node.node, jinja_nodes.Name):
+        # A bare name called like a function is always meant as a helper: a record read from JSON
+        # never holds anything callable, so this is an error rather than merely an unknown root.
+        if node.node.name not in _GLOBAL_NAMES:
+            errors.append(_unknown(where, "helper", node.node.name, _GLOBAL_NAMES))
+        exclude = ("node",)  # the callee is judged above, not walked again as a root read below
+    elif isinstance(node, jinja_nodes.Name) and node.ctx == "load":
+        if node.name in not_yet_computed:
+            warnings.append(f"{where} reads {node.name!r}, which is computed after it.")
+        elif known is not None and node.name not in known:
+            warnings.append(_unknown_root(where, node.name, known))
+    for child in node.iter_child_nodes(exclude=exclude):
+        _walk(child, known, not_yet_computed, where, errors, warnings)
+
+
+def _hint(name: str, candidates) -> str:
+    """A " Did you mean 'lower'?" suffix, or '' when nothing in `candidates` is close enough to `name`."""
+    matches = difflib.get_close_matches(name, candidates, n=1)
+    return f" Did you mean {matches[0]!r}?" if matches else ""
+
+
+def _unknown(where: str, kind: str, name: str, candidates: frozenset) -> str:
+    return f"{where}: unknown {kind} {name!r}.{_hint(name, candidates)}"
+
+
+def _unknown_root(where: str, name: str, known: frozenset) -> str:
+    return f"{where} reads {name!r}, which this node does not declare.{_hint(name, known)}"
 
 
 def check_judgement(node, label) -> list:
