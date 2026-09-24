@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from dynamiq.utils import generate_uuid
 
@@ -201,10 +201,18 @@ class RuleSeverity(str, Enum):
 
 
 class RuleMissingPolicy(str, Enum):
-    """What a rule reports when a value it reads is missing: a finding to review, or the rule's own severity."""
+    """What a rule reports when a value it reads is missing.
+
+    `not_evaluated` holds the rule as a finding to review. `fail` reports the rule's own severity. `not_applicable`
+    skips the rule for a record without the value, as `applies_when` would, so the rule needs no presence guard.
+    Only data the record lacks is skipped. A value that is there but cannot be read, a lookup that found nothing, a
+    name the node does not declare or a call of a name no helper has is still `not_evaluated`, or the severity
+    under `fail`, whatever the policy.
+    """
 
     NOT_EVALUATED = "not_evaluated"
     FAIL = "fail"
+    NOT_APPLICABLE = "not_applicable"
 
 
 class DerivedValue(Authored):
@@ -221,7 +229,8 @@ class Rule(Authored):
     `check` is an expression that must hold for the rule to pass; `applies_when` is an optional precondition,
     and a rule that does not apply reports `not_applicable`. `message` is a template rendered with the whole
     record when the check does not hold. `effective_from` and `effective_until` are ISO dates; outside the
-    window the rule is not applicable for the record's `as_of` date.
+    window the rule is not applicable for the record's `as_of` date. `on_missing` says what a missing value
+    means for this rule, overriding the node's policy; unset, or saved empty, it leaves that to the node.
     """
 
     id: str = Field(default_factory=generate_uuid)
@@ -237,3 +246,10 @@ class Rule(Authored):
     effective_from: str | None = None
     effective_until: str | None = None
     enabled: bool = True
+    on_missing: RuleMissingPolicy | None = None
+
+    @field_validator("on_missing", mode="before")
+    @classmethod
+    def empty_policy_is_unset(cls, value: Any) -> Any:
+        """The editor saves a field left empty as '', which leaves the policy to the node, as None does."""
+        return None if isinstance(value, str) and not value.strip() else value

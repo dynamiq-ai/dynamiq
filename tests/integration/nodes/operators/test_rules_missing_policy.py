@@ -1,0 +1,601 @@
+"""A rule says what a missing value means for it: `on_missing` on the rule overrides the node's.
+
+`not_applicable` skips the rule for a record that does not carry a value it reads, as `applies_when` would, so the
+rule needs no presence guard: `shipment.weight_kg <= 30` does not apply to a shipment nobody weighed, and a record
+whose only unmet rules were skipped still passes. Only data the record lacks is skipped, and only where a read names
+it: a blank no read accounts for, from a lookup inside `text()` that found nothing say, is not. Nor is a check that
+reads a value nobody could read, calls a name no helper has, finds a value missing under a name the node does not
+declare (a typo), or reads a derived value a lookup found nothing for, whatever else the record lacks. Each is a
+problem to fix, not data to wait for: the rule is not evaluated, or reports its severity under `fail`. A derived
+value that came out missing counts as data the record lacks exactly when the same expression, written in the check,
+would.
+"""
+
+import textwrap
+from typing import Callable, NamedTuple
+
+import pytest
+
+from dynamiq import Workflow
+from dynamiq.flows import Flow
+from dynamiq.nodes import InputTransformer
+from dynamiq.nodes.node import NodeDependency
+from dynamiq.nodes.operators import Rules
+from dynamiq.nodes.types import DerivedValue, NamedField, Rule, RuleMissingPolicy
+from dynamiq.nodes.utils import Input, Output
+from dynamiq.runnables import RunnableConfig, RunnableStatus
+
+LENDING = ("loan", "appraisal", "limits", "rates")
+LIMIT = ("limit", "limits[loan.program]")
+LTV = ("ltv", "loan.amount / appraisal.value")
+LIMITS = {"standard": 500000}
+
+
+def run(node: Rules, data: dict) -> dict:
+    result = node.run(input_data=data, config=RunnableConfig(callbacks=[]))
+    assert result.status == RunnableStatus.SUCCESS, result.error
+    return result.output
+
+
+def by_id(output: dict) -> dict[str, dict]:
+    return {finding["rule_id"]: finding for finding in output["findings"]}
+
+
+def outcome(output: dict, rule_id: str = "rule") -> tuple[str, str | None]:
+    finding = by_id(output)[rule_id]
+    return finding["status"], finding["message"]
+
+
+def screening(
+    check: str,
+    policy: str | None = None,
+    *,
+    inputs: tuple[str, ...] = (),
+    derived: tuple[tuple[str, str], ...] = (),
+    applies_when: str | None = None,
+    node_policy: str = "not_evaluated",
+) -> Rules:
+    """A node with one `warn` rule, `rule`, reading the named inputs and derived values."""
+    return Rules(
+        name="screening",
+        input_fields=[NamedField(name=name) for name in inputs],
+        derived_values=[DerivedValue(name=name, expression=expression) for name, expression in derived],
+        on_missing=node_policy,
+        rules=[
+            Rule(
+                id="rule",
+                name="the rule",
+                severity="warn",
+                applies_when=applies_when,
+                check=check,
+                on_missing=policy,
+            )
+        ],
+    )
+
+
+# --- data the record lacks is skipped ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("weight", [{}, {"weight_kg": None}], ids=["absent", "null"])
+def test_a_rule_set_to_skip_missing_data_does_not_apply_to_a_record_without_the_value(weight):
+    node = Rules(
+        name="shipping",
+        input_fields=[NamedField(name="shipment")],
+        rules=[
+            Rule(
+                id="weight",
+                name="weight within the carrier limit",
+                check="shipment.weight_kg <= 30",
+                on_missing="not_applicable",
+            ),
+            Rule(id="destination", name="destination given", check="shipment.country is present"),
+        ],
+    )
+
+    output = run(node, {"shipment": {"country": "DE", **weight}})
+
+    assert outcome(output, "weight") == ("not_applicable", "does not apply: missing value for shipment.weight_kg")
+    assert outcome(output, "destination") == ("pass", None)
+    assert output["summary"] == {
+        "pass": 1,
+        "fail": 0,
+        "warn": 0,
+        "info": 0,
+        "not_applicable": 1,
+        "not_evaluated": 0,
+    }
+    # The skipped rule counts as having run: a record whose only unmet rule lacked its data still passes.
+    assert output["status"] == "pass"
+    # With the value the rule decides as any rule does.
+    weighed = run(node, {"shipment": {"country": "DE", "weight_kg": 42}})
+    assert outcome(weighed, "weight") == ("fail", None)
+    assert weighed["status"] == "fail"
+
+
+@pytest.mark.parametrize(
+    ("policy", "expected", "status"),
+    [
+        (None, ("not_evaluated", "missing value for shipment.weight_kg"), "not_evaluated"),
+        ("not_evaluated", ("not_evaluated", "missing value for shipment.weight_kg"), "not_evaluated"),
+        ("fail", ("warn", "missing value for shipment.weight_kg"), "warn"),
+        ("not_applicable", ("not_applicable", "does not apply: missing value for shipment.weight_kg"), "pass"),
+    ],
+)
+def test_each_policy_reports_a_missing_value_its_own_way(policy, expected, status):
+    output = run(screening("shipment.weight_kg <= 30", policy, inputs=("shipment",)), {"shipment": {}})
+
+    assert outcome(output) == expected
+    assert output["status"] == status
+
+
+class Skipped(NamedTuple):
+    node: Callable[[str | None], Rules]
+    record: dict
+    missing: str
+
+
+SKIPPED = {
+    "blank-text": Skipped(
+        lambda policy: screening("text(app.purpose) == 'purchase'", policy, inputs=("app",)),
+        {"app": {"purpose": "  "}},
+        "app.purpose",
+    ),
+    "blank-number": Skipped(
+        lambda policy: screening("number(doc.amount) > 1000", policy, inputs=("doc",)),
+        {"doc": {"amount": ""}},
+        "doc.amount",
+    ),
+    "nothing-present": Skipped(
+        lambda policy: screening("first_present(order.coupon, order.promo) == 'SPRING'", policy, inputs=("order",)),
+        {"order": {"promo": " "}},
+        "order.coupon",
+    ),
+    "derived-from-absent-data": Skipped(
+        lambda policy: screening("ltv <= 0.8", policy, inputs=LENDING, derived=(LTV,)),
+        {"loan": {"amount": 300000}, "appraisal": {}},
+        "ltv",
+    ),
+    "derived-lookup-by-an-absent-key": Skipped(
+        lambda policy: screening("loan.amount <= limit", policy, inputs=LENDING, derived=(LIMIT,)),
+        {"loan": {"amount": 300000}, "limits": LIMITS},
+        "limit",
+    ),
+    "derived-blank-text-of-a-lookup-by-a-blank-key": Skipped(
+        lambda policy: screening(
+            "grade == 'A'", policy, inputs=LENDING, derived=(("grade", "text(limits[loan.program])"),)
+        ),
+        {"loan": {"program": " "}, "limits": {"standard": "A"}},
+        "grade",
+    ),
+    "a-derived-value-name": Skipped(
+        lambda policy: screening("net > 0", policy, inputs=("doc",), derived=(("net", "number(doc.net)"),)),
+        {"doc": {}},
+        "net",
+    ),
+    "nothing-declared": Skipped(
+        lambda policy: screening("order.total > 100", policy),
+        {"order": {}},
+        "order.total",
+    ),
+    "in-applies-when": Skipped(
+        lambda policy: screening(
+            "docs.flood_cert is present",
+            policy,
+            inputs=("property", "docs"),
+            applies_when="property.flood_zone in ['A', 'V']",
+        ),
+        {"property": {}, "docs": {}},
+        "property.flood_zone",
+    ),
+    "beside-a-number-read-as-written": Skipped(
+        lambda policy: screening("number(doc.amount) > doc.limit", policy, inputs=("doc",)),
+        {"doc": {"amount": "$1,500.00"}},
+        "doc.limit",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", SKIPPED.values(), ids=SKIPPED.keys())
+def test_data_the_record_lacks_is_skipped_by_a_rule_set_to_skip_it(case):
+    output = run(case.node("not_applicable"), case.record)
+
+    assert outcome(output) == ("not_applicable", f"does not apply: missing value for {case.missing}")
+    assert output["status"] == "pass"
+    assert outcome(run(case.node(None), case.record)) == ("not_evaluated", f"missing value for {case.missing}")
+    assert outcome(run(case.node("fail"), case.record)) == ("warn", f"missing value for {case.missing}")
+
+
+# --- a mistake or a value nobody could read is never skipped -----------------------------------------------------
+
+
+class Held(NamedTuple):
+    node: Callable[..., Rules]
+    record: dict
+    reason: str
+
+
+HELD = {
+    "unreadable-value": Held(
+        lambda **policy: screening("number(doc.amount) > 1000", inputs=("doc",), **policy),
+        {"doc": {"amount": "TBD"}},
+        "check could not be evaluated: not a number: 'TBD'",
+    ),
+    "unreadable-in-applies-when": Held(
+        lambda **policy: screening("doc.approved", inputs=("doc",), applies_when="number(doc.amount) > 1000", **policy),
+        {"doc": {"amount": "TBD"}},
+        "applies_when could not be evaluated: not a number: 'TBD'",
+    ),
+    "lookup-in-the-check": Held(
+        lambda **policy: screening("loan.amount <= limits[loan.program]", inputs=LENDING, **policy),
+        {"loan": {"amount": 300000, "program": "jumbo"}, "limits": LIMITS},
+        "check could not be evaluated: 'dict object' has no attribute 'jumbo'",
+    ),
+    # A blank with no path: the lookup inside `text()` found nothing, and no value the check reads is blank.
+    "lookup-inside-text": Held(
+        lambda **policy: screening(
+            "text(categories[claim.code]) == 'dental'", inputs=("claim", "categories"), **policy
+        ),
+        {"claim": {"code": "D9"}, "categories": {"D1": "dental"}},
+        "missing value: text() found no text",
+    ),
+    "derived-lookup": Held(
+        lambda **policy: screening("loan.amount <= limit", inputs=LENDING, derived=(LIMIT,), **policy),
+        {"loan": {"amount": 300000, "program": "jumbo"}, "limits": LIMITS},
+        "missing value for limit",
+    ),
+    "derived-lookup-in-applies-when": Held(
+        lambda **policy: screening(
+            "loan.insured", inputs=LENDING, derived=(LIMIT,), applies_when="loan.amount > limit", **policy
+        ),
+        {"loan": {"amount": 300000, "program": "jumbo"}, "limits": LIMITS},
+        "missing value for limit",
+    ),
+    "derived-lookup-by-a-blank-key": Held(
+        lambda **policy: screening("loan.amount <= limit", inputs=LENDING, derived=(LIMIT,), **policy),
+        {"loan": {"amount": 300000, "program": ""}, "limits": LIMITS},
+        "missing value for limit",
+    ),
+    "derived-lookup-through-number": Held(
+        lambda **policy: screening(
+            "loan.rate <= rate", inputs=LENDING, derived=(("rate", "number(rates[loan.program])"),), **policy
+        ),
+        {"loan": {"rate": 7, "program": "jumbo"}, "rates": {"standard": "6.5"}},
+        "missing value for rate",
+    ),
+    "derived-from-a-derived-lookup": Held(
+        lambda **policy: screening(
+            "headroom >= 0",
+            inputs=LENDING,
+            derived=(LIMIT, ("headroom", "limit - loan.amount")),
+            **policy,
+        ),
+        {"loan": {"amount": 300000, "program": "jumbo"}, "limits": LIMITS},
+        "missing value for headroom",
+    ),
+    "derived-lookup-beside-missing-data": Held(
+        lambda **policy: screening("loan.exempt or loan.amount <= limit", inputs=LENDING, derived=(LIMIT,), **policy),
+        {"loan": {"amount": 300000, "program": "jumbo"}, "limits": LIMITS},
+        "missing value for loan.exempt",
+    ),
+    # No input is declared, so only the call itself tells the mistyped helper from data the record lacks.
+    "mistyped-helper": Held(
+        lambda **policy: screening("firstpresent(order.coupon, order.promo) == 'SPRING'", **policy),
+        {"order": {"coupon": "SPRING"}},
+        "missing value for firstpresent",
+    ),
+    "mistyped-helper-beside-missing-data": Held(
+        lambda **policy: screening(
+            "order.total > 100 and firstpresent(order.coupon) == 'SPRING'", inputs=("order",), **policy
+        ),
+        {"order": {"coupon": "SPRING"}},
+        "missing value for order.total",
+    ),
+    "derived-mistyped-helper": Held(
+        lambda **policy: screening(
+            "code == 'SPRING'", inputs=("order",), derived=(("code", "firstpresent(order.coupon)"),), **policy
+        ),
+        {"order": {"coupon": "SPRING"}},
+        "missing value for code",
+    ),
+    "derived-error": Held(
+        lambda **policy: screening("ltv <= 0.8", inputs=LENDING, derived=(LTV,), **policy),
+        {"loan": {"amount": 300000}, "appraisal": {"value": 0}},
+        "check could not be evaluated: division by zero",
+    ),
+    # The missing limit must not hide the ratio nobody could compute.
+    "unreadable-beside-missing-data": Held(
+        lambda **policy: screening("ltv <= appraisal.max_ltv", inputs=LENDING, derived=(LTV,), **policy),
+        {"loan": {"amount": 300000}, "appraisal": {"value": 0}},
+        "check could not be evaluated: division by zero",
+    ),
+    "unreadable-beside-missing-data-in-applies-when": Held(
+        lambda **policy: screening(
+            "doc.approved",
+            inputs=("doc",),
+            derived=(("net", "number(doc.net)"),),
+            applies_when="net > doc.threshold",
+            **policy,
+        ),
+        {"doc": {"net": "TBD"}},
+        "applies_when could not be evaluated: not a number: 'TBD'",
+    ),
+    # The check reads the text itself through `number()` or `date()`: the missing value stops it before the reader
+    # runs, and must not hide text nobody could read. The finding still names the missing value.
+    "unreadable-number-beside-missing-data": Held(
+        lambda **policy: screening("number(doc.amount) > doc.limit", inputs=("doc",), **policy),
+        {"doc": {"amount": "TBD"}},
+        "missing value for doc.limit",
+    ),
+    "unreadable-date-beside-missing-data": Held(
+        lambda **policy: screening("date(doc.issued, format='%d.%m.%Y') <= date(doc.due)", inputs=("doc",), **policy),
+        {"doc": {"issued": "March"}},
+        "missing value for doc.due",
+    ),
+    "unreadable-date-in-days-between": Held(
+        lambda **policy: screening("days_between(doc.opened, doc.closed) <= 30", inputs=("doc",), **policy),
+        {"doc": {"opened": "March"}},
+        "missing value for doc.closed",
+    ),
+    "unreadable-number-as-a-fallback": Held(
+        lambda **policy: screening("first_present(number(doc.net), 0) > doc.limit", inputs=("doc",), **policy),
+        {"doc": {"net": "TBD"}},
+        "missing value for doc.limit",
+    ),
+    "number-told-a-decimal-it-cannot-read": Held(
+        lambda **policy: screening("number(doc.amount, decimal=';') > doc.limit", inputs=("doc",), **policy),
+        {"doc": {"amount": "5"}},
+        "missing value for doc.limit",
+    ),
+    "derived-unreadable-inline": Held(
+        lambda **policy: screening(
+            "tax > 0", inputs=("doc",), derived=(("tax", "doc.rate * number(doc.net)"),), **policy
+        ),
+        {"doc": {"net": "TBD"}},
+        "missing value for tax",
+    ),
+    "derived-unreadable-fallback": Held(
+        lambda **policy: screening(
+            "tax > 0",
+            inputs=("doc",),
+            derived=(("net", "number(doc.net)"), ("tax", "doc.rate * first_present(net, 0)")),
+            **policy,
+        ),
+        {"doc": {"net": "TBD"}},
+        "missing value for tax",
+    ),
+    "typo": Held(
+        lambda **policy: screening("lon.amount > 0", inputs=("loan",), **policy),
+        {"loan": {"amount": 5}},
+        "missing value for lon.amount",
+    ),
+    "typo-beside-missing-data": Held(
+        lambda **policy: screening("loan.amount <= 500000 or lon.exempt", inputs=("loan",), **policy),
+        {"loan": {}},
+        "missing value for loan.amount",
+    ),
+    "derived-typo": Held(
+        lambda **policy: screening("doubled > 0", inputs=("loan",), derived=(("doubled", "lon.amount * 2"),), **policy),
+        {"loan": {"amount": 5}},
+        "missing value for doubled",
+    ),
+    "derived-read-of-a-later-derived-value": Held(
+        lambda **policy: screening(
+            "doubled > 0",
+            inputs=("loan",),
+            derived=(("doubled", "amount * 2"), ("amount", "loan.amount")),
+            **policy,
+        ),
+        {"loan": {"amount": 5}},
+        "missing value for doubled",
+    ),
+}
+# Every way a rule or its node can say "skip", "hold" or leave it to the default: none of them skips any of these.
+NOT_FAIL = [
+    {"policy": None},
+    {"policy": "not_evaluated"},
+    {"policy": "not_applicable"},
+    {"policy": None, "node_policy": "not_applicable"},
+    {"policy": "not_applicable", "node_policy": "fail"},
+]
+
+
+@pytest.mark.parametrize("policy", NOT_FAIL, ids=lambda policy: "-".join(str(value) for value in policy.values()))
+@pytest.mark.parametrize("case", HELD.values(), ids=HELD.keys())
+def test_a_mistake_or_a_value_nobody_could_read_is_never_skipped(case, policy):
+    output = run(case.node(**policy), case.record)
+
+    assert outcome(output) == ("not_evaluated", case.reason)
+    assert output["status"] == "not_evaluated"
+
+
+@pytest.mark.parametrize("policy", [{"policy": "fail"}, {"policy": "fail", "node_policy": "not_applicable"}])
+@pytest.mark.parametrize("case", HELD.values(), ids=HELD.keys())
+def test_a_mistake_or_a_value_nobody_could_read_reports_the_severity_under_fail(case, policy):
+    output = run(case.node(**policy), case.record)
+
+    assert outcome(output) == ("warn", case.reason)
+    assert output["status"] == "warn"
+
+
+def test_a_lookup_that_found_nothing_is_judged_record_by_record():
+    node = screening("loan.amount <= limit", "not_applicable", inputs=LENDING, derived=(LIMIT,))
+
+    unlisted = run(node, {"loan": {"amount": 300000, "program": "jumbo"}, "limits": LIMITS})
+    unknown = run(node, {"loan": {"amount": 300000}, "limits": LIMITS})
+    listed = run(node, {"loan": {"amount": 300000, "program": "standard"}, "limits": LIMITS})
+    again = run(node, {"loan": {"amount": 300000, "program": "jumbo"}, "limits": LIMITS})
+
+    assert outcome(unlisted) == ("not_evaluated", "missing value for limit")
+    assert outcome(unknown) == ("not_applicable", "does not apply: missing value for limit")
+    assert outcome(listed) == ("pass", None)
+    assert outcome(again) == outcome(unlisted)
+    # The output reports the value as missing either way: only whether a rule may skip it differs.
+    assert unlisted["derived"] == unknown["derived"] == {"limit": None}
+    assert unlisted["derived_errors"] == unknown["derived_errors"] == {}
+
+
+# --- the rule's policy and the node's ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("node_policy", "rule_policy", "expected"),
+    [
+        ("fail", "not_applicable", ("not_applicable", "does not apply: missing value for claim.amount")),
+        ("not_evaluated", "not_applicable", ("not_applicable", "does not apply: missing value for claim.amount")),
+        ("not_applicable", "not_evaluated", ("not_evaluated", "missing value for claim.amount")),
+        ("not_applicable", "fail", ("warn", "missing value for claim.amount")),
+        ("not_applicable", None, ("not_applicable", "does not apply: missing value for claim.amount")),
+        ("fail", None, ("warn", "missing value for claim.amount")),
+    ],
+)
+def test_a_rule_policy_overrides_the_node_policy(node_policy, rule_policy, expected):
+    node = screening("claim.amount <= 10000", rule_policy, inputs=("claim",), node_policy=node_policy)
+
+    assert outcome(run(node, {"claim": {}})) == expected
+
+
+def test_a_node_set_to_skip_missing_data_skips_it_for_every_rule_that_sets_nothing():
+    node = Rules(
+        name="claims",
+        input_fields=[NamedField(name="claim")],
+        on_missing="not_applicable",
+        rules=[
+            Rule(id="amount", name="amount within the limit", check="claim.amount <= 10000"),
+            Rule(id="coded", name="diagnosis coded", check="text(claim.diagnosis) is present"),
+            Rule(id="dated", name="date of service", check="date(claim.service_date) <= today()", on_missing="fail"),
+        ],
+    )
+
+    output = run(node, {"claim": {"diagnosis": "J45"}})
+
+    assert outcome(output, "amount") == ("not_applicable", "does not apply: missing value for claim.amount")
+    assert outcome(output, "coded") == ("pass", None)
+    assert outcome(output, "dated") == ("fail", "missing value for claim.service_date")
+    assert output["status"] == "fail"
+
+
+# --- the setting ------------------------------------------------------------------------------------------------
+
+
+def test_the_setting_takes_not_applicable_and_an_empty_value_leaves_it_to_the_node():
+    assert RuleMissingPolicy.NOT_APPLICABLE.value == "not_applicable"
+    assert Rule(id="r", check="true").on_missing is None
+    assert Rule(id="r", check="true", on_missing="not_applicable").on_missing is RuleMissingPolicy.NOT_APPLICABLE
+    assert Rule.model_validate({"id": "r", "check": "true", "on_missing": ""}).on_missing is None
+    assert Rules(name="n", on_missing="not_applicable").on_missing is RuleMissingPolicy.NOT_APPLICABLE
+
+    node = screening("shipment.weight_kg <= 30", "", inputs=("shipment",), node_policy="not_applicable")
+    assert node.rules[0].on_missing is None
+    assert outcome(run(node, {"shipment": {}}))[0] == "not_applicable"
+
+
+def shipping_workflow() -> Workflow:
+    start = Input(id="start", name="start")
+    review = Rules(
+        id="shipping",
+        name="shipping",
+        input_fields=[NamedField(name="shipment")],
+        on_missing="not_applicable",
+        rules=[
+            Rule(id="weight", name="weight within the limit", check="shipment.weight_kg <= 30"),
+            Rule(id="value", name="declared value", check="shipment.value <= 1000", severity="warn", on_missing="fail"),
+            Rule(
+                id="country", name="destination", check="shipment.country in ['DE', 'FR']", on_missing="not_evaluated"
+            ),
+            Rule(id="hazmat", name="hazmat declared", check="shipment.hazmat is present", on_missing="not_applicable"),
+        ],
+        depends=[NodeDependency(node=start)],
+        input_transformer=InputTransformer(selector={"shipment": "$.start.output.shipment"}),
+    )
+    end = Output(id="end", name="end", depends=[NodeDependency(node=review)])
+    return Workflow(id="workflow", flow=Flow(id="flow", nodes=[start, review, end]))
+
+
+def test_the_policies_survive_a_yaml_round_trip(tmp_path):
+    path = tmp_path / "shipping.yaml"
+    shipping_workflow().to_yaml_file(path)
+
+    loaded = Workflow.from_yaml_file(str(path), init_components=True)
+    node = next(node for node in loaded.flow.nodes if isinstance(node, Rules))
+
+    assert node.on_missing == RuleMissingPolicy.NOT_APPLICABLE
+    assert [rule.on_missing for rule in node.rules] == [
+        None,
+        RuleMissingPolicy.FAIL,
+        RuleMissingPolicy.NOT_EVALUATED,
+        RuleMissingPolicy.NOT_APPLICABLE,
+    ]
+    record = {"shipment": {"hazmat": False}}
+    output = loaded.run(input_data=record, config=RunnableConfig(callbacks=[])).output["shipping"]["output"]
+    original = shipping_workflow().run(input_data=record, config=RunnableConfig(callbacks=[]))
+    assert output == original.output["shipping"]["output"]
+    assert {finding["rule_id"]: finding["status"] for finding in output["findings"]} == {
+        "weight": "not_applicable",
+        "value": "warn",
+        "country": "not_evaluated",
+        "hazmat": "pass",
+    }
+
+
+EDITOR_YAML = textwrap.dedent(
+    """
+    nodes:
+      start:
+        type: dynamiq.nodes.utils.Input
+        name: start
+
+      review:
+        type: dynamiq.nodes.operators.Rules
+        name: review
+        input_fields:
+          - { id: f1, name: shipment }
+        rules:
+          - id: weight
+            name: Weight within the carrier limit
+            severity: fail
+            applies_when: ""
+            check: shipment.weight_kg <= 30
+            message: ""
+            on_missing: ""
+          - id: country
+            name: Destination served
+            severity: warn
+            applies_when: ""
+            check: shipment.country in ['DE', 'FR']
+            message: ""
+            on_missing: not_applicable
+        on_missing: not_evaluated
+        depends:
+          - node: start
+        input_transformer:
+          selector:
+            shipment: $.start.output.shipment
+
+    flows:
+      review-flow:
+        name: Review
+        nodes: [start, review]
+
+    workflows:
+      review:
+        flow: review-flow
+    """
+)
+
+
+def test_a_rule_saved_with_an_empty_policy_takes_the_node_policy(tmp_path):
+    path = tmp_path / "review.yaml"
+    path.write_text(EDITOR_YAML)
+
+    workflow = Workflow.from_yaml_file(str(path), init_components=True)
+    review = next(node for node in workflow.flow.nodes if isinstance(node, Rules))
+    result = workflow.run(input_data={"shipment": {}}, config=RunnableConfig(callbacks=[]))
+
+    assert [rule.on_missing for rule in review.rules] == [None, RuleMissingPolicy.NOT_APPLICABLE]
+    assert result.status == RunnableStatus.SUCCESS
+    output = result.output["review"]["output"]
+    assert [(finding["status"], finding["message"]) for finding in output["findings"]] == [
+        ("not_evaluated", "missing value for shipment.weight_kg"),
+        ("not_applicable", "does not apply: missing value for shipment.country"),
+    ]
