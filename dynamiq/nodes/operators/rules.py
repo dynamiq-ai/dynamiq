@@ -565,27 +565,17 @@ class RecordSandbox(ImmutableSandboxedEnvironment):
         return super().getattr(obj, attribute)
 
 
-# Each side of an `and` or an `or` whose truth alone a check uses (`_mark_deciding`) is judged as Python's `and` and
-# `or` judge it, by its truth: a blank raises `MissingValue` there, inside the helper's `try`, as a read that found
-# nothing already has (`need`), and a value nobody could read raises its own error, which no side gives way to. A side
-# that stands in for a missing one is judged as the check's result is (`holds`): a lazy one, what `select` yields say,
-# by its items, since a generator is true whatever it would yield, and it comes out as the list of them; the first side
-# keeps Python's truth, as it always had. The truth is judged inline, not by a function of its own: a chain of `or`s
-# nests a helper call and a side's function for each `or`, and a third frame each would bring a long chain that much
-# nearer the recursion limit.
+def _decide(decider: bool, left: Callable[[], Any], right: Callable[[], Any]) -> Any:
+    """`left or right` where `decider` is true, `left and right` where it is false, for an `and` or an `or` whose truth
+    alone a check uses (`_mark_deciding`), each side a function: either side decides where the other stops at a missing
+    value.
 
-
-def rule_or(left: Callable[[], Any], right: Callable[[], Any]) -> Any:
-    """`left or right` where a check uses only its truth, and either side decides when the other stops at a missing
-    value; an `or` whose value the check uses is Python's (`_mark_deciding`).
-
-    Where the left side is there, this is Python's `or`: the left side where it is true, else the right side. Where the
-    left side stops at a missing value, a true right side decides the `or`, whatever the left side would hold, and is
-    returned, as Python's `or` returns a side; a lazy right side is true only where it yields an item, and is then the
-    list of its items. A false right side cannot decide the `or`, and the left side's missing value stands, as it
-    does where the right side is missing too: of two missing values, the reason names the left one, the first in
-    reading order. Only a missing value gives way: any other error, a lookup that found nothing, a value nobody could
-    read or a name nothing defines, is an error on whichever side the evaluation reaches it.
+    Where the left side is there, this is Python's `or` or `and`, judging it by Python's truth. Where it stops at a
+    missing value, a right side whose truth is `decider` decides and is returned; it is judged as `holds` judges a
+    check, a lazy one, what `select` yields say, by its items, and comes out as the list of them. Any other right side
+    cannot decide, and the left side's missing value stands, as where the right side stops at one too: of two, the
+    reason names the left one. Only a missing value gives way, a blank's included: a value nobody could read, a lookup
+    that found nothing or a name nothing defines is an error on whichever side the evaluation reaches it.
     """
     try:
         value = left()
@@ -595,38 +585,20 @@ def rule_or(left: Callable[[], Any], right: Callable[[], Any]) -> Any:
             other = right()
             if isinstance(other, Iterator):
                 other = list(other)
-            other_true = bool(other)
+            decides = bool(other) == decider
         except MissingValue:
             raise missing from None
-        if other_true:
+        if decides:
             return other
         raise missing from None
-    return value if true else right()
+    return value if true == decider else right()
 
 
-def rule_and(left: Callable[[], Any], right: Callable[[], Any]) -> Any:
-    """`left and right` where a check uses only its truth, and either side decides when the other stops at a missing
-    value; an `and` whose value the check uses is Python's (`_mark_deciding`).
-
-    Where the left side is there, this is Python's `and`. Where it stops at a missing value, a false right side decides
-    the `and` and is returned, a lazy one that yields nothing as the empty list; a true one cannot, and the left side's
-    missing value stands, as in `rule_or`.
-    """
-    try:
-        value = left()
-        true = bool(value)
-    except MissingValue as missing:
-        try:
-            other = right()
-            if isinstance(other, Iterator):
-                other = list(other)
-            other_true = bool(other)
-        except MissingValue:
-            raise missing from None
-        if not other_true:
-            return other
-        raise missing from None
-    return right() if true else value
+# The helpers a check's `or` and `and` call (`RuleCodeGenerator`). A chain of `or`s nests a call and a side's function
+# for each `or`, so a partial, which adds no frame, and a truth judged inline keep a long chain as far from the
+# recursion limit as it can be.
+rule_or = functools.partial(_decide, True)
+rule_and = functools.partial(_decide, False)
 
 
 def _deciding(operator: str, helper: str) -> Callable[[CodeGenerator, nodes.BinExpr, Frame], None]:
