@@ -16,9 +16,10 @@ is skipped rather than guessed at.
 A Rules node's checks, `applies_when` and derived values, and an Expression node's expressions,
 are Jinja2 text and are parsed here too (`check_expressions`). This module stays free of an
 import of the SDK engine even so - that alone costs about 4.7s, which a `validate` call cannot
-spend - so `RULE_HELPERS` and `RULE_TESTS` below are a hand-kept copy of
-`dynamiq.nodes.operators.rules.HELPERS` and `.TESTS`; a drift test in the test file, which may
-import the engine, is the guard against the two falling out of step.
+spend - so `RULE_HELPERS`, `RULE_TESTS` and `RULE_RESERVED_NAMES` below are a hand-kept copy of
+`dynamiq.nodes.operators.rules.HELPERS`, `.TESTS` and `.RESERVED_NAMES`, and `_path_of` of the
+engine's own; a drift test in the test file, which may import the engine, is the guard against
+the names falling out of step, the filter and global names included.
 """
 from __future__ import annotations
 
@@ -84,6 +85,18 @@ RULE_HELPERS = frozenset(
     }
 )
 RULE_TESTS = frozenset({"present", "blank"})
+# Mirrors dynamiq.nodes.operators.rules.RESERVED_NAMES - the helpers there were before the
+# vocabulary grew. The engine refuses to build a derived value named after one, and an expression
+# that calls one and reads the same name as a value; a name added since (`text`, `number`,
+# `first_present`) it lets a flow that already uses it keep building.
+RULE_RESERVED_NAMES = frozenset({"has", "days_between", "date", "today", "len", "abs", "min", "max", "sum", "round"})
+# Jinja binds this name inside every expression, so the engine refuses to build one that reads it
+# (rules.py's RESERVED_ROOT).
+RESERVED_ROOT = "self"
+# The tests that only ask about the value they test (rules.py's _EXEMPT_TESTS): the engine reads
+# nothing else of one, not what `sameas` compares the value with, as it reads nothing of a keyword
+# argument of `default`, so a name there refuses no build.
+_EXEMPT_TESTS = frozenset({"defined", "undefined", "none", "sameas", "present", "blank"})
 # The Rules node's own input, an ISO date fixing the effective-window comparison. Never declared
 # in `input_fields`, but always readable, so it counts as a known root the way a declared input does.
 AS_OF_KEY = "as_of"
@@ -686,6 +699,13 @@ def check_rules(node, label) -> list:
             errors.append(
                 f"rules {label!r}: derived value {name!r} takes a name an input or another derived value has."
             )
+        elif name in RULE_RESERVED_NAMES:
+            errors.append(f"rules {label!r}: derived value {name!r} is already the name of a helper.")
+        elif name == RESERVED_ROOT:
+            errors.append(
+                f"rules {label!r}: derived value {name!r} could not be read by a rule: Jinja reserves the name "
+                "inside an expression."
+            )
         taken.add(name)
         if not str(derived.get("expression") or "").strip():
             errors.append(f"rules {label!r}: derived value {name!r} has no `expression`.")
@@ -759,11 +779,15 @@ def check_expressions(node, label) -> tuple[list, list]:
 
     A syntax error, an unknown filter, an unknown test and a call of a name no helper has are all
     errors: none of them can ever be right, whatever the record turns out to hold - a record read
-    from JSON is never itself callable, so calling a bare name is always meant as a helper. A root
-    name this node's own declared shape does not vouch for is only a WARNING, and is skipped
-    where that shape cannot be known at all - a node with neither `input_fields` nor a selector,
-    or one whose `input_transformer` sets a `path`, so the record is a sub-tree whose keys nothing
-    here can see.
+    from JSON is never itself callable, so calling a bare name is always meant as a helper. So is
+    what the engine refuses when it builds the node, with the engine's own reason: text that is
+    more than one expression (`loan.a }} loan.b`), text nested too deeply to read, a read of
+    `self`, a private `__` attribute on a Rules node (the Expression node leaves that to its
+    sandbox), and a name read as a value and called as a helper, where the helper is one of the
+    original ten or one of Jinja's own globals. A root name this node's own declared shape does not
+    vouch for is only a WARNING, and is skipped where that shape cannot be known at all - a node
+    with neither `input_fields` nor a selector, or one whose `input_transformer` sets a `path`, so
+    the record is a sub-tree whose keys nothing here can see.
 
     A disabled rule (`enabled: false`) is not parsed at all: it never compiles on the node either,
     so a draft left broken while switched off must keep validating clean.
@@ -797,7 +821,7 @@ def _check_rules_expressions(node, label, errors: list, warnings: list) -> None:
             where = f"rules {label!r}: derived value {name!r}"
             reads_known = (known | computed) if known is not None else None
             not_yet_computed = derived_names - computed
-            _parse_and_walk(text, reads_known, not_yet_computed, where, errors, warnings)
+            _parse_and_walk(text, reads_known, not_yet_computed, where, errors, warnings, private=True)
         computed.add(name)
 
     # Every derived value is computed before any rule runs, so all of them are fair game to a
@@ -811,7 +835,7 @@ def _check_rules_expressions(node, label, errors: list, warnings: list) -> None:
             text = str(rule.get(attr) or "")
             if text.strip():
                 where = f"rules {label!r}: rule {rule_label!r} {attr}"
-                _parse_and_walk(text, rule_known, frozenset(), where, errors, warnings)
+                _parse_and_walk(text, rule_known, frozenset(), where, errors, warnings, private=True)
 
 
 def _check_expression_items(node, label, errors: list, warnings: list) -> None:
@@ -825,7 +849,7 @@ def _check_expression_items(node, label, errors: list, warnings: list) -> None:
             continue
         key = item.get("key") or index
         where = f"expression {label!r}: key {key!r}"
-        _parse_and_walk(text, known, frozenset(), where, errors, warnings)
+        _parse_and_walk(text, known, frozenset(), where, errors, warnings, private=False)
 
 
 def _declared_roots(node) -> tuple[frozenset, bool]:
@@ -876,45 +900,184 @@ def _without_wrapper_leak(message: str) -> str:
 
 
 def _parse_and_walk(
-    text: str, known: frozenset | None, not_yet_computed: frozenset, where: str, errors: list, warnings: list
+    text: str,
+    known: frozenset | None,
+    not_yet_computed: frozenset,
+    where: str,
+    errors: list,
+    warnings: list,
+    *,
+    private: bool,
 ) -> None:
+    """Parses one expression and walks it (`_walk`). `private` says whether the engine refuses a
+    read of a private `__` attribute when it builds the node: the Rules node does, the Expression
+    node leaves that to its sandbox."""
     try:
         parsed = _EXPRESSION_ENVIRONMENT.parse(_EXPRESSION_PREFIX + text + " }}")
     except TemplateSyntaxError as e:
         errors.append(f"{where} is not a valid expression: {_without_wrapper_leak(str(e))}")
         return
+    except RecursionError:
+        errors.append(_too_deep(where))
+        return
+    if not _is_one_expression(parsed):
+        errors.append(
+            f"{where} is not a valid expression: chunk after expression; write the expression alone, "
+            "without '{{' or '}}'"
+        )
+        return
+    scan = _Scan(known, not_yet_computed, where, private)
+    try:
+        _walk(parsed, scan)
+    except RecursionError:
+        errors.append(_too_deep(where))
+        return
+    if (clash := scan.clash()) is not None:
+        scan.errors.append(f"{where} reads {clash!r} as a value and calls it as a helper")
     # Collected locally and de-duplicated before joining the caller's lists: the same typo read
     # twice in one expression should be named once, not once per occurrence.
-    found_errors: list = []
-    found_warnings: list = []
-    _walk(parsed, known, not_yet_computed, where, found_errors, found_warnings)
-    errors.extend(dict.fromkeys(found_errors))
-    warnings.extend(dict.fromkeys(found_warnings))
+    errors.extend(dict.fromkeys(scan.errors))
+    warnings.extend(dict.fromkeys(scan.warnings))
 
 
-def _walk(node, known: frozenset | None, not_yet_computed: frozenset, where: str, errors: list, warnings: list) -> None:
+def _is_one_expression(parsed) -> bool:
+    """Whether the wrapped text parsed as one expression, all the engine's `compile_expression`
+    reads: `loan.a }} loan.b` parses as a template holding an expression and then text, where the
+    engine stops at the `}}` with "chunk after expression"."""
+    body = parsed.body
+    return (
+        len(body) == 1
+        and isinstance(body[0], jinja_nodes.Output)
+        and len(body[0].nodes) == 1
+        and not isinstance(body[0].nodes[0], jinja_nodes.TemplateData)
+    )
+
+
+def _too_deep(where: str) -> str:
+    # Jinja's parser recurses once per level of nesting, and so does the walk here, so text nested a
+    # few hundred levels deep exhausts Python's recursion limit rather than parsing.
+    return f"{where} is nested too deeply to read; split it into smaller expressions"
+
+
+class _Scan:
+    """One walk of a parsed expression: what it may read (`known`, None where the node's shape
+    cannot be known, and `not_yet_computed`), where it sits, whether the engine refuses a private
+    attribute there, and what the walk finds - errors, warnings, and for the engine's refusal of a
+    name both read and called, the global names the expression calls and the roots of the paths
+    the engine reads, in the order it reads them."""
+
+    def __init__(self, known: frozenset | None, not_yet_computed: frozenset, where: str, private: bool) -> None:
+        self.known = known
+        self.not_yet_computed = not_yet_computed
+        self.where = where
+        self.private = private
+        self.errors: list = []
+        self.warnings: list = []
+        self.called: list = []
+        self.roots: list = []
+
+    def clash(self) -> str | None:
+        """The name the engine refuses to build an expression over for reading it as a value and
+        calling it, or None: the first name both read and called, where that is one of the original
+        helpers or one of Jinja's own globals. A name the vocabulary added since, `text` say, the
+        engine lets through, holding the expression when it runs instead."""
+        clash = next((name for name in self.roots if name in self.called), None)
+        return clash if clash in RULE_RESERVED_NAMES or clash not in RULE_HELPERS else None
+
+    def read(self, path: str, segments: list) -> None:
+        """Judges a path the engine reads as it does when it builds the node: a read of `self`, a
+        private segment where the engine refuses one, and a root named like a global, which `clash`
+        weighs."""
+        if segments[0] == RESERVED_ROOT:
+            self.errors.append(
+                f"{self.where} reads {path!r}: Jinja reserves the name 'self' inside an expression, so a "
+                "top-level key of that name cannot be read; nest it inside a record or rename the input"
+            )
+        if self.private and any(isinstance(segment, str) and segment.startswith("__") for segment in segments):
+            self.errors.append(f"{self.where} reads a private attribute ({path})")
+        if segments[0] in _GLOBAL_NAMES:
+            self.roots.append(segments[0])
+
+
+def _path_of(node) -> tuple[str, list] | None:
+    """The path a name with attributes and constant keys after it reads, written as the engine
+    writes it (`loan.a`, `docs['Flood.Cert']`, `items[0]`), with its segments; None for any other
+    node. A copy of dynamiq.nodes.operators.rules._path_of, whose paths the engine's refusals judge."""
+    if isinstance(node, jinja_nodes.Name):
+        return node.name, [node.name]
+    if isinstance(node, jinja_nodes.Getattr):
+        base = _path_of(node.node)
+        return (f"{base[0]}.{node.attr}", [*base[1], node.attr]) if base else None
+    if isinstance(node, jinja_nodes.Getitem) and isinstance(node.arg, jinja_nodes.Const):
+        base = _path_of(node.node)
+        key = node.arg.value
+        if base is None:
+            return None
+        if isinstance(key, str):
+            if IDENTIFIER_RE.match(key):
+                return f"{base[0]}.{key}", [*base[1], key]
+            escaped = key.replace("\\", "\\\\").replace("'", "\\'")
+            return f"{base[0]}['{escaped}']", [*base[1], key]
+        if isinstance(key, int) and not isinstance(key, bool):
+            return f"{base[0]}[{key}]", [*base[1], key]
+    return None
+
+
+def _walk(node, scan: _Scan, counted: bool = True) -> None:
     """Visits every node of a parsed expression, whichever branch of a conditional it sits in -
-    see `check_expressions` for why compiling alone would miss a filter or test used inside one."""
+    see `check_expressions` for why compiling alone would miss a filter or test used inside one.
+
+    A path, a name with the attributes and constant keys after it, is judged whole, as the engine
+    reads it. `counted` is False inside what the engine reads nothing of: what a test that only asks
+    about its value is given besides (`x is sameas y`), and a keyword argument of `default`. A name
+    there is still checked against the node's shape, but refuses no build."""
     exclude: tuple[str, ...] = ()
+    # The fields of this node the engine does not read.
+    uncounted: tuple[str, ...] = ()
     if isinstance(node, jinja_nodes.Filter):
         if node.name not in _FILTER_NAMES:
-            errors.append(_unknown(where, "filter", node.name, _FILTER_NAMES))
+            scan.errors.append(_unknown(scan.where, "filter", node.name, _FILTER_NAMES))
+        if node.name == "default":
+            uncounted = ("kwargs", "dyn_args", "dyn_kwargs")
     elif isinstance(node, jinja_nodes.Test):
         if node.name not in _TEST_NAMES:
-            errors.append(_unknown(where, "test", node.name, _TEST_NAMES))
+            scan.errors.append(_unknown(scan.where, "test", node.name, _TEST_NAMES))
+        if node.name in _EXEMPT_TESTS:
+            uncounted = ("args", "kwargs", "dyn_args", "dyn_kwargs")
     elif isinstance(node, jinja_nodes.Call) and isinstance(node.node, jinja_nodes.Name):
-        # A bare name called like a function is always meant as a helper: a record read from JSON
-        # never holds anything callable, so this is an error rather than merely an unknown root.
-        if node.node.name not in _GLOBAL_NAMES:
-            errors.append(_unknown(where, "helper", node.node.name, _GLOBAL_NAMES))
+        name = node.node.name
+        if name in _GLOBAL_NAMES:
+            if counted:
+                scan.called.append(name)
+        else:
+            # A bare name called like a function is always meant as a helper: a record read from JSON
+            # never holds anything callable, so this is an error rather than merely an unknown root.
+            scan.errors.append(_unknown(scan.where, "helper", name, _GLOBAL_NAMES))
+            # The engine reads the name it calls as a member of the record all the same.
+            if counted:
+                scan.read(name, [name])
         exclude = ("node",)  # the callee is judged above, not walked again as a root read below
-    elif isinstance(node, jinja_nodes.Name) and node.ctx == "load":
-        if node.name in not_yet_computed:
-            warnings.append(f"{where} reads {node.name!r}, which is computed after it.")
-        elif known is not None and node.name not in known:
-            warnings.append(_unknown_root(where, node.name, known))
-    for child in node.iter_child_nodes(exclude=exclude):
-        _walk(child, known, not_yet_computed, where, errors, warnings)
+    elif isinstance(node, jinja_nodes.Call) and isinstance(node.node, jinja_nodes.Getattr):
+        # A method call reads the object it is called on, never a member named like the method:
+        # `loan.get('rate')` reads `loan`.
+        _walk(node.node.node, scan, counted)
+        exclude = ("node",)
+    elif (read := _path_of(node)) is not None:
+        path, segments = read
+        if counted:
+            scan.read(path, segments)
+        root = segments[0]
+        if counted and root == RESERVED_ROOT:
+            pass  # refused above; a warning about an undeclared name would only repeat it
+        elif root in scan.not_yet_computed:
+            scan.warnings.append(f"{scan.where} reads {root!r}, which is computed after it.")
+        elif scan.known is not None and root not in scan.known:
+            scan.warnings.append(_unknown_root(scan.where, root, scan.known))
+        return
+    for field, value in node.iter_fields(exclude=exclude):
+        for child in value if isinstance(value, list) else [value]:
+            if isinstance(child, jinja_nodes.Node):
+                _walk(child, scan, counted and field not in uncounted)
 
 
 def _hint(name: str, candidates) -> str:

@@ -11,6 +11,7 @@ below is the drift guard, and it is the one test here allowed to import the engi
 import json
 import uuid
 
+import pytest
 from click.testing import CliRunner
 
 from dynamiq.cli import flowcheck
@@ -264,6 +265,160 @@ def test_as_of_is_not_a_known_root_for_an_expression_node():
     # The same name IS known on a Rules node.
     control = rules_node(rules=[rule(check="as_of is present")])
     assert flowcheck.check_expressions(control, "screen") == ([], [])
+
+
+# --- what the engine refuses to build ----------------------------------------------------------------------------
+
+SELF_REFUSAL = (
+    "Jinja reserves the name 'self' inside an expression, so a top-level key of that name cannot be read; "
+    "nest it inside a record or rename the input"
+)
+
+
+@pytest.mark.parametrize("check", ["loan.a }} loan.b", "loan.a }}{{ loan.b", "loan.a }}"])
+def test_text_the_engine_reads_as_more_than_one_expression_is_an_error(check):
+    # Wrapped in "{{ }}", `loan.a }} loan.b` parses as a template: an expression, then text. The engine compiles one
+    # expression and refuses whatever follows the "}}" that ends it.
+    node = rules_node(rules=[rule(check=check)])
+
+    errors, warnings = flowcheck.check_expressions(node, "screen")
+
+    assert errors == [
+        "rules 'screen': rule 'R1' check is not a valid expression: chunk after expression; "
+        "write the expression alone, without '{{' or '}}'"
+    ]
+    assert warnings == []
+
+
+def test_an_expression_node_item_that_is_more_than_one_expression_is_an_error():
+    node = expression_node(expressions=[{"id": "x1", "key": "rate", "expression": "loan.a }}{{ loan.b"}])
+
+    errors, _ = flowcheck.check_expressions(node, "calc")
+
+    assert errors == [
+        "expression 'calc': key 'rate' is not a valid expression: chunk after expression; "
+        "write the expression alone, without '{{' or '}}'"
+    ]
+
+
+DEEP = {
+    "nested-brackets": "(" * 400 + "loan.a" + ")" * 400 + " > 1",
+    "long-chain": " or ".join(f"loan.f{index} == 'x'" for index in range(3000)),
+}
+
+
+@pytest.mark.parametrize("check", DEEP.values(), ids=DEEP.keys())
+def test_an_expression_nested_too_deeply_to_read_is_an_error_naming_the_node_and_rule(check):
+    node = rules_node(rules=[rule(check=check)])
+
+    errors, warnings = flowcheck.check_expressions(node, "screen")
+
+    assert errors == ["rules 'screen': rule 'R1' check is nested too deeply to read; split it into smaller expressions"]
+    assert warnings == []
+
+
+def test_validate_reports_an_expression_nested_too_deeply_rather_than_crashing():
+    flow = _flow_with_a_root_typo_warning()
+    flow["nodes"][1]["rules"] = [rule(check=DEEP["nested-brackets"])]
+
+    errors, _ = flowcheck.validate(flow)
+
+    assert any("rule 'R1' check is nested too deeply to read" in error for error in errors), errors
+
+
+@pytest.mark.parametrize(
+    ("check", "refusal"),
+    [
+        ("self.limit > 1", f"reads 'self.limit': {SELF_REFUSAL}"),
+        ("has(self)", f"reads 'self': {SELF_REFUSAL}"),
+        ("loan.__class__ is defined", "reads a private attribute (loan.__class__)"),
+        ("loan['__dict__'] is defined", "reads a private attribute (loan.__dict__)"),
+        ('loan["__b.c"] is defined', "reads a private attribute (loan['__b.c'])"),
+        ("date(loan.closed) < date", "reads 'date' as a value and calls it as a helper"),
+        ("has(len) and len(loan.items) > 1", "reads 'len' as a value and calls it as a helper"),
+        ("range(3) | list == range", "reads 'range' as a value and calls it as a helper"),
+    ],
+    ids=[
+        "self",
+        "self-asked-about",
+        "private-attribute",
+        "private-key",
+        "private-quoted-key",
+        "helper-read",
+        "helper-asked-about",
+        "jinja-global-read",
+    ],
+)
+def test_what_the_engine_refuses_to_build_is_an_error_with_its_reason(check, refusal):
+    node = rules_node(rules=[rule(check=check)])
+
+    errors, warnings = flowcheck.check_expressions(node, "screen")
+
+    assert errors == [f"rules 'screen': rule 'R1' check {refusal}"]
+    assert warnings == []
+
+
+@pytest.mark.parametrize(
+    "check",
+    [
+        "loan.self > 1",
+        "loan._id > 1",
+        "loan['a.__b'] is defined",
+        # A method's name is no read of the record: the sandbox refuses this one when it runs, not the build.
+        "loan.__len__() > 1",
+        # `text`, `number` and `first_present` came after flows that read inputs so named: the engine holds such a
+        # rule when it runs instead.
+        "text(text) == 'x'",
+        # The engine reads neither what `sameas` compares with nor a keyword argument of `default`.
+        "loan.x is sameas date and date(loan.a) > today()",
+        "(loan.a | default(boolean=date)) and date(loan.b) > today()",
+    ],
+)
+def test_what_the_engine_builds_is_not_refused(check):
+    errors, _ = flowcheck.check_expressions(rules_node(rules=[rule(check=check)]), "screen")
+
+    assert errors == []
+
+
+def test_an_expression_node_mirrors_the_refusals_its_engine_makes():
+    # The Expression node refuses a read of `self` and a helper's name read as a value, as the Rules node does; a
+    # private attribute it leaves to the sandbox, which refuses the read when the expression runs.
+    def errors_of(expression: str) -> list:
+        node = expression_node(expressions=[{"id": "x1", "key": "k", "expression": expression}])
+        return flowcheck.check_expressions(node, "calc")[0]
+
+    assert errors_of("self.a") == [f"expression 'calc': key 'k' reads 'self.a': {SELF_REFUSAL}"]
+    assert errors_of("len(loan.items) > len") == [
+        "expression 'calc': key 'k' reads 'len' as a value and calls it as a helper"
+    ]
+    assert errors_of("loan.__class__") == []
+
+
+@pytest.mark.parametrize(
+    ("name", "error"),
+    [
+        ("date", "rules 'screen': derived value 'date' is already the name of a helper."),
+        ("len", "rules 'screen': derived value 'len' is already the name of a helper."),
+        (
+            "self",
+            "rules 'screen': derived value 'self' could not be read by a rule: Jinja reserves the name inside an "
+            "expression.",
+        ),
+    ],
+)
+def test_a_derived_value_named_as_the_engine_refuses_is_an_error(name, error):
+    node = rules_node(derived_values=[{"id": "d1", "name": name, "expression": "loan.amount"}])
+
+    assert flowcheck.check_rules(node, "screen") == [error]
+
+
+@pytest.mark.parametrize("name", ["text", "number", "first_present", "range"])
+def test_a_derived_value_may_take_a_name_the_engine_lets_it_shadow(name):
+    # The helpers added since derived values could first be named keep flows that already use those names building;
+    # Jinja's own globals were never refused.
+    node = rules_node(derived_values=[{"id": "d1", "name": name, "expression": "loan.amount"}])
+
+    assert flowcheck.check_rules(node, "screen") == []
 
 
 def test_an_unrecognized_rule_level_on_missing_is_an_error():
