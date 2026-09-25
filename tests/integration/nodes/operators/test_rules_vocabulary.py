@@ -689,8 +689,9 @@ def test_a_build_error_names_the_text_the_author_wrote(text, error):
 
 
 NESTED_TOO_DEEPLY = "(" * 200 + "order.total" + ")" * 200 + " > 1"
-# Read without trouble, but compiled to code nested a level for each `or`, deeper than Python's parser takes.
+# Read without trouble, but compiled to code nested a level for each operator, deeper than Python's parser takes.
 TOO_LONG_A_CHAIN = " or ".join(f"order.a{i} == {i}" for i in range(200))
+TOO_LONG_A_SUM = " + ".join("order.total" for _ in range(200)) + " > 1"
 
 
 @pytest.mark.parametrize(
@@ -711,17 +712,29 @@ TOO_LONG_A_CHAIN = " or ".join(f"order.a{i} == {i}" for i in range(200))
         ),
         ({"rules": [Rule(id="R1", check=TOO_LONG_A_CHAIN)]}, "Rules 'vocabulary', rule 1: the check"),
         (
+            {"derived_values": [DerivedValue(name="total", expression=TOO_LONG_A_SUM)]},
+            "Rules 'vocabulary': derived value 'total'",
+        ),
+        (
             {"rules": [Rule(id="R1", check="true", message="{{ " + TOO_LONG_A_CHAIN + " }}")]},
             "Rules 'vocabulary', rule 1: the message",
         ),
     ],
-    ids=["check", "applies-when", "derived-value", "message", "long-or-chain-check", "long-or-chain-message"],
+    ids=[
+        "check",
+        "applies-when",
+        "derived-value",
+        "message",
+        "long-or-chain-check",
+        "long-sum-derived-value",
+        "long-or-chain-message",
+    ],
 )
 def test_text_nested_too_deeply_to_read_names_its_rule_when_the_node_is_built(settings, error):
     """Jinja reads each level of nesting through a dozen calls, so some 70 parentheses exhaust Python's stack before the
-    text is read, and it compiles a chain of `or`s to code nested a level for each, which Python's parser refuses at 200
-    levels: the node still fails to build, naming the rule, where it failed with a bare `RecursionError` or
-    `SyntaxError`."""
+    text is read, and it compiles a chain of operators, `or`, `+`, `not` or a filter, to code nested a level for each,
+    which Python's parser refuses at 200 levels: the node still fails to build, naming the rule, where it failed with a
+    bare `RecursionError` or `SyntaxError`."""
     with pytest.raises(ValueError) as refused:
         Rules(name="vocabulary", input_fields=[NamedField(name="order")], **settings)
 
@@ -775,7 +788,10 @@ def test_a_rule_reading_and_calling_number_is_held_when_it_runs_not_refused_at_b
         ("date(raw)", "07-Aug-2026", date(2026, 8, 7)),
         ("date(raw)", "07-AUG-2026", date(2026, 8, 7)),
         ("date(raw)", "7th August 2026", date(2026, 8, 7)),
+        ("date(raw)", "7TH AUGUST 2026", date(2026, 8, 7)),
         ("date(raw)", "7 August, 2026", date(2026, 8, 7)),
+        ("date(raw)", "7 August,2026", date(2026, 8, 7)),
+        ("date(raw)", "7 Aug.,2026", date(2026, 8, 7)),
         ("date(raw, format='%d.%m.%Y')", "17.07.2026", date(2026, 7, 17)),
         # The shapes it read before.
         ("date(raw)", "2026-08-07T10:15:00Z", date(2026, 8, 7)),
@@ -792,7 +808,10 @@ def test_a_rule_reading_and_calling_number_is_held_when_it_runs_not_refused_at_b
         "day-first-dashed",
         "day-first-dashed-capitals",
         "day-first-ordinal",
+        "day-first-ordinal-capitals",
         "day-first-comma",
+        "day-first-comma-without-a-space",
+        "day-first-abbreviated-comma-without-a-space",
         "format",
         "iso",
         "us",
@@ -1192,6 +1211,27 @@ def test_a_reason_quotes_about_80_characters_of_a_long_value():
         to_date("x" * 78)
     with pytest.raises(ValueError, match=f"^not a date: '{'x' * 78}…$"):
         to_date("x" * 79)
+
+
+def test_a_reason_quotes_about_80_characters_of_a_key_a_lookup_found_nothing_under():
+    """A lookup by a page of text, `limits[doc.note]`, names the key it found nothing under, and a reason quotes about
+    80 characters of it, as of a value; a shorter key is named whole, and so is the one an Expression node fails on."""
+    page = "Amount: see the attached schedule of payments. " * 1100
+    quoted = repr(page)[:79] + "…"
+    node = Rules(
+        name="vocabulary",
+        input_fields=[NamedField(name="doc"), NamedField(name="limits")],
+        rules=[Rule(id="long", check="limits[doc.note] > 5"), Rule(id="short", check="limits[doc.kind] > 5")],
+    )
+
+    output = run(node, {"doc": {"note": page, "kind": "jumbo"}, "limits": {"standard": 1}})
+
+    assert {rule_id: finding["message"] for rule_id, finding in by_id(output).items()} == {
+        "long": f"check could not be evaluated: 'dict object' has no attribute {quoted}",
+        "short": "check could not be evaluated: 'dict object' has no attribute 'jumbo'",
+    }
+    assert failure("{'x': 1}[note] + 1", note=page) == f"'dict object' has no attribute {quoted}"
+    assert failure("{'x': 1}[note] + 1", note="jumbo") == "'dict object' has no attribute 'jumbo'"
 
 
 def test_an_unreadable_value_has_no_members_a_rule_can_read():

@@ -572,9 +572,11 @@ def nested_nodes(node: dict, label):
     """Each node defined inside `node`, at any depth, with its label: the path to it,
     `map-1 > rules-1`.
 
-    As the loader reads a flow, a node is any object with a dotted `type` held by a node's field,
-    alone or in a list: a Map's `node`, an agent's `llm` and `tools`, a Judgement's `judge`. A
-    flow a node names by its id, in `flow` or `flows`, is a flow of its own and is not followed.
+    A node is an object with a dotted `type` held by a node's field, alone or in a list: a Map's
+    `node`, an agent's `llm` and `tools`, a Judgement's `judge`, as the loader follows them for the
+    flows they reference. The loader builds a node held deeper as well, in a mapping with no `type`
+    or in a list inside a list, which this does not reach. A flow a node names by its id, in `flow`
+    or `flows`, is a flow of its own and is not followed.
     """
     for key, value in node.items():
         for index, item in enumerate(value if isinstance(value, list) else [value]):

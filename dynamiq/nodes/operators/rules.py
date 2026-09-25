@@ -41,7 +41,7 @@ _YEAR_FIRST_DATE = re.compile(r"^([0-9]{4})/([0-9]{1,2})/([0-9]{1,2})$")
 _NAMED_DATE = re.compile(r"^(?P<month>[A-Za-z]+)\.?\s+(?P<day>[0-9]{1,2})(?:,\s*|\s+)(?P<year>[0-9]{4})$")
 # The day first, before a month written as a word, which says which number is the day: `7 Aug 2026`, `07-AUG-2026`.
 _DAY_FIRST_DATE = re.compile(
-    r"^(?P<day>[0-9]{1,2})(?:st|nd|rd|th)?(?:\s+|-)(?P<month>[A-Za-z]+)\.?,?(?:\s+|-)(?P<year>[0-9]{4})$"
+    r"^(?P<day>[0-9]{1,2})(?i:st|nd|rd|th)?(?:\s+|-)(?P<month>[A-Za-z]+)\.?(?:,?(?:\s+|-)|,)(?P<year>[0-9]{4})$"
 )
 _MONTH_NAMES = (
     "january",
@@ -494,7 +494,19 @@ def _refuses_unreadable(test: Callable[..., Any]) -> Callable[..., Any]:
     return refuse_unreadable
 
 
-class RuleUndefined(ChainableUndefined):
+class QuotedUndefined(Undefined):
+    """Jinja's undefined, naming what it was looked up by as a reason quotes a value (`_quoted`): a lookup by a page of
+    text, `limits[doc.note]`, would otherwise copy the page into every reason that names it. A shorter name prints as
+    Jinja prints it."""
+
+    __slots__ = ()
+
+    @property
+    def _undefined_message(self) -> str:
+        return super()._undefined_message.replace(repr(self._undefined_name), _quoted(self._undefined_name))
+
+
+class RuleUndefined(QuotedUndefined, ChainableUndefined):
     """A value that is not there.
 
     Attribute and item access chain, so `has(docs.FloodCert.pages)` can ask about a document that is missing;
@@ -519,15 +531,15 @@ class RecordSandbox(ImmutableSandboxedEnvironment):
 
     Every sandbox, the Rules node's and the Expression node's alike, carries the helpers, the `present` and `blank`
     tests, and a `blank` of its own: its undefined marked `Blank`, so blank input is as missing as anything
-    undefined in that sandbox. Every test in it, Jinja's own as well, refuses a value nobody could read, as `has()`
-    does: a rule that asks about one is held for the value's error, and an expression fails its run, as using the
-    value would.
+    undefined in that sandbox. Its undefined is a `QuotedUndefined` unless it is given one. Every test in it,
+    Jinja's own as well, refuses a value nobody could read, as `has()` does: a rule that asks about one is held for
+    the value's error, and an expression fails its run, as using the value would.
     """
 
     blank: type[Undefined]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, **{"undefined": QuotedUndefined, **kwargs})
         self.blank = type("Blank", (Blank, self.undefined), {"__slots__": ()})
         self.globals.update(HELPERS)
         self.tests.update(TESTS)
