@@ -112,8 +112,16 @@ UNDER_NOT_EVALUATED = {
     "days_between(X, doc.y) > 0": {
         ABSENT: ("not_evaluated", "missing value for doc.x"),
         None: ("not_evaluated", "missing value for doc.x"),
-        "": ("not_evaluated", "check could not be evaluated: not a date: ''"),
-        "  ": ("not_evaluated", "check could not be evaluated: not a date: '  '"),
+        "": Changed(
+            ("not_evaluated", "check could not be evaluated: not a date: ''"),
+            ("not_evaluated", "missing value for doc.x"),
+            BLANK_DATE_IS_MISSING,
+        ),
+        "  ": Changed(
+            ("not_evaluated", "check could not be evaluated: not a date: '  '"),
+            ("not_evaluated", "missing value for doc.x"),
+            BLANK_DATE_IS_MISSING,
+        ),
         "TBD": ("not_evaluated", "check could not be evaluated: not a date: 'TBD'"),
         VALID: ("pass", None),
         DERIVED_ERROR: Changed(

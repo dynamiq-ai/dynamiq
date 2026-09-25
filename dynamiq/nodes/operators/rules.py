@@ -255,12 +255,20 @@ def days_between(start: Any, end: Any) -> int:
 
     A value `date()` could not read raises its error, `start`'s before `end`'s, as `date()` raised them while it read
     the arguments left to right; raw text is then read `end` first, as it always was, so `days_between(a, b)` over
-    two texts that are no dates names `b`.
+    two texts that are no dates names `b`. Blank text is missing where it is read, as what `date()` makes of it is:
+    `days_between(a, b)` over blank text in `b` is `days_between(a, date(b))`.
     """
     for value in (start, end):
         if isinstance(value, Unreadable):
             raise value.error()
-    return (to_date(end) - to_date(start)).days
+    return (_day(end) - _day(start)).days
+
+
+def _day(value: Any) -> date:
+    """A date `days_between` is handed, read as `to_date` reads it; blank text is missing, as `date()` makes it."""
+    if isinstance(value, str) and not value.strip():
+        raise MissingValue("missing value: days_between() found no date")
+    return to_date(value)
 
 
 def today() -> date:
@@ -640,9 +648,10 @@ class _Asked(Enum):
 
 
 class BlankSource(NamedTuple):
-    """The paths a call of `text()`, `number()`, `date()` or `first_present()` is handed as they are, whose blank the
-    call turns into a missing value where the expression needs what it returns (`_blank_source`), and whether a
-    question that takes blank text for a value, `has(x)` or `x is defined`, asked about one of them first."""
+    """The paths a call of `text()`, `number()`, `date()`, `days_between()` or `first_present()` is handed as they
+    are, whose blank the call turns into a missing value where the expression needs what it returns (`_blank_sources`),
+    and whether a question that takes blank text for a value, `has(x)` or `x is defined`, asked about one of them
+    first."""
 
     paths: tuple[str, ...]
     guarded: bool = False
@@ -674,8 +683,8 @@ class _Collected(NamedTuple):
     unknown_calls: list[str]
     readers: list[Reader]
     unknown_names: list[tuple[str, str]]
-    # The paths handed to a helper that turns a blank into a missing value, one group per call whose result the
-    # expression needs, and the paths a question asked about, by what it asked (`_Asked`).
+    # The paths handed to a helper that turns a blank into a missing value, in groups whose blank stops a call whose
+    # result the expression needs (`_blank_sources`), and the paths a question asked about, by what it asked (`_Asked`).
     blank_sources: list[tuple[str, ...]]
     asked: dict[_Asked, list[str]]
 
@@ -706,19 +715,22 @@ def _readers_of(call: nodes.Call) -> list[Reader]:
     ]
 
 
-def _blank_source(call: nodes.Call) -> tuple[str, ...]:
-    """The paths whose blank a call of `text()`, `number()`, `date()` or `first_present()` turns into a missing value:
-    the value a reader is handed, or every value `first_present()` is handed, since it comes out blank only when each
-    of them is. () where the call is handed anything but a path as it is, a filtered value or a constant say."""
+def _blank_sources(call: nodes.Call) -> list[tuple[str, ...]]:
+    """The paths whose blank a call of `text()`, `number()`, `date()`, `days_between()` or `first_present()` turns
+    into a missing value, in groups whose blank alone stops the call: the value a reader is handed, each date
+    `days_between()` is handed, or every value `first_present()` is handed, which comes out blank only when each of
+    them is. A value handed as anything but a path as it is, a filtered value or a constant say, is in none."""
     if call.dyn_args or call.dyn_kwargs or not isinstance(call.node, nodes.Name):
-        return ()
+        return []
     if call.node.name in ("text", "number", "date"):
         path = _path_of(call.args[0]) if call.args else None
-        return () if path is None else (path,)
+        return [] if path is None else [(path,)]
+    if call.node.name == "days_between":
+        return [(path,) for argument in call.args if (path := _path_of(argument)) is not None]
     if call.node.name == "first_present" and call.args:
         paths = [_path_of(argument) for argument in call.args]
-        return () if None in paths else tuple(paths)
-    return ()
+        return [] if None in paths else [tuple(paths)]
+    return []
 
 
 def _root(path: str) -> str:
@@ -745,8 +757,10 @@ def _collect_paths(
         collected.readers.extend(reader for reader in _readers_of(node) if reader not in collected.readers)
         # A helper's blank stops the expression only where it needs what the helper returns: not inside `has`, a
         # test that asks about it, `| default` or `first_present`, each of which takes a blank for an answer.
-        if required and not lenient and (source := _blank_source(node)) and source not in collected.blank_sources:
-            collected.blank_sources.append(source)
+        if required and not lenient:
+            collected.blank_sources.extend(
+                source for source in _blank_sources(node) if source not in collected.blank_sources
+            )
         fallback = lenient or name == "first_present"
         # A question over what a reader returns asks whether the value it read is blank: `has(text(x))` is false
         # for blank text.
@@ -1596,17 +1610,17 @@ class Rules(Node):
     def _missing_reason(reads: Reads, scope: dict[str, Any], error: MissingValue) -> tuple[str | None, str]:
         """The value an expression that used a blank could not decide on, and why.
 
-        Only `text()`, `number()`, `date()` and `first_present()` turn a blank into a missing value, so the value
-        named is the first one they were handed that turned out blank, `app.a` in `app.b == '' and text(app.a) ==
-        'x'`, where the blank `app.b` was compared and held. That leaves out a helper whose blank the expression
-        takes for an answer, inside `has()`, a test, `| default` or `first_present()`; one a question that takes
-        blank text for missing asked about first (`app.a is present and text(app.a) == 'x'`); and one `has(app.a)`
+        Only `text()`, `number()`, `date()`, `days_between()` and `first_present()` turn a blank into a missing value,
+        so the value named is the first one they were handed that turned out blank, `app.a` in `app.b == '' and
+        text(app.a) == 'x'`, where the blank `app.b` was compared and held. That leaves out a helper whose blank the
+        expression takes for an answer, inside `has()`, a test, `| default` or `first_present()`; one a question that
+        takes blank text for missing asked about first (`app.a is present and text(app.a) == 'x'`); and one `has(app.a)`
         asked about first where `app.a` is missing, since `has()` stops a missing value though it lets blank text
         through (`BlankSource`). `app.a is defined` counts as `has(app.a)` there, though a null passes it. Failing
         those, the value named is the first the expression reads that is missing or blank, one a helper was handed
-        through a filter say. A helper that returns a blank is handed a value, not the path the value came from, so
-        the reads name it; a blank no read accounts for, one made from a literal or by a lookup that found nothing
-        say, has no path and keeps the error's own message.
+        through a filter say. A helper that returns a blank is handed a value, not the path the value came from, so the
+        reads name it; a blank no read accounts for, one made from a literal or by a lookup that found nothing say, has
+        no path and keeps the error's own message.
         """
         for source in reads.blank_sources:
             values = [resolve_path(scope, path) for path in source.paths]

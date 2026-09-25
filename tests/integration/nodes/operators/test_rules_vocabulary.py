@@ -786,7 +786,7 @@ def test_a_date_that_does_not_match_the_format_given_is_unreadable_naming_the_fo
         ("Oct 1, 2026", ("pass", None), ("pass", None)),
         (
             "",
-            ("not_evaluated", "check could not be evaluated: not a date: ''"),
+            ("not_evaluated", "missing value for app.closed"),
             ("not_evaluated", "missing value for app.closed"),
         ),
         (
@@ -797,8 +797,9 @@ def test_a_date_that_does_not_match_the_format_given_is_unreadable_naming_the_fo
     ],
     ids=["dated", "blank", "unreadable"],
 )
-def test_days_between_reads_the_new_formats_and_a_blank_read_through_date_is_missing(closed, raw, read):
-    """`days_between` reads raw values as it always has; read through `date()`, a blank one is missing instead."""
+def test_days_between_reads_the_new_formats_and_a_blank_date_as_missing(closed, raw, read):
+    """`days_between` reads a date as `date()` reads it, whether it is handed the text or what `date()` made of it: a
+    blank one is missing either way."""
     node = rules(
         Rule(id="raw", check="days_between(app.opened, app.closed) == 55"),
         Rule(id="read", check="days_between(date(app.opened), date(app.closed)) == 55"),
@@ -808,6 +809,80 @@ def test_days_between_reads_the_new_formats_and_a_blank_read_through_date_is_mis
 
     assert (findings["raw"]["status"], findings["raw"]["message"]) == raw
     assert (findings["read"]["status"], findings["read"]["message"]) == read
+
+
+@pytest.mark.parametrize("closed", ["", "  ", None, ABSENT], ids=["empty", "spaces", "null", "absent"])
+@pytest.mark.parametrize(
+    ("policy", "expected"),
+    [
+        (None, ("not_evaluated", "missing value for app.closed")),
+        ("not_applicable", ("not_applicable", "does not apply: missing value for app.closed")),
+    ],
+    ids=["default-policy", "not-applicable"],
+)
+def test_days_between_holds_a_blank_date_as_it_holds_a_null_one(closed, policy, expected):
+    """Blank text is no date anybody gave, as a null is none: the rule is held for it, or skipped where it skips a
+    missing value, whether `days_between` is handed the text or what `date()` made of it."""
+    node = rules(
+        Rule(id="raw", check="days_between(app.opened, app.closed) <= 30", on_missing=policy),
+        Rule(id="read", check="days_between(app.opened, date(app.closed)) <= 30", on_missing=policy),
+    )
+
+    findings = by_id(run(node, record(opened="2026-08-07", closed=closed)))
+
+    assert {rule_id: (finding["status"], finding["message"]) for rule_id, finding in findings.items()} == {
+        "raw": expected,
+        "read": expected,
+    }
+
+
+def test_a_blank_date_days_between_reads_is_missing_in_a_derived_value_and_an_expression_too():
+    """A derived value over it is missing rather than an error, and a rule over that value may skip it; an expression
+    fails its run on it, as on what `date()` makes of it, naming no text it could not read."""
+    node = Rules(
+        name="vocabulary",
+        input_fields=[NamedField(name="app")],
+        derived_values=[DerivedValue(name="age", expression="days_between(app.opened, app.closed)")],
+        rules=[Rule(id="held", check="age <= 30"), Rule(id="skipped", check="age <= 30", on_missing="not_applicable")],
+    )
+
+    output = run(node, record(opened="2026-08-07", closed="  "))
+
+    assert (output["derived"], output["derived_errors"]) == ({"age": None}, {})
+    assert {rule_id: (finding["status"], finding["message"]) for rule_id, finding in by_id(output).items()} == {
+        "held": ("not_evaluated", "missing value for age"),
+        "skipped": ("not_applicable", "does not apply: missing value for age"),
+    }
+    assert failure("days_between(opened, closed)", opened="2026-08-07", closed="") == (
+        "missing value: days_between() found no date"
+    )
+
+
+@pytest.mark.parametrize(
+    ("placed", "shipped", "read", "message"),
+    [
+        ("", "TBD", "days_between(date(order.placed), order.shipped) <= 30", "not a date: 'TBD'"),
+        ("TBD", "", "days_between(order.placed, date(order.shipped)) <= 30", None),
+    ],
+    ids=["blank-start", "blank-end"],
+)
+def test_a_blank_date_beside_one_that_is_no_date_reads_as_date_would_make_it(placed, shipped, read, message):
+    """Raw text is read `end` first, as it always was, and blank text is missing where it is read, as what `date()`
+    makes of it is: beside a text that is no date, the check gives the reason it gives with `date()` around the blank,
+    the missing end or the unreadable end, whichever is read first."""
+    node = rules(
+        Rule(id="raw", check="days_between(order.placed, order.shipped) <= 30"),
+        Rule(id="read", check=read),
+        member="order",
+    )
+
+    findings = by_id(run(node, record("order", placed=placed, shipped=shipped)))
+
+    reason = f"check could not be evaluated: {message}" if message else "missing value for order.shipped"
+    assert {rule_id: (finding["status"], finding["message"]) for rule_id, finding in findings.items()} == {
+        "raw": ("not_evaluated", reason),
+        "read": ("not_evaluated", reason),
+    }
 
 
 @pytest.mark.parametrize(
