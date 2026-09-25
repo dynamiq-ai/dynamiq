@@ -209,7 +209,7 @@ def test_an_amount_nobody_could_read_stays_unreadable_for_the_rules_so_no_fallba
     assert by_id(without_net)["net"]["message"] == "missing value for net"
 
 
-def test_a_message_prints_the_text_the_record_holds_for_a_derived_value_nobody_could_read():
+def test_a_message_prints_none_for_a_derived_value_nobody_could_read_as_derived_shows_it():
     node = invoicing(
         Rule(
             id="gross",
@@ -222,7 +222,8 @@ def test_a_message_prints_the_text_the_record_holds_for_a_derived_value_nobody_c
     output = run(node, {"doc": {"net": "TBD", "gross": "5"}})
 
     assert statuses(output) == {"gross": "fail"}
-    assert by_id(output)["gross"]["message"] == "Gross 5 with net TBD"
+    assert output["derived"] == {"net": None}
+    assert by_id(output)["gross"]["message"] == "Gross 5 with net None"
 
 
 @pytest.mark.parametrize(
@@ -254,27 +255,34 @@ def test_a_message_reads_a_derived_value_that_could_not_be_computed_as_it_always
 
 
 @pytest.mark.parametrize(
-    "message",
+    ("derived", "reason"),
+    [("number(doc.x)", UNREADABLE_NET), ("date(doc.x)", "not a date: 'TBD'")],
+    ids=["number", "date"],
+)
+@pytest.mark.parametrize(
+    ("message", "shown"),
     [
-        "Net {{ d }}",
-        "Net {% if has(d) %}{{ d }}{% else %}not given{% endif %}",
-        # A value the message itself reads through `number()` prints the same way.
-        "Net {{ number(doc.x) }}",
+        ("Value {{ d }}", "Value None"),
+        ("Value {% if has(d) %}{{ d }}{% else %}not given{% endif %}", "Value not given"),
+        # A value the message reads through `date()` itself prints the text the record holds.
+        ("Value {{ date(doc.x) }}", "Value TBD"),
     ],
     ids=["printed", "guarded", "read-in-the-message"],
 )
-def test_a_message_reads_a_derived_value_nobody_could_read_as_the_text_the_record_holds(message):
+def test_a_message_reads_a_derived_value_nobody_could_read_as_none_as_derived_shows_it(derived, reason, message, shown):
+    """A derived value over text its reader cannot read is None under `derived`, and was None on origin/main, where
+    a derived `date()` over `TBD` failed; a message reads it as None too, so its guard decides as it did."""
     node = Rules(
         name="invoicing",
         input_fields=[NamedField(name="doc")],
-        derived_values=[DerivedValue(name="d", expression="number(doc.x)")],
+        derived_values=[DerivedValue(name="d", expression=derived)],
         rules=[Rule(id="gross", name="gross over the floor", check="doc.gross > 100", message=message)],
     )
 
     output = run(node, {"doc": {"x": "TBD", "gross": 5}})
 
-    assert output["derived_errors"] == {"d": UNREADABLE_NET}
-    assert (by_id(output)["gross"]["status"], by_id(output)["gross"]["message"]) == ("fail", "Net TBD")
+    assert (output["derived"], output["derived_errors"]) == ({"d": None}, {"d": reason})
+    assert (by_id(output)["gross"]["status"], by_id(output)["gross"]["message"]) == ("fail", shown)
 
 
 def test_a_derived_value_computed_from_one_that_could_not_be_is_an_error_too_and_a_missing_one_stays_missing():
