@@ -9,8 +9,11 @@ from enum import Enum
 from typing import Any, ClassVar, Literal, NamedTuple, NoReturn
 from uuid import uuid4
 
-from jinja2 import ChainableUndefined, Template, TemplateSyntaxError, Undefined, nodes, pass_environment
+from jinja2 import ChainableUndefined, Template, TemplateSyntaxError, Undefined, nodes, pass_context, pass_environment
+from jinja2.environment import TemplateExpression
 from jinja2.exceptions import TemplateRuntimeError, UndefinedError
+from jinja2.parser import Parser
+from jinja2.runtime import Context
 from jinja2.sandbox import ImmutableSandboxedEnvironment
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
@@ -87,8 +90,8 @@ _MISSING = object()
 class MissingValue(UndefinedError):
     """A value a rule needs is missing or blank, so the rule could not decide.
 
-    Jinja raises an undefined value's error with the message alone, so the path is optional; a raiser that knows
-    which read found nothing builds the error with `for_path`, which names the path in the message and on `path`.
+    Jinja raises an undefined value's error with the message alone, so the path is optional; `need`, which knows
+    which read found nothing, builds the error with `for_path`, which names the path in the message and on `path`.
     """
 
     def __init__(self, message: str | None = None, *, path: str | None = None) -> None:
@@ -715,6 +718,9 @@ class _Collected(NamedTuple):
     # result the expression needs (`_blank_sources`), and the paths a question asked about, by what it asked (`_Asked`).
     blank_sources: list[tuple[str, ...]]
     asked: dict[_Asked, list[str]]
+    # Each node that reads a path where the expression needs the value, with the path: `need()` wraps those whose
+    # path no guard elsewhere makes optional (`_compile_lazy`).
+    needed: list[tuple[nodes.Node, str]]
 
 
 def _readers_of(call: nodes.Call) -> list[Reader]:
@@ -824,6 +830,8 @@ def _collect_paths(
         target = collected.lenient if lenient else collected.required if required else collected.optional
         if path not in target:
             target.append(path)
+        if target is collected.required:
+            collected.needed.append((node, path))
         if asked is not None and not lenient and path not in collected.asked[asked]:
             collected.asked[asked].append(path)
         return
@@ -835,7 +843,9 @@ def _is_under(path: str, prefix: str) -> bool:
     return path == prefix or path.startswith(prefix + ".") or path.startswith(prefix + "[")
 
 
-def _reads_of(parsed: nodes.Template) -> Reads:
+def _collected(parsed: nodes.Node) -> _Collected:
+    """Every path a parsed expression or template reads, as `_collect_paths` sorts it, before a guard elsewhere
+    makes one optional (`_reads_of`)."""
     collected = _Collected(
         required=[],
         optional=[],
@@ -846,8 +856,13 @@ def _reads_of(parsed: nodes.Template) -> Reads:
         unknown_names=[],
         blank_sources=[],
         asked={question: [] for question in _Asked},
+        needed=[],
     )
     _collect_paths(parsed, collected, required=True)
+    return collected
+
+
+def _reads_of(collected: _Collected) -> Reads:
     required: list[str] = []
     optional = list(collected.optional)
     for path in collected.required:
@@ -891,16 +906,17 @@ def read_paths(expression: str) -> Reads:
     A path the expression only asks `has`, `is defined`, `is present`, `is blank` or `default` about, or
     offers to `first_present` as a fallback, is optional: it may be missing without stopping the evaluation,
     and so may anything read under it, since `has(docs.FloodCert) and docs.FloodCert.zone == 'A'` is how a
-    check guards a read; the guard decides, not a pre-check. Every other path is required. A helper's name is
-    never a read: `days_between(a, b)` reads `a` and `b`, while a bare `date` is a member of the record,
-    whatever the record holds under it.
+    check guards a read; the guard decides. Every other path is required: a check or an `applies_when` stops at
+    one that is missing where it reads it, and only there (`need`). A helper's name is never a read:
+    `days_between(a, b)` reads `a` and `b`, while a bare `date` is a member of the record, whatever the record
+    holds under it.
     """
-    return _reads_of(_ENVIRONMENT.parse("{{ " + expression + " }}"))
+    return _reads_of(_collected(_ENVIRONMENT.parse("{{ " + expression + " }}")))
 
 
 def read_template(template: str) -> Reads:
     """The paths a message template reads, the way `read_paths` reads an expression."""
-    return _reads_of(_ENVIRONMENT.parse(template))
+    return _reads_of(_collected(_ENVIRONMENT.parse(template)))
 
 
 def scope_for(reads: Reads, scope: dict[str, Any], undefined: type[Undefined]) -> dict[str, Any]:
@@ -950,8 +966,9 @@ def refuse_clash(compiled: Callable[..., Any], reads: Reads, where: str) -> tupl
     One name cannot be both: the record's member would shadow the helper, or the helper stand in for the member.
     Such an expression is refused when the node is built, naming it, unless the name is one the vocabulary added
     since: an expression over an input called `text`, written before `text` was a helper, must keep building. It
-    raises the clash whenever it is evaluated instead, an error rather than a missing value, so none of its reads is
-    required ahead of it: a missing one would otherwise report the rule as missing before the clash is reached.
+    raises the clash whenever it is evaluated instead, an error rather than a missing value, before it reads
+    anything, so none of its reads is required: a missing one must not pass the clash off as missing, as it would a
+    derived value's other failures.
     """
     clash = next((name for name in reads.helpers_read if name in reads.helpers_called), None)
     if clash is None:
@@ -1001,28 +1018,134 @@ def _split_path(path: str) -> list[str | int]:
 def resolve_path(context: dict[str, Any], path: str) -> Any:
     """The value at a dotted path in the context, or the missing marker when any step is absent.
 
-    A path that reaches a value nobody could read ends there: the marker's own members, `value` and `reason`,
-    are not the record's, and the path is no more missing than the value is, so a finding shows why the value
-    could not be read, and a rule that reads the path is not evaluated for that reason rather than as missing.
+    A step reads what Jinja reads there: a key of any mapping, whatever the key's type (`m[0]` over `{0: 'x'}`), an
+    item of a list or a tuple, or a character of a text, by its index (`code[0]`). A key a dict lacks is missing,
+    though a method of the dict has its name; an attribute is read only of another object, never behind an
+    underscore. A path that reaches a value nobody could read ends there: the marker's own members, `value` and
+    `reason`, are not the record's, and the path is no more missing than the value is, so a finding shows why the
+    value could not be read, and a rule that reads the path is not evaluated for that reason rather than as missing.
     """
     current: Any = context
     for part in _split_path(path):
         if isinstance(current, Unreadable):
             return current
-        if isinstance(part, int):
-            if isinstance(current, (list, tuple)) and -len(current) <= part < len(current):
+        if isinstance(current, Mapping) and part in current:
+            current = current[part]
+        elif isinstance(part, int):
+            if isinstance(current, (list, tuple, str)) and -len(current) <= part < len(current):
                 current = current[part]
             else:
                 return _MISSING
         elif isinstance(current, dict):
-            if part not in current:
-                return _MISSING
-            current = current[part]
+            return _MISSING
         elif hasattr(current, part) and not part.startswith("_"):
             current = getattr(current, part)
         else:
             return _MISSING
     return _MISSING if isinstance(current, Undefined) else current
+
+
+@pass_context
+def need(context: Context, value: Any, path: str) -> Any:
+    """What a read an expression needs found, or a `MissingValue` naming the path where the record holds nothing.
+
+    A rule's compiled expression hands each such read here as Jinja reaches it (`_compile_lazy`), so a missing value
+    stops the expression where it is read, and only there. Nothing is a null, or an undefined or a method Jinja found
+    in place of a value the record lacks: `ticket.items` over a ticket without items finds the mapping's method. At
+    a path the record does hold, a method or an undefined goes on as it is and fails where it is used:
+    `invoice.items.count` reads the list's method, `ticket.tags.append` one the sandbox refuses.
+    """
+    if value is None or (
+        (isinstance(value, Undefined) or callable(value)) and _is_missing(resolve_path(context.get_all(), path))
+    ):
+        raise MissingValue.for_path(path)
+    return value
+
+
+def callee(value: Any) -> Any:
+    """What the name a call calls holds, or the error of a name nothing defines, raised before the call's arguments
+    are read: a rule's compiled expression hands each such name here (`_compile_lazy`), so `firstpresent(x)` is the
+    helper no one has, whatever `x` holds, rather than a missing `x`. A name the record holds goes on as it is."""
+    if isinstance(value, Undefined):
+        value._fail_with_undefined_error()
+    return value
+
+
+# `need` and `callee` as the compiled code imports them, under names of Jinja's own that no expression can reach.
+_NEED = f"{__name__}.need"
+_CALLEE = f"{__name__}.callee"
+
+
+def _needing(node: nodes.Node, needed: Mapping[int, str], names: set[str], called: bool = False) -> nodes.Node:
+    """`node` with each read under it that the expression needs, in `needed` by the node's id, handed to `need()`
+    with its path, and each name it looks up added to `names`. A call's target is never such a read: a name no helper
+    or global has goes to `callee()` instead, so `firstpresent(x)`, where the record does not hold the name either,
+    raises that the name is undefined before `x` is read."""
+    path = needed.get(id(node))
+    if path is not None and not called:
+        names.add(_root(path))
+        return nodes.Call(nodes.ImportedName(_NEED), [node, nodes.Const(path)], [], None, None, lineno=node.lineno)
+    if isinstance(node, nodes.Name):
+        names.add(node.name)
+        if called and node.name not in GLOBAL_NAMES:
+            return nodes.Call(nodes.ImportedName(_CALLEE), [node], [], None, None, lineno=node.lineno)
+        return node
+    for field, value in node.iter_fields():
+        if isinstance(value, nodes.Node):
+            setattr(node, field, _needing(value, needed, names, isinstance(node, nodes.Call) and field == "node"))
+        elif isinstance(value, list):
+            value[:] = [_needing(item, needed, names) if isinstance(item, nodes.Node) else item for item in value]
+    return node
+
+
+class _Lazy:
+    """A rule's expression as `_compile_lazy` compiles it, handed only the names it looks up.
+
+    Jinja copies whatever an expression is handed into a new context on every call, and a rule looks up a few of the
+    record's names beside every derived value the node computes: the rest would be copied for nothing, for every
+    rule of every record. A name it does not look up is one it cannot reach, so the result is the same.
+    """
+
+    __slots__ = ("expression", "names")
+
+    def __init__(self, expression: TemplateExpression, names: frozenset[str]) -> None:
+        self.expression = expression
+        self.names = names
+
+    def __call__(self, scope: Mapping[str, Any]) -> Any:
+        return self.expression({name: scope[name] for name in self.names if name in scope})
+
+
+def _compile_lazy(text: str) -> tuple[_Lazy, Reads]:
+    """A check or an `applies_when` compiled as `compile_expression` compiles it, keeping an undefined result, and
+    its reads.
+
+    Each read the expression needs goes through `need()`, so a missing value stops it where it is read and nowhere
+    else: Jinja evaluates left to right and stops where the result is decided, so the branch of an `if` it does not
+    take, the side of an `and` or an `or` the other side decided and the rest of a comparison chain already false
+    are never read. A value it only asks about or falls back on (`has`, `is defined`, `| default`, `first_present`)
+    is read as it always was. The name a call calls is no read: one no helper or global has goes through `callee()`,
+    which Python evaluates before the call's arguments, so `firstpresent(x)`, where nothing defines the name, raises
+    that it is undefined whether or not `x` is there; a name the record holds is called as it holds it. An
+    undefined result is kept rather than turned into None, so a bare
+    `limits[program]` that finds nothing is not evaluated instead of read as false and reported as a verdict. The
+    text is parsed as `compile_expression` parses it, so a syntax error names the text as the author wrote it.
+    """
+    parser = Parser(_ENVIRONMENT, text, state="variable")
+    try:
+        expression = parser.parse_expression()
+        if not parser.stream.eos:
+            raise TemplateSyntaxError("chunk after expression", parser.stream.current.lineno, None, None)
+    except TemplateSyntaxError:
+        _ENVIRONMENT.handle_exception(source=text)
+    collected = _collected(expression)
+    reads = _reads_of(collected)
+    required = set(reads.required)
+    names: set[str] = set()
+    expression = _needing(expression, {id(node): path for node, path in collected.needed if path in required}, names)
+    template = nodes.Template([nodes.Assign(nodes.Name("result", "store"), expression, lineno=1)], lineno=1)
+    template.set_environment(_ENVIRONMENT)
+    return _Lazy(TemplateExpression(_ENVIRONMENT.from_string(template), False), frozenset(names)), reads
 
 
 def _unreadable_because(path: str, reason: str) -> str:
@@ -1110,11 +1233,25 @@ class Rules(Node):
 
     - Statuses: `pass` when the check holds; the rule's severity (`fail`, `warn`, `info`) when it does not;
       `not_applicable` when `applies_when` does not hold, the record's `as_of` date is outside the rule's effective
-      window, or the rule skips a missing value; `not_evaluated` when a value the check reads is missing or the
-      check cannot be evaluated. A rule reported at its severity gives its own message, where it has one, rendered
-      with the whole record, where a derived value nobody could compute reads as None, as `derived` shows it; one
-      that did not run or did not apply says why. `evaluated` holds the values the check reads, empty where the rule
-      did not apply.
+      window, or the rule skips a missing value; `not_evaluated` when the check reaches a value that is missing or
+      cannot be evaluated. A rule reported at its severity gives its own message, where it has one, rendered with
+      the whole record, where a derived value nobody could compute reads as None, as `derived` shows it; one that
+      did not run or did not apply says why. `evaluated` holds the values the check reads, empty where the rule did
+      not apply.
+    - Missing values: a check and `applies_when` are evaluated left to right, and a value counts only once the
+      evaluation reaches it. The branch of an `if` not taken, the side of an `and` or an `or` the other side
+      already decided and the rest of a comparison chain already false are never read, so a value missing there
+      changes nothing. The first value needed that is missing stops the expression, and the reason names that
+      value; where a helper turned a blank it was handed into a missing value, `text()` of blank text say, the
+      reason names a blank value the check reads, which may sit in a branch not taken. An error reached first is
+      an error, whatever the expression would have read after it, and a call of a name nothing defines, neither a
+      helper nor the record, is one before its arguments are read. A message decides nothing and reads a missing
+      value as it always did.
+    - Derived values are computed as they always were: a missing value stops one only where the expression uses
+      it, so a null it falls back past still computes, `(x or 0) < 3` is true over a null `x`, and a list or a
+      dict it builds holds None for a member the record lacks; a failure beside a missing value it needs makes it
+      missing. Naming part of a check as a derived value can therefore change what the rule reports: the check
+      `(x or 0) < 3` stops at the null `x`, where a check that reads the same text as a derived value decides.
     - Policies: `on_missing` on the node, which a rule's own overrides, says what a missing value means:
       `not_evaluated`, the default, holds the rule for review; `fail` reports its severity, the reason after its
       message; `not_applicable` skips it ("does not apply: missing value for …"), so the rule needs no presence
@@ -1130,16 +1267,18 @@ class Rules(Node):
         - needs a lookup that found nothing, `limits[loan.program]` for a program the table lacks, in the check or
           in a derived value it does not only fall back on (`first_present(limit, 500000)`);
         - meets a blank no read accounts for, from a lookup inside `text()` say.
-      A derived value that came out missing counts as data the record lacks exactly when the same expression,
-      written in the check, would. Under `not_applicable` the reason says why the rule was not skipped, `missing
-      value for loan.amount (not skipped: lon is not an input or a derived value)`, unless it is already the error
-      of a value nobody could read.
-    - What a skipped rule cannot see: an error its check would raise on the values that are there, a zero divisor,
-      a misspelled method (`text(app.name).startwith('A')`) or a value of the wrong type; that surfaces on the
-      records that carry the missing value.
+      A derived value that came out missing counts as data the record lacks when a value it reads is missing,
+      whether or not its evaluation reached that value. Under `not_applicable` the reason says why the rule was not
+      skipped, `missing value for loan.amount (not skipped: lon is not an input or a derived value)`, unless it is
+      already the error of a value nobody could read.
+    - What a skipped rule cannot see: an error its check would raise after the missing value it stopped at, on
+      values that are there: a zero divisor, a misspelled method (`app.age >= 18 and text(app.name).startwith('A')`
+      without an age) or a value of the wrong type; that surfaces on the records that carry the missing value. An
+      error the check reaches before the missing value is reported on every record, the one that lacks the value
+      as well: `loan.amount / appraisal.value <= appraisal.max_ltv` over a zero value, with or without the limit.
     - Overall status: `fail` if any rule failed, else `warn` if any warned, else `not_evaluated` if any check did
       not run, else `pass`. A check held for a missing value did not run, so a record is never `pass` while a value
-      was missing, unless every rule that missed one was set to skip it.
+      a check needed was missing, unless every rule that missed one was set to skip it.
 
     The output holds `findings` in rule order, which a trace keeps whole, a `summary` of statuses, `status`, the
     `derived` values and `derived_errors`. A derived value computed from a missing value is missing, None under
@@ -1207,14 +1346,19 @@ class Rules(Node):
             output_data = {**output_data, "findings": UntruncatedList(findings)}
         return super().transform_output(output_data, **kwargs)
 
-    def _compile_expression(self, text: str, where: str) -> tuple[Callable[..., Any], Reads]:
+    def _compile_expression(self, text: str, where: str, *, lazy: bool = True) -> tuple[Callable[..., Any], Reads]:
         try:
-            # A lookup that finds nothing must come back as RuleUndefined, whose truth test raises, rather
-            # than be turned into None on the way out: a bare `limits[program]` is then not evaluated
-            # instead of read as false and reported as a verdict. Compiled before its reads are collected,
-            # from the text wrapped in braces, so a syntax error names the text as the author wrote it.
-            compiled = _ENVIRONMENT.compile_expression(text, undefined_to_none=False)
-            reads = read_paths(text)
+            if lazy:
+                # A check and `applies_when` stop at a missing value only where they read it.
+                compiled, reads = _compile_lazy(text)
+            else:
+                # A derived value is computed as it always was. A lookup that finds nothing must come back as
+                # RuleUndefined, whose truth test raises, rather than be turned into None on the way out: a bare
+                # `limits[program]` is then not evaluated instead of read as false and reported as a verdict.
+                # Compiled before its reads are collected, from the text wrapped in braces, so a syntax error names
+                # the text as the author wrote it.
+                compiled = _ENVIRONMENT.compile_expression(text, undefined_to_none=False)
+                reads = read_paths(text)
         except TemplateSyntaxError as e:
             raise ValueError(f"{where} is not a valid expression: {e}") from e
         except (RecursionError, SyntaxError) as e:
@@ -1239,7 +1383,7 @@ class Rules(Node):
             if not value.expression.strip():
                 raise ValueError(f"{label} has no expression")
             taken.add(value.name)
-            compiled.append((value.name, *self._compile_expression(value.expression, label)))
+            compiled.append((value.name, *self._compile_expression(value.expression, label, lazy=False)))
         return compiled
 
     def _compile_rules(self) -> list[CompiledRule]:
@@ -1470,8 +1614,6 @@ class Rules(Node):
         """
         if compiled.applies is not None:
             reads = compiled.applies_reads
-            if missing := self._missing(reads.required, scope):
-                return self._missing_status(compiled, "applies_when", reads, scope, unskippable, missing)
             try:
                 applies = holds(compiled.applies(scope_for(reads, scope, RuleUndefined)))
             except MissingValue as e:
@@ -1483,8 +1625,6 @@ class Rules(Node):
                 return STATUS_NOT_APPLICABLE, f"does not apply: {compiled.rule.applies_when.strip()}", True
 
         reads = compiled.check_reads
-        if missing := self._missing(reads.required, scope):
-            return self._missing_status(compiled, "check", reads, scope, unskippable, missing)
         try:
             held = holds(compiled.check(scope_for(reads, scope, RuleUndefined)))
         except MissingValue as e:
@@ -1669,20 +1809,23 @@ class Rules(Node):
 
     @staticmethod
     def _missing_reason(reads: Reads, scope: dict[str, Any], error: MissingValue) -> tuple[str | None, str]:
-        """The value an expression that used a blank could not decide on, and why.
+        """The value an expression that stopped at a missing value could not decide on, and why.
 
-        Only `text()`, `number()`, `date()`, `days_between()` and `first_present()` turn a blank into a missing value,
-        so the value named is the first one they were handed that turned out blank, `app.a` in `app.b == '' and
-        text(app.a) == 'x'`, where the blank `app.b` was compared and held. That leaves out a helper whose blank the
-        expression takes for an answer, inside `has()`, a test, `| default` or `first_present()`; one a question that
-        takes blank text for missing asked about first (`app.a is present and text(app.a) == 'x'`); and one `has(app.a)`
-        asked about first where `app.a` is missing, since `has()` stops a missing value though it lets blank text
-        through (`BlankSource`). `app.a is defined` counts as `has(app.a)` there, though a null passes it. Failing
-        those, the value named is the first the expression reads that is missing or blank, one a helper was handed
-        through a filter say. A helper that returns a blank is handed a value, not the path the value came from, so the
-        reads name it; a blank no read accounts for, one made from a literal or by a lookup that found nothing say, has
-        no path and keeps the error's own message.
+        A read the expression needs names its own path where it finds nothing (`need`): the value the evaluation
+        reached, wherever the expression reads it. Otherwise a helper turned a blank into a missing value, and only
+        `text()`, `number()`, `date()`, `days_between()` and `first_present()` do, so the value named is the first one
+        they were handed that turned out blank, `app.a` in `app.b == '' and text(app.a) == 'x'`, where the blank `app.b`
+        was compared and held. That leaves out a helper whose blank the expression takes for an answer, inside `has()`,
+        a test, `| default` or `first_present()`; one a question that takes blank text for missing asked about first
+        (`app.a is present and text(app.a) == 'x'`); and one `has(app.a)` asked about first where `app.a` is missing,
+        since `has()` stops a missing value though it lets blank text through (`BlankSource`). `app.a is defined` counts
+        as `has(app.a)` there, though a null passes it. Failing those, the value named is the first the expression reads
+        that is missing or blank, one a helper was handed through a filter say. A helper that returns a blank is handed
+        a value, not the path the value came from, so the reads name it; a blank no read accounts for, one made from a
+        literal or by a lookup that found nothing say, has no path and keeps the error's own message.
         """
+        if error.path:
+            return error.path, f"missing value for {error.path}"
         for source in reads.blank_sources:
             values = [resolve_path(scope, path) for path in source.paths]
             if all(is_blank(value) for value in values) and not (source.guarded and any(map(_is_missing, values))):
