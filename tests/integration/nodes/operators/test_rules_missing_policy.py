@@ -521,7 +521,7 @@ HELD = {
         lambda **policy: screening("date(doc.issued) <= date(doc.due)", inputs=("doc",), **policy),
         {"doc": {"issued": "2026-02-30"}},
         "missing value for doc.due",
-        "doc.issued is unreadable: day is out of range for month",
+        "doc.issued is not a date: '2026-02-30' (day is out of range for month)",
     ),
     "unreadable-date-in-days-between": Held(
         lambda **policy: screening("days_between(doc.opened, doc.closed) <= 30", inputs=("doc",), **policy),

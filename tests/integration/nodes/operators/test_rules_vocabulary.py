@@ -688,6 +688,37 @@ def test_a_build_error_names_the_text_the_author_wrote(text, error):
     assert str(refused_expression.value) == f"Expression 'reader': 'value' is not a valid expression: {error}"
 
 
+NESTED_TOO_DEEPLY = "(" * 200 + "order.total" + ")" * 200 + " > 1"
+
+
+@pytest.mark.parametrize(
+    ("settings", "error"),
+    [
+        ({"rules": [Rule(id="R1", check=NESTED_TOO_DEEPLY)]}, "Rules 'vocabulary', rule 1: the check"),
+        (
+            {"rules": [Rule(id="R1", check="true", applies_when=NESTED_TOO_DEEPLY)]},
+            "Rules 'vocabulary', rule 1: applies_when",
+        ),
+        (
+            {"derived_values": [DerivedValue(name="total", expression=NESTED_TOO_DEEPLY)]},
+            "Rules 'vocabulary': derived value 'total'",
+        ),
+        (
+            {"rules": [Rule(id="R1", check="true", message="{{ " + NESTED_TOO_DEEPLY + " }}")]},
+            "Rules 'vocabulary', rule 1: the message",
+        ),
+    ],
+    ids=["check", "applies-when", "derived-value", "message"],
+)
+def test_text_nested_too_deeply_to_read_names_its_rule_when_the_node_is_built(settings, error):
+    """Jinja reads each level of nesting through a dozen calls, so some 70 parentheses exhaust Python's stack before the
+    text is read: the node still fails to build, naming the rule, where it failed with a bare `RecursionError`."""
+    with pytest.raises(ValueError) as refused:
+        Rules(name="vocabulary", input_fields=[NamedField(name="order")], **settings)
+
+    assert str(refused.value) == f"{error} is nested too deeply to read; split it into smaller expressions"
+
+
 def test_a_rule_reading_and_calling_number_is_held_when_it_runs_not_refused_at_build():
     """`number` is a name the vocabulary added, so an input of that name keeps building, as one called `text` does."""
     node = Rules(
@@ -777,6 +808,31 @@ def test_a_date_that_does_not_match_the_format_given_is_unreadable_naming_the_fo
     assert (finding["status"], finding["message"]) == (
         "not_evaluated",
         "check could not be evaluated: not a date: '2026-07-17' (format '%d.%m.%Y')",
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw", "why"),
+    [
+        ("2025-02-29", "day is out of range for month"),
+        ("02/29/2025", "day is out of range for month"),
+        ("2025/02/29", "day is out of range for month"),
+        ("August 32, 2026", "day is out of range for month"),
+        ("31 June 2026", "day is out of range for month"),
+        ("13/08/2026", "month must be in 1..12"),
+    ],
+    ids=["iso", "us", "year-first", "named", "day-first", "month-out-of-range"],
+)
+def test_a_date_the_calendar_lacks_names_the_text_and_why(raw, why):
+    """Text in a date's shape that names no day of the calendar is unreadable, naming the text as any other text that
+    is no date does, with Python's reason after it."""
+    node = rules(Rule(id="DT-01", check="date(app.opened) < today()"))
+
+    finding = by_id(run(node, record(opened=raw)))["DT-01"]
+
+    assert (finding["status"], finding["message"]) == (
+        "not_evaluated",
+        f"check could not be evaluated: not a date: {raw!r} ({why})",
     )
 
 
@@ -1082,6 +1138,39 @@ def test_a_message_prints_an_unreadable_value_as_the_text_the_record_holds():
     finding = by_id(run(node, record(amount="900", opened="March")))["AMT-01"]
 
     assert (finding["status"], finding["message"]) == ("fail", "Amount 900 for a file opened March")
+
+
+def test_a_reason_quotes_about_80_characters_of_a_long_value():
+    """Every finding that reads a value nobody could read carries the reason, and a page of text in an amount field
+    would be copied into each of them: a reason quotes about 80 characters of the value, a shorter one whole."""
+    page = "Amount: see the attached schedule of payments. " * 1100
+    quoted = repr(page)[:79] + "…"
+    node = Rules(
+        name="vocabulary",
+        input_fields=[NamedField(name="doc")],
+        derived_values=[DerivedValue(name="amount", expression="number(doc.amount)")],
+        rules=[
+            Rule(id="number", check="number(doc.amount) > 1000"),
+            Rule(id="date", check="date(doc.amount) < today()"),
+        ],
+    )
+
+    output = run(node, record("doc", amount=page))
+
+    assert len(page) > 50_000
+    assert output["derived_errors"] == {"amount": f"not a number: {quoted}"}
+    assert len(output["derived_errors"]["amount"]) < 120
+    assert {rule_id: finding["message"] for rule_id, finding in by_id(output).items()} == {
+        "number": f"check could not be evaluated: not a number: {quoted}",
+        "date": f"check could not be evaluated: not a date: {quoted}",
+    }
+    as_of = node.run(input_data={"doc": {}, "as_of": page}, config=RunnableConfig(callbacks=[]))
+    assert as_of.error.message == f"Rules: 'as_of' is not a date: {quoted}"
+    # A value whose repr is 80 characters is quoted whole; one a character longer is cut to 80.
+    with pytest.raises(ValueError, match=f"^not a date: '{'x' * 78}'$"):
+        to_date("x" * 78)
+    with pytest.raises(ValueError, match=f"^not a date: '{'x' * 78}…$"):
+        to_date("x" * 79)
 
 
 def test_an_unreadable_value_has_no_members_a_rule_can_read():

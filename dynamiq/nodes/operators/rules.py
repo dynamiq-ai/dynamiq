@@ -175,6 +175,17 @@ def _is_missing(value: Any) -> bool:
     return value is None or value is _MISSING or isinstance(value, Undefined)
 
 
+# The most of a value a reason quotes. Every finding that reads a value nobody could read carries the reason, so a page
+# of text in an amount field would otherwise be copied into each of them.
+_QUOTED_LENGTH = 80
+
+
+def _quoted(value: Any) -> str:
+    """The value as a reason quotes it: its repr, cut to about 80 characters with `…` where it is longer."""
+    text = repr(value)
+    return text if len(text) <= _QUOTED_LENGTH else f"{text[:_QUOTED_LENGTH - 1]}…"
+
+
 def has(value: Any) -> bool:
     """True when a value is present: defined and not null.
 
@@ -235,19 +246,24 @@ def to_date(value: Any, format: str | None = None) -> date:
             try:
                 return datetime.strptime(written, format).date()
             except ValueError as e:
-                raise ValueError(f"not a date: {value!r} (format {format!r})") from e
-        if _ISO_DATE.match(written):
-            return date.fromisoformat(written[:10])
-        if us := _US_DATE.match(written):
-            month, day, year = (int(part) for part in us.groups())
-            return date(year, month, day)
-        if year_first := _YEAR_FIRST_DATE.match(written):
-            year, month, day = (int(part) for part in year_first.groups())
-            return date(year, month, day)
-        named = _NAMED_DATE.match(written) or _DAY_FIRST_DATE.match(written)
-        if named and (month := _MONTHS.get(named["month"].lower())):
-            return date(int(named["year"]), month, int(named["day"]))
-    raise ValueError(f"not a date: {value!r}")
+                raise ValueError(f"not a date: {_quoted(value)} (format {format!r})") from e
+        try:
+            if _ISO_DATE.match(written):
+                return date.fromisoformat(written[:10])
+            if us := _US_DATE.match(written):
+                month, day, year = (int(part) for part in us.groups())
+                return date(year, month, day)
+            if year_first := _YEAR_FIRST_DATE.match(written):
+                year, month, day = (int(part) for part in year_first.groups())
+                return date(year, month, day)
+            named = _NAMED_DATE.match(written) or _DAY_FIRST_DATE.match(written)
+            if named and (month := _MONTHS.get(named["month"].lower())):
+                return date(int(named["year"]), month, int(named["day"]))
+        except ValueError as e:
+            # Text in a date's shape that names no day of the calendar, `02/29/2025`: Python says which part is out of
+            # range, and the reason names the text as well.
+            raise ValueError(f"not a date: {_quoted(value)} ({e})") from e
+    raise ValueError(f"not a date: {_quoted(value)}")
 
 
 def days_between(start: Any, end: Any) -> int:
@@ -373,7 +389,7 @@ def number(environment: "RecordSandbox", value: Any, decimal: str = ".") -> Any:
     if is_blank(value):
         return environment.blank(hint="missing value: number() found no number", exc=MissingValue)
     read = _number_of(value, decimal)
-    return Unreadable(value, f"not a number: {value!r}") if read is None else read
+    return Unreadable(value, f"not a number: {_quoted(value)}") if read is None else read
 
 
 @pass_environment
@@ -1035,6 +1051,13 @@ class _Hold(NamedTuple):
     lookup: bool = False
 
 
+def _too_deep(where: str) -> str:
+    """Why text nested too deeply fails the build, as `workflow validate` puts it. Jinja reads each level of nesting
+    through a dozen calls, so some 70 parentheses exhaust Python's stack before the text is read, and the bare
+    `RecursionError` would name no rule."""
+    return f"{where} is nested too deeply to read; split it into smaller expressions"
+
+
 class CompiledRule(NamedTuple):
     rule: Rule
     applies: Callable[..., Any] | None
@@ -1171,6 +1194,8 @@ class Rules(Node):
             reads = read_paths(text)
         except TemplateSyntaxError as e:
             raise ValueError(f"{where} is not a valid expression: {e}") from e
+        except RecursionError:
+            raise ValueError(_too_deep(where)) from None
         # The sandbox refuses these at run time; refusing them at build time names the rule instead of holding it.
         if private := _private_segment(reads.required + reads.optional):
             raise ValueError(f"{where} reads a private attribute ({private})")
@@ -1218,6 +1243,8 @@ class Rules(Node):
                     message_reads = read_template(rule.message)
                 except TemplateSyntaxError as e:
                     raise ValueError(f"{label}: the message is not a valid template: {e}") from e
+                except RecursionError:
+                    raise ValueError(_too_deep(f"{label}: the message")) from None
                 refuse_reserved_read(message_reads, f"{label}: the message")
             applies_compiled, applies_reads = None, Reads(required=[], optional=[])
             if applies:
@@ -1359,7 +1386,7 @@ class Rules(Node):
         try:
             return to_date(value)
         except ValueError as e:
-            raise ValueError(f"Rules: '{AS_OF_KEY}' is not a date: {value!r}") from e
+            raise ValueError(f"Rules: '{AS_OF_KEY}' is not a date: {_quoted(value)}") from e
 
     def _evaluate(
         self,
