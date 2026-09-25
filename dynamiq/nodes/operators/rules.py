@@ -1257,8 +1257,9 @@ def _check_and_or_decide() -> bool:
     read them as main does: a missing value on either side stops the rule where the other side should decide it, which
     holds the rule, or skips it under `not_applicable`, and an error the other side would raise goes unseen. The module
     imports all the same, and the tests pin that either side decides; it runs this once, when it is imported, so the
-    log names such a release rather than the change going unnoticed. The release is read from the package, not from
-    its metadata, which a bundled application may not ship.
+    log names such a release rather than the change going unnoticed. The release is the one the package names, or
+    unknown where reading it fails: jinja2 3.2 looks it up in the package's metadata, which a bundled application may
+    not ship.
     """
     cause = ""
     try:
@@ -1270,11 +1271,14 @@ def _check_and_or_decide() -> bool:
         decided, cause = False, f" (the check raised {type(e).__name__}: {e})"
     if decided:
         return True
-    release = getattr(jinja2, "__version__", None) or "(version unknown)"
+    try:
+        release = jinja2.__version__
+    except Exception:
+        release = None
     logger.warning(
-        f"jinja2 {release} does not compile the `and` and the `or` of a Rules check as dynamiq expects: in a check "
-        "they will not decide past a missing value on either side, which then stops the rule under its missing-data "
-        f"policy; pin jinja2 to a release this version of dynamiq is tested with{cause}"
+        f"jinja2 {release or '(version unknown)'} does not compile the `and` and the `or` of a Rules check as dynamiq "
+        "expects: in a check they will not decide past a missing value on either side, which then stops the rule under "
+        f"its missing-data policy; pin jinja2 to a release this version of dynamiq is tested with{cause}"
     )
     return False
 

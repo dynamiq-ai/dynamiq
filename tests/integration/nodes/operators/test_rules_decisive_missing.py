@@ -22,7 +22,7 @@ import logging
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
-from types import MappingProxyType, SimpleNamespace
+from types import MappingProxyType, ModuleType, SimpleNamespace
 
 import jinja2
 import pytest
@@ -998,6 +998,26 @@ def test_the_warning_names_the_jinja2_release_where_the_package_has_no_metadata(
 
     assert len(warnings) == 1
     assert warnings[0].startswith(f"{named} does not compile")
+
+
+def test_the_warning_says_the_release_is_unknown_where_reading_it_raises(monkeypatch):
+    """jinja2 3.2 looks `__version__` up in the package's metadata, and the lookup raises where a bundled application
+    ships none, which a default for a missing attribute does not catch: the warning says the release is unknown, so
+    the import still only warns."""
+
+    def no_metadata(name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    stand_in = ModuleType("jinja2")
+    stand_in.__getattr__ = no_metadata
+    monkeypatch.setattr(rules_module, "jinja2", stand_in)
+    compile_and_or_with_jinjas_own_visitors(monkeypatch)
+
+    with warnings_logged() as warnings:
+        assert not rules_module._check_and_or_decide()
+
+    assert len(warnings) == 1
+    assert warnings[0].startswith("jinja2 (version unknown) does not compile")
 
 
 def test_a_check_still_calls_what_the_record_holds_through_the_sandbox():
