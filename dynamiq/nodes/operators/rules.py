@@ -627,7 +627,7 @@ class RuleCodeGenerator(CodeGenerator):
             super().visit_Call(node, frame, forward_caller=forward_caller)
             return
         self.visit(node.node, frame)
-        self.write("(context, " if helper == _NEED else "(")
+        self.write("(context, " if helper in (_NEED, _BLANK_AT) else "(")
         for index, argument in enumerate(node.args):
             if index:
                 self.write(", ")
@@ -1062,12 +1062,15 @@ def callee(value: Any) -> Any:
     return value
 
 
-def blank_at(value: Any, path: str, raw: bool = False) -> Any:
-    """`value`, or a blank that stops a check naming `path` in place of one the check counts as missing (`_needing`):
-    a blank a helper made of the value at `path`, or, where `value` is that value itself (`raw`), blank text, which
-    `days_between()` counts as missing."""
+@pass_context
+def blank_at(context: Context, value: Any, paths: tuple[str, ...], raw: bool = False) -> Any:
+    """`value`, or, where it is a blank a helper made, or with `raw` blank text, which `days_between()` counts as
+    missing, and the value at each of `paths` is blank as well, a blank that stops a check naming the first path
+    (`_needing`): the record lacks the value the blank came from. Any other blank stays the helper's own."""
     if isinstance(value, Blank) or (raw and isinstance(value, str) and not value.strip()):
-        return _CHECK_ENVIRONMENT.blank(exc=lambda _: MissingValue.for_path(path))
+        scope = context.get_all()
+        if all(is_blank(resolve_path(scope, path)) for path in paths):
+            return _CHECK_ENVIRONMENT.blank(exc=lambda _: MissingValue.for_path(paths[0]))
     return value
 
 
@@ -1078,8 +1081,8 @@ _CALLEE = f"{__name__}.callee"
 _BLANK_AT = f"{__name__}.blank_at"
 
 
-# The helpers that turn a blank they are handed into a missing value (`blank_at`).
-_BLANK_HELPERS = frozenset({"text", "number", "date", "first_present", "days_between"})
+# The helpers that turn a blank they are handed into one they return (`blank_at`); `days_between()` raises instead.
+_BLANK_MAKERS = frozenset({"text", "number", "date", "first_present"})
 
 
 def _call(name: str, node: nodes.Expr, *args: nodes.Expr) -> nodes.Call:
@@ -1087,12 +1090,25 @@ def _call(name: str, node: nodes.Expr, *args: nodes.Expr) -> nodes.Call:
     return nodes.Call(nodes.ImportedName(name), [node, *args], [], None, None, lineno=node.lineno)
 
 
+def _handed_path(argument: nodes.Node) -> str | None:
+    """The path whose value `argument` hands a helper: the path itself, the one a filter over it reads, or the one a
+    `text()`, `number()`, `date()` or `first_present()` inside it is handed first."""
+    if (path := _path_of(argument)) is not None:
+        return path
+    if isinstance(argument, nodes.Filter) and argument.node is not None:
+        return _handed_path(argument.node)
+    maker = isinstance(argument, nodes.Call) and isinstance(argument.node, nodes.Name)
+    if maker and argument.node.name in _BLANK_MAKERS and argument.args:
+        return _handed_path(argument.args[0])
+    return None
+
+
 def _needing(node: nodes.Node, needed: Mapping[int, str], names: set[str], called: bool = False) -> nodes.Node:
     """`node` with each read under it that the expression needs, in `needed` by the node's id, handed to `need()`
     with its path, and each name it looks up added to `names`. A called name no helper or global has goes to
-    `callee()`, so `firstpresent(x)`, where nothing defines the name, raises before `x` is read; a helper's blank names
-    the path it was handed as it is, the first to `text()`, `number()`, `date()` or `first_present()` or any to
-    `days_between()` (`blank_at`)."""
+    `callee()`, so `firstpresent(x)`, where nothing defines the name, raises before `x` is read. A blank a helper makes
+    goes to `blank_at()` with the paths its value came from (`_handed_path`): the first value `text()`, `number()` or
+    `date()` is handed, every value `first_present()` is, where each has one, and each date `days_between()` is."""
     path = needed.get(id(node))
     if path is not None and not called:
         names.add(_root(path))
@@ -1103,21 +1119,34 @@ def _needing(node: nodes.Node, needed: Mapping[int, str], names: set[str], calle
             return _call(_CALLEE, node)
         return node
     helper = node.node.name if isinstance(node, nodes.Call) and isinstance(node.node, nodes.Name) else None
+    tagged = helper in _BLANK_MAKERS or helper == "days_between"
     # Read before `need()` wraps the arguments, which are then no longer paths.
-    handed = [_path_of(argument) for argument in node.args] if helper in _BLANK_HELPERS else []
+    handed = [_handed_path(argument) for argument in node.args] if tagged else []
+    handed_by_name = {item.key: _handed_path(item.value) for item in node.kwargs} if tagged else {}
     for field, value in node.iter_fields():
         if isinstance(value, nodes.Node):
             setattr(node, field, _needing(value, needed, names, isinstance(node, nodes.Call) and field == "node"))
         elif isinstance(value, list):
             value[:] = [_needing(item, needed, names) if isinstance(item, nodes.Node) else item for item in value]
     if helper == "days_between":
-        node.args = [
-            argument if path is None else _call(_BLANK_AT, argument, nodes.Const(path), nodes.Const(True))
-            for argument, path in zip(node.args, handed)
-        ]
-    elif handed and handed[0] is not None:
-        return _call(_BLANK_AT, node, nodes.Const(handed[0]))
+        # Each date is handed to it as the record holds it, and its blank text is missing where it is read.
+        node.args = [_blank_at(argument, path, raw=True) for argument, path in zip(node.args, handed)]
+        for item in node.kwargs:
+            item.value = _blank_at(item.value, handed_by_name[item.key], raw=True)
+    elif helper == "first_present":
+        # Its blank is every value it is handed coming out blank, so each must come from a path.
+        if handed and None not in handed:
+            return _blank_at(node, *handed)
+    elif helper in _BLANK_MAKERS:
+        return _blank_at(node, handed[0] if handed else handed_by_name.get("value"))
     return node
+
+
+def _blank_at(node: nodes.Expr, *paths: str | None, raw: bool = False) -> nodes.Expr:
+    """`node` handed to `blank_at()` with `paths`, or as it is where the first is None."""
+    if not paths or paths[0] is None:
+        return node
+    return _call(_BLANK_AT, node, nodes.Const(paths), nodes.Const(raw))
 
 
 def _mark_deciding(node: nodes.Node, truth: bool = True) -> None:
@@ -1154,8 +1183,9 @@ def _compile_lazy(text: str) -> tuple[_Lazy, Reads]:
     """A check or an `applies_when` and its reads, compiled as `compile_expression` compiles it but keeping an undefined
     result, so a bare `limits[program]` that finds nothing is no verdict. Each read it needs goes through `need()`, so
     a missing value stops it only where the evaluation reaches it; a call of a name no helper has goes through
-    `callee()`, and a blank a helper makes of a path through `blank_at()` (`_needing`); an `and` or an `or` whose truth
-    alone counts decides in `RuleSandbox` (`_mark_deciding`). A syntax error names the text as the author wrote it."""
+    `callee()`, and a blank a helper makes goes through `blank_at()` with the paths its value came from (`_needing`);
+    an `and` or an `or` whose truth alone counts decides in `RuleSandbox` (`_mark_deciding`). A syntax error names the
+    text as the author wrote it."""
     parser = Parser(_CHECK_ENVIRONMENT, text, state="variable")
     try:
         expression = parser.parse_expression()
@@ -1284,12 +1314,12 @@ class Rules(Node):
 
     A rule is `pass` when its check holds and its severity (`fail`, `warn`, `info`) when it does not; `not_applicable`
     when `applies_when` does not hold or `as_of` falls outside its effective window; `not_evaluated`, or its severity
-    under the `fail` policy, when it cannot be evaluated. Where the check or `applies_when` stops at a missing value,
-    `on_missing`, the rule's or else the node's, decides: `not_evaluated`, the default, holds the rule for review,
-    `fail` reports its severity and `not_applicable` skips it. Only data the record lacks is skipped: a rule is held,
-    saying why, where its expression, reached or not, reads a value nobody could read, calls a name nothing defines,
-    uses a filter or a test the sandbox lacks, finds a value missing under a name the node does not declare, or needs a
-    derived value whose lookup found nothing or that is missing for any of these.
+    under `fail`, when it cannot be evaluated. Where the check or `applies_when` stops at a missing value, `on_missing`,
+    the rule's or else the node's, decides: `not_evaluated`, the default, holds the rule for review, `fail` reports its
+    severity and `not_applicable` skips it. Only data the record lacks is skipped: a rule is held, saying why, where it
+    stops at a blank no path accounts for, a lookup's say, or its expression, reached or not, reads a value nobody could
+    read, calls a name nothing defines, uses a filter or a test the sandbox lacks, finds a value missing under an
+    undeclared name, or needs a derived value whose lookup found nothing or that is held for any of these.
 
     A check and `applies_when` evaluate left to right, and a missing value counts only where the evaluation reaches it:
     never in the branch of an `if` not taken, on the side of an `and` or an `or` its first side decided or in the rest
@@ -1298,17 +1328,16 @@ class Rules(Node):
     handed: `app.a | default(app.b)` is held without `app.b` though `app.a` is there. Where only the truth of an `and`
     or an `or` counts, as the whole expression, under `not`, as the test of an `if` or a branch of one whose truth alone
     counts, or as a side of another such, either side decides where the other stops at a missing value: `a or b` is true
-    where `b` is, `a and b` false where `b` is. Where the check uses its value, `(app.fee or 100) > 50` say, it is
-    Python's, and a missing side it reads holds the rule. The reason names the value the evaluation stopped at, the left
-    of two, or, for a blank a helper made of anything but a path, the first blank value the check reads. Only a missing
-    value gives way: an error is an error on either side. A rule that skipped a value, or whose other side decided,
-    cannot see an error its check would raise after it: `app.b / app.q > 1 or app.a == 1` passes without `app.b` where
-    `app.a` is 1, though `app.q` is 0.
+    where `b` is, `a and b` false where `b` is. Where the check uses its value, `(app.fee or 100) > 50`, it is Python's:
+    a missing side it reads holds the rule. The reason names the value the evaluation stopped at, the left of two, a
+    helper's blank by the path its value came from. Only a missing value gives way: an error is an error on either side.
+    A rule that skipped a value, or whose other side decided, cannot see an error its check would raise after it: with
+    `app.a` 1 and `app.q` 0, `app.b / app.q > 1 or app.a == 1` passes without `app.b`.
 
-    Derived values and messages are evaluated as written, as Jinja evaluates them: `and` and `or` are Python's, and a
-    missing value stops a derived value only where it is used, so naming part of a check as a derived value can change
-    what the rule reports, either way. A derived value computed from a missing value is missing, None under `derived`;
-    one that could not be computed is None too, its reason under `derived_errors`, and a rule that uses it is held.
+    Derived values and messages are evaluated as written: `and` and `or` are Python's, and a missing value stops a
+    derived value only where it is used, so naming part of a check as a derived value can change what the rule reports.
+    A derived value computed from a missing value is missing, None under `derived`; one that could not be computed is
+    None too, its reason under `derived_errors`, and a rule that uses it is held.
 
     The output holds `findings` in rule order, which a trace keeps whole, a `summary` of statuses, `status` (`fail` if
     any rule failed, else `warn` if any warned, else `not_evaluated` if any did not run, else `pass`), `derived` and
@@ -1643,8 +1672,7 @@ class Rules(Node):
             try:
                 applies = holds(compiled.applies(scope_for(reads, scope, RuleUndefined)))
             except MissingValue as e:
-                path, reason = self._missing_reason(reads, scope, e)
-                return self._missing_status(compiled, "applies_when", reads, scope, unskippable, path, reason)
+                return self._missing_status(compiled, "applies_when", reads, scope, unskippable, e)
             except EVALUATION_ERRORS as e:
                 return self._error_status(compiled, f"applies_when could not be evaluated: {e}")
             if not applies:
@@ -1654,8 +1682,7 @@ class Rules(Node):
         try:
             held = holds(compiled.check(scope_for(reads, scope, RuleUndefined)))
         except MissingValue as e:
-            path, reason = self._missing_reason(reads, scope, e)
-            return self._missing_status(compiled, "check", reads, scope, unskippable, path, reason)
+            return self._missing_status(compiled, "check", reads, scope, unskippable, e)
         except EVALUATION_ERRORS as e:
             return self._error_status(compiled, f"check could not be evaluated: {e}")
         return (STATUS_PASSED, None, True) if held else (compiled.rule.severity.value, None, True)
@@ -1671,14 +1698,14 @@ class Rules(Node):
         reads: Reads,
         scope: dict[str, Any],
         unskippable: Mapping[str, _Hold],
-        path: str | None,
-        reason: str | None = None,
+        missing: MissingValue,
     ) -> tuple[str, str, bool]:
-        """The status, reason and whether the check ran, for an expression that stopped at a missing value, which `path`
-        names where a read accounts for it, under the rule's policy. A value nobody could read makes it an error under
-        every policy; `not_applicable` skips only data the record lacks (`_why_held`), a skipped rule counting as run.
-        Both look at every value the expression reads, reached or not: stricter than the evaluation, never looser."""
-        reason = reason or f"missing value for {path}"
+        """The status, reason and whether the check ran, for an expression that stopped at `missing`, under the rule's
+        policy. A value nobody could read makes it an error under every policy. `not_applicable` skips only data the
+        record lacks: a missing value that names its path (`need`, `blank_at`) where nothing else holds the rule
+        (`_why_held`), a skipped rule counting as run; one that names none, a blank a helper made of a lookup say, holds
+        it. Both look at every value the expression reads, reached or not: stricter than the evaluation, not looser."""
+        path, reason = missing.path, str(missing)
         # Compared with None: the marker refuses a truth test, as every other use.
         _, unreadable = self._unreadable(reads.required + reads.optional, scope)
         if unreadable is not None:
@@ -1809,18 +1836,6 @@ class Rules(Node):
             if isinstance(value := resolve_path(scope, path), Unreadable):
                 return path, value
         return None, None
-
-    @staticmethod
-    def _missing_reason(reads: Reads, scope: dict[str, Any], error: MissingValue) -> tuple[str | None, str]:
-        """The path an expression stopped at, where its missing value names it (`need`, `blank_at`), and the reason. A
-        blank a helper made of anything but a path names the first blank value the expression reads; one no read
-        accounts for, from a lookup that found nothing say, keeps the error's own message."""
-        if error.path:
-            return error.path, f"missing value for {error.path}"
-        for path in reads.required + reads.optional:
-            if is_blank(resolve_path(scope, path)):
-                return path, f"missing value for {path}"
-        return None, str(error)
 
     @staticmethod
     def _render(compiled: CompiledRule, scope: dict[str, Any], reason: str | None) -> str | None:

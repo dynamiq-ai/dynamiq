@@ -520,6 +520,85 @@ def test_the_reason_names_the_blank_the_evaluation_stopped_at(check, app, missin
     assert outcome(run(node, {"app": app})) == (status, f"{prefix}missing value for {missing}")
 
 
+@pytest.mark.parametrize(
+    ("policy", "status", "prefix"),
+    [(None, "not_evaluated", ""), ("fail", "fail", ""), ("not_applicable", "not_applicable", "does not apply: ")],
+)
+@pytest.mark.parametrize(
+    ("check", "app", "missing"),
+    [
+        ("app.b == '' and first_present(text(app.c), app.a) == 'x'", {"b": "", "c": " ", "a": ""}, "app.c"),
+        ("app.b == '' and number(text(app.a)) > 1", {"b": "", "a": " "}, "app.a"),
+        ("app.b == '' and text(app.x | trim) == 'y'", {"b": "", "x": "  "}, "app.x"),
+        ("app.b == '' and days_between(app.o | trim, app.c) > 1", {"b": "", "o": "  ", "c": "2026-08-07"}, "app.o"),
+        ("app.b == '' and days_between(start=app.o, end=app.c) > 1", {"b": "", "o": " ", "c": "2026-08-07"}, "app.o"),
+        ("app.b == '' and text(app.x) == 'y'", {"b": ""}, "app.x"),
+        ("app.b == '' and text(app.x) == 'y'", {"b": "", "x": " "}, "app.x"),
+    ],
+    ids=[
+        "first-present-over-a-helper",
+        "number-over-text",
+        "a-filter-over-a-blank-path",
+        "days-between-over-a-filter",
+        "days-between-by-keyword",
+        "text-of-an-absent-path",
+        "text-of-a-blank-path",
+    ],
+)
+def test_a_helpers_blank_names_the_path_it_came_from_through_filters_and_helpers(
+    check, app, missing, policy, status, prefix
+):
+    """A blank a helper makes names the path its value came from, through a filter over the path or a helper handed it
+    first, where the value there is blank too; it is data the record lacks, so a rule set to skip it does. The blank
+    `app.b` compared before it was never where the check stopped."""
+    node = screening(check, policy)
+
+    assert outcome(run(node, {"app": app})) == (status, f"{prefix}missing value for {missing}")
+
+
+@pytest.mark.parametrize(
+    ("policy", "status", "suffix"),
+    [
+        (None, "not_evaluated", ""),
+        ("fail", "fail", ""),
+        ("not_applicable", "not_evaluated", " (not skipped: no field of the record is named)"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("check", "app", "hint"),
+    [
+        ("app.c == '' and text(limits[app.k]) == 'x'", {"c": "", "k": "zz"}, "missing value: text() found no text"),
+        (
+            "app.b == '' and text(app.x | replace('x', '')) == 'y'",
+            {"b": "", "x": "x"},
+            "missing value: text() found no text",
+        ),
+        (
+            "app.b == '' and first_present(app.a, limits[app.k]) == 'x'",
+            {"b": "", "a": "", "k": "zz"},
+            "missing value: first_present() found nothing present",
+        ),
+        (
+            "app.b == '' and days_between(app.o | replace('x', ''), app.c) > 1",
+            {"b": "", "o": "x", "c": "2026-08-07"},
+            "missing value: days_between() found no date",
+        ),
+    ],
+    ids=["a-lookup-that-found-nothing", "a-filter-over-a-value-there", "a-lookup-among-fallbacks", "days-between"],
+)
+def test_a_blank_no_path_accounts_for_is_never_skipped_nor_named_after_another_blank(
+    check, app, hint, policy, status, suffix
+):
+    """A blank a helper made of a lookup that found nothing, or of a value that is there, is no data the record lacks:
+    the reason is the helper's own, naming no value, and a rule set to skip missing data is held. Naming the blank
+    `app.b` or `app.c` read before it would skip a gap in the table as if the record lacked a value."""
+    node = screening(check, policy, inputs=("app", "limits"))
+
+    output = run(node, {"app": app, "limits": {"x": 2}})
+
+    assert outcome(output) == (status, f"{hint}{suffix}")
+
+
 @pytest.mark.parametrize("policy", POLICIES)
 @pytest.mark.parametrize(
     ("check", "record", "error"),
