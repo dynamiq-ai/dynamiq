@@ -5,6 +5,7 @@ import re
 from collections.abc import Callable, Container, ItemsView, Iterator, KeysView, Mapping, ValuesView
 from datetime import date, datetime
 from decimal import Decimal
+from enum import Enum
 from typing import Any, ClassVar, Literal, NamedTuple, NoReturn
 from uuid import uuid4
 
@@ -620,13 +621,30 @@ class Reader(NamedTuple):
     kwargs: tuple[tuple[str, Any], ...] = ()
 
 
+class _Asked(Enum):
+    """What a value read inside a question is asked about. `has(x)` and a test such as `x is defined` ask whether it
+    is MISSING and take blank text for a value; `x is present`, `x is blank` and any question over what `text()`,
+    `number()` or `date()` return, `has(text(x))` say, ask whether it is BLANK and take blank text for missing."""
+
+    MISSING = "missing"
+    BLANK = "blank"
+
+
+class BlankSource(NamedTuple):
+    """The paths a call of `text()`, `number()`, `date()` or `first_present()` is handed as they are, whose blank the
+    call turns into a missing value where the expression needs what it returns (`_blank_source`), and whether a
+    question that takes blank text for a value, `has(x)` or `x is defined`, asked about one of them first."""
+
+    paths: tuple[str, ...]
+    guarded: bool = False
+
+
 class Reads(NamedTuple):
     """The paths an expression reads: the ones it needs, the ones it only asks about, the global names it calls
     and reads as values, which a record key of the same name would shadow, the paths it calls as if they were
     helpers, a mistyped `firstpresent(x)` say, which are read like any member as well, the paths it reads as a
     number or a date, the filters and tests it uses that the sandbox does not have, each as `(kind, name)`:
-    `("filter", "lowr")`, and the paths whose blank a helper it calls turns into a missing value, one group per
-    call (`_blank_source`)."""
+    `("filter", "lowr")`, and the blanks the helpers it calls may stop it at (`BlankSource`)."""
 
     required: list[str]
     optional: list[str]
@@ -635,7 +653,7 @@ class Reads(NamedTuple):
     unknown_calls: tuple[str, ...] = ()
     readers: tuple[Reader, ...] = ()
     unknown_names: tuple[tuple[str, str], ...] = ()
-    blank_sources: tuple[tuple[str, ...], ...] = ()
+    blank_sources: tuple[BlankSource, ...] = ()
 
 
 class _Collected(NamedTuple):
@@ -647,7 +665,10 @@ class _Collected(NamedTuple):
     unknown_calls: list[str]
     readers: list[Reader]
     unknown_names: list[tuple[str, str]]
+    # The paths handed to a helper that turns a blank into a missing value, one group per call whose result the
+    # expression needs, and the paths a question asked about, by what it asked (`_Asked`).
     blank_sources: list[tuple[str, ...]]
+    asked: dict[_Asked, list[str]]
 
 
 def _readers_of(call: nodes.Call) -> list[Reader]:
@@ -695,7 +716,9 @@ def _root(path: str) -> str:
     return path.split(".")[0].split("[")[0]
 
 
-def _collect_paths(node: nodes.Node, collected: _Collected, required: bool, lenient: bool = False) -> None:
+def _collect_paths(
+    node: nodes.Node, collected: _Collected, required: bool, lenient: bool = False, asked: _Asked | None = None
+) -> None:
     # A filter or a test the sandbox does not have is refused when the expression is built, unless it sits in a
     # conditional, where Jinja leaves it to raise when that branch runs: it is noted, as a helper nobody has is.
     if isinstance(node, (nodes.Filter, nodes.Test)):
@@ -708,28 +731,38 @@ def _collect_paths(node: nodes.Node, collected: _Collected, required: bool, leni
     # `has`, `is defined`, `is present` or `default` is allowed to be missing, and so is anything read inside the
     # arguments of `first_present`, which skips a missing value rather than asking about it.
     if isinstance(node, nodes.Call) and isinstance(node.node, nodes.Name) and node.node.name in GLOBAL_NAMES:
-        collected.called.append(node.node.name)
+        name = node.node.name
+        collected.called.append(name)
         collected.readers.extend(reader for reader in _readers_of(node) if reader not in collected.readers)
-        if (source := _blank_source(node)) and source not in collected.blank_sources:
+        # A helper's blank stops the expression only where it needs what the helper returns: not inside `has`, a
+        # test that asks about it, `| default` or `first_present`, each of which takes a blank for an answer.
+        if required and not lenient and (source := _blank_source(node)) and source not in collected.blank_sources:
             collected.blank_sources.append(source)
-        fallback = lenient or node.node.name == "first_present"
+        fallback = lenient or name == "first_present"
+        # A question over what a reader returns asks whether the value it read is blank: `has(text(x))` is false
+        # for blank text.
+        if name == "has":
+            asked = asked or _Asked.MISSING
+        elif name in ("text", "number", "date") and asked is not None:
+            asked = _Asked.BLANK
         for child in node.iter_child_nodes(exclude=("node",)):
-            _collect_paths(child, collected, required and node.node.name != "has", fallback)
+            _collect_paths(child, collected, required and name != "has", fallback, asked)
         return
     if isinstance(node, nodes.Test) and node.name in _EXEMPT_TESTS:
-        _collect_paths(node.node, collected, required=False, lenient=lenient)
+        question = _Asked.BLANK if node.name in TESTS else asked or _Asked.MISSING
+        _collect_paths(node.node, collected, False, lenient, question)
         return
     if isinstance(node, nodes.Filter) and node.name == "default":
-        _collect_paths(node.node, collected, required=False, lenient=lenient)
+        _collect_paths(node.node, collected, False, lenient, asked)
         for argument in node.args:
-            _collect_paths(argument, collected, required, lenient)
+            _collect_paths(argument, collected, required, lenient, asked)
         return
     # A method call reads the object it is called on, not a member of the method's name: `invoice.get('vat_rate')`
     # needs `invoice`, and a dict holds no key called `get`.
     if isinstance(node, nodes.Call) and isinstance(node.node, nodes.Getattr):
-        _collect_paths(node.node.node, collected, required, lenient)
+        _collect_paths(node.node.node, collected, required, lenient, asked)
         for child in node.iter_child_nodes(exclude=("node",)):
-            _collect_paths(child, collected, required, lenient)
+            _collect_paths(child, collected, required, lenient, asked)
         return
     # Any other call of a path calls what the record holds there as if it were a helper: `firstpresent(x)` reads
     # `firstpresent` like any member, and the path is noted, since a record holds data, never a helper to call.
@@ -740,9 +773,11 @@ def _collect_paths(node: nodes.Node, collected: _Collected, required: bool, leni
         target = collected.lenient if lenient else collected.required if required else collected.optional
         if path not in target:
             target.append(path)
+        if asked is not None and not lenient and path not in collected.asked[asked]:
+            collected.asked[asked].append(path)
         return
     for child in node.iter_child_nodes():
-        _collect_paths(child, collected, required, lenient)
+        _collect_paths(child, collected, required, lenient, asked)
 
 
 def _is_under(path: str, prefix: str) -> bool:
@@ -759,6 +794,7 @@ def _reads_of(parsed: nodes.Template) -> Reads:
         readers=[],
         unknown_names=[],
         blank_sources=[],
+        asked={question: [] for question in _Asked},
     )
     _collect_paths(parsed, collected, required=True)
     required: list[str] = []
@@ -773,6 +809,19 @@ def _reads_of(parsed: nodes.Template) -> Reads:
     # `first_present(a.b, c) == 1 and a.b.c > 0` still needs `a.b.c`.
     optional += [path for path in collected.lenient if path not in required and path not in optional]
     roots = dict.fromkeys(_root(path) for path in required + optional)
+
+    # Nor does a helper's blank stop it where a question that takes blank text for missing asked about the value
+    # first: `app.a is present and text(app.a) == 'x'` never hands `text()` a blank `app.a`. A question that takes
+    # blank text for a value, `has(app.a)`, stops only a missing one, which the reason looks at record by record
+    # (`Rules._missing_reason`).
+    def asked_about(paths: tuple[str, ...], question: _Asked) -> bool:
+        return any(_is_under(path, guard) for path in paths for guard in collected.asked[question])
+
+    blank_sources = tuple(
+        BlankSource(paths, guarded=asked_about(paths, _Asked.MISSING))
+        for paths in collected.blank_sources
+        if not asked_about(paths, _Asked.BLANK)
+    )
     return Reads(
         required=required,
         optional=optional,
@@ -781,7 +830,7 @@ def _reads_of(parsed: nodes.Template) -> Reads:
         unknown_calls=tuple(collected.unknown_calls),
         readers=tuple(collected.readers),
         unknown_names=tuple(collected.unknown_names),
-        blank_sources=tuple(collected.blank_sources),
+        blank_sources=blank_sources,
     )
 
 
@@ -1541,14 +1590,20 @@ class Rules(Node):
 
         Only `text()`, `number()`, `date()` and `first_present()` turn a blank into a missing value, so the value
         named is the first one they were handed that turned out blank, `app.a` in `app.b == '' and text(app.a) ==
-        'x'`, where the blank `app.b` was compared and held; failing that, the first value the expression reads that
-        is missing or blank, one a helper was handed through a filter say. A helper that returns a blank is handed a
-        value, not the path the value came from, so the reads name it; a blank no read accounts for, one made from a
-        literal or by a lookup that found nothing say, has no path and keeps the error's own message.
+        'x'`, where the blank `app.b` was compared and held. That leaves out a helper whose blank the expression
+        takes for an answer, inside `has()`, a test, `| default` or `first_present()`; one a question that takes
+        blank text for missing asked about first (`app.a is present and text(app.a) == 'x'`); and one `has(app.a)`
+        asked about first where `app.a` is missing, since `has()` stops a missing value though it lets blank text
+        through (`BlankSource`). `app.a is defined` counts as `has(app.a)` there, though a null passes it. Failing
+        those, the value named is the first the expression reads that is missing or blank, one a helper was handed
+        through a filter say. A helper that returns a blank is handed a value, not the path the value came from, so
+        the reads name it; a blank no read accounts for, one made from a literal or by a lookup that found nothing
+        say, has no path and keeps the error's own message.
         """
         for source in reads.blank_sources:
-            if all(is_blank(resolve_path(scope, path)) for path in source):
-                return source[0], f"missing value for {source[0]}"
+            values = [resolve_path(scope, path) for path in source.paths]
+            if all(is_blank(value) for value in values) and not (source.guarded and any(map(_is_missing, values))):
+                return source.paths[0], f"missing value for {source.paths[0]}"
         for path in reads.required + reads.optional:
             if is_blank(resolve_path(scope, path)):
                 return path, f"missing value for {path}"

@@ -164,6 +164,62 @@ def test_the_reason_names_the_blank_a_helper_turned_missing(check, app, missing,
     assert outcome(output) == (status, f"{prefix}missing value for {missing}")
 
 
+HAS_GUARD = "(has(app.a) and text(app.a) == 'x') or number(app.b) > 1"
+
+
+@pytest.mark.parametrize(
+    ("check", "record", "missing"),
+    [
+        # A guard the blank does not pass keeps `text(app.a)` from running; the check stops at `number(app.b)`.
+        ("(app.a is present and text(app.a) == 'x') or number(app.b) > 1", {"app": {"a": "", "b": ""}}, "app.b"),
+        ("(has(text(app.a)) and text(app.a) == 'x') or number(app.b) > 1", {"app": {"a": "", "b": ""}}, "app.b"),
+        ("text(app.a) is defined and text(app.a) == 'x' or number(app.b) > 1", {"app": {"a": "", "b": ""}}, "app.b"),
+        # `has()` stops a null or absent value, but blank text passes it, and `text()` stops the check there.
+        (HAS_GUARD, {"app": {"a": None, "b": ""}}, "app.b"),
+        (HAS_GUARD, {"app": {"b": ""}}, "app.b"),
+        (HAS_GUARD, {"app": {"a": "  ", "b": ""}}, "app.a"),
+        # A fallback stands in for the blank `text(app.a)` makes; the check stops at `number(app.c)`.
+        (
+            "first_present(text(app.a), app.b) == 'x' and number(app.c) > 1",
+            {"app": {"a": "", "b": "x", "c": ""}},
+            "app.c",
+        ),
+        ("text(app.a) | default('x', true) == 'x' and number(app.c) > 1", {"app": {"a": "", "c": ""}}, "app.c"),
+        (
+            "(text(doc.purpose) | default('none')) in ['purchase', 'none'] and number(doc.amount) > 0",
+            {"doc": {"purpose": " ", "amount": ""}},
+            "doc.amount",
+        ),
+        # Nothing stands in for it: the blank `text(app.a)` makes is the one that stops the check.
+        ("app.b == '' and text(app.a) == 'x'", {"app": {"b": "", "a": "  "}}, "app.a"),
+    ],
+    ids=[
+        "present-guard",
+        "has-text-guard",
+        "text-defined-guard",
+        "has-guard-over-null",
+        "has-guard-over-absent",
+        "has-guard-over-blank-text",
+        "first-present",
+        "default-true",
+        "default",
+        "needed",
+    ],
+)
+@pytest.mark.parametrize(
+    ("policy", "status", "prefix"),
+    [(None, "not_evaluated", ""), ("fail", "warn", ""), ("not_applicable", "not_applicable", "does not apply: ")],
+    ids=["unset", "fail", "not_applicable"],
+)
+def test_the_reason_names_no_blank_a_guard_or_a_fallback_took_care_of(check, record, missing, policy, status, prefix):
+    """A helper's blank that a guard, `| default`, `first_present` or a test took care of never stopped the check, so
+    the reason names the blank that did; the status is the same either way. A guard takes care of what it asks about:
+    `x is present` of blank text, `has(x)` only of a value that is missing."""
+    output = run(screening(check, policy, inputs=tuple(record)), record)
+
+    assert outcome(output) == (status, f"{prefix}missing value for {missing}")
+
+
 class Skipped(NamedTuple):
     node: Callable[[str | None], Rules]
     record: dict
