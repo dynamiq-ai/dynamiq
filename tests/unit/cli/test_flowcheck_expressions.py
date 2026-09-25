@@ -66,6 +66,43 @@ def test_a_syntax_error_names_the_node_and_the_rule():
     assert any("screen" in e and "R1" in e and "not a valid expression" in e for e in errors), errors
 
 
+def test_an_unclosed_bracket_reads_as_the_end_of_the_expression_not_the_wrappers_brace():
+    # check_expressions() itself wraps the author's text as "{{ " + text + " }}" to parse it. An
+    # unclosed bracket runs Jinja's lexer off the end of the author's OWN text and into that
+    # wrapping, so Jinja's raw message names the wrapper's own "}" - something the author never
+    # typed - as the unexpected token: "unexpected '}', expected ')'".
+    node = rules_node(rules=[rule(check="loan.amount > 100 and (((")])
+
+    errors, _ = flowcheck.check_expressions(node, "screen")
+
+    assert errors == [
+        "rules 'screen': rule 'R1' check is not a valid expression: unexpected end of expression, expected ')'"
+    ]
+    assert "'}'" not in errors[0]
+
+
+def test_an_unterminated_quote_points_at_the_authors_own_text_not_the_wrapped_one():
+    # Jinja's fallback error for a string with no closing quote names an absolute character
+    # position - counted from the start of the WRAPPED text, so it is off by len("{{ "), unless
+    # translated back to where the quote actually sits in the check the author wrote (15, here).
+    node = rules_node(rules=[rule(check="loan.status == 'unterminated")])
+
+    errors, _ = flowcheck.check_expressions(node, "screen")
+
+    assert errors == ["rules 'screen': rule 'R1' check is not a valid expression: unexpected char \"'\" at 15"]
+    assert "at 18" not in errors[0]  # the wrapped-text position, which the author never wrote
+
+
+def test_an_ordinary_syntax_error_keeps_jinjas_own_wording():
+    # A mistake that is really and only in the author's own text - not one that runs off the end
+    # into check_expressions()'s own wrapping - is not touched at all.
+    node = rules_node(rules=[rule(check="loan..amount")])
+
+    errors, _ = flowcheck.check_expressions(node, "screen")
+
+    assert errors == ["rules 'screen': rule 'R1' check is not a valid expression: expected name or number"]
+
+
 def test_an_unknown_filter_inside_a_conditional_is_still_caught():
     # Compiling `loan.amount | lowr if loan.flag else loan.amount` would not catch this: Jinja
     # only resolves a filter used inside a conditional expression at run time.
@@ -133,6 +170,17 @@ def test_a_disabled_rules_check_is_not_parsed_at_all():
     assert errors == [] and warnings == []
 
 
+def test_a_disabled_rules_on_missing_is_still_validated():
+    # `on_missing` is a plain configuration value, checked in check_rules() (not check_expressions())
+    # the same unconditional way `severity` already is - unlike the check/applies_when text, which
+    # a disabled rule never compiles and so is never parsed either.
+    node = rules_node(rules=[rule(check="loan.amount | lowr", on_missing="skip", enabled=False)])
+
+    errors = flowcheck.check_rules(node, "screen")
+
+    assert any("R1" in e and "on_missing 'skip'" in e for e in errors), errors
+
+
 def test_an_applies_when_typo_is_caught_the_same_way_as_a_check():
     node = rules_node(rules=[rule(check="true", applies_when="loan.amount is presnt")])
 
@@ -181,6 +229,41 @@ def test_a_well_formed_expression_node_is_silent():
     node = expression_node(expressions=[{"id": "x1", "key": "rate", "expression": "loan.amount | round(2)"}])
 
     assert flowcheck.check_expressions(node, "calc") == ([], [])
+
+
+def test_an_expression_node_accepts_the_same_vocabulary_as_rules():
+    # expression.py's Expression node shares rules.py's RecordSandbox (same HELPERS, same TESTS),
+    # so a name the docstring lists only for Rules - text/number/first_present, is present/is
+    # blank - must not falsely read as unknown here.
+    node = expression_node(
+        expressions=[
+            {
+                "id": "x1",
+                "key": "rate",
+                "expression": (
+                    "text(loan.status) == 'approved' and number(loan.amount) > 0 "
+                    "and first_present(loan.a, loan.b) is present and loan.c is blank"
+                ),
+            }
+        ]
+    )
+
+    assert flowcheck.check_expressions(node, "calc") == ([], [])
+
+
+def test_as_of_is_not_a_known_root_for_an_expression_node():
+    # `as_of` is the Rules node's own input (it fixes the effective-window date); an Expression
+    # node has no such thing, so unlike on a Rules node, reading it here is an unknown root.
+    node = expression_node(expressions=[{"id": "x1", "key": "k", "expression": "as_of"}])
+
+    errors, warnings = flowcheck.check_expressions(node, "calc")
+
+    assert errors == []
+    assert any("'as_of'" in w and "does not declare" in w for w in warnings), warnings
+
+    # The same name IS known on a Rules node.
+    control = rules_node(rules=[rule(check="as_of is present")])
+    assert flowcheck.check_expressions(control, "screen") == ([], [])
 
 
 def test_an_unrecognized_rule_level_on_missing_is_an_error():

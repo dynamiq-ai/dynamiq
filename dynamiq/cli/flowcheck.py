@@ -97,6 +97,11 @@ _EXPRESSION_ENVIRONMENT = ImmutableSandboxedEnvironment()
 _FILTER_NAMES = frozenset(_EXPRESSION_ENVIRONMENT.filters)
 _TEST_NAMES = frozenset(_EXPRESSION_ENVIRONMENT.tests) | RULE_TESTS
 _GLOBAL_NAMES = frozenset(_EXPRESSION_ENVIRONMENT.globals) | RULE_HELPERS
+# What `_parse_and_walk` puts around the author's own text before parsing it - never seen by the
+# author, so a syntax error naming a piece of it (a raw character position, or the wrapper's own
+# closing brace swallowed as a mismatched bracket) needs translating back before it is shown; see
+# `_without_wrapper_leak`.
+_EXPRESSION_PREFIX = "{{ "
 
 # Shapes people write when they think a flow is something else.
 WRONG_SHAPE_KEYS = {
@@ -188,6 +193,17 @@ def coerce_depends(value) -> list:
     if isinstance(value, list):
         return [{"node": d} if isinstance(d, str) else d for d in value]
     return []
+
+
+def _as_dict(value) -> dict:
+    """`value` when it is already an object, else `{}` - the shape a JSON key should have had.
+
+    Shared by every reader of `input_transformer`/`input_transformer.selector` (`validate` below
+    and `_declared_roots` further down) so "missing or the wrong type" is one rule, not one written
+    out at each site. A caller that also needs to REPORT the wrong type still checks it directly
+    first (this throws that fact away on purpose) - only the safe, coerced value is common.
+    """
+    return value if isinstance(value, dict) else {}
 
 
 def validate(flow, known_types: set | None = None):
@@ -316,11 +332,11 @@ def validate(flow, known_types: set | None = None):
                 f'{{"selector": {{"field": "$.node.output.x"}}}}, got {type(transformer).__name__}. '
                 "The JSONPath goes inside `selector`, not on `input_transformer` itself."
             )
-            transformer = {}
+        transformer = _as_dict(transformer)
         selector = transformer.get("selector") or {}
         if not isinstance(selector, dict):
             errors.append(f"node {label!r}: input_transformer.selector must be an object of field -> JSONPath.")
-            selector = {}
+        selector = _as_dict(selector)
         # The runtime resolves more than `$.<node-id>...`: `input_transformer.path` selects a
         # sub-tree first, so a selector under it is relative and names no node at all; bracket
         # notation addresses the same thing as dotted; and a literal is a legal constant.
@@ -824,21 +840,48 @@ def _declared_roots(node) -> tuple[frozenset, bool]:
         for field in (node.get("input_fields") or [])
         if isinstance(field, dict) and field.get("name")
     }
-    transformer = node.get("input_transformer")
-    transformer = transformer if isinstance(transformer, dict) else {}
-    selector = transformer.get("selector")
-    selector_keys = {str(key) for key in selector} if isinstance(selector, dict) else set()
+    transformer = _as_dict(node.get("input_transformer"))
+    selector_keys = {str(key) for key in _as_dict(transformer.get("selector"))}
     declared = inputs | selector_keys
     return frozenset(declared), bool(declared) and not transformer.get("path")
+
+
+# Jinja names a lone `}` this way only from one place (jinja2.lexer's brace-balancing check): an
+# open bracket still pending from the author's own text makes the lexer read the wrapper's own
+# closing `}}` as a mismatched attempt to close THAT bracket, one `}` at a time - and that branch
+# always names what it expected instead. A *bare* "unexpected '}'", with nothing further, is a
+# different thing: the author's own text closing something that was never open, which the lexer
+# catches with an empty balancing stack and no "expected" to report - left alone here, since it
+# names a character the author actually wrote.
+_UNCLOSED_BRACKET_RE = re.compile(r"unexpected '\}', expected ")
+# Jinja's other way of naming a spot: an absolute character offset into whatever text it parsed -
+# here, the WRAPPED text, so "at N" is off by the length of the prefix the author never wrote.
+_POSITION_RE = re.compile(r"\bat (\d+)\b")
+
+
+def _without_wrapper_leak(message: str) -> str:
+    """Jinja's own syntax-error message, with anything that only makes sense against
+    `_EXPRESSION_PREFIX + text + " }}"` - never the text the author wrote - translated back to
+    their own expression. Built from the message itself, two small substitutions, not a hard-coded
+    string per error shape: any other message, an ordinary mistake in the author's own text, comes
+    back unchanged.
+    """
+    message = _UNCLOSED_BRACKET_RE.sub("unexpected end of expression, expected ", message)
+
+    def _shift(match: re.Match) -> str:
+        position = int(match.group(1)) - len(_EXPRESSION_PREFIX)
+        return f"at {position}" if position >= 0 else "at the start of the expression"
+
+    return _POSITION_RE.sub(_shift, message)
 
 
 def _parse_and_walk(
     text: str, known: frozenset | None, not_yet_computed: frozenset, where: str, errors: list, warnings: list
 ) -> None:
     try:
-        parsed = _EXPRESSION_ENVIRONMENT.parse("{{ " + text + " }}")
+        parsed = _EXPRESSION_ENVIRONMENT.parse(_EXPRESSION_PREFIX + text + " }}")
     except TemplateSyntaxError as e:
-        errors.append(f"{where} is not a valid expression: {e}")
+        errors.append(f"{where} is not a valid expression: {_without_wrapper_leak(str(e))}")
         return
     # Collected locally and de-duplicated before joining the caller's lists: the same typo read
     # twice in one expression should be named once, not once per occurrence.
