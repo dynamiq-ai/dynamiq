@@ -1,17 +1,19 @@
-"""A missing value counts only where a check reads it and the rest of the check cannot decide without it.
+"""A missing value counts only where a check's evaluation reaches it.
 
 Jinja evaluates an expression left to right and stops where the result is decided: the branch of an `if` it does not
-take, the side of an `and` or an `or` the other side already decided and the rest of a comparison chain already false
-are never read, so a value missing there cannot change the result. A check and an `applies_when` each stop at a
-missing value where they read it, and name the value they stopped at; a call of a name nothing defines, neither a
-helper nor the record, is an error before its arguments are read. Either side of an `and` or an `or` decides where the
-other stops at a missing value: `a or b` is true where `b` is, and `a and b` false where `b` is, whether or not `a` is
-there; where the side that is there cannot decide, the missing value stands, the left one where both are missing. Only
-a missing value gives way: an error on either side is an error. A path reads what Jinja reads, a character of a text by
-its index and a key of any mapping. A value an expression only asks about (`has`, `is present`, `| default`,
-`first_present`) was never needed, and reads as it always did; so does everything in a message, which decides nothing,
-in an Expression node, which reads a missing input as None, and in a derived value, which is computed as it always
-was, `and` and `or` included.
+take, the side of an `and` or an `or` its first side already decided and the rest of a comparison chain already false
+are never read, so a value missing there cannot change the result. A check and an `applies_when` each stop at a missing
+value where they read it, and name the value they stopped at; a call of a name nothing defines, neither a helper nor the
+record, is an error before its arguments are read. Where only the truth of an `and` or an `or` counts, as the check
+itself, under `not`, as the test of an `if`, as a branch of an `if` whose truth alone counts or as a side of another
+such `and` or `or`, either side decides where the other stops at a missing value: `a or b` is true where `b` is, and
+`a and b` false where `b` is, whether or not `a` is there; where the side that is there cannot decide, the missing value
+stands, the left one where both are missing. Where the check uses its value, compared or computed with, an `and` or an
+`or` is Python's, and a missing side it reads holds the rule. Only a missing value gives way: an error on either side is
+an error. A path reads what Jinja reads, a character of a text by its index and a key of any mapping. A value an
+expression only asks about (`has`, `is present`, `| default`, `first_present`) was never needed, and reads as it always
+did; so does everything in a message, which decides nothing, in an Expression node, which reads a missing input as None,
+and in a derived value, which is computed as it always was, `and` and `or` included.
 """
 
 from types import MappingProxyType, SimpleNamespace
@@ -60,7 +62,7 @@ def screening(
     )
 
 
-# --- a check reads only what decides it ------------------------------------------------------------------------
+# --- a check reads only what its evaluation reaches -------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -314,7 +316,7 @@ def test_a_check_reads_the_paths_read_paths_names_in_the_same_order(check):
     assert list(finding["evaluated"]) == reads.required + reads.optional
 
 
-# --- either side of an `and` or an `or` decides -----------------------------------------------------------------
+# --- either side of an `and` or an `or` whose truth alone counts decides ----------------------------------------
 
 
 @pytest.mark.parametrize("policy", POLICIES)
@@ -557,13 +559,15 @@ def test_a_not_or_an_if_still_stops_at_the_missing_value_it_reads(check):
     [
         ("(app.a or 'fallback') == 'fallback'", {"a": "x"}, ("fail", None)),
         ("(app.a or 'fallback') == 'fallback'", {"a": ""}, ("pass", None)),
-        ("(app.a or 'fallback') == 'fallback'", {"a": None}, ("pass", None)),
-        ("(app.a or 'fallback') == 'fallback'", {}, ("pass", None)),
+        ("(app.a or 'fallback') == 'fallback'", {"a": None}, ("not_evaluated", "missing value for app.a")),
+        ("(app.a or 'fallback') == 'fallback'", {}, ("not_evaluated", "missing value for app.a")),
         ("(app.nickname or app.name) == 'Ann'", {"nickname": "Annie", "name": "Ann"}, ("fail", None)),
-        ("(app.nickname or app.name) == 'Ann'", {"name": "Ann"}, ("pass", None)),
+        ("(app.nickname or app.name) == 'Ann'", {"nickname": "", "name": "Ann"}, ("pass", None)),
+        ("(app.nickname or app.name) == 'Ann'", {"name": "Ann"}, ("not_evaluated", "missing value for app.nickname")),
         ("(app.nickname or app.name) == 'Ann'", {"name": ""}, ("not_evaluated", "missing value for app.nickname")),
-        ("(app.a and app.b) == ''", {"b": ""}, ("pass", None)),
+        ("(app.a and app.b) == ''", {"b": ""}, ("not_evaluated", "missing value for app.a")),
         ("(app.a and app.b) == ''", {"b": "x"}, ("not_evaluated", "missing value for app.a")),
+        ("first_present(app.nickname, app.name) == 'Ann'", {"name": "Ann"}, ("pass", None)),
     ],
     ids=[
         "or-first-side-true",
@@ -571,18 +575,123 @@ def test_a_not_or_an_if_still_stops_at_the_missing_value_it_reads(check):
         "or-first-side-null",
         "or-first-side-absent",
         "or-first-side-true-over-a-second-that-is-there",
+        "or-first-side-false-over-a-second-that-is-there",
         "or-first-side-absent-the-second-true",
         "or-first-side-absent-the-second-false",
         "and-first-side-absent-the-second-false",
         "and-first-side-absent-the-second-true",
+        "first-present-falls-back-past-a-missing-value",
     ],
 )
-def test_an_and_or_an_or_is_the_value_of_the_side_that_decides_it(check, app, expected):
-    """`a or 'fallback'` is `a` where `a` is true and the fallback otherwise, a missing `a` included. A second side that
-    cannot decide, false in an `or` or true in an `and`, is no value, and the missing first side stands."""
+def test_an_and_or_an_or_whose_value_the_check_compares_is_pythons_and_stops_at_a_missing_side(check, app, expected):
+    """Compared, an `and` or an `or` is Python's: `a or 'fallback'` is `a` where `a` is true and the fallback where `a`
+    is there and false. A missing side it reads holds the rule, whatever the other side holds, since a value in its
+    place could change the verdict: a nickname would decide `(app.nickname or app.name) == 'Ann'`. `first_present`
+    falls back past a missing value, as its author means."""
     node = screening(check)
 
     assert outcome(run(node, {"app": app})) == expected
+
+
+@pytest.mark.parametrize(
+    ("policy", "status", "prefix"),
+    [
+        (None, "not_evaluated", ""),
+        ("fail", "fail", ""),
+        ("not_applicable", "not_applicable", "does not apply: "),
+    ],
+)
+@pytest.mark.parametrize(
+    ("check", "app", "missing"),
+    [
+        ("(app.a or app.b) == 1", {"b": 1}, "app.a"),
+        ("(app.a or app.b) == 1", {"b": "  "}, "app.a"),
+        ("(app.a and app.b) == ''", {"b": ""}, "app.a"),
+        ("(app.fee or 100) > 50", {}, "app.fee"),
+        ("(app.fee or 0) < 50", {}, "app.fee"),
+        ("(app.a or app.b) > 1", {"b": "x"}, "app.a"),
+        ("(app.a or app.b) - 1 > 0", {"b": 5}, "app.a"),
+        ("(app.a or app.b) | length > 1", {"b": "xy"}, "app.a"),
+        ("max(app.a or 2, 1) > 1", {}, "app.a"),
+        ("(app.a or app.b) is number", {"b": 3}, "app.a"),
+        ("(app.x if app.k else (app.a or app.b)) == 1", {"k": False, "b": 1}, "app.a"),
+    ],
+    ids=[
+        "compared-where-the-other-side-would-pass",
+        "compared-where-the-other-side-would-fail",
+        "an-and-compared",
+        "a-fallback-that-would-pass",
+        "a-fallback-that-would-not",
+        "compared-where-the-other-side-would-raise",
+        "computed-with",
+        "filtered",
+        "handed-to-a-helper",
+        "tested",
+        "the-branch-of-an-if-whose-value-is-compared",
+    ],
+)
+def test_a_missing_side_of_an_and_or_an_or_whose_value_the_check_uses_holds_the_rule_under_its_policy(
+    check, app, missing, policy, status, prefix
+):
+    """Wherever the check uses the value of an `and` or an `or`, comparing it, computing with it, filtering it, testing
+    it, handing it to a helper or taking it as a branch of an `if` whose value it uses, the other side does not stand in
+    for a missing one: `(app.fee or 100) > 50` is held without the fee as `(app.fee or 0) < 50` is, whatever the
+    fallback would make of the verdict, and a type error the other side would raise is never reached. The missing value
+    holds the rule under its policy, as it did before either side could decide."""
+    node = screening(check, policy)
+
+    assert outcome(run(node, {"app": app})) == (status, f"{prefix}missing value for {missing}")
+
+
+@pytest.mark.parametrize(
+    ("check", "app", "expected"),
+    [
+        ("not (app.a or app.b)", {"b": 1}, ("fail", None)),
+        ("not (app.a or app.b)", {"b": 0}, ("not_evaluated", "missing value for app.a")),
+        ("(1 if app.a or app.b else 2) == 1", {"b": 1}, ("pass", None)),
+        ("(1 if app.a or app.b else 2) == 1", {"b": 0}, ("not_evaluated", "missing value for app.a")),
+        ("(1 if (app.a or app.b) and app.c else 2) == 1", {"b": 1, "c": 1}, ("pass", None)),
+        ("(not (app.a and app.b)) == true", {"b": 0}, ("pass", None)),
+        ("app.a or app.b if app.k else app.c", {"k": True, "b": 1}, ("pass", None)),
+        ("app.a or app.b if app.k else app.c", {"k": True, "b": 0}, ("not_evaluated", "missing value for app.a")),
+        ("not (app.x if app.k else (app.a or app.b))", {"k": False, "b": 1}, ("fail", None)),
+        ("(app.a or app.b) == 1 or app.c == 1", {"b": 1, "c": 1}, ("pass", None)),
+        ("(app.a or app.b) == 1 or app.c == 1", {"b": 1, "c": 0}, ("not_evaluated", "missing value for app.a")),
+    ],
+    ids=[
+        "under-not",
+        "under-not-the-other-side-false",
+        "the-test-of-an-if-whose-value-is-compared",
+        "the-test-of-an-if-the-other-side-false",
+        "inside-an-and-that-is-the-test-of-an-if",
+        "under-a-not-whose-value-is-compared",
+        "a-branch-of-an-if-that-is-the-check",
+        "a-branch-of-an-if-that-is-the-check-the-other-side-false",
+        "a-branch-of-an-if-under-not",
+        "a-compared-or-as-a-side-the-other-side-decides",
+        "a-compared-or-as-a-side-the-other-side-cannot-decide",
+    ],
+)
+def test_an_and_or_an_or_whose_truth_alone_the_check_uses_is_decided_by_either_side(check, app, expected):
+    """Under `not`, as the test of an `if`, as a branch of an `if` whose truth alone the check uses, and inside another
+    `and` or `or` used so, only the truth of an `and` or an `or` counts, and either side decides it where the other is
+    missing, wherever the check then uses what `not` or the `if` makes of it. A compared `or` that stops at a missing
+    side is a side that stops at a missing value, and gives way to the other side of the `or` that is the check, which
+    decides where it can."""
+    node = screening(check)
+
+    assert outcome(run(node, {"app": app})) == expected
+
+
+def test_an_or_whose_value_applies_when_compares_holds_the_rule_at_a_missing_side():
+    """`applies_when` uses an `and` or an `or` as a check does: compared, a missing side holds the rule."""
+    node = screening("app.points <= 2", applies_when="(app.kind or app.type) == 'fixed'")
+
+    assert outcome(run(node, {"app": {"type": "fixed", "points": 1}})) == (
+        "not_evaluated",
+        "missing value for app.kind",
+    )
+    assert outcome(run(node, {"app": {"kind": "", "type": "fixed", "points": 1}})) == ("pass", None)
 
 
 @pytest.mark.parametrize(
