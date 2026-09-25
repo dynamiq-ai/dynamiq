@@ -70,8 +70,10 @@ class Expression(Node):
                 raise ValueError(f"Expression '{self.name}': key {item.key!r} is used twice")
             keys.add(item.key)
             try:
-                reads = read_paths(item.expression)
+                # Compiled before its reads are collected, from the text wrapped in braces, so a syntax error
+                # names the text as the author wrote it.
                 expression = _ENVIRONMENT.compile_expression(item.expression, undefined_to_none=True)
+                reads = read_paths(item.expression)
             except TemplateSyntaxError as e:
                 raise ValueError(f"Expression '{self.name}': {item.key!r} is not a valid expression: {e}") from e
             expression, reads = refuse_clash(expression, reads, f"Expression '{self.name}': {item.key!r}")

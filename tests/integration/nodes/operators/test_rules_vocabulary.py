@@ -650,6 +650,26 @@ def test_a_reader_reads_its_argument_and_never_its_own_name():
     assert (reads.required, reads.optional) == ([], ["doc.net", "doc.gross"])
 
 
+@pytest.mark.parametrize(
+    ("text", "error"),
+    [
+        ("(loan.amount > 1", "unexpected end of template, expected ')'."),
+        ("loan.status == 'open", 'unexpected char "\'" at 15'),
+    ],
+    ids=["unclosed-bracket", "unterminated-quote"],
+)
+def test_a_build_error_names_the_text_the_author_wrote(text, error):
+    """A node compiles the text as it was written before it looks for what the text reads, which it does with the
+    text wrapped in braces: an error names neither the wrapper's `}` nor a position counted from the braces."""
+    with pytest.raises(ValueError) as refused_rule:
+        rules(Rule(id="R1", check=text), member="loan")
+    with pytest.raises(ValueError) as refused_expression:
+        reader(text, {"loan": {}})
+
+    assert str(refused_rule.value) == f"Rules 'vocabulary', rule 1: the check is not a valid expression: {error}"
+    assert str(refused_expression.value) == f"Expression 'reader': 'value' is not a valid expression: {error}"
+
+
 def test_a_rule_reading_and_calling_number_is_held_when_it_runs_not_refused_at_build():
     """`number` is a name the vocabulary added, so an input of that name keeps building, as one called `text` does."""
     node = Rules(

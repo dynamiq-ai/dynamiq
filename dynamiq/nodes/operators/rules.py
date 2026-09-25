@@ -1086,11 +1086,12 @@ class Rules(Node):
 
     def _compile_expression(self, text: str, where: str) -> tuple[Callable[..., Any], Reads]:
         try:
-            reads = read_paths(text)
             # A lookup that finds nothing must come back as RuleUndefined, whose truth test raises, rather
             # than be turned into None on the way out: a bare `limits[program]` is then not evaluated
-            # instead of read as false and reported as a verdict.
+            # instead of read as false and reported as a verdict. Compiled before its reads are collected,
+            # from the text wrapped in braces, so a syntax error names the text as the author wrote it.
             compiled = _ENVIRONMENT.compile_expression(text, undefined_to_none=False)
+            reads = read_paths(text)
         except TemplateSyntaxError as e:
             raise ValueError(f"{where} is not a valid expression: {e}") from e
         # The sandbox refuses these at run time; refusing them at build time names the rule instead of holding it.
@@ -1418,14 +1419,15 @@ class Rules(Node):
 
         The expression may call a name that is no helper and that the record does not hold, a mistyped
         `firstpresent`, or use a filter or a test the sandbox does not have, `x | lowr` inside a conditional, which
-        Jinja leaves to raise until that branch runs. It may read a value nobody could read, which a missing one must
-        not hide: one already so, an earlier derived value, or text it reads through `number()` or `date()`
-        (`number(doc.amount) > doc.limit` over an amount of `TBD`). A value it finds missing may sit under a name
-        outside `declared`, a typo, where the node declares its inputs (None where it does not), or under a derived
-        value in `pending`, one computed after `reading`, the derived value this expression computes. Or it may read a
-        derived value held for any of these defects, wherever it reads it, or one a lookup found nothing for, where it
-        needs the value rather than falls back on it: a gap in a table or in the node, never in the record. A defect
-        speaks over a lookup that found nothing, whichever the expression reads first.
+        Jinja leaves to raise until that branch runs. It may read text through `number()` or `date()` that they
+        cannot read, which a missing value must not hide (`number(doc.amount) > doc.limit` over an amount of `TBD`);
+        a value that is already one nobody could read, an earlier derived value say, its callers look for first
+        (`_missing_status`, `_why_missing`). A value it finds missing may sit under a name outside `declared`, a
+        typo, where the node declares its inputs (None where it does not), or under a derived value in `pending`,
+        one computed after `reading`, the derived value this expression computes. Or it may read a derived value
+        held for any of these defects, wherever it reads it, or one a lookup found nothing for, where it needs the
+        value rather than falls back on it: a gap in a table or in the node, never in the record. A defect speaks
+        over a lookup that found nothing, whichever the expression reads first.
         """
         if (callee := self._missing(list(reads.unknown_calls), scope)) is not None:
             return _Hold(f"{callee} is not a helper")
@@ -1433,9 +1435,6 @@ class Rules(Node):
             kind, name = reads.unknown_names[0]
             return _Hold(f"{name} is not a {kind}")
         paths = reads.required + reads.optional
-        found, unreadable = self._unreadable(paths, scope)
-        if unreadable is not None:
-            return _Hold(_unreadable_because(found, unreadable.reason))
         if (misread := self._misread(reads.readers, scope)) is not None:
             return _Hold(misread)
         # A defect holds wherever it is read and speaks over a lookup that found nothing, whichever the expression
@@ -1477,8 +1476,12 @@ class Rules(Node):
         lacks, which a check reports as an error, unless the expression has a defect of its own, a call of a name no
         helper has say (`firstpresent(x) | default(0)`), which is the cause instead. A None the expression computes
         itself, with `else none` say, is its author's answer, and counts as data the record lacks so long as the
-        values it reads do (`_why_held`).
+        values it reads do (`_why_held`). A value it reads that nobody could read, an earlier derived value say,
+        holds it before anything else, as it would the same expression in a check.
         """
+        found, unreadable = self._unreadable(reads.required + reads.optional, known)
+        if unreadable is not None:
+            return _Hold(_unreadable_because(found, unreadable.reason))
         hold = self._why_held(reads, known, self._declared, unskippable, pending, name)
         if hold is not None and not hold.lookup:
             return hold
