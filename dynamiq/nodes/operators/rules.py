@@ -1150,6 +1150,17 @@ class Rules(Node):
             data["rules_count"] = len(self.rules)
         return data
 
+    def transform_output(self, output_data: Any, **kwargs) -> Any:
+        """The output as the node's output transformer shapes it, with `findings` a list a trace keeps whole.
+
+        `execute` marks the findings so, but an output the node cache replays comes back through JSON, as plain lists,
+        and a mocked one was never marked; both pass through here on their way out as well, and are marked again.
+        """
+        findings = output_data.get("findings") if isinstance(output_data, dict) else None
+        if isinstance(findings, list) and not isinstance(findings, UntruncatedList):
+            output_data = {**output_data, "findings": UntruncatedList(findings)}
+        return super().transform_output(output_data, **kwargs)
+
     def _compile_expression(self, text: str, where: str) -> tuple[Callable[..., Any], Reads]:
         try:
             # A lookup that finds nothing must come back as RuleUndefined, whose truth test raises, rather
