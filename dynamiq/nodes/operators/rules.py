@@ -6,6 +6,7 @@ from collections.abc import Callable, Container, ItemsView, Iterator, KeysView, 
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
+from importlib import metadata
 from typing import Any, ClassVar, Literal, NamedTuple, NoReturn
 from uuid import uuid4
 
@@ -22,6 +23,7 @@ from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.types import DerivedValue, NamedField, Rule, RuleMissingPolicy
 from dynamiq.runnables import RunnableConfig
+from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import TRUNCATE_LIST_LIMIT, UntruncatedList
 
 STATUS_PASSED = "pass"
@@ -1316,6 +1318,37 @@ def _compile_lazy(text: str) -> tuple[_Lazy, Reads]:
     template = nodes.Template([nodes.Assign(nodes.Name("result", "store"), expression, lineno=1)], lineno=1)
     template.set_environment(_CHECK_ENVIRONMENT)
     return _Lazy(TemplateExpression(_CHECK_ENVIRONMENT.from_string(template), False), frozenset(names)), reads
+
+
+def _check_and_or_decide() -> bool:
+    """Compiles and evaluates one check to make sure either side of its `and` and its `or` decides where the other stops
+    at a missing value, and warns once, naming the jinja2 release, where it does not; returns whether it does.
+
+    The code generator that makes them decide relies on Jinja's internals (`RuleCodeGenerator`), and a jinja2 release
+    that changed those could compile a check's `and` and `or` as Python's again without any error. A check would then
+    hold every rule the other side of an `and` or an `or` should decide, as it did before either side could: stricter,
+    never looser, so the module still imports, and the tests pin that either side decides. The module runs this once,
+    when it is imported, so the log names such a release rather than the change going unnoticed.
+    """
+    cause = ""
+    try:
+        check, _ = _compile_lazy("(a.x or b) and not (a.y and c)")
+        decided = holds(check({"a": {}, "b": True, "c": False}))
+    except MissingValue:
+        decided = False
+    except Exception as e:
+        decided, cause = False, f" (the check raised {type(e).__name__}: {e})"
+    if decided:
+        return True
+    logger.warning(
+        f"jinja2 {metadata.version('jinja2')} does not compile the `and` and the `or` of a Rules check as dynamiq "
+        "expects: in a check they will not decide past a missing value on either side, and a rule the other side would "
+        f"decide is held as missing; pin jinja2 to a release this version of dynamiq is tested with{cause}"
+    )
+    return False
+
+
+_check_and_or_decide()
 
 
 def _unreadable_because(path: str, reason: str) -> str:

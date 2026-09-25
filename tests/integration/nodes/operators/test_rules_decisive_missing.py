@@ -16,15 +16,25 @@ did; so does everything in a message, which decides nothing, in an Expression no
 and in a derived value, which is computed as it always was, `and` and `or` included.
 """
 
+import importlib.util
+import logging
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from importlib.metadata import version
 from types import MappingProxyType, SimpleNamespace
 
 import pytest
+from jinja2 import nodes
+from jinja2.compiler import CodeGenerator
+from jinja2.visitor import NodeVisitor
 
 from dynamiq.nodes.operators import Expression, Rules
 from dynamiq.nodes.operators import rules as rules_module
 from dynamiq.nodes.operators.rules import has, read_paths, resolve_path
 from dynamiq.nodes.types import DerivedValue, ExpressionItem, NamedField, Rule
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.utils.logger import logger
 
 POLICIES = [None, "not_evaluated", "fail", "not_applicable"]
 
@@ -785,6 +795,55 @@ def test_a_check_compiles_with_the_vocabulary_the_rest_of_the_node_uses():
         set(others.filters),
         set(others.tests),
     )
+
+
+@contextmanager
+def warnings_logged() -> Iterator[list[str]]:
+    """The warnings the SDK logs inside the block, read from its logger whether or not pytest captures logs."""
+    messages: list[str] = []
+
+    class Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            if record.levelno == logging.WARNING:
+                messages.append(record.getMessage())
+
+    handler = Collect()
+    logger.addHandler(handler)
+    try:
+        yield messages
+    finally:
+        logger.removeHandler(handler)
+
+
+def test_the_module_warns_once_when_imported_under_a_jinja2_that_compiles_a_checks_and_and_or_with_its_own_visitors(
+    monkeypatch,
+):
+    """When it is imported, the module compiles a check and makes sure either side of its `and` and its `or` decides
+    where the other is missing. Under a jinja2 release whose code generator compiled them with its own visitors, as
+    Python's `and` and `or`, a check holds every rule the other side of an `and` or an `or` should decide: stricter,
+    never looser. The module imports all the same, and warns once, naming the release."""
+    with warnings_logged() as warnings:
+        assert rules_module._check_and_or_decide()
+    assert warnings == []
+    dispatch = NodeVisitor.get_visitor
+
+    def own_and_or(self, node):
+        if isinstance(self, CodeGenerator) and isinstance(node, (nodes.And, nodes.Or)):
+            return getattr(CodeGenerator, f"visit_{type(node).__name__}").__get__(self)
+        return dispatch(self, node)
+
+    monkeypatch.setattr(NodeVisitor, "get_visitor", own_and_or)
+    spec = importlib.util.spec_from_file_location("rules_under_another_jinja2", rules_module.__file__)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+
+    with warnings_logged() as warnings:
+        spec.loader.exec_module(module)
+
+    assert len(warnings) == 1
+    assert warnings[0].startswith(f"jinja2 {version('jinja2')} does not compile")
+    node = module.Rules(name="n", input_fields=[NamedField(name="app")], rules=[Rule(id="r", check="app.a or app.b")])
+    assert outcome(run(node, {"app": {"b": True}})) == ("not_evaluated", "missing value for app.a")
 
 
 def test_a_check_still_calls_what_the_record_holds_through_the_sandbox():
