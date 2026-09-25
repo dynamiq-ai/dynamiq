@@ -14,6 +14,11 @@ from pydantic import BaseModel, PydanticUserError, RootModel
 TRUNCATE_EMBEDDINGS_LIMIT = 20
 TRUNCATE_LIST_LIMIT = 50
 
+
+class UntruncatedList(list):
+    """A list a trace keeps whole: `format_value`'s `for_tracing` truncation skips it."""
+
+
 CHARS_PER_TOKEN = 4
 
 # Values for these keys are credentials; traces and logs must not persist them in cleartext.
@@ -431,7 +436,12 @@ def format_value(
             formatted_dict[k] = formatted_v
         return formatted_dict
 
-    if for_tracing and isinstance(value, list) and len(value) > truncate_limit:
+    if (
+        for_tracing
+        and isinstance(value, list)
+        and not isinstance(value, UntruncatedList)
+        and len(value) > truncate_limit
+    ):
         value = value[:truncate_limit]
 
     if isinstance(value, (list, tuple, set)):

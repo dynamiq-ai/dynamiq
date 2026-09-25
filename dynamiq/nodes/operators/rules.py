@@ -17,7 +17,7 @@ from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.types import DerivedValue, NamedField, Rule, RuleMissingPolicy
 from dynamiq.runnables import RunnableConfig
-from dynamiq.utils.utils import TRUNCATE_LIST_LIMIT
+from dynamiq.utils.utils import TRUNCATE_LIST_LIMIT, UntruncatedList
 
 STATUS_PASSED = "pass"
 STATUS_FAIL = "fail"
@@ -930,7 +930,8 @@ class Rules(Node):
     surfaces on the records that carry the value.
 
     The output holds `findings` in rule order, a `summary` of statuses, `status`, the `derived` values and
-    `derived_errors`. A derived value computed from a missing value is missing, None under `derived`. One that
+    `derived_errors`; a trace keeps every finding, unlike the longer lists it otherwise cuts to
+    `TRUNCATE_LIST_LIMIT`. A derived value computed from a missing value is missing, None under `derived`. One that
     could not be computed from values that are there, a division by zero or `number()` of `TBD`, is None there
     too, with the reason under `derived_errors`, and a rule that reads it is not evaluated, naming the reason.
     So is one that reads a value nobody could read, an earlier derived value say, even beside a missing one.
@@ -980,8 +981,8 @@ class Rules(Node):
     def to_dict(self, include_secure_params: bool = True, for_tracing: bool = False, **kwargs) -> dict:
         """Converts the instance to a dictionary.
 
-        A trace keeps the first rules and the total: the findings carry every rule that mattered, and a large
-        rule set would otherwise be copied into every run it takes part in.
+        A trace keeps the first rules and the total: `findings`, kept whole in a trace, already carries every
+        rule that mattered, and a large rule set here would otherwise be copied into every run it takes part in.
         """
         data = super().to_dict(include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs)
         rules = self.rules[:TRUNCATE_LIST_LIMIT] if for_tracing else self.rules
@@ -1143,7 +1144,9 @@ class Rules(Node):
             pending.discard(name)
         scope = {**context, **values}
 
-        findings: list[dict[str, Any]] = []
+        # A trace keeps this whole rather than cutting it to `TRUNCATE_LIST_LIMIT`: past that many rules,
+        # the platform UI still needs every rule's own finding to show its coverage and last result.
+        findings: list[dict[str, Any]] = UntruncatedList()
         screened = True
         for compiled in self._compiled:
             finding, evaluated = self._evaluate(compiled, scope, as_of, unskippable)
