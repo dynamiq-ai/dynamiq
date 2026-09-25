@@ -220,8 +220,10 @@ class RuleMissingPolicy(str, Enum):
 class DerivedValue(Authored):
     """A value a Rules node computes once per record, before its rules run, and exposes to them by name.
 
-    One that cannot be computed comes out as `None`; the node's `derived_errors` names the reason when the
-    cause is the expression's own rather than a value the record lacks.
+    One computed from a value the record lacks is missing: `None` under the node's `derived`, and missing to the
+    rules. One that cannot be computed from the values that are there, a division by zero or `number()` of `TBD`,
+    also shows `None` under `derived`, with the reason under `derived_errors`; the rules, though, see a value that
+    cannot be read, so a rule that reads it, or asks about it with `has()` or a test, is held, naming the reason.
     """
 
     id: str = Field(default_factory=generate_uuid)

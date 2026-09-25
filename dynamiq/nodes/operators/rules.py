@@ -128,12 +128,14 @@ class Unreadable:
     """A value `number()` or `date()` could not read, with the reason: `TBD` where an amount goes.
 
     It is there, so it is not missing, and `first_present` stops at it instead of letting a fallback speak over it.
-    Every use raises `UnreadableValue` with the reason: a comparison, arithmetic, a truth test, a count, a hash, a
-    member or an item, the conversions behind `| float` and `| int`, which would otherwise read it as 0, and the
-    conversion to text behind `| string`, the text filters, `~` and `join`, which would hand a check back the text the
-    reader refused. So does a question about it, `has()` or any test, `is present` and `is none` among them, which
-    would otherwise answer on a value nobody read. Only a rule's message prints it, as the text the record holds
-    (`_rendered`).
+    The uses a check makes of a value raise `UnreadableValue` with the reason: a comparison, arithmetic, a truth
+    test, a count, a hash, a member or an item, the conversions behind `| float` and `| int`, which would otherwise
+    read it as 0, and the conversion to text behind `| string`, the text filters, `~` and `join`, which would hand a
+    check back the text the reader refused. So does a question about it, `has()` or any test, `is present` and `is
+    none` among them, which would otherwise answer on a value nobody read. A rule's message prints it as the text
+    the record holds (`_rendered`). Only its repr is not refused: `| pprint` and a `'%r'` format print
+    `Unreadable('TBD', ...)`, the marker rather than a value; and a list that holds one can still be counted, which
+    uses the list, not it.
     """
 
     __slots__ = ("value", "reason")
@@ -977,66 +979,54 @@ class RulesInputSchema(BaseModel):
 class Rules(Node):
     """Evaluates every rule against the inputs and returns one finding per rule.
 
-    Inputs arrive by name and rules read them by path (`docs.Note.interest_rate`), so a record of any shape
-    needs no mapping beyond naming it. Derived values are computed once per record, in order, before the rules
-    run, and are read by name like an input. Expressions use the same sandboxed engine as the Expression node,
-    plus the helpers `has`, `days_between`, `date`, `today`, `len`, `abs`, `min`, `max`, `sum`, `round`, `text`,
-    `number` and `first_present`, and the tests `is present` and `is blank`. A record member named like a
-    helper is the member where a rule reads it as a value and the helper where a rule calls it. A
-    member named like a method of the record, `items` or `update`, is the member: the method is reached only
-    for a key the record lacks, and a read the sandbox refuses holds that rule as `not_evaluated` rather than
-    failing the run.
+    Inputs arrive by name and rules read them by path (`docs.Note.interest_rate`); derived values are computed once
+    per record, in order, before the rules run, and are read by name like an input. Expressions run in a
+    `RecordSandbox`, as the Expression node's do, with the helpers `has`, `days_between`, `date`, `today`, `len`,
+    `abs`, `min`, `max`, `sum`, `round`, `text`, `number` and `first_present` and the tests `is present` and `is
+    blank`. A record member named like a helper is the member where a rule reads it and the helper where a rule
+    calls it; one named like a method of the record, `items` say, is the member, the method reached only for a key
+    the record lacks. Rules compile when the node is built, so a malformed expression fails then, naming the rule.
 
-    Every enabled rule reports a status: `pass` when its check holds; its severity (`fail`, `warn`, `info`)
-    when the check does not; `not_applicable` when `applies_when` does not hold or the record's `as_of` date
-    falls outside the rule's effective window; `not_evaluated` when a value the check reads is missing or the
-    check cannot be evaluated. A missing value never passes or fails a rule silently. The message is rendered with
-    the whole record, and the finding carries the values the check read under `evaluated`. Rules compile when the
-    node is built, so a malformed expression fails then, naming the rule.
+    - Statuses: `pass` when the check holds; the rule's severity (`fail`, `warn`, `info`) when it does not;
+      `not_applicable` when `applies_when` does not hold, the record's `as_of` date is outside the rule's effective
+      window, or the rule skips a missing value; `not_evaluated` when a value the check reads is missing or the
+      check cannot be evaluated. A rule reported at its severity gives its own message, where it has one, rendered
+      with the whole record; one that did not run or did not apply says why. `evaluated` holds the values the check
+      reads, empty where the rule did not apply.
+    - Policies: `on_missing` on the node, which a rule's own overrides, says what a missing value means:
+      `not_evaluated`, the default, holds the rule for review; `fail` reports its severity, the reason after its
+      message; `not_applicable` skips it ("does not apply: missing value for …"), so the rule needs no presence
+      guard. A missing value never passes or fails a rule silently.
+    - Never skipped: only data the record lacks is skipped, and only where a read names it. Whatever else is
+      missing, a rule is held, `not_evaluated` or its severity under `fail`, when its expression
+        - reads or asks about a value nobody could read: text `number()`, `date()` or `days_between()` cannot read
+          (`TBD` for an amount), or a derived value nobody could compute (`has(ltv)` over a ratio divided by zero);
+        - calls a name no helper has (`firstpresent(x)`), or uses a filter or a test no sandbox has, which Jinja
+          leaves inside a conditional to raise only when that branch runs;
+        - finds a value missing under a name the node does not declare, where it sets `input_fields` (a typo; the
+          selector's keys, the derived values and `as_of` are declared as well);
+        - needs a lookup that found nothing, `limits[loan.program]` for a program the table lacks, in the check or
+          in a derived value it does not only fall back on (`first_present(limit, 500000)`);
+        - meets a blank no read accounts for, from a lookup inside `text()` say.
+      A derived value that came out missing counts as data the record lacks exactly when the same expression,
+      written in the check, would. Under `not_applicable` the reason says why the rule was not skipped, `missing
+      value for loan.amount (not skipped: lon is not an input or a derived value)`, unless it is already the error
+      of a value nobody could read.
+    - What a skipped rule cannot see: an error its check would raise on the values that are there, a zero divisor,
+      a misspelled method (`text(app.name).startwith('A')`) or a value of the wrong type; that surfaces on the
+      records that carry the missing value.
+    - Overall status: `fail` if any rule failed, else `warn` if any warned, else `not_evaluated` if any check did
+      not run, else `pass`. A check held for a missing value did not run, so a record is never `pass` while a value
+      was missing, unless every rule that missed one was set to skip it.
 
-    `on_missing`, the node's policy, which a rule's own `on_missing` overrides, says what a missing value means:
-    `not_evaluated`, the default, holds the rule for review; `fail` reports the rule's severity; `not_applicable`
-    skips the rule ("does not apply: missing value for …"), so a rule needs no presence guard. Under
-    `not_evaluated` and `fail` a reason reads as it always has.
-
-    Only data the record lacks is skipped, and only where a read names it: a blank no read accounts for, from a
-    lookup inside `text()` say, is still `not_evaluated`, or the severity under `fail`. So is a rule whose
-    expression, even beside a value the record does lack, reads a value nobody could read, text that `number()`,
-    `date()` or `days_between()` cannot read among them (`number(doc.amount) > doc.limit` over `TBD`); calls a
-    name no helper has (`firstpresent(x)`); uses a filter or a test the sandbox does not have, which Jinja leaves
-    inside a conditional to raise only when that branch runs (`x | lowr if y else z`); finds a value missing under
-    a name the node does not declare, where it declares its inputs (a typo; the keys its input transformer's
-    selector maps and `as_of` are declared with them); or
-    needs a derived value a lookup found nothing for (`limits[loan.program]` for a program the table lacks), unless
-    it only falls back on one
-    (`first_present(limit, 500000)`). A derived value that came out missing counts as data the record lacks exactly
-    when the same expression, written in the check, would; one held for a defect of its own, a typo, a name no
-    helper has or a value nobody could read, holds a rule wherever the rule reads it, as a fallback too. Held
-    under `not_applicable`, the rule's reason says why it was not skipped, `missing value for loan.amount (not
-    skipped: lon is not an input or a derived value)`, unless the reason is already the error of a value nobody
-    could read.
-
-    A rule skipped for a missing value cannot see an error its check would raise on the values that are there: a
-    zero divisor, a misspelled method (`text(app.name).startwith('A')`), a value of the wrong type, a lookup inside
-    the check itself. On a record whose missing value stops the check first the rule is skipped; the error
-    surfaces on the records that carry the value.
-
-    The output holds `findings` in rule order, a `summary` of statuses, `status`, the `derived` values and
-    `derived_errors`; a trace keeps every finding, unlike the longer lists it otherwise cuts to
-    `TRUNCATE_LIST_LIMIT`. A derived value computed from a missing value is missing, None under `derived`. One that
-    could not be computed from values that are there, a division by zero or `number()` of `TBD`, is None there
-    too, with the reason under `derived_errors`, and a rule that reads it is not evaluated, naming the reason.
-    So is one that reads a value nobody could read, an earlier derived value say, even beside a missing one.
-    Where the missing value raises first, an unreadable value the expression makes itself with `number()` or
-    `date()`, or reaches only through `first_present()`, goes unseen and the result is missing: `doc.rate *
-    number(doc.net)` with the rate missing. Still, no rule skips such a value under `not_applicable` where the
-    reader is handed a path as it is, as here, rather than `number(doc.net | trim)`.
-
-    The status is `fail` if any rule failed, else `warn` if any warned, else `not_evaluated` if any check
-    did not run, else `pass`; a check that read a missing value did not run under `not_evaluated` or `fail`, so a
-    record is never `pass` while a value was missing, whatever its finding reports, unless every rule that missed
-    one was set to skip it. An optional `as_of` input, an ISO date, fixes the date the effective windows are
-    compared with; without it the run date is used.
+    The output holds `findings` in rule order, which a trace keeps whole, a `summary` of statuses, `status`, the
+    `derived` values and `derived_errors`. A derived value computed from a missing value is missing, None under
+    `derived`; one that could not be computed from the values that are there, a division by zero or `number()` of
+    `TBD`, or from one nobody could read, is None there too, with the reason under `derived_errors`, and every rule
+    that reads it is held, naming the reason. Where a missing value stops the expression before a reader in it runs,
+    `doc.rate * number(doc.net)` with the rate missing and the net `TBD`, the value is missing instead, though a rule
+    set to skip is still held on it where the reader is handed a path as it is, as here. An optional `as_of` input,
+    a date, fixes the day the effective windows are compared with; without it the run date is used.
     """
 
     name: str | None = "rules"

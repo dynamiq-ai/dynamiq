@@ -8,7 +8,8 @@ where `app.purpose | trim == 'purchase'` would fail it.
 
 A record also says things a rule cannot read: `TBD` where an amount goes, `March` where a date goes. `number()` and
 `date()` read what documents write, `$586,764.00` or `Oct 1, 2026`, and hold anything else as unreadable: the value is
-there, so it is present, but a rule that uses it is not evaluated, naming the value, where `| float` would read 0.
+there, so it is not missing, but a rule that uses it or asks about it is not evaluated, naming the value, where
+`| float` would read 0.
 """
 
 import json
