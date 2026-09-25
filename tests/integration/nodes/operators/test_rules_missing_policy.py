@@ -4,14 +4,14 @@
 rule needs no presence guard: `shipment.weight_kg <= 30` does not apply to a shipment nobody weighed, and a record
 whose only unmet rules were skipped still passes. Only data the record lacks is skipped, and only where a read names
 it: a blank no read accounts for, from a lookup inside `text()` that found nothing say, is not. Nor is a check that
-reads a value nobody could read, calls a name no helper has, finds a value missing under a name a node with declared
-inputs does not declare (a typo), or needs a derived value a lookup found nothing for, whatever else the record
-lacks. Each is a problem to fix, not data to wait for: the rule is not evaluated, or reports its severity under
-`fail`, and a rule set to skip says why it did not ("… (not skipped: lon is not an input or a derived value)"). A
-derived value that came out missing counts as data the record lacks exactly when the same expression, written in the
-check, would. What a skipped rule cannot see is an error its check would raise on the values that are there; that
-surfaces on the records that carry the missing value. A rule's `on_missing` that is no policy at all leaves the
-choice to the node, with a warning, rather than refusing the build.
+reads a value nobody could read, calls a name no helper has, uses a filter or a test the sandbox does not have,
+finds a value missing under a name a node with declared inputs does not declare (a typo), or needs a derived value a
+lookup found nothing for, whatever else the record lacks. Each is a problem to fix, not data to wait for: the rule is
+not evaluated, or reports its severity under `fail`, and a rule set to skip says why it did not ("… (not skipped: lon
+is not an input or a derived value)"). A derived value that came out missing counts as data the record lacks exactly
+when the same expression, written in the check, would. What a skipped rule cannot see is an error its check would
+raise on the values that are there; that surfaces on the records that carry the missing value. A rule's `on_missing`
+that is no policy at all leaves the choice to the node, with a warning, rather than refusing the build.
 """
 
 import json
@@ -377,6 +377,28 @@ HELD = {
         {"order": {"coupon": "SPRING"}},
         "missing value for code",
         "firstpresent is not a helper",
+    ),
+    # Jinja lets a filter or a test it does not have sit in a conditional until that branch runs, and the missing
+    # value stops the check before it does: a typo all the same.
+    "unknown-filter-in-a-conditional": Held(
+        lambda **policy: screening("(loan.a | lowr == 'x') if loan.b else true", inputs=("loan",), **policy),
+        {"loan": {"b": 1}},
+        "missing value for loan.a",
+        "lowr is not a filter",
+    ),
+    "unknown-test-in-a-conditional": Held(
+        lambda **policy: screening("(loan.a is presnt) if loan.b else loan.c > 1", inputs=("loan",), **policy),
+        {"loan": {"b": 1}},
+        "missing value for loan.a",
+        "presnt is not a test",
+    ),
+    "derived-unknown-filter-in-a-conditional": Held(
+        lambda **policy: screening(
+            "label == 'x'", inputs=("loan",), derived=(("label", "(loan.a | lowr) if loan.b else ''"),), **policy
+        ),
+        {"loan": {"b": 1}},
+        "missing value for label",
+        "lowr is not a filter",
     ),
     "derived-error": Held(
         lambda **policy: screening("ltv <= 0.8", inputs=LENDING, derived=(LTV,), **policy),

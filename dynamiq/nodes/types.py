@@ -207,8 +207,9 @@ class RuleMissingPolicy(str, Enum):
     `not_evaluated` holds the rule as a finding to review. `fail` reports the rule's own severity. `not_applicable`
     skips the rule for a record without the value, as `applies_when` would, so the rule needs no presence guard.
     Only data the record lacks is skipped. A value that is there but cannot be read, a lookup that found nothing, a
-    name the node does not declare or a call of a name no helper has is still `not_evaluated`, or the severity
-    under `fail`, whatever the policy; under `not_applicable` the finding's reason says why it was not skipped.
+    name the node does not declare, a call of a name no helper has or a filter or a test no sandbox has is still
+    `not_evaluated`, or the severity under `fail`, whatever the policy; under `not_applicable` the finding's reason
+    says why it was not skipped.
     """
 
     NOT_EVALUATED = "not_evaluated"

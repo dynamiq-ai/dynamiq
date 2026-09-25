@@ -618,8 +618,9 @@ class Reader(NamedTuple):
 class Reads(NamedTuple):
     """The paths an expression reads: the ones it needs, the ones it only asks about, the global names it calls
     and reads as values, which a record key of the same name would shadow, the paths it calls as if they were
-    helpers, a mistyped `firstpresent(x)` say, which are read like any member as well, and the paths it reads as a
-    number or a date."""
+    helpers, a mistyped `firstpresent(x)` say, which are read like any member as well, the paths it reads as a
+    number or a date, and the filters and tests it uses that the sandbox does not have, each as `(kind, name)`:
+    `("filter", "lowr")`."""
 
     required: list[str]
     optional: list[str]
@@ -627,6 +628,7 @@ class Reads(NamedTuple):
     helpers_read: tuple[str, ...] = ()
     unknown_calls: tuple[str, ...] = ()
     readers: tuple[Reader, ...] = ()
+    unknown_names: tuple[tuple[str, str], ...] = ()
 
 
 class _Collected(NamedTuple):
@@ -637,6 +639,7 @@ class _Collected(NamedTuple):
     lenient: list[str]
     unknown_calls: list[str]
     readers: list[Reader]
+    unknown_names: list[tuple[str, str]]
 
 
 def _readers_of(call: nodes.Call) -> list[Reader]:
@@ -670,6 +673,14 @@ def _root(path: str) -> str:
 
 
 def _collect_paths(node: nodes.Node, collected: _Collected, required: bool, lenient: bool = False) -> None:
+    # A filter or a test the sandbox does not have is refused when the expression is built, unless it sits in a
+    # conditional, where Jinja leaves it to raise when that branch runs: it is noted, as a helper nobody has is.
+    if isinstance(node, (nodes.Filter, nodes.Test)):
+        kind, known = (
+            ("filter", _ENVIRONMENT.filters) if isinstance(node, nodes.Filter) else ("test", _ENVIRONMENT.tests)
+        )
+        if node.name not in known and (kind, node.name) not in collected.unknown_names:
+            collected.unknown_names.append((kind, node.name))
     # A call of a helper reads its arguments, never a member of the helper's name; a value asked about with
     # `has`, `is defined`, `is present` or `default` is allowed to be missing, and so is anything read inside the
     # arguments of `first_present`, which skips a missing value rather than asking about it.
@@ -714,7 +725,9 @@ def _is_under(path: str, prefix: str) -> bool:
 
 
 def _reads_of(parsed: nodes.Template) -> Reads:
-    collected = _Collected(required=[], optional=[], called=[], lenient=[], unknown_calls=[], readers=[])
+    collected = _Collected(
+        required=[], optional=[], called=[], lenient=[], unknown_calls=[], readers=[], unknown_names=[]
+    )
     _collect_paths(parsed, collected, required=True)
     required: list[str] = []
     optional = list(collected.optional)
@@ -735,6 +748,7 @@ def _reads_of(parsed: nodes.Template) -> Reads:
         helpers_read=tuple(root for root in roots if root in GLOBAL_NAMES),
         unknown_calls=tuple(collected.unknown_calls),
         readers=tuple(collected.readers),
+        unknown_names=tuple(collected.unknown_names),
     )
 
 
@@ -961,9 +975,11 @@ class Rules(Node):
     lookup inside `text()` say, is still `not_evaluated`, or the severity under `fail`. So is a rule whose
     expression, even beside a value the record does lack, reads a value nobody could read, text that `number()`,
     `date()` or `days_between()` cannot read among them (`number(doc.amount) > doc.limit` over `TBD`); calls a
-    name no helper has (`firstpresent(x)`); finds a value missing under a name the node does not declare, where it
-    declares its inputs (a typo; `as_of` is declared with them); or needs a derived value a lookup found nothing
-    for (`limits[loan.program]` for a program the table lacks), unless it only falls back on one
+    name no helper has (`firstpresent(x)`); uses a filter or a test the sandbox does not have, which Jinja leaves
+    inside a conditional to raise only when that branch runs (`x | lowr if y else z`); finds a value missing under
+    a name the node does not declare, where it declares its inputs (a typo; `as_of` is declared with them); or
+    needs a derived value a lookup found nothing for (`limits[loan.program]` for a program the table lacks), unless
+    it only falls back on one
     (`first_present(limit, 500000)`). A derived value that came out missing counts as data the record lacks exactly
     when the same expression, written in the check, would; one held for a defect of its own, a typo, a name no
     helper has or a value nobody could read, holds a rule wherever the rule reads it, as a fallback too. Held
@@ -1371,17 +1387,21 @@ class Rules(Node):
         when it is. The reason names the name or the path at fault.
 
         The expression may call a name that is no helper and that the record does not hold, a mistyped
-        `firstpresent`. It may read a value nobody could read, which a missing one must not hide: one already so, an
-        earlier derived value, or text it reads through `number()` or `date()` (`number(doc.amount) > doc.limit`
-        over an amount of `TBD`). A value it finds missing may sit under a name outside `declared`, a typo, where the
-        node declares its inputs (None where it does not), or under a derived value in `pending`, one computed after
-        `reading`, the derived value this expression computes. Or it may read a derived value held for any of these
-        defects, wherever it reads it, or one a lookup found nothing for, where it needs the value rather than falls
-        back on it: a gap in a table or in the node, never in the record. A defect speaks over a lookup that found
-        nothing, whichever the expression reads first.
+        `firstpresent`, or use a filter or a test the sandbox does not have, `x | lowr` inside a conditional, which
+        Jinja leaves to raise until that branch runs. It may read a value nobody could read, which a missing one must
+        not hide: one already so, an earlier derived value, or text it reads through `number()` or `date()`
+        (`number(doc.amount) > doc.limit` over an amount of `TBD`). A value it finds missing may sit under a name
+        outside `declared`, a typo, where the node declares its inputs (None where it does not), or under a derived
+        value in `pending`, one computed after `reading`, the derived value this expression computes. Or it may read a
+        derived value held for any of these defects, wherever it reads it, or one a lookup found nothing for, where it
+        needs the value rather than falls back on it: a gap in a table or in the node, never in the record. A defect
+        speaks over a lookup that found nothing, whichever the expression reads first.
         """
         if (callee := self._missing(list(reads.unknown_calls), scope)) is not None:
             return _Hold(f"{callee} is not a helper")
+        if reads.unknown_names:
+            kind, name = reads.unknown_names[0]
+            return _Hold(f"{name} is not a {kind}")
         paths = reads.required + reads.optional
         found, unreadable = self._unreadable(paths, scope)
         if unreadable is not None:
