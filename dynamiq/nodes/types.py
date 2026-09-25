@@ -1,9 +1,10 @@
 from enum import Enum
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from dynamiq.utils import generate_uuid
+from dynamiq.utils.logger import logger
 
 
 class NodeGroup(str, Enum):
@@ -201,14 +202,31 @@ class RuleSeverity(str, Enum):
 
 
 class RuleMissingPolicy(str, Enum):
-    """What a rule reports when a value it reads is missing: a finding to review, or the rule's own severity."""
+    """What a rule reports when a value it reads is missing.
+
+    `not_evaluated` holds the rule as a finding to review. `fail` reports the rule's own severity. `not_applicable`
+    skips the rule for a record without the value, as `applies_when` would, so the rule needs no presence guard.
+    Only data the record lacks is skipped. A value that is there but cannot be read, a lookup that found nothing, a
+    name the node does not declare, a call of a name no helper has or a filter or a test no sandbox has is still
+    `not_evaluated`, or the severity under `fail`, whatever the policy; under `not_applicable` the finding's reason
+    says why it was not skipped.
+    """
 
     NOT_EVALUATED = "not_evaluated"
     FAIL = "fail"
+    NOT_APPLICABLE = "not_applicable"
 
 
 class DerivedValue(Authored):
-    """A value a Rules node computes once per record, before its rules run, and exposes to them by name."""
+    """A value a Rules node computes once per record, before its rules run, and exposes to them by name.
+
+    One computed from a value the record lacks is missing: `None` under the node's `derived`, and missing to the
+    rules. One that cannot be computed from the values that are there, a division by zero or `number()` of `TBD`,
+    also shows `None` under `derived`, with the reason under `derived_errors`; the rules, though, see a value that
+    cannot be read, so a rule that reads it, or asks about it with `has()` or a test, is held, naming the reason. A
+    rule's message reads it as None, as `derived` shows it, so a guard in the message (`{% if has(ltv) %}`) decides
+    as it did before derived values kept their errors.
+    """
 
     id: str = Field(default_factory=generate_uuid)
     name: str
@@ -221,7 +239,10 @@ class Rule(Authored):
     `check` is an expression that must hold for the rule to pass; `applies_when` is an optional precondition,
     and a rule that does not apply reports `not_applicable`. `message` is a template rendered with the whole
     record when the check does not hold. `effective_from` and `effective_until` are ISO dates; outside the
-    window the rule is not applicable for the record's `as_of` date.
+    window the rule is not applicable for the record's `as_of` date. `on_missing` says what a missing value
+    means for this rule, overriding the node's policy; unset, or saved empty, it leaves that to the node, and so
+    does a value that is no policy, with a warning. Unset, it is left out when the rule is serialized, so a rule
+    saved before rules had a policy of their own serializes as it did.
     """
 
     id: str = Field(default_factory=generate_uuid)
@@ -237,3 +258,26 @@ class Rule(Authored):
     effective_from: str | None = None
     effective_until: str | None = None
     enabled: bool = True
+    # Left out of a dump while unset, rather than written as null: every flow saved before the key existed would
+    # otherwise read as changed. `exclude_if` keeps the JSON schema as it is, which a model serializer would not.
+    on_missing: RuleMissingPolicy | None = Field(default=None, exclude_if=lambda policy: policy is None)
+
+    @field_validator("on_missing", mode="before")
+    @classmethod
+    def unknown_policy_is_unset(cls, value: Any, info: ValidationInfo) -> Any:
+        """A policy left empty, as the editor saves it, leaves the choice to the node, as None does.
+
+        So does a value that is no policy, `skip` or a typo, with a warning naming it: before rules had a policy of
+        their own the key was ignored, and a rule that carries one must keep building.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        allowed = [policy.value for policy in RuleMissingPolicy]
+        # A member of the enum equals its value, so it passes here as well.
+        if value is None or value in allowed:
+            return value
+        logger.warning(
+            f"Rule {info.data.get('id')!r}: on_missing {value!r} is not one of {', '.join(allowed)}, "
+            "so the node's policy applies."
+        )
+        return None
