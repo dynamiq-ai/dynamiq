@@ -1,8 +1,8 @@
 from dynamiq.connections import VertexAI as VertexAIConnection
-from dynamiq.nodes.llms.base import BaseLLM
+from dynamiq.nodes.llms.gemini import GeminiCachingLLM
 
 
-class VertexAI(BaseLLM):
+class VertexAI(GeminiCachingLLM):
     """VertexAI LLM node.
 
     This class provides an implementation for the VertexAI Language Model node.
@@ -10,6 +10,8 @@ class VertexAI(BaseLLM):
     Attributes:
         connection (VertexAIConnection | None): The connection to use for the VertexAI LLM.
         MODEL_PREFIX (str): The prefix for the VertexAI model name.
+        cache_control (GeminiCacheControl | Literal[False] | None): Context caching config,
+            applied to Gemini models only. See :class:`GeminiCachingLLM`.
     """
 
     connection: VertexAIConnection | None = None
