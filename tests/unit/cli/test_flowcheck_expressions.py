@@ -3,9 +3,10 @@
 flowcheck.check_expressions() walks the parsed Jinja2 AST rather than relying on compiling it:
 Jinja only checks a filter or test used inside a conditional expression at run time, so a plain
 compile would miss `x | lowr if a else b`. It never imports the SDK engine (see flowcheck's
-module docstring), so RULE_HELPERS/RULE_TESTS are a hand-kept copy of
-dynamiq.nodes.operators.rules.HELPERS/.TESTS - test_the_mirrored_vocabulary_matches_the_engine
-below is the drift guard, and it is the one test here allowed to import the engine.
+module docstring), so RULE_HELPERS/RULE_TESTS/RULE_RESERVED_NAMES are a hand-kept copy of
+dynamiq.nodes.operators.rules.HELPERS/.TESTS/.RESERVED_NAMES - test_the_mirrored_vocabulary_matches_the_engine
+below is the drift guard, for the filter, test and global names too, and it is the one test here
+allowed to import the engine.
 """
 
 import json
@@ -449,11 +450,21 @@ def test_node_level_on_missing_accepts_not_applicable():
 
 def test_the_mirrored_vocabulary_matches_the_engine():
     """The one test here allowed to import the engine (see flowcheck's module docstring) - it is
-    the guard against RULE_HELPERS/RULE_TESTS drifting from the real HELPERS/TESTS dicts."""
-    from dynamiq.nodes.operators.rules import HELPERS, TESTS
+    the guard against flowcheck's hand-kept names drifting from the engine's: the helpers, the
+    tests, the original helper names, the name Jinja reserves, the tests that only ask about their
+    value, and the filters, tests and globals each engine's sandbox carries."""
+    from dynamiq.nodes.operators import expression, rules
 
-    assert flowcheck.RULE_HELPERS == set(HELPERS)
-    assert flowcheck.RULE_TESTS == set(TESTS)
+    assert flowcheck.RULE_HELPERS == set(rules.HELPERS)
+    assert flowcheck.RULE_TESTS == set(rules.TESTS)
+    assert flowcheck.RULE_RESERVED_NAMES == rules.RESERVED_NAMES
+    assert flowcheck.RESERVED_ROOT == rules.RESERVED_ROOT
+    assert flowcheck._EXEMPT_TESTS == rules._EXEMPT_TESTS
+    assert flowcheck._GLOBAL_NAMES == rules.GLOBAL_NAMES
+    for sandbox in (rules._ENVIRONMENT, expression._ENVIRONMENT):
+        assert flowcheck._FILTER_NAMES == set(sandbox.filters)
+        assert flowcheck._TEST_NAMES == set(sandbox.tests)
+        assert flowcheck._GLOBAL_NAMES == set(sandbox.globals)
 
 
 def _flow_with_a_root_typo_warning() -> dict:
