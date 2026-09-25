@@ -39,9 +39,12 @@ class Expression(Node):
     referred to on its own that is missing evaluates to None; using a missing input in arithmetic
     fails the run, as does an expression that reaches for Python internals. The helpers a rule can
     call are available as well: `has`, `days_between`, `date`, `today`, `len`, `abs`, `min`, `max`,
-    `sum` and `round`; an input named like one of them is the input where an expression reads it as a
-    value and the helper where an expression calls it. The output holds one key per expression, plus every
-    input when `pass_through` is set, with expressions winning on a clash.
+    `sum`, `round`, `text`, `number` and `first_present`; so are the tests `is present` and `is blank`.
+    An input named like one of the helpers is the input where an expression reads it as a value and
+    the helper where an expression calls it. A blank result, `text('  ')` or `date('')` say, comes out
+    as None, like a missing input; a value `number()` or `date()` cannot read fails the run instead,
+    `number('TBD')` as `date('March')` does. The output holds one key per expression, plus every input
+    when `pass_through` is set, with expressions winning on a clash.
     """
 
     name: str | None = "expression"

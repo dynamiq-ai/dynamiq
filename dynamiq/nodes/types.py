@@ -217,7 +217,11 @@ class RuleMissingPolicy(str, Enum):
 
 
 class DerivedValue(Authored):
-    """A value a Rules node computes once per record, before its rules run, and exposes to them by name."""
+    """A value a Rules node computes once per record, before its rules run, and exposes to them by name.
+
+    One that cannot be computed comes out as `None`; the node's `derived_errors` names the reason when the
+    cause is the expression's own rather than a value the record lacks.
+    """
 
     id: str = Field(default_factory=generate_uuid)
     name: str

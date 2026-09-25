@@ -360,7 +360,8 @@ def first_present(environment: "RecordSandbox", *values: Any) -> Any:
 
     A fallback written out, `a if a is present else b`, names each value twice and grows with every alternative;
     `first_present(a, b, c)` names each once. A value it reads may be missing without holding the rule, since the
-    next one stands in for it: only when none is present is the result missing.
+    next one stands in for it: only when none is present is the result missing. A value nobody could read counts
+    as present too, so `first_present` stops there rather than falling back past it.
     """
     for value in values:
         if is_present(value):
@@ -417,10 +418,10 @@ def _keeps_blank(filter_: Callable[..., Any]) -> Callable[..., Any]:
 class RuleUndefined(ChainableUndefined):
     """A value that is not there.
 
-    Attribute and item access chain, so `has(docs.FloodCert.pages)` can ask about a document that is missing; a
-    comparison, a truth test, a count or a loop over the value raises instead, so a lookup such as
-    `limits[loan.program]` for a program the table lacks makes the rule not evaluated rather than quietly true or
-    false. Rendering it in a message gives an empty string.
+    Attribute and item access chain, so `has(docs.FloodCert.pages)` can ask about a document that is missing;
+    `is present` and `is blank` ask about it the same way. A comparison, a truth test, a count or a loop over
+    the value raises instead, so a lookup such as `limits[loan.program]` for a program the table lacks makes
+    the rule not evaluated rather than quietly true or false. Rendering it in a message gives an empty string.
     """
 
     __slots__ = ()
@@ -696,11 +697,12 @@ def _reads_of(parsed: nodes.Template) -> Reads:
 def read_paths(expression: str) -> Reads:
     """The paths an expression reads, in order of appearance.
 
-    A path the expression only asks `has`, `is defined` or `default` about is optional: it may be missing
-    without stopping the evaluation, and so may anything read under it, since `has(docs.FloodCert) and
-    docs.FloodCert.zone == 'A'` is how a check guards a read; the guard decides, not a pre-check. Every other
-    path is required. A helper's name is never a read: `days_between(a, b)` reads `a` and `b`, while a bare
-    `date` is a member of the record, whatever the record holds under it.
+    A path the expression only asks `has`, `is defined`, `is present`, `is blank` or `default` about, or
+    offers to `first_present` as a fallback, is optional: it may be missing without stopping the evaluation,
+    and so may anything read under it, since `has(docs.FloodCert) and docs.FloodCert.zone == 'A'` is how a
+    check guards a read; the guard decides, not a pre-check. Every other path is required. A helper's name is
+    never a read: `days_between(a, b)` reads `a` and `b`, while a bare `date` is a member of the record,
+    whatever the record holds under it.
     """
     return _reads_of(_ENVIRONMENT.parse("{{ " + expression + " }}"))
 
@@ -892,8 +894,9 @@ class Rules(Node):
     Inputs arrive by name and rules read them by path (`docs.Note.interest_rate`), so a record of any shape
     needs no mapping beyond naming it. Derived values are computed once per record, in order, before the rules
     run, and are read by name like an input. Expressions use the same sandboxed engine as the Expression node,
-    plus `has`, `days_between`, `date`, `today`, `len`, `abs`, `min`, `max`, `sum` and `round`. A record member
-    named like a helper is the member where a rule reads it as a value and the helper where a rule calls it. A
+    plus the helpers `has`, `days_between`, `date`, `today`, `len`, `abs`, `min`, `max`, `sum`, `round`, `text`,
+    `number` and `first_present`, and the tests `is present` and `is blank`. A record member named like a
+    helper is the member where a rule reads it as a value and the helper where a rule calls it. A
     member named like a method of the record, `items` or `update`, is the member: the method is reached only
     for a key the record lacks, and a read the sandbox refuses holds that rule as `not_evaluated` rather than
     failing the run.
