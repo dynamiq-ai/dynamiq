@@ -715,6 +715,27 @@ def test_days_between_reads_the_new_formats_and_a_blank_read_through_date_is_mis
     assert (findings["read"]["status"], findings["read"]["message"]) == read
 
 
+@pytest.mark.parametrize(
+    ("placed", "shipped", "message"),
+    [
+        ("sometime", "TBD", "check could not be evaluated: not a date: 'sometime'"),
+        ("TBD", "sometime", "check could not be evaluated: not a date: 'TBD'"),
+        (ABSENT, "TBD", "missing value for order.placed"),
+        ("TBD", ABSENT, "missing value for order.shipped"),
+    ],
+    ids=["both-unreadable", "both-unreadable-reversed", "placed-missing", "shipped-missing"],
+)
+def test_days_between_names_the_first_argument_when_both_dates_are_bad(placed, shipped, message):
+    """`days_between(date(a), date(b))` reads `a` before `b`, so when both are unreadable the reason is `a`'s,
+    in reading order, whichever text it holds. A value the record lacks outright is caught before the check
+    ever runs, so it is named instead, on whichever side it sits."""
+    node = rules(Rule(id="R1", check="days_between(date(order.placed), date(order.shipped)) <= 30"), member="order")
+
+    finding = by_id(run(node, record("order", placed=placed, shipped=shipped)))["R1"]
+
+    assert (finding["status"], finding["message"]) == ("not_evaluated", message)
+
+
 def test_to_date_reads_the_new_formats_and_still_raises_on_what_it_cannot_read():
     """`days_between`, an effective window and `as_of` read their dates through it."""
     assert to_date("2026/8/7") == date(2026, 8, 7)
