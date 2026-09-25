@@ -913,8 +913,9 @@ def read_paths(expression: str) -> Reads:
     offers to `first_present` as a fallback, is optional: it may be missing without stopping the evaluation,
     and so may anything read under it, since `has(docs.FloodCert) and docs.FloodCert.zone == 'A'` is how a
     check guards a read; the guard decides. Every other path is required, and a check stops where it reads one that
-    is missing (`need`). A helper's name is never a read: `days_between(a, b)` reads `a` and `b`, while a bare `date`
-    is a member of the record, whatever the record holds under it.
+    is missing (`need`), unless the other side of an `and` or an `or` whose truth alone it uses decides in its place
+    (`rule_or`). A helper's name is never a read: `days_between(a, b)` reads `a` and `b`, while a bare `date` is a
+    member of the record, whatever the record holds under it.
     """
     return _reads_of(_collected(_ENVIRONMENT.parse("{{ " + expression + " }}")))
 
@@ -1182,10 +1183,10 @@ class _Lazy:
 def _compile_lazy(text: str) -> tuple[_Lazy, Reads]:
     """A check or an `applies_when` and its reads, compiled as `compile_expression` compiles it but keeping an undefined
     result, so a bare `limits[program]` that finds nothing is no verdict. Each read it needs goes through `need()`, so
-    a missing value stops it only where the evaluation reaches it; a call of a name no helper has goes through
-    `callee()`, and a blank a helper makes goes through `blank_at()` with the paths its value came from (`_needing`);
-    an `and` or an `or` whose truth alone counts decides in `RuleSandbox` (`_mark_deciding`). A syntax error names the
-    text as the author wrote it."""
+    a missing value stops it only where the evaluation reaches it; a call of a name no helper or global has goes
+    through `callee()`, and a blank a helper makes goes through `blank_at()` with the paths its value came from
+    (`_needing`); an `and` or an `or` whose truth alone counts decides in `RuleSandbox` (`_mark_deciding`). A syntax
+    error names the text as the author wrote it."""
     parser = Parser(_CHECK_ENVIRONMENT, text, state="variable")
     try:
         expression = parser.parse_expression()
@@ -1339,9 +1340,10 @@ class Rules(Node):
     A derived value computed from a missing value is missing, None under `derived`; one that could not be computed is
     None too, its reason under `derived_errors`, and a rule that uses it is held.
 
-    The output holds `findings` in rule order, which a trace keeps whole, a `summary` of statuses, `status` (`fail` if
-    any rule failed, else `warn` if any warned, else `not_evaluated` if any did not run, else `pass`), `derived` and
-    `derived_errors`. An optional `as_of` date is the day effective windows are compared with, the run date without it.
+    The output holds `findings` in rule order, which a trace keeps whole, each with its rendered message or reason and
+    the values its check reads (`evaluated`); a `summary` of statuses; `status`, `fail` if any rule failed, else `warn`
+    if any warned, else `not_evaluated` if any did not run, else `pass`; and `derived` and `derived_errors`. An optional
+    `as_of` date is the day effective windows are compared with, the run date without it.
     """
 
     name: str | None = "rules"
