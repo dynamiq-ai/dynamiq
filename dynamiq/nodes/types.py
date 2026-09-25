@@ -236,7 +236,8 @@ class Rule(Authored):
     record when the check does not hold. `effective_from` and `effective_until` are ISO dates; outside the
     window the rule is not applicable for the record's `as_of` date. `on_missing` says what a missing value
     means for this rule, overriding the node's policy; unset, or saved empty, it leaves that to the node, and so
-    does a value that is no policy, with a warning.
+    does a value that is no policy, with a warning. Unset, it is left out when the rule is serialized, so a rule
+    saved before rules had a policy of their own serializes as it did.
     """
 
     id: str = Field(default_factory=generate_uuid)
@@ -252,7 +253,9 @@ class Rule(Authored):
     effective_from: str | None = None
     effective_until: str | None = None
     enabled: bool = True
-    on_missing: RuleMissingPolicy | None = None
+    # Left out of a dump while unset, rather than written as null: every flow saved before the key existed would
+    # otherwise read as changed. `exclude_if` keeps the JSON schema as it is, which a model serializer would not.
+    on_missing: RuleMissingPolicy | None = Field(default=None, exclude_if=lambda policy: policy is None)
 
     @field_validator("on_missing", mode="before")
     @classmethod

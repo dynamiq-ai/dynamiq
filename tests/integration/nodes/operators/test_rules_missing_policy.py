@@ -14,6 +14,7 @@ surfaces on the records that carry the missing value. A rule's `on_missing` that
 choice to the node, with a warning, rather than refusing the build.
 """
 
+import json
 import logging
 import textwrap
 from collections.abc import Iterator
@@ -21,6 +22,7 @@ from contextlib import contextmanager
 from typing import Callable, NamedTuple
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from dynamiq import Workflow
@@ -926,6 +928,40 @@ def test_the_policies_survive_a_yaml_round_trip(tmp_path):
         "country": "not_evaluated",
         "hazmat": "pass",
     }
+
+
+def test_a_rule_that_sets_no_policy_serializes_as_it_did_before_rules_had_one(tmp_path):
+    """A flow saved before rules had a policy of their own must serialize as it did, or every such flow would read as
+    changed: the key is left out where the rule sets nothing, and kept where it sets a policy."""
+    unset = Rule(id="weight", check="shipment.weight_kg <= 30")
+    kept = Rule(id="value", check="shipment.value <= 1000", on_missing="fail")
+
+    assert "on_missing" not in unset.model_dump()
+    assert "on_missing" not in json.loads(unset.model_dump_json())
+    assert kept.model_dump()["on_missing"] == RuleMissingPolicy.FAIL
+    assert json.loads(kept.model_dump_json())["on_missing"] == "fail"
+    node = Rules(name="shipping", input_fields=[NamedField(name="shipment")], rules=[unset, kept])
+    assert [rule.get("on_missing", "unset") for rule in node.to_dict()["rules"]] == ["unset", RuleMissingPolicy.FAIL]
+
+    path = tmp_path / "shipping.yaml"
+    shipping_workflow().to_yaml_file(path)
+
+    saved = yaml.safe_load(path.read_text())["nodes"]["shipping"]
+    assert saved["on_missing"] == "not_applicable"
+    assert [rule.get("on_missing", "unset") for rule in saved["rules"]] == [
+        "unset",
+        "fail",
+        "not_evaluated",
+        "not_applicable",
+    ]
+    loaded = Workflow.from_yaml_file(str(path), init_components=True)
+    node = next(node for node in loaded.flow.nodes if isinstance(node, Rules))
+    assert [rule.on_missing for rule in node.rules] == [
+        None,
+        RuleMissingPolicy.FAIL,
+        RuleMissingPolicy.NOT_EVALUATED,
+        RuleMissingPolicy.NOT_APPLICABLE,
+    ]
 
 
 EDITOR_YAML = textwrap.dedent(
