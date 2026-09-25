@@ -414,6 +414,10 @@ def failure(expression: str, **inputs) -> str:
         ("1 234", 1234),
         ("1 234.56", 1234.56),
         ("6.25 %", 6.25),
+        ("¥1,000", 1000),
+        ("₹ 250.75", 250.75),
+        ("−5", -5),
+        ("−₩1,000", -1000),
         (42, 42),
         (2.5, 2.5),
         (Decimal("586764.00"), 586764.0),
@@ -430,6 +434,10 @@ def failure(expression: str, **inputs) -> str:
         "space-grouped",
         "space-grouped-decimal",
         "spaced-percent",
+        "yen",
+        "rupee",
+        "minus-sign",
+        "minus-sign-before-won",
         "int",
         "float",
         "decimal",
@@ -465,6 +473,10 @@ def test_number_reads_an_amount_the_way_a_document_writes_it(raw, expected):
         "1 23",
         "1 234,56",
         "12$5",
+        "₹1,23,456",
+        "(−5)",
+        "¢50",
+        "USD 1,000",
         True,
         float("nan"),
         float("inf"),
@@ -489,6 +501,10 @@ def test_number_reads_an_amount_the_way_a_document_writes_it(raw, expected):
         "spaced-group-of-two",
         "spaced-with-decimal-comma",
         "currency-between-digits",
+        "lakh-grouping",
+        "minus-sign-in-parentheses",
+        "cents",
+        "currency-code",
         "true",
         "nan-float",
         "inf-float",
@@ -497,7 +513,8 @@ def test_number_reads_an_amount_the_way_a_document_writes_it(raw, expected):
 def test_number_holds_a_value_it_cannot_read_rather_than_guessing(raw):
     """Each of these is there, so it is not missing, yet any reading of it is a guess: `12,5` is 12.5 or 125
     depending on who wrote it, and so is `12 5`; `100, 200` may be two amounts; `| float` reads `TBD` as 0; and
-    Python itself reads `1e5`, `1_000` and `١٢`."""
+    Python itself reads `1e5`, `1_000` and `١٢`. Commas group thousands only, so `₹1,23,456`, grouped in lakhs, is no
+    amount either; `¢50` is cents, not 50 of the currency; and a currency is read from its sign, never its code."""
     node = rules(
         Rule(id="AMT-01", check="number(doc.amount) > 1000"),
         Rule(id="bare", check="number(doc.amount)"),
@@ -699,12 +716,35 @@ def test_a_rule_reading_and_calling_number_is_held_when_it_runs_not_refused_at_b
         ("date(raw)", "Oct 1, 2026", date(2026, 10, 1)),
         ("date(raw)", "October 1, 2026", date(2026, 10, 1)),
         ("date(raw)", "Sept. 1 2026", date(2026, 9, 1)),
+        # A month written as a word says which number is the day, so the day may come first.
+        ("date(raw)", "1 Oct 2026", date(2026, 10, 1)),
+        ("date(raw)", "7 August 2026", date(2026, 8, 7)),
+        ("date(raw)", "7 Aug 2026", date(2026, 8, 7)),
+        ("date(raw)", "07-Aug-2026", date(2026, 8, 7)),
+        ("date(raw)", "07-AUG-2026", date(2026, 8, 7)),
+        ("date(raw)", "7th August 2026", date(2026, 8, 7)),
+        ("date(raw)", "7 August, 2026", date(2026, 8, 7)),
         ("date(raw, format='%d.%m.%Y')", "17.07.2026", date(2026, 7, 17)),
         # The shapes it read before.
         ("date(raw)", "2026-08-07T10:15:00Z", date(2026, 8, 7)),
         ("date(raw)", "08/07/2026", date(2026, 8, 7)),
     ],
-    ids=["year-first-slashes", "short-month", "month", "sept-without-comma", "format", "iso", "us"],
+    ids=[
+        "year-first-slashes",
+        "short-month",
+        "month",
+        "sept-without-comma",
+        "day-first-short-month",
+        "day-first",
+        "day-first-abbreviated",
+        "day-first-dashed",
+        "day-first-dashed-capitals",
+        "day-first-ordinal",
+        "day-first-comma",
+        "format",
+        "iso",
+        "us",
+    ],
 )
 def test_date_reads_the_shapes_a_document_writes_a_date_in(expression, raw, expected):
     assert evaluate(expression, raw=raw) == expected
@@ -824,7 +864,9 @@ def test_to_date_reads_the_new_formats_and_still_raises_on_what_it_cannot_read()
     assert to_date("2026/8/7") == date(2026, 8, 7)
     assert to_date(" oct 1, 2026 ") == date(2026, 10, 1)
     assert to_date("17.07.2026", format="%d.%m.%Y") == date(2026, 7, 17)
-    for text in ("March", "Oct 12026", "Octember 1, 2026", "1 Oct 2026", ""):
+    assert to_date("1 Oct 2026") == date(2026, 10, 1)
+    # A day before a month written as a number is no more readable than it was: `7-8-2026` is 7 August or 8 July.
+    for text in ("March", "Oct 12026", "Octember 1, 2026", "7-8-2026", "7 Foo 2026", ""):
         with pytest.raises(ValueError, match=f"^not a date: {text!r}$"):
             to_date(text)
     with pytest.raises(ValueError):

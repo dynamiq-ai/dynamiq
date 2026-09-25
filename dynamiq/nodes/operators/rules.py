@@ -39,6 +39,10 @@ _US_DATE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 _YEAR_FIRST_DATE = re.compile(r"^([0-9]{4})/([0-9]{1,2})/([0-9]{1,2})$")
 _NAMED_DATE = re.compile(r"^(?P<month>[A-Za-z]+)\.?\s+(?P<day>[0-9]{1,2})(?:,\s*|\s+)(?P<year>[0-9]{4})$")
+# The day first, before a month written as a word, which says which number is the day: `7 Aug 2026`, `07-AUG-2026`.
+_DAY_FIRST_DATE = re.compile(
+    r"^(?P<day>[0-9]{1,2})(?:st|nd|rd|th)?(?:\s+|-)(?P<month>[A-Za-z]+)\.?,?(?:\s+|-)(?P<year>[0-9]{4})$"
+)
 _MONTH_NAMES = (
     "january",
     "february",
@@ -64,7 +68,9 @@ _GROUPED_THOUSANDS = {
     ",": re.compile(r"[1-9][0-9]{0,2}(?:,[0-9]{3})+"),
     ".": re.compile(r"[1-9][0-9]{0,2}(?:\.[0-9]{3})+"),
 }
-_CURRENCY = re.compile(r"[$€£]")
+# The currency signs a document writes beside an amount, and only signs: `¢`, a hundredth of the unit, would read `¢50`
+# as 50, and a code, `USD 1,000`, leaves the amount unreadable.
+_CURRENCY = re.compile(r"[$€£¥₹₩₽₺₪₫₱₦₴]")
 # Whitespace beside a comma or a point: `100, 200` may be two amounts as much as one.
 _SPACE_BESIDE_SEPARATOR = re.compile(r"\s[.,]|[.,]\s")
 # Whitespace between two digits, which groups thousands the way a grouping separator does: `1 234`.
@@ -207,8 +213,9 @@ def to_date(value: Any, format: str | None = None) -> date:
     """Reads a date from a date, a datetime or text written the way documents write one.
 
     The text may be ISO (`2026-08-07`, a time after it allowed), US month first (`08/07/2026`), year first with
-    slashes (`2026/08/07`) or an English month name (`Aug 7, 2026`, `August 7 2026`), read in English whatever the
-    process's locale. Given a `format`, the text is read as `datetime.strptime` reads that format, and nothing else.
+    slashes (`2026/08/07`) or an English month name, month first or day first: `Aug 7, 2026`, `7 Aug 2026`, read in
+    English whatever the process's locale. Given a `format`, the text is read as `datetime.strptime` reads that
+    format, and nothing else.
 
     Raises when there is no date to read: a value already missing raises its own undefined error and a value already
     unreadable its own error, so `days_between(date(a), b)` reports what `date()` found; anything else raises a
@@ -237,7 +244,8 @@ def to_date(value: Any, format: str | None = None) -> date:
         if year_first := _YEAR_FIRST_DATE.match(written):
             year, month, day = (int(part) for part in year_first.groups())
             return date(year, month, day)
-        if (named := _NAMED_DATE.match(written)) and (month := _MONTHS.get(named["month"].lower())):
+        named = _NAMED_DATE.match(written) or _DAY_FIRST_DATE.match(written)
+        if named and (month := _MONTHS.get(named["month"].lower())):
             return date(int(named["year"]), month, int(named["day"]))
     raise ValueError(f"not a date: {value!r}")
 
@@ -280,7 +288,8 @@ def _read_number(written: str, decimal: str) -> int | float | None:
     """The number the text writes, or None when it writes none, or writes one only a guess could read."""
     grouping = "," if decimal == "." else "."
     # A currency sign says nothing about the amount; read as a space, it cannot join the digits on either side of it.
-    body = _CURRENCY.sub(" ", written)
+    # The minus sign a PDF prints, `−5`, is the hyphen a keyboard writes.
+    body = _CURRENCY.sub(" ", written.replace("\u2212", "-"))
     if _SPACE_BESIDE_SEPARATOR.search(body):
         return None
     # Spaces group thousands in some documents, `1 234`, and count only where a grouping separator could stand; a
@@ -340,11 +349,12 @@ def _number_of(value: Any, decimal: str) -> int | float | None:
 def number(environment: "RecordSandbox", value: Any, decimal: str = ".") -> Any:
     """The value as a number: an int when it has no decimal point, a float when it has one.
 
-    Text is read the way a document writes an amount. Currency signs (`$`, `€`, `£`) and the spaces around the
-    number say nothing about it; parentheses make it negative, `(1,200.50)`; a `%` after it is dropped, so `6.25%` is
-    6.25; commas group thousands, `1,234,567.89`, and so do spaces, `1 234 567`, but only where they group thousands.
-    `decimal=','` reads a decimal comma instead, `1.234,56` or `1 234,56`. Anything else is unreadable rather than
-    guessed at: `12,5`, `12 5`, `100, 200`, `1e5`, `nan`, `TBD`, `true`. Where `| float` reads `TBD` as 0, a rule that
+    Text is read the way a document writes an amount. Currency signs (`$`, `€`, `£`, `¥`, `₹` and the like) and the
+    spaces around the number say nothing about it; parentheses make it negative, `(1,200.50)`, as a minus sign does,
+    `-5` or the `−5` a PDF prints; a `%` after it is dropped, so `6.25%` is 6.25; commas group thousands,
+    `1,234,567.89`, and so do spaces, `1 234 567`, but only where they group thousands. `decimal=','` reads a decimal
+    comma instead, `1.234,56` or `1 234,56`. Anything else is unreadable rather than guessed at: `12,5`, `12 5`,
+    `100, 200`, `1,23,456`, `USD 1,000`, `1e5`, `nan`, `TBD`, `true`. Where `| float` reads `TBD` as 0, a rule that
     uses an unreadable number is not evaluated, naming the value. A blank value is missing, as in `text()`; a value
     already missing or unreadable passes through as it is.
     """
