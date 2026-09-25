@@ -16,14 +16,15 @@ did; so does everything in a message, which decides nothing, in an Expression no
 and in a derived value, which is computed as it always was, `and` and `or` included.
 """
 
+import importlib.metadata
 import importlib.util
 import logging
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
-from importlib.metadata import version
 from types import MappingProxyType, SimpleNamespace
 
+import jinja2
 import pytest
 from jinja2 import nodes
 from jinja2.compiler import CodeGenerator
@@ -547,16 +548,27 @@ def test_only_a_missing_value_gives_way_to_the_other_side_and_an_error_on_either
     )
 
 
-@pytest.mark.parametrize("app", [{"name": "Ann"}, {"name": "Ann", "age": 30}], ids=["without-the-age", "with-the-age"])
-def test_an_error_on_the_other_side_of_an_and_a_missing_value_gives_way_to_surfaces_on_every_record(app):
-    """A missing age gives way to the other side of the `and`, whose misspelled method fails: the error is reported on
-    the record without the age as well, and a rule set to skip missing data is not skipped."""
+MISSPELLED_METHOD = ("not_evaluated", "check could not be evaluated: 'str object' has no attribute 'startwith'")
+
+
+@pytest.mark.parametrize(
+    ("app", "expected"),
+    [
+        ({"name": "Ann"}, MISSPELLED_METHOD),
+        ({"name": "Ann", "age": 30}, MISSPELLED_METHOD),
+        ({"name": "Ann", "age": 10}, ("fail", None)),
+    ],
+    ids=["without-the-age", "with-an-age-of-18-or-more", "with-an-age-that-decides-first"],
+)
+def test_an_error_on_the_other_side_of_an_and_a_missing_value_gives_way_to_surfaces_with_or_without_the_value(
+    app, expected
+):
+    """A missing age gives way to the other side of the `and`, whose misspelled method fails: the error is reported
+    without the age as with an age of 18 or more, and a rule set to skip missing data is not skipped. An age under 18
+    decides the `and` before the method is reached."""
     node = screening("app.age >= 18 and text(app.name).startwith('A')", "not_applicable")
 
-    assert outcome(run(node, {"app": app})) == (
-        "not_evaluated",
-        "check could not be evaluated: 'str object' has no attribute 'startwith'",
-    )
+    assert outcome(run(node, {"app": app})) == expected
 
 
 def test_an_error_after_a_missing_value_outside_an_and_or_an_or_surfaces_only_where_the_value_is_there():
@@ -591,23 +603,30 @@ def test_an_error_behind_a_missing_value_the_other_side_decides_past_is_never_re
 
 
 @pytest.mark.parametrize(
-    ("policy", "held"),
+    ("policy", "held", "held_elsewhere"),
     [
-        (None, ("not_evaluated", "missing value for dco.a")),
-        ("fail", ("fail", "missing value for dco.a")),
+        (None, ("not_evaluated", "missing value for dco.a"), ("not_evaluated", "missing value for doc.x")),
+        ("fail", ("fail", "missing value for dco.a"), ("fail", "missing value for doc.x")),
         (
             "not_applicable",
             ("not_evaluated", "missing value for dco.a (not skipped: dco is not an input or a derived value)"),
+            ("not_evaluated", "missing value for doc.x (not skipped: dco is not an input or a derived value)"),
         ),
     ],
 )
-def test_a_value_missing_under_a_name_the_node_does_not_declare_holds_the_rule_only_where_it_stops_at_it(policy, held):
-    """A typo is no data the record lacks, so a rule set to skip is not skipped for it; but it gives way to the other
-    side of an `or` as any missing value does, and where that side decides, the rule has its verdict."""
+def test_a_value_missing_under_a_name_the_node_does_not_declare_gives_way_where_the_other_side_decides(
+    policy, held, held_elsewhere
+):
+    """A typo is no data the record lacks, so a rule set to skip is not skipped for it wherever the check has it: where
+    the rule stops at the typo, and where it stops at another missing value, the typo in a branch the evaluation never
+    took. It gives way to the other side of an `or` as any missing value does, though, and where that side decides,
+    the rule has its verdict."""
     node = screening("dco.a == 1 or doc.b == 1", policy, inputs=("doc",))
+    elsewhere = screening("(doc.x if doc.k else dco.a) == 1", policy, inputs=("doc",))
 
     assert outcome(run(node, {"doc": {"b": 1}})) == ("pass", None)
     assert outcome(run(node, {"doc": {"b": 0}})) == held
+    assert outcome(run(elsewhere, {"doc": {"k": True}})) == held_elsewhere
 
 
 @pytest.mark.parametrize("policy", POLICIES)
@@ -882,16 +901,9 @@ def warnings_logged() -> Iterator[list[str]]:
         logger.removeHandler(handler)
 
 
-def test_the_module_warns_once_when_imported_under_a_jinja2_that_compiles_a_checks_and_and_or_with_its_own_visitors(
-    monkeypatch,
-):
-    """When it is imported, the module compiles a check and makes sure either side of its `and` and its `or` decides
-    where the other is missing. Under a jinja2 release whose code generator compiled them with its own visitors, as
-    Python's `and` and `or`, a check holds every rule the other side of an `and` or an `or` should decide: stricter,
-    never looser. The module imports all the same, and warns once, naming the release."""
-    with warnings_logged() as warnings:
-        assert rules_module._check_and_or_decide()
-    assert warnings == []
+def compile_and_or_with_jinjas_own_visitors(monkeypatch) -> None:
+    """Has Jinja's code generator compile `and` and `or` with its own visitors, as Python's, as a jinja2 release whose
+    internals the Rules node no longer matches might."""
     dispatch = NodeVisitor.get_visitor
 
     def own_and_or(self, node):
@@ -900,6 +912,19 @@ def test_the_module_warns_once_when_imported_under_a_jinja2_that_compiles_a_chec
         return dispatch(self, node)
 
     monkeypatch.setattr(NodeVisitor, "get_visitor", own_and_or)
+
+
+def test_the_module_warns_once_when_imported_under_a_jinja2_that_compiles_a_checks_and_and_or_with_its_own_visitors(
+    monkeypatch,
+):
+    """When it is imported, the module compiles a check and makes sure either side of its `and` and its `or` decides
+    where the other is missing. Under a jinja2 release whose code generator compiled them with its own visitors, as
+    Python's `and` and `or`, a check reads them as main does: a missing value on either side stops the rule where the
+    other side should decide it. The module imports all the same, and warns once, naming the release."""
+    with warnings_logged() as warnings:
+        assert rules_module._check_and_or_decide()
+    assert warnings == []
+    compile_and_or_with_jinjas_own_visitors(monkeypatch)
     spec = importlib.util.spec_from_file_location("rules_under_another_jinja2", rules_module.__file__)
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)
@@ -908,9 +933,36 @@ def test_the_module_warns_once_when_imported_under_a_jinja2_that_compiles_a_chec
         spec.loader.exec_module(module)
 
     assert len(warnings) == 1
-    assert warnings[0].startswith(f"jinja2 {version('jinja2')} does not compile")
+    assert warnings[0].startswith(f"jinja2 {jinja2.__version__} does not compile")
     node = module.Rules(name="n", input_fields=[NamedField(name="app")], rules=[Rule(id="r", check="app.a or app.b")])
     assert outcome(run(node, {"app": {"b": True}})) == ("not_evaluated", "missing value for app.a")
+
+
+@pytest.mark.parametrize(
+    ("release", "named"),
+    [("3.1.99", "jinja2 3.1.99"), (None, "jinja2 (version unknown)")],
+    ids=["the-release-the-package-names", "no-release-named-at-all"],
+)
+def test_the_warning_names_the_jinja2_release_where_the_package_has_no_metadata(monkeypatch, release, named):
+    """A bundled application may ship jinja2 without its metadata, where looking the release up there raises. The
+    warning reads the release from the package itself, or says it is unknown, so the check that must never stop the
+    import still only warns."""
+
+    def no_metadata(name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(importlib.metadata, "version", no_metadata)
+    if release is None:
+        monkeypatch.delattr(jinja2, "__version__")
+    else:
+        monkeypatch.setattr(jinja2, "__version__", release)
+    compile_and_or_with_jinjas_own_visitors(monkeypatch)
+
+    with warnings_logged() as warnings:
+        assert not rules_module._check_and_or_decide()
+
+    assert len(warnings) == 1
+    assert warnings[0].startswith(f"{named} does not compile")
 
 
 def test_a_check_still_calls_what_the_record_holds_through_the_sandbox():

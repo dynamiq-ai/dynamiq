@@ -206,11 +206,14 @@ class RuleMissingPolicy(str, Enum):
 
     `not_evaluated` holds the rule as a finding to review. `fail` reports the rule's own severity. `not_applicable`
     skips the rule for a record without the value, as `applies_when` would, so the rule needs no presence guard.
-    Only data the record lacks is skipped. A value that is there but cannot be read, a lookup that found nothing, a
-    name the node does not declare, a call of a name no helper has or a filter or a test no sandbox has is still
-    `not_evaluated` where the rule stops at it, or the severity under `fail`, whatever the policy; under
-    `not_applicable` the finding's reason says why it was not skipped. Where the other side of an `and` or an `or`
-    decides instead, the rule has its verdict.
+    Only data the record lacks is skipped. A value that is there but cannot be read, a lookup that found nothing, a name
+    the node does not declare, a call of a name no helper has or a filter or a test no sandbox has is still
+    `not_evaluated`, or the severity under `fail`, whatever the policy, where the rule stops at it. A rule that stops at
+    a missing value is not skipped either where its expression, in a part the evaluation never reached as well, reads a
+    value nobody could read, calls a name no helper has, uses a filter or a test no sandbox has, reads a value missing
+    under a name the node does not declare or needs a derived value whose lookup found nothing. Under `not_applicable`
+    the finding's reason says why it was not skipped. Where the other side of an `and` or an `or` decides instead, the
+    rule has its verdict.
     """
 
     NOT_EVALUATED = "not_evaluated"

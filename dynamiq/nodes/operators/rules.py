@@ -6,10 +6,10 @@ from collections.abc import Callable, Container, ItemsView, Iterator, KeysView, 
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
-from importlib import metadata
 from typing import Any, ClassVar, Literal, NamedTuple, NoReturn
 from uuid import uuid4
 
+import jinja2
 from jinja2 import ChainableUndefined, Template, TemplateSyntaxError, Undefined, nodes, pass_context, pass_environment
 from jinja2.compiler import CodeGenerator, Frame, optimizeconst
 from jinja2.environment import TemplateExpression
@@ -1326,9 +1326,11 @@ def _check_and_or_decide() -> bool:
 
     The code generator that makes them decide relies on Jinja's internals (`RuleCodeGenerator`), and a jinja2 release
     that changed those could compile a check's `and` and `or` as Python's again without any error. A check would then
-    hold every rule the other side of an `and` or an `or` should decide, as it did before either side could: stricter,
-    never looser, so the module still imports, and the tests pin that either side decides. The module runs this once,
-    when it is imported, so the log names such a release rather than the change going unnoticed.
+    read them as main does: a missing value on either side stops the rule where the other side should decide it, which
+    holds the rule, or skips it under `not_applicable`, and an error the other side would raise goes unseen. The module
+    imports all the same, and the tests pin that either side decides; it runs this once, when it is imported, so the
+    log names such a release rather than the change going unnoticed. The release is read from the package, not from
+    its metadata, which a bundled application may not ship.
     """
     cause = ""
     try:
@@ -1340,10 +1342,11 @@ def _check_and_or_decide() -> bool:
         decided, cause = False, f" (the check raised {type(e).__name__}: {e})"
     if decided:
         return True
+    release = getattr(jinja2, "__version__", None) or "(version unknown)"
     logger.warning(
-        f"jinja2 {metadata.version('jinja2')} does not compile the `and` and the `or` of a Rules check as dynamiq "
-        "expects: in a check they will not decide past a missing value on either side, and a rule the other side would "
-        f"decide is held as missing; pin jinja2 to a release this version of dynamiq is tested with{cause}"
+        f"jinja2 {release} does not compile the `and` and the `or` of a Rules check as dynamiq expects: in a check "
+        "they will not decide past a missing value on either side, which then stops the rule under its missing-data "
+        f"policy; pin jinja2 to a release this version of dynamiq is tested with{cause}"
     )
     return False
 
@@ -1444,29 +1447,30 @@ class Rules(Node):
       did not apply.
     - Missing values: a check and `applies_when` are evaluated left to right, and a missing value counts only where the
       evaluation reaches it. The branch of an `if` not taken, the side of an `and` or an `or` its first side already
-      decided and the rest of a comparison chain already false are never read, so a value missing there changes nothing.
-      A missing value the check only asks about, with `has`, a test such as `is defined` or `is present` or the
-      `default` filter, does not hold the rule either, since the question answers for it, and one it offers to
-      `first_present` holds it only where every value offered is missing. Any other value the evaluation reaches counts,
-      even where the rest of the check would decide without it: every value a call, a filter or a list is handed is
-      read, so `app.a | default(app.b)` is held without `app.b` though `app.a` is there, and `app.a in [app.b, app.c]`
-      without `app.c` whatever `app.b` holds. The one exception is an `and` or an `or` whose truth alone counts, as the
-      check or `applies_when` itself, under `not`, as the test of an `if`, as a branch of an `if` whose truth alone
-      counts, or as a side of another such `and` or `or`: either side decides it where the other stops at a missing
-      value. `a or b` is true where `b` is, and `a and b` false where `b` is, whether or not `a` is there, so
-      `app.occupancy == 'primary' or app.purpose == 'purchase'` passes a purchase without an occupancy; a lazy side,
-      what `select` yields say, decides by its items. Where the check uses its value instead, compares it, computes with
-      it, filters or tests it, hands it to a helper or takes it as a branch of an `if` whose value it uses, an `and` or
-      an `or` is Python's: the side that decides it is its value, and a missing side it reads holds the rule, since a
-      value in its place could change the verdict. `(app.nickname or app.name) == 'Ann'` is held without a nickname, as
-      `(app.fee or 100) > 50` is without a fee, where `first_present(app.nickname, app.name) == 'Ann'` falls back as its
-      author means. Where nothing decides without it, the first value needed that is missing holds the rule, of two on
-      either side of an `and` or an `or` the left one, and the reason names that value; where a helper turned a blank it
-      was handed into a missing value, `text()` of blank text say, the reason names a blank value the check reads, which
-      may sit in a branch not taken. An error the evaluation reaches is an error, whatever the expression would have
-      read after it, on either side of an `and` or an `or` as well: only a missing value gives way to the other side. A
-      call of a name nothing defines, neither a helper nor the record, is an error before its arguments are read. A
-      message decides nothing and reads a missing value as it always did.
+      decided and the rest of a comparison chain already false are never read, so a value missing there never stops the
+      rule; where the rule stops at a missing value elsewhere, though, what those parts read can still keep it from
+      being skipped, or make it an error (see Never skipped). A missing value the check only asks about, with `has`, a
+      test such as `is defined` or `is present` or the `default` filter, does not hold the rule either, since the
+      question answers for it, and one it offers to `first_present` holds it only where every value offered is missing.
+      Any other value the evaluation reaches counts, even where the rest of the check would decide without it: every
+      value a call, a filter or a list is handed is read, so `app.a | default(app.b)` is held without `app.b` though
+      `app.a` is there, and `app.a in [app.b, app.c]` without `app.c` whatever `app.b` holds. The one exception is an
+      `and` or an `or` whose truth alone counts, as the check or `applies_when` itself, under `not`, as the test of an
+      `if`, as a branch of an `if` whose truth alone counts, or as a side of another such `and` or `or`: either side
+      decides it where the other stops at a missing value. `a or b` is true where `b` is, and `a and b` false where `b`
+      is, whether or not `a` is there, so `app.occupancy == 'primary' or app.purpose == 'purchase'` passes a purchase
+      without an occupancy; a lazy side, what `select` yields say, decides by its items. Where the check uses its value
+      instead, compares it, computes with it, filters or tests it, hands it to a helper or takes it as a branch of an
+      `if` whose value it uses, an `and` or an `or` is Python's: the side that decides it is its value, and a missing
+      side it reads holds the rule, since a value in its place could change the verdict. `(app.nickname or app.name) ==
+      'Ann'` is held without a nickname, as `(app.fee or 100) > 50` is without a fee, where `first_present(app.nickname,
+      app.name) == 'Ann'` falls back as its author means. Where nothing decides without it, the first value needed that
+      is missing holds the rule, of two on either side of an `and` or an `or` the left one, and the reason names that
+      value; where a helper turned a blank it was handed into a missing value, `text()` of blank text say, the reason
+      names a blank value the check reads, which may sit in a branch not taken. An error the evaluation reaches is an
+      error, whatever the expression would have read after it, on either side of an `and` or an `or` as well: only a
+      missing value gives way to the other side. A call of a name nothing defines, neither a helper nor the record, is
+      an error before its arguments are read. A message decides nothing and reads a missing value as it always did.
     - Derived values are computed as they always were: a missing value stops one only where the expression uses it, so a
       null it falls back past still computes, `(x or 0) < 3` is true over a null `x`, and a list or a dict it builds
       holds None for a member the record lacks; a failure beside a missing value it needs makes it missing; and `and`
@@ -1507,12 +1511,12 @@ class Rules(Node):
     - What a skipped rule cannot see, nor one the other side of an `and` or an `or` decides: an error its check would
       raise after the missing value it stopped at, on values that are there: a zero divisor (`appraisal.max_ltv >=
       loan.amount / appraisal.value` without a limit), a misspelled method or a value of the wrong type; that surfaces
-      on the records that carry the missing value. So `app.b / app.q > 1 or app.a == 1` passes where `app.b` is missing
-      and `app.a` is 1, though `app.q` is 0: the division fails only where `app.b` is there. An error the check reaches
-      before the missing value, or on the other side of an `and` or an `or` the missing value gives way to, is reported
-      on every record, the one that lacks the value as well: `loan.amount / appraisal.value <= appraisal.max_ltv` over a
-      zero value, with or without the limit, and `app.age >= 18 and text(app.name).startwith('A')`, with or without the
-      age.
+      on the records that carry the missing value. So `app.b / app.q > 1 or app.a ==
+      1` passes where `app.b` is missing and `app.a` is 1, though `app.q` is 0: the division fails only where `app.b` is
+      there. An error the check reaches before the missing value, or on the other side of an `and` or an `or` the
+      missing value gives way to, is reported with or without the value: `loan.amount / appraisal.value <=
+      appraisal.max_ltv` over a zero value, with or without the limit, and `app.age >= 18 and
+      text(app.name).startwith('A')` without the age as with an age of 18 or more.
     - Overall status: `fail` if any rule failed, else `warn` if any warned, else `not_evaluated` if any check did not
       run, else `pass`. A check held for a missing value did not run, so a record is never `pass` while a check or an
       `applies_when` stopped at a missing value, unless every rule that did was set to skip it.
