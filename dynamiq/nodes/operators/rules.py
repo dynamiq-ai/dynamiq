@@ -1437,39 +1437,47 @@ class Rules(Node):
 
     - Statuses: `pass` when the check holds; the rule's severity (`fail`, `warn`, `info`) when it does not;
       `not_applicable` when `applies_when` does not hold, the record's `as_of` date is outside the rule's effective
-      window, or the rule skips a missing value; `not_evaluated` when the check cannot decide without a value that
+      window, or the rule skips a missing value; `not_evaluated` when the check or `applies_when` stops at a value that
       is missing, or cannot be evaluated. A rule reported at its severity gives its own message, where it has one,
-      rendered with the whole record, where a derived value nobody could compute reads as None, as `derived` shows
-      it; one that did not run or did not apply says why. `evaluated` holds the values the check reads, empty where
-      the rule did not apply.
-    - Missing values: a check and `applies_when` are evaluated left to right, and a value counts only once the
-      evaluation reaches it. The branch of an `if` not taken, the side of an `and` or an `or` the other side already
+      rendered with the whole record, where a derived value nobody could compute reads as None, as `derived` shows it;
+      one that did not run or did not apply says why. `evaluated` holds the values the check reads, empty where the rule
+      did not apply.
+    - Missing values: a check and `applies_when` are evaluated left to right, and a missing value counts only where the
+      evaluation reaches it. The branch of an `if` not taken, the side of an `and` or an `or` its first side already
       decided and the rest of a comparison chain already false are never read, so a value missing there changes nothing.
-      Where only the truth of an `and` or an `or` counts, as the check or `applies_when` itself, under `not`, as the
-      test of an `if`, as a branch of an `if` whose truth alone counts, or as a side of another such `and` or `or`,
-      either side decides where the other stops at a missing value: `a or b` is true where `b` is, and `a and b` false
-      where `b` is, whether or not `a` is there, so `app.occupancy == 'primary' or app.purpose == 'purchase'` passes a
-      purchase without an occupancy; a lazy side, what `select` yields say, decides by its items. Where the check uses
-      its value instead, compares it, computes with it, filters or tests it, hands it to a helper or takes it as a
-      branch of an `if` whose value it uses, an `and` or an `or` is Python's: the side that decides it is its value, and
-      a missing side it reads holds the rule, since a value in its place could change the verdict. `(app.nickname or
-      app.name) == 'Ann'` is held without a nickname, as `(app.fee or 100) > 50` is without a fee, where
-      `first_present(app.nickname, app.name) == 'Ann'` falls back as its author means. Where nothing decides without it,
-      the first value needed that is missing holds the rule, of two on either side of an `and` or an `or` the left one,
-      and the reason names that value; where a helper turned a blank it was handed into a missing value, `text()` of
-      blank text say, the reason names a blank value the check reads, which may sit in a branch not taken. An error the
-      evaluation reaches is an error, whatever the expression would have read after it, on either side of an `and` or an
-      `or` as well: only a missing value gives way to the other side. A call of a name nothing defines, neither a helper
-      nor the record, is an error before its arguments are read. A message decides nothing and reads a missing value as
-      it always did.
-    - Derived values are computed as they always were: a missing value stops one only where the expression uses
-      it, so a null it falls back past still computes, `(x or 0) < 3` is true over a null `x`, and a list or a
-      dict it builds holds None for a member the record lacks; a failure beside a missing value it needs makes it
-      missing; and `and` and `or` are Python's, so a side that is not there, or a blank a helper made, makes the
-      value missing though the other side would decide. Naming part of a check as a derived value can therefore
-      change what the rule reports: the check `(x or 0) < 3` stops at the null `x`, where a check that reads the
-      same text as a derived value decides, and the check `a or b` holds where `b` does, where a derived `a or b` is
-      missing without `a`.
+      A missing value the check only asks about, with `has`, a test such as `is defined` or `is present` or the
+      `default` filter, does not hold the rule either, since the question answers for it, and one it offers to
+      `first_present` holds it only where every value offered is missing. Any other value the evaluation reaches counts,
+      even where the rest of the check would decide without it: every value a call, a filter or a list is handed is
+      read, so `app.a | default(app.b)` is held without `app.b` though `app.a` is there, and `app.a in [app.b, app.c]`
+      without `app.c` whatever `app.b` holds. The one exception is an `and` or an `or` whose truth alone counts, as the
+      check or `applies_when` itself, under `not`, as the test of an `if`, as a branch of an `if` whose truth alone
+      counts, or as a side of another such `and` or `or`: either side decides it where the other stops at a missing
+      value. `a or b` is true where `b` is, and `a and b` false where `b` is, whether or not `a` is there, so
+      `app.occupancy == 'primary' or app.purpose == 'purchase'` passes a purchase without an occupancy; a lazy side,
+      what `select` yields say, decides by its items. Where the check uses its value instead, compares it, computes with
+      it, filters or tests it, hands it to a helper or takes it as a branch of an `if` whose value it uses, an `and` or
+      an `or` is Python's: the side that decides it is its value, and a missing side it reads holds the rule, since a
+      value in its place could change the verdict. `(app.nickname or app.name) == 'Ann'` is held without a nickname, as
+      `(app.fee or 100) > 50` is without a fee, where `first_present(app.nickname, app.name) == 'Ann'` falls back as its
+      author means. Where nothing decides without it, the first value needed that is missing holds the rule, of two on
+      either side of an `and` or an `or` the left one, and the reason names that value; where a helper turned a blank it
+      was handed into a missing value, `text()` of blank text say, the reason names a blank value the check reads, which
+      may sit in a branch not taken. An error the evaluation reaches is an error, whatever the expression would have
+      read after it, on either side of an `and` or an `or` as well: only a missing value gives way to the other side. A
+      call of a name nothing defines, neither a helper nor the record, is an error before its arguments are read. A
+      message decides nothing and reads a missing value as it always did.
+    - Derived values are computed as they always were: a missing value stops one only where the expression uses it, so a
+      null it falls back past still computes, `(x or 0) < 3` is true over a null `x`, and a list or a dict it builds
+      holds None for a member the record lacks; a failure beside a missing value it needs makes it missing; and `and`
+      and `or` are Python's, so a side that is not there, or a blank a helper made, makes the value missing though the
+      other side would decide. Naming part of a check as a derived value can therefore change what the rule reports, and
+      make it looser as well as stricter: the check `(x or 0) < 3` stops at the null `x`, where a check that reads the
+      same text as a derived value decides; the check `a or b` passes where `b` is true, where a derived `a or b` is
+      missing without `a`; and a derived value whose lookup found nothing is missing, so it gives way to the other side
+      of an `and` or an `or` whose truth alone counts, where the same lookup written in the check is an error: with
+      `lim` derived as `limits[app.program]` for a program the table lacks, `lim > 5 or app.a == 1` passes where
+      `limits[app.program] > 5 or app.a == 1` is not evaluated.
     - Policies: `on_missing` on the node, which a rule's own overrides, says what a missing value means:
       `not_evaluated`, the default, holds the rule for review; `fail` reports its severity, the reason after its
       message; `not_applicable` skips it ("does not apply: missing value for …"), so the rule needs no presence
@@ -1486,20 +1494,28 @@ class Rules(Node):
         - needs a lookup that found nothing, `limits[loan.program]` for a program the table lacks, in the check or
           in a derived value it does not only fall back on (`first_present(limit, 500000)`);
         - meets a blank no read accounts for, from a lookup inside `text()` say.
-      A derived value that came out missing counts as data the record lacks when a value it reads is missing,
-      whether or not its evaluation reached that value. Under `not_applicable` the reason says why the rule was not
-      skipped, `missing value for loan.amount (not skipped: lon is not an input or a derived value)`, unless it is
-      already the error of a value nobody could read.
-    - What a skipped rule cannot see: an error its check would raise after the missing value it stopped at, on
-      values that are there: a zero divisor (`appraisal.max_ltv >= loan.amount / appraisal.value` without a limit),
-      a misspelled method or a value of the wrong type; that surfaces on the records that carry the missing value.
-      An error the check reaches before the missing value, or on the other side of an `and` or an `or` the missing
-      value gives way to, is reported on every record, the one that lacks the value as well: `loan.amount /
-      appraisal.value <= appraisal.max_ltv` over a zero value, with or without the limit, and `app.age >= 18 and
-      text(app.name).startwith('A')`, with or without the age.
-    - Overall status: `fail` if any rule failed, else `warn` if any warned, else `not_evaluated` if any check did
-      not run, else `pass`. A check held for a missing value did not run, so a record is never `pass` while a value
-      a check needed was missing, unless every rule that missed one was set to skip it.
+      Once a missing value stops the expression, a value nobody could read, a name no helper has, a filter or a test no
+      sandbox has, a value missing under a name the node does not declare and a derived value it needs whose lookup
+      found nothing hold the rule wherever the expression has them, in a branch not taken or on a side the evaluation
+      never read as well: that holds more rules than the evaluation alone would, never fewer. A derived value nobody
+      could compute speaks over the missing value under every policy: `(app.x if app.k else ltv) == 1` with the flag
+      set, `app.x` missing and `ltv` a ratio divided by zero is held for the division rather than for `app.x`. A derived
+      value that came out missing counts as data the record lacks when a value it reads is missing, whether or not its
+      evaluation reached that value. Under `not_applicable` the reason says why the rule was not skipped, `missing value
+      for loan.amount (not skipped: lon is not an input or a derived value)`, unless it is already the error of a value
+      nobody could read.
+    - What a skipped rule cannot see, nor one the other side of an `and` or an `or` decides: an error its check would
+      raise after the missing value it stopped at, on values that are there: a zero divisor (`appraisal.max_ltv >=
+      loan.amount / appraisal.value` without a limit), a misspelled method or a value of the wrong type; that surfaces
+      on the records that carry the missing value. So `app.b / app.q > 1 or app.a == 1` passes where `app.b` is missing
+      and `app.a` is 1, though `app.q` is 0: the division fails only where `app.b` is there. An error the check reaches
+      before the missing value, or on the other side of an `and` or an `or` the missing value gives way to, is reported
+      on every record, the one that lacks the value as well: `loan.amount / appraisal.value <= appraisal.max_ltv` over a
+      zero value, with or without the limit, and `app.age >= 18 and text(app.name).startwith('A')`, with or without the
+      age.
+    - Overall status: `fail` if any rule failed, else `warn` if any warned, else `not_evaluated` if any check did not
+      run, else `pass`. A check held for a missing value did not run, so a record is never `pass` while a check or an
+      `applies_when` stopped at a missing value, unless every rule that did was set to skip it.
 
     The output holds `findings` in rule order, which a trace keeps whole, a `summary` of statuses, `status`, the
     `derived` values and `derived_errors`. A derived value computed from a missing value is missing, None under
@@ -1874,12 +1890,18 @@ class Rules(Node):
         for it, under the rule's policy.
 
         `not_applicable` skips the rule, and a skipped rule counts as having run, so a record whose only unmet rules
-        lacked their data can still pass. It skips only data the record lacks: where anything else stopped the
-        expression as well (`_why_held`), or no value it reads accounts for the stop, the rule is not evaluated and
+        lacked their data can still pass. It skips only data the record lacks: where the expression holds anything
+        else no rule may skip (`_why_held`), or no value it reads accounts for the stop, the rule is not evaluated and
         the reason says why it was not skipped. Under `fail` and `not_evaluated` the reason stays as it is. Where the
         expression reads a value nobody could read, whose reason a missing value must not hide (`ltv <=
         appraisal.max_ltv` over a ratio divided by zero), the stop is an error instead, under every policy, and its
         reason already names the cause.
+
+        Both look at every value the expression reads, whether or not the evaluation reached it, in a branch not taken
+        say: `(app.x if app.k else ltv) == 1` with the flag set, `app.x` missing and `ltv` a ratio divided by zero is
+        the error of `ltv`. That is deliberate, and stricter than the evaluation, never looser: what they find can keep
+        a rule from being skipped, or name an error where the missing value would have been named, but never skips a
+        rule or gives it a verdict.
         """
         reason = reason or f"missing value for {path}"
         # Compared with None: the marker refuses a truth test, as every other use.

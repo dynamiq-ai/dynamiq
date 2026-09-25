@@ -138,6 +138,25 @@ def test_a_comparison_chain_already_false_never_reads_the_rest(app, expected):
 
 
 @pytest.mark.parametrize(
+    ("check", "app", "missing"),
+    [
+        ("app.a | default(app.b) == 1", {"a": 1}, "app.b"),
+        ("app.a in [app.b, app.c]", {"a": 1, "b": 1}, "app.c"),
+        ("max(app.a, app.b) > 0", {"a": 1}, "app.b"),
+    ],
+    ids=["the-fallback-a-filter-is-handed", "a-member-of-a-list", "an-argument-of-a-call"],
+)
+def test_every_value_a_filter_a_list_or_a_call_is_handed_is_read_though_the_rest_would_decide_without_it(
+    check, app, missing
+):
+    """The evaluation reaches every value a filter, a list or a call is handed before it uses any, so a missing one
+    holds the rule, though `app.a` is there for `default` to keep and already in the list."""
+    node = screening(check)
+
+    assert outcome(run(node, {"app": app})) == ("not_evaluated", f"missing value for {missing}")
+
+
+@pytest.mark.parametrize(
     ("app", "expected"),
     [
         ({}, ("pass", None)),
@@ -555,6 +574,54 @@ def test_an_error_after_a_missing_value_outside_an_and_or_an_or_surfaces_only_wh
         "not_evaluated",
         "check could not be evaluated: division by zero",
     )
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+def test_an_error_behind_a_missing_value_the_other_side_decides_past_is_never_reached(policy):
+    """The missing `app.b` gives way to `app.a == 1`, which decides: the division by the zero `app.q` behind it is never
+    reached, so the rule passes, as a rule skipped for `app.b` would not see the error either. Where `app.b` is there,
+    the division fails."""
+    node = screening("app.b / app.q > 1 or app.a == 1", policy)
+
+    assert outcome(run(node, {"app": {"q": 0, "a": 1}})) == ("pass", None)
+    assert outcome(run(node, {"app": {"b": 5, "q": 0, "a": 1}})) == (
+        "fail" if policy == "fail" else "not_evaluated",
+        "check could not be evaluated: division by zero",
+    )
+
+
+@pytest.mark.parametrize(
+    ("policy", "held"),
+    [
+        (None, ("not_evaluated", "missing value for dco.a")),
+        ("fail", ("fail", "missing value for dco.a")),
+        (
+            "not_applicable",
+            ("not_evaluated", "missing value for dco.a (not skipped: dco is not an input or a derived value)"),
+        ),
+    ],
+)
+def test_a_value_missing_under_a_name_the_node_does_not_declare_holds_the_rule_only_where_it_stops_at_it(policy, held):
+    """A typo is no data the record lacks, so a rule set to skip is not skipped for it; but it gives way to the other
+    side of an `or` as any missing value does, and where that side decides, the rule has its verdict."""
+    node = screening("dco.a == 1 or doc.b == 1", policy, inputs=("doc",))
+
+    assert outcome(run(node, {"doc": {"b": 1}})) == ("pass", None)
+    assert outcome(run(node, {"doc": {"b": 0}})) == held
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+def test_a_derived_value_nobody_could_compute_speaks_over_the_missing_value_from_a_branch_not_taken(policy):
+    """The check stops at the missing `app.x`, and the branch that reads `ltv` is never taken; yet the reads are scanned
+    for a value nobody could read wherever the check has them, so the rule reports the division by zero behind `ltv`,
+    under every policy: stricter than the evaluation, never looser."""
+    node = screening("(app.x if app.k else ltv) == 1", policy, derived=(("ltv", "app.p / app.q"),))
+
+    assert outcome(run(node, {"app": {"k": True, "p": 1, "q": 0}})) == (
+        "fail" if policy == "fail" else "not_evaluated",
+        "check could not be evaluated: division by zero",
+    )
+    assert outcome(run(node, {"app": {"k": True, "p": 1, "q": 1}}))[1].endswith("missing value for app.x")
 
 
 @pytest.mark.parametrize("check", ["not app.a", "(1 if app.a else 2) == 2"])
@@ -1028,6 +1095,24 @@ def test_naming_part_of_a_check_as_a_derived_value_can_change_what_the_rule_repo
     value it needs."""
     assert outcome(run(screening(check, policy), record)) == inline
     assert outcome(run(screening("named", policy, derived=(("named", check),)), record)) == named
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+def test_a_derived_value_whose_lookup_found_nothing_gives_way_where_the_same_lookup_in_the_check_is_an_error(policy):
+    """Naming part of a check can make the rule looser as well: the derived `lim` is missing where the table lacks the
+    program, and gives way to the other side of the `or`, which decides, where the same lookup written in the check is
+    an error no side gives way to."""
+    record = {"app": {"program": "jumbo", "a": 1}, "limits": {"standard": 1}}
+    lookup = ("lim", "limits[app.program]")
+
+    named = screening("lim > 5 or app.a == 1", policy, inputs=("app", "limits"), derived=(lookup,))
+    inline = screening("limits[app.program] > 5 or app.a == 1", policy, inputs=("app", "limits"))
+
+    assert outcome(run(named, record)) == ("pass", None)
+    assert outcome(run(inline, record)) == (
+        "fail" if policy == "fail" else "not_evaluated",
+        "check could not be evaluated: 'dict object' has no attribute 'jumbo'",
+    )
 
 
 @pytest.mark.parametrize(

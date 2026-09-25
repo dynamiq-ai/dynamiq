@@ -9,11 +9,11 @@ finds a value missing under a name a node with declared inputs does not declare 
 lookup found nothing for, whatever else the record lacks. Each is a problem to fix, not data to wait for: the rule is
 not evaluated, or reports its severity under `fail`, and a rule set to skip says why it did not ("… (not skipped: lon
 is not an input or a derived value)"). A derived value that came out missing counts as data the record lacks when a
-value it reads is missing, whether or not its evaluation reached that value. What a skipped rule cannot see is an
-error its check would raise after the missing value it stops at, on the values that are there; that surfaces on the
-records that carry the missing value, while an error the check reaches first, or on the other side of an `and` or an
-`or` the missing value gives way to, is reported on every record. A rule's `on_missing` that is no policy at all leaves
-the choice to the node, with a warning, rather than refusing the build.
+value it reads is missing, whether or not its evaluation reached that value. What a skipped rule cannot see, nor one the
+other side of an `and` or an `or` decides, is an error its check would raise after the missing value it stops at, on the
+values that are there; that surfaces on the records that carry the missing value, while an error the check reaches
+first, or on the other side of an `and` or an `or` the missing value gives way to, is reported on every record. A rule's
+`on_missing` that is no policy at all leaves the choice to the node, with a warning, rather than refusing the build.
 """
 
 import json
