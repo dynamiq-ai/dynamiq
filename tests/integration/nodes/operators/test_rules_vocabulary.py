@@ -693,6 +693,9 @@ NESTED_TOO_DEEPLY = "(" * 200 + "order.total" + ")" * 200 + " > 1"
 # Read without trouble, but compiled to code nested a level for each operator, deeper than Python's parser takes.
 TOO_LONG_A_CHAIN = " or ".join(f"order.a{i} == {i}" for i in range(200))
 TOO_LONG_A_SUM = " + ".join("order.total" for _ in range(200)) + " > 1"
+# Compiled to Python blocks nested a level for each, deeper than Python takes: past 100 levels of indentation, 20 loops.
+IFS_TOO_DEEP = "{% if order.a %}" * 100 + "x" + "{% endif %}" * 100
+LOOPS_TOO_DEEP = "{% for item in order.items %}" * 21 + "x" + "{% endfor %}" * 21
 
 
 @pytest.mark.parametrize(
@@ -720,6 +723,8 @@ TOO_LONG_A_SUM = " + ".join("order.total" for _ in range(200)) + " > 1"
             {"rules": [Rule(id="R1", check="true", message="{{ " + TOO_LONG_A_CHAIN + " }}")]},
             "Rules 'vocabulary', rule 1: the message",
         ),
+        ({"rules": [Rule(id="R1", check="true", message=IFS_TOO_DEEP)]}, "Rules 'vocabulary', rule 1: the message"),
+        ({"rules": [Rule(id="R1", check="true", message=LOOPS_TOO_DEEP)]}, "Rules 'vocabulary', rule 1: the message"),
     ],
     ids=[
         "check",
@@ -729,13 +734,16 @@ TOO_LONG_A_SUM = " + ".join("order.total" for _ in range(200)) + " > 1"
         "long-or-chain-check",
         "long-sum-derived-value",
         "long-or-chain-message",
+        "ifs-in-a-message",
+        "loops-in-a-message",
     ],
 )
 def test_text_nested_too_deeply_to_read_names_its_rule_when_the_node_is_built(settings, error):
     """Jinja reads each level of nesting through a dozen calls, so some 70 parentheses exhaust Python's stack before the
-    text is read, and it compiles a chain of operators, `or`, `+`, `not` or a filter, to code nested a level for each,
-    which Python's parser refuses at 200 levels: the node still fails to build, naming the rule, where it failed with a
-    bare `RecursionError` or `SyntaxError`."""
+    text is read; it compiles a chain of operators, `or`, `+`, `not` or a filter, to code nested a level for each, which
+    Python's parser refuses at 200 levels, and a message's nested `{% if %}` or `{% for %}` blocks to Python blocks,
+    which it refuses past 100 levels of indentation or 20 loops: the node still fails to build, naming the rule, where
+    it failed with a bare `RecursionError` or `SyntaxError`, or said the message was not a valid template."""
     with pytest.raises(ValueError) as refused:
         Rules(name="vocabulary", input_fields=[NamedField(name="order")], **settings)
 

@@ -1063,15 +1063,18 @@ class _Hold(NamedTuple):
     lookup: bool = False
 
 
-# What Python's parser says of code nested deeper than it takes.
-_NESTING_LIMITS = frozenset({"too many nested parentheses", "too many statically nested blocks"})
+# What Python says of code nested deeper than it takes: parentheses past 200, indentation past 100, loops past 20.
+_NESTING_LIMITS = frozenset(
+    {"too many nested parentheses", "too many levels of indentation", "too many statically nested blocks"}
+)
 
 
 def build_error(where: str, error: RecursionError | SyntaxError, what: str = "expression") -> str:
     """Why text fails the build where Python raised `error` on it, naming `where` it is. Jinja reads each level of
-    nesting through a dozen calls, so some 70 parentheses exhaust Python's stack, and it compiles a chain of operators
-    to code nested a level for each, which Python's parser refuses at 200 levels: such text is nested too deeply to
-    read, as `workflow validate` puts it. Any other `SyntaxError`, from the Python parser Jinja's lexer reads a number
+    nesting through a dozen calls, so some 70 parentheses exhaust Python's stack; it compiles a chain of operators to
+    code nested a level for each, which Python's parser refuses at 200 levels, and a message's nested blocks to Python
+    blocks, refused past 100 levels of indentation or 20 loops: such text is nested too deeply to read, as `workflow
+    validate` puts it. Any other `SyntaxError`, from the Python parser Jinja's lexer reads a number
     with (`1١.5`), makes the text no valid `what`, in the parser's words, as a syntax error Jinja finds does."""
     if isinstance(error, RecursionError) or error.msg in _NESTING_LIMITS:
         return f"{where} is nested too deeply to read; split it into smaller expressions"
