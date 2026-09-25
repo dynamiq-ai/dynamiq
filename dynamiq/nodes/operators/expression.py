@@ -10,12 +10,12 @@ from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.operators.rules import (
     Reads,
     RecordSandbox,
+    build_error,
     concrete,
     read_paths,
     refuse_clash,
     refuse_reserved_read,
     scope_for,
-    too_deep,
 )
 from dynamiq.nodes.types import ExpressionItem, NamedField
 from dynamiq.runnables import RunnableConfig
@@ -78,8 +78,8 @@ class Expression(Node):
                 reads = read_paths(item.expression)
             except TemplateSyntaxError as e:
                 raise ValueError(f"Expression '{self.name}': {item.key!r} is not a valid expression: {e}") from e
-            except (RecursionError, SyntaxError):
-                raise ValueError(too_deep(f"Expression '{self.name}': {item.key!r}")) from None
+            except (RecursionError, SyntaxError) as e:
+                raise ValueError(build_error(f"Expression '{self.name}': {item.key!r}", e)) from None
             expression, reads = refuse_clash(expression, reads, f"Expression '{self.name}': {item.key!r}")
             refuse_reserved_read(reads, f"Expression '{self.name}': {item.key!r}")
             compiled.append((item.key, expression, reads))

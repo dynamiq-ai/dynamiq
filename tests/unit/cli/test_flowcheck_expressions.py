@@ -9,6 +9,7 @@ below is the drift guard, for the filter, test and global names too, and it is t
 allowed to import the engine.
 """
 
+import ast
 import json
 import uuid
 
@@ -300,6 +301,27 @@ def test_an_expression_node_item_that_is_more_than_one_expression_is_an_error():
         "expression 'calc': key 'rate' is not a valid expression: chunk after expression; "
         "write the expression alone, without '{{' or '}}'"
     ]
+
+
+def test_a_number_python_cannot_read_is_an_error_rather_than_a_crash():
+    """Jinja's lexer reads a number with Python's parser, which raises its own `SyntaxError` for `1١.5`, digits of two
+    scripts: validate reports it as the engine does, as text that is not valid, rather than crashing."""
+    text = "loan.rate == 1\u0661.5"
+    try:
+        ast.literal_eval("1\u0661.5")
+    except SyntaxError as e:
+        parser_says = e.msg
+    node = rules_node(rules=[rule(check=text), rule(id="R2", message="{{ " + text + " }}")])
+    calc = expression_node(expressions=[{"id": "x1", "key": "rate", "expression": text}])
+
+    errors, _ = flowcheck.check_expressions(node, "screen")
+    expression_errors, _ = flowcheck.check_expressions(calc, "calc")
+
+    assert errors == [
+        f"rules 'screen': rule 'R1' check is not a valid expression: {parser_says}",
+        f"rules 'screen': rule 'R2' message is not a valid template: {parser_says}",
+    ]
+    assert expression_errors == [f"expression 'calc': key 'rate' is not a valid expression: {parser_says}"]
 
 
 DEEP = {

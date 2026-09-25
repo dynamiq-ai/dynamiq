@@ -950,6 +950,10 @@ def _parse_and_walk(
     except TemplateSyntaxError as e:
         errors.append(f"{where} is not a valid expression: {_without_wrapper_leak(str(e))}")
         return
+    except SyntaxError as e:
+        # Python's own, from the parser Jinja's lexer reads a number with (`1١.5`).
+        errors.append(f"{where} is not a valid expression: {e.msg}")
+        return
     except RecursionError:
         errors.append(_too_deep(where))
         return
@@ -988,6 +992,9 @@ def _parse_message(text: str, where: str, errors: list) -> None:
         parsed = _EXPRESSION_ENVIRONMENT.parse(text)
     except TemplateSyntaxError as e:
         errors.append(f"{where} is not a valid template: {e}")
+        return
+    except SyntaxError as e:
+        errors.append(f"{where} is not a valid template: {e.msg}")
         return
     except RecursionError:
         errors.append(_too_deep(where))

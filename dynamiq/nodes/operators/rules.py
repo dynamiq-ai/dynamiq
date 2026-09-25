@@ -1063,12 +1063,19 @@ class _Hold(NamedTuple):
     lookup: bool = False
 
 
-def too_deep(where: str) -> str:
-    """Why text nested too deeply fails the build, as `workflow validate` puts it. Jinja reads each level of nesting
-    through a dozen calls, so some 70 parentheses exhaust Python's stack before the text is read, and it compiles a
-    chain of `or`s to code nested a level for each, which Python's parser refuses at 200 levels; the bare
-    `RecursionError` or `SyntaxError` would name no rule."""
-    return f"{where} is nested too deeply to read; split it into smaller expressions"
+# What Python's parser says of code nested deeper than it takes.
+_NESTING_LIMITS = frozenset({"too many nested parentheses", "too many statically nested blocks"})
+
+
+def build_error(where: str, error: RecursionError | SyntaxError, what: str = "expression") -> str:
+    """Why text fails the build where Python raised `error` on it, naming `where` it is. Jinja reads each level of
+    nesting through a dozen calls, so some 70 parentheses exhaust Python's stack, and it compiles a chain of operators
+    to code nested a level for each, which Python's parser refuses at 200 levels: such text is nested too deeply to
+    read, as `workflow validate` puts it. Any other `SyntaxError`, from the Python parser Jinja's lexer reads a number
+    with (`1١.5`), makes the text no valid `what`, in the parser's words, as a syntax error Jinja finds does."""
+    if isinstance(error, RecursionError) or error.msg in _NESTING_LIMITS:
+        return f"{where} is nested too deeply to read; split it into smaller expressions"
+    return f"{where} is not a valid {what}: {error.msg}"
 
 
 class CompiledRule(NamedTuple):
@@ -1207,8 +1214,8 @@ class Rules(Node):
             reads = read_paths(text)
         except TemplateSyntaxError as e:
             raise ValueError(f"{where} is not a valid expression: {e}") from e
-        except (RecursionError, SyntaxError):
-            raise ValueError(too_deep(where)) from None
+        except (RecursionError, SyntaxError) as e:
+            raise ValueError(build_error(where, e)) from None
         # The sandbox refuses these at run time; refusing them at build time names the rule instead of holding it.
         if private := _private_segment(reads.required + reads.optional):
             raise ValueError(f"{where} reads a private attribute ({private})")
@@ -1256,8 +1263,8 @@ class Rules(Node):
                     message_reads = read_template(rule.message)
                 except TemplateSyntaxError as e:
                     raise ValueError(f"{label}: the message is not a valid template: {e}") from e
-                except (RecursionError, SyntaxError):
-                    raise ValueError(too_deep(f"{label}: the message")) from None
+                except (RecursionError, SyntaxError) as e:
+                    raise ValueError(build_error(f"{label}: the message", e, "template")) from None
                 refuse_reserved_read(message_reads, f"{label}: the message")
             applies_compiled, applies_reads = None, Reads(required=[], optional=[])
             if applies:

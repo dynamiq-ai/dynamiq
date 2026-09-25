@@ -12,6 +12,7 @@ there, so it is not missing, but a rule that uses it or asks about it is not eva
 `| float` would read 0.
 """
 
+import ast
 import json
 from datetime import date
 from decimal import Decimal
@@ -751,6 +752,56 @@ def test_an_expression_nested_too_deeply_to_read_names_its_output_when_the_node_
     assert str(refused.value) == (
         "Expression 'reader': 'value' is nested too deeply to read; split it into smaller expressions"
     )
+
+
+# Jinja's lexer reads a number with Python's own parser, which refuses digits of another script inside a float.
+OTHER_SCRIPT_DIGITS = "1\u0661.5"
+NOT_A_NUMBER_PYTHON_READS = f"order.total == {OTHER_SCRIPT_DIGITS}"
+
+
+def python_parser_says(text: str) -> str:
+    """What Python's parser says of `text`, in the words of the Python running the test."""
+    try:
+        ast.literal_eval(text)
+    except SyntaxError as e:
+        return e.msg
+    raise AssertionError(f"{text!r} parses")
+
+
+@pytest.mark.parametrize(
+    ("settings", "error"),
+    [
+        (
+            {"rules": [Rule(id="R1", check=NOT_A_NUMBER_PYTHON_READS)]},
+            "Rules 'vocabulary', rule 1: the check is not a valid expression",
+        ),
+        (
+            {"rules": [Rule(id="R1", check="true", applies_when=NOT_A_NUMBER_PYTHON_READS)]},
+            "Rules 'vocabulary', rule 1: applies_when is not a valid expression",
+        ),
+        (
+            {"derived_values": [DerivedValue(name="total", expression=NOT_A_NUMBER_PYTHON_READS)]},
+            "Rules 'vocabulary': derived value 'total' is not a valid expression",
+        ),
+        (
+            {"rules": [Rule(id="R1", check="true", message="{{ " + NOT_A_NUMBER_PYTHON_READS + " }}")]},
+            "Rules 'vocabulary', rule 1: the message is not a valid template",
+        ),
+    ],
+    ids=["check", "applies-when", "derived-value", "message"],
+)
+def test_a_number_python_cannot_read_is_no_valid_expression_rather_than_one_nested_too_deeply(settings, error):
+    """Jinja's lexer reads a number with Python's parser, and the `SyntaxError` it raises for `1١.5`, digits of two
+    scripts, is no nesting limit: the build says the text is not valid, in the parser's words, as for any syntax
+    error, where it said it was nested too deeply."""
+    with pytest.raises(ValueError) as refused:
+        Rules(name="vocabulary", input_fields=[NamedField(name="order")], **settings)
+    with pytest.raises(ValueError) as refused_expression:
+        reader(NOT_A_NUMBER_PYTHON_READS, {"order": {}})
+
+    parser_says = python_parser_says(OTHER_SCRIPT_DIGITS)
+    assert str(refused.value) == f"{error}: {parser_says}"
+    assert str(refused_expression.value) == f"Expression 'reader': 'value' is not a valid expression: {parser_says}"
 
 
 def test_a_rule_reading_and_calling_number_is_held_when_it_runs_not_refused_at_build():
