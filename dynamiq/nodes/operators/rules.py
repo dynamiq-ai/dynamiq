@@ -10,6 +10,7 @@ from typing import Any, ClassVar, Literal, NamedTuple, NoReturn
 from uuid import uuid4
 
 from jinja2 import ChainableUndefined, Template, TemplateSyntaxError, Undefined, nodes, pass_context, pass_environment
+from jinja2.compiler import CodeGenerator, Frame, optimizeconst
 from jinja2.environment import TemplateExpression
 from jinja2.exceptions import TemplateRuntimeError, UndefinedError
 from jinja2.parser import Parser
@@ -562,6 +563,127 @@ class RecordSandbox(ImmutableSandboxedEnvironment):
         return super().getattr(obj, attribute)
 
 
+# Each side of an `and` or an `or` in a check is judged as Python's `and` and `or` judge it, by its truth: a blank
+# raises `MissingValue` there, inside the helper's `try`, as a read that found nothing already has (`need`), and a value
+# nobody could read raises its own error, which no side gives way to. A side that stands in for a missing one is judged
+# as the check's result is (`holds`): a lazy one, what `select` yields say, by its items, since a generator is true
+# whatever it would yield, and it comes out as the list of them; the first side keeps Python's truth, as it always had.
+# The truth is judged inline, not by a function of its own: a chain of `or`s nests a helper call and a side's function
+# for each `or`, and a third frame each would bring a long chain that much nearer the recursion limit.
+
+
+def rule_or(left: Callable[[], Any], right: Callable[[], Any]) -> Any:
+    """`left or right` in a check, where either side decides when the other stops at a missing value.
+
+    Where the left side is there, this is Python's `or`: the left side where it is true, else the right side. Where the
+    left side stops at a missing value, a true right side decides the `or`, whatever the left side would hold, and is
+    its value, so `a or 'fallback'` is the fallback; a lazy right side is true only where it yields an item, and is then
+    the list of its items. A false right side cannot decide the `or`, and the left side's missing value stands, as it
+    does where the right side is missing too: of two missing values, the reason names the left one, the first in
+    reading order. Only a missing value gives way: any other error, a lookup that found nothing, a value nobody could
+    read or a name nothing defines, is an error on whichever side the evaluation reaches it.
+    """
+    try:
+        value = left()
+        true = bool(value)
+    except MissingValue as missing:
+        try:
+            other = right()
+            if isinstance(other, Iterator):
+                other = list(other)
+            other_true = bool(other)
+        except MissingValue:
+            raise missing from None
+        if other_true:
+            return other
+        raise missing from None
+    return value if true else right()
+
+
+def rule_and(left: Callable[[], Any], right: Callable[[], Any]) -> Any:
+    """`left and right` in a check, where either side decides when the other stops at a missing value.
+
+    Where the left side is there, this is Python's `and`. Where it stops at a missing value, a false right side decides
+    the `and` and is its value, a lazy one that yields nothing as the empty list; a true one cannot, and the left
+    side's missing value stands, as in `rule_or`.
+    """
+    try:
+        value = left()
+        true = bool(value)
+    except MissingValue as missing:
+        try:
+            other = right()
+            if isinstance(other, Iterator):
+                other = list(other)
+            other_true = bool(other)
+        except MissingValue:
+            raise missing from None
+        if not other_true:
+            return other
+        raise missing from None
+    return right() if true else value
+
+
+def _deciding(helper: str) -> Callable[[CodeGenerator, nodes.BinExpr, Frame], None]:
+    """The visitor that compiles an `and` or an `or` to a call of the environment's `helper`, each side a function.
+
+    It is built the way Jinja builds its own operator visitors (`_make_binop`), so compiling a long chain recurses no
+    deeper than Jinja's own would, and the code it writes nests one call where Jinja nests one parenthesis: a chain
+    Jinja would compile, this compiles too. An `and` or an `or` Jinja folds to a constant when the check is built,
+    `false and …` say, is still folded, and the side after the constant is never looked at (`optimizeconst`).
+    """
+
+    @optimizeconst
+    def visitor(self: CodeGenerator, node: nodes.BinExpr, frame: Frame) -> None:
+        self.write(f"environment.{helper}(lambda: ")
+        self.visit(node.left, frame)
+        self.write(", lambda: ")
+        self.visit(node.right, frame)
+        self.write(")")
+
+    return visitor
+
+
+class RuleCodeGenerator(CodeGenerator):
+    """Jinja's code generator, with each `and` and `or` compiled to a call of the environment's `rule_and` or `rule_or`
+    that hands it each side as a function, so the helper evaluates the sides and either can decide when the other stops
+    at a missing value. A side reads the names its expression's frame resolved, as it would inline, and runs before the
+    helper returns. The sandbox is synchronous, as it must be: Jinja writes `await` only into an asynchronous
+    environment's code, and a lambda cannot hold one.
+
+    It also calls this module's own `need()` and `callee()` directly, `need()` with the context it asks for, where Jinja
+    would call them through the sandbox, which has nothing to check in them: a check calls one for every read it needs,
+    and an `and` or an `or` that gives way reads the other side too. Anything else a check calls still goes through the
+    sandbox.
+    """
+
+    visit_And = _deciding("rule_and")
+    visit_Or = _deciding("rule_or")
+
+    def visit_Call(self, node: nodes.Call, frame: Frame, forward_caller: bool = False) -> None:
+        helper = node.node.importname if isinstance(node.node, nodes.ImportedName) else None
+        if helper not in (_NEED, _CALLEE):
+            super().visit_Call(node, frame, forward_caller=forward_caller)
+            return
+        self.visit(node.node, frame)
+        self.write("(context, " if helper == _NEED else "(")
+        for index, argument in enumerate(node.args):
+            if index:
+                self.write(", ")
+            self.visit(argument, frame)
+        self.write(")")
+
+
+class RuleSandbox(RecordSandbox):
+    """The sandbox a check and an `applies_when` compile in: a `RecordSandbox` in which either side of an `and` or an
+    `or` decides when the other stops at a missing value (`rule_or`, `rule_and`). A derived value, a message and the
+    Expression node compile in a plain `RecordSandbox`, where `and` and `or` are Python's."""
+
+    code_generator_class = RuleCodeGenerator
+    rule_and = staticmethod(rule_and)
+    rule_or = staticmethod(rule_or)
+
+
 def _method_text(value: Any) -> str:
     """A method as text: a path ending at one, `invoice.items.count`, names the method, never the data."""
     return f"{getattr(value, '__name__', type(value).__name__)}(…)"
@@ -582,9 +704,13 @@ def _rendered(value: Any) -> Any:
     return _method_text(value) if callable(value) and not isinstance(value, Undefined) else value
 
 
-# One sandbox for every Rules node; the expressions it compiles are stateless. Only a rendered message
-# passes through `finalize`; a compiled expression does not, so a check keeps the value it read.
+# The sandbox every Rules node compiles its derived values and messages in, and reads every expression's paths with;
+# what it compiles is stateless. Only a rendered message passes through `finalize`; a compiled derived value does not,
+# so it keeps the value it read.
 _ENVIRONMENT = RecordSandbox(undefined=RuleUndefined, finalize=_rendered)
+# The sandbox every check and `applies_when` compiles in: the same, with either side of an `and` or an `or` deciding
+# when the other is missing. A check renders nothing, so it needs no `finalize`.
+_CHECK_ENVIRONMENT = RuleSandbox(undefined=RuleUndefined)
 
 
 def concrete(value: Any) -> Any:
@@ -907,9 +1033,9 @@ def read_paths(expression: str) -> Reads:
     offers to `first_present` as a fallback, is optional: it may be missing without stopping the evaluation,
     and so may anything read under it, since `has(docs.FloodCert) and docs.FloodCert.zone == 'A'` is how a
     check guards a read; the guard decides. Every other path is required: a check or an `applies_when` stops at
-    one that is missing where it reads it, and only there (`need`). A helper's name is never a read:
-    `days_between(a, b)` reads `a` and `b`, while a bare `date` is a member of the record, whatever the record
-    holds under it.
+    one that is missing where it reads it, and only there (`need`), unless the other side of an `and` or an `or`
+    decides in its place (`rule_or`). A helper's name is never a read: `days_between(a, b)` reads `a` and `b`, while
+    a bare `date` is a member of the record, whatever the record holds under it.
     """
     return _reads_of(_collected(_ENVIRONMENT.parse("{{ " + expression + " }}")))
 
@@ -1050,10 +1176,11 @@ def need(context: Context, value: Any, path: str) -> Any:
     """What a read an expression needs found, or a `MissingValue` naming the path where the record holds nothing.
 
     A rule's compiled expression hands each such read here as Jinja reaches it (`_compile_lazy`), so a missing value
-    stops the expression where it is read, and only there. Nothing is a null, or an undefined or a method Jinja found
-    in place of a value the record lacks: `ticket.items` over a ticket without items finds the mapping's method. At
-    a path the record does hold, a method or an undefined goes on as it is and fails where it is used:
-    `invoice.items.count` reads the list's method, `ticket.tags.append` one the sandbox refuses.
+    stops the expression where it is read, and only there; on a side of an `and` or an `or`, it stops that side,
+    which gives way to the other (`rule_or`). Nothing is a null, or an undefined or a method Jinja found in place of a
+    value the record lacks: `ticket.items` over a ticket without items finds the mapping's method. At a path the
+    record does hold, a method or an undefined goes on as it is and fails where it is used: `invoice.items.count`
+    reads the list's method, `ticket.tags.append` one the sandbox refuses.
     """
     if value is None or (
         (isinstance(value, Undefined) or callable(value)) and _is_missing(resolve_path(context.get_all(), path))
@@ -1123,29 +1250,30 @@ def _compile_lazy(text: str) -> tuple[_Lazy, Reads]:
     Each read the expression needs goes through `need()`, so a missing value stops it where it is read and nowhere
     else: Jinja evaluates left to right and stops where the result is decided, so the branch of an `if` it does not
     take, the side of an `and` or an `or` the other side decided and the rest of a comparison chain already false
-    are never read. A value it only asks about or falls back on (`has`, `is defined`, `| default`, `first_present`)
-    is read as it always was. The name a call calls is no read: one no helper or global has goes through `callee()`,
-    which Python evaluates before the call's arguments, so `firstpresent(x)`, where nothing defines the name, raises
-    that it is undefined whether or not `x` is there; a name the record holds is called as it holds it. An
-    undefined result is kept rather than turned into None, so a bare
-    `limits[program]` that finds nothing is not evaluated instead of read as false and reported as a verdict. The
-    text is parsed as `compile_expression` parses it, so a syntax error names the text as the author wrote it.
+    are never read. It compiles in `RuleSandbox`, where a side of an `and` or an `or` that stops at a missing value
+    gives way to the other side, which decides in its place where it can (`rule_or`). A value it only asks about or
+    falls back on (`has`, `is defined`, `| default`, `first_present`) is read as it always was. The name a call calls
+    is no read: one no helper or global has goes through `callee()`, which Python evaluates before the call's
+    arguments, so `firstpresent(x)`, where nothing defines the name, raises that it is undefined whether or not `x` is
+    there; a name the record holds is called as it holds it. An undefined result is kept rather than turned into None,
+    so a bare `limits[program]` that finds nothing is not evaluated instead of read as false and reported as a verdict.
+    The text is parsed as `compile_expression` parses it, so a syntax error names the text as the author wrote it.
     """
-    parser = Parser(_ENVIRONMENT, text, state="variable")
+    parser = Parser(_CHECK_ENVIRONMENT, text, state="variable")
     try:
         expression = parser.parse_expression()
         if not parser.stream.eos:
             raise TemplateSyntaxError("chunk after expression", parser.stream.current.lineno, None, None)
     except TemplateSyntaxError:
-        _ENVIRONMENT.handle_exception(source=text)
+        _CHECK_ENVIRONMENT.handle_exception(source=text)
     collected = _collected(expression)
     reads = _reads_of(collected)
     required = set(reads.required)
     names: set[str] = set()
     expression = _needing(expression, {id(node): path for node, path in collected.needed if path in required}, names)
     template = nodes.Template([nodes.Assign(nodes.Name("result", "store"), expression, lineno=1)], lineno=1)
-    template.set_environment(_ENVIRONMENT)
-    return _Lazy(TemplateExpression(_ENVIRONMENT.from_string(template), False), frozenset(names)), reads
+    template.set_environment(_CHECK_ENVIRONMENT)
+    return _Lazy(TemplateExpression(_CHECK_ENVIRONMENT.from_string(template), False), frozenset(names)), reads
 
 
 def _unreadable_because(path: str, reason: str) -> str:
@@ -1225,39 +1353,52 @@ class Rules(Node):
 
     Inputs arrive by name and rules read them by path (`docs.Note.interest_rate`); derived values are computed once
     per record, in order, before the rules run, and are read by name like an input. Expressions run in a
-    `RecordSandbox`, as the Expression node's do, with the helpers `has`, `days_between`, `date`, `today`, `len`,
-    `abs`, `min`, `max`, `sum`, `round`, `text`, `number` and `first_present` and the tests `is present` and `is
-    blank`. A record member named like a helper is the member where a rule reads it and the helper where a rule
-    calls it; one named like a method of the record, `items` say, is the member, the method reached only for a key
-    the record lacks. Rules compile when the node is built, so a malformed expression fails then, naming the rule.
+    `RecordSandbox`, as the Expression node's do, a check and an `applies_when` in a `RuleSandbox`, one where either
+    side of an `and` or an `or` can decide alone (see Missing values), with the helpers `has`, `days_between`, `date`,
+    `today`, `len`, `abs`, `min`, `max`, `sum`, `round`, `text`, `number` and `first_present` and the tests `is
+    present` and `is blank`. A record member named like a helper is the member where a rule reads it and the helper
+    where a rule calls it; one named like a method of the record, `items` say, is the member, the method reached only
+    for a key the record lacks. Rules compile when the node is built, so a malformed expression fails then, naming the
+    rule.
 
     - Statuses: `pass` when the check holds; the rule's severity (`fail`, `warn`, `info`) when it does not;
       `not_applicable` when `applies_when` does not hold, the record's `as_of` date is outside the rule's effective
-      window, or the rule skips a missing value; `not_evaluated` when the check reaches a value that is missing or
-      cannot be evaluated. A rule reported at its severity gives its own message, where it has one, rendered with
-      the whole record, where a derived value nobody could compute reads as None, as `derived` shows it; one that
-      did not run or did not apply says why. `evaluated` holds the values the check reads, empty where the rule did
-      not apply.
+      window, or the rule skips a missing value; `not_evaluated` when the check cannot decide without a value that
+      is missing, or cannot be evaluated. A rule reported at its severity gives its own message, where it has one,
+      rendered with the whole record, where a derived value nobody could compute reads as None, as `derived` shows
+      it; one that did not run or did not apply says why. `evaluated` holds the values the check reads, empty where
+      the rule did not apply.
     - Missing values: a check and `applies_when` are evaluated left to right, and a value counts only once the
       evaluation reaches it. The branch of an `if` not taken, the side of an `and` or an `or` the other side
       already decided and the rest of a comparison chain already false are never read, so a value missing there
-      changes nothing. The first value needed that is missing stops the expression, and the reason names that
-      value; where a helper turned a blank it was handed into a missing value, `text()` of blank text say, the
-      reason names a blank value the check reads, which may sit in a branch not taken. An error reached first is
-      an error, whatever the expression would have read after it, and a call of a name nothing defines, neither a
-      helper nor the record, is one before its arguments are read. A message decides nothing and reads a missing
-      value as it always did.
+      changes nothing. Either side of an `and` or an `or` decides where the other stops at a missing value: `a or b`
+      is true where `b` is, and `a and b` false where `b` is, whether or not `a` is there, so `app.occupancy ==
+      'primary' or app.purpose == 'purchase'` passes a purchase without an occupancy; a lazy side, what `select`
+      yields say, decides by its items. As a value, the side that decides is the value: `a or 'fallback'` is the
+      fallback where `a` is missing, and in `(app.nickname or app.name) == 'Ann'` with no nickname the name decides
+      the value, so the verdict can depend on which side is present. Where nothing decides without it, the first
+      value needed that is missing holds the rule, of two on either side of an `and` or an `or` the left one, and the
+      reason names that value; where a helper turned a blank it was handed into a missing value, `text()` of blank
+      text say, the reason names a blank value the check reads, which may sit in a branch not taken. An error the
+      evaluation reaches is an error, whatever the expression would have read after it, on either side of an `and`
+      or an `or` as well: only a missing value gives way to the other side. A call of a name nothing defines,
+      neither a helper nor the record, is an error before its arguments are read. A message decides nothing and
+      reads a missing value as it always did.
     - Derived values are computed as they always were: a missing value stops one only where the expression uses
       it, so a null it falls back past still computes, `(x or 0) < 3` is true over a null `x`, and a list or a
       dict it builds holds None for a member the record lacks; a failure beside a missing value it needs makes it
-      missing. Naming part of a check as a derived value can therefore change what the rule reports: the check
-      `(x or 0) < 3` stops at the null `x`, where a check that reads the same text as a derived value decides.
+      missing; and `and` and `or` are Python's, so a side that is not there, or a blank a helper made, makes the
+      value missing though the other side would decide. Naming part of a check as a derived value can therefore
+      change what the rule reports: the check `(x or 0) < 3` stops at the null `x`, where a check that reads the
+      same text as a derived value decides, and the check `a or b` holds where `b` does, where a derived `a or b` is
+      missing without `a`.
     - Policies: `on_missing` on the node, which a rule's own overrides, says what a missing value means:
       `not_evaluated`, the default, holds the rule for review; `fail` reports its severity, the reason after its
       message; `not_applicable` skips it ("does not apply: missing value for …"), so the rule needs no presence
       guard. A missing value never passes or fails a rule silently.
-    - Never skipped: only data the record lacks is skipped, and only where a read names it. Whatever else is
-      missing, a rule is held, `not_evaluated` or its severity under `fail`, when its expression
+    - Never skipped: only data the record lacks is skipped, and only where a read names it. Where a missing value
+      stops a rule's expression, the rule is held rather than skipped, `not_evaluated` or its severity under
+      `fail`, when that expression
         - reads or asks about a value nobody could read: text `number()`, `date()` or `days_between()` cannot read
           (`TBD` for an amount), or a derived value nobody could compute (`has(ltv)` over a ratio divided by zero);
         - calls a name no helper has (`firstpresent(x)`), or uses a filter or a test no sandbox has, which Jinja
@@ -1272,10 +1413,12 @@ class Rules(Node):
       skipped, `missing value for loan.amount (not skipped: lon is not an input or a derived value)`, unless it is
       already the error of a value nobody could read.
     - What a skipped rule cannot see: an error its check would raise after the missing value it stopped at, on
-      values that are there: a zero divisor, a misspelled method (`app.age >= 18 and text(app.name).startwith('A')`
-      without an age) or a value of the wrong type; that surfaces on the records that carry the missing value. An
-      error the check reaches before the missing value is reported on every record, the one that lacks the value
-      as well: `loan.amount / appraisal.value <= appraisal.max_ltv` over a zero value, with or without the limit.
+      values that are there: a zero divisor (`appraisal.max_ltv >= loan.amount / appraisal.value` without a limit),
+      a misspelled method or a value of the wrong type; that surfaces on the records that carry the missing value.
+      An error the check reaches before the missing value, or on the other side of an `and` or an `or` the missing
+      value gives way to, is reported on every record, the one that lacks the value as well: `loan.amount /
+      appraisal.value <= appraisal.max_ltv` over a zero value, with or without the limit, and `app.age >= 18 and
+      text(app.name).startwith('A')`, with or without the age.
     - Overall status: `fail` if any rule failed, else `warn` if any warned, else `not_evaluated` if any check did
       not run, else `pass`. A check held for a missing value did not run, so a record is never `pass` while a value
       a check needed was missing, unless every rule that missed one was set to skip it.
@@ -1349,7 +1492,8 @@ class Rules(Node):
     def _compile_expression(self, text: str, where: str, *, lazy: bool = True) -> tuple[Callable[..., Any], Reads]:
         try:
             if lazy:
-                # A check and `applies_when` stop at a missing value only where they read it.
+                # A check and `applies_when` stop at a missing value only where they read it, and either side of
+                # an `and` or an `or` in them decides where the other is missing (`RuleSandbox`).
                 compiled, reads = _compile_lazy(text)
             else:
                 # A derived value is computed as it always was. A lookup that finds nothing must come back as

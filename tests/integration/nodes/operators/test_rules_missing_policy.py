@@ -11,8 +11,9 @@ not evaluated, or reports its severity under `fail`, and a rule set to skip says
 is not an input or a derived value)"). A derived value that came out missing counts as data the record lacks when a
 value it reads is missing, whether or not its evaluation reached that value. What a skipped rule cannot see is an
 error its check would raise after the missing value it stops at, on the values that are there; that surfaces on the
-records that carry the missing value, while an error the check reaches first is reported on every record. A rule's
-`on_missing` that is no policy at all leaves the choice to the node, with a warning, rather than refusing the build.
+records that carry the missing value, while an error the check reaches first, or on the other side of an `and` or an
+`or` the missing value gives way to, is reported on every record. A rule's `on_missing` that is no policy at all leaves
+the choice to the node, with a warning, rather than refusing the build.
 """
 
 import json
@@ -444,13 +445,14 @@ HELD = {
         {"order": {"coupon": "SPRING"}},
         "check could not be evaluated: 'firstpresent' is undefined",
     ),
+    # An error the check reaches on the other side of an `and` the missing total gives way to is reported: the name a
+    # call calls is judged before its arguments are read.
     "mistyped-helper-beside-missing-data": Held(
         lambda **policy: screening(
             "order.total > 100 and firstpresent(order.coupon) == 'SPRING'", inputs=("order",), **policy
         ),
         {"order": {"coupon": "SPRING"}},
-        "missing value for order.total",
-        "firstpresent is not a helper",
+        "check could not be evaluated: 'firstpresent' is undefined",
     ),
     "derived-mistyped-helper": Held(
         lambda **policy: screening(
@@ -824,12 +826,23 @@ def test_a_lookup_that_found_nothing_is_judged_record_by_record():
             True,
         ),
         (
+            "appraisal.max_ltv >= loan.amount / appraisal.value",
+            LENDING,
+            {"loan": {"amount": 300000}, "appraisal": {"value": 0}},
+            {"loan": {"amount": 300000}, "appraisal": {"value": 0, "max_ltv": 0.8}},
+            "division by zero",
+            # The missing limit is read first, and stops the comparison before the division fails.
+            False,
+        ),
+        (
             "app.age >= 18 and text(app.name).startwith('A')",
             ("app",),
             {"app": {"name": "Ann"}},
             {"app": {"name": "Ann", "age": 30}},
             "'str object' has no attribute 'startwith'",
-            False,
+            # An error the check reaches on the other side of an `and` the missing age gives way to is reported: the
+            # misspelled method fails whether or not the age is there.
+            True,
         ),
         (
             "doc.total + doc.label > doc.limit",
@@ -841,14 +854,14 @@ def test_a_lookup_that_found_nothing_is_judged_record_by_record():
             True,
         ),
     ],
-    ids=["zero-divisor", "misspelled-method", "wrong-type"],
+    ids=["zero-divisor", "zero-divisor-after-the-missing-limit", "misspelled-method", "wrong-type"],
 )
 def test_an_error_on_the_values_there_shows_wherever_the_check_reaches_it_before_a_missing_value(
     check, inputs, lacking, carrying, error, reached_first
 ):
     """A missing value the check reads before the values that are there are used stops it, so the rule is skipped on
-    a record that lacks it; the error surfaces on the records that carry it. An error the check reaches first is
-    reported on every record."""
+    a record that lacks it; the error surfaces on the records that carry it. An error the check reaches first, or on
+    the other side of an `and` or an `or` the missing value gives way to, is reported on every record."""
     node = screening(check, "not_applicable", inputs=inputs)
 
     if reached_first:
