@@ -139,6 +139,31 @@ def test_each_policy_reports_a_missing_value_its_own_way(policy, expected, statu
     assert output["status"] == status
 
 
+@pytest.mark.parametrize(
+    ("check", "app", "missing"),
+    [
+        ("app.b == '' and text(app.a) == 'x'", {"b": "", "a": "  "}, "app.a"),
+        ("app.b == '' and number(app.a) > 1", {"b": "", "a": ""}, "app.a"),
+        ("app.b == '' and date(app.a) < today()", {"b": "", "a": " "}, "app.a"),
+        ("app.b == '' and first_present(app.a, app.c) == 'x'", {"b": "", "a": "", "c": []}, "app.a"),
+        # The fallback stands in for the blank `app.a`, so the blank that stops the check is `app.c`.
+        ("first_present(app.a, 'x') == 'x' and text(app.c) == 'y'", {"a": " ", "c": ""}, "app.c"),
+    ],
+    ids=["text", "number", "date", "first-present", "past-a-fallback"],
+)
+@pytest.mark.parametrize(
+    ("policy", "status", "prefix"),
+    [(None, "not_evaluated", ""), ("fail", "warn", ""), ("not_applicable", "not_applicable", "does not apply: ")],
+    ids=["unset", "fail", "not_applicable"],
+)
+def test_the_reason_names_the_blank_a_helper_turned_missing(check, app, missing, policy, status, prefix):
+    """`app.b == ''` reads a blank and holds; the check stops where `text()`, `number()`, `date()` or `first_present()`
+    turns a blank into a missing value, and the reason names that one."""
+    output = run(screening(check, policy, inputs=("app",)), {"app": app})
+
+    assert outcome(output) == (status, f"{prefix}missing value for {missing}")
+
+
 class Skipped(NamedTuple):
     node: Callable[[str | None], Rules]
     record: dict
