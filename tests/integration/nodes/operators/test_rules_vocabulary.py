@@ -770,6 +770,34 @@ def test_days_between_names_the_first_argument_when_both_dates_are_bad(placed, s
     assert (finding["status"], finding["message"]) == ("not_evaluated", message)
 
 
+@pytest.mark.parametrize(
+    ("check", "named"),
+    [
+        ("days_between(order.placed, order.shipped) <= 30", "TBD"),
+        ("days_between(order.placed, date(order.shipped)) <= 30", "TBD"),
+        ("days_between(date(order.placed), order.shipped) <= 30", "sometime"),
+        ("days_between(date(order.placed), date(order.shipped)) <= 30", "sometime"),
+    ],
+    ids=["raw", "read-end", "read-start", "read-both"],
+)
+def test_days_between_names_the_bad_date_it_always_named_in_every_shape(check, named):
+    """`date()` raised as each argument was read, left to right, and `days_between` read raw text `end` first: over a
+    placed date of `sometime` and a shipped one of `TBD`, each shape names the text it named before `date()` handed
+    on a value it could not read instead of raising."""
+    node = rules(Rule(id="R1", check=check), member="order")
+
+    finding = by_id(run(node, record("order", placed="sometime", shipped="TBD")))["R1"]
+
+    assert (finding["status"], finding["message"]) == (
+        "not_evaluated",
+        f"check could not be evaluated: not a date: {named!r}",
+    )
+
+
+def test_an_expression_over_two_texts_that_are_no_dates_names_the_end_as_it_always_did():
+    assert "not a date: 'y'" in failure("days_between(start, end)", start="x", end="y")
+
+
 def test_to_date_reads_the_new_formats_and_still_raises_on_what_it_cannot_read():
     """`days_between`, an effective window and `as_of` read their dates through it."""
     assert to_date("2026/8/7") == date(2026, 8, 7)

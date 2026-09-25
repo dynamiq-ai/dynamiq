@@ -241,12 +241,14 @@ def to_date(value: Any, format: str | None = None) -> date:
 def days_between(start: Any, end: Any) -> int:
     """The number of days from `start` to `end`, negative when `end` comes first.
 
-    Reads `start` before `end`, so when both are unreadable the error names `start`'s reason
-    first, `days_between(a, b)` naming `a` rather than `b`.
+    A value `date()` could not read raises its error, `start`'s before `end`'s, as `date()` raised them while it read
+    the arguments left to right; raw text is then read `end` first, as it always was, so `days_between(a, b)` over
+    two texts that are no dates names `b`.
     """
-    start_date = to_date(start)
-    end_date = to_date(end)
-    return (end_date - start_date).days
+    for value in (start, end):
+        if isinstance(value, Unreadable):
+            raise value.error()
+    return (to_date(end) - to_date(start)).days
 
 
 def today() -> date:
