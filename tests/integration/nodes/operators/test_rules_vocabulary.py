@@ -689,6 +689,8 @@ def test_a_build_error_names_the_text_the_author_wrote(text, error):
 
 
 NESTED_TOO_DEEPLY = "(" * 200 + "order.total" + ")" * 200 + " > 1"
+# Read without trouble, but compiled to code nested a level for each `or`, deeper than Python's parser takes.
+TOO_LONG_A_CHAIN = " or ".join(f"order.a{i} == {i}" for i in range(200))
 
 
 @pytest.mark.parametrize(
@@ -707,16 +709,35 @@ NESTED_TOO_DEEPLY = "(" * 200 + "order.total" + ")" * 200 + " > 1"
             {"rules": [Rule(id="R1", check="true", message="{{ " + NESTED_TOO_DEEPLY + " }}")]},
             "Rules 'vocabulary', rule 1: the message",
         ),
+        ({"rules": [Rule(id="R1", check=TOO_LONG_A_CHAIN)]}, "Rules 'vocabulary', rule 1: the check"),
+        (
+            {"rules": [Rule(id="R1", check="true", message="{{ " + TOO_LONG_A_CHAIN + " }}")]},
+            "Rules 'vocabulary', rule 1: the message",
+        ),
     ],
-    ids=["check", "applies-when", "derived-value", "message"],
+    ids=["check", "applies-when", "derived-value", "message", "long-or-chain-check", "long-or-chain-message"],
 )
 def test_text_nested_too_deeply_to_read_names_its_rule_when_the_node_is_built(settings, error):
     """Jinja reads each level of nesting through a dozen calls, so some 70 parentheses exhaust Python's stack before the
-    text is read: the node still fails to build, naming the rule, where it failed with a bare `RecursionError`."""
+    text is read, and it compiles a chain of `or`s to code nested a level for each, which Python's parser refuses at 200
+    levels: the node still fails to build, naming the rule, where it failed with a bare `RecursionError` or
+    `SyntaxError`."""
     with pytest.raises(ValueError) as refused:
         Rules(name="vocabulary", input_fields=[NamedField(name="order")], **settings)
 
     assert str(refused.value) == f"{error} is nested too deeply to read; split it into smaller expressions"
+
+
+@pytest.mark.parametrize("text", [NESTED_TOO_DEEPLY, TOO_LONG_A_CHAIN], ids=["nested-parentheses", "long-or-chain"])
+def test_an_expression_nested_too_deeply_to_read_names_its_output_when_the_node_is_built(text):
+    """The Expression node compiles an output as a rule's check is compiled, and fails the same way, naming the output,
+    where it failed with a bare `RecursionError` or `SyntaxError`."""
+    with pytest.raises(ValueError) as refused:
+        reader(text, {"order": {}})
+
+    assert str(refused.value) == (
+        "Expression 'reader': 'value' is nested too deeply to read; split it into smaller expressions"
+    )
 
 
 def test_a_rule_reading_and_calling_number_is_held_when_it_runs_not_refused_at_build():
