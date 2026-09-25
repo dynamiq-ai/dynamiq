@@ -584,6 +584,40 @@ def test_first_present_stops_at_an_unreadable_value_rather_than_skipping_it():
 
 
 @pytest.mark.parametrize(
+    ("check", "value", "reason"),
+    [
+        ("has(date(doc.value))", "March", "not a date: 'March'"),
+        ("date(doc.value) is defined", "March", "not a date: 'March'"),
+        ("date(doc.value) is not none", "March", "not a date: 'March'"),
+        ("date(doc.value) is present", "March", "not a date: 'March'"),
+        ("date(doc.value) is string", "March", "not a date: 'March'"),
+        ("date(doc.value) is sameas none", "March", "not a date: 'March'"),
+        ("[date(doc.value)] | select('defined') | list | length == 1", "March", "not a date: 'March'"),
+        ("has(number(doc.value))", "TBD", "not a number: 'TBD'"),
+        ("number(doc.value) is number", "TBD", "not a number: 'TBD'"),
+        ("number(doc.value) is blank", "TBD", "not a number: 'TBD'"),
+        ("first_present(number(doc.value), 0) > 1", "TBD", "not a number: 'TBD'"),
+    ],
+)
+def test_asking_about_a_value_nobody_could_read_holds_the_rule_naming_the_text(check, value, reason):
+    """`date('March')` raised before `date()` read what documents write, so `has(date(x))` was never answered over
+    text that is no date; it still is not. A presence or type test is no verdict on the value, and a fallback does
+    not hide it either."""
+    node = rules(Rule(id="R1", check=check), member="doc")
+
+    finding = by_id(run(node, record("doc", value=value)))["R1"]
+
+    assert (finding["status"], finding["message"]) == ("not_evaluated", f"check could not be evaluated: {reason}")
+
+
+@pytest.mark.parametrize(
+    "expression", ["has(date(value))", "date(value) is defined", "date(value) is none", "date(value) is present"]
+)
+def test_an_expression_asking_about_a_date_nobody_could_read_fails_the_run_as_using_it_does(expression):
+    assert "not a date: 'March'" in failure(expression, value="March")
+
+
+@pytest.mark.parametrize(
     "check",
     [
         "number(doc.amount) | round(2) > 5",

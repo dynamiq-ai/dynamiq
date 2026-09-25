@@ -127,11 +127,13 @@ class UnreadableValue(TemplateRuntimeError):
 class Unreadable:
     """A value `number()` or `date()` could not read, with the reason: `TBD` where an amount goes.
 
-    It is there, so it is present rather than missing, and `first_present` stops at it instead of letting a fallback
-    speak over it. Every use raises `UnreadableValue` with the reason: a comparison, arithmetic, a truth test, a count,
-    a hash, a member or an item, the conversions behind `| float` and `| int`, which would otherwise read it as 0, and
-    the conversion to text behind `| string`, the text filters, `~` and `join`, which would hand a check back the
-    text the reader refused. Only a rule's message prints it, as the text the record holds (`_rendered`).
+    It is there, so it is not missing, and `first_present` stops at it instead of letting a fallback speak over it.
+    Every use raises `UnreadableValue` with the reason: a comparison, arithmetic, a truth test, a count, a hash, a
+    member or an item, the conversions behind `| float` and `| int`, which would otherwise read it as 0, and the
+    conversion to text behind `| string`, the text filters, `~` and `join`, which would hand a check back the text the
+    reader refused. So does a question about it, `has()` or any test, `is present` and `is none` among them, which
+    would otherwise answer on a value nobody read. Only a rule's message prints it, as the text the record holds
+    (`_rendered`).
     """
 
     __slots__ = ("value", "reason")
@@ -164,7 +166,13 @@ def _is_missing(value: Any) -> bool:
 
 
 def has(value: Any) -> bool:
-    """True when a value is present: defined and not null."""
+    """True when a value is present: defined and not null.
+
+    A value nobody could read raises its error instead of answering: it is there, yet a verdict on it, `has(ltv)`
+    over a ratio divided by zero say, would be a verdict on nothing anyone read.
+    """
+    if isinstance(value, Unreadable):
+        raise value.error()
     return not _is_missing(value)
 
 
@@ -186,7 +194,8 @@ def is_blank(value: Any) -> bool:
 
 
 def is_present(value: Any) -> bool:
-    """`x is present`: anything that is not blank."""
+    """`x is present`: anything that is not blank. `first_present` asks it too, and stops at a value nobody could
+    read, which is not blank; the test itself refuses such a value, as every test in a sandbox does."""
     return not is_blank(value)
 
 
@@ -404,6 +413,12 @@ TESTS: dict[str, Callable[[Any], bool]] = {"present": is_present, "blank": is_bl
 _TEXT_FILTERS = ("lower", "upper", "trim", "title", "capitalize", "replace", "string")
 
 
+def _value_at(function: Callable[..., Any]) -> int:
+    """Where a filter or a test receives the value it is applied to: second for one that asks Jinja for its
+    environment or context first, as `replace` asks for its eval context, else first."""
+    return 0 if getattr(function, "jinja_pass_arg", None) is None else 1
+
+
 def _keeps_blank(filter_: Callable[..., Any]) -> Callable[..., Any]:
     """The filter, with a blank passed on untouched.
 
@@ -412,13 +427,31 @@ def _keeps_blank(filter_: Callable[..., Any]) -> Callable[..., Any]:
     marker expect. `wraps` copies the filter's attributes, Jinja's pass-argument marker among them, so `replace`
     still receives its eval context first and the value second.
     """
-    value_at = 0 if getattr(filter_, "jinja_pass_arg", None) is None else 1
+    value_at = _value_at(filter_)
 
     @functools.wraps(filter_)
     def keep_blank(*args: Any, **kwargs: Any) -> Any:
         return args[value_at] if isinstance(args[value_at], Blank) else filter_(*args, **kwargs)
 
     return keep_blank
+
+
+def _refuses_unreadable(test: Callable[..., Any]) -> Callable[..., Any]:
+    """The test, raising the error of a value nobody could read instead of answering about it.
+
+    `date(doc.closing) is defined` over `March` would otherwise pass on a date nobody could read, and `ltv is none`
+    over a ratio divided by zero pass or fail on a figure nobody computed; `select('defined')` and `reject('none')`
+    call the same tests. `wraps` keeps the pass-argument marker, as for the filters.
+    """
+    value_at = _value_at(test)
+
+    @functools.wraps(test)
+    def refuse_unreadable(*args: Any, **kwargs: Any) -> Any:
+        if len(args) > value_at and isinstance(args[value_at], Unreadable):
+            raise args[value_at].error()
+        return test(*args, **kwargs)
+
+    return refuse_unreadable
 
 
 class RuleUndefined(ChainableUndefined):
@@ -446,7 +479,9 @@ class RecordSandbox(ImmutableSandboxedEnvironment):
 
     Every sandbox, the Rules node's and the Expression node's alike, carries the helpers, the `present` and `blank`
     tests, and a `blank` of its own: its undefined marked `Blank`, so blank input is as missing as anything
-    undefined in that sandbox.
+    undefined in that sandbox. Every test in it, Jinja's own as well, refuses a value nobody could read, as `has()`
+    does: a rule that asks about one is held for the value's error, and an expression fails its run, as using the
+    value would.
     """
 
     blank: type[Undefined]
@@ -456,6 +491,7 @@ class RecordSandbox(ImmutableSandboxedEnvironment):
         self.blank = type("Blank", (Blank, self.undefined), {"__slots__": ()})
         self.globals.update(HELPERS)
         self.tests.update(TESTS)
+        self.tests.update({name: _refuses_unreadable(test) for name, test in self.tests.items()})
         for name in _TEXT_FILTERS:
             self.filters[name] = _keeps_blank(self.filters[name])
 

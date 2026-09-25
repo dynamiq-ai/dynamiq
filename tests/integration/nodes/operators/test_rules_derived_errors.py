@@ -4,9 +4,10 @@ A Rules node computes its derived values once per record, before the rules run. 
 appraisal.value` over a null appraisal is missing, as the appraisal is: None under `derived`, and a rule that reads
 `ltv` is not evaluated for a missing value. Over an appraisal of 0 nothing is missing, yet there is no ratio: the
 value is None under `derived` as well, with the reason under `derived_errors`, and a rule that reads it is not
-evaluated, naming the reason. The value is there, so `ltv is present` holds and `first_present` stops at it: a
-fallback never speaks over a figure the record gives but nobody could compute or read. A value computed from one
-nobody could read is unreadable too, even where another value it reads is missing.
+evaluated, naming the reason, a rule that only asks about it too: `has(ltv)`, `ltv is present` or `ltv is none`
+would be a verdict on a figure nobody computed. The value is there, so `first_present` stops at it: a fallback never
+speaks over a figure the record gives but nobody could compute or read. A value computed from one nobody could read
+is unreadable too, even where another value it reads is missing.
 """
 
 import json
@@ -81,15 +82,46 @@ def test_a_derived_value_that_cannot_be_computed_reports_why_and_holds_every_rul
         "limit": "not_evaluated",
         "guarded": "not_evaluated",
         "high": "not_evaluated",
-        "present": "pass",
+        "present": "not_evaluated",
     }
     assert by_id(output)["limit"]["message"] == "check could not be evaluated: division by zero"
     assert by_id(output)["limit"]["evaluated"] == {"ltv": "unreadable: division by zero"}
-    # A guard asks whether there is a value, and there is one: the error holds the rule instead of failing it.
+    # A guard asks whether there is a value, and the only answer is the error: it holds the rule rather than pass
+    # or fail it, as asking whether the LTV was computed does.
     assert by_id(output)["guarded"]["message"] == "check could not be evaluated: division by zero"
+    assert by_id(output)["present"]["message"] == "check could not be evaluated: division by zero"
     assert by_id(output)["high"]["message"] == "applies_when could not be evaluated: division by zero"
     assert output["status"] == "not_evaluated"
     assert json.loads(json.dumps(output)) == output
+
+
+@pytest.mark.parametrize(
+    "check",
+    [
+        "has(ltv)",
+        "not has(ltv) or ltv <= 0.8",
+        "ltv is not none",
+        "ltv is none",
+        "ltv is present",
+        "ltv is blank",
+        "ltv is defined",
+        "ltv is number",
+    ],
+)
+@pytest.mark.parametrize(
+    ("policy", "status"),
+    [(None, "not_evaluated"), ("not_applicable", "not_evaluated"), ("fail", "fail")],
+    ids=["unset", "not_applicable", "fail"],
+)
+def test_asking_about_a_derived_value_that_could_not_be_computed_holds_the_rule_naming_the_error(check, policy, status):
+    """Before derived values kept their errors a failed LTV read as None, so `has(ltv)` failed and `ltv is none`
+    passed on a figure nobody computed. Now the question is answered by the error: a rule that only asks about the
+    value is held as one that uses it is, and never skipped."""
+    node = lending(Rule(id="asked", name="LTV asked about", check=check, on_missing=policy))
+
+    finding = by_id(run(node, appraised(value=0)))["asked"]
+
+    assert (finding["status"], finding["message"]) == (status, "check could not be evaluated: division by zero")
 
 
 @pytest.mark.parametrize(
