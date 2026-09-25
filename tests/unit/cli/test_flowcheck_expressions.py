@@ -422,6 +422,143 @@ def test_a_derived_value_may_take_a_name_the_engine_lets_it_shadow(name):
     assert flowcheck.check_rules(node, "screen") == []
 
 
+# --- a rule's message --------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("message", "error"),
+    [
+        ("{{ order.total | lowr }}", "rules 'screen': rule 'R1' message: unknown filter 'lowr'. Did you mean 'lower'?"),
+        (
+            "{{ order.total",
+            "rules 'screen': rule 'R1' message is not a valid template: unexpected end of template, expected 'end of "
+            "print statement'.",
+        ),
+        (
+            "{{ order.total is presnt }}",
+            "rules 'screen': rule 'R1' message: unknown test 'presnt'. Did you mean 'present'?",
+        ),
+        # Jinja looks a filter up inside `{% if %}` only when that branch renders, and the message then comes back as it
+        # was written.
+        (
+            "{% if order.late %}{{ order.total | lowr }}{% endif %}",
+            "rules 'screen': rule 'R1' message: unknown filter 'lowr'. Did you mean 'lower'?",
+        ),
+        ("Total {{ self.total }}", f"rules 'screen': rule 'R1' message reads 'self.total': {SELF_REFUSAL}"),
+        (
+            "{{ " + DEEP["nested-brackets"] + " }}",
+            "rules 'screen': rule 'R1' message is nested too deeply to read; split it into smaller expressions",
+        ),
+    ],
+    ids=["unknown-filter", "unfinished", "unknown-test", "unknown-filter-in-a-branch", "self", "nested-too-deeply"],
+)
+def test_a_rule_message_is_checked_as_the_template_the_engine_compiles(message, error):
+    node = rules_node(rules=[rule(message=message)])
+
+    errors, warnings = flowcheck.check_expressions(node, "screen")
+
+    assert errors == [error]
+    assert warnings == []
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # `order` is no input of the node: a message prints a value the record lacks as empty text.
+        "Total {{ order.total }}",
+        # A message may call what it defines itself.
+        "{% set comma = joiner(', ') %}{% for item in loan.items %}{{ comma() }}{{ item.name }}{% endfor %}",
+        "{% macro money(x) %}{{ x | round(2) }}{% endmacro %}Total {{ money(loan.amount) }}",
+        # The engine refuses a private attribute in a check, but builds a message that reads one: it prints the key.
+        "Kind {{ loan.__typename }}",
+    ],
+    ids=["undeclared-name", "joiner", "macro", "private-key"],
+)
+def test_a_message_the_engine_builds_is_not_refused(message):
+    node = rules_node(rules=[rule(message=message)])
+
+    assert flowcheck.check_expressions(node, "screen") == ([], [])
+
+
+def test_a_disabled_rules_message_is_not_parsed_at_all():
+    node = rules_node(rules=[rule(message="{{ order.total | lowr", enabled=False)])
+
+    assert flowcheck.check_expressions(node, "screen") == ([], [])
+
+
+# --- a node inside another ---------------------------------------------------------------------------------------
+
+MAP = "dynamiq.nodes.operators.Map"
+
+
+def _flow_mapping(inner: dict) -> dict:
+    """A flow whose Map runs `inner` over each order the input holds."""
+    start = {"id": "start", "name": "start", "type": flowcheck.INPUT_TYPE}
+    mapper = {
+        "id": "map-1",
+        "name": "map-1",
+        "type": MAP,
+        "depends": [{"node": "start"}],
+        "input_transformer": {"selector": {"input": "$.start.output.orders"}},
+        "node": inner,
+    }
+    end = {
+        "id": "end",
+        "name": "end",
+        "type": flowcheck.OUTPUT_TYPE,
+        "depends": [{"node": "map-1"}],
+        "input_transformer": {"selector": {"result": "$.map-1.output"}},
+    }
+    return {"id": str(uuid.uuid4()), "nodes": [start, mapper, end]}
+
+
+def test_a_rules_node_inside_a_map_is_checked_as_a_top_level_one_is():
+    """The loader builds a Map's node with the flow, so its rules compile, or fail to, as a top-level node's do."""
+    inner = rules_node(
+        id="rules-1",
+        name="rules-1",
+        depends=[],
+        rules=[rule(check="loan.amount | lowr == 'x'", message="{{ loan.amount"), rule(id="R2", on_missing="skip")],
+    )
+
+    errors, _ = flowcheck.validate(_flow_mapping(inner))
+
+    assert [error for error in errors if "rules-1" in error] == [
+        "rules 'map-1 > rules-1': rule 'R2' on_missing 'skip' is not one of not_evaluated, fail, not_applicable.",
+        "rules 'map-1 > rules-1': rule 'R1' check: unknown filter 'lowr'. Did you mean 'lower'?",
+        "rules 'map-1 > rules-1': rule 'R1' message is not a valid template: unexpected end of template, expected "
+        "'end of print statement'.",
+    ]
+
+
+def test_an_expression_node_inside_a_map_is_checked_as_a_top_level_one_is():
+    inner = expression_node(
+        id="calc-1",
+        name="calc-1",
+        depends=[],
+        expressions=[{"id": "x1", "key": "rate", "expression": "lon.amount | lowr"}],
+    )
+
+    errors, warnings = flowcheck.validate(_flow_mapping(inner))
+
+    assert [error for error in errors if "calc-1" in error] == [
+        "expression 'map-1 > calc-1': key 'rate': unknown filter 'lowr'. Did you mean 'lower'?"
+    ]
+    assert [warning for warning in warnings if "calc-1" in warning] == [
+        "expression 'map-1 > calc-1': key 'rate' reads 'lon', which this node does not declare. Did you mean 'loan'?"
+    ]
+
+
+def test_a_node_nested_deeper_is_labelled_with_the_path_to_it():
+    inner = rules_node(depends=[], rules=[rule(check="loan.amount | lowr == 'x'")])
+    del inner["id"]
+    outer = _flow_mapping({"id": "map-2", "name": "map-2", "type": MAP, "node": inner})
+
+    errors, _ = flowcheck.validate(outer)
+
+    assert "rules 'map-1 > map-2 > screen': rule 'R1' check: unknown filter 'lowr'. Did you mean 'lower'?" in errors
+
+
 def test_an_unrecognized_rule_level_on_missing_is_an_error():
     node = rules_node(rules=[rule(check="true", on_missing="skip")])
 

@@ -13,8 +13,9 @@ in is not the same question as what the API accepts, and reading one to answer t
 this reject the SDK's own emitted types for knowledge-base nodes. Omit it and the type check
 is skipped rather than guessed at.
 
-A Rules node's checks, `applies_when` and derived values, and an Expression node's expressions,
-are Jinja2 text and are parsed here too (`check_expressions`). This module stays free of an
+A Rules node's checks, `applies_when`, derived values and messages, and an Expression node's
+expressions, are Jinja2 text and are parsed here too (`check_expressions`), wherever the node
+sits: at the top of the flow or inside another, a Map's `node` say. This module stays free of an
 import of the SDK engine even so - that alone costs about 4.7s, which a `validate` call cannot
 spend - so `RULE_HELPERS`, `RULE_TESTS` and `RULE_RESERVED_NAMES` below are a hand-kept copy of
 `dynamiq.nodes.operators.rules.HELPERS`, `.TESTS` and `.RESERVED_NAMES`, and `_path_of` of the
@@ -548,6 +549,15 @@ def validate(flow, known_types: set | None = None):
             expression_errors, expression_warnings = check_expressions(node, label)
             errors.extend(expression_errors)
             warnings.extend(expression_warnings)
+        # The loader builds a node defined inside this one with the flow, so a Rules or an
+        # Expression node there compiles its text as a top-level one does, and is checked the
+        # same way, labelled with the path to it.
+        for nested_label, nested in nested_nodes(node, label):
+            if nested.get("type") in (RULES_TYPE, EXPRESSION_TYPE):
+                errors.extend(check_operator(nested, nested_label))
+                expression_errors, expression_warnings = check_expressions(nested, nested_label)
+                errors.extend(expression_errors)
+                warnings.extend(expression_warnings)
 
     for path, text in walk_strings(flow):
         if path.rsplit(".", 1)[-1] in PROSE_KEYS or len(text) > 200:
@@ -556,6 +566,23 @@ def validate(flow, known_types: set | None = None):
             errors.append(f"{path} is still the placeholder {text!r} - replace it with a real value.")
 
     return errors, warnings
+
+
+def nested_nodes(node: dict, label):
+    """Each node defined inside `node`, at any depth, with its label: the path to it,
+    `map-1 > rules-1`.
+
+    As the loader reads a flow, a node is any object with a dotted `type` held by a node's field,
+    alone or in a list: a Map's `node`, an agent's `llm` and `tools`, a Judgement's `judge`. A
+    flow a node names by its id, in `flow` or `flows`, is a flow of its own and is not followed.
+    """
+    for key, value in node.items():
+        for index, item in enumerate(value if isinstance(value, list) else [value]):
+            if isinstance(item, dict) and isinstance(item.get("type"), str) and "." in item["type"]:
+                place = f"{key}[{index}]" if isinstance(value, list) else key
+                item_label = f"{label} > {item.get('id') or item.get('name') or place}"
+                yield item_label, item
+                yield from nested_nodes(item, item_label)
 
 
 def check_branch(source, source_id, option, label) -> list:
@@ -769,7 +796,8 @@ def check_expression(node, label) -> list:
 def check_expressions(node, label) -> tuple[list, list]:
     """Parses every Jinja2 expression on a Rules or Expression node: a Rules node's rule `check`,
     `applies_when` and each derived value's `expression`; an Expression node's each
-    `expressions[].expression`. Returns (errors, warnings).
+    `expressions[].expression`. A rule's `message` is a template, parsed as one (`_parse_message`).
+    Returns (errors, warnings).
 
     Compiling the text is not enough: Jinja only checks a filter or test used inside a
     conditional expression (`x | lowr if a else b`) at RUN time, letting it stay undefined at
@@ -836,6 +864,9 @@ def _check_rules_expressions(node, label, errors: list, warnings: list) -> None:
             if text.strip():
                 where = f"rules {label!r}: rule {rule_label!r} {attr}"
                 _parse_and_walk(text, rule_known, frozenset(), where, errors, warnings, private=True)
+        message = str(rule.get("message") or "")
+        if message.strip():
+            _parse_message(message, f"rules {label!r}: rule {rule_label!r} message", errors)
 
 
 def _check_expression_items(node, label, errors: list, warnings: list) -> None:
@@ -940,6 +971,34 @@ def _parse_and_walk(
     warnings.extend(dict.fromkeys(scan.warnings))
 
 
+def _parse_message(text: str, where: str, errors: list) -> None:
+    """Parses a rule's message as the template the engine compiles it into, and walks it (`_walk`).
+
+    What the engine refuses to build is an error, as for a check: a syntax error, a filter or a
+    test the sandbox does not have, and a read of `self`. Jinja looks a filter or a test up inside
+    `{% if %}` only when that branch renders, and the message then comes back as it was written,
+    so the walk finds one there too. A name the node does not declare is no error, nor a warning:
+    a message prints a value the record lacks as empty text. Nor is a call of a name no helper
+    has, since a message may call a macro or a `joiner()` it defines itself, nor a private `__`
+    segment, which the engine builds a message over: it prints a key of that name a record holds.
+    """
+    try:
+        parsed = _EXPRESSION_ENVIRONMENT.parse(text)
+    except TemplateSyntaxError as e:
+        errors.append(f"{where} is not a valid template: {e}")
+        return
+    except RecursionError:
+        errors.append(_too_deep(where))
+        return
+    scan = _Scan(None, frozenset(), where, private=False, template=True)
+    try:
+        _walk(parsed, scan)
+    except RecursionError:
+        errors.append(_too_deep(where))
+        return
+    errors.extend(dict.fromkeys(scan.errors))
+
+
 def _is_one_expression(parsed) -> bool:
     """Whether the wrapped text parsed as one expression, all the engine's `compile_expression`
     reads: `loan.a }} loan.b` parses as a template holding an expression and then text, where the
@@ -962,15 +1021,19 @@ def _too_deep(where: str) -> str:
 class _Scan:
     """One walk of a parsed expression: what it may read (`known`, None where the node's shape
     cannot be known, and `not_yet_computed`), where it sits, whether the engine refuses a private
-    attribute there, and what the walk finds - errors, warnings, and for the engine's refusal of a
-    name both read and called, the global names the expression calls and the roots of the paths
-    the engine reads, in the order it reads them."""
+    attribute there, whether it is a message's template, which may define names of its own to
+    call, and what the walk finds - errors, warnings, and for the engine's refusal of a name both
+    read and called, the global names the expression calls and the roots of the paths the engine
+    reads, in the order it reads them."""
 
-    def __init__(self, known: frozenset | None, not_yet_computed: frozenset, where: str, private: bool) -> None:
+    def __init__(
+        self, known: frozenset | None, not_yet_computed: frozenset, where: str, private: bool, template: bool = False
+    ) -> None:
         self.known = known
         self.not_yet_computed = not_yet_computed
         self.where = where
         self.private = private
+        self.template = template
         self.errors: list = []
         self.warnings: list = []
         self.called: list = []
@@ -1052,7 +1115,9 @@ def _walk(node, scan: _Scan, counted: bool = True) -> None:
         else:
             # A bare name called like a function is always meant as a helper: a record read from JSON
             # never holds anything callable, so this is an error rather than merely an unknown root.
-            scan.errors.append(_unknown(scan.where, "helper", name, _GLOBAL_NAMES))
+            # A message's template may call a name it defines itself, a macro say.
+            if not scan.template:
+                scan.errors.append(_unknown(scan.where, "helper", name, _GLOBAL_NAMES))
             # The engine reads the name it calls as a member of the record all the same.
             if counted:
                 scan.read(name, [name])
