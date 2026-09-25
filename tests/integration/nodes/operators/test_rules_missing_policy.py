@@ -3,10 +3,12 @@
 `not_applicable` skips the rule for a record that does not carry a value it reads, as `applies_when` would, so the
 rule needs no presence guard: `shipment.weight_kg <= 30` does not apply to a shipment nobody weighed, and a record
 whose only unmet rules were skipped still passes. Only data the record lacks is skipped, and only where a read names
-it: a blank no read accounts for, from a lookup inside `text()` that found nothing say, is not. Nor is a check that
-reads a value nobody could read, calls a name no helper has, uses a filter or a test the sandbox does not have,
-finds a value missing under a name a node with declared inputs does not declare (a typo), or needs a derived value a
-lookup found nothing for, whatever else the record lacks. Each is a problem to fix, not data to wait for: the rule is
+it: a blank no field of the record accounts for, from a lookup inside `text()` that found nothing say, is not. Nor is a
+check that reads a value nobody could read, calls a name no helper has, uses a filter or a test the sandbox does not
+have, finds a value missing under a name a node with declared inputs does not declare (a typo), or needs a derived
+value a lookup found nothing for, whatever else the record lacks; unless a helper made that a blank beside a blank value
+the derived value reads, as `app.c == '' and text(limits[app.k]) == 'x'` does over a blank `app.c`, which counts as data
+the record lacks. Each is a problem to fix, not data to wait for: the rule is
 not evaluated, or reports its severity under `fail`, and a rule set to skip says why it did not ("… (not skipped: lon
 is not an input or a derived value)"). A derived value that came out missing counts as data the record lacks when a
 value it reads is missing, whether or not its evaluation reached that value. What a skipped rule cannot see, nor one the
@@ -385,14 +387,14 @@ HELD = {
         {"loan": {"amount": 300000, "program": "jumbo"}, "limits": LIMITS},
         "check could not be evaluated: 'dict object' has no attribute 'jumbo'",
     ),
-    # A blank with no path: the lookup inside `text()` found nothing, and no value the check reads is blank.
+    # A blank no field of the record accounts for: the lookup inside `text()` found nothing, which the reason quotes.
     "lookup-inside-text": Held(
         lambda **policy: screening(
             "text(categories[claim.code]) == 'dental'", inputs=("claim", "categories"), **policy
         ),
         {"claim": {"code": "D9"}, "categories": {"D1": "dental"}},
-        "missing value: text() found no text",
-        "no field of the record is named",
+        "missing value: text() found no text ('dict object' has no attribute 'D9')",
+        "no field of the record accounts for it",
     ),
     "derived-lookup": Held(
         lambda **policy: screening("loan.amount <= limit", inputs=LENDING, derived=(LIMIT,), **policy),

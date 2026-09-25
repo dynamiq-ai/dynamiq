@@ -292,6 +292,15 @@ def today() -> date:
     return date.today()
 
 
+def _found_nothing(what: str, value: Any) -> str:
+    """Why a helper made a blank of `value`: `missing value: text() found no text`, with what the value says of itself
+    where it is undefined, `('dict object' has no attribute 'zz')` for a lookup that found nothing, so that one helper's
+    blank is told from another's."""
+    if isinstance(value, Undefined) and not isinstance(value, Blank):
+        return f"missing value: {what} ({value._undefined_message})"
+    return f"missing value: {what}"
+
+
 @pass_environment
 def text(environment: "RecordSandbox", value: Any) -> Any:
     """The value as text without the spaces around it, or a blank when there is no text.
@@ -305,7 +314,7 @@ def text(environment: "RecordSandbox", value: Any) -> Any:
     if isinstance(value, (Blank, Unreadable)):
         return value
     if is_blank(value):
-        return environment.blank(hint="missing value: text() found no text", exc=MissingValue)
+        return environment.blank(hint=_found_nothing("text() found no text", value), exc=MissingValue)
     return str(value).strip()
 
 
@@ -388,7 +397,7 @@ def number(environment: "RecordSandbox", value: Any, decimal: str = ".") -> Any:
     if isinstance(value, (Blank, Unreadable)):
         return value
     if is_blank(value):
-        return environment.blank(hint="missing value: number() found no number", exc=MissingValue)
+        return environment.blank(hint=_found_nothing("number() found no number", value), exc=MissingValue)
     read = _number_of(value, decimal)
     return Unreadable(value, f"not a number: {_quoted(value)}") if read is None else read
 
@@ -403,7 +412,7 @@ def read_date(environment: "RecordSandbox", value: Any, format: str | None = Non
     if isinstance(value, (Blank, Unreadable)):
         return value
     if is_blank(value):
-        return environment.blank(hint="missing value: date() found no date", exc=MissingValue)
+        return environment.blank(hint=_found_nothing("date() found no date", value), exc=MissingValue)
     try:
         return to_date(value, format)
     except ValueError as e:
@@ -1091,25 +1100,55 @@ def _call(name: str, node: nodes.Expr, *args: nodes.Expr) -> nodes.Call:
     return nodes.Call(nodes.ImportedName(name), [node, *args], [], None, None, lineno=node.lineno)
 
 
-def _handed_path(argument: nodes.Node) -> str | None:
-    """The path whose value `argument` hands a helper: the path itself, the one a filter over it reads, or the one a
-    `text()`, `number()`, `date()` or `first_present()` inside it is handed first."""
-    if (path := _path_of(argument)) is not None:
-        return path
-    if isinstance(argument, nodes.Filter) and argument.node is not None:
-        return _handed_path(argument.node)
-    maker = isinstance(argument, nodes.Call) and isinstance(argument.node, nodes.Name)
-    if maker and argument.node.name in _BLANK_MAKERS and argument.args:
-        return _handed_path(argument.args[0])
-    return None
+def _sources(node: nodes.Node) -> tuple[str, ...] | None:
+    """Every path the value of `node` could have come from, or None where it could come from anything else: the path
+    itself, a filter's value and `default`'s fallback, both sides of an `or` or an `and`, both branches of an `if`, the
+    value a method is called on, and every value `text()`, `number()`, `date()` or `first_present()` passes on;
+    `x.get('F')` reads `x.F`, and then its default. A literal adds no path, so `default('')` leaves the value to the
+    path before it; a lookup by a key read when the check runs, arithmetic or `~` comes from no path."""
+    if isinstance(node, nodes.Const):
+        return ()
+    if (path := _path_of(node)) is not None:
+        return (path,)
+    found: list[str] = []
+    if isinstance(node, nodes.Filter):
+        parts = [node.node]
+        if node.name in ("default", "d"):
+            # With none given, the fallback is '', a literal.
+            fallback = next((item.value for item in node.kwargs if item.key == "default_value"), None)
+            parts += node.args[:1] or ([fallback] if fallback is not None else [])
+    elif isinstance(node, (nodes.And, nodes.Or)):
+        parts = [node.left, node.right]
+    elif isinstance(node, nodes.CondExpr):
+        parts = [node.expr1, node.expr2]
+    elif isinstance(node, nodes.Call) and isinstance(node.node, nodes.Getattr) and node.node.attr == "get":
+        # What `x['F']` reads, where the key is written in the check; one read when it runs is a lookup.
+        key = node.args[0] if node.args else None
+        path = _path_of(nodes.Getitem(node.node.node, key, "load")) if isinstance(key, nodes.Const) else None
+        if path is None or len(node.args) > 2 or node.kwargs or node.dyn_args or node.dyn_kwargs:
+            return None
+        found.append(path)
+        parts = node.args[1:]
+    elif isinstance(node, nodes.Call) and isinstance(node.node, nodes.Getattr):
+        parts = [node.node.node]
+    elif isinstance(node, nodes.Call) and isinstance(node.node, nodes.Name) and node.node.name in _BLANK_MAKERS:
+        value = next((item.value for item in node.kwargs if item.key == "value"), None)
+        parts = list(node.args) if node.node.name == "first_present" else [node.args[0] if node.args else value]
+    else:
+        return None
+    for part in parts:
+        if part is None or (paths := _sources(part)) is None:
+            return None
+        found += paths
+    return tuple(dict.fromkeys(found))
 
 
 def _needing(node: nodes.Node, needed: Mapping[int, str], names: set[str], called: bool = False) -> nodes.Node:
     """`node` with each read under it that the expression needs, in `needed` by the node's id, handed to `need()`
     with its path, and each name it looks up added to `names`. A called name no helper or global has goes to
-    `callee()`, so `firstpresent(x)`, where nothing defines the name, raises before `x` is read. A blank a helper makes
-    goes to `blank_at()` with the paths its value came from (`_handed_path`): the first value `text()`, `number()` or
-    `date()` is handed, every value `first_present()` is, where each has one, and each date `days_between()` is."""
+    `callee()`, so `firstpresent(x)`, where nothing defines the name, raises before `x` is read. The blank `text()`,
+    `number()`, `date()` or `first_present()` makes, and each date `days_between()` is handed, goes to `blank_at()`
+    with every path its value could have come from, where it could only have come from paths (`_sources`)."""
     path = needed.get(id(node))
     if path is not None and not called:
         names.add(_root(path))
@@ -1120,34 +1159,29 @@ def _needing(node: nodes.Node, needed: Mapping[int, str], names: set[str], calle
             return _call(_CALLEE, node)
         return node
     helper = node.node.name if isinstance(node, nodes.Call) and isinstance(node.node, nodes.Name) else None
-    tagged = helper in _BLANK_MAKERS or helper == "days_between"
-    # Read before `need()` wraps the arguments, which are then no longer paths.
-    handed = [_handed_path(argument) for argument in node.args] if tagged else []
-    handed_by_name = {item.key: _handed_path(item.value) for item in node.kwargs} if tagged else {}
+    dated = helper == "days_between"
+    # Read before `need()` wraps the reads, which are then no longer paths.
+    sources = _sources(node) if helper in _BLANK_MAKERS else None
+    dates = [_sources(argument) for argument in node.args] if dated else []
+    dates_by_name = {item.key: _sources(item.value) for item in node.kwargs} if dated else {}
     for field, value in node.iter_fields():
         if isinstance(value, nodes.Node):
             setattr(node, field, _needing(value, needed, names, isinstance(node, nodes.Call) and field == "node"))
         elif isinstance(value, list):
             value[:] = [_needing(item, needed, names) if isinstance(item, nodes.Node) else item for item in value]
-    if helper == "days_between":
+    if dated:
         # Each date is handed to it as the record holds it, and its blank text is missing where it is read.
-        node.args = [_blank_at(argument, path, raw=True) for argument, path in zip(node.args, handed)]
+        node.args = [_blank_at(argument, paths, raw=True) for argument, paths in zip(node.args, dates)]
         for item in node.kwargs:
-            item.value = _blank_at(item.value, handed_by_name[item.key], raw=True)
-    elif helper == "first_present":
-        # Its blank is every value it is handed coming out blank, so each must come from a path.
-        if handed and None not in handed:
-            return _blank_at(node, *handed)
+            item.value = _blank_at(item.value, dates_by_name[item.key], raw=True)
     elif helper in _BLANK_MAKERS:
-        return _blank_at(node, handed[0] if handed else handed_by_name.get("value"))
+        return _blank_at(node, sources)
     return node
 
 
-def _blank_at(node: nodes.Expr, *paths: str | None, raw: bool = False) -> nodes.Expr:
-    """`node` handed to `blank_at()` with `paths`, or as it is where the first is None."""
-    if not paths or paths[0] is None:
-        return node
-    return _call(_BLANK_AT, node, nodes.Const(paths), nodes.Const(raw))
+def _blank_at(node: nodes.Expr, paths: tuple[str, ...] | None, raw: bool = False) -> nodes.Expr:
+    """`node` handed to `blank_at()` with `paths`, or as it is where there are none to name."""
+    return _call(_BLANK_AT, node, nodes.Const(paths), nodes.Const(raw)) if paths else node
 
 
 def _mark_deciding(node: nodes.Node, truth: bool = True) -> None:
@@ -1308,7 +1342,7 @@ class Rules(Node):
     """Evaluates every rule against the inputs and returns one finding per rule.
 
     Inputs arrive by name and rules read them by path (`docs.Note.interest_rate`); derived values are computed once per
-    record, in order, before the rules run, and are read by name like an input. A malformed expression fails the build,
+    record, in order, before the rules run, and read by name like an input. A malformed expression fails the build,
     naming its rule. Expressions are sandboxed Jinja with the helpers `has`, `days_between`, `date`, `today`, `len`,
     `abs`, `min`, `max`, `sum`, `round`, `text`, `number` and `first_present` and the tests `is present` and `is blank`;
     a record member named like a helper is the member where a rule reads it and the helper where a rule calls it.
@@ -1318,9 +1352,10 @@ class Rules(Node):
     under `fail`, when it cannot be evaluated. Where the check or `applies_when` stops at a missing value, `on_missing`,
     the rule's or else the node's, decides: `not_evaluated`, the default, holds the rule for review, `fail` reports its
     severity and `not_applicable` skips it. Only data the record lacks is skipped: a rule is held, saying why, where it
-    stops at a blank no path accounts for, a lookup's say, or its expression, reached or not, reads a value nobody could
-    read, calls a name nothing defines, uses a filter or a test the sandbox lacks, finds a value missing under an
-    undeclared name, or needs a derived value whose lookup found nothing or that is held for any of these.
+    stops at a blank no path accounts for, or its expression, reached or not, reads a value nobody could read, calls a
+    name nothing defines, uses a filter or a test the sandbox lacks, finds nothing under an undeclared name, or needs a
+    derived value held for any of these or whose lookup found nothing, unless a helper made that a blank beside a blank
+    it reads: `app.c == '' and text(limits[app.k]) == 'x'`, derived, is skipped where `app.c` is blank.
 
     A check and `applies_when` evaluate left to right, and a missing value counts only where the evaluation reaches it:
     never in the branch of an `if` not taken, on the side of an `and` or an `or` its first side decided or in the rest
@@ -1328,22 +1363,21 @@ class Rules(Node):
     offers it to `first_present` beside a value that is there. A call, a filter or a list reads every value it is
     handed: `app.a | default(app.b)` is held without `app.b` though `app.a` is there. Where only the truth of an `and`
     or an `or` counts, as the whole expression, under `not`, as the test of an `if` or a branch of one whose truth alone
-    counts, or as a side of another such, either side decides where the other stops at a missing value: `a or b` is true
-    where `b` is, `a and b` false where `b` is. Where the check uses its value, `(app.fee or 100) > 50`, it is Python's:
-    a missing side it reads holds the rule. The reason names the value the evaluation stopped at, the left of two, a
-    helper's blank by the path its value came from. Only a missing value gives way: an error is an error on either side.
-    A rule that skipped a value, or whose other side decided, cannot see an error its check would raise after it: with
-    `app.a` 1 and `app.q` 0, `app.b / app.q > 1 or app.a == 1` passes without `app.b`.
+    counts, or as a side of another such, either side decides where the other stops at a missing value. Where the check
+    uses its value, `(app.fee or 100) > 50`, it is Python's: a missing side it reads holds the rule. The reason names
+    the value the evaluation stopped at, the left of two, a helper's blank the first field it could have come from where
+    all are blank. Only a missing value gives way: an error is an error on either side. A rule that skipped a value, or
+    whose other side decided, cannot see an error raised past it: with `app.a` 1 and `app.q` 0, `app.b / app.q > 1 or
+    app.a == 1` passes without `app.b`.
 
     Derived values and messages are evaluated as written: `and` and `or` are Python's, and a missing value stops a
-    derived value only where it is used, so naming part of a check as a derived value can change what the rule reports.
-    A derived value computed from a missing value is missing, None under `derived`; one that could not be computed is
-    None too, its reason under `derived_errors`, and a rule that uses it is held.
+    derived value only where it is used. One computed from a missing value is missing, None under `derived`; one that
+    could not be computed is None too, its reason under `derived_errors`, and a rule that uses it is held.
 
-    The output holds `findings` in rule order, which a trace keeps whole, each with its rendered message or reason and
-    the values its check reads (`evaluated`); a `summary` of statuses; `status`, `fail` if any rule failed, else `warn`
-    if any warned, else `not_evaluated` if any did not run, else `pass`; and `derived` and `derived_errors`. An optional
-    `as_of` date is the day effective windows are compared with, the run date without it.
+    The output holds `findings` in rule order, each with its message and the values its check read (`evaluated`), which
+    a trace keeps whole; a `summary`; `status`, `fail` if any rule failed, else `warn` if any warned, else
+    `not_evaluated` if any did not run, else `pass`; `derived` and `derived_errors`. The `as_of` input, a date, else the
+    run date, is the day effective windows are compared with.
     """
 
     name: str | None = "rules"
@@ -1719,7 +1753,7 @@ class Rules(Node):
             return STATUS_NOT_EVALUATED, reason, False
         hold = self._why_held(reads, scope, self._declared, unskippable)
         if hold is None and path is None:
-            hold = _Hold("no field of the record is named")
+            hold = _Hold("no field of the record accounts for it")
         if hold is None:
             return STATUS_NOT_APPLICABLE, f"does not apply: {reason}", True
         return STATUS_NOT_EVALUATED, f"{reason} (not skipped: {hold.reason})", False

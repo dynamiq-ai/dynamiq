@@ -534,6 +534,32 @@ def test_the_reason_names_the_blank_the_evaluation_stopped_at(check, app, missin
         ("app.b == '' and days_between(start=app.o, end=app.c) > 1", {"b": "", "o": " ", "c": "2026-08-07"}, "app.o"),
         ("app.b == '' and text(app.x) == 'y'", {"b": ""}, "app.x"),
         ("app.b == '' and text(app.x) == 'y'", {"b": "", "x": " "}, "app.x"),
+        (
+            "app.b == '' and text(app.nickname or app.name) == 'Ann'",
+            {"b": "", "nickname": "", "name": " "},
+            "app.nickname",
+        ),
+        ("app.b == '' and text(app.x if app.k else app.y) == 'z'", {"b": "", "x": " ", "y": "", "k": True}, "app.x"),
+        ("app.b == '' and number(app.x.replace('$', '')) > 1", {"b": "", "x": "  "}, "app.x"),
+        ("app.b == '' and text(app.x | default(app.y)) == 'z'", {"b": "", "y": " "}, "app.x"),
+        ("app.b == '' and text(first_present(app.x, app.y)) == 'z'", {"b": "", "x": " ", "y": ""}, "app.x"),
+        (
+            "app.b == '' and days_between(first_present(app.x, app.y), app.c) > 1",
+            {"b": "", "x": " ", "y": "", "c": "2026-08-07"},
+            "app.x",
+        ),
+        (
+            "app.b == '' and first_present(first_present(app.x, app.y), app.z) == 'w'",
+            {"b": "", "x": " ", "y": "", "z": "  "},
+            "app.x",
+        ),
+        ("app.b == '' and number(first_present(app.x, app.y | trim)) > 1", {"b": "", "x": " ", "y": "  "}, "app.x"),
+        ("app.b == '' and text(app.x | default('')) == 'z'", {"b": ""}, "app.x"),
+        ("app.b == '' and text(app.get('F')) == 'z'", {"b": ""}, "app.F"),
+        ("app.b == '' and text(app.get('F', '')) == 'z'", {"b": "", "F": "  "}, "app.F"),
+        ("app.b == '' and text(app.get('Issue Date', '')) == 'z'", {"b": ""}, "app['Issue Date']"),
+        ("app.b == '' and first_present(app.x, '') == 'z'", {"b": ""}, "app.x"),
+        ("app.b == '' and number(first_present(app.x, '  ' | trim)) > 1", {"b": "", "x": " "}, "app.x"),
     ],
     ids=[
         "first-present-over-a-helper",
@@ -543,17 +569,50 @@ def test_the_reason_names_the_blank_the_evaluation_stopped_at(check, app, missin
         "days-between-by-keyword",
         "text-of-an-absent-path",
         "text-of-a-blank-path",
+        "an-or-of-two-blanks",
+        "an-if-of-two-blanks",
+        "a-method-of-a-blank",
+        "a-default-that-is-blank",
+        "a-helper-over-first-present",
+        "days-between-over-first-present",
+        "first-present-over-first-present",
+        "number-over-first-present-over-a-filter",
+        "a-literal-default",
+        "a-get-by-a-constant-key",
+        "a-get-with-a-literal-default-of-a-blank",
+        "a-get-by-a-key-no-name-writes",
+        "a-literal-among-fallbacks",
+        "a-literal-filtered-among-fallbacks",
     ],
 )
 def test_a_helpers_blank_names_the_path_it_came_from_through_filters_and_helpers(
     check, app, missing, policy, status, prefix
 ):
-    """A blank a helper makes names the path its value came from, through a filter over the path or a helper handed it
-    first, where the value there is blank too; it is data the record lacks, so a rule set to skip it does. The blank
-    `app.b` compared before it was never where the check stopped."""
+    """A blank a helper makes is data the record lacks where every value it could have come from is blank in the
+    record: the path itself, a filter's value and a `default`'s, both sides of an `or` or an `and`, both branches of an
+    `if`, the value a method is called on, and every value a helper inside it passes on. It names the first of them, and
+    a rule set to skip it does; a literal among them, `default('')` say, adds none, and `x.get('F')` reads `x.F`. The
+    blank `app.b` compared before it was never where the check stopped."""
     node = screening(check, policy)
 
     assert outcome(run(node, {"app": app})) == (status, f"{prefix}missing value for {missing}")
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+@pytest.mark.parametrize(
+    ("app", "expected"), [({}, ("fail", None)), ({"F": "x"}, ("pass", None))], ids=["absent", "there"]
+)
+def test_a_get_a_check_compares_reads_and_decides_as_it_always_did(app, expected, policy):
+    """`app.get('F')` is a call on `app`, which the check needs, and hands back None for a key the record lacks: the
+    comparison decides on it, as Jinja's does, however `app.F` names a blank a helper makes of it."""
+    node = screening("app.get('F') == 'x'", policy)
+
+    assert (read_paths("app.get('F') == 'x'").required, outcome(run(node, {"app": app}))) == (["app"], expected)
+
+
+NO_TEXT = "missing value: text() found no text"
+NO_NUMBER = "missing value: number() found no number"
+NOTHING = "missing value: first_present() found nothing present"
 
 
 @pytest.mark.parametrize(
@@ -561,13 +620,17 @@ def test_a_helpers_blank_names_the_path_it_came_from_through_filters_and_helpers
     [
         (None, "not_evaluated", ""),
         ("fail", "fail", ""),
-        ("not_applicable", "not_evaluated", " (not skipped: no field of the record is named)"),
+        ("not_applicable", "not_evaluated", " (not skipped: no field of the record accounts for it)"),
     ],
 )
 @pytest.mark.parametrize(
     ("check", "app", "hint"),
     [
-        ("app.c == '' and text(limits[app.k]) == 'x'", {"c": "", "k": "zz"}, "missing value: text() found no text"),
+        (
+            "app.c == '' and text(limits[app.k]) == 'x'",
+            {"c": "", "k": "zz"},
+            f"{NO_TEXT} ('dict object' has no attribute 'zz')",
+        ),
         (
             "app.b == '' and text(app.x | replace('x', '')) == 'y'",
             {"b": "", "x": "x"},
@@ -583,15 +646,58 @@ def test_a_helpers_blank_names_the_path_it_came_from_through_filters_and_helpers
             {"b": "", "o": "x", "c": "2026-08-07"},
             "missing value: days_between() found no date",
         ),
+        ("app.b == '' and text(app.nickname or app.name) == 'Ann'", {"b": "", "nickname": " ", "name": "Ann"}, NO_TEXT),
+        ("app.b == '' and text(app.x if app.k else app.y) == 'z'", {"b": "", "x": "x", "y": " ", "k": False}, NO_TEXT),
+        ("app.b == '' and number(app.x.replace('$', '')) > 1", {"b": "", "x": "$"}, NO_NUMBER),
+        (
+            "app.b == '' and text(app.x | default(limits[app.k])) == 'z'",
+            {"b": "", "k": "zz"},
+            f"{NO_TEXT} ('dict object' has no attribute 'zz')",
+        ),
+        ("app.b == '' and text(first_present(app.x, limits[app.k])) == 'z'", {"b": "", "x": " ", "k": "zz"}, NOTHING),
+        (
+            "app.b == '' and days_between(first_present(app.x, limits[app.k]), app.c) > 1",
+            {"b": "", "x": " ", "k": "zz", "c": "2026-08-07"},
+            NOTHING,
+        ),
+        (
+            "app.b == '' and first_present(first_present(app.x, limits[app.k]), app.y) == 'z'",
+            {"b": "", "x": " ", "y": "", "k": "zz"},
+            NOTHING,
+        ),
+        ("app.b == '' and text(limits.get(app.k)) == 'z'", {"b": "", "k": "zz"}, NO_TEXT),
+        ("app.b == '' and text('') == 'z'", {"b": ""}, NO_TEXT),
+        (
+            "text(app.name) == 'x' or text(limits[app.k]) == 'y'",
+            {"name": "Ann", "k": "zz"},
+            f"{NO_TEXT} ('dict object' has no attribute 'zz')",
+        ),
     ],
-    ids=["a-lookup-that-found-nothing", "a-filter-over-a-value-there", "a-lookup-among-fallbacks", "days-between"],
+    ids=[
+        "a-lookup-that-found-nothing",
+        "a-filter-over-a-value-there",
+        "a-lookup-among-fallbacks",
+        "days-between",
+        "an-or-with-a-side-there",
+        "an-if-with-a-branch-there",
+        "a-method-of-a-value-there",
+        "a-default-that-is-a-lookup",
+        "a-helper-over-a-lookup-among-fallbacks",
+        "days-between-over-a-lookup-among-fallbacks",
+        "first-present-over-a-lookup-among-fallbacks",
+        "a-get-by-a-key-read-at-run-time",
+        "a-literal-alone",
+        "the-second-of-two-helpers",
+    ],
 )
 def test_a_blank_no_path_accounts_for_is_never_skipped_nor_named_after_another_blank(
     check, app, hint, policy, status, suffix
 ):
-    """A blank a helper made of a lookup that found nothing, or of a value that is there, is no data the record lacks:
-    the reason is the helper's own, naming no value, and a rule set to skip missing data is held. Naming the blank
-    `app.b` or `app.c` read before it would skip a gap in the table as if the record lacked a value."""
+    """A blank a helper made where any value it could have come from is not blank in the record, a lookup that found
+    nothing or a value that is there, or that comes from a literal alone, is no data the record lacks: the reason is
+    the helper's own, naming no value, with what an undefined value it was handed says of itself, and a rule set to
+    skip missing data is held. Naming the blank `app.b` or `app.c` read before it would skip a gap in the table as if
+    the record lacked a value."""
     node = screening(check, policy, inputs=("app", "limits"))
 
     output = run(node, {"app": app, "limits": {"x": 2}})
