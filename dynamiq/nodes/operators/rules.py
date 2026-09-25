@@ -1005,7 +1005,8 @@ class Rules(Node):
     `date()` or `days_between()` cannot read among them (`number(doc.amount) > doc.limit` over `TBD`); calls a
     name no helper has (`firstpresent(x)`); uses a filter or a test the sandbox does not have, which Jinja leaves
     inside a conditional to raise only when that branch runs (`x | lowr if y else z`); finds a value missing under
-    a name the node does not declare, where it declares its inputs (a typo; `as_of` is declared with them); or
+    a name the node does not declare, where it declares its inputs (a typo; the keys its input transformer's
+    selector maps and `as_of` are declared with them); or
     needs a derived value a lookup found nothing for (`limits[loan.program]` for a program the table lacks), unless
     it only falls back on one
     (`first_present(limit, 500000)`). A derived value that came out missing counts as data the record lacks exactly
@@ -1048,8 +1049,9 @@ class Rules(Node):
 
     _compiled: list[CompiledRule] = PrivateAttr(default_factory=list)
     _derived: list[tuple[str, Callable[..., Any], Reads]] = PrivateAttr(default_factory=list)
-    # The names an expression may read from where the node declares its inputs: those, the derived values and `as_of`.
-    # None where it declares none, since a record read then cannot be told from a typo.
+    # The names an expression may read from where the node declares its inputs: those, the keys its input transformer's
+    # selector maps, which the record holds whether or not `input_fields` lists them, the derived values and `as_of`.
+    # None where it declares no input, since a record read then cannot be told from a typo.
     _declared: set[str] | None = PrivateAttr(default=None)
     # Whether some rule skips a missing value by its own policy, and whether some rule leaves its policy to the node.
     _rules_skip: bool = PrivateAttr(default=False)
@@ -1060,8 +1062,8 @@ class Rules(Node):
         self._derived = self._compile_derived()
         self._compiled = self._compile_rules()
         if self.input_fields:
-            names = {field.name for field in self.input_fields} | {name for name, _, _ in self._derived}
-            self._declared = names | {AS_OF_KEY}
+            names = {field.name for field in self.input_fields} | set(self.input_transformer.selector or {})
+            self._declared = names | {name for name, _, _ in self._derived} | {AS_OF_KEY}
         self._rules_skip = any(item.rule.on_missing == RuleMissingPolicy.NOT_APPLICABLE for item in self._compiled)
         self._rules_defer = any(item.rule.on_missing is None for item in self._compiled)
 

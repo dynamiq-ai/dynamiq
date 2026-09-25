@@ -709,6 +709,29 @@ def test_a_mistake_or_a_value_nobody_could_read_reports_the_severity_under_fail(
     assert output["status"] == "warn"
 
 
+def test_an_input_the_selector_maps_is_declared_though_input_fields_does_not_list_it():
+    """The record a node reads holds the keys its input transformer's selector maps, which `input_fields` may not
+    list: an input mapped there is no typo, so a record without its value skips a rule set to skip, while a name
+    neither declares is still held."""
+    node = Rules(
+        name="lending",
+        input_fields=[NamedField(name="loan")],
+        input_transformer=InputTransformer(selector={"loan": "$.loan", "appraisal": "$.appraisal"}),
+        rules=[
+            Rule(id="appraised", check="appraisal.value > 0", on_missing="not_applicable"),
+            Rule(id="typo", check="apraisal.value > 0", on_missing="not_applicable"),
+        ],
+    )
+
+    output = run(node, {"loan": {"amount": 300000}, "appraisal": {}})
+
+    assert outcome(output, "appraised") == ("not_applicable", "does not apply: missing value for appraisal.value")
+    assert outcome(output, "typo") == (
+        "not_evaluated",
+        "missing value for apraisal.value (not skipped: apraisal is not an input or a derived value)",
+    )
+
+
 def test_a_lookup_that_found_nothing_is_judged_record_by_record():
     node = screening("loan.amount <= limit", "not_applicable", inputs=LENDING, derived=(LIMIT,))
 
