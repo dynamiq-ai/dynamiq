@@ -485,6 +485,41 @@ def test_a_blank_a_helper_turned_missing_gives_way_to_the_other_side_as_a_missin
     assert outcome(run(node, {"app": {"a": "  ", "b": b}})) == expected
 
 
+@pytest.mark.parametrize(
+    ("policy", "status", "prefix"),
+    [(None, "not_evaluated", ""), ("fail", "fail", ""), ("not_applicable", "not_applicable", "does not apply: ")],
+)
+@pytest.mark.parametrize(
+    ("check", "app", "missing"),
+    [
+        ("text(app.a) == 'x' if app.kind == 'y' else text(app.b) == 'z'", {"kind": "n", "a": " ", "b": ""}, "app.b"),
+        ("(app.kind == 'y' and text(app.a) == 'x') or number(app.b) > 1", {"kind": "n", "a": " ", "b": ""}, "app.b"),
+        ("days_between(app.opened, app.closed) > 30", {"opened": "", "closed": " "}, "app.closed"),
+        ("days_between(app.opened, date(app.closed)) > 30", {"opened": "", "closed": " "}, "app.closed"),
+        (
+            "(app.kind == 'y' and text(app.a) == 'x') or days_between(app.opened, app.closed) > 30",
+            {"kind": "n", "a": " ", "opened": "2026-08-07", "closed": ""},
+            "app.closed",
+        ),
+    ],
+    ids=[
+        "if-branch-not-taken",
+        "and-side-not-read",
+        "days-between-reads-end-first",
+        "days-between-over-date",
+        "days-between-past-a-side-not-read",
+    ],
+)
+def test_the_reason_names_the_blank_the_evaluation_stopped_at(check, app, missing, policy, status, prefix):
+    """A helper that turns a blank it is handed into a missing value, `text()` of blank text say, stops the check
+    naming the path it was handed, so the reason names the blank the evaluation stopped at, never one it did not reach
+    in the branch of an `if` not taken or on the side of an `and` its first side decided. `days_between` reads `end`
+    first, so of two blank dates it stops at `end`, whether it is handed the text or what `date()` made of it."""
+    node = screening(check, policy)
+
+    assert outcome(run(node, {"app": app})) == (status, f"{prefix}missing value for {missing}")
+
+
 @pytest.mark.parametrize("policy", POLICIES)
 @pytest.mark.parametrize(
     ("check", "record", "error"),
