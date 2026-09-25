@@ -225,6 +225,58 @@ def test_a_message_prints_the_text_the_record_holds_for_a_derived_value_nobody_c
     assert by_id(output)["gross"]["message"] == "Gross 5 with net TBD"
 
 
+@pytest.mark.parametrize(
+    ("message", "shown"),
+    [
+        ("Amount {{ loan.amount }}{% if has(ltv) %}, LTV {{ ltv }}{% endif %}", "Amount 5000"),
+        ("Amount {{ loan.amount }}{% if ltv is defined %}, LTV {{ ltv }}{% endif %}", "Amount 5000, LTV None"),
+        ("Amount {{ loan.amount }}{% if ltv is not none %}, LTV {{ ltv }}{% endif %}", "Amount 5000"),
+        ("Amount {{ loan.amount }}{% if ltv %}, LTV {{ ltv }}{% endif %}", "Amount 5000"),
+        ("Amount {{ loan.amount }}, LTV {{ ltv | default('n/a', true) }}", "Amount 5000, LTV n/a"),
+    ],
+    ids=["has", "is-defined", "is-not-none", "truth", "default"],
+)
+def test_a_message_reads_a_derived_value_that_could_not_be_computed_as_it_always_did(message, shown):
+    """Before derived values kept their errors, a ratio divided by zero was None, and a message guarded it; the
+    message reads None there still, so its guard decides rather than the message coming back as written. Each
+    message is the one origin/main renders."""
+    node = Rules(
+        name="lending",
+        input_fields=[NamedField(name="loan")],
+        derived_values=[DerivedValue(name="ltv", expression="loan.a / loan.v")],
+        rules=[Rule(id="small", name="small loan", check="loan.amount < 1000", message=message)],
+    )
+
+    output = run(node, {"loan": {"amount": 5000, "a": 1, "v": 0}})
+
+    assert output["derived_errors"] == {"ltv": "division by zero"}
+    assert (by_id(output)["small"]["status"], by_id(output)["small"]["message"]) == ("fail", shown)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Net {{ d }}",
+        "Net {% if has(d) %}{{ d }}{% else %}not given{% endif %}",
+        # A value the message itself reads through `number()` prints the same way.
+        "Net {{ number(doc.x) }}",
+    ],
+    ids=["printed", "guarded", "read-in-the-message"],
+)
+def test_a_message_reads_a_derived_value_nobody_could_read_as_the_text_the_record_holds(message):
+    node = Rules(
+        name="invoicing",
+        input_fields=[NamedField(name="doc")],
+        derived_values=[DerivedValue(name="d", expression="number(doc.x)")],
+        rules=[Rule(id="gross", name="gross over the floor", check="doc.gross > 100", message=message)],
+    )
+
+    output = run(node, {"doc": {"x": "TBD", "gross": 5}})
+
+    assert output["derived_errors"] == {"d": UNREADABLE_NET}
+    assert (by_id(output)["gross"]["status"], by_id(output)["gross"]["message"]) == ("fail", "Net TBD")
+
+
 def test_a_derived_value_computed_from_one_that_could_not_be_is_an_error_too_and_a_missing_one_stays_missing():
     node = invoicing(
         Rule(id="tax", name="tax is positive", check="tax > 0"),

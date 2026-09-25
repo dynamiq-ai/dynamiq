@@ -223,7 +223,9 @@ class DerivedValue(Authored):
     One computed from a value the record lacks is missing: `None` under the node's `derived`, and missing to the
     rules. One that cannot be computed from the values that are there, a division by zero or `number()` of `TBD`,
     also shows `None` under `derived`, with the reason under `derived_errors`; the rules, though, see a value that
-    cannot be read, so a rule that reads it, or asks about it with `has()` or a test, is held, naming the reason.
+    cannot be read, so a rule that reads it, or asks about it with `has()` or a test, is held, naming the reason. A
+    rule's message reads it as the value the record holds, `TBD` say, or None where it holds none, so a guard in the
+    message (`{% if has(ltv) %}`) still decides.
     """
 
     id: str = Field(default_factory=generate_uuid)

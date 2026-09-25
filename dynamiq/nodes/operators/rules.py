@@ -132,8 +132,10 @@ class Unreadable:
     test, a count, a hash, a member or an item, the conversions behind `| float` and `| int`, which would otherwise
     read it as 0, and the conversion to text behind `| string`, the text filters, `~` and `join`, which would hand a
     check back the text the reader refused. So does a question about it, `has()` or any test, `is present` and `is
-    none` among them, which would otherwise answer on a value nobody read. A rule's message prints it as the text
-    the record holds (`_rendered`). Only its repr is not refused: `| pprint` and a `'%r'` format print
+    none` among them, which would otherwise answer on a value nobody read. A rule's message, which decides nothing,
+    reads a derived value or an input that is itself such a value as the value the record holds, None where it
+    holds none (`Rules.execute`), and prints one it reaches through `number()`, `date()` or a member as the text the
+    record holds (`_rendered`). Only its repr is not refused: `| pprint` and a `'%r'` format print
     `Unreadable('TBD', ...)`, the marker rather than a value; and a list that holds one can still be counted, which
     uses the list, not it.
     """
@@ -523,7 +525,8 @@ def _rendered(value: Any) -> Any:
     print a repr carrying an address that differs on every run, against the determinism a finding promises.
     An undefined is callable too, and keeps rendering as the empty string a message expects. A value `number()`
     or `date()` could not read, which refuses to become text anywhere else, prints as the text the record holds,
-    so a reviewer reads what the record says.
+    so a reviewer reads what the record says: one the message reads through them itself, or one inside an input,
+    since a derived value nobody could read reaches a message as the value the record holds already.
     """
     if isinstance(value, Unreadable):
         return value.value
@@ -991,7 +994,8 @@ class Rules(Node):
       `not_applicable` when `applies_when` does not hold, the record's `as_of` date is outside the rule's effective
       window, or the rule skips a missing value; `not_evaluated` when a value the check reads is missing or the
       check cannot be evaluated. A rule reported at its severity gives its own message, where it has one, rendered
-      with the whole record; one that did not run or did not apply says why. `evaluated` holds the values the check
+      with the whole record, where a derived value nobody could compute reads as the value the record holds, None
+      where it holds none; one that did not run or did not apply says why. `evaluated` holds the values the check
       reads, empty where the rule did not apply.
     - Policies: `on_missing` on the node, which a rule's own overrides, says what a missing value means:
       `not_evaluated`, the default, holds the rule for review; `fail` reports its severity, the reason after its
@@ -1227,13 +1231,19 @@ class Rules(Node):
                     unskippable[name] = hold
             pending.discard(name)
         scope = {**context, **values}
+        # What a message reads: a value nobody could read as the value the record holds, None where it holds none (a
+        # ratio divided by zero). Before derived values kept their errors such a value was None, and a message's own
+        # guard, `{% if has(ltv) %}`, must still decide rather than the message come back as written. The rules read
+        # the marker itself.
+        unreadable = {name: value.value for name, value in scope.items() if isinstance(value, Unreadable)}
+        shown = {**scope, **unreadable} if unreadable else scope
 
         # A trace keeps this whole rather than cutting it to `TRUNCATE_LIST_LIMIT`: past that many rules,
         # the platform UI still needs every rule's own finding to show its coverage and last result.
         findings: list[dict[str, Any]] = UntruncatedList()
         screened = True
         for compiled in self._compiled:
-            finding, evaluated = self._evaluate(compiled, scope, as_of, unskippable)
+            finding, evaluated = self._evaluate(compiled, scope, shown, as_of, unskippable)
             findings.append(finding)
             screened = screened and evaluated
         summary = {status: 0 for status in STATUSES}
@@ -1270,10 +1280,16 @@ class Rules(Node):
             raise ValueError(f"Rules: '{AS_OF_KEY}' is not a date: {value!r}") from e
 
     def _evaluate(
-        self, compiled: CompiledRule, scope: dict[str, Any], as_of: date, unskippable: Mapping[str, _Hold]
+        self,
+        compiled: CompiledRule,
+        scope: dict[str, Any],
+        shown: dict[str, Any],
+        as_of: date,
+        unskippable: Mapping[str, _Hold],
     ) -> tuple[dict[str, Any], bool]:
         """The finding for one rule, and whether its check ran: a missing value or an error means it did not,
-        unless the rule skips the missing value, which counts as a rule that did not apply."""
+        unless the rule skips the missing value, which counts as a rule that did not apply. The rule reads `scope`;
+        its message reads `shown`, where a value nobody could read is the value the record holds (`execute`)."""
         rule = compiled.rule
         finding: dict[str, Any] = {
             "rule_id": rule.id,
@@ -1304,7 +1320,7 @@ class Rules(Node):
         if status in (STATUS_NOT_EVALUATED, STATUS_NOT_APPLICABLE):
             finding["message"] = reason
         elif status != STATUS_PASSED:
-            finding["message"] = self._render(compiled, scope, reason)
+            finding["message"] = self._render(compiled, shown, reason)
         return finding, evaluated
 
     @staticmethod
