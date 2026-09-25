@@ -758,16 +758,18 @@ def test_a_filter_no_sandbox_has_beside_an_and_or_an_or_is_still_refused_when_th
 @pytest.mark.parametrize(
     ("app", "expected"),
     [
-        ({"a189": 189}, ("pass", None)),
+        ({"a195": 195}, ("pass", None)),
         ({"a0": 0}, ("pass", None)),
         ({}, ("not_evaluated", "missing value for app.a0")),
     ],
     ids=["the-last-side-decides", "the-first-side-decides", "every-side-missing"],
 )
-def test_a_long_or_chain_builds_and_any_side_of_it_decides(app, expected):
-    """Each `and` and `or` of a check is a call with a function for each side, so a chain nests as deep as it is long;
-    one near the longest Python compiles still builds and runs."""
-    node = screening(" or ".join(f"app.a{i} == {i}" for i in range(190)))
+def test_the_longest_or_chain_a_check_builds_still_builds_and_any_side_of_it_decides(app, expected):
+    """Each `or` of a chain that is the check is a call with a function for each side, so the chain nests as deep as it
+    is long, and `need()` nests its first read one level deeper: 196 terms of `app.aN == N` is the longest such chain
+    Python compiles, a term shorter than Jinja alone compiles. It builds and runs, so a check that nested any deeper
+    would fail here first."""
+    node = screening(" or ".join(f"app.a{i} == {i}" for i in range(196)))
 
     assert outcome(run(node, {"app": app})) == expected
 

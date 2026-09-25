@@ -632,9 +632,12 @@ def _deciding(operator: str, helper: str) -> Callable[[CodeGenerator, nodes.BinE
     the environment's `helper`, each side a function, and any other one to Python's `operator`, as Jinja writes it.
 
     It is built the way Jinja builds its own operator visitors (`_make_binop`), so compiling a long chain recurses no
-    deeper than Jinja's own would, and the code it writes nests one call where Jinja nests one parenthesis: a chain
-    Jinja would compile, this compiles too. An `and` or an `or` Jinja folds to a constant when the check is built,
-    `false and …` say, is still folded, and the side after the constant is never looked at (`optimizeconst`).
+    deeper than Jinja's own would, and the code it writes nests one call where Jinja nests one parenthesis. `need()`
+    nests a read the check needs one call deeper than Jinja would, though, so a chain whose first term reads one nests a
+    level deeper than Jinja's own: the longest chain of `app.aN == N` Python compiles is 196 terms, where Jinja alone
+    compiles 197, and a longer one fails the build with Python's `SyntaxError: too many nested parentheses`, as one past
+    Jinja's own limit always did. An `and` or an `or` Jinja folds to a constant when the check is built, `false and …`
+    say, is still folded, and the side after the constant is never looked at (`optimizeconst`).
     """
 
     @optimizeconst
