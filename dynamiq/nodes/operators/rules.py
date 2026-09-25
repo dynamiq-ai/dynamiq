@@ -140,16 +140,11 @@ class UnreadableValue(TemplateRuntimeError):
 class Unreadable:
     """A value `number()` or `date()` could not read, with the reason: `TBD` where an amount goes.
 
-    It is there, so it is not missing, and `first_present` stops at it instead of letting a fallback speak over it.
-    The uses a check makes of a value raise `UnreadableValue` with the reason: a comparison, arithmetic, a truth
-    test, a count, a hash, a member or an item, the conversions behind `| float` and `| int`, which would otherwise
-    read it as 0, and the conversion to text behind `| string`, the text filters, `~` and `join`, which would hand a
-    check back the text the reader refused. So does a question about it, `has()` or any test, `is present` and `is
-    none` among them, which would otherwise answer on a value nobody read. A rule's message, which decides nothing,
-    reads a derived value or an input that is itself such a value as None, as `derived` shows it (`Rules.execute`),
-    and prints one it reaches through `number()`, `date()` or a member as the text the record holds (`_rendered`).
-    Only its repr is not refused: `| pprint` and a `'%r'` format print `Unreadable('TBD', ...)`, the marker rather
-    than a value; and a list that holds one can still be counted, which uses the list, not it.
+    It is there, so it is not missing, and `first_present` stops at it rather than fall back past it. Every use a check
+    makes of it raises `UnreadableValue` with the reason: a comparison, arithmetic, a truth test, a count, a member, the
+    conversions behind `| float` and `| int`, which would read it as 0, the conversion to text and any question about
+    it, `has()` or a test; only its repr does not. A message reads a derived value or an input that is one as None, as
+    `derived` shows it, and prints one it reaches through `number()`, `date()` or a member as the text the record holds.
     """
 
     __slots__ = ("value", "reason")
@@ -529,17 +524,12 @@ class RuleUndefined(QuotedUndefined, ChainableUndefined):
 class RecordSandbox(ImmutableSandboxedEnvironment):
     """The immutable sandbox with a record's keys read before an object's attributes.
 
-    Jinja reads `a.b` attribute first, so over a dict record `invoice.items` would be the dict's method and
-    `ticket.update`, a mutating method the sandbox refuses, an undefined that raises on use. A record is data:
-    a dotted read takes the key the mapping holds, the way `resolve_path` and a finding's `evaluated` read it,
-    and reaches an attribute only for a key the mapping lacks, which is what `invoice.get('vat_rate', 0)`
-    relies on.
-
-    Every sandbox, the Rules node's and the Expression node's alike, carries the helpers, the `present` and `blank`
-    tests, and a `blank` of its own: its undefined marked `Blank`, so blank input is as missing as anything
-    undefined in that sandbox. Its undefined is a `QuotedUndefined` unless it is given one. Every test in it,
-    Jinja's own as well, refuses a value nobody could read, as `has()` does: a rule that asks about one is held for
-    the value's error, and an expression fails its run, as using the value would.
+    Jinja reads `a.b` attribute first, so over a dict record `invoice.items` would be the dict's method. A dotted read
+    takes the key the mapping holds, as `resolve_path` does, and reaches an attribute only for a key the mapping lacks,
+    which `invoice.get('vat_rate', 0)` relies on. Every sandbox, the Rules node's and the Expression node's, carries
+    the helpers, the `present` and `blank` tests and a `blank` of its own, its undefined marked `Blank`, so blank input
+    is as missing as anything undefined there; its undefined is a `QuotedUndefined` unless it is given one, and every
+    test in it refuses a value nobody could read, as `has()` does.
     """
 
     blank: type[Undefined]
@@ -567,16 +557,10 @@ class RecordSandbox(ImmutableSandboxedEnvironment):
 
 def _decide(decider: bool, left: Callable[[], Any], right: Callable[[], Any]) -> Any:
     """`left or right` where `decider` is true, `left and right` where it is false, for an `and` or an `or` whose truth
-    alone a check uses (`_mark_deciding`), each side a function: either side decides where the other stops at a missing
-    value.
-
-    Where the left side is there, this is Python's `or` or `and`, judging it by Python's truth. Where it stops at a
-    missing value, a right side whose truth is `decider` decides and is returned; it is judged as `holds` judges a
-    check, a lazy one, what `select` yields say, by its items, and comes out as the list of them. Any other right side
-    cannot decide, and the left side's missing value stands, as where the right side stops at one too: of two, the
-    reason names the left one. Only a missing value gives way, a blank's included: a value nobody could read, a lookup
-    that found nothing or a name nothing defines is an error on whichever side the evaluation reaches it.
-    """
+    alone a check uses (`_mark_deciding`), each side a function. Where the left side is there, this is Python's `or` or
+    `and`. Where it stops at a missing value, a right side whose truth is `decider` decides and is returned, a lazy one,
+    what `select` yields say, judged by its items and returned as their list; otherwise the left side's missing value
+    stands. Only a missing value gives way, a blank's included: an error is an error on either side."""
     try:
         value = left()
         true = bool(value)
@@ -604,15 +588,9 @@ rule_and = functools.partial(_decide, False)
 def _deciding(operator: str, helper: str) -> Callable[[CodeGenerator, nodes.BinExpr, Frame], None]:
     """The visitor that compiles an `and` or an `or` whose truth alone the check uses (`_mark_deciding`) to a call of
     the environment's `helper`, each side a function, and any other one to Python's `operator`, as Jinja writes it.
-
-    It is built the way Jinja builds its own operator visitors (`_make_binop`), so compiling a long chain recurses no
-    deeper than Jinja's own would, and the code it writes nests one call where Jinja nests one parenthesis. `need()`
-    nests a read the check needs one call deeper than Jinja would, though, so a chain whose first term reads one nests a
-    level deeper than Jinja's own: the longest chain of `app.aN == N` Python compiles is 196 terms, where Jinja alone
-    compiles 197, and a longer one fails the build with Python's `SyntaxError: too many nested parentheses`, as one past
-    Jinja's own limit always did. An `and` or an `or` Jinja folds to a constant when the check is built, `false and …`
-    say, is still folded, and the side after the constant is never looked at (`optimizeconst`).
-    """
+    Built as Jinja builds its own (`_make_binop`), it nests one call where Jinja nests one parenthesis, and one Jinja
+    folds to a constant, `false and …` say, stays folded (`optimizeconst`). `need()` nests a read one call deeper, so
+    the longest chain of `app.aN == N` that builds is 196 terms, one short of Jinja's; a longer one is too deep."""
 
     @optimizeconst
     def visitor(self: CodeGenerator, node: nodes.BinExpr, frame: Frame) -> None:
@@ -634,18 +612,11 @@ def _deciding(operator: str, helper: str) -> Callable[[CodeGenerator, nodes.BinE
 
 
 class RuleCodeGenerator(CodeGenerator):
-    """Jinja's code generator, with each `and` and `or` whose truth alone a check uses (`_mark_deciding`) compiled to a
-    call of the environment's `rule_and` or `rule_or` that hands it each side as a function, so the helper evaluates
-    the sides and either can decide when the other stops at a missing value; any other `and` or `or` is Python's, as
-    Jinja compiles it. A side reads the names its expression's frame resolved, as it would inline, and runs before the
-    helper returns. The sandbox is synchronous, as it must be: Jinja writes `await` only into an asynchronous
-    environment's code, and a lambda cannot hold one.
-
-    It also calls this module's own `need()`, `callee()` and `blank_at()` directly, `need()` with the context it asks
-    for, where Jinja would call them through the sandbox, which has nothing to check in them: a check calls one for
-    every read it needs, and an `and` or an `or` that gives way reads the other side too. Anything else a check calls
-    still goes through the sandbox.
-    """
+    """Jinja's code generator, compiling each `and` and `or` whose truth alone a check uses (`_mark_deciding`) to a call
+    of the environment's `rule_and` or `rule_or` with each side as a function (`_deciding`), which reads the names its
+    frame resolved, as it would inline; a lambda cannot hold an `await`, so the sandbox must stay synchronous. It calls
+    this module's `need()`, with the context, `callee()` and `blank_at()` directly, as the sandbox has nothing to check
+    in them; anything else a check calls goes through the sandbox."""
 
     visit_And = _deciding("and", "rule_and")
     visit_Or = _deciding("or", "rule_or")
@@ -681,15 +652,9 @@ def _method_text(value: Any) -> str:
 
 
 def _rendered(value: Any) -> Any:
-    """A value as a message prints it.
-
-    A message is the one place a value is turned into text, so a method a template names would otherwise
-    print a repr carrying an address that differs on every run, against the determinism a finding promises.
-    An undefined is callable too, and keeps rendering as the empty string a message expects. A value `number()`
-    or `date()` could not read, which refuses to become text anywhere else, prints as the text the record holds,
-    so a reviewer reads what the record says: one the message reads through them itself, or one inside an input,
-    since a derived value nobody could read reaches a message as None already.
-    """
+    """A value as a message prints it: a method as its name, since its repr carries an address that differs on every
+    run, an undefined, callable too, as the empty string, and a value `number()` or `date()` could not read as the
+    text the record holds, which refuses to become text anywhere else."""
     if isinstance(value, Unreadable):
         return value.value
     return _method_text(value) if callable(value) and not isinstance(value, Undefined) else value
@@ -947,10 +912,9 @@ def read_paths(expression: str) -> Reads:
     A path the expression only asks `has`, `is defined`, `is present`, `is blank` or `default` about, or
     offers to `first_present` as a fallback, is optional: it may be missing without stopping the evaluation,
     and so may anything read under it, since `has(docs.FloodCert) and docs.FloodCert.zone == 'A'` is how a
-    check guards a read; the guard decides. Every other path is required: a check or an `applies_when` stops at
-    one that is missing where it reads it, and only there (`need`), unless the other side of an `and` or an `or`
-    whose truth alone it uses decides in its place (`rule_or`). A helper's name is never a read: `days_between(a, b)`
-    reads `a` and `b`, while a bare `date` is a member of the record, whatever the record holds under it.
+    check guards a read; the guard decides. Every other path is required, and a check stops where it reads one that
+    is missing (`need`). A helper's name is never a read: `days_between(a, b)` reads `a` and `b`, while a bare `date`
+    is a member of the record, whatever the record holds under it.
     """
     return _reads_of(_collected(_ENVIRONMENT.parse("{{ " + expression + " }}")))
 
@@ -1002,15 +966,10 @@ def refuse_reserved_read(reads: Reads, where: str) -> None:
 
 
 def refuse_clash(compiled: Callable[..., Any], reads: Reads, where: str) -> tuple[Callable[..., Any], Reads]:
-    """The compiled expression and its reads, refusing a name the expression both reads as a value and calls.
-
-    One name cannot be both: the record's member would shadow the helper, or the helper stand in for the member.
-    Such an expression is refused when the node is built, naming it, unless the name is one the vocabulary added
-    since: an expression over an input called `text`, written before `text` was a helper, must keep building. It
-    raises the clash whenever it is evaluated instead, an error rather than a missing value, before it reads
-    anything, so none of its reads is required: a missing one must not pass the clash off as missing, as it would a
-    derived value's other failures.
-    """
+    """The compiled expression and its reads, refusing a name the expression both reads as a value and calls: the
+    member would shadow the helper, or the helper the member. A name the vocabulary added since, `text` say, keeps an
+    old expression over an input of that name building, and raises the clash, an error, whenever it is evaluated,
+    before it reads anything; none of its reads is then required, so no missing one passes the clash off as missing."""
     clash = next((name for name in reads.helpers_read if name in reads.helpers_called), None)
     if clash is None:
         return compiled, reads
@@ -1057,15 +1016,10 @@ def _split_path(path: str) -> list[str | int]:
 
 
 def resolve_path(context: dict[str, Any], path: str) -> Any:
-    """The value at a dotted path in the context, or the missing marker when any step is absent.
-
-    A step reads what Jinja reads there: a key of any mapping, whatever the key's type (`m[0]` over `{0: 'x'}`), an
-    item of a list or a tuple, or a character of a text, by its index (`code[0]`). A key a dict lacks is missing,
-    though a method of the dict has its name; an attribute is read only of another object, never behind an
-    underscore. A path that reaches a value nobody could read ends there: the marker's own members, `value` and
-    `reason`, are not the record's, and the path is no more missing than the value is, so a finding shows why the
-    value could not be read, and a rule that reads the path is not evaluated for that reason rather than as missing.
-    """
+    """The value at a dotted path in the context, or the missing marker when any step is absent. A step reads what
+    Jinja reads there: a key of any mapping (`m[0]` over `{0: 'x'}`), an item of a list, a tuple or a text by its index,
+    or an attribute of another object, never behind an underscore; a key a dict lacks is missing, though a method has
+    its name. A path that reaches a value nobody could read ends at it, so a rule reading the path gets its error."""
     current: Any = context
     for part in _split_path(path):
         if isinstance(current, Unreadable):
@@ -1088,15 +1042,10 @@ def resolve_path(context: dict[str, Any], path: str) -> Any:
 
 @pass_context
 def need(context: Context, value: Any, path: str) -> Any:
-    """What a read an expression needs found, or a `MissingValue` naming the path where the record holds nothing.
-
-    A rule's compiled expression hands each such read here as Jinja reaches it (`_compile_lazy`), so a missing value
-    stops the expression where it is read, and only there; on a side of an `and` or an `or` whose truth alone the
-    expression uses, it stops that side, which gives way to the other (`rule_or`). Nothing is a null, or an undefined
-    or a method Jinja found in place of a value the record lacks: `ticket.items` over a ticket without items finds the
-    mapping's method. At a path the record does hold, a method or an undefined goes on as it is and fails where it is
-    used: `invoice.items.count` reads the list's method, `ticket.tags.append` one the sandbox refuses.
-    """
+    """What a read a check needs found, or a `MissingValue` naming the path where the record holds nothing: a null, or
+    an undefined or a method Jinja found in place of a value the record lacks (`ticket.items` over a ticket without
+    items finds the mapping's method). At a path the record holds, a method or an undefined goes on as it is and fails
+    where it is used: `invoice.items.count` reads the list's method."""
     if value is None or (
         (isinstance(value, Undefined) or callable(value)) and _is_missing(resolve_path(context.get_all(), path))
     ):
@@ -1140,11 +1089,10 @@ def _call(name: str, node: nodes.Expr, *args: nodes.Expr) -> nodes.Call:
 
 def _needing(node: nodes.Node, needed: Mapping[int, str], names: set[str], called: bool = False) -> nodes.Node:
     """`node` with each read under it that the expression needs, in `needed` by the node's id, handed to `need()`
-    with its path, and each name it looks up added to `names`. A call's target is never such a read: a name no helper
-    or global has goes to `callee()` instead, so `firstpresent(x)`, where the record does not hold the name either,
-    raises that the name is undefined before `x` is read. A blank a helper counts as missing names the path the helper
-    was handed as it is: the first one `text()`, `number()`, `date()` or `first_present()` is handed, or each one
-    `days_between()` is handed (`blank_at`)."""
+    with its path, and each name it looks up added to `names`. A called name no helper or global has goes to
+    `callee()`, so `firstpresent(x)`, where nothing defines the name, raises before `x` is read; a helper's blank names
+    the path it was handed as it is, the first to `text()`, `number()`, `date()` or `first_present()` or any to
+    `days_between()` (`blank_at`)."""
     path = needed.get(id(node))
     if path is not None and not called:
         names.add(_root(path))
@@ -1173,17 +1121,10 @@ def _needing(node: nodes.Node, needed: Mapping[int, str], names: set[str], calle
 
 
 def _mark_deciding(node: nodes.Node, truth: bool = True) -> None:
-    """Sets `deciding` on each `and` and `or` under `node`: true where the expression uses only its truth, so either
-    side decides it where the other stops at a missing value (`RuleCodeGenerator`), false where it uses its value.
-    `truth` says whether the expression uses only the truth of `node` itself, as a check and an `applies_when` use
-    their own.
-
-    Only the truth of an `and` or an `or` counts where it is the operand of `not`, the test of an `if`, a branch of an
-    `if` whose truth alone counts, or a side of an `and` or an `or` whose truth alone counts. Anywhere else the
-    expression uses its value: compares it, computes with it, filters or tests it, hands it to a helper or takes it as a
-    branch of an `if` whose value it uses. There it stays Python's, whose value is the side that decides it, so a
-    missing side it reads holds the rule, since a value in its place could change the result.
-    """
+    """Sets `deciding` on each `and` and `or` under `node`: true where the expression uses only its truth, as the
+    operand of `not`, the test of an `if`, or a branch of an `if` or a side of an `and` or an `or` whose truth alone
+    counts; false where it uses the value, which Python's `and` and `or` give, so a missing side read there holds the
+    rule. `truth` says whether only the truth of `node` itself counts, as for a check and an `applies_when`."""
     if isinstance(node, (nodes.And, nodes.Or)):
         node.deciding = truth
         _mark_deciding(node.left, truth)
@@ -1196,12 +1137,8 @@ def _mark_deciding(node: nodes.Node, truth: bool = True) -> None:
 
 
 class _Lazy:
-    """A rule's expression as `_compile_lazy` compiles it, handed only the names it looks up.
-
-    Jinja copies whatever an expression is handed into a new context on every call, and a rule looks up a few of the
-    record's names beside every derived value the node computes: the rest would be copied for nothing, for every
-    rule of every record. A name it does not look up is one it cannot reach, so the result is the same.
-    """
+    """A rule's expression as `_compile_lazy` compiles it, handed only the names it looks up: Jinja copies whatever an
+    expression is handed into a new context on every call, and a name it does not look up is one it cannot reach."""
 
     __slots__ = ("expression", "names")
 
@@ -1214,22 +1151,11 @@ class _Lazy:
 
 
 def _compile_lazy(text: str) -> tuple[_Lazy, Reads]:
-    """A check or an `applies_when` compiled as `compile_expression` compiles it, keeping an undefined result, and
-    its reads.
-
-    Each read the expression needs goes through `need()`, so a missing value stops it where it is read and nowhere else:
-    Jinja evaluates left to right and stops where the result is decided, so the branch of an `if` it does not take, the
-    side of an `and` or an `or` its first side decided and the rest of a comparison chain already false are never read.
-    It compiles in `RuleSandbox`, where a side of an `and` or an `or` whose truth alone the expression uses
-    (`_mark_deciding`) gives way to the other side where it stops at a missing value, and the other side decides in its
-    place where it can (`rule_or`); an `and` or an `or` whose value it uses is Python's. A value it only asks about or
-    falls back on (`has`, `is defined`, `| default`, `first_present`) is read as it always was. The name a call calls is
-    no read: one no helper or global has goes through `callee()`, which Python evaluates before the call's arguments, so
-    `firstpresent(x)`, where nothing defines the name, raises that it is undefined whether or not `x` is there; a name
-    the record holds is called as it holds it. An undefined result is kept rather than turned into None, so a bare
-    `limits[program]` that finds nothing is not evaluated instead of read as false and reported as a verdict. The text
-    is parsed as `compile_expression` parses it, so a syntax error names the text as the author wrote it.
-    """
+    """A check or an `applies_when` and its reads, compiled as `compile_expression` compiles it but keeping an undefined
+    result, so a bare `limits[program]` that finds nothing is no verdict. Each read it needs goes through `need()`, so
+    a missing value stops it only where the evaluation reaches it; a call of a name no helper has goes through
+    `callee()`, and a blank a helper makes of a path through `blank_at()` (`_needing`); an `and` or an `or` whose truth
+    alone counts decides in `RuleSandbox` (`_mark_deciding`). A syntax error names the text as the author wrote it."""
     parser = Parser(_CHECK_ENVIRONMENT, text, state="variable")
     try:
         expression = parser.parse_expression()
@@ -1250,17 +1176,10 @@ def _compile_lazy(text: str) -> tuple[_Lazy, Reads]:
 
 def _check_and_or_decide() -> bool:
     """Compiles and evaluates one check to make sure either side of its `and` and its `or` decides where the other stops
-    at a missing value, and warns once, naming the jinja2 release, where it does not; returns whether it does.
-
-    The code generator that makes them decide relies on Jinja's internals (`RuleCodeGenerator`), and a jinja2 release
-    that changed those could compile a check's `and` and `or` as Python's again without any error. A check would then
-    read them as main does: a missing value on either side stops the rule where the other side should decide it, which
-    holds the rule, or skips it under `not_applicable`, and an error the other side would raise goes unseen. The module
-    imports all the same, and the tests pin that either side decides; it runs this once, when it is imported, so the
-    log names such a release rather than the change going unnoticed. The release is the one the package names, or
-    unknown where reading it fails: jinja2 3.2 looks it up in the package's metadata, which a bundled application may
-    not ship.
-    """
+    at a missing value, and warns once, naming the jinja2 release, where it does not; returns whether it does. The code
+    generator relies on Jinja's internals (`RuleCodeGenerator`), and a release that changed them could compile a
+    check's `and` and `or` as Python's again with no error; the module still imports, and the log names the release,
+    or calls it unknown where reading it fails, as it does in jinja2 3.2 without the package's metadata."""
     cause = ""
     try:
         check, _ = _compile_lazy("(a.x or b) and not (a.y and c)")
@@ -1313,12 +1232,8 @@ def _shown(value: Any) -> Any:
 
 
 class _Hold(NamedTuple):
-    """Why no rule may skip a missing value, and whether that is only a lookup that found nothing.
-
-    A lookup that found nothing holds a rule only where the rule needs the value: a fallback, `first_present(limit,
-    0)`, stands in for it as its author meant. Anything else is a defect of the expression itself, a typo, a name no
-    helper has or a value nobody could read, and holds the rule wherever the value is read.
-    """
+    """Why no rule may skip a missing value, and whether that is only a lookup that found nothing, which holds a rule
+    only where it needs the value, not where a fallback stands in for it (`first_present(limit, 0)`)."""
 
     reason: str
     lookup: bool = False
@@ -1362,106 +1277,42 @@ class Rules(Node):
     """Evaluates every rule against the inputs and returns one finding per rule.
 
     Inputs arrive by name and rules read them by path (`docs.Note.interest_rate`); derived values are computed once per
-    record, in order, before the rules run, and are read by name like an input. Expressions run in a `RecordSandbox`, as
-    the Expression node's do, a check and an `applies_when` in a `RuleSandbox`, one where either side of an `and` or an
-    `or` whose truth alone counts can decide alone (see Missing values), with the helpers `has`, `days_between`, `date`,
-    `today`, `len`, `abs`, `min`, `max`, `sum`, `round`, `text`, `number` and `first_present` and the tests `is present`
-    and `is blank`. A record member named like a helper is the member where a rule reads it and the helper where a rule
-    calls it; one named like a method of the record, `items` say, is the member, the method reached only for a key the
-    record lacks. Rules compile when the node is built, so a malformed expression fails then, naming the rule.
+    record, in order, before the rules run, and are read by name like an input. A malformed expression fails the build,
+    naming its rule. Expressions are sandboxed Jinja with the helpers `has`, `days_between`, `date`, `today`, `len`,
+    `abs`, `min`, `max`, `sum`, `round`, `text`, `number` and `first_present` and the tests `is present` and `is blank`;
+    a record member named like a helper is the member where a rule reads it and the helper where a rule calls it.
 
-    - Statuses: `pass` when the check holds; the rule's severity (`fail`, `warn`, `info`) when it does not;
-      `not_applicable` when `applies_when` does not hold, the record's `as_of` date is outside the rule's effective
-      window, or the rule skips a missing value; `not_evaluated` when the check or `applies_when` stops at a value that
-      is missing, or cannot be evaluated. A rule reported at its severity gives its own message, where it has one,
-      rendered with the whole record, where a derived value nobody could compute reads as None, as `derived` shows it;
-      one that did not run or did not apply says why. `evaluated` holds the values the check reads, empty where the rule
-      did not apply.
-    - Missing values: a check and `applies_when` are evaluated left to right, and a missing value counts only where the
-      evaluation reaches it. The branch of an `if` not taken, the side of an `and` or an `or` its first side already
-      decided and the rest of a comparison chain already false are never read, so a value missing there never stops the
-      rule; where the rule stops at a missing value elsewhere, though, what those parts read can still keep it from
-      being skipped, or make it an error (see Never skipped). A missing value the check only asks about, with `has`, a
-      test such as `is defined` or `is present` or the `default` filter, does not hold the rule either, since the
-      question answers for it, and one it offers to `first_present` holds it only where every value offered is missing.
-      Any other value the evaluation reaches counts, even where the rest of the check would decide without it: every
-      value a call, a filter or a list is handed is read, so `app.a | default(app.b)` is held without `app.b` though
-      `app.a` is there, and `app.a in [app.b, app.c]` without `app.c` whatever `app.b` holds. The one exception is an
-      `and` or an `or` whose truth alone counts, as the check or `applies_when` itself, under `not`, as the test of an
-      `if`, as a branch of an `if` whose truth alone counts, or as a side of another such `and` or `or`: either side
-      decides it where the other stops at a missing value. `a or b` is true where `b` is, and `a and b` false where `b`
-      is, whether or not `a` is there, so `app.occupancy == 'primary' or app.purpose == 'purchase'` passes a purchase
-      without an occupancy; a lazy side, what `select` yields say, decides by its items. Where the check uses its value
-      instead, compares it, computes with it, filters or tests it, hands it to a helper or takes it as a branch of an
-      `if` whose value it uses, an `and` or an `or` is Python's: the side that decides it is its value, and a missing
-      side it reads holds the rule, since a value in its place could change the verdict. `(app.nickname or app.name) ==
-      'Ann'` is held without a nickname, as `(app.fee or 100) > 50` is without a fee, where `first_present(app.nickname,
-      app.name) == 'Ann'` falls back as its author means. Where nothing decides without it, the first value needed that
-      is missing holds the rule, of two on either side of an `and` or an `or` the left one, and the reason names that
-      value; where a helper turned a blank it was handed into a missing value, `text()` of blank text say, the reason
-      names the path it was handed, or, where it was handed anything else, a blank value the check reads. An error the
-      evaluation reaches is an error, whatever the expression would have read after it, on either side of an `and` or
-      an `or` as well: only a missing value gives way to the other side. A call of a name nothing defines, neither a
-      helper nor the record, is an error before its arguments are read. A message decides nothing and reads a missing
-      value as it always did.
-    - Derived values are computed as they always were: a missing value stops one only where the expression uses it, so a
-      null it falls back past still computes, `(x or 0) < 3` is true over a null `x`, and a list or a dict it builds
-      holds None for a member the record lacks; a failure beside a missing value it needs makes it missing; and `and`
-      and `or` are Python's, so a side that is not there, or a blank a helper made, makes the value missing though the
-      other side would decide. Naming part of a check as a derived value can therefore change what the rule reports, and
-      make it looser as well as stricter: the check `(x or 0) < 3` stops at the null `x`, where a check that reads the
-      same text as a derived value decides; the check `a or b` passes where `b` is true, where a derived `a or b` is
-      missing without `a`; and a derived value whose lookup found nothing is missing, so it gives way to the other side
-      of an `and` or an `or` whose truth alone counts, where the same lookup written in the check is an error: with
-      `lim` derived as `limits[app.program]` for a program the table lacks, `lim > 5 or app.a == 1` passes where
-      `limits[app.program] > 5 or app.a == 1` is not evaluated.
-    - Policies: `on_missing` on the node, which a rule's own overrides, says what a missing value means:
-      `not_evaluated`, the default, holds the rule for review; `fail` reports its severity, the reason after its
-      message; `not_applicable` skips it ("does not apply: missing value for …"), so the rule needs no presence
-      guard. A missing value never passes or fails a rule silently.
-    - Never skipped: only data the record lacks is skipped, and only where a read names it. Where a missing value
-      stops a rule's expression, the rule is held rather than skipped, `not_evaluated` or its severity under
-      `fail`, when that expression
-        - reads or asks about a value nobody could read: text `number()`, `date()` or `days_between()` cannot read
-          (`TBD` for an amount), or a derived value nobody could compute (`has(ltv)` over a ratio divided by zero);
-        - calls a name no helper has (`firstpresent(x)`), or uses a filter or a test no sandbox has, which Jinja
-          leaves inside a conditional to raise only when that branch runs;
-        - finds a value missing under a name the node does not declare, where it sets `input_fields` (a typo; the
-          selector's keys, the derived values and `as_of` are declared as well);
-        - needs a lookup that found nothing, `limits[loan.program]` for a program the table lacks, in the check or
-          in a derived value it does not only fall back on (`first_present(limit, 500000)`);
-        - meets a blank no read accounts for, from a lookup inside `text()` say.
-      Once a missing value stops the expression, a value nobody could read, a name no helper has, a filter or a test no
-      sandbox has, a value missing under a name the node does not declare and a derived value it needs whose lookup
-      found nothing hold the rule wherever the expression has them, in a branch not taken or on a side the evaluation
-      never read as well: that holds more rules than the evaluation alone would, never fewer. A derived value nobody
-      could compute speaks over the missing value under every policy: `(app.x if app.k else ltv) == 1` with the flag
-      set, `app.x` missing and `ltv` a ratio divided by zero is held for the division rather than for `app.x`. A derived
-      value that came out missing counts as data the record lacks when a value it reads is missing, whether or not its
-      evaluation reached that value. Under `not_applicable` the reason says why the rule was not skipped, `missing value
-      for loan.amount (not skipped: lon is not an input or a derived value)`, unless it is already the error of a value
-      nobody could read.
-    - What a skipped rule cannot see, nor one the other side of an `and` or an `or` decides: an error its check would
-      raise after the missing value it stopped at, on values that are there: a zero divisor (`appraisal.max_ltv >=
-      loan.amount / appraisal.value` without a limit), a misspelled method or a value of the wrong type; that surfaces
-      on the records that carry the missing value. So `app.b / app.q > 1 or app.a ==
-      1` passes where `app.b` is missing and `app.a` is 1, though `app.q` is 0: the division fails only where `app.b` is
-      there. An error the check reaches before the missing value, or on the other side of an `and` or an `or` the
-      missing value gives way to, is reported with or without the value: `loan.amount / appraisal.value <=
-      appraisal.max_ltv` over a zero value, with or without the limit, and `app.age >= 18 and
-      text(app.name).startwith('A')` without the age as with an age of 18 or more.
-    - Overall status: `fail` if any rule failed, else `warn` if any warned, else `not_evaluated` if any check did not
-      run, else `pass`. A check held for a missing value did not run, so a record is never `pass` while a check or an
-      `applies_when` stopped at a missing value, unless every rule that did was set to skip it.
+    A rule is `pass` when its check holds and its severity (`fail`, `warn`, `info`) when it does not; `not_applicable`
+    when `applies_when` does not hold or `as_of` falls outside its effective window; `not_evaluated`, or its severity
+    under the `fail` policy, when it cannot be evaluated. Where the check or `applies_when` stops at a missing value,
+    `on_missing`, the rule's or else the node's, decides: `not_evaluated`, the default, holds the rule for review,
+    `fail` reports its severity and `not_applicable` skips it. Only data the record lacks is skipped: a rule is held,
+    saying why, where its expression, reached or not, reads a value nobody could read, calls a name nothing defines,
+    uses a filter or a test the sandbox lacks, finds a value missing under a name the node does not declare, or needs a
+    derived value whose lookup found nothing or that is missing for any of these.
 
-    The output holds `findings` in rule order, which a trace keeps whole, a `summary` of statuses, `status`, the
-    `derived` values and `derived_errors`. A derived value computed from a missing value is missing, None under
-    `derived`; one that could not be computed from the values that are there, a division by zero or `number()` of
-    `TBD`, or from one nobody could read, is None there too, with the reason under `derived_errors`, and every rule
-    that reads it is held, naming the reason. Where a missing value stops the expression before a reader in it runs,
-    `doc.rate * number(doc.net)` with the rate missing and the net `TBD`, the value is missing instead, though a rule
-    set to skip is still held on it where the reader is handed a path as it is, as here. An optional `as_of` input,
-    a date, fixes the day the effective windows are compared with; without it the run date is used.
+    A check and `applies_when` evaluate left to right, and a missing value counts only where the evaluation reaches it:
+    never in the branch of an `if` not taken, on the side of an `and` or an `or` its first side decided or in the rest
+    of a comparison chain already false, nor where the check only asks about it (`has`, `is present`, `| default`) or
+    offers it to `first_present` beside a value that is there. A call, a filter or a list reads every value it is
+    handed: `app.a | default(app.b)` is held without `app.b` though `app.a` is there. Where only the truth of an `and`
+    or an `or` counts, as the whole expression, under `not`, as the test of an `if` or a branch of one whose truth alone
+    counts, or as a side of another such, either side decides where the other stops at a missing value: `a or b` is true
+    where `b` is, `a and b` false where `b` is. Where the check uses its value, `(app.fee or 100) > 50` say, it is
+    Python's, and a missing side it reads holds the rule. The reason names the value the evaluation stopped at, the left
+    of two, or, for a blank a helper made of anything but a path, the first blank value the check reads. Only a missing
+    value gives way: an error is an error on either side. A rule that skipped a value, or whose other side decided,
+    cannot see an error its check would raise after it: `app.b / app.q > 1 or app.a == 1` passes without `app.b` where
+    `app.a` is 1, though `app.q` is 0.
+
+    Derived values and messages are evaluated as written, as Jinja evaluates them: `and` and `or` are Python's, and a
+    missing value stops a derived value only where it is used, so naming part of a check as a derived value can change
+    what the rule reports, either way. A derived value computed from a missing value is missing, None under `derived`;
+    one that could not be computed is None too, its reason under `derived_errors`, and a rule that uses it is held.
+
+    The output holds `findings` in rule order, which a trace keeps whole, a `summary` of statuses, `status` (`fail` if
+    any rule failed, else `warn` if any warned, else `not_evaluated` if any did not run, else `pass`), `derived` and
+    `derived_errors`. An optional `as_of` date is the day effective windows are compared with, the run date without it.
     """
 
     name: str | None = "rules"
@@ -1823,23 +1674,10 @@ class Rules(Node):
         path: str | None,
         reason: str | None = None,
     ) -> tuple[str, str, bool]:
-        """The status of an expression that stopped at a missing value, which `path` names where a read accounts
-        for it, under the rule's policy.
-
-        `not_applicable` skips the rule, and a skipped rule counts as having run, so a record whose only unmet rules
-        lacked their data can still pass. It skips only data the record lacks: where the expression holds anything
-        else no rule may skip (`_why_held`), or no value it reads accounts for the stop, the rule is not evaluated and
-        the reason says why it was not skipped. Under `fail` and `not_evaluated` the reason stays as it is. Where the
-        expression reads a value nobody could read, whose reason a missing value must not hide (`ltv <=
-        appraisal.max_ltv` over a ratio divided by zero), the stop is an error instead, under every policy, and its
-        reason already names the cause.
-
-        Both look at every value the expression reads, whether or not the evaluation reached it, in a branch not taken
-        say: `(app.x if app.k else ltv) == 1` with the flag set, `app.x` missing and `ltv` a ratio divided by zero is
-        the error of `ltv`. That is deliberate, and stricter than the evaluation, never looser: what they find can keep
-        a rule from being skipped, or name an error where the missing value would have been named, but never skips a
-        rule or gives it a verdict.
-        """
+        """The status, reason and whether the check ran, for an expression that stopped at a missing value, which `path`
+        names where a read accounts for it, under the rule's policy. A value nobody could read makes it an error under
+        every policy; `not_applicable` skips only data the record lacks (`_why_held`), a skipped rule counting as run.
+        Both look at every value the expression reads, reached or not: stricter than the evaluation, never looser."""
         reason = reason or f"missing value for {path}"
         # Compared with None: the marker refuses a truth test, as every other use.
         _, unreadable = self._unreadable(reads.required + reads.optional, scope)
@@ -1873,21 +1711,12 @@ class Rules(Node):
         pending: Container[str] = frozenset(),
         reading: str | None = None,
     ) -> _Hold | None:
-        """Why what an expression finds missing is not only data the record lacks, so no rule may skip it, or None
-        when it is. The reason names the name or the path at fault.
-
-        The expression may call a name that is no helper and that the record does not hold, a mistyped
-        `firstpresent`, or use a filter or a test the sandbox does not have, `x | lowr` inside a conditional, which
-        Jinja leaves to raise until that branch runs. It may read text through `number()` or `date()` that they
-        cannot read, which a missing value must not hide (`number(doc.amount) > doc.limit` over an amount of `TBD`);
-        a value that is already one nobody could read, an earlier derived value say, its callers look for first
-        (`_missing_status`, `_why_missing`). A value it finds missing may sit under a name outside `declared`, a
-        typo, where the node declares its inputs (None where it does not), or under a derived value in `pending`,
-        one computed after `reading`, the derived value this expression computes. Or it may read a derived value
-        held for any of these defects, wherever it reads it, or one a lookup found nothing for, where it needs the
-        value rather than falls back on it: a gap in a table or in the node, never in the record. A defect speaks
-        over a lookup that found nothing, whichever the expression reads first.
-        """
+        """Why what an expression finds missing is not only data the record lacks, so no rule may skip it, naming the
+        name or the path at fault; None when it is. The defects: a call of a name nothing defines, a filter or a test
+        the sandbox lacks, text a reader cannot read, a value missing under a name outside `declared` (None where the
+        node declares no input) or under a derived value in `pending`, computed after `reading`, and a derived value
+        held for any of these or for a value nobody could read. A derived value whose lookup found nothing holds only
+        where the expression needs it, and any defect speaks over it."""
         if (callee := self._missing(list(reads.unknown_calls), scope)) is not None:
             return _Hold(f"{callee} is not a helper")
         if reads.unknown_names:
@@ -1926,18 +1755,11 @@ class Rules(Node):
         pending: Container[str],
         unskippable: Mapping[str, _Hold],
     ) -> _Hold | None:
-        """Why a derived value that came out missing is not only data the record lacks, or None when it is, as the
-        same expression written in a check would be; `pending` holds the derived values not computed yet.
-
-        There, a blank from `text()`, `number()`, `date()` or `first_present()` is missing when a value it read is
-        missing or blank, and an undefined result when a value it needs is missing. With every value it needs
-        there, an undefined result is a lookup that found nothing, `limits[loan.program]` for a program the table
-        lacks, which a check reports as an error, unless the expression has a defect of its own, a call of a name no
-        helper has say (`firstpresent(x) | default(0)`), which is the cause instead. A None the expression computes
-        itself, with `else none` say, is its author's answer, and counts as data the record lacks so long as the
-        values it reads do (`_why_held`). A value it reads that nobody could read, an earlier derived value say,
-        holds it before anything else, as it would the same expression in a check.
-        """
+        """Why a derived value that came out missing is not only data the record lacks, or None when it is, as for the
+        same expression in a check; `pending` holds the derived values not computed yet. A value it reads that nobody
+        could read speaks first, then what `_why_held` finds; a blank result no blank value it reads accounts for, or an
+        undefined one no missing value it needs accounts for, is a lookup that found nothing. A None it computes itself
+        is its author's answer."""
         found, unreadable = self._unreadable(reads.required + reads.optional, known)
         if unreadable is not None:
             return _Hold(_unreadable_because(found, unreadable.reason))
@@ -1990,14 +1812,9 @@ class Rules(Node):
 
     @staticmethod
     def _missing_reason(reads: Reads, scope: dict[str, Any], error: MissingValue) -> tuple[str | None, str]:
-        """The value an expression that stopped at a missing value could not decide on, and why.
-
-        The error names the path the evaluation stopped at, where a read the expression needs found nothing (`need`)
-        or a helper turned a blank it was handed as a path into a missing value (`blank_at`). A blank a helper made of
-        anything else, a filtered value say, has no path, so the value named is the first the expression reads that is
-        missing or blank; a blank no read accounts for, one made by a lookup that found nothing say, keeps the error's
-        own message.
-        """
+        """The path an expression stopped at, where its missing value names it (`need`, `blank_at`), and the reason. A
+        blank a helper made of anything but a path names the first blank value the expression reads; one no read
+        accounts for, from a lookup that found nothing say, keeps the error's own message."""
         if error.path:
             return error.path, f"missing value for {error.path}"
         for path in reads.required + reads.optional:
