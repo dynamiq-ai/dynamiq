@@ -20,6 +20,7 @@ MODEL = "gemini/gemini-2.5-pro"
 SYSTEM = {"role": "system", "content": "You are a support bot."}
 USER = {"role": "user", "content": "hi"}
 TOO_SMALL = "Cached content is too small. total_token_count=1385, min_total_token_count=2048"
+VERTEX_TOO_SMALL = "The cached content is of 3998 tokens. The minimum token count to start explicit caching is 4096."
 
 
 def _gemini(model=MODEL, **kwargs) -> Gemini:
@@ -164,7 +165,8 @@ class TestTooSmallRecovery:
             cache_control=GeminiCacheControl(),
         )
 
-    def test_retries_uncached_and_stops_caching_on_the_node(self):
+    @pytest.mark.parametrize("error", [TOO_SMALL, VERTEX_TOO_SMALL])
+    def test_retries_uncached_and_stops_caching_on_the_node(self, error):
         with patch("litellm.completion"), patch("litellm.stream_chunk_builder"):
             node = self._node()
             calls = []
@@ -173,7 +175,7 @@ class TestTooSmallRecovery:
                 calls.append(params["messages"])
                 content = params["messages"][0]["content"]
                 if isinstance(content, list) and content[-1].get("cache_control"):
-                    raise Exception(TOO_SMALL)
+                    raise Exception(error)
                 return _mock_response("ok")
 
             node._completion = fake_completion

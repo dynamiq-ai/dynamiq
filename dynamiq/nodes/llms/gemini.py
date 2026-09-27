@@ -6,9 +6,13 @@ from dynamiq.connections import Gemini as GeminiConnection
 from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.utils.logger import logger
 
-# Google rejects a cache below a per-model minimum (2048 tokens for gemini-2.5-pro) that
-# LiteLLM's own 1024-token gate does not know about, and the whole request fails.
-_CACHE_TOO_SMALL_INDICATOR = "cached content is too small"
+# Google rejects a cache below a per-model minimum that LiteLLM's own 1024-token gate does
+# not know about, and the whole request fails: 2048 on gemini-2.5-pro (Gemini API), 4096 on
+# gemini-3.8-flash (Vertex). Vertex 2.5 models also miscount the cache as "1 tokens".
+_CACHE_TOO_SMALL_INDICATORS = (
+    "cached content is too small",  # Gemini API
+    "minimum token count to start explicit caching",  # Vertex AI
+)
 
 
 class GeminiCacheControl(BaseModel):
@@ -89,7 +93,8 @@ class GeminiCachingLLM(BaseLLM):
     def _recover_completion_params(self, exc: BaseException, common_params: dict) -> dict | None:
         """Retry uncached when Google finds the system prompt below the model's cache minimum."""
         messages = common_params.get("messages") or []
-        if _CACHE_TOO_SMALL_INDICATOR in str(exc).lower() and self._has_cache_control(messages):
+        msg = str(exc).lower()
+        if any(ind in msg for ind in _CACHE_TOO_SMALL_INDICATORS) and self._has_cache_control(messages):
             logger.warning(
                 "LLM '%s': model '%s' rejected the context cache as too small; retrying uncached.",
                 self.name,
