@@ -251,6 +251,48 @@ def test_a_branch_must_name_an_option_of_a_choice():
     assert not [e for e in found if "hit_policy" in e]
 
 
+def choice_with(*options: dict) -> dict:
+    return {"id": "route", "name": "route", "type": CHOICE, "depends": [{"node": "start"}], "options": options}
+
+
+HIGH = {
+    "id": "high",
+    "name": "high",
+    "condition": {"variable": "$.score", "operator": "numeric-greater-than", "value": 7},
+}
+
+
+def fallback_warnings(*options: dict) -> list[str]:
+    after = {
+        "id": "after",
+        "name": "after",
+        "type": EXPRESSION,
+        "depends": [{"node": "route"}],
+        "expressions": [{"key": "x", "expression": "1"}],
+    }
+    return [w for w in warnings_of(flow_with(choice_with(*options), after)) if "fallback option" in w]
+
+
+def test_a_fallback_the_editor_keeps_is_not_flagged():
+    assert not fallback_warnings(HIGH, {"id": "default", "name": "default", "condition": None})
+    assert not fallback_warnings(HIGH)
+
+
+def test_a_fallback_under_another_id_is_flagged_since_an_editor_save_would_ungate_its_branch():
+    found = fallback_warnings(HIGH, {"id": "otherwise", "name": "otherwise", "condition": None})
+
+    assert len(found) == 1
+    assert "'otherwise'" in found[0] and "id and name 'default'" in found[0]
+
+
+def test_a_fallback_before_other_options_is_flagged_even_under_the_default_id():
+    # With hit policy "first" a fallback ends the walk, so the options after it never run; the
+    # editor always saves its fallback last, which would change which branch runs.
+    found = fallback_warnings({"id": "default", "name": "default"}, HIGH)
+
+    assert len(found) == 1
+
+
 def test_the_canvas_draws_a_branch_through_the_options_handle():
     choice = {
         "id": "route",

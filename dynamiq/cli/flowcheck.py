@@ -33,6 +33,8 @@ SUB_WORKFLOW_TYPE = "dynamiq.nodes.operators.SubWorkflow"
 JUDGEMENT_TYPE = "dynamiq.nodes.tools.Judgement"
 
 CHOICE_HIT_POLICIES = ("first", "all")
+# The id the web editor gives the one fallback it keeps, the last option of a Choice.
+CHOICE_DEFAULT_OPTION = "default"
 TABLE_HIT_POLICIES = ("first", "unique", "collect")
 TABLE_AGGREGATIONS = ("list", "sum", "min", "max", "count")
 RULE_SEVERITIES = ("fail", "warn", "info")
@@ -467,6 +469,8 @@ def validate(flow, known_types: set | None = None):
 
         if node_type.startswith("dynamiq.nodes.operators.") or node_type == JUDGEMENT_TYPE:
             errors.extend(check_operator(node, label))
+        if node_type == CHOICE_TYPE:
+            warnings.extend(warn_fallback_the_editor_cannot_keep(node, label))
 
     for path, text in walk_strings(flow):
         if path.rsplit(".", 1)[-1] in PROSE_KEYS or len(text) > 200:
@@ -538,6 +542,30 @@ def check_choice(node, label) -> list:
             "`first` runs the first branch whose condition holds, `all` runs every one."
         )
     return errors
+
+
+def warn_fallback_the_editor_cannot_keep(node, label) -> list:
+    """A fallback the runtime runs as written but the web editor would change on its next save.
+
+    The editor keeps one fallback, the last option, with id "default". It reads any other option
+    without a condition as absent, so a save from the editor drops it and the node behind that
+    branch then runs on every path. Opening a workflow in the editor is common enough that a
+    shape it cannot keep is worth flagging, though the flow itself is valid.
+    """
+    options = [o for o in (node.get("options") or []) if isinstance(o, dict)]
+    fallbacks = [index for index, option in enumerate(options) if not option.get("condition")]
+    if not fallbacks:
+        return []
+    last = len(options) - 1
+    if fallbacks == [last] and options[last].get("id") == CHOICE_DEFAULT_OPTION:
+        return []
+    ids = ", ".join(repr(options[index].get("id")) for index in fallbacks)
+    return [
+        f"choice {label!r}: the fallback option {ids} has no condition, and the web editor keeps a fallback "
+        f"only as the last option with id {CHOICE_DEFAULT_OPTION!r}. Saved from the editor, the branch "
+        f"would lose its gate and its nodes would run on every path. Make the fallback the last option, "
+        f"with id and name {CHOICE_DEFAULT_OPTION!r}, and point its dependents at option {CHOICE_DEFAULT_OPTION!r}."
+    ]
 
 
 def check_decision_table(node, label) -> list:
