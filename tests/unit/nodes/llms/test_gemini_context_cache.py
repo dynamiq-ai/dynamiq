@@ -83,6 +83,38 @@ class TestDisabledByDefault:
 
         assert llm.cache_control is None
 
+    def test_agent_does_not_turn_it_on_for_claude_on_vertex(self):
+        """The model name says Claude and the node has a `cache_control` field -- but the
+        field takes a Gemini config, which Claude would reject."""
+        llm = _vertex(
+            "vertex_ai/claude-sonnet-4-6",
+            prompt=prompts.Prompt(messages=[prompts.Message(role="user", content="{{input}}")]),
+        )
+        llm.connection.id = str(uuid.uuid4())
+
+        Agent(name="a", llm=llm, tools=[], max_loops=2)
+
+        assert llm.cache_control is None
+
+
+class TestTheTwoNodesStayInSync:
+    """`Gemini` and `VertexAI` each declare the field and hooks, as `Anthropic` and `Bedrock` do."""
+
+    def test_same_cache_control_field(self):
+        assert Gemini.model_fields["cache_control"].annotation == VertexAI.model_fields["cache_control"].annotation
+
+    @pytest.mark.parametrize(
+        "hook",
+        [
+            "supports_prompt_caching",
+            "update_completion_params",
+            "_recover_completion_params",
+            "_persist_completion_recovery",
+        ],
+    )
+    def test_both_nodes_override_the_hook(self, hook):
+        assert hook in vars(Gemini) and hook in vars(VertexAI)
+
 
 class TestMarkers:
     def test_string_system_prompt_becomes_a_marked_text_block(self):
