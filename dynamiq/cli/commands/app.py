@@ -256,10 +256,11 @@ def app_requirements(*, api: ApiClient, settings: Settings, app_id: str):
 @click.argument("user_id")
 @with_api_and_settings
 def app_requirements_status(*, api: ApiClient, settings: Settings, app_id: str, user_id: str):
-    """Whether ONE end user has connected everything, and what is still `unsatisfied`.
+    """Whether ONE end user has connected everything required, and what is still `unsatisfied`.
 
-    Poll this after sending them a connect link. A run for a user with anything unsatisfied
-    fails before the workflow is even built.
+    Poll this after sending them a connect link. A run for a user with a required requirement
+    unsatisfied fails before the workflow is even built; an unsatisfied optional one only
+    removes the agent tools that need it.
     """
     url = f"{app_endpoint(api, app_id)}/v1/requirements/status?user_id={quote(user_id)}"
     call_app(url, access_key(), method="GET")
@@ -268,19 +269,39 @@ def app_requirements_status(*, api: ApiClient, settings: Settings, app_id: str, 
 @app.command("connect-token")
 @click.argument("app_id")
 @click.argument("user_id")
+@click.option(
+    "--requirement",
+    "requirement_ids",
+    multiple=True,
+    help="Offer only this requirement on the link (repeatable). Default: every requirement.",
+)
 @with_api_and_settings
-def app_connect_token(*, api: ApiClient, settings: Settings, app_id: str, user_id: str):
+def app_connect_token(
+    *, api: ApiClient, settings: Settings, app_id: str, user_id: str, requirement_ids: tuple[str, ...]
+):
     """Mint a CONNECT LINK for ONE end user so they attach their own accounts.
 
     Give the returned `url` to that person and nobody else: it is scoped to them and this app,
-    is single-use and expires within minutes. Never open or reuse it yourself.
+    and expires after 24 hours. Never open or reuse it yourself. Scope it with --requirement
+    for a per-integration "Connect" button.
 
     This is NOT `integration connect-project`, which connects YOUR project's shared account.
     Sending that one to an end user looks like it worked and leaves the run unsatisfied,
     because nothing ties the account to them or to the requirement.
     """
-    call_app(
-        f"{app_endpoint(api, app_id)}/v1/connect/tokens",
-        access_key(),
-        json_body={"user_id": user_id},
-    )
+    body = {"user_id": user_id}
+    if requirement_ids:
+        body["requirement_ids"] = list(requirement_ids)
+    call_app(f"{app_endpoint(api, app_id)}/v1/connect/tokens", access_key(), json_body=body)
+
+
+@app.command("disconnect")
+@click.argument("app_id")
+@click.argument("requirement_id")
+@click.argument("user_id")
+@click.confirmation_option(prompt="Disconnect this end user's account?")
+@with_api_and_settings
+def app_disconnect(*, api: ApiClient, settings: Settings, app_id: str, requirement_id: str, user_id: str):
+    """Delete ONE end user's connected account for a requirement; they must connect it again to use it."""
+    url = f"{app_endpoint(api, app_id)}/v1/requirements/{quote(requirement_id)}/connections?user_id={quote(user_id)}"
+    call_app(url, access_key(), method="DELETE")
