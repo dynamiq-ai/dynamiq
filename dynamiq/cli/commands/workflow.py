@@ -400,8 +400,14 @@ def flow_ui_for(flow: dict, custom: dict | None = None) -> dict:
     `flow_ui` is required by create/save/release, so one is generated whenever the caller does
     not supply their own. The UI keys its rendering off fields a minimal payload does not have
     (`type`, `title`, `data.metadata_ui`, `data.custom_content`), and off `data.metadata.id`
-    being the CANVAS node's uuid rather than the flow node's slug - a flow_ui missing those
+    being the CANVAS node's uuid rather than the flow node's id - a flow_ui missing those
     saves fine and then draws nothing. Shape verified against a platform-authored workflow.
+
+    A flow node's `id` and `name` may differ: `depends` and `$.<id>` selectors refer to the id,
+    and the name is what people read. `data.metadata.name` carries the flow node's ID, because
+    the editor finds a canvas node's flow node through it and writes it back as the node's id
+    when it saves - so it must never be the name, or an editor save would rename the node and
+    break every selector that reads from it. The display fields carry the name.
 
     `custom_node_data` is the third key, and it is where the editor keeps everything the
     backend node model has no field for. It is keyed by the id the editor looks a node up by:
@@ -409,8 +415,8 @@ def flow_ui_for(flow: dict, custom: dict | None = None) -> dict:
 
     What CANNOT be generated here is a Pipedream tool's `pipedreamApp` / `pipedreamComponent`:
     those come from Pipedream, not from the flow. Build such a tool with the skill's
-    the skill's `pipedream_node` and pass the result via `--flow-ui`, or the tool draws
-    with no logo, no account picker and no configuration form.
+    `pipedream_node` and pass the result to `workflow flow-ui --custom`, or the tool draws with
+    no logo, no account picker and no configuration form.
     """
     input_type = "dynamiq.nodes.utils.Input"
     output_type = "dynamiq.nodes.utils.Output"
@@ -420,19 +426,19 @@ def flow_ui_for(flow: dict, custom: dict | None = None) -> dict:
     custom_node_data: dict = {}
     for i, node in enumerate(flow.get("nodes", [])):
         ui_id = str(uuid.uuid4())
-        slug = node.get("id")
-        ui_ids[slug] = ui_id
+        flow_id = node.get("id")
+        name = node.get("name") or flow_id
+        ui_ids[flow_id] = ui_id
         node_type = node.get("type")
         position = {"x": i * 378, "y": 245.5}
-        label = str(node.get("name") or slug or "").replace("-", " ").title()
+        label = str(name or "").replace("-", " ").title()
 
         nodes.append(
             {
                 "id": ui_id,
                 "data": {
-                    # metadata.id is the CANVAS id, not the flow node slug; the slug is `name`.
-                    "metadata": {"id": ui_id, "name": slug, "type": node_type, "depends": []},
-                    "metadata_ui": {"title": slug, "position": dict(position)},
+                    "metadata": {"id": ui_id, "name": flow_id, "type": node_type, "depends": []},
+                    "metadata_ui": {"title": name, "position": dict(position)},
                     "custom_content": {
                         "key": None,
                         "ref": None,
@@ -441,9 +447,9 @@ def flow_ui_for(flow: dict, custom: dict | None = None) -> dict:
                         "props": {"children": label},
                     },
                 },
-                "desc": f"{slug} Node",
+                "desc": f"{name} Node",
                 "type": node_type,
-                "title": slug,
+                "title": name,
                 "width": 150,
                 "height": 60,
                 "dragging": False,
@@ -451,13 +457,13 @@ def flow_ui_for(flow: dict, custom: dict | None = None) -> dict:
                 "selected": False,
                 # Input/Output are the fixed ends of a flow and the UI does not let you delete them.
                 "deletable": node_type not in (input_type, output_type),
-                "node_name": slug,
+                "node_name": name,
                 "selectable": True,
                 "position_absolute": dict(position),
             }
         )
         # A top-level node is looked up by its canvas uuid, and carries that uuid as its `id`.
-        custom_node_data[ui_id] = {**node, "id": ui_id, "name": slug}
+        custom_node_data[ui_id] = {**node, "id": ui_id, "name": name}
         nested_custom_entries(node, custom_node_data)
 
     by_slug = {node.get("id"): node for node in flow.get("nodes", [])}
@@ -489,13 +495,84 @@ def flow_ui_for(flow: dict, custom: dict | None = None) -> dict:
                 }
             )
     # A top-level node is keyed by the canvas uuid minted above, and a caller cannot predict
-    # that - so an entry supplied under the flow node's id is resolved here. Nested nodes keep
-    # their own id and fall through unchanged.
+    # that - so an entry supplied under the flow node's id is resolved here, and keeps the
+    # canvas uuid as its `id` like the generated entry it extends. Nested nodes keep their own
+    # id and fall through unchanged.
     for node_id, entry in (custom or {}).items():
         key = ui_ids.get(node_id, node_id)
-        custom_node_data[key] = {**custom_node_data.get(key, {}), **entry}
+        merged = {**custom_node_data.get(key, {}), **entry}
+        if node_id in ui_ids:
+            merged["id"] = key
+        custom_node_data[key] = merged
 
     return {"nodes": nodes, "edges": edges, "custom_node_data": custom_node_data}
+
+
+# Canvas nodes with no flow node behind them: sticky notes, and the group frames older
+# knowledge bases were drawn with. The editor leaves both out of the flow it saves.
+CANVAS_ONLY_TYPES = ("dynamiq.nodes.group.GroupNode",)
+CANVAS_ONLY_PREFIX = "onlyUINode."
+
+
+def canvas_mismatch(flow: dict, flow_ui) -> dict | None:
+    """What FLOW_UI draws differently from FLOW, or None when every node lines up.
+
+    A canvas node stands for the flow node whose id is in its `data.metadata.name`. The result
+    names the flow nodes the canvas has no node for (`undrawn`) and the canvas nodes that stand
+    for no node of the flow (`stale`), by id.
+    """
+    flow_ids = [node.get("id") for node in flow.get("nodes") or [] if isinstance(node, dict)]
+    canvas = flow_ui.get("nodes") if isinstance(flow_ui, dict) else None
+    drawn = set()
+    stale = []
+    for canvas_node in canvas if isinstance(canvas, list) else []:
+        if not isinstance(canvas_node, dict):
+            continue
+        node_type = str(canvas_node.get("type") or "")
+        if node_type in CANVAS_ONLY_TYPES or node_type.startswith(CANVAS_ONLY_PREFIX):
+            continue
+        metadata = (canvas_node.get("data") or {}).get("metadata") or {}
+        flow_id = metadata.get("name")
+        if flow_id in flow_ids:
+            drawn.add(flow_id)
+        else:
+            stale.append(flow_id if flow_id is not None else canvas_node.get("id"))
+    undrawn = [flow_id for flow_id in flow_ids if flow_id not in drawn]
+    if not undrawn and not stale:
+        return None
+    return {"undrawn": undrawn, "stale": stale}
+
+
+def redraw_flow_ui(flow: dict, saved_ui) -> dict:
+    """A canvas generated for FLOW that keeps what SAVED_UI recorded for the nodes still in it.
+
+    The flow's own fields come from FLOW. What only the canvas can hold - a Pipedream tool's app
+    and component, a Composio toolkit, a Choice's option ids - is carried over for every node
+    whose id is still in the flow, and dropped with the nodes that are gone.
+    """
+    ui = flow_ui_for(flow)
+    saved_nodes = saved_ui.get("nodes") if isinstance(saved_ui, dict) else None
+    saved_entries = saved_ui.get("custom_node_data") if isinstance(saved_ui, dict) else None
+    if not isinstance(saved_entries, dict):
+        return ui
+
+    # A top-level node's entry is keyed by its canvas uuid, which the new canvas does not keep.
+    flow_id_by_saved_key = {}
+    for canvas_node in saved_nodes if isinstance(saved_nodes, list) else []:
+        if isinstance(canvas_node, dict):
+            flow_id = ((canvas_node.get("data") or {}).get("metadata") or {}).get("name")
+            if flow_id is not None:
+                flow_id_by_saved_key[canvas_node.get("id")] = flow_id
+    key_by_flow_id = {node["data"]["metadata"]["name"]: node["id"] for node in ui["nodes"]}
+    # Nested nodes are keyed by their own flow id in both canvases.
+    key_by_flow_id.update({key: key for key in ui["custom_node_data"] if key not in key_by_flow_id.values()})
+
+    for saved_key, entry in saved_entries.items():
+        key = key_by_flow_id.get(flow_id_by_saved_key.get(saved_key, saved_key))
+        if key is None or not isinstance(entry, dict):
+            continue
+        ui["custom_node_data"][key] = {**entry, **ui["custom_node_data"][key]}
+    return ui
 
 
 def choice_option(source: dict | None, option) -> dict | None:
@@ -752,11 +829,25 @@ def release_workflow(
             "replaces it - save the real DAG, confirm it with `workflow get`, then release. Pass "
             "--allow-starter to override."
         )
-    body = {
-        "name": name or data.get("name"),
-        "flow": flow_body,
-        "flow_ui": read_json_arg(flow_ui) if flow_ui else (data.get("flow_ui") or flow_ui_for(flow_body)),
-    }
+    saved_ui = data.get("flow_ui")
+    if flow_ui:
+        ui_body = read_json_arg(flow_ui)
+    elif not saved_ui:
+        ui_body = flow_ui_for(flow_body)
+    elif not flow or not (mismatch := canvas_mismatch(flow_body, saved_ui)):
+        ui_body = saved_ui
+    else:
+        # The saved canvas was drawn for the saved flow; sent with this one it would draw
+        # nodes that no longer exist and leave out the new ones.
+        click.echo(
+            f"note: the saved canvas does not match this flow (not drawn: {mismatch['undrawn']}, "
+            f"no longer in the flow: {mismatch['stale']}); generated one from the flow, keeping "
+            "the saved records of the nodes still in it. Pass --flow-ui to send your own.",
+            err=True,
+        )
+        ui_body = redraw_flow_ui(flow_body, saved_ui)
+
+    body = {"name": name or data.get("name"), "flow": flow_body, "flow_ui": ui_body}
     echo_response(api.post(f"/v1/workflows/{workflow_id}/release", json=body))
 
 
@@ -866,6 +957,7 @@ def verify_workflow_command(*, api: ApiClient, settings: Settings, workflow_id: 
     nodes = flow.get("nodes") or []
     errors, _ = flowcheck.validate(flow, known_types=platform_node_types(api))
 
+    mismatch = canvas_mismatch(flow, data.get("flow_ui"))
     summary = {
         "id": data.get("id"),
         "name": data.get("name"),
@@ -873,9 +965,20 @@ def verify_workflow_command(*, api: ApiClient, settings: Settings, workflow_id: 
         "nodes": compact_items(nodes),
         "has_flow_ui": bool(data.get("flow_ui")),
         "custom_node_data": len((data.get("flow_ui") or {}).get("custom_node_data") or {}),
+        "canvas": mismatch or "matches the flow",
         "problems": errors,
     }
     click.echo(json.dumps(summary, indent=2, ensure_ascii=False))
+
+    if mismatch:
+        # The editor draws what the canvas misses, so the workflow still opens and runs; the
+        # layout just is not the one that was saved.
+        click.echo(
+            f"warning: the saved canvas does not match the flow (not drawn: {mismatch['undrawn']}, "
+            f"no longer in the flow: {mismatch['stale']}). The editor lays the missing nodes out "
+            "itself; to keep a layout, save with --flow-ui from `workflow flow-ui` on this flow.",
+            err=True,
+        )
 
     if len(nodes) <= 1:
         raise click.ClickException(
