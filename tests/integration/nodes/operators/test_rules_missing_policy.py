@@ -3,15 +3,20 @@
 `not_applicable` skips the rule for a record that does not carry a value it reads, as `applies_when` would, so the
 rule needs no presence guard: `shipment.weight_kg <= 30` does not apply to a shipment nobody weighed, and a record
 whose only unmet rules were skipped still passes. Only data the record lacks is skipped, and only where a read names
-it: a blank no read accounts for, from a lookup inside `text()` that found nothing say, is not. Nor is a check that
-reads a value nobody could read, calls a name no helper has, uses a filter or a test the sandbox does not have,
-finds a value missing under a name a node with declared inputs does not declare (a typo), or needs a derived value a
-lookup found nothing for, whatever else the record lacks. Each is a problem to fix, not data to wait for: the rule is
+it: a blank no field of the record accounts for, from a lookup inside `text()` that found nothing say, is not. Nor is a
+check that reads a value nobody could read, calls a name no helper has, uses a filter or a test the sandbox does not
+have, finds a value missing under a name a node with declared inputs does not declare (a typo), or needs a derived
+value a lookup found nothing for, whatever else the record lacks; unless a helper made that a blank beside a blank value
+the derived value reads, as `app.c == '' and text(limits[app.k]) == 'x'` does over a blank `app.c`, which counts as data
+the record lacks. Each is a problem to fix, not data to wait for: the rule is
 not evaluated, or reports its severity under `fail`, and a rule set to skip says why it did not ("… (not skipped: lon
-is not an input or a derived value)"). A derived value that came out missing counts as data the record lacks exactly
-when the same expression, written in the check, would. What a skipped rule cannot see is an error its check would
-raise on the values that are there; that surfaces on the records that carry the missing value. A rule's `on_missing`
-that is no policy at all leaves the choice to the node, with a warning, rather than refusing the build.
+is not an input or a derived value)"). A derived value that came out missing counts as data the record lacks when a
+value it reads is missing, whether or not its evaluation reached that value. What a skipped rule cannot see, nor one the
+other side of an `and` or an `or` decides, is an error its check would raise after the missing value it stops at, on the
+values that are there; that surfaces on the records that carry the missing value, while an error the check reaches
+first, or on the other side of an `and` or an `or` the missing value gives way to, is reported with or without the
+value. A rule's `on_missing` that is no policy at all leaves the choice to the node, with a warning, rather than
+refusing the build.
 """
 
 import json
@@ -382,14 +387,14 @@ HELD = {
         {"loan": {"amount": 300000, "program": "jumbo"}, "limits": LIMITS},
         "check could not be evaluated: 'dict object' has no attribute 'jumbo'",
     ),
-    # A blank with no path: the lookup inside `text()` found nothing, and no value the check reads is blank.
+    # A blank no field of the record accounts for: the lookup inside `text()` found nothing, which the reason quotes.
     "lookup-inside-text": Held(
         lambda **policy: screening(
             "text(categories[claim.code]) == 'dental'", inputs=("claim", "categories"), **policy
         ),
         {"claim": {"code": "D9"}, "categories": {"D1": "dental"}},
-        "missing value: text() found no text",
-        "no field of the record is named",
+        "missing value: text() found no text ('dict object' has no attribute 'D9')",
+        "no field of the record accounts for it",
     ),
     "derived-lookup": Held(
         lambda **policy: screening("loan.amount <= limit", inputs=LENDING, derived=(LIMIT,), **policy),
@@ -436,20 +441,21 @@ HELD = {
         "missing value for loan.exempt",
         "the lookup for limit found nothing",
     ),
-    # No input is declared, so only the call itself tells the mistyped helper from data the record lacks.
+    # No input is declared, so only the call itself tells the mistyped helper from data the record lacks. An error the
+    # check reaches before a missing value is reported: the name a call calls is judged before its arguments are read.
     "mistyped-helper": Held(
         lambda **policy: screening("firstpresent(order.coupon, order.promo) == 'SPRING'", **policy),
         {"order": {"coupon": "SPRING"}},
-        "missing value for firstpresent",
-        "firstpresent is not a helper",
+        "check could not be evaluated: 'firstpresent' is undefined",
     ),
+    # An error the check reaches on the other side of an `and` the missing total gives way to is reported: the name a
+    # call calls is judged before its arguments are read.
     "mistyped-helper-beside-missing-data": Held(
         lambda **policy: screening(
             "order.total > 100 and firstpresent(order.coupon) == 'SPRING'", inputs=("order",), **policy
         ),
         {"order": {"coupon": "SPRING"}},
-        "missing value for order.total",
-        "firstpresent is not a helper",
+        "check could not be evaluated: 'firstpresent' is undefined",
     ),
     "derived-mistyped-helper": Held(
         lambda **policy: screening(
@@ -503,8 +509,8 @@ HELD = {
         {"doc": {"net": "TBD"}},
         "applies_when could not be evaluated: not a number: 'TBD'",
     ),
-    # The check reads the text itself through `number()` or `date()`: the missing value stops it before the reader
-    # runs, and must not hide text nobody could read. The finding still names the missing value.
+    # The check reads the text itself through `number()` or `date()`: the missing value stops it before it uses what
+    # the reader made of the text, and must not hide text nobody could read. The finding still names the missing value.
     "unreadable-number-beside-missing-data": Held(
         lambda **policy: screening("number(doc.amount) > doc.limit", inputs=("doc",), **policy),
         {"doc": {"amount": "TBD"}},
@@ -535,11 +541,12 @@ HELD = {
         "missing value for doc.limit",
         "doc.net is not a number: 'TBD'",
     ),
+    # An error the check reaches before a missing value is reported: `number()` refuses the decimal before the limit
+    # is read.
     "number-told-a-decimal-it-cannot-read": Held(
         lambda **policy: screening("number(doc.amount, decimal=';') > doc.limit", inputs=("doc",), **policy),
         {"doc": {"amount": "5"}},
-        "missing value for doc.limit",
-        "doc.amount could not be read: number() reads a decimal point '.' or a decimal comma ',', not ';'",
+        "check could not be evaluated: number() reads a decimal point '.' or a decimal comma ',', not ';'",
     ),
     "derived-unreadable-inline": Held(
         lambda **policy: screening(
@@ -809,7 +816,7 @@ def test_a_lookup_that_found_nothing_is_judged_record_by_record():
 
 
 @pytest.mark.parametrize(
-    ("check", "inputs", "lacking", "carrying", "error"),
+    ("check", "inputs", "lacking", "carrying", "error", "reached_first"),
     [
         (
             "loan.amount / appraisal.value <= appraisal.max_ltv",
@@ -817,6 +824,18 @@ def test_a_lookup_that_found_nothing_is_judged_record_by_record():
             {"loan": {"amount": 300000}, "appraisal": {"value": 0}},
             {"loan": {"amount": 300000}, "appraisal": {"value": 0, "max_ltv": 0.8}},
             "division by zero",
+            # An error the check reaches before a missing value is reported: the division fails before the limit is
+            # read.
+            True,
+        ),
+        (
+            "appraisal.max_ltv >= loan.amount / appraisal.value",
+            LENDING,
+            {"loan": {"amount": 300000}, "appraisal": {"value": 0}},
+            {"loan": {"amount": 300000}, "appraisal": {"value": 0, "max_ltv": 0.8}},
+            "division by zero",
+            # The missing limit is read first, and stops the comparison before the division fails.
+            False,
         ),
         (
             "app.age >= 18 and text(app.name).startwith('A')",
@@ -824,6 +843,9 @@ def test_a_lookup_that_found_nothing_is_judged_record_by_record():
             {"app": {"name": "Ann"}},
             {"app": {"name": "Ann", "age": 30}},
             "'str object' has no attribute 'startwith'",
+            # An error the check reaches on the other side of an `and` the missing age gives way to is reported: the
+            # misspelled method fails whether or not the age is there.
+            True,
         ),
         (
             "doc.total + doc.label > doc.limit",
@@ -831,19 +853,25 @@ def test_a_lookup_that_found_nothing_is_judged_record_by_record():
             {"doc": {"total": 5, "label": "x"}},
             {"doc": {"total": 5, "label": "x", "limit": 1}},
             "unsupported operand type(s) for +: 'int' and 'str'",
+            # An error the check reaches before a missing value is reported: the sum fails before the limit is read.
+            True,
         ),
     ],
-    ids=["zero-divisor", "misspelled-method", "wrong-type"],
+    ids=["zero-divisor", "zero-divisor-after-the-missing-limit", "misspelled-method", "wrong-type"],
 )
-def test_an_error_the_check_would_raise_on_the_values_there_shows_where_the_record_carries_the_missing_one(
-    check, inputs, lacking, carrying, error
+def test_an_error_on_the_values_there_shows_wherever_the_check_reaches_it_before_a_missing_value(
+    check, inputs, lacking, carrying, error, reached_first
 ):
-    """A missing value stops the check before the values that are there are used, so the rule is skipped on a record
-    that lacks it; the error surfaces on the records that carry it."""
+    """A missing value the check reads before the values that are there are used stops it, so the rule is skipped on
+    a record that lacks it; the error surfaces on the records that carry it. An error the check reaches first, or on
+    the other side of an `and` or an `or` the missing value gives way to, is reported with or without the value."""
     node = screening(check, "not_applicable", inputs=inputs)
 
-    skipped, missing = outcome(run(node, lacking))
-    assert skipped == "not_applicable" and missing.startswith("does not apply: missing value for ")
+    if reached_first:
+        assert outcome(run(node, lacking)) == ("not_evaluated", f"check could not be evaluated: {error}")
+    else:
+        skipped, missing = outcome(run(node, lacking))
+        assert skipped == "not_applicable" and missing.startswith("does not apply: missing value for ")
     assert outcome(run(node, carrying)) == ("not_evaluated", f"check could not be evaluated: {error}")
 
 
