@@ -1973,20 +1973,6 @@ class AtlasCloud(BaseApiKeyConnection):
             "api_key": self.api_key,
         }
 
-    @property
-    def completion_params(self) -> dict:
-        """Connection params for completion calls.
-
-        Atlas Cloud model ids are already `vendor/model` (e.g. `openai/gpt-4.1-mini`), unlike
-        LiteLLM's own provider prefixes, so LiteLLM doesn't recognize them and needs to be told
-        explicitly to treat this as an OpenAI-compatible endpoint via `custom_llm_provider`
-        rather than by inferring a provider from the model string.
-
-        Returns:
-            dict: `conn_params` plus `custom_llm_provider`.
-        """
-        return {**self.conn_params, "custom_llm_provider": "openai"}
-
 
 class TypeSafe(HttpApiKey):
     """A connection to the TypeSafe System One API, the judge behind a Judgement node.

@@ -1,6 +1,7 @@
 import uuid
 
 import pytest
+from litellm import get_llm_provider
 
 from dynamiq import Workflow, connections
 from dynamiq.callbacks import TracingCallbackHandler
@@ -43,6 +44,7 @@ def get_atlascloud_workflow(
     [
         "openai/gpt-4.1-mini",
         "anthropic/claude-sonnet-4.6",
+        "deepseek-ai/deepseek-v3.2",
     ],
 )
 def test_workflow_with_atlascloud_llm(mock_llm_response_text, mock_llm_executor, model):
@@ -72,7 +74,7 @@ def test_workflow_with_atlascloud_llm(mock_llm_response_text, mock_llm_executor,
     mock_llm_executor.assert_called_once_with(
         tools=None,
         tool_choice=None,
-        model=model,
+        model=f"openai/{model}",
         messages=wf_atlascloud_ai.flow.nodes[0].prompt.format_messages(),
         stream=False,
         temperature=0.1,
@@ -84,7 +86,27 @@ def test_workflow_with_atlascloud_llm(mock_llm_response_text, mock_llm_executor,
         top_p=None,
         api_key=connection.api_key,
         api_base=connection.url,
-        custom_llm_provider="openai",
         response_format=None,
         drop_params=True,
     )
+    assert wf_atlascloud_ai.flow.nodes[0].model == model
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "openai/gpt-4.1-mini",
+        "anthropic/claude-sonnet-4.6",
+        "deepseek-ai/deepseek-v3.2",
+    ],
+)
+def test_atlascloud_model_id_reaches_api_unchanged(model):
+    connection = connections.AtlasCloud(api_key="api_key")
+    llm = AtlasCloud(model=model, connection=connection)
+
+    params = llm.update_completion_params({"model": llm.model, "api_base": connection.url})
+    sent_model, provider, _, api_base = get_llm_provider(model=params["model"], api_base=params["api_base"])
+
+    assert provider == "openai"
+    assert sent_model == model
+    assert api_base == "https://api.atlascloud.ai/v1"
