@@ -1502,6 +1502,28 @@ class Exa(Http):
         return self
 
 
+class Linkup(Http):
+    """
+    Represents a connection to the Linkup Search API.
+
+    Attributes:
+        url (str): The URL of the Linkup API.
+        method (Literal[HTTPMethod.POST]): HTTP method used for the request, defaults to POST.
+        api_key (str): The API key for authentication, fetched from the environment variable 'LINKUP_API_KEY'.
+    """
+
+    url: str = Field(default="https://api.linkup.so/v1/")
+    method: Literal[HTTPMethod.POST] = HTTPMethod.POST
+    api_key: str = Field(default_factory=partial(get_env_var, "LINKUP_API_KEY"))
+
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Setup headers after model validation."""
+        if self.api_key:
+            self.headers.update({"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"})
+        return self
+
+
 class Ollama(BaseConnection):
     """Represents a connection to Ollama API.
 
