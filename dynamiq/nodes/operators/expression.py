@@ -8,11 +8,12 @@ from pydantic import BaseModel, ConfigDict, PrivateAttr
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.operators.rules import (
-    HELPERS,
     Reads,
     RecordSandbox,
+    build_error,
     concrete,
     read_paths,
+    refuse_clash,
     refuse_reserved_read,
     scope_for,
 )
@@ -21,10 +22,9 @@ from dynamiq.runnables import RunnableConfig
 
 # One sandbox for every Expression node: it keeps no state, it refuses attribute access that would
 # reach Python internals, so an expression cannot escape into the process, and it reads a record's key
-# before a method of the same name, as a rule does. The Rules node's helpers serve an expression too: a
-# due date or an age is a date computation over the same inputs.
+# before a method of the same name, as a rule does. The sandbox carries the Rules node's helpers, which
+# serve an expression too: a due date or an age is a date computation over the same inputs.
 _ENVIRONMENT = RecordSandbox()
-_ENVIRONMENT.globals.update(HELPERS)
 
 
 class ExpressionInputSchema(BaseModel):
@@ -40,9 +40,13 @@ class Expression(Node):
     referred to on its own that is missing evaluates to None; using a missing input in arithmetic
     fails the run, as does an expression that reaches for Python internals. The helpers a rule can
     call are available as well: `has`, `days_between`, `date`, `today`, `len`, `abs`, `min`, `max`,
-    `sum` and `round`; an input named like one of them is the input where an expression reads it as a
-    value and the helper where an expression calls it. The output holds one key per expression, plus every
-    input when `pass_through` is set, with expressions winning on a clash.
+    `sum`, `round`, `text`, `number` and `first_present`; so are the tests `is present` and `is blank`.
+    An input named like one of the helpers is the input where an expression reads it as a value and
+    the helper where an expression calls it. A blank result, `text('  ')` or `date('')` say, comes out
+    as None, like a missing input; a value `number()` or `date()` cannot read fails the run instead,
+    `number('TBD')` as `date('March')` does, and so does a question about one, `has(date('March'))`.
+    The output holds one key per expression, plus every input when `pass_through` is set, with
+    expressions winning on a clash.
     """
 
     name: str | None = "expression"
@@ -68,14 +72,15 @@ class Expression(Node):
                 raise ValueError(f"Expression '{self.name}': key {item.key!r} is used twice")
             keys.add(item.key)
             try:
-                reads = read_paths(item.expression)
+                # Compiled before its reads are collected, from the text wrapped in braces, so a syntax error
+                # names the text as the author wrote it.
                 expression = _ENVIRONMENT.compile_expression(item.expression, undefined_to_none=True)
+                reads = read_paths(item.expression)
             except TemplateSyntaxError as e:
                 raise ValueError(f"Expression '{self.name}': {item.key!r} is not a valid expression: {e}") from e
-            if clash := next((name for name in reads.helpers_read if name in reads.helpers_called), None):
-                raise ValueError(
-                    f"Expression '{self.name}': {item.key!r} reads {clash!r} as a value and calls it as a helper"
-                )
+            except (RecursionError, SyntaxError) as e:
+                raise ValueError(build_error(f"Expression '{self.name}': {item.key!r}", e)) from None
+            expression, reads = refuse_clash(expression, reads, f"Expression '{self.name}': {item.key!r}")
             refuse_reserved_read(reads, f"Expression '{self.name}': {item.key!r}")
             compiled.append((item.key, expression, reads))
         return compiled
