@@ -1,0 +1,132 @@
+# Loan pricing as decisions: an eligibility table, an adjustments table, a rate formula and a route,
+# packaged as a flow that a batch workflow runs once per application through a sub-workflow.
+nodes:
+  start:
+    type: dynamiq.nodes.utils.Input
+    name: start
+
+  eligibility:
+    type: dynamiq.nodes.operators.DecisionTable
+    name: eligibility
+    hit_policy: first
+    input_columns:
+      - { id: fico, name: fico, type: int }
+      - { id: ltv, name: ltv, type: int }
+      - { id: program, name: program, type: string }
+    output_columns:
+      - { id: decision, name: decision, type: string }
+    rules:
+      - { id: e1, name: below floor, when: ["< 580", "", ""], then: [decline] }
+      - { id: e2, name: fha floor, when: ["[580..619]", "", "FHA"], then: [review] }
+      - { id: e3, name: conforming, when: ["", "<= 97", ""], then: [approve] }
+      - { id: e4, name: everything else, when: ["", "", ""], then: [review] }
+    depends:
+      - node: start
+    input_transformer:
+      selector:
+        fico: $.start.output.fico
+        ltv: $.start.output.ltv
+        program: $.start.output.program
+
+  adjustments:
+    type: dynamiq.nodes.operators.DecisionTable
+    name: adjustments
+    hit_policy: collect
+    aggregation: sum
+    input_columns:
+      - { id: fico, name: fico, type: int }
+      - { id: ltv, name: ltv, type: int }
+      - { id: program, name: program, type: string }
+    output_columns:
+      - { id: llpa, name: llpa, type: float }
+    rules:
+      - { id: a1, name: mid fico, when: ["[680..739]", "", ""], then: ["0.75"] }
+      - { id: a2, name: low fico, when: ["< 680", "", ""], then: ["1.5"] }
+      - { id: a3, name: high ltv, when: ["", "> 80", ""], then: ["0.25"] }
+      - { id: a4, name: government, when: ["", "", "FHA, VA"], then: ["0.125"] }
+    depends:
+      - node: start
+    input_transformer:
+      selector:
+        fico: $.start.output.fico
+        ltv: $.start.output.ltv
+        program: $.start.output.program
+
+  rate:
+    type: dynamiq.nodes.operators.Expression
+    name: rate
+    input_fields:
+      - { id: base_rate, name: base_rate }
+      - { id: llpa, name: llpa }
+    expressions:
+      - { id: x1, key: rate, expression: "(base_rate + (llpa or 0)) | round(3)" }
+      - { id: x2, key: tier, expression: "'A' if (llpa or 0) < 0.5 else 'B'" }
+    depends:
+      - node: start
+      - node: adjustments
+    input_transformer:
+      selector:
+        base_rate: $.start.output.base_rate
+        llpa: $.adjustments.output.llpa
+
+  end:
+    type: dynamiq.nodes.utils.Output
+    name: end
+    depends:
+      - node: eligibility
+      - node: rate
+    input_transformer:
+      selector:
+        decision: $.eligibility.output.decision
+        rate: $.rate.output.rate
+        tier: $.rate.output.tier
+        matched_rules: $.adjustments.output.matched_rules
+
+  batch_start:
+    type: dynamiq.nodes.utils.Input
+    name: start
+
+  price_each:
+    type: dynamiq.nodes.operators.Map
+    name: price_each
+    max_workers: 4
+    node:
+      id: price_one
+      type: dynamiq.nodes.operators.SubWorkflow
+      name: price_one
+      flow: pricing
+      input_fields:
+        - { name: fico, type: int, required: true }
+        - { name: ltv, type: int, required: true }
+        - { name: program, type: string }
+        - { name: base_rate, type: float, required: true }
+      output_fields:
+        - { name: decision, type: string }
+        - { name: rate, type: float }
+        - { name: tier, type: string }
+    depends:
+      - node: batch_start
+    input_transformer:
+      selector:
+        input: $.batch_start.output.applications
+
+  batch_end:
+    type: dynamiq.nodes.utils.Output
+    name: end
+    depends:
+      - node: price_each
+    input_transformer:
+      selector:
+        priced: $.price_each.output.output
+
+flows:
+  pricing:
+    name: Pricing
+    nodes: [start, eligibility, adjustments, rate, end]
+  batch:
+    name: Batch pricing
+    nodes: [batch_start, price_each, batch_end]
+
+workflows:
+  batch-pricing:
+    flow: batch

@@ -460,26 +460,32 @@ def flow_ui_for(flow: dict, custom: dict | None = None) -> dict:
         custom_node_data[ui_id] = {**node, "id": ui_id, "name": slug}
         nested_custom_entries(node, custom_node_data)
 
+    by_slug = {node.get("id"): node for node in flow.get("nodes", [])}
     edges = []
     for node in flow.get("nodes", []):
         target = ui_ids.get(node.get("id"))
         for dep in node.get("depends", []) or []:
-            source = ui_ids.get(dep.get("node") if isinstance(dep, dict) else dep)
+            dep = {"node": dep} if isinstance(dep, str) else dep
+            source = ui_ids.get(dep.get("node"))
             if not source or not target:
                 continue
+            # A branch leaves a Choice through the option's own handle, and the editor labels it with
+            # the option's name; every other edge leaves through the node's single source handle.
+            option = choice_option(by_slug.get(dep.get("node")), dep.get("option"))
+            handle = option["id"] if option else "source"
             edges.append(
                 {
-                    "id": f"reactflow__edge-{source}source-{target}target",
+                    "id": f"reactflow__edge-{source}{handle}-{target}target",
                     "type": "smoothstep",
-                    "label": None,
+                    "label": option["name"] if option else None,
                     "style": {"stroke": "#96A1B8", "opacity": 1, "stroke_width": 2},
                     "source": source,
                     "target": target,
                     "animated": True,
                     "marker_end": {"type": "arrow", "color": "#96A1B8", "opacity": 1},
-                    "source_handle": "source",
+                    "source_handle": handle,
                     "target_handle": "target",
-                    "is_choice_option": False,
+                    "is_choice_option": option is not None,
                 }
             )
     # A top-level node is keyed by the canvas uuid minted above, and a caller cannot predict
@@ -490,6 +496,20 @@ def flow_ui_for(flow: dict, custom: dict | None = None) -> dict:
         custom_node_data[key] = {**custom_node_data.get(key, {}), **entry}
 
     return {"nodes": nodes, "edges": edges, "custom_node_data": custom_node_data}
+
+
+def choice_option(source: dict | None, option) -> dict | None:
+    """The option of a Choice node a dependency names by its id; None when there is none.
+
+    The runtime matches a gate by the option's id alone, so a dependency naming the option's name is
+    drawn as a plain, unlabelled edge, the visible sign that the branch is not gated.
+    """
+    if option is None or not isinstance(source, dict) or source.get("type") != flowcheck.CHOICE_TYPE:
+        return None
+    for candidate in source.get("options") or []:
+        if isinstance(candidate, dict) and candidate.get("id") is not None and str(candidate["id"]) == str(option):
+            return {"id": str(candidate["id"]), "name": str(candidate.get("name") or candidate["id"])}
+    return None
 
 
 @workflow.command("list")
@@ -581,8 +601,8 @@ def save_workflow(
 @click.option(
     "--dry-run/--no-dry-run",
     default=True,
-    help="Sent as dry_run. On by default: without it the endpoint answers 400 bad_input. "
-    "It does NOT stop nodes executing - tools really act.",
+    help="Sent as dry_run, on by default as on the endpoint. The nodes still run, tools included; a dry run "
+    "deletes afterwards what the run wrote into a vector store, and --no-dry-run keeps it.",
 )
 @click.option("--last-node-output", is_flag=True, help="Return only the last node's output.")
 @with_api_and_settings
@@ -594,18 +614,18 @@ def test_workflow(
     This endpoint takes a FORM (not a JSON body): `flow` and `input` are sent as
     JSON-encoded strings. FLOW/INPUT_DATA are inline JSON or @file. No project_id needed.
 
-    `dry_run` is on by default because it is the only form the endpoint accepts - without it
-    the answer is `400 bad_input` with an empty details object. Despite the name it is NOT a
-    simulation: the flow executes and its tools really act, so a Notion tool creates a real
-    page. Choose an obviously-test input.
+    `dry_run` is on by default, as it is on the endpoint. It is not a simulation: the flow
+    executes and its tools really act, so a Notion tool creates a real page. What it governs is
+    cleanup: the documents a writer ingested into a vector store, and a collection it created,
+    are deleted once the run ends. --no-dry-run sends dry_run=false and keeps them; a field left
+    out would not, since the runtime's own default is on. Choose an obviously-test input.
     """
     form = {
         "flow": json.dumps(normalize_flow(read_json_arg(flow), settings.project_id)),
         "input": json.dumps(read_json_arg(input_data)),
         "stream": "false",
+        "dry_run": "true" if dry_run else "false",
     }
-    if dry_run:
-        form["dry_run"] = "true"
     if last_node_output:
         form["last_node_output"] = "true"
     # This endpoint takes multipart; a urlencoded body is answered with 415.
@@ -755,7 +775,8 @@ def list_workflow_versions(*, api: ApiClient, settings: Settings, workflow_id: s
 def validate_flow_command(*, api: ApiClient, settings: Settings, flow: str, offline: bool):
     """Check a flow JSON locally, before it is saved. Exits non-zero on any error.
 
-    FLOW is inline JSON or @file. Nothing is sent anywhere; this is a read of the file.
+    FLOW is inline JSON or @file. Nothing is persisted: the flow is read from disk, and the one
+    request made is a read of the platform's node types, which --offline skips.
 
     The API accepts a flow it cannot run - unknown keys are dropped rather than rejected -
     so a misplaced selector yields empty output instead of an error, and a tool with the

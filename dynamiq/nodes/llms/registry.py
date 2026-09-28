@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +58,22 @@ class ModelMetadata(BaseModel):
     input_cost_per_token_above_512k_tokens: float | None = None
     output_cost_per_token_above_512k_tokens: float | None = None
     cache_read_input_token_cost_above_512k_tokens: float | None = None
+
+
+@contextmanager
+def _litellm_debug_info_suppressed(litellm: Any) -> Iterator[None]:
+    """Silence litellm's stdout hints (e.g. the "Provider List" banner) for an expected miss.
+
+    ``get_model_info`` (also called inside ``register_model``) prints that banner before
+    raising for a key it can't map to a provider, which the sync treats as "unknown model".
+    The caller's setting is restored.
+    """
+    previous = litellm.suppress_debug_info
+    litellm.suppress_debug_info = True
+    try:
+        yield
+    finally:
+        litellm.suppress_debug_info = previous
 
 
 def _as_info_dict(info: ModelMetadata | dict[str, Any]) -> dict[str, Any]:
@@ -131,28 +149,30 @@ class ModelRegistry:
             return
 
         registered = refreshed = skipped = failed = 0
-        for key, info in items.items():
-            try:
-                existing = litellm.get_model_info(model=key)  # case-/prefix-tolerant lookup
-            except Exception:
-                existing = None
-            if existing:
-                provider = info.get("litellm_provider")
-                if not isinstance(provider, str) or not key.startswith(f"{provider.lower()}/"):
-                    skipped += 1
-                    continue
-                sync_info = {**existing, **info}
-            else:
-                sync_info = info
-            try:
-                litellm.register_model({key: sync_info})
+        # Probing and registering a key litellm can't map to a provider prints a banner.
+        with _litellm_debug_info_suppressed(litellm):
+            for key, info in items.items():
+                try:
+                    existing = litellm.get_model_info(model=key)  # case-/prefix-tolerant lookup
+                except Exception:
+                    existing = None
                 if existing:
-                    refreshed += 1
+                    provider = info.get("litellm_provider")
+                    if not isinstance(provider, str) or not key.startswith(f"{provider.lower()}/"):
+                        skipped += 1
+                        continue
+                    sync_info = {**existing, **info}
                 else:
-                    registered += 1
-            except Exception as exc:
-                failed += 1
-                logger.debug("ModelRegistry: failed to register %s into litellm: %s", key, exc)
+                    sync_info = info
+                try:
+                    litellm.register_model({key: sync_info})
+                    if existing:
+                        refreshed += 1
+                    else:
+                        registered += 1
+                except Exception as exc:
+                    failed += 1
+                    logger.debug("ModelRegistry: failed to register %s into litellm: %s", key, exc)
 
         log = logger.warning if failed else logger.debug
         log(
