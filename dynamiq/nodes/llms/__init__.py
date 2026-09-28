@@ -12,7 +12,7 @@ from .databricks import Databricks
 from .deepinfra import DeepInfra
 from .deepseek import DeepSeek
 from .fireworksai import FireworksAI
-from .gemini import Gemini
+from .gemini import Gemini, GeminiCacheControl
 from .groq import Groq
 from .huggingface import HuggingFace
 from .mistral import Mistral
