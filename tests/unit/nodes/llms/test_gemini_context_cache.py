@@ -261,14 +261,16 @@ class TestSizeGate:
 
         assert messages[0] == _cached_system(self.BIG)
 
-    def test_tools_count_towards_the_gate(self):
-        """Google caches the tool schemas with the system prompt, so they count too."""
+    def test_tools_do_not_count_towards_the_gate(self):
+        """LiteLLM skips caching when the system prompt alone is under 1024 tokens, however
+        large the tools, so a marker here would only look like caching."""
         tools = [{"type": "function", "function": {"name": "search", "description": self.BIG, "parameters": {}}}]
+        messages = [SYSTEM, USER]
         llm = _gemini(cache_control=GeminiCacheControl())
 
-        params = llm.update_completion_params({"model": llm.model, "messages": [SYSTEM, USER], "tools": tools})
+        params = llm.update_completion_params({"model": llm.model, "messages": messages, "tools": tools})
 
-        assert params["messages"][0] == _cached_system()
+        assert params["messages"] is messages
 
     def test_only_the_cached_part_counts(self):
         """A long user message is not cached, so it must not lift a short system prompt over the gate."""

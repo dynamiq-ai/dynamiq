@@ -30,11 +30,12 @@ class GeminiCacheControl(BaseModel):
     Attributes:
         ttl_seconds: Cache lifetime, counted from creation. ``None`` keeps Google's
             default of one hour.
-        min_tokens: Cache only when the system prompt and tools reach this many tokens
-            (LiteLLM's estimate). Google's minimum depends on the model and API -- 2048 for
-            gemini-2.5-pro, 4096 for gemini-3.8-flash on Vertex -- and a request below it
-            fails, so the default clears every model seen so far. Lower it only for a model
-            known to accept less.
+        min_tokens: Cache only when the system prompt reaches this many tokens (LiteLLM's
+            estimate, which runs below Google's count). Google's minimum depends on the model
+            and API -- 2048 for gemini-2.5-pro, 4096 for gemini-3.8-flash on Vertex -- and a
+            request below it fails, so the default clears every model seen so far. Tools are
+            cached too but not counted: LiteLLM skips caching when the system prompt alone is
+            under 1024 tokens, however large the tools.
     """
 
     ttl_seconds: PositiveInt | None = None
@@ -55,7 +56,7 @@ def apply_gemini_cache_control(model: str, params: dict[str, Any], cache_control
 
     messages = list(params["messages"])
     n_system = next((idx for idx, message in enumerate(messages) if message.get("role") != "system"), len(messages))
-    if not n_system or _count_tokens(model, messages[:n_system], params.get("tools")) < cache_control.min_tokens:
+    if not n_system or _count_tokens(model, messages[:n_system]) < cache_control.min_tokens:
         return params
 
     control = {"type": "ephemeral"}
@@ -67,10 +68,10 @@ def apply_gemini_cache_control(model: str, params: dict[str, Any], cache_control
     return params | {"messages": messages}
 
 
-def _count_tokens(model: str, messages: list[dict], tools: list[dict] | None) -> int:
-    """Estimate the cached part; on failure return 0, so the request goes uncached rather than failing."""
+def _count_tokens(model: str, messages: list[dict]) -> int:
+    """Estimate the system prompt; on failure return 0, so the request goes uncached rather than failing."""
     try:
-        return token_counter(model=model, messages=messages, tools=tools or None)
+        return token_counter(model=model, messages=messages)
     except Exception as e:
         logger.debug("Gemini context caching: token count failed for model '%s': %s", model, e)
         return 0
