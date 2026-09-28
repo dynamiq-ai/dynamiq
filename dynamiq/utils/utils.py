@@ -16,6 +16,28 @@ TRUNCATE_LIST_LIMIT = 50
 
 CHARS_PER_TOKEN = 4
 
+# Values for these keys are credentials; traces and logs must not persist them in cleartext.
+TRACING_REDACTED_KEYS = frozenset({"mcp_http_headers"})
+TRACING_REDACTED_PLACEHOLDER = "***"
+
+
+def redact_tracing_keys(value: Any) -> Any:
+    """Replace the values of ``TRACING_REDACTED_KEYS`` at any depth, leaving the rest untouched.
+
+    ``format_value`` redacts as it walks a plain dict, but the model and ``to_dict`` branches
+    return an already-serialized structure it does not descend into. A per-run credential
+    reaches tracing that way - ``tool_params`` is a ``ToolParams`` model, so the header dict sits
+    nested inside a single ``model_dump()`` - so those branches redact their result with this.
+    """
+    if isinstance(value, dict):
+        return {
+            key: TRACING_REDACTED_PLACEHOLDER if key in TRACING_REDACTED_KEYS else redact_tracing_keys(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple, set)):
+        return type(value)(redact_tracing_keys(item) for item in value)
+    return value
+
 
 class TruncationMethod(str, Enum):
     """Enum for text truncation methods."""
@@ -163,18 +185,29 @@ def _file_name_for_log(file_obj: Any, index: int | None = None) -> str:
     return "<unnamed file>"
 
 
+def _log_value_or_redaction(key: str, value: Any) -> Any:
+    """The formatted value, or the placeholder when the key names a credential."""
+    if key in TRACING_REDACTED_KEYS:
+        return TRACING_REDACTED_PLACEHOLDER
+    return format_value_for_log(value)
+
+
 def format_value_for_log(value: Any) -> Any:
     """Recursively replace BytesIO/bytes with file names for safe logging.
 
     Mirrors :func:`serialize_files_in_value` structure but never embeds file content —
     only ``name`` (or a ``file_{i}`` / ``<unnamed file>`` placeholder).
+
+    Values of :data:`TRACING_REDACTED_KEYS` are replaced too: the node lifecycle logs render
+    a validated input instance through here at DEBUG, and that instance carries the same
+    credentials the trace redacts.
     """
     if isinstance(value, BytesIO):
         return _file_name_for_log(value)
     if isinstance(value, bytes):
         return f"<bytes len={len(value)}>"
     if isinstance(value, dict):
-        return {k: format_value_for_log(v) for k, v in value.items()}
+        return {k: _log_value_or_redaction(k, v) for k, v in value.items()}
     if isinstance(value, list):
         return [
             _file_name_for_log(item, i) if isinstance(item, BytesIO) else format_value_for_log(item)
@@ -186,9 +219,9 @@ def format_value_for_log(value: Any) -> Any:
             for i, item in enumerate(value)
         )
     if isinstance(value, BaseModel):
-        data = {k: format_value_for_log(getattr(value, k)) for k in type(value).model_fields}
+        data = {k: _log_value_or_redaction(k, getattr(value, k)) for k in type(value).model_fields}
         if value.model_extra:
-            data.update({k: format_value_for_log(v) for k, v in value.model_extra.items()})
+            data.update({k: _log_value_or_redaction(k, v) for k, v in value.model_extra.items()})
         return data
     return value
 
@@ -383,6 +416,9 @@ def format_value(
     if isinstance(value, dict):
         formatted_dict = {}
         for k, v in value.items():
+            if for_tracing and k in TRACING_REDACTED_KEYS:
+                formatted_dict[k] = TRACING_REDACTED_PLACEHOLDER
+                continue
             new_path = f"{path}.{k}" if path else k
             formatted_v = format_value(
                 v,
@@ -415,7 +451,10 @@ def format_value(
         return type(value)(formatted_list)
 
     if isinstance(value, (RunnableResult, *python_input_schema_types)):
-        return value.to_dict(skip_format_types=skip_format_types, force_format_types=force_format_types)
+        formatted = value.to_dict(skip_format_types=skip_format_types, force_format_types=force_format_types)
+        # `to_dict` formats its own members without `for_tracing`, so redaction has to be reapplied
+        # to what it returns - a result carries the node input that may hold the credentials.
+        return redact_tracing_keys(formatted) if for_tracing else formatted
     if isinstance(value, BaseModel):
         dict_kwargs = {"for_tracing": for_tracing} if for_tracing else {}
         if hasattr(value, "to_dict"):
@@ -425,6 +464,9 @@ def format_value(
                 base_dict = value.to_dict()
         else:
             base_dict = value.model_dump()
+
+        if for_tracing:
+            base_dict = redact_tracing_keys(base_dict)
 
         return base_dict
     if isinstance(value, Exception):

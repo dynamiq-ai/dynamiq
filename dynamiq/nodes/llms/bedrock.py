@@ -1,3 +1,7 @@
+from typing import Any, Literal
+
+from pydantic import BaseModel, model_validator
+
 from dynamiq.connections import AWS as AWSConnection
 from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.utils.logger import logger
@@ -8,6 +12,41 @@ _BEDROCK_STOP_UNSUPPORTED_INDICATORS = (
 )
 
 
+class BedrockCacheControl(BaseModel):
+    """Bedrock (Converse API) prompt caching configuration.
+
+    A breakpoint caches everything before it. Converse renders the request as
+    ``tools -> system -> messages``, so the system point also covers the tool schemas
+    (measured: adding a ``tool_config`` point on top of it moves neither tokens nor cost).
+
+    Attributes:
+        ttl: Cache lifetime. Reaches the wire only on the system breakpoint, and only for
+            models priced for extended TTL; the rolling message breakpoint always uses
+            Bedrock's default lifetime.
+        cache_injection_point_index: Message index for the rolling breakpoint.
+            ``-1`` marks the last message, which is what the next agent loop
+            reads back, so each call writes only the delta.
+        cache_system: Also pin a breakpoint on the system message, so the system
+            prompt and tool schemas stay cached when the message tail is rewritten
+            (history compaction). Resolves to nothing without a system message.
+    """
+
+    type: Literal["ephemeral"] = "ephemeral"
+    ttl: Literal["5m", "1h"] | None = "5m"
+    cache_injection_point_index: int = -1
+    cache_system: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_cache_tools(cls, data: Any) -> Any:
+        """``cache_tools`` (v0.64.0) named the same head pin, back when it targeted toolConfig."""
+        if isinstance(data, dict) and "cache_tools" in data:
+            data = dict(data)
+            data.setdefault("cache_system", data.pop("cache_tools"))
+            logger.warning("BedrockCacheControl: `cache_tools` is deprecated, use `cache_system`.")
+        return data
+
+
 class Bedrock(BaseLLM):
     """Bedrock LLM node.
 
@@ -16,9 +55,46 @@ class Bedrock(BaseLLM):
     Attributes:
         connection (AWSConnection | None): The connection to use for the Bedrock LLM.
         MODEL_PREFIX (str): The prefix for the Bedrock model name.
+        cache_control (BedrockCacheControl | Literal[False] | None): Prompt caching config.
+            ``None`` (the default) chooses nothing, leaving an :class:`Agent` free to
+            enable caching on this node at construction; ``False`` opts out. A bare node
+            caches only when given a config -- ``None`` and ``False`` send no breakpoints.
     """
     connection: AWSConnection | None = None
     MODEL_PREFIX = "bedrock/"
+    # ``None`` = nothing chosen (survives a YAML round trip, lets an Agent inject the
+    # default); ``False`` = opt out.
+    cache_control: BedrockCacheControl | Literal[False] | None = None
+
+    def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Attach the node's own prompt caching configuration to completion params."""
+        params = super().update_completion_params(params)
+        return self._apply_cache_control(params, self.cache_control)
+
+    def _apply_cache_control(self, params: dict[str, Any], cache_control: Any) -> dict[str, Any]:
+        """Attach Bedrock cache points for the given configuration."""
+        if not cache_control:
+            return params
+
+        control = cache_control.model_dump(
+            exclude_none=True,
+            exclude={"cache_injection_point_index", "cache_system"},
+        )
+        points = params.setdefault("cache_control_injection_points", [])
+
+        # Head first: points are honored in order, so the durable one wins if the
+        # 4-block budget runs short. Separate copies -- LiteLLM assigns by reference.
+        if cache_control.cache_system:
+            points.append({"location": "message", "role": "system", "control": dict(control)})
+
+        points.append(
+            {
+                "location": "message",
+                "index": cache_control.cache_injection_point_index,
+                "control": dict(control),
+            }
+        )
+        return params
 
     def __init__(self, **kwargs):
         """Initialize the Bedrock LLM node.

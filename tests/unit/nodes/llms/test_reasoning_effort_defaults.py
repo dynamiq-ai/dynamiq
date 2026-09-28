@@ -111,3 +111,21 @@ class TestPrefixedModelIds:
     def test_openai_prefix_is_stripped_before_resolution(self):
         params = _build(_llm("openai/gpt-5.1"))
         assert "reasoning_effort" not in params
+
+
+class TestGpt6Family:
+    """gpt-6 models reject ``max_tokens`` and need the same shaping as gpt-5."""
+
+    @pytest.mark.parametrize("model", ["gpt-6-sol", "gpt-6-astra", "gpt-6-luna", "openai/gpt-6-astra"])
+    def test_max_tokens_sent_as_max_completion_tokens(self, model):
+        llm = _llm(model)
+        params = llm.update_completion_params({"max_tokens": 1000, "stop": ["</output>"]})
+        assert "max_tokens" not in params
+        assert params["max_completion_tokens"] == llm.max_tokens
+        assert "stop" not in params
+
+    @pytest.mark.parametrize("model", ["gpt-6-sol", "gpt-6-astra", "gpt-6-luna"])
+    def test_reasoning_effort_and_verbosity_applied(self, model):
+        params = _build(_llm(model))
+        assert params["reasoning_effort"] == ReasoningEffort.MEDIUM
+        assert params["verbosity"] is not None

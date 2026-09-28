@@ -128,6 +128,10 @@ class JSONInnerThoughtsExtractor:
             return self._handle_comma()
 
         if self.state == "value":
+            if c in " \t\r\n":
+                # Padding around an unquoted top-level value — no scalar token contains
+                # whitespace, so this is never part of the value itself.
+                return "", ""
             # Non-string scalar in top-level value (number, bool, null).
             return self._consume_value_char(c)
 

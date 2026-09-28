@@ -7,7 +7,7 @@ from pathlib import Path
 
 import click
 
-from dynamiq.cli.client import ApiClient
+from dynamiq.cli.client import ApiClient, ok
 from dynamiq.cli.commands.context import with_api_and_settings
 from dynamiq.cli.config import Settings
 
@@ -23,7 +23,7 @@ def list_services(*, api: ApiClient, settings: Settings):
         return
 
     response = api.get(f"/v1/services?project_id={project_id}")
-    if response.status_code == 200:
+    if ok(response):
         services = response.json().get("data", [])
         max_name_len = max(len(s["name"]) for s in services) + 2 if services else 40
         max_category_len = max(len(s["category"]) for s in services) + 2 if services else 40
@@ -44,7 +44,7 @@ def list_services(*, api: ApiClient, settings: Settings):
 @with_api_and_settings
 def get_service(*, api: ApiClient, settings: Settings, service_id: str):
     response = api.get(f"/v1/services/{service_id}")
-    if response.status_code == 200:
+    if ok(response):
         service_info = response.json().get("data", [])
         for key, value in service_info.items():
             click.echo(f"{key}: {value}")
@@ -80,7 +80,7 @@ def create_service(*, api: ApiClient, settings: Settings, name: str, access: str
             "/v1/services",
             json=payload,
         )
-        if response.status_code == 200:
+        if ok(response):
             click.echo(f"Service '{name}' created successfully: {response.json()}")
         else:
             click.echo("Failed to create service.")
@@ -210,7 +210,7 @@ def deploy_service(
         try:
             if image:
                 response = api.post(api_endpoint, json=data)
-                if response.status_code == 200:
+                if ok(response):
                     click.echo("Deployment successfully started with image.")
                 else:
                     click.echo(f"Failed to deploy service. Status: {response.status_code}")
@@ -220,7 +220,7 @@ def deploy_service(
                 with open(archive_path, "rb") as archive_file:
                     files = {"source": ("archive.tar.gz", archive_file, "application/x-tar")}
                     response = api.post(api_endpoint, data={"data": json.dumps(data)}, files=files)
-                    if response.status_code == 200:
+                    if ok(response):
                         click.echo("Deployment successfully started with docker build.")
                     else:
                         click.echo(f"Failed to deploy service. Status: {response.status_code}")
@@ -247,7 +247,7 @@ def _require_project() -> None:
 @with_api_and_settings
 def get_service_status(*, api: ApiClient, settings: Settings, service_id: str):
     response = api.get(f"/v1/services/{service_id}/deployments")
-    if response.status_code == 200:
+    if ok(response):
         service_info = response.json().get("data", [])
         for key, value in service_info[0].items() if service_info else []:
             if not isinstance(value, dict):
@@ -270,7 +270,7 @@ def update_service(*, api: ApiClient, settings: Settings, service_id: str, acces
         click.echo("Nothing to update. Please provide --access or --description.")
         return
     response = api.put(f"/v1/services/{service_id}", json=payload)
-    if response.status_code == 200:
+    if ok(response):
         click.echo(f"Service with ID '{service_id}' updated successfully: {response.json()}")
     else:
         click.echo(f"Failed to update service with ID '{service_id}'.")
@@ -281,7 +281,7 @@ def update_service(*, api: ApiClient, settings: Settings, service_id: str, acces
 @with_api_and_settings
 def delete_service(*, api: ApiClient, settings: Settings, service_id: str):
     response = api.delete(f"/v1/services/{service_id}")
-    if response.status_code == 200:
+    if ok(response):
         click.echo(f"Service with ID '{service_id}' deleted successfully.")
     else:
         click.echo(f"Failed to delete service with ID '{service_id}'.")

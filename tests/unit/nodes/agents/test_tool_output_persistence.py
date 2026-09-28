@@ -1,6 +1,12 @@
+import io
 import re
 
-from dynamiq.nodes.agents.utils import ToolOutputSandboxPersistenceConfig, process_tool_output_with_sandbox_persistence
+from dynamiq.nodes.agents.utils import (
+    ToolOutputSandboxPersistenceConfig,
+    process_tool_output_for_agent,
+    process_tool_output_with_sandbox_persistence,
+    summarize_binary_tool_output,
+)
 
 
 class DummySandbox:
@@ -167,3 +173,56 @@ def test_truncate_false_returns_full_content_with_sandbox_enabled():
 
     assert result == content
     assert sandbox.saved == []
+
+
+def test_binary_tool_output_is_summarized_instead_of_escaped():
+    """A text-to-speech tool returns audio bytes as its content. Rendering those with str() fills
+    the model's context with thousands of escape sequences and tells it nothing."""
+    audio = b"\xff\xfb\x90\x64" * 2000
+
+    result = process_tool_output_for_agent(audio)
+
+    assert result == "<8000 bytes of binary data>"
+
+
+def test_binary_values_inside_a_tool_output_do_not_break_serialization():
+    """Any dict carrying bytes used to raise TypeError: Object of type bytes is not JSON serializable."""
+    result = process_tool_output_for_agent({"content": b"\x00\x01", "mime_type": "audio/mpeg"})
+
+    assert result == "<2 bytes of binary data>"
+
+    result = process_tool_output_for_agent({"waveform": b"\x00\x01", "mime_type": "audio/mpeg"})
+
+    assert "<2 bytes of binary data>" in result
+    assert "audio/mpeg" in result
+
+
+def test_binary_tool_output_is_summarized_with_the_file_it_produced():
+    """The bytes are useless to the model, but knowing what was made and where it went is not."""
+    audio = io.BytesIO(b"\xff\xfb\x90\x64")
+    audio.name = "greeting.mp3"
+
+    summary = summarize_binary_tool_output(
+        {"content": b"\xff\xfb\x90\x64" * 2000, "files": [audio], "mime_type": "audio/mpeg"}
+    )
+
+    assert summary == "Produced audio/mpeg (8000 bytes), returned as file 'greeting.mp3'."
+
+
+def test_binary_tool_output_summary_copes_with_no_file_and_no_type():
+    assert summarize_binary_tool_output({"content": b"\x00\x01"}) == "Produced 2 bytes of binary data."
+
+
+def test_a_text_body_that_happens_to_be_bytes_is_still_readable():
+    """HttpApiCall leaves `content` as bytes for anything but an exact application/json header,
+    so most JSON, HTML and XML bodies arrive here as bytes and the agent has to be able to read
+    them."""
+    body = b'{"answer": 42, "detail": "what the agent needed"}'
+
+    assert process_tool_output_for_agent(body) == '{"answer": 42, "detail": "what the agent needed"}'
+    assert process_tool_output_for_agent({"content": body}) == '{"answer": 42, "detail": "what the agent needed"}'
+
+
+def test_genuine_binary_is_still_summarized():
+    assert process_tool_output_for_agent(b"\xff\xfb\x90\x64" * 10) == "<40 bytes of binary data>"
+    assert process_tool_output_for_agent(b"RIFF\x24\x00\x00\x00WAVE") == "<12 bytes of binary data>"

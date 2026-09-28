@@ -18,7 +18,7 @@ This directory contains examples demonstrating how to apply Dynamiq agents to so
 
 ### Humanizer skill (Dynamiq API)
 
-- **`agent_humanizer_skill.py`**: Uses the **humanizer** skill from the Dynamiq API (skill id `cfb2ddd9-7b5b-457f-9ef6-666db9c45eb3`, version `adcf8695-31b0-4a50-ba68-3606b5158e7c`). The agent uses SkillsTool to list and get the humanizer skill content, then applies its guidelines to remove signs of AI-generated writing and make text sound more natural. Set `DYNAMIQ_URL` (e.g. `https://api.sandbox.getdynamiq.ai`) and `DYNAMIQ_API_KEY`.
+- **`agent_humanizer_skill.py`**: Uses the **humanizer** skill from the Dynamiq API (skill id `cfb2ddd9-7b5b-457f-9ef6-666db9c45eb3`, version `adcf8695-31b0-4a50-ba68-3606b5158e7c`). The agent uses SkillsTool to list and get the humanizer skill content, then applies its guidelines to remove signs of AI-generated writing and make text sound more natural. Set `DYNAMIQ_URL` (e.g. `https://api.getdynamiq.ai`) and `DYNAMIQ_API_KEY`.
 
 ### Financial Agent
 

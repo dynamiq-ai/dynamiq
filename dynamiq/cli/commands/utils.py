@@ -7,13 +7,18 @@ from .app import app
 from .config import config
 from .connection import connection
 from .dataset import dataset
+from .deployment import database, finetuning, inference
 from .evaluation import evaluation
 from .integration import integration
+from .knowledgebase import knowledgebase
+from .memory import memory
 from .org import org
 from .project import project
 from .resource_profiles import profile
 from .service import service
+from .skill import skill
 from .trigger import trigger
+from .voice import voice
 from .workflow import workflow
 
 
@@ -43,6 +48,19 @@ cli.add_command(dataset, name="dataset")
 cli.add_command(dataset, name="datasets")
 cli.add_command(connection, name="connection")
 cli.add_command(connection, name="connections")
+cli.add_command(memory, name="memory")
+cli.add_command(memory, name="memories")
+cli.add_command(knowledgebase, name="knowledge-base")
+cli.add_command(knowledgebase, name="knowledge-bases")
+cli.add_command(skill, name="skill")
+cli.add_command(skill, name="skills")
+cli.add_command(finetuning, name="fine-tuning")
+cli.add_command(inference, name="inference")
+cli.add_command(inference, name="inferences")
+cli.add_command(database, name="database")
+cli.add_command(database, name="databases")
+cli.add_command(voice, name="voice")
+cli.add_command(voice, name="voice-agents")
 cli.add_command(app, name="app")
 cli.add_command(app, name="apps")
 cli.add_command(trigger, name="trigger")

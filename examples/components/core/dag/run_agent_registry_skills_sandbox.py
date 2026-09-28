@@ -152,7 +152,7 @@ def run_with_ui_tracing(
     access_key: str | None = None,
 ):
     """Set DYNAMIQ_TRACE_ACCESS_KEY (and optional DYNAMIQ_TRACE_BASE_URL)."""
-    base_url = base_url or os.environ.get("DYNAMIQ_TRACE_BASE_URL", "https://collector.sandbox.getdynamiq.ai")
+    base_url = base_url or os.environ.get("DYNAMIQ_TRACE_BASE_URL", "https://collector.getdynamiq.ai")
     access_key = access_key or os.environ.get("DYNAMIQ_TRACE_ACCESS_KEY")
     tracing = DynamiqTracingCallbackHandler(base_url=base_url, access_key=access_key)
     wf, result = run_agent_registry_skills_sandbox(prompt=prompt, callbacks=[tracing])

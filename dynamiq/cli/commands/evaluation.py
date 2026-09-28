@@ -1,6 +1,6 @@
 import click
 
-from dynamiq.cli.client import ApiClient
+from dynamiq.cli.client import ApiClient, ok
 from dynamiq.cli.commands.context import with_api_and_settings
 from dynamiq.cli.commands.workflow import echo_list, echo_response, pagination_options, read_json_arg, require_project
 from dynamiq.cli.config import Settings
@@ -121,7 +121,7 @@ def get_results(*, api: ApiClient, settings: Settings, evaluation_id: str, page,
 def download_results(*, api: ApiClient, settings: Settings, evaluation_id: str, out_path: str | None):
     """Download the ENTIRE result set in one call - no pagination to walk."""
     response = api.get(f"/v1/evaluations/{evaluation_id}/results/download")
-    if response.status_code != 200:
+    if not ok(response):
         raise click.ClickException(f"HTTP {response.status_code}: {response.text.strip()[:2000]}")
     if out_path:
         with open(out_path, "w") as f:
@@ -158,3 +158,83 @@ def rerun_evaluation(*, api: ApiClient, settings: Settings, evaluation_id: str):
 def delete_evaluation(*, api: ApiClient, settings: Settings, evaluation_id: str):
     """Delete an evaluation permanently."""
     echo_response(api.delete(f"/v1/evaluations/{evaluation_id}"))
+
+
+# App evaluations are the LIVE counterpart to the batch ones above: a metric attached to a
+# deployed app scores a sampled share of real traffic. They are created under the app but
+# managed under /v1/app-evaluations/{id}, which is why the commands below split that way.
+
+
+@evaluation.command("app-list")
+@click.argument("app_id")
+@with_api_and_settings
+def list_app_evaluations(*, api: ApiClient, settings: Settings, app_id: str):
+    """List the evaluations attached to a deployed app."""
+    echo_response(api.get(f"/v1/apps/{app_id}/evaluations"))
+
+
+@evaluation.command("app-attach")
+@click.argument("app_id")
+@click.argument("payload")
+@with_api_and_settings
+def attach_app_evaluation(*, api: ApiClient, settings: Settings, app_id: str, payload: str):
+    """Attach a metric to an app so its LIVE runs are scored as they happen.
+
+    REQUIRED: `name`, `metric_id`, `metric_version_id` (both UUIDs - `evaluation metrics`
+    prints them as `id` and `latest_version_id`). Optional: `enabled` (default true),
+    `sample_rate` 0.0-1.0, `input_transformer`.
+
+    There is no dataset and no ground truth here, so a metric that compares against an
+    expected answer cannot work - pick one that judges the answer on its own. Every sampled
+    run costs an extra LLM call, so start around 0.1-0.2 rather than 1.0.
+    """
+    echo_response(api.post(f"/v1/apps/{app_id}/evaluations", json=read_json_arg(payload)))
+
+
+@evaluation.command("app-get")
+@click.argument("evaluation_id")
+@with_api_and_settings
+def get_app_evaluation(*, api: ApiClient, settings: Settings, evaluation_id: str):
+    """Fetch one app evaluation by its own id (NOT the app id)."""
+    echo_response(api.get(f"/v1/app-evaluations/{evaluation_id}"))
+
+
+@evaluation.command("app-update")
+@click.argument("evaluation_id")
+@click.argument("payload")
+@with_api_and_settings
+def update_app_evaluation(*, api: ApiClient, settings: Settings, evaluation_id: str, payload: str):
+    """Change an app evaluation - typically `enabled` or `sample_rate`.
+
+    The body is a full replacement: `name`, `metric_version_id`, `enabled` and `sample_rate`
+    are all sent, so read it with `app-get` first and edit that, or a field you omit is reset.
+
+    The METRIC itself cannot be changed - only its version. A `metric_version_id` belonging to
+    a different metric is rejected. To move to another metric, `app-attach` it as a second
+    evaluation, confirm it scores, then `app-detach` the old one.
+    """
+    echo_response(api.put(f"/v1/app-evaluations/{evaluation_id}", json=read_json_arg(payload)))
+
+
+@evaluation.command("app-runs")
+@click.argument("evaluation_id")
+@pagination_options
+@with_api_and_settings
+def list_app_evaluation_runs(
+    *, api: ApiClient, settings: Settings, evaluation_id: str, page, page_size, fetch_all, compact
+):
+    """Scores produced by an app evaluation, newest first.
+
+    Empty is not a failure: nothing is scored until the app receives traffic, and only the
+    sampled share of it is.
+    """
+    echo_list(api, f"/v1/app-evaluations/{evaluation_id}/runs", None, page, page_size, fetch_all, compact)
+
+
+@evaluation.command("app-detach")
+@click.argument("evaluation_id")
+@click.confirmation_option(prompt="Detach this evaluation from the app?")
+@with_api_and_settings
+def delete_app_evaluation(*, api: ApiClient, settings: Settings, evaluation_id: str):
+    """Stop scoring live runs and delete the attachment permanently."""
+    echo_response(api.delete(f"/v1/app-evaluations/{evaluation_id}"))

@@ -10,6 +10,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationInfo, field_validator, model_validator
 
 from dynamiq.checkpoints.checkpoint import BaseCheckpointState
+from dynamiq.components.converters.text import decode_text_bytes
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -25,6 +26,7 @@ from dynamiq.nodes.converters.pypdf import DocumentCreationMode as PyPDFDocument
 from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.types import ActionType
+from dynamiq.nodes.tools.utils import find_positions
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox
 from dynamiq.storages.file.base import FileStore
@@ -35,24 +37,9 @@ logger = logging.getLogger(__name__)
 
 EXTRACTED_TEXT_SUFFIX = ".extracted.txt"
 RESERVED_AGENT_PATH_PREFIX = "._agent"
-
-
-def _find_positions(content: str, needle: str) -> list[int]:
-    """Offsets of every position ``needle`` occurs at, overlapping ones included.
-
-    "aa" in "aaa" reports two candidate positions where ``str.count`` sees one. Either
-    could be the site the caller meant, which is what makes such a find string
-    ambiguous; how many a replacement would actually consume is a separate question,
-    answered by ``str.count``.
-    """
-    if not needle:
-        return []
-    positions = []
-    start = 0
-    while (index := content.find(needle, start)) != -1:
-        positions.append(index)
-        start = index + 1
-    return positions
+# Types read raw instead of through a converter: no extracted-text cache (which would go stale
+# after a write) and no stripping, so line ranges match the bytes on disk.
+RAW_TEXT_FILE_TYPES = {FileType.PLAIN_TEXT_DATA}
 
 
 def _line_of(content: str, offset: int) -> int:
@@ -801,13 +788,19 @@ class FileReadTool(Node):
                 result_payload["content"] = processed
                 return result_payload
 
+            detected_type = None
             try:
                 file_io = BytesIO(content)
                 filename = os.path.basename(input_data.file_path)
 
                 detected_type = self._detect_file_type(file_io, filename, config, **kwargs)
 
-                if detected_type:
+                if detected_type in RAW_TEXT_FILE_TYPES:
+                    logger.debug(
+                        f"Tool {self.name} - {self.id}: detected type {detected_type} is read raw, "
+                        "skipping converter/extraction cache"
+                    )
+                elif detected_type:
                     text_content, page_entries = self._process_file_with_converter(
                         file_io,
                         filename,
@@ -892,12 +885,18 @@ class FileReadTool(Node):
                     f"Tool {self.name} - {self.id}: file processing failed: {str(e)}, falling back to raw content"
                 )
 
-            if input_data.start_line is not None or input_data.end_line is not None:
+            # A recognized plain-text type is known to be text, so it is decoded leniently.
+            # Anything else is only treated as text if it is valid UTF-8; otherwise it falls
+            # through to the binary rendering below, since nothing says it is text.
+            if detected_type in RAW_TEXT_FILE_TYPES:
+                text_fallback = decode_text_bytes(content)
+            else:
                 try:
                     text_fallback = content.decode("utf-8")
                 except UnicodeDecodeError:
                     text_fallback = None
 
+            if input_data.start_line is not None or input_data.end_line is not None:
                 if text_fallback is not None:
                     sliced, total, a_start, a_end = self._slice_lines(
                         text_fallback, input_data.start_line, input_data.end_line, input_data.file_path
@@ -908,6 +907,16 @@ class FileReadTool(Node):
                         "total_lines": total,
                         "line_range": [a_start, a_end],
                     }
+
+            if text_fallback is not None:
+                rendered_text = self._render_text_content(
+                    text_content=text_fallback,
+                    mode=mode,
+                    chunk_size=chunk_size,
+                    preview_limit=preview_limit,
+                    file_path=input_data.file_path,
+                )
+                return {"content": rendered_text, "file_info": file_info}
 
             rendered_content = self._render_binary_content(
                 content=content,
@@ -1439,7 +1448,7 @@ class FileWriteTool(Node):
         for edit in edits:
             # Located against current content, not the original: a prior edit can
             # add or remove candidate positions, and shift the lines they sit on.
-            positions = _find_positions(content, edit.find)
+            positions = find_positions(content, edit.find)
             if not positions:
                 skipped.append(edit.find)
                 continue
@@ -1465,7 +1474,7 @@ class FileWriteTool(Node):
             details = []
             duplicated_by_batch = False
             for find, count in ambiguous:
-                in_file = _find_positions(stored, find)
+                in_file = find_positions(stored, find)
                 if len(in_file) > 1:
                     lines = _format_lines([_line_of(stored, position) for position in in_file])
                     details.append(f"{repr(find[:80])} matches {len(in_file)} places (lines {lines})")

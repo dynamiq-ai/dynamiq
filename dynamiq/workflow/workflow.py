@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, computed_field
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.flows import BaseFlow, Flow
+from dynamiq.nodes import Node
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableFailedNodeInfo, RunnableResultError
 from dynamiq.types.cancellation import CanceledException
@@ -18,6 +19,49 @@ from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
     from dynamiq.serializers.loaders.yaml import WorkflowYamlData
+
+
+def _collect_flow(flow: Flow, flows: dict[str, Flow], nodes: dict[str, Node], seen: set[int]) -> None:
+    """Registers a flow and its nodes, then the flows those nodes hold.
+
+    A node dumps a flow it holds as `flow: <id>` wherever it sits (a SubWorkflow in a flow, in a
+    Map, in an agent's tools), so the flow and its nodes must be emitted in their own sections for
+    the reference to resolve on load.
+    """
+    if (known := flows.get(flow.id)) is not None:
+        if known is not flow:
+            raise ValueError(
+                f"Flow id '{flow.id}' is used by two different flows; ids must be unique to dump a workflow"
+            )
+        return
+    flows[flow.id] = flow
+    for node in flow.nodes:
+        # The sections are keyed by id, so a second node under the same id would silently replace the
+        # first and the reloaded flows would share it.
+        if (known := nodes.get(node.id)) is not None and known is not node:
+            raise ValueError(
+                f"Node id '{node.id}' is used by two different nodes; ids must be unique to dump a workflow"
+            )
+        nodes[node.id] = node
+        _collect_held(node, flows, nodes, seen)
+
+
+def _collect_held(value: Any, flows: dict[str, Flow], nodes: dict[str, Node], seen: set[int]) -> None:
+    """Follows the flows and nodes a value holds, through lists and dicts, visiting each node once."""
+    if isinstance(value, Flow):
+        _collect_flow(value, flows, nodes, seen)
+    elif isinstance(value, Node):
+        if id(value) in seen:
+            return
+        seen.add(id(value))
+        for name in type(value).model_fields:
+            _collect_held(getattr(value, name, None), flows, nodes, seen)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _collect_held(item, flows, nodes, seen)
+    elif isinstance(value, dict):
+        for item in value.values():
+            _collect_held(item, flows, nodes, seen)
 
 
 class Workflow(BaseModel, Runnable):
@@ -134,12 +178,10 @@ class Workflow(BaseModel, Runnable):
         """
         from dynamiq.serializers.loaders.yaml import WorkflowYamlData
 
-        return WorkflowYamlData(
-            workflows={self.id: self},
-            flows={self.flow.id: self.flow},
-            nodes={node.id: node for node in self.flow.nodes},
-            connections={},
-        )
+        flows: dict[str, Flow] = {}
+        nodes: dict[str, Node] = {}
+        _collect_flow(self.flow, flows, nodes, seen=set())
+        return WorkflowYamlData(workflows={self.id: self}, flows=flows, nodes=nodes, connections={})
 
     def to_yaml_file(self, file_path: str | PathLike | IO[Any]):
         """

@@ -379,6 +379,181 @@ def test_file_read_tool_with_sandbox_like_backend(llm_model):
     assert "Alice" in result.output["content"]
 
 
+@pytest.mark.parametrize(
+    "file_path",
+    [
+        "/home/user/traces/_manifest.json",
+        "data/events.jsonl",
+        "data/events.ndjson",
+        "config/settings.yaml",
+        "config/settings.yml",
+        "config/pyproject.toml",
+        "feeds/feed.xml",
+        "logs/run.log",
+        "notes/readme.markdown",
+    ],
+)
+def test_file_read_tool_returns_text_formats_as_text(llm_model, file_path):
+    """Text data formats come back as text, not as a ``b'...'`` bytes repr."""
+    file_store = InMemoryFileStore()
+    raw = '{\n  "window_start": "2026-09-10",\n  "note": "caf\u00e9"\n}'
+    file_store.store(file_path.lstrip("/"), raw.encode("utf-8"))
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    result = tool.run({"file_path": file_path.lstrip("/"), "brief": "Read"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = result.output["content"]
+    assert isinstance(content, str)
+    assert content == raw
+    assert not content.startswith("b'")
+
+
+@pytest.mark.parametrize("file_path", ["data/state.json", "logs/run.log", "notes/a.markdown", "notes/b.text"])
+def test_file_read_tool_plain_text_data_reread_after_write_is_fresh(llm_model, file_path):
+    """Re-reading a plain-text data format after it changes on disk returns the new content."""
+    file_store = InMemoryFileStore()
+    file_store.store(file_path, b'{"v": 1}')
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    first = tool.run({"file_path": file_path, "brief": "Read v1"})
+    assert first.status == RunnableStatus.SUCCESS
+    assert first.output["content"] == '{"v": 1}'
+    assert not file_store.exists(f"{file_path}{EXTRACTED_TEXT_SUFFIX}")
+
+    file_store.store(file_path, b'{"v": 2}', overwrite=True)
+    second = tool.run({"file_path": file_path, "brief": "Read v2"})
+    assert second.status == RunnableStatus.SUCCESS
+    assert second.output["content"] == '{"v": 2}'
+    assert not file_store.exists(f"{file_path}{EXTRACTED_TEXT_SUFFIX}")
+
+
+def test_file_read_tool_plain_text_data_reread_after_append_is_fresh(llm_model):
+    """Appending to a .log file is reflected on the next read, not masked by a stale cache."""
+    file_store = InMemoryFileStore()
+    file_store.store("logs/run.log", b"start\n")
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    first = tool.run({"file_path": "logs/run.log", "brief": "Read"})
+    assert first.output["content"] == "start\n"
+
+    file_store.store("logs/run.log", b"start\nmore\n", overwrite=True)
+    second = tool.run({"file_path": "logs/run.log", "brief": "Read again"})
+    assert second.output["content"] == "start\nmore\n"
+
+
+@pytest.mark.parametrize("file_path", ["data/state.json", "logs/run.log", "notes/a.markdown", "notes/b.text"])
+def test_file_read_tool_plain_text_data_line_range_matches_file_on_disk(llm_model, file_path):
+    """start_line/end_line and total_lines are computed against the file as written."""
+    file_store = InMemoryFileStore()
+    file_store.store(file_path, b"\n\nline3\nline4\nline5\n")
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    result = tool.run({"file_path": file_path, "start_line": 3, "end_line": 3, "brief": "Read line 3"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["total_lines"] == 5
+    assert result.output["line_range"] == [3, 3]
+    assert "line3" in result.output["content"]
+    assert not file_store.exists(f"{file_path}{EXTRACTED_TEXT_SUFFIX}")
+
+
+def test_file_search_tool_plain_text_data_searches_fresh_content_after_write(file_store, llm_model):
+    """file-search over a plain-text data format is not stuck on a stale extracted-text cache."""
+    file_store.store("data/state.json", b'{"status": "pending"}')
+    read_tool = FileReadTool(file_store=file_store, llm=llm_model)
+    read_tool.run({"file_path": "data/state.json", "brief": "Read"})
+    assert not file_store.exists("data/state.json.extracted.txt")
+
+    file_store.store("data/state.json", b'{"status": "done"}', overwrite=True)
+
+    search_tool = FileSearchTool(file_store=file_store)
+    result = search_tool.run({"query": "done", "file_path": "data/state.json", "brief": "Search"})
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"]["total_matches"] == 1
+
+    stale = search_tool.run({"query": "pending", "file_path": "data/state.json", "brief": "Search stale"})
+    assert stale.status == RunnableStatus.SUCCESS
+    assert stale.output["content"]["total_matches"] == 0
+
+
+def test_file_read_tool_text_format_with_undecodable_bytes_is_still_text(file_store, llm_model):
+    """A known text format with stray non-UTF-8 bytes is decoded leniently, not returned as bytes."""
+    file_store.store("logs/run.log", b"started\n\xff\xfe broken byte\nfinished")
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    result = tool.run({"file_path": "logs/run.log", "brief": "Read log"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = result.output["content"]
+    assert isinstance(content, str)
+    assert "started" in content and "finished" in content
+
+
+def test_file_read_tool_plain_text_data_cp1252_log_is_decoded_not_replaced(file_store, llm_model):
+    """A cp1252-encoded .log is decoded via charset detection, not corrupted with replacement chars."""
+    file_store.store("logs/run.log", b"start\ncaf\xe9 au lait\nend\n")
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    result = tool.run({"file_path": "logs/run.log", "brief": "Read log"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == "start\ncafé au lait\nend\n"
+    assert "�" not in result.output["content"]
+
+
+def test_file_read_tool_plain_text_data_utf16_bom_json_is_decoded(file_store, llm_model):
+    """A UTF-16 (with BOM) .json file decodes correctly, with no NULs or replacement chars."""
+    raw = '{"note": "café"}'
+    file_store.store("data/state.json", raw.encode("utf-16"))
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    result = tool.run({"file_path": "data/state.json", "brief": "Read"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = result.output["content"]
+    assert content == raw
+    assert "\x00" not in content
+    assert "�" not in content
+
+
+def test_file_read_tool_plain_text_data_utf8_bom_yaml_is_decoded_without_bom(file_store, llm_model):
+    """A UTF-8 file with a leading BOM decodes without the BOM character in the content."""
+    raw = "key: café\n"
+    file_store.store("config/settings.yaml", raw.encode("utf-8-sig"))
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    result = tool.run({"file_path": "config/settings.yaml", "brief": "Read config"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = result.output["content"]
+    assert content == raw
+    assert not content.startswith("﻿")
+
+
+def test_file_read_tool_unknown_extension_utf8_falls_back_to_text(file_store, llm_model):
+    """An unrecognised extension holding UTF-8 is returned as text, not ``str(bytes)``."""
+    file_store.store("scripts/build.sh", b"#!/bin/sh\necho 'hi'\n")
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    result = tool.run({"file_path": "scripts/build.sh", "brief": "Read script"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == "#!/bin/sh\necho 'hi'\n"
+
+
+def test_file_read_tool_unknown_extension_binary_stays_bytes(file_store, llm_model):
+    """Non-UTF-8 content of an unknown type keeps the binary rendering."""
+    payload = b"\x00\x9f\x92\x96binary"
+    file_store.store("blobs/data.bin", payload)
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    result = tool.run({"file_path": "blobs/data.bin", "brief": "Read blob"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == payload
+
+
 # ---------------------------------------------------------------------------
 # FileWriteTool – edit mode tests
 # ---------------------------------------------------------------------------

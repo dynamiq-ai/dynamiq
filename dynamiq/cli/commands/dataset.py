@@ -1,6 +1,6 @@
 import click
 
-from dynamiq.cli.client import ApiClient
+from dynamiq.cli.client import ApiClient, ok
 from dynamiq.cli.commands.context import with_api_and_settings
 from dynamiq.cli.commands.workflow import echo_list, echo_response, pagination_options, read_json_arg, require_project
 from dynamiq.cli.config import Settings
@@ -117,7 +117,7 @@ def fork_version(*, api: ApiClient, settings: Settings, dataset_version_id: str)
 def download_version(*, api: ApiClient, settings: Settings, dataset_version_id: str, fmt: str, out_path: str | None):
     """Download a whole version in one call (json or jsonl)."""
     response = api.get(f"/v1/dataset-versions/{dataset_version_id}/download", params={"format": fmt})
-    if response.status_code != 200:
+    if not ok(response):
         raise click.ClickException(f"HTTP {response.status_code}: {response.text.strip()[:2000]}")
     if out_path:
         with open(out_path, "w") as f:

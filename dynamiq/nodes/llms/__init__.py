@@ -3,7 +3,7 @@ from .anthropic import Anthropic, AnthropicCacheControl
 from .anyscale import Anyscale
 from .azureai import AzureAI
 from .base import BaseLLM
-from .bedrock import Bedrock
+from .bedrock import Bedrock, BedrockCacheControl
 from .cerebras import Cerebras
 from .cohere import Cohere
 from .custom_llm import CustomLLM

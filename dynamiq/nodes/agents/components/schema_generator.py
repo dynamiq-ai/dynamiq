@@ -1,8 +1,9 @@
 """Schema generation for Agent function calling and structured output modes."""
 
 import types
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, Literal, Union, get_args, get_origin
+from typing import Any, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -17,6 +18,23 @@ TYPE_MAPPING = {
     dict: "object",
 }
 
+THOUGHT_DESCRIPTION_TOOL_CALL = (
+    "Your first-person reasoning for this step, written before you decide the arguments below: "
+    "what you already know, why this specific tool is the right one right now (not a restatement "
+    "of the original task), and what you expect it to return. 1-3 concrete sentences."
+)
+THOUGHT_DESCRIPTION_FINAL_ANSWER = (
+    "Your first-person reasoning for why you can answer now: which findings or tool results "
+    "support the answer below. 1-3 concrete sentences, not a restatement of the original task."
+)
+THOUGHT_DESCRIPTION_PLAN_NEXT_ACTION = (
+    "Your first-person reasoning for this step, written before you decide the action below: "
+    "if picking a tool, what you already know, why this specific tool is the right one right "
+    "now (not a restatement of the original task), and what you expect it to return; if "
+    "finishing, which findings or tool results support the answer you're about to give. "
+    "1-3 concrete sentences."
+)
+
 FINAL_ANSWER_FUNCTION_SCHEMA = {
     "type": "function",
     "function": {
@@ -28,7 +46,7 @@ FINAL_ANSWER_FUNCTION_SCHEMA = {
             "properties": {
                 "thought": {
                     "type": "string",
-                    "description": "Your reasoning about why you can answer original question.",
+                    "description": THOUGHT_DESCRIPTION_FINAL_ANSWER,
                 },
                 "answer": {"type": "string", "description": "Answer on initial request."},
                 "output_files": {
@@ -81,7 +99,7 @@ def build_final_answer_function_schema(response_format: dict | type[BaseModel] |
         "properties": {
             "thought": {
                 "type": "string",
-                "description": "Your reasoning about why you can answer original question.",
+                "description": THOUGHT_DESCRIPTION_FINAL_ANSWER,
             },
             "answer": answer_schema,
             "output_files": {
@@ -119,6 +137,12 @@ def _is_accessible_to_agent(field: Any) -> bool:
     return not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True)
 
 
+def _holds_many_files(annotation: Any) -> bool:
+    """Whether a stored-file field can hold more than one file."""
+    members = get_args(annotation) if get_origin(annotation) in (Union, types.UnionType) else (annotation,)
+    return any((get_origin(member) or member) in (list, tuple, set, dict) for member in members)
+
+
 def _reorder_fields(fields: dict) -> list[tuple[str, Any]]:
     """Reorder fields so that priority fields (e.g. brief) come first."""
     priority = [(k, v) for k, v in fields.items() if k in PRIORITY_FIELDS]
@@ -143,10 +167,13 @@ def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str]
         for name, field in _reorder_fields(tool.resolved_input_schema.model_fields):
             if _is_accessible_to_agent(field):
                 args = get_args(field.annotation)
-                if get_origin(field.annotation) in (Union, types.UnionType):
+                # Checked before the union branch: a stored-file field accepts whatever the tool
+                # needs at execution (bytes, BytesIO, a mapping), but the LLM only ever names files.
+                # The arity still has to match, or the model sends a list to a field holding one file.
+                if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
+                    type_str = "tuple[str, ...]" if _holds_many_files(field.annotation) else "str"
+                elif get_origin(field.annotation) in (Union, types.UnionType):
                     type_str = str(field.annotation)
-                elif field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
-                    type_str = "tuple[str, ...]"
                 elif args and hasattr(args[0], "model_fields") and get_origin(field.annotation) is list:
                     nested_fields = [
                         f"{fn}: {getattr(fi.annotation, '__name__', str(fi.annotation))} - {fi.description or ''}"
@@ -199,7 +226,7 @@ def generate_structured_output_schemas(
                 "properties": {
                     "thought": {
                         "type": "string",
-                        "description": "Your reasoning about the next step.",
+                        "description": THOUGHT_DESCRIPTION_PLAN_NEXT_ACTION,
                     },
                     "action": {
                         "type": "string",
@@ -418,7 +445,7 @@ def generate_function_calling_schemas(
 
             # Flat-args: prepend `thought` so it streams first and the model sees it before tool params.
             properties = {
-                "thought": {"type": "string", "description": "Your reasoning about using this tool."},
+                "thought": {"type": "string", "description": THOUGHT_DESCRIPTION_TOOL_CALL},
                 **properties,
             }
             # Only genuinely-required fields are required here. Strict mode (which
@@ -454,7 +481,7 @@ def generate_function_calling_schemas(
                         "properties": {
                             "thought": {
                                 "type": "string",
-                                "description": "Your reasoning about using this tool.",
+                                "description": THOUGHT_DESCRIPTION_TOOL_CALL,
                             },
                         },
                         "additionalProperties": allows_extra,

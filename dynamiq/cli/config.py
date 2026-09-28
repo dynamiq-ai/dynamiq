@@ -1,6 +1,5 @@
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -75,17 +74,10 @@ class Settings(BaseModel):
             except json.JSONDecodeError as exc:
                 raise SystemExit(f"❌ Corrupted credentials file at {_CREDS_FILE_PATH}: {exc}") from exc
 
-        # Explicit env always beats the stored files (catalyst injects env into sandboxes).
-        # Warn when they disagree so the switch is never silent.
+        # Env beats the stored files (catalyst injects env into sandboxes). Documented
+        # precedence, so it is not worth warning about on every invocation; `config show`
+        # reports what is actually in effect.
         stored = {**disk, **creds}
-        for key, value in env.items():
-            if key in stored and stored[key] != value:
-                source = "DYNAMIQ_API_TOKEN/KEY" if key == "api_key" else f"DYNAMIQ_{key.upper()}"
-                print(
-                    f"warning: {key} from the environment ({source}) overrides the value stored in "
-                    f"{_CONFIG_FILE_PATH.parent}. Unset it to use the stored one.",
-                    file=sys.stderr,
-                )
         merged = {**stored, **env}
         try:
             return cls.model_validate(merged)

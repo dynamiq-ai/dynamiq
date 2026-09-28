@@ -65,3 +65,33 @@ def test_workflow_with_httpapicall(
     assert call_mock.last_request.url == url
     for header, value in expected_headers.items():
         assert call_mock.last_request.headers.get(header) == value
+
+
+def test_an_agent_can_read_a_json_body_that_arrived_as_bytes(requests_mock):
+    """`ResponseType.RAW` is the default and the auto-JSON override needs an exact
+    `application/json` header, so an ordinary charset-tagged body reaches the agent as bytes."""
+    from dynamiq.connections import OpenAI as OpenAIConnection
+    from dynamiq.nodes.agents import Agent
+    from dynamiq.nodes.llms import OpenAI
+
+    url = "https://api.example.com/answer"
+    tool = HttpApiCall(
+        connection=connections.Http(method=connections.HTTPMethod.GET, url=url),
+        name="api-call",
+    )
+    requests_mock.get(
+        url,
+        content=b'{"answer": 42, "detail": "what the agent needed"}',
+        headers={"content-type": "application/json; charset=utf-8"},
+    )
+    agent = Agent(
+        name="Agent",
+        llm=OpenAI(connection=OpenAIConnection(api_key="k"), model="gpt-4o"),
+        role="r",
+        tools=[tool],
+    )
+
+    observation, _, _ = agent._run_tool(tool, {"data": {}}, config=None)
+
+    assert "what the agent needed" in observation
+    assert "bytes of binary data" not in observation

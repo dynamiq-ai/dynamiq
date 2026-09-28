@@ -64,7 +64,7 @@ def run_workflow_yaml_cycle_with_ui_tracing(
     access_key: str | None = None,
 ):
     """Run YAML cycle with Dynamiq UI tracing callback."""
-    base_url = base_url or os.environ.get("DYNAMIQ_TRACE_BASE_URL", "https://collector.sandbox.getdynamiq.ai")
+    base_url = base_url or os.environ.get("DYNAMIQ_TRACE_BASE_URL", "https://collector.getdynamiq.ai")
     access_key = access_key or os.environ.get("DYNAMIQ_TRACE_ACCESS_KEY")
     tracing = DynamiqTracingCallbackHandler(base_url=base_url, access_key=access_key)
     results = run_workflow_yaml_cycle(

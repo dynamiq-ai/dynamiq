@@ -1,7 +1,7 @@
 """Run agent with Dynamiq API skill (humanizer) from YAML.
 
 Loads agent_humanizer_skill.yaml, runs with a humanizer prompt. Set DYNAMIQ_URL
-(e.g. https://api.sandbox.getdynamiq.ai) and DYNAMIQ_API_KEY.
+(e.g. https://api.getdynamiq.ai) and DYNAMIQ_API_KEY.
 """
 
 from pathlib import Path

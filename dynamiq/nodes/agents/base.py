@@ -35,10 +35,12 @@ from dynamiq.nodes.agents.utils import (
     ToolOutputSandboxPersistenceConfig,
     bytes_to_data_url,
     convert_bytesio_to_file_info,
+    decode_text_payload,
     extract_message_text,
     is_image_file,
     is_video_file,
     process_tool_output_with_sandbox_persistence,
+    summarize_binary_tool_output,
 )
 from dynamiq.nodes.cloning import carry_mock_exclusions, regenerate_node_ids
 from dynamiq.nodes.llms import BaseLLM
@@ -47,6 +49,7 @@ from dynamiq.nodes.schema_utils import strip_inaccessible_fields
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileSearchTool, FileWriteTool
 from dynamiq.nodes.tools.mcp import MCPServer
+from dynamiq.nodes.tools.memory_store_tool import MemoryStoreTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
@@ -72,9 +75,10 @@ from dynamiq.skills.types import SkillMetadata
 from dynamiq.skills.utils import ingest_skills_into_sandbox, normalize_sandbox_skills_base_path
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
+from dynamiq.storages.memory.base import MemoryStore, MemoryStoreConfig
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.utils.logger import logger
-from dynamiq.utils.utils import deep_merge
+from dynamiq.utils.utils import TRACING_REDACTED_KEYS, TRACING_REDACTED_PLACEHOLDER, deep_merge
 
 # Per-call tool overlay (e.g. LTM tools bound to a request's user_id); isolated
 # per thread / per asyncio task via ContextVar.
@@ -284,6 +288,14 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
         description="Configuration for file storage used by the agent.",
     )
+    memory_store: MemoryStoreConfig | None = Field(
+        default=None,
+        description=(
+            "The agent's memory: notes it keeps across conversations, reached through its own tool. "
+            "Kept separate from `file_store` so it stays available to sandbox-backed agents, which "
+            "cannot enable a file store. Pass a `CompositeMemoryStore` backend for several memories."
+        ),
+    )
     sandbox: SandboxConfig | None = Field(default=None, description="Configuration for sandbox used by the agent.")
     share_sandbox_with_subagents: bool = Field(
         default=False,
@@ -487,6 +499,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             "images": True,
             "videos": True,
             "file_store": True,
+            "memory_store": True,
             "skills": True,
             "sandbox": True,
             "system_prompt_manager": True,  # Runtime state container, not serializable
@@ -511,6 +524,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             data["videos"] = [{"name": getattr(f, "name", f"video_{i}")} for i, f in enumerate(self.videos)]
 
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
+        data["memory_store"] = self.memory_store.to_dict(**kwargs) if self.memory_store else None
         data["sandbox"] = self.sandbox.to_dict(**kwargs) if self.sandbox else None
         data["skills"] = self.skills.to_dict(**kwargs)
 
@@ -767,9 +781,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 len(ltm_tools),
                 ", ".join(t.name for t in ltm_tools),
             )
+        run_tools = ltm_tools + self._build_memory_store_tool(input_data)
         # Always set — a sub-agent without LTM would otherwise inherit the
         # parent's overlay via `ContextAwareThreadPoolExecutor`.
-        ltm_token = _run_extra_tools.set(ltm_tools)
+        ltm_token = _run_extra_tools.set(run_tools)
         my_run_key = f"{self.sanitize_tool_name(self.name) or 'agent'}-{uuid4().hex[:8]}"
         agent_run_token = _current_agent_run.set(my_run_key)
         # Session/borrow setup lives INSIDE the try so the finally always resets the ContextVars and
@@ -1050,6 +1065,23 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         for tool in tools:
             tool.is_optimized_for_agents = True
         return tools
+
+    def _build_memory_store_tool(self, input_data: "AgentInputSchema") -> list[Node]:
+        """Construct the per-run memory-store tool, or [] when no store is configured.
+
+        Per run like the LTM tools, so the run's ``user_id`` is bound into the instance -- one agent
+        object serves concurrent runs, and a shared tool would read the wrong tenant's memories.
+        A missing ``user_id`` is fine here: a single-tenant store has nothing to scope to.
+        """
+        if not self.memory_store_backend:
+            return []
+        return [
+            MemoryStoreTool(
+                backend=self.memory_store_backend,
+                write_enabled=self.memory_store.write_enabled,
+                user_id=getattr(input_data, "user_id", None),
+            )
+        ]
 
     def _is_input_output_trace_message(self, message: Message) -> bool:
         """Return True when a message is an internal ReAct/tool-trace entry."""
@@ -1454,8 +1486,52 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 merged_input[key] = deep_merge(value, merged_nested)
                 debug_info.append(f"  - From {source}: Merged nested {key}")
             else:
+                logged_value = TRACING_REDACTED_PLACEHOLDER if key in TRACING_REDACTED_KEYS else value
                 merged_input[key] = value
-                debug_info.append(f"  - From {source}: Set {key}={value}")
+                debug_info.append(f"  - From {source}: Set {key}={logged_value}")
+
+    def _apply_tool_param_lookups(
+        self,
+        merged_input: dict,
+        lookups: list[tuple[str, Any]],
+        is_child_agent: bool,
+        debug_info: list,
+    ) -> None:
+        """Apply matching tool_params dicts in order so later entries win on the same key.
+
+        Server-level and tool-level entries both apply: owner first, then the tool. Nested
+        ``ToolParams`` are left for the child-agent path and are not merged into this tool's input.
+        """
+        seen: set[int] = set()
+        for source, value in lookups:
+            if value is None:
+                continue
+            value_id = id(value)
+            if value_id in seen:
+                continue
+            seen.add(value_id)
+            if isinstance(value, ToolParams):
+                if self.verbose:
+                    detail = "will apply to child agent" if is_child_agent else "ignored for non-agent tool"
+                    debug_info.append(f"  - From {source}: encountered nested ToolParams ({detail})")
+            elif isinstance(value, dict):
+                self._apply_parameters(merged_input, value, source, debug_info)
+
+    def _owner_server_name_is_unambiguous(self, owner: Any) -> bool:
+        """Whether ``owner.name`` identifies exactly one MCP server among this run's tools.
+
+        ``MCPServer.name`` defaults to ``"mcp"`` and nothing enforces uniqueness, so two servers
+        left unrenamed answer to the same ``by_name`` key. Params keyed by that name would reach
+        both — and ``mcp_http_headers`` carries a credential, so a header meant for one server
+        would be sent to the other server's host. The name match is refused in that case; the
+        server's id still selects it unambiguously.
+        """
+        owner_ids = {
+            other.id
+            for tool in self._runtime_tools
+            if (other := getattr(tool, "_owner_server", None)) is not None and other.name == owner.name
+        }
+        return len(owner_ids) <= 1
 
     def _clone_tool_for_execution(
         self,
@@ -1658,31 +1734,54 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     self._apply_parameters(merged_input, global_params, "global", debug_info)
 
                 # 2. Apply parameters by tool name (medium priority)
-                name_params_any = (
-                    tool_params.by_name_params.get(tool.name)
-                    or tool_params.by_name_params.get(self.sanitize_tool_name(tool.name))
-                    or (resolved_agent and tool_params.by_name_params.get(resolved_agent.name))
-                    or (resolved_agent and tool_params.by_name_params.get(self.sanitize_tool_name(resolved_agent.name)))
+                # MCPServer is replaced by the tools it discovers, so match by_name/by_id against
+                # the owning server as well. Callers can key mcp_http_headers (and other params)
+                # once by server name/id instead of listing every remote tool. The owner's *name*
+                # only counts when it picks out a single server; ids always do. Server-level dicts
+                # are applied first, then the tool's own entry, so the two merge rather than one
+                # short-circuiting the other.
+                owner = getattr(tool, "_owner_server", None)
+                name_lookups: list[tuple[str, Any]] = []
+                if owner and owner.name:
+                    if self._owner_server_name_is_unambiguous(owner):
+                        name_lookups.append((f"name:{owner.name}", tool_params.by_name_params.get(owner.name)))
+                        name_lookups.append(
+                            (f"name:{owner.name}", tool_params.by_name_params.get(self.sanitize_tool_name(owner.name)))
+                        )
+                    elif tool_params.by_name_params.get(owner.name) or tool_params.by_name_params.get(
+                        self.sanitize_tool_name(owner.name)
+                    ):
+                        # Dropped rather than applied: the entry may carry a credential, and there is
+                        # no way to tell which of the same-named servers it was meant for.
+                        logger.warning(
+                            f"Agent {self.name} - {self.id}: tool_params entry by_name[{owner.name!r}] is ambiguous - "
+                            f"more than one MCP server is named {owner.name!r}, so it is not applied to "
+                            f"tool '{tool.name}'. Rename the servers, or key the params by server id instead."
+                        )
+                if resolved_agent:
+                    name_lookups.append(
+                        (f"name:{resolved_agent.name}", tool_params.by_name_params.get(resolved_agent.name))
+                    )
+                    name_lookups.append(
+                        (
+                            f"name:{resolved_agent.name}",
+                            tool_params.by_name_params.get(self.sanitize_tool_name(resolved_agent.name)),
+                        )
+                    )
+                name_lookups.append((f"name:{tool.name}", tool_params.by_name_params.get(tool.name)))
+                name_lookups.append(
+                    (f"name:{tool.name}", tool_params.by_name_params.get(self.sanitize_tool_name(tool.name)))
                 )
-                if name_params_any:
-                    if isinstance(name_params_any, ToolParams):
-                        if self.verbose:
-                            detail = "will apply to child agent" if is_child_agent else "ignored for non-agent tool"
-                            debug_info.append(f"  - From name:{tool.name}: encountered nested ToolParams ({detail})")
-                    elif isinstance(name_params_any, dict):
-                        self._apply_parameters(merged_input, name_params_any, f"name:{tool.name}", debug_info)
+                self._apply_tool_param_lookups(merged_input, name_lookups, is_child_agent, debug_info)
 
                 # 3. Apply parameters by tool ID (highest priority)
-                id_params_any = tool_params.by_id_params.get(tool.id) or (
-                    resolved_agent and tool_params.by_id_params.get(resolved_agent.id)
-                )
-                if id_params_any:
-                    if isinstance(id_params_any, ToolParams):
-                        if self.verbose:
-                            detail = "will apply to child agent" if is_child_agent else "ignored for non-agent tool"
-                            debug_info.append(f"  - From id:{tool.id}: encountered nested ToolParams ({detail})")
-                    elif isinstance(id_params_any, dict):
-                        self._apply_parameters(merged_input, id_params_any, f"id:{tool.id}", debug_info)
+                id_lookups: list[tuple[str, Any]] = []
+                if owner:
+                    id_lookups.append((f"id:{owner.id}", tool_params.by_id_params.get(owner.id)))
+                if resolved_agent:
+                    id_lookups.append((f"id:{resolved_agent.id}", tool_params.by_id_params.get(resolved_agent.id)))
+                id_lookups.append((f"id:{tool.id}", tool_params.by_id_params.get(tool.id)))
+                self._apply_tool_param_lookups(merged_input, id_lookups, is_child_agent, debug_info)
 
                 if self.verbose and debug_info:
                     logger.debug("\n".join(debug_info))
@@ -1781,6 +1880,14 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 max_tokens=self.tool_output_max_length,
                 truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
             )
+
+            if isinstance(tool_result_output_content, (bytes, bytearray)) and not decode_text_payload(
+                tool_result_output_content
+            ):
+                # Audio, images and archives come back as raw bytes; describe them instead of
+                # spending the model's context on escape sequences it cannot read anyway. A body
+                # that decodes as text is left alone — an HTTP tool's JSON arrives as bytes too.
+                tool_result_content_processed = summarize_binary_tool_output(tool_result.output)
 
             if saved_files:
                 paths = ", ".join(saved_files)
@@ -2114,25 +2221,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             from dynamiq.nodes.agents.agent import Agent
 
             if isinstance(self, Agent):
-                from dynamiq.nodes.agents.prompts.manager import ReactPromptConfig
-                from dynamiq.nodes.tools.agent_tool import SubAgentTool
-
-                self.system_prompt_manager.build_react_prompt(
-                    ReactPromptConfig(
-                        inference_mode=self.inference_mode,
-                        has_tools=True,
-                        parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
-                        delegation_allowed=self.delegation_allowed,
-                        context_compaction_enabled=self.summarization_config.enabled,
-                        notes_file_path=self.get_notes_file_path(),
-                        todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
-                        or bool(self.sandbox_backend),
-                        sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
-                        has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in self.tools),
-                        role=self.role,
-                        instructions=self.instructions,
-                    )
-                )
+                # The canonical config, not a second copy: the tools added above make
+                # `has_tools` true on their own, and fields added later cannot be missed here.
+                self.system_prompt_manager.build_react_prompt(self._react_prompt_config())
 
     def _inject_attached_files_into_message(
         self,
@@ -2262,6 +2353,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     def file_store_backend(self) -> FileStore | None:
         """Get the file store backend from the configuration if enabled."""
         return self.file_store.backend if self.file_store.enabled else None
+
+    @property
+    def memory_store_backend(self) -> MemoryStore | None:
+        """The agent's memory backend when one is enabled."""
+        return self.memory_store.backend if self.memory_store and self.memory_store.enabled else None
 
     @property
     def sandbox_backend(self) -> Sandbox | None:

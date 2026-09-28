@@ -15,6 +15,7 @@ from litellm.exceptions import (
     Timeout,
 )
 from litellm.utils import supports_pdf_input
+from litellm.utils import supports_prompt_caching as litellm_supports_prompt_caching
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from dynamiq.callbacks.streaming import BaseStreamingCallbackHandler
@@ -23,6 +24,7 @@ from dynamiq.connections import BaseConnection, HttpApiKey
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.llms._fc_sanitization import sanitize_fc_messages
 from dynamiq.nodes.llms.registry import model_registry
+from dynamiq.nodes.llms.utils import litellm_video_input_flag
 from dynamiq.nodes.node import ConnectionNode, NodeDependency, ensure_config
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Prompt
@@ -501,14 +503,15 @@ class BaseLLM(ConnectionNode):
     def is_video_input_supported(self) -> bool:
         """Check if the LLM supports native video input.
 
-        Unlike vision/PDF, litellm exposes no video-input capability signal (its `video_*`
-        APIs are for generation, not describing input support), so this skips the litellm
-        tier entirely: it checks the model_info override, then the custom registry. A model
-        needs an explicit `supports_video_input` entry in model_registry.json to resolve here,
-        even if litellm already recognizes the model for other purposes.
+        Resolution order: ``model_info`` override, litellm's raw per-model flag (see
+        ``litellm_video_input_flag`` in ``utils.py`` -- only when explicitly set),
+        ``model_registry.json``, then ``False``.
         """
         if self.model_info and self.model_info.supports_video_input is not None:
             return self.model_info.supports_video_input
+        litellm_flag = litellm_video_input_flag(self.model)
+        if litellm_flag is not None:
+            return litellm_flag
         custom = model_registry.supports_video_input(self.model)
         return custom if custom is not None else False
 
@@ -830,6 +833,24 @@ class BaseLLM(ConnectionNode):
             for param in SAMPLING_PARAMS:
                 params.pop(param, None)
         return params
+
+    # Allowlist: LiteLLM's flag means "caches", not "accepts our breakpoints". Nova caches but
+    # 400s on a cachePoint in a tool-call message (verified live); Bedrock's OpenAI/xAI models
+    # cache implicitly.
+    BREAKPOINT_MODEL_FAMILIES: ClassVar[tuple[str, ...]] = ("anthropic", "claude")
+
+    def supports_prompt_caching(self) -> bool:
+        """Whether this node's model accepts explicit cache breakpoints.
+
+        An unsupporting model rejects the request outright rather than ignoring the
+        breakpoint, so unknown models answer False.
+        """
+        if not any(family in self.model for family in self.BREAKPOINT_MODEL_FAMILIES):
+            return False
+        try:
+            return bool(litellm_supports_prompt_caching(self.model))
+        except Exception:
+            return False
 
     # Per-request cap on strict tools. ``None`` means no cap. Providers with a
     # hard limit (e.g. Anthropic) override this.

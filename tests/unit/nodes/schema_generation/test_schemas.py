@@ -3,6 +3,7 @@ import pytest
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import Anthropic, Gemini, OpenAI, WatsonX
 from dynamiq.nodes.node import ConnectionNode
+from dynamiq.nodes.operators import Choice, DecisionTable, Expression, Rules, SubWorkflow
 from dynamiq.nodes.tools import BedrockAgentCoreInterpreterTool, E2BInterpreterTool, ScaleSerpTool, TavilyTool
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
@@ -32,6 +33,11 @@ from dynamiq.utils.workflow_generation import (
         (ScaleSerpTool, {}),
         (TavilyTool, {}),
         (KnowledgebaseRetriever, {}),
+        (Choice, {}),
+        (DecisionTable, {}),
+        (Rules, {}),
+        (Expression, {}),
+        (SubWorkflow, {}),
     ],
 )
 def test_nodes_schema_generation(node, params):

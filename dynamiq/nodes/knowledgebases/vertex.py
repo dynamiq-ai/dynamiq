@@ -193,27 +193,13 @@ class VertexAIRagSearch(ConnectionNode):
         makes the google-cloud client call `google.auth.default()`, which is the same
         Application Default Credentials path `VertexAI.conn_params` relies on for LiteLLM.
         """
-        connection = self.connection
-        if connection is None:
+        if self.connection is None:
             raise ValueError("A VertexAI connection is required to build credentials.")
 
-        if not connection.has_service_account_credentials:
+        info = self.connection.service_account_info
+        if info is None:
             return None
 
-        info = {
-            "type": "service_account",
-            "project_id": connection.project_id,
-            "private_key_id": connection.private_key_id,
-            "private_key": connection.private_key,
-            "client_email": connection.client_email,
-            "client_id": connection.client_id,
-            "auth_uri": connection.auth_uri,
-            "token_uri": connection.token_uri,
-            "auth_provider_x509_cert_url": connection.auth_provider_x509_cert_url,
-            "client_x509_cert_url": connection.client_x509_cert_url,
-            "universe_domain": connection.universe_domain,
-        }
-        info = {key: value for key, value in info.items() if value}
         return service_account.Credentials.from_service_account_info(info, scopes=[CLOUD_PLATFORM_SCOPE])
 
     def _endpoint_location(self) -> str:
