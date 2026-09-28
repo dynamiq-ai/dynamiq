@@ -29,7 +29,11 @@ Examples:
 
 class SerplyInputSchema(BaseModel):
     query: str = Field(default="", description="Parameter to provide a search query.")
-    limit: int | None = Field(default=None, description="Parameter to specify the number of results to return.")
+    limit: int | None = Field(
+        default=None, ge=1, le=10, description="Parameter to specify the number of results to return (1-10)."
+    )
+    gl: str | None = Field(default=None, description="Country code used to localize results, for example 'us'.")
+    hl: str | None = Field(default=None, description="Language code used to localize results, for example 'en'.")
 
 
 class SerplyTool(ConnectionNode):
@@ -77,11 +81,14 @@ class SerplyTool(ConnectionNode):
                 "Parameter 'query' must be provided in input data or node parameters.", recoverable=True
             )
 
+        gl = input_data.gl or self.gl
+        hl = input_data.hl or self.hl
+
         params: dict[str, Any] = {"q": query, "num": limit}
-        if self.gl:
-            params["gl"] = self.gl
-        if self.hl:
-            params["hl"] = self.hl
+        if gl:
+            params["gl"] = gl
+        if hl:
+            params["hl"] = hl
 
         request_kwargs = {
             "method": self.connection.method,
@@ -107,10 +114,14 @@ class SerplyTool(ConnectionNode):
         return "\n".join(formatted_results).strip()
 
     def _handle_response(self, response: Any, query: str, limit: int) -> dict[str, Any]:
-        search_result = response.json()
-
         if response.status_code >= 400:
-            error = search_result.get("detail") if isinstance(search_result, dict) else None
+            # Error bodies are usually {"detail": ...}, but gateways can return non-JSON pages.
+            try:
+                body = response.json()
+                error = body.get("detail", body) if isinstance(body, dict) else body
+            except ValueError:
+                error = response.text
+            error = f"HTTP {response.status_code}: {error}"
             logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {error}")
             raise ToolExecutionException(
                 f"Tool '{self.name}' failed to retrieve search results. "
@@ -118,6 +129,7 @@ class SerplyTool(ConnectionNode):
                 recoverable=True,
             )
 
+        search_result = response.json()
         # Serply can return a couple more results than requested, so trim to the limit.
         results = search_result.get("results", [])[:limit]
         formatted_results = self._format_search_results(results)

@@ -80,3 +80,56 @@ def test_search_with_custom_params(mock_requests):
     assert "## Sources with URLs" in content
     assert "## Search results for" in content
     assert "Test Result 2" not in content
+
+
+def test_localization_from_input_overrides_node_defaults(mock_requests):
+    """Agent-supplied gl/hl reach the request and override node-level defaults."""
+    search_tool = SerplyTool(connection=Serply(api_key="test_key"), gl="us", hl="en")
+
+    search_tool.run({"query": "weather in Berlin", "gl": "de", "hl": "de"})
+
+    params = mock_requests.call_args[1]["params"]
+    assert params["gl"] == "de"
+    assert params["hl"] == "de"
+
+
+def test_missing_query_fails_without_request(mock_requests):
+    search_tool = SerplyTool(connection=Serply(api_key="test_key"))
+
+    result = search_tool.run({})
+
+    assert result.status.value == "failure"
+    mock_requests.assert_not_called()
+
+
+def test_limit_out_of_range_is_rejected(mock_requests):
+    search_tool = SerplyTool(connection=Serply(api_key="test_key"))
+
+    result = search_tool.run({"query": "test query", "limit": 50})
+
+    assert result.status.value == "failure"
+    mock_requests.assert_not_called()
+
+
+def test_error_status_surfaces_detail(mocker):
+    mock_response = mocker.Mock(status_code=401)
+    mock_response.json.return_value = {"detail": "Invalid API key"}
+    mocker.patch("requests.request", return_value=mock_response)
+    search_tool = SerplyTool(connection=Serply(api_key="bad_key"))
+
+    result = search_tool.run({"query": "test query"})
+
+    assert result.status.value == "failure"
+    assert "HTTP 401: Invalid API key" in str(result.error.message)
+
+
+def test_error_status_with_non_json_body(mocker):
+    mock_response = mocker.Mock(status_code=502, text="<html>Bad Gateway</html>")
+    mock_response.json.side_effect = ValueError("not json")
+    mocker.patch("requests.request", return_value=mock_response)
+    search_tool = SerplyTool(connection=Serply(api_key="test_key"))
+
+    result = search_tool.run({"query": "test query"})
+
+    assert result.status.value == "failure"
+    assert "HTTP 502" in str(result.error.message)
