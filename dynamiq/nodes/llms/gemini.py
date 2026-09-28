@@ -1,14 +1,15 @@
 from typing import Any, Literal
 
+from litellm import token_counter
 from pydantic import BaseModel, PositiveInt
 
 from dynamiq.connections import Gemini as GeminiConnection
 from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.utils.logger import logger
 
-# Google rejects a cache below a per-model minimum that LiteLLM's own 1024-token gate does
-# not know about, and the whole request fails: 2048 on gemini-2.5-pro (Gemini API), 4096 on
-# gemini-3.8-flash (Vertex). Vertex `us-central1` also miscounts caches as "1 tokens".
+# Google rejects a cache below the model's minimum and fails the whole request. `min_tokens`
+# keeps known models clear of it; these catch the rest, and Vertex `us-central1`, which
+# intermittently counts a cache of any size as "1 tokens".
 _CACHE_TOO_SMALL_INDICATORS = (
     "cached content is too small",  # Gemini API
     "minimum token count to start explicit caching",  # Vertex AI
@@ -24,15 +25,20 @@ class GeminiCacheControl(BaseModel):
 
     Unlike Anthropic, every distinct cached prefix is a separate resource billed for
     storage until it expires, so only the system prompt is cached -- a rolling point on
-    the message tail would create a new cache on every agent step. Prompts below the
-    model's minimum are sent uncached.
+    the message tail would create a new cache on every agent step.
 
     Attributes:
         ttl_seconds: Cache lifetime, counted from creation. ``None`` keeps Google's
             default of one hour.
+        min_tokens: Cache only when the system prompt and tools reach this many tokens
+            (LiteLLM's estimate). Google's minimum depends on the model and API -- 2048 for
+            gemini-2.5-pro, 4096 for gemini-3.8-flash on Vertex -- and a request below it
+            fails, so the default clears every model seen so far. Lower it only for a model
+            known to accept less.
     """
 
     ttl_seconds: PositiveInt | None = None
+    min_tokens: PositiveInt = 4096
 
 
 def apply_gemini_cache_control(model: str, params: dict[str, Any], cache_control: Any) -> dict[str, Any]:
@@ -47,35 +53,49 @@ def apply_gemini_cache_control(model: str, params: dict[str, Any], cache_control
     if not cache_control or not is_gemini or not params.get("messages"):
         return params
 
+    messages = list(params["messages"])
+    n_system = next((idx for idx, message in enumerate(messages) if message.get("role") != "system"), len(messages))
+    if not n_system or _count_tokens(model, messages[:n_system], params.get("tools")) < cache_control.min_tokens:
+        return params
+
     control = {"type": "ephemeral"}
     if cache_control.ttl_seconds is not None:
         control["ttl"] = f"{cache_control.ttl_seconds}s"
-
-    messages = list(params["messages"])
-    for idx, message in enumerate(messages):
-        if message.get("role") != "system":
-            break
-        messages[idx] = _with_cache_control(message, control)
+    for idx in range(n_system):
+        messages[idx] = _with_cache_control(messages[idx], control)
 
     return params | {"messages": messages}
 
 
+def _count_tokens(model: str, messages: list[dict], tools: list[dict] | None) -> int:
+    """Estimate the cached part; on failure return 0, so the request goes uncached rather than failing."""
+    try:
+        return token_counter(model=model, messages=messages, tools=tools or None)
+    except Exception as e:
+        logger.debug("Gemini context caching: token count failed for model '%s': %s", model, e)
+        return 0
+
+
 def uncached_retry_params(llm: BaseLLM, exc: BaseException, params: dict) -> dict | None:
-    """Params to retry with when Google rejects the cache as below the model's minimum, else ``None``."""
+    """Params to retry this one request uncached when Google rejects the cache, else ``None``.
+
+    Not persisted on the node: the Vertex `us-central1` rejection is intermittent, so the
+    next request may well cache.
+    """
     messages = params.get("messages") or []
     msg = str(exc).lower()
-    if not any(ind in msg for ind in _CACHE_TOO_SMALL_INDICATORS) or not has_gemini_cache_control(messages):
+    if not any(ind in msg for ind in _CACHE_TOO_SMALL_INDICATORS) or not _has_cache_control(messages):
         return None
 
     logger.warning(
-        "LLM '%s': model '%s' rejected the context cache as too small; retrying uncached.",
+        "LLM '%s': model '%s' rejected the context cache; retrying this request uncached.",
         llm.name,
         llm.model,
     )
     return params | {"messages": _strip_cache_control(messages)}
 
 
-def has_gemini_cache_control(messages: list[dict]) -> bool:
+def _has_cache_control(messages: list[dict]) -> bool:
     return any(
         isinstance(block, dict) and "cache_control" in block
         for message in messages
@@ -147,11 +167,5 @@ class Gemini(BaseLLM):
         return apply_gemini_cache_control(self.model, params, self.cache_control)
 
     def _recover_completion_params(self, exc: BaseException, common_params: dict) -> dict | None:
-        """Retry uncached when Google finds the system prompt below the model's cache minimum."""
+        """Retry this request uncached when Google rejects the context cache."""
         return uncached_retry_params(self, exc, common_params) or super()._recover_completion_params(exc, common_params)
-
-    def _persist_completion_recovery(self, common_params: dict, recovered: dict) -> None:
-        """Stop caching once the prompt proved too small, so later calls skip the failing attempt."""
-        if self.cache_control and not has_gemini_cache_control(recovered["messages"]):
-            self.cache_control = False
-        super()._persist_completion_recovery(common_params, recovered)

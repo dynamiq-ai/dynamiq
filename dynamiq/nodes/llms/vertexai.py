@@ -5,7 +5,6 @@ from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.nodes.llms.gemini import (
     GeminiCacheControl,
     apply_gemini_cache_control,
-    has_gemini_cache_control,
     uncached_retry_params,
 )
 
@@ -51,11 +50,5 @@ class VertexAI(BaseLLM):
         return apply_gemini_cache_control(self.model, params, self.cache_control)
 
     def _recover_completion_params(self, exc: BaseException, common_params: dict) -> dict | None:
-        """Retry uncached when Google finds the system prompt below the model's cache minimum."""
+        """Retry this request uncached when Google rejects the context cache."""
         return uncached_retry_params(self, exc, common_params) or super()._recover_completion_params(exc, common_params)
-
-    def _persist_completion_recovery(self, common_params: dict, recovered: dict) -> None:
-        """Stop caching once the prompt proved too small, so later calls skip the failing attempt."""
-        if self.cache_control and not has_gemini_cache_control(recovered["messages"]):
-            self.cache_control = False
-        super()._persist_completion_recovery(common_params, recovered)

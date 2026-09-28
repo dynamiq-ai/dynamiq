@@ -23,6 +23,11 @@ TOO_SMALL = "Cached content is too small. total_token_count=1385, min_total_toke
 VERTEX_TOO_SMALL = "The cached content is of 3998 tokens. The minimum token count to start explicit caching is 4096."
 
 
+def _cfg(**kwargs) -> GeminiCacheControl:
+    """A config without the size gate, for tests that use a one-line system prompt."""
+    return GeminiCacheControl(min_tokens=1, **kwargs)
+
+
 def _gemini(model=MODEL, **kwargs) -> Gemini:
     return Gemini(
         name="g",
@@ -109,7 +114,6 @@ class TestTheTwoNodesStayInSync:
             "supports_prompt_caching",
             "update_completion_params",
             "_recover_completion_params",
-            "_persist_completion_recovery",
         ],
     )
     def test_both_nodes_override_the_hook(self, hook):
@@ -119,23 +123,24 @@ class TestTheTwoNodesStayInSync:
 class TestMarkers:
     def test_string_system_prompt_becomes_a_marked_text_block(self):
         """On the block, not the message: LiteLLM reads the TTL only from a block."""
-        assert _messages(_gemini(cache_control=GeminiCacheControl()), [SYSTEM, USER]) == [_cached_system(), USER]
+        assert _messages(_gemini(cache_control=_cfg()), [SYSTEM, USER]) == [_cached_system(), USER]
 
     def test_ttl_is_sent_in_seconds(self):
-        messages = _messages(_gemini(cache_control=GeminiCacheControl(ttl_seconds=300)), [SYSTEM, USER])
+        messages = _messages(_gemini(cache_control=_cfg(ttl_seconds=300)), [SYSTEM, USER])
 
         assert messages[0] == _cached_system(control={"type": "ephemeral", "ttl": "300s"})
 
-    def test_ttl_must_be_positive(self):
+    @pytest.mark.parametrize("field", ["ttl_seconds", "min_tokens"])
+    def test_numbers_must_be_positive(self, field):
         with pytest.raises(ValueError):
-            GeminiCacheControl(ttl_seconds=0)
+            GeminiCacheControl(**{field: 0})
 
     def test_only_the_leading_system_messages_are_marked(self):
         """LiteLLM caches one contiguous block; a later system message must stay out of it."""
         late_system = {"role": "system", "content": "Summary so far."}
         second = {"role": "system", "content": "Be brief."}
 
-        messages = _messages(_gemini(cache_control=GeminiCacheControl()), [SYSTEM, second, USER, late_system])
+        messages = _messages(_gemini(cache_control=_cfg()), [SYSTEM, second, USER, late_system])
 
         assert messages == [_cached_system(), _cached_system("Be brief."), USER, late_system]
 
@@ -145,7 +150,7 @@ class TestMarkers:
             "content": [{"type": "text", "text": "part one"}, {"type": "text", "text": "part two"}],
         }
 
-        messages = _messages(_gemini(cache_control=GeminiCacheControl()), [system, USER])
+        messages = _messages(_gemini(cache_control=_cfg()), [system, USER])
 
         assert messages[0]["content"] == [
             {"type": "text", "text": "part one"},
@@ -158,24 +163,24 @@ class TestMarkers:
         system = {"role": "system", "content": [block]}
         messages = [system, USER]
 
-        _messages(_gemini(cache_control=GeminiCacheControl()), messages)
+        _messages(_gemini(cache_control=_cfg()), messages)
 
         assert messages == [{"role": "system", "content": [{"type": "text", "text": "part"}]}, USER]
         assert "cache_control" not in block
 
     def test_no_system_prompt_sends_nothing_cached(self):
-        assert _messages(_gemini(cache_control=GeminiCacheControl()), [USER]) == [USER]
+        assert _messages(_gemini(cache_control=_cfg()), [USER]) == [USER]
 
     @pytest.mark.parametrize("model", ["vertex_ai/gemini-2.5-pro", "vertex_ai/gemini-3-flash-preview"])
     def test_vertex_gemini_is_marked(self, model):
-        assert _messages(_vertex(model, cache_control=GeminiCacheControl()), [SYSTEM, USER])[0] == _cached_system()
+        assert _messages(_vertex(model, cache_control=_cfg()), [SYSTEM, USER])[0] == _cached_system()
 
     @pytest.mark.parametrize(
         "llm",
         [
             # Claude on Vertex takes Anthropic's cache_control, where "300s" is not a valid TTL.
-            lambda: _vertex("vertex_ai/claude-sonnet-4-6", cache_control=GeminiCacheControl(ttl_seconds=300)),
-            lambda: _gemini("gemini/gemma-3-27b-it", cache_control=GeminiCacheControl()),
+            lambda: _vertex("vertex_ai/claude-sonnet-4-6", cache_control=_cfg(ttl_seconds=300)),
+            lambda: _gemini("gemini/gemma-3-27b-it", cache_control=_cfg()),
         ],
     )
     def test_non_gemini_models_are_left_alone(self, llm):
@@ -184,9 +189,9 @@ class TestMarkers:
         assert _messages(llm(), messages) is messages
 
 
-class TestTooSmallRecovery:
-    """Google enforces a per-model minimum (2048 tokens on gemini-2.5-pro) above LiteLLM's
-    1024-token gate, and rejects the whole request instead of skipping the cache."""
+class TestRejectionRecovery:
+    """Google rejects a cache below the model's minimum, and Vertex `us-central1` sometimes
+    rejects one of any size, failing the whole request instead of skipping the cache."""
 
     def _node(self):
         return Gemini(
@@ -194,11 +199,12 @@ class TestTooSmallRecovery:
             model=MODEL,
             connection=connections.Gemini(api_key="k"),
             prompt=Prompt(messages=[SYSTEM, USER]),
-            cache_control=GeminiCacheControl(),
+            cache_control=_cfg(),
         )
 
     @pytest.mark.parametrize("error", [TOO_SMALL, VERTEX_TOO_SMALL])
-    def test_retries_uncached_and_stops_caching_on_the_node(self, error):
+    def test_retries_this_request_uncached_and_keeps_caching_on(self, error):
+        """The Vertex rejection is intermittent, so the next request tries the cache again."""
         with patch("litellm.completion"), patch("litellm.stream_chunk_builder"):
             node = self._node()
             calls = []
@@ -215,10 +221,10 @@ class TestTooSmallRecovery:
 
             assert result["content"] == "ok"
             assert calls[1][0] == {"role": "system", "content": [{"type": "text", "text": "You are a support bot."}]}
-            assert node.cache_control is False
+            assert node.cache_control == _cfg()
 
             node.execute(MagicMock(messages=None, files=None), config=RunnableConfig(callbacks=[]))
-            assert len(calls) == 3, "later calls skip the failing cached attempt"
+            assert len(calls) == 4, "the next request tries the cache again"
 
     def test_other_errors_are_not_retried_uncached(self):
         with patch("litellm.completion"), patch("litellm.stream_chunk_builder"):
@@ -229,12 +235,49 @@ class TestTooSmallRecovery:
                 node.execute(MagicMock(messages=None, files=None), config=RunnableConfig(callbacks=[]))
 
             assert node._completion.call_count == 1
-            assert node.cache_control == GeminiCacheControl()
+            assert node.cache_control == _cfg()
 
     def test_uncached_request_is_not_recovered(self):
         """Without markers the error is not ours to handle; no pointless identical retry."""
         params = {"messages": [SYSTEM, USER]}
 
-        assert (
-            _gemini(cache_control=GeminiCacheControl())._recover_completion_params(Exception(TOO_SMALL), params) is None
+        assert _gemini(cache_control=_cfg())._recover_completion_params(Exception(TOO_SMALL), params) is None
+
+
+class TestSizeGate:
+    """Below `min_tokens` the request goes out uncached, so it cannot hit Google's minimum."""
+
+    BIG = "Rule: answer precisely and cite the rule. " * 700  # ~6k tokens
+
+    def test_default_gate_leaves_a_short_prompt_uncached(self):
+        messages = [SYSTEM, USER]
+
+        assert _messages(_gemini(cache_control=GeminiCacheControl()), messages) is messages
+
+    def test_long_prompt_is_cached_with_the_default_gate(self):
+        messages = _messages(
+            _gemini(cache_control=GeminiCacheControl()), [{"role": "system", "content": self.BIG}, USER]
         )
+
+        assert messages[0] == _cached_system(self.BIG)
+
+    def test_tools_count_towards_the_gate(self):
+        """Google caches the tool schemas with the system prompt, so they count too."""
+        tools = [{"type": "function", "function": {"name": "search", "description": self.BIG, "parameters": {}}}]
+        llm = _gemini(cache_control=GeminiCacheControl())
+
+        params = llm.update_completion_params({"model": llm.model, "messages": [SYSTEM, USER], "tools": tools})
+
+        assert params["messages"][0] == _cached_system()
+
+    def test_only_the_cached_part_counts(self):
+        """A long user message is not cached, so it must not lift a short system prompt over the gate."""
+        messages = [SYSTEM, {"role": "user", "content": self.BIG}]
+
+        assert _messages(_gemini(cache_control=GeminiCacheControl()), messages) is messages
+
+    def test_token_count_failure_sends_uncached(self):
+        messages = [{"role": "system", "content": self.BIG}, USER]
+
+        with patch("dynamiq.nodes.llms.gemini.token_counter", side_effect=RuntimeError("boom")):
+            assert _messages(_gemini(cache_control=GeminiCacheControl()), messages) is messages
