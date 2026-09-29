@@ -129,8 +129,16 @@ UNDER_NOT_EVALUATED = {
         ),
     },
     "days_between(X, doc.z) > 0": {
-        ABSENT: ("not_evaluated", "missing value for doc.x"),
-        None: ("not_evaluated", "missing value for doc.x"),
+        ABSENT: Changed(
+            ("not_evaluated", "missing value for doc.x"),
+            ("not_evaluated", "check could not be evaluated: not a date: 'later'"),
+            UNREADABLE_OVER_MISSING,
+        ),
+        None: Changed(
+            ("not_evaluated", "missing value for doc.x"),
+            ("not_evaluated", "check could not be evaluated: not a date: 'later'"),
+            UNREADABLE_OVER_MISSING,
+        ),
         "": ("not_evaluated", "check could not be evaluated: not a date: 'later'"),
         "  ": ("not_evaluated", "check could not be evaluated: not a date: 'later'"),
         "TBD": ("not_evaluated", "check could not be evaluated: not a date: 'later'"),
@@ -140,8 +148,16 @@ UNDER_NOT_EVALUATED = {
         ),
     },
     "days_between(date(X), date(doc.z)) > 0": {
-        ABSENT: ("not_evaluated", "missing value for doc.x"),
-        None: ("not_evaluated", "missing value for doc.x"),
+        ABSENT: Changed(
+            ("not_evaluated", "missing value for doc.x"),
+            ("not_evaluated", "check could not be evaluated: not a date: 'later'"),
+            UNREADABLE_OVER_MISSING,
+        ),
+        None: Changed(
+            ("not_evaluated", "missing value for doc.x"),
+            ("not_evaluated", "check could not be evaluated: not a date: 'later'"),
+            UNREADABLE_OVER_MISSING,
+        ),
         "": Changed(
             ("not_evaluated", "check could not be evaluated: not a date: ''"),
             ("not_evaluated", "check could not be evaluated: not a date: 'later'"),

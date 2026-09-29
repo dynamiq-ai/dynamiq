@@ -19,10 +19,12 @@ value. A rule's `on_missing` that is no policy at all leaves the choice to the n
 refusing the build.
 """
 
+import asyncio
 import json
 import logging
 import textwrap
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Callable, NamedTuple
 
@@ -153,8 +155,25 @@ def test_each_policy_reports_a_missing_value_its_own_way(policy, expected, statu
         ("app.b == '' and first_present(app.a, app.c) == 'x'", {"b": "", "a": "", "c": []}, "app.a"),
         # The fallback stands in for the blank `app.a`, so the blank that stops the check is `app.c`.
         ("first_present(app.a, 'x') == 'x' and text(app.c) == 'y'", {"a": " ", "c": ""}, "app.c"),
+        # A blank turned into text is as missing as a blank compared.
+        ("app.b == '' and text(app.a) ~ '' == 'x'", {"b": "", "a": "  "}, "app.a"),
+        ("app.b == '' and [text(app.a), 'y'] | join == 'xy'", {"b": "", "a": "  "}, "app.a"),
+        ("app.b == '' and '%s' | format(number(app.a)) == '1'", {"b": "", "a": ""}, "app.a"),
+        ("app.b == '' and 'on ' ~ date(app.a) == 'on 2026-10-01'", {"b": "", "a": " "}, "app.a"),
+        ("app.b == '' and first_present(app.a, app.c) ~ '' == 'x'", {"b": "", "a": "", "c": []}, "app.a"),
     ],
-    ids=["text", "number", "date", "first-present", "past-a-fallback"],
+    ids=[
+        "text",
+        "number",
+        "date",
+        "first-present",
+        "past-a-fallback",
+        "text-concat",
+        "text-join",
+        "number-format",
+        "date-concat",
+        "first-present-concat",
+    ],
 )
 @pytest.mark.parametrize(
     ("policy", "status", "prefix"),
@@ -510,36 +529,32 @@ HELD = {
         "applies_when could not be evaluated: not a number: 'TBD'",
     ),
     # The check reads the text itself through `number()` or `date()`: the missing value stops it before it uses what
-    # the reader made of the text, and must not hide text nobody could read. The finding still names the missing value.
+    # the reader made of the text, and must not hide text nobody could read, as it does not hide a derived value that
+    # reads it.
     "unreadable-number-beside-missing-data": Held(
         lambda **policy: screening("number(doc.amount) > doc.limit", inputs=("doc",), **policy),
         {"doc": {"amount": "TBD"}},
-        "missing value for doc.limit",
-        "doc.amount is not a number: 'TBD'",
+        "check could not be evaluated: not a number: 'TBD'",
     ),
     "unreadable-date-beside-missing-data": Held(
         lambda **policy: screening("date(doc.issued, format='%d.%m.%Y') <= date(doc.due)", inputs=("doc",), **policy),
         {"doc": {"issued": "March"}},
-        "missing value for doc.due",
-        "doc.issued is not a date: 'March' (format '%d.%m.%Y')",
+        "check could not be evaluated: not a date: 'March' (format '%d.%m.%Y')",
     ),
     "impossible-date-beside-missing-data": Held(
         lambda **policy: screening("date(doc.issued) <= date(doc.due)", inputs=("doc",), **policy),
         {"doc": {"issued": "2026-02-30"}},
-        "missing value for doc.due",
-        "doc.issued is not a date: '2026-02-30' (day is out of range for month)",
+        "check could not be evaluated: not a date: '2026-02-30' (day is out of range for month)",
     ),
     "unreadable-date-in-days-between": Held(
         lambda **policy: screening("days_between(doc.opened, doc.closed) <= 30", inputs=("doc",), **policy),
         {"doc": {"opened": "March"}},
-        "missing value for doc.closed",
-        "doc.opened is not a date: 'March'",
+        "check could not be evaluated: not a date: 'March'",
     ),
     "unreadable-number-as-a-fallback": Held(
         lambda **policy: screening("first_present(number(doc.net), 0) > doc.limit", inputs=("doc",), **policy),
         {"doc": {"net": "TBD"}},
-        "missing value for doc.limit",
-        "doc.net is not a number: 'TBD'",
+        "check could not be evaluated: not a number: 'TBD'",
     ),
     # An error the check reaches before a missing value is reported: `number()` refuses the decimal before the limit
     # is read.
@@ -553,8 +568,7 @@ HELD = {
             "tax > 0", inputs=("doc",), derived=(("tax", "doc.rate * number(doc.net)"),), **policy
         ),
         {"doc": {"net": "TBD"}},
-        "missing value for tax",
-        "doc.net is not a number: 'TBD'",
+        "check could not be evaluated: not a number: 'TBD'",
     ),
     "derived-unreadable-fallback": Held(
         lambda **policy: screening(
@@ -622,8 +636,7 @@ HELD = {
             **policy,
         ),
         {"doc": {"net": "TBD"}},
-        "missing value for doc.limit",
-        "doc.net is not a number: 'TBD'",
+        "check could not be evaluated: not a number: 'TBD'",
     ),
     # A defect of the derived value's own expression speaks over a lookup that found nothing in it, whichever the
     # expression reads first, so a rule that only falls back on the value is still held.
@@ -772,6 +785,118 @@ def test_a_mistake_or_a_value_nobody_could_read_reports_the_severity_under_fail(
     assert output["status"] == "warn"
 
 
+@pytest.mark.parametrize(
+    "policy",
+    [{}, {"policy": "fail"}, {"policy": "not_applicable"}, {"node_policy": "not_applicable"}],
+    ids=["unset", "fail", "rule-skips", "node-skips"],
+)
+@pytest.mark.parametrize(
+    ("check", "derived"),
+    [
+        ("number(a) > b", ()),
+        ("d > b", (("d", "number(a)"),)),
+        ("c > 0", (("c", "number(a) - b"),)),
+        ("c > 0", (("d", "number(a)"), ("c", "d - b"))),
+    ],
+    ids=["inline", "derived", "inline-in-a-derived-value", "derived-in-a-derived-value"],
+)
+def test_text_nobody_could_read_speaks_over_a_missing_value_wherever_it_is_read(check, derived, policy):
+    """`number(a) > b` over `a` of `TBD` and no `b` names the text nobody could read, as the same reader in a derived
+    value does: a reviewer who filled in `b` would otherwise meet `TBD` on the next run."""
+    output = run(screening(check, inputs=("a", "b"), derived=derived, **policy), {"a": "TBD"})
+
+    status = "warn" if policy.get("policy") == "fail" else "not_evaluated"
+    assert outcome(output) == (status, "check could not be evaluated: not a number: 'TBD'")
+
+
+BRANCHED = "(doc.kind == 'loan' or number(doc.amount) > 0) and doc.limit > 0"
+
+
+@pytest.mark.parametrize(
+    ("policy", "expected"),
+    [
+        ({}, ("not_evaluated", "missing value for doc.limit")),
+        ({"policy": "fail"}, ("warn", "missing value for doc.limit")),
+        ({"policy": "not_applicable"}, ("not_applicable", "does not apply: missing value for doc.limit")),
+    ],
+    ids=["unset", "fail", "not_applicable"],
+)
+def test_a_reader_in_a_branch_the_record_never_takes_does_not_speak_over_a_missing_value(policy, expected):
+    """`number(doc.amount)` sits behind an `or` a loan never reaches: the only thing that stopped the check is the
+    missing limit, so that is what the finding names, and a rule set to skip missing data skips it."""
+    output = run(screening(BRANCHED, inputs=("doc",), **policy), {"doc": {"kind": "loan", "amount": "TBD"}})
+
+    assert outcome(output) == expected
+
+
+def test_a_reader_in_a_branch_the_record_takes_still_speaks_over_a_missing_value():
+    output = run(screening(BRANCHED, "not_applicable", inputs=("doc",)), {"doc": {"kind": "card", "amount": "TBD"}})
+
+    assert outcome(output) == ("not_evaluated", "check could not be evaluated: not a number: 'TBD'")
+
+
+@pytest.mark.parametrize(
+    ("kind", "derived", "errors", "expected"),
+    [
+        ("loan", None, {}, ("not_applicable", "does not apply: missing value for x")),
+        (
+            "card",
+            None,
+            {"x": "not a number: 'TBD'"},
+            ("not_evaluated", "check could not be evaluated: not a number: 'TBD'"),
+        ),
+    ],
+    ids=["branch-not-taken", "branch-taken"],
+)
+def test_a_derived_value_is_unreadable_only_through_a_reader_it_ran(kind, derived, errors, expected):
+    """`x` reads the amount only for a record that is no loan; a loan's `x` is missing for its limit alone."""
+    node = screening(
+        "x > 1",
+        "not_applicable",
+        inputs=("doc",),
+        derived=(("x", "doc.limit * 2 if doc.kind == 'loan' else number(doc.amount)"),),
+    )
+
+    output = run(node, {"doc": {"kind": kind, "amount": "TBD"}})
+
+    assert (output["derived"], output["derived_errors"]) == ({"x": derived}, errors)
+    assert outcome(output) == expected
+
+
+# A loan never reaches the reader, so it is skipped for its missing limit; any other kind meets `TBD` first.
+CONCURRENT = [{"doc": {"kind": "loan" if index % 2 else "card", "amount": "TBD"}} for index in range(64)]
+CONCURRENT_OUTCOMES = [
+    (
+        ("not_applicable", "does not apply: missing value for doc.limit")
+        if record["doc"]["kind"] == "loan"
+        else ("not_evaluated", "check could not be evaluated: not a number: 'TBD'")
+    )
+    for record in CONCURRENT
+]
+
+
+def test_records_evaluated_at_once_on_threads_each_see_only_their_own_readers():
+    node = screening(BRANCHED, "not_applicable", inputs=("doc",))
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        outputs = list(pool.map(lambda record: run(node, record), CONCURRENT))
+
+    assert [outcome(output) for output in outputs] == CONCURRENT_OUTCOMES
+
+
+def test_records_evaluated_at_once_in_tasks_each_see_only_their_own_readers():
+    node = screening(BRANCHED, "not_applicable", inputs=("doc",))
+
+    async def screen_all() -> list:
+        config = RunnableConfig(callbacks=[])
+        return await asyncio.gather(*(node.run_async(input_data=record, config=config) for record in CONCURRENT))
+
+    results = asyncio.run(screen_all())
+
+    assert all(result.status == RunnableStatus.SUCCESS for result in results)
+    assert [outcome(result.output) for result in results] == CONCURRENT_OUTCOMES
+
+
 def test_an_input_the_selector_maps_is_declared_though_input_fields_does_not_list_it():
     """The record a node reads holds the keys its input transformer's selector maps, which `input_fields` may not
     list: an input mapped there is no typo, so a record without its value skips a rule set to skip, while a name
@@ -793,6 +918,32 @@ def test_an_input_the_selector_maps_is_declared_though_input_fields_does_not_lis
         "not_evaluated",
         "missing value for apraisal.value (not skipped: apraisal is not an input or a derived value)",
     )
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [[], [NamedField(name="doc")]],
+    ids=["selector-only", "selector-and-input-fields"],
+)
+def test_a_node_that_declares_its_inputs_only_through_the_selector_still_holds_a_typo(fields):
+    """The selector's keys declare the record as much as `input_fields` does, so a node that lists none of them in
+    `input_fields` still tells a name it never maps, a typo, from data the record lacks."""
+    node = Rules(
+        name="selected",
+        input_fields=fields,
+        input_transformer=InputTransformer(selector={"doc": "$.doc"}),
+        on_missing="not_applicable",
+        rules=[Rule(id="r", check="doc.x > 1 and lon > 2"), Rule(id="skipped", check="doc.y > 1")],
+    )
+
+    output = run(node, {"doc": {"x": 5}})
+
+    assert outcome(output, "r") == (
+        "not_evaluated",
+        "missing value for lon (not skipped: lon is not an input or a derived value)",
+    )
+    assert outcome(output, "skipped") == ("not_applicable", "does not apply: missing value for doc.y")
+    assert output["status"] == "not_evaluated"
 
 
 def test_a_lookup_that_found_nothing_is_judged_record_by_record():

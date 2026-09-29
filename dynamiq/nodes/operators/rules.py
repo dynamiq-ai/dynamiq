@@ -3,6 +3,8 @@ import math
 import numbers
 import re
 from collections.abc import Callable, Container, ItemsView, Iterator, KeysView, Mapping, ValuesView
+from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, ClassVar, Literal, NamedTuple, NoReturn
@@ -43,7 +45,11 @@ EVALUATION_ERRORS = (TemplateRuntimeError, TypeError, ValueError, ArithmeticErro
 _US_DATE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 _YEAR_FIRST_DATE = re.compile(r"^([0-9]{4})/([0-9]{1,2})/([0-9]{1,2})$")
-_NAMED_DATE = re.compile(r"^(?P<month>[A-Za-z]+)\.?\s+(?P<day>[0-9]{1,2})(?:,\s*|\s+)(?P<year>[0-9]{4})$")
+# The month written as a word first, the day after it, with an ordinal suffix or without: `Aug 7, 2026`, `August 7th,
+# 2026`.
+_NAMED_DATE = re.compile(
+    r"^(?P<month>[A-Za-z]+)\.?\s+(?P<day>[0-9]{1,2})(?i:st|nd|rd|th)?(?:,\s*|\s+)(?P<year>[0-9]{4})$"
+)
 # The day first, before a month written as a word, which says which number is the day: `7 Aug 2026`, `07-AUG-2026`.
 _DAY_FIRST_DATE = re.compile(
     r"^(?P<day>[0-9]{1,2})(?i:st|nd|rd|th)?(?:\s+|-)(?P<month>[A-Za-z]+)\.?(?:,?(?:\s+|-)|,)(?P<year>[0-9]{4})$"
@@ -74,8 +80,13 @@ _GROUPED_THOUSANDS = {
     ".": re.compile(r"[1-9][0-9]{0,2}(?:\.[0-9]{3})+"),
 }
 # The currency signs a document writes beside an amount, and only signs: `¢`, a hundredth of the unit, would read `¢50`
-# as 50, and a code, `USD 1,000`, leaves the amount unreadable.
-_CURRENCY = re.compile(r"[$€£¥₹₩₽₺₪₫₱₦₴]")
+# as 50, and a code, `USD 1,000`, leaves the amount unreadable. `¤`, the sign for any currency, is also the one every
+# sign is read as.
+_CURRENCY = re.compile(r"[$€£¥₹₩₽₺₪₫₱₦₴¤]")
+_ANY_CURRENCY = "¤"
+# A currency sign where an amount may carry one, once all spaces are gone: first, after an opening parenthesis or a
+# sign, `($5)`, `-$5`, or last, before a closing parenthesis, `5 €`. Anywhere else, `100$200`, it is no part of it.
+_CURRENCY_AT_AN_END = re.compile(rf"^(\(?[+-]?){_ANY_CURRENCY}|{_ANY_CURRENCY}(\)?)$")
 # Whitespace beside a comma or a point: `100, 200` may be two amounts as much as one.
 _SPACE_BESIDE_SEPARATOR = re.compile(r"\s[.,]|[.,]\s")
 # Whitespace between two digits, which groups thousands the way a grouping separator does: `1 234`.
@@ -112,6 +123,13 @@ class Blank:
     Each sandbox derives its blank from its own undefined (`RecordSandbox.blank`), so a blank is as missing as
     anything undefined there: in a rule it raises on use, in an expression it comes out as None. The marker is how a
     text filter tells a blank, which it passes on, from any other undefined, which it keeps reading as ''.
+
+    Unlike any other undefined, a blank refuses to become text: `~`, `join`, `format`, a `%` format, `str.format`
+    and every filter that reads it as text raise the missing value, in both sandboxes, as arithmetic on it does.
+    Jinja's undefined reads as '' there, and the comparison after it would give a verdict on a value nobody gave:
+    `text(first) ~ ' ' ~ text(last) == name` over a blank `first`. The text filters that pass a blank on
+    (`_TEXT_FILTERS`) keep it blank instead, and a message prints one as the '' any undefined prints as (`_rendered`).
+    Only its repr is not refused, as for `Unreadable`.
     """
 
     __slots__ = ()
@@ -122,6 +140,9 @@ class Blank:
     # The numeric hooks Jinja's undefined lacks, where Python would raise a type error instead: a blank `number()`
     # rounded, `round(n, 2)` or `| abs`, is as missing as one added to.
     __round__ = __abs__ = __trunc__ = __floor__ = __ceil__ = __index__ = _raise_missing
+    # Every conversion to text: `str()` behind `~`, `join`, `%s` and the filters, `format()` behind `str.format`,
+    # and the markup hook Jinja's chainable undefined answers with `str()`.
+    __str__ = __format__ = __html__ = _raise_missing
 
 
 class UnreadableValue(TemplateRuntimeError):
@@ -170,6 +191,31 @@ class Unreadable:
 
     def __repr__(self) -> str:
         return f"Unreadable({self.value!r}, {self.reason!r})"
+
+
+# What `number()`, `date()` and `days_between()` could not read while one expression was evaluated, in the order they
+# met it (`_reading`); None outside such an evaluation. A missing value that stops the expression must not hide text a
+# reader met before it, and only what a reader met counts: a reader in a branch the record never takes read nothing.
+# A context variable, so records evaluated at once on other threads or in other tasks each keep their own.
+_MISREAD: ContextVar[list["Unreadable"] | None] = ContextVar("rules_misread", default=None)
+
+
+@contextmanager
+def _reading() -> Iterator[list["Unreadable"]]:
+    """Collects what the readers could not read while the expressions inside are evaluated."""
+    misread: list[Unreadable] = []
+    token = _MISREAD.set(misread)
+    try:
+        yield misread
+    finally:
+        _MISREAD.reset(token)
+
+
+def _misread(value: "Unreadable") -> "Unreadable":
+    """Notes a value a reader could not read for the evaluation that asked for it (`_reading`), and returns it."""
+    if (misread := _MISREAD.get()) is not None:
+        misread.append(value)
+    return value
 
 
 def _is_missing(value: Any) -> bool:
@@ -225,9 +271,9 @@ def to_date(value: Any, format: str | None = None) -> date:
     """Reads a date from a date, a datetime or text written the way documents write one.
 
     The text may be ISO (`2026-08-07`, a time after it allowed), US month first (`08/07/2026`), year first with
-    slashes (`2026/08/07`) or an English month name, month first or day first: `Aug 7, 2026`, `7 Aug 2026`, read in
-    English whatever the process's locale. Given a `format`, the text is read as `datetime.strptime` reads that
-    format, and nothing else.
+    slashes (`2026/08/07`) or an English month name, month first or day first, the day with an ordinal suffix or
+    without: `Aug 7, 2026`, `August 7th, 2026`, `7 Aug 2026`, read in English whatever the process's locale. Given a
+    `format`, the text is read as `datetime.strptime` reads that format, and nothing else.
 
     Raises when there is no date to read: a value already missing raises its own undefined error and a value already
     unreadable its own error, so `days_between(date(a), b)` reports what `date()` found; anything else raises a
@@ -278,14 +324,26 @@ def days_between(start: Any, end: Any) -> int:
     for value in (start, end):
         if isinstance(value, Unreadable):
             raise value.error()
-    return (_day(end) - _day(start)).days
+    try:
+        last = _day(end)
+    except UndefinedError:
+        # The call is handed both dates: text in `start` it cannot read is met (`_misread`) before the missing `end`
+        # stops it, as `days_between(date(a), date(b))` meets it, and the error stays the missing end's.
+        with suppress(ValueError, UndefinedError):
+            _day(start)
+        raise
+    return (last - _day(start)).days
 
 
 def _day(value: Any) -> date:
     """A date `days_between` is handed, read as `to_date` reads it; blank text is missing, as `date()` makes it."""
     if isinstance(value, str) and not value.strip():
         raise MissingValue("missing value: days_between() found no date")
-    return to_date(value)
+    try:
+        return to_date(value)
+    except ValueError as e:
+        _misread(Unreadable(value, str(e)))
+        raise
 
 
 def today() -> date:
@@ -321,9 +379,13 @@ def text(environment: "RecordSandbox", value: Any) -> Any:
 def _read_number(written: str, decimal: str) -> int | float | None:
     """The number the text writes, or None when it writes none, or writes one only a guess could read."""
     grouping = "," if decimal == "." else "."
-    # A currency sign says nothing about the amount; read as a space, it cannot join the digits on either side of it.
+    # A currency sign says nothing about the amount, but it is no space: read as one, it would group the digits on
+    # either side of it as thousands, `$100 $200` as 100200. Every sign reads as `¤`, which groups nothing, and one
+    # sign at an end of the amount is dropped once the spaces are gone; any other stays and leaves the text unreadable.
     # The minus sign a PDF prints, `−5`, is the hyphen a keyboard writes.
-    body = _CURRENCY.sub(" ", written.replace("\u2212", "-"))
+    body = _CURRENCY.sub(_ANY_CURRENCY, written.replace("\u2212", "-"))
+    if body.count(_ANY_CURRENCY) > 1:
+        return None
     if _SPACE_BESIDE_SEPARATOR.search(body):
         return None
     # Spaces group thousands in some documents, `1 234`, and count only where a grouping separator could stand; a
@@ -332,8 +394,9 @@ def _read_number(written: str, decimal: str) -> int | float | None:
         if grouping in body:
             return None
         body = _SPACE_BETWEEN_DIGITS.sub(grouping, body)
-    # Any other space, at either end or beside a sign, a parenthesis or `%`, says nothing about the amount either.
-    body = _SPACE.sub("", body)
+    # Any other space, at either end or beside a sign, a parenthesis, a currency sign or `%`, says nothing about the
+    # amount either.
+    body = _CURRENCY_AT_AN_END.sub(r"\1\2", _SPACE.sub("", body))
     # An amount in parentheses is negative, as an account writes a debit.
     negative = body.startswith("(") and body.endswith(")")
     if negative:
@@ -393,13 +456,15 @@ def number(environment: "RecordSandbox", value: Any, decimal: str = ".") -> Any:
     already missing or unreadable passes through as it is.
     """
     if decimal not in (".", ","):
-        raise ValueError(f"number() reads a decimal point '.' or a decimal comma ',', not {decimal!r}")
+        refusal = f"number() reads a decimal point '.' or a decimal comma ',', not {decimal!r}"
+        _misread(Unreadable(value, refusal))
+        raise ValueError(refusal)
     if isinstance(value, (Blank, Unreadable)):
         return value
     if is_blank(value):
         return environment.blank(hint=_found_nothing("number() found no number", value), exc=MissingValue)
     read = _number_of(value, decimal)
-    return Unreadable(value, f"not a number: {_quoted(value)}") if read is None else read
+    return _misread(Unreadable(value, f"not a number: {_quoted(value)}")) if read is None else read
 
 
 @pass_environment
@@ -416,7 +481,7 @@ def read_date(environment: "RecordSandbox", value: Any, format: str | None = Non
     try:
         return to_date(value, format)
     except ValueError as e:
-        return Unreadable(value, str(e))
+        return _misread(Unreadable(value, str(e)))
 
 
 @pass_environment
@@ -458,8 +523,9 @@ RESERVED_NAMES = frozenset({"has", "days_between", "date", "today", "len", "abs"
 # The tests that ask about a value; like `is defined`, they may read one that is missing.
 TESTS: dict[str, Callable[[Any], bool]] = {"present": is_present, "blank": is_blank}
 
-# Jinja's text filters read an undefined value as '', which a comparison takes for an answer: `date(x) | string`
-# over a blank `x` as well.
+# The text filters that pass a blank on rather than raise at it (`Blank`), so a question after them still answers:
+# `text(x) | lower is blank`, `first_present(text(x) | lower, 'none')`. Any other conversion of a blank to text
+# raises it as missing.
 _TEXT_FILTERS = ("lower", "upper", "trim", "title", "capitalize", "replace", "string")
 
 
@@ -472,7 +538,7 @@ def _value_at(function: Callable[..., Any]) -> int:
 def _keeps_blank(filter_: Callable[..., Any]) -> Callable[..., Any]:
     """The filter, with a blank passed on untouched.
 
-    `text(x) | lower == 'purchase'` would otherwise fail a blank `x` that `text(x) == 'purchase'` holds as missing.
+    `text(x) | lower` is then as blank as `text(x)`, where the filter itself would raise at it as missing (`Blank`).
     Only a blank passes: any other undefined still reads as '', as the messages and expressions written before the
     marker expect. `wraps` copies the filter's attributes, Jinja's pass-argument marker among them, so `replace`
     still receives its eval context first and the value second.
@@ -666,6 +732,9 @@ def _rendered(value: Any) -> Any:
     text the record holds, which refuses to become text anywhere else."""
     if isinstance(value, Unreadable):
         return value.value
+    # A blank refuses to become text anywhere a check could compare it; a message printing one decides nothing.
+    if isinstance(value, Blank):
+        return ""
     return _method_text(value) if callable(value) and not isinstance(value, Undefined) else value
 
 
@@ -750,29 +819,17 @@ def _path_of(node: nodes.Node) -> str | None:
 GLOBAL_NAMES = frozenset(_ENVIRONMENT.globals)
 
 
-class Reader(NamedTuple):
-    """A path an expression reads as a number or a date: the helper that reads it, `number` or `date`, and the
-    arguments after the value, where they are constants (`date(doc.issued, format='%d.%m.%Y')`)."""
-
-    path: str
-    helper: str
-    args: tuple[Any, ...] = ()
-    kwargs: tuple[tuple[str, Any], ...] = ()
-
-
 class Reads(NamedTuple):
     """The paths an expression reads: the ones it needs, the ones it only asks about, the global names it calls
     and reads as values, which a record key of the same name would shadow, the paths it calls as if they were
-    helpers, a mistyped `firstpresent(x)` say, which are read like any member as well, the paths it reads as a
-    number or a date, and the filters and tests it uses that the sandbox does not have, each as `(kind, name)`:
-    `("filter", "lowr")`."""
+    helpers, a mistyped `firstpresent(x)` say, which are read like any member as well, and the filters and tests it
+    uses that the sandbox does not have, each as `(kind, name)`: `("filter", "lowr")`."""
 
     required: list[str]
     optional: list[str]
     helpers_called: tuple[str, ...] = ()
     helpers_read: tuple[str, ...] = ()
     unknown_calls: tuple[str, ...] = ()
-    readers: tuple[Reader, ...] = ()
     unknown_names: tuple[tuple[str, str], ...] = ()
 
 
@@ -783,37 +840,10 @@ class _Collected(NamedTuple):
     # The fallbacks `first_present` reads: allowed to be missing, yet asked about by nothing, so they guard nothing.
     lenient: list[str]
     unknown_calls: list[str]
-    readers: list[Reader]
     unknown_names: list[tuple[str, str]]
     # Each node that reads a path where the expression needs the value, with the path: `need()` wraps those whose
     # path no guard elsewhere makes optional (`_compile_lazy`).
     needed: list[tuple[nodes.Node, str]]
-
-
-def _readers_of(call: nodes.Call) -> list[Reader]:
-    """The paths a call of `number()`, `date()` or `days_between()` reads as a number or a date.
-
-    Only a path passed as it is, with constant arguments after it, is kept: that much can be read again without
-    evaluating the expression. `days_between(a, b)` reads each of its values as `date()` does.
-    """
-    name = call.node.name if isinstance(call.node, nodes.Name) else None
-    if call.dyn_args or call.dyn_kwargs:
-        return []
-    if name == "days_between":
-        return [Reader(path, "date") for argument in call.args if (path := _path_of(argument)) is not None]
-    if name not in ("number", "date") or not call.args or (path := _path_of(call.args[0])) is None:
-        return []
-    extra = call.args[1:]
-    if not all(isinstance(argument, nodes.Const) for argument in [*extra, *(item.value for item in call.kwargs)]):
-        return []
-    return [
-        Reader(
-            path,
-            name,
-            tuple(argument.value for argument in extra),
-            tuple((item.key, item.value.value) for item in call.kwargs),
-        )
-    ]
 
 
 def _root(path: str) -> str:
@@ -834,7 +864,6 @@ def _collect_paths(node: nodes.Node, collected: _Collected, required: bool, leni
     # arguments of `first_present`, which skips a missing value rather than asking about it.
     if isinstance(node, nodes.Call) and isinstance(node.node, nodes.Name) and node.node.name in GLOBAL_NAMES:
         collected.called.append(node.node.name)
-        collected.readers.extend(reader for reader in _readers_of(node) if reader not in collected.readers)
         fallback = lenient or node.node.name == "first_present"
         for child in node.iter_child_nodes(exclude=("node",)):
             _collect_paths(child, collected, required and node.node.name != "has", fallback)
@@ -883,7 +912,6 @@ def _collected(parsed: nodes.Node) -> _Collected:
         called=[],
         lenient=[],
         unknown_calls=[],
-        readers=[],
         unknown_names=[],
         needed=[],
     )
@@ -910,7 +938,6 @@ def _reads_of(collected: _Collected) -> Reads:
         helpers_called=tuple(dict.fromkeys(collected.called)),
         helpers_read=tuple(root for root in roots if root in GLOBAL_NAMES),
         unknown_calls=tuple(collected.unknown_calls),
-        readers=tuple(collected.readers),
         unknown_names=tuple(collected.unknown_names),
     )
 
@@ -1051,14 +1078,22 @@ def resolve_path(context: dict[str, Any], path: str) -> Any:
 
 
 @pass_context
-def need(context: Context, value: Any, path: str) -> Any:
+def need(context: Context, value: Any, path: str, handed: bool = False) -> Any:
     """What a read a check needs found, or a `MissingValue` naming the path where the record holds nothing: a null, or
     an undefined or a method Jinja found in place of a value the record lacks (`ticket.items` over a ticket without
     items finds the mapping's method). At a path the record holds, a method or an undefined goes on as it is and fails
-    where it is used: `invoice.items.count` reads the list's method."""
+    where it is used: `invoice.items.count` reads the list's method.
+
+    A date `days_between()` is `handed` (`_handed`) does not stop the check where it is read: it is an undefined that
+    raises the same `MissingValue` where `days_between()` uses it, so the call still meets the other date first, and
+    text there it cannot read is not hidden by the missing one (`_reading`)."""
     if value is None or (
         (isinstance(value, Undefined) or callable(value)) and _is_missing(resolve_path(context.get_all(), path))
     ):
+        if handed:
+            return _CHECK_ENVIRONMENT.undefined(
+                hint=f"missing value for {path}", exc=lambda _: MissingValue.for_path(path)
+            )
         raise MissingValue.for_path(path)
     return value
 
@@ -1171,11 +1206,29 @@ def _needing(node: nodes.Node, needed: Mapping[int, str], names: set[str], calle
             value[:] = [_needing(item, needed, names) if isinstance(item, nodes.Node) else item for item in value]
     if dated:
         # Each date is handed to it as the record holds it, and its blank text is missing where it is read.
-        node.args = [_blank_at(argument, paths, raw=True) for argument, paths in zip(node.args, dates)]
+        node.args = [_blank_at(_handed(argument), paths, raw=True) for argument, paths in zip(node.args, dates)]
         for item in node.kwargs:
-            item.value = _blank_at(item.value, dates_by_name[item.key], raw=True)
+            item.value = _blank_at(_handed(item.value), dates_by_name[item.key], raw=True)
     elif helper in _BLANK_MAKERS:
         return _blank_at(node, sources)
+    return node
+
+
+def _handed(node: nodes.Expr) -> nodes.Expr:
+    """A date `days_between()` is handed, with the read `need()` makes of it marked as handed, where the call is handed
+    the path as it is or through `date()`: `days_between(a, b)` and `days_between(date(a), date(b))` meet both dates
+    before a missing one stops them, as the call reads them (`days_between`)."""
+    target = node
+    while isinstance(target, nodes.Call):
+        callee_ = target.node
+        if isinstance(callee_, nodes.ImportedName) and callee_.importname == _NEED:
+            target.args.append(nodes.Const(True))
+            break
+        is_date = isinstance(callee_, nodes.Name) and callee_.name == "date"
+        is_blank_at = isinstance(callee_, nodes.ImportedName) and callee_.importname == _BLANK_AT
+        if not (is_date or is_blank_at) or not target.args:
+            break
+        target = target.args[0]
     return node
 
 
@@ -1352,10 +1405,13 @@ class Rules(Node):
     under `fail`, when it cannot be evaluated. Where the check or `applies_when` stops at a missing value, `on_missing`,
     the rule's or else the node's, decides: `not_evaluated`, the default, holds the rule for review, `fail` reports its
     severity and `not_applicable` skips it. Only data the record lacks is skipped: a rule is held, saying why, where it
-    stops at a blank no path accounts for, or its expression, reached or not, reads a value nobody could read, calls a
-    name nothing defines, uses a filter or a test the sandbox lacks, finds nothing under an undeclared name, or needs a
-    derived value held for any of these or whose lookup found nothing, unless a helper made that a blank beside a blank
-    it reads: `app.c == '' and text(limits[app.k]) == 'x'`, derived, is skipped where `app.c` is blank.
+    stops at a blank no path accounts for, or its expression, reached or not, reads a value nobody could compute, calls
+    a name nothing defines, uses a filter or a test the sandbox lacks, finds nothing under an undeclared name, or needs
+    a derived value held for any of these or whose lookup found nothing, unless a helper made that a blank beside a
+    blank it reads: `app.c == '' and text(limits[app.k]) == 'x'`, derived, is skipped where `app.c` is blank. Text a
+    `number()`, `date()` or `days_between()` met on the way to the missing value and could not read is an error under
+    every policy, as it would be without the missing value: `number(doc.amount) > doc.limit` over an amount of `TBD`
+    and no limit. A reader the evaluation never reached met nothing; `days_between()` meets both dates it is handed.
 
     A check and `applies_when` evaluate left to right, and a missing value counts only where the evaluation reaches it:
     never in the branch of an `if` not taken, on the side of an `and` or an `or` its first side decided or in the rest
@@ -1390,9 +1446,10 @@ class Rules(Node):
 
     _compiled: list[CompiledRule] = PrivateAttr(default_factory=list)
     _derived: list[tuple[str, Callable[..., Any], Reads]] = PrivateAttr(default_factory=list)
-    # The names an expression may read from where the node declares its inputs: those, the keys its input transformer's
-    # selector maps, which the record holds whether or not `input_fields` lists them, the derived values and `as_of`.
-    # None where it declares no input, since a record read then cannot be told from a typo.
+    # The names an expression may read from where the node declares its inputs: those `input_fields` lists, the keys
+    # its input transformer's selector maps, which the record holds whether or not `input_fields` lists them, the
+    # derived values and `as_of`. None where it declares no input either way, since a record read then cannot be told
+    # from a typo.
     _declared: set[str] | None = PrivateAttr(default=None)
     # Whether some rule skips a missing value by its own policy, and whether some rule leaves its policy to the node.
     _rules_skip: bool = PrivateAttr(default=False)
@@ -1402,8 +1459,9 @@ class Rules(Node):
         super().__init__(**kwargs)
         self._derived = self._compile_derived()
         self._compiled = self._compile_rules()
-        if self.input_fields:
-            names = {field.name for field in self.input_fields} | set(self.input_transformer.selector or {})
+        # The selector's keys declare the record as much as `input_fields` does: a node may list its inputs in either.
+        names = {field.name for field in self.input_fields} | set(self.input_transformer.selector or {})
+        if names:
             self._declared = names | {name for name, _, _ in self._derived} | {AS_OF_KEY}
         self._rules_skip = any(item.rule.on_missing == RuleMissingPolicy.NOT_APPLICABLE for item in self._compiled)
         self._rules_defer = any(item.rule.on_missing is None for item in self._compiled)
@@ -1559,29 +1617,32 @@ class Rules(Node):
             # How the value came out missing, where it did: undefined, as a key the record lacks or a lookup that
             # finds nothing does, and blank, as `number()` of blank text does.
             undefined = blank = False
-            try:
-                result = expression(scope_for(reads, known, RuleUndefined))
-                undefined, blank = isinstance(result, Undefined), isinstance(result, Blank)
-                # A value the expression could not find is missing, inside a list or a dict it built as well,
-                # and the output stays serializable.
-                value = concrete(result)
-            except UndefinedError as e:
-                # So is one it used, arithmetic on a key the record lacks or on a blank `number()` read, unless
-                # it also reads a value nobody could read, which the missing one must not hide: `doc.rate * net`
-                # over a missing rate is as unreadable as `net`, for the same reason.
-                undefined, blank = True, isinstance(e, MissingValue)
-                _, value = self._unreadable(reads.required, known)
-            except UnreadableValue as e:
-                # A value nobody could read makes what is computed from it unreadable, whatever else is missing.
-                value = Unreadable(e.value, str(e))
-            except EVALUATION_ERRORS as e:
-                # A failure while a value the expression needs is missing, `amount / value` over a null `value`,
-                # is that value missing too, unless it also reads a value nobody could read. Any other failure
-                # is an error: as None it would read as a value nobody gave, one `first_present` or a guard skips.
-                if self._missing(reads.required, known):
-                    _, value = self._unreadable(reads.required, known)
-                else:
-                    value = Unreadable(None, str(e))
+            with _reading() as misread:
+                try:
+                    result = expression(scope_for(reads, known, RuleUndefined))
+                    undefined, blank = isinstance(result, Undefined), isinstance(result, Blank)
+                    # A value the expression could not find is missing, inside a list or a dict it built as well,
+                    # and the output stays serializable.
+                    value = concrete(result)
+                except UndefinedError as e:
+                    # So is one it used, arithmetic on a key the record lacks or on a blank `number()` read, unless
+                    # it also reads a value nobody could read, which the missing one must not hide: `doc.rate * net`
+                    # over a missing rate is as unreadable as `net`, for the same reason, and so is
+                    # `doc.rate * number(doc.net)` over a net of `TBD`, where `number()` ran before the rate stopped it
+                    # (`_unread`).
+                    undefined, blank = True, isinstance(e, MissingValue)
+                    value = self._unread(reads.required, misread, known)
+                except UnreadableValue as e:
+                    # A value nobody could read makes what is computed from it unreadable, whatever else is missing.
+                    value = Unreadable(e.value, str(e))
+                except EVALUATION_ERRORS as e:
+                    # A failure while a value the expression needs is missing, `amount / value` over a null `value`,
+                    # is that value missing too, unless it also reads a value nobody could read. Any other failure
+                    # is an error: as None it would read as a value nobody gave, one `first_present` or a guard skips.
+                    if self._missing(reads.required, known):
+                        value = self._unread(reads.required, misread, known)
+                    else:
+                        value = Unreadable(None, str(e))
             values[name] = value
             if isinstance(value, Unreadable):
                 # The rules read it as unreadable, keeping the value the error names, if any, for a message to
@@ -1705,22 +1766,26 @@ class Rules(Node):
         """
         if compiled.applies is not None:
             reads = compiled.applies_reads
-            try:
-                applies = holds(compiled.applies(scope_for(reads, scope, RuleUndefined)))
-            except MissingValue as e:
-                return self._missing_status(compiled, "applies_when", reads, scope, unskippable, e)
-            except EVALUATION_ERRORS as e:
-                return self._error_status(compiled, f"applies_when could not be evaluated: {e}")
+            # Evaluated once, to wherever it stops: what a reader in it could not read on the way counts (`_reading`),
+            # and a reader it never reached met nothing.
+            with _reading() as misread:
+                try:
+                    applies = holds(compiled.applies(scope_for(reads, scope, RuleUndefined)))
+                except MissingValue as e:
+                    return self._missing_status(compiled, "applies_when", reads, scope, unskippable, misread, e)
+                except EVALUATION_ERRORS as e:
+                    return self._error_status(compiled, f"applies_when could not be evaluated: {e}")
             if not applies:
                 return STATUS_NOT_APPLICABLE, f"does not apply: {compiled.rule.applies_when.strip()}", True
 
         reads = compiled.check_reads
-        try:
-            held = holds(compiled.check(scope_for(reads, scope, RuleUndefined)))
-        except MissingValue as e:
-            return self._missing_status(compiled, "check", reads, scope, unskippable, e)
-        except EVALUATION_ERRORS as e:
-            return self._error_status(compiled, f"check could not be evaluated: {e}")
+        with _reading() as misread:
+            try:
+                held = holds(compiled.check(scope_for(reads, scope, RuleUndefined)))
+            except MissingValue as e:
+                return self._missing_status(compiled, "check", reads, scope, unskippable, misread, e)
+            except EVALUATION_ERRORS as e:
+                return self._error_status(compiled, f"check could not be evaluated: {e}")
         return (STATUS_PASSED, None, True) if held else (compiled.rule.severity.value, None, True)
 
     def _policy(self, compiled: CompiledRule) -> RuleMissingPolicy:
@@ -1734,16 +1799,21 @@ class Rules(Node):
         reads: Reads,
         scope: dict[str, Any],
         unskippable: Mapping[str, _Hold],
+        misread: list[Unreadable],
         missing: MissingValue,
     ) -> tuple[str, str, bool]:
         """The status, reason and whether the check ran, for an expression that stopped at `missing`, under the rule's
-        policy. A value nobody could read makes it an error under every policy. `not_applicable` skips only data the
-        record lacks: a missing value that names its path (`need`, `blank_at`) where nothing else holds the rule
-        (`_why_held`), a skipped rule counting as run; one that names none, a blank a helper made of a lookup say, holds
-        it. Both look at every value the expression reads, reached or not: stricter than the evaluation, not looser."""
+        policy. A value nobody could read makes it an error under every policy: one of the values the expression reads
+        that already is one, reached or not (`ltv <= appraisal.max_ltv` over a ratio divided by zero), or text a
+        `number()` or `date()` in it met and could not read on the way to the stop (`misread`: `number(a) > b` over `a`
+        of `TBD` and no `b`), which the missing value must not hide (`_unread`); a reader the evaluation never reached
+        met nothing. `not_applicable` skips only data the record lacks: a missing value that names its path (`need`,
+        `blank_at`) where nothing else holds the rule (`_why_held`), a skipped rule counting as run; one that names
+        none, a blank a helper made of a lookup say, holds it. `_why_held` looks at every value the expression reads,
+        reached or not: stricter than the evaluation, not looser."""
         path, reason = missing.path, str(missing)
         # Compared with None: the marker refuses a truth test, as every other use.
-        _, unreadable = self._unreadable(reads.required + reads.optional, scope)
+        unreadable = self._unread(reads.required + reads.optional, misread, scope)
         if unreadable is not None:
             return self._error_status(compiled, f"{where} could not be evaluated: {unreadable.reason}")
         policy = self._policy(compiled)
@@ -1776,18 +1846,18 @@ class Rules(Node):
     ) -> _Hold | None:
         """Why what an expression finds missing is not only data the record lacks, so no rule may skip it, naming the
         name or the path at fault; None when it is. The defects: a call of a name nothing defines, a filter or a test
-        the sandbox lacks, text a reader cannot read, a value missing under a name outside `declared` (None where the
-        node declares no input) or under a derived value in `pending`, computed after `reading`, and a derived value
-        held for any of these or for a value nobody could read. A derived value whose lookup found nothing holds only
-        where the expression needs it, and any defect speaks over it."""
+        the sandbox lacks, a value missing under a name outside `declared` (None where the node declares no input) or
+        under a derived value in `pending`, computed after `reading`, and a derived value held for any of these or for
+        a value nobody could read. A derived value whose lookup found nothing holds only where the expression needs
+        it, and any defect speaks over it. Text a reader met and could not read, and a value that already is one
+        nobody could read, which a missing value must not hide, its callers look for first (`_missing_status`,
+        `_why_missing`)."""
         if (callee := self._missing(list(reads.unknown_calls), scope)) is not None:
             return _Hold(f"{callee} is not a helper")
         if reads.unknown_names:
             kind, name = reads.unknown_names[0]
             return _Hold(f"{name} is not a {kind}")
         paths = reads.required + reads.optional
-        if (misread := self._misread(reads.readers, scope)) is not None:
-            return _Hold(misread)
         # A defect holds wherever it is read and speaks over a lookup that found nothing, whichever the expression
         # reads first; a fallback stands in for the lookup, as its author meant (`first_present(limit, 0)`), so that
         # holds only where the value is needed.
@@ -1845,26 +1915,6 @@ class Rules(Node):
         return None
 
     @staticmethod
-    def _misread(readers: tuple[Reader, ...], scope: dict[str, Any]) -> str | None:
-        """Why a value an expression reads as a number or a date, and that is there, is one its reader cannot read,
-        or cannot read with the arguments it is given (`decimal=';'`), naming its path; None when every one reads.
-
-        The reader runs again on the value alone, as the expression would run it: a missing value stays missing,
-        and one already unreadable is left to the scan for those.
-        """
-        for reader in readers:
-            value = resolve_path(scope, reader.path)
-            if is_blank(value) or isinstance(value, Unreadable):
-                continue
-            try:
-                read = HELPERS[reader.helper](_ENVIRONMENT, value, *reader.args, **dict(reader.kwargs))
-            except EVALUATION_ERRORS as e:
-                return f"{reader.path} could not be read: {e}"
-            if isinstance(read, Unreadable):
-                return _unreadable_because(reader.path, read.reason)
-        return None
-
-    @staticmethod
     def _unreadable(paths: list[str], scope: dict[str, Any]) -> tuple[str, Unreadable] | tuple[None, None]:
         """The first path that reaches a value nobody could read, and the value with its reason; (None, None) when
         there is none."""
@@ -1872,6 +1922,17 @@ class Rules(Node):
             if isinstance(value := resolve_path(scope, path), Unreadable):
                 return path, value
         return None, None
+
+    @classmethod
+    def _unread(cls, paths: list[str], misread: list[Unreadable], scope: dict[str, Any]) -> Unreadable | None:
+        """A value nobody could read that an expression stopped by a missing value reads, which the missing value
+        must not hide: one of `paths` that already is one, a derived value say, or the first text a `number()` or
+        `date()` in it met and could not read while it was evaluated (`_reading`), `number(a) > b` over `a` of `TBD`
+        and no `b`. None when there is none."""
+        _, unreadable = cls._unreadable(paths, scope)
+        if unreadable is not None:
+            return unreadable
+        return misread[0] if misread else None
 
     @staticmethod
     def _render(compiled: CompiledRule, scope: dict[str, Any], reason: str | None) -> str | None:

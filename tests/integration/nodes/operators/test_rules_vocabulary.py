@@ -419,6 +419,13 @@ def failure(expression: str, **inputs) -> str:
         ("₹ 250.75", 250.75),
         ("−5", -5),
         ("−₩1,000", -1000),
+        ("-$5", -5),
+        ("$-5", -5),
+        ("($5)", -5),
+        ("($ 1,200.50)", -1200.5),
+        ("1 200 €", 1200),
+        ("$ 1 234", 1234),
+        ("5 $", 5),
         (42, 42),
         (2.5, 2.5),
         (Decimal("586764.00"), 586764.0),
@@ -439,6 +446,13 @@ def failure(expression: str, **inputs) -> str:
         "rupee",
         "minus-sign",
         "minus-sign-before-won",
+        "minus-before-currency",
+        "currency-before-minus",
+        "currency-in-parentheses",
+        "spaced-currency-in-parentheses",
+        "currency-after-space-grouped",
+        "currency-before-space-grouped",
+        "currency-after",
         "int",
         "float",
         "decimal",
@@ -474,6 +488,11 @@ def test_number_reads_an_amount_the_way_a_document_writes_it(raw, expected):
         "1 23",
         "1 234,56",
         "12$5",
+        "100$200",
+        "$100 $200",
+        "€1 €000",
+        "$5$",
+        "1 $ 200",
         "₹1,23,456",
         "(−5)",
         "¢50",
@@ -502,6 +521,11 @@ def test_number_reads_an_amount_the_way_a_document_writes_it(raw, expected):
         "spaced-group-of-two",
         "spaced-with-decimal-comma",
         "currency-between-digits",
+        "currency-between-groups",
+        "two-amounts",
+        "currency-before-each-group",
+        "currency-on-both-sides",
+        "spaced-currency-between-digits",
         "lakh-grouping",
         "minus-sign-in-parentheses",
         "cents",
@@ -558,8 +582,19 @@ def test_a_rule_over_number_decides_on_an_amount_and_holds_one_it_cannot_read(am
         ("€ 1.234.567,89", 1234567.89),
         ("12 345,67", 12345.67),
         ("1 234,5", 1234.5),
+        ("€ 1.200,50", 1200.5),
+        ("1 200,50 €", 1200.5),
     ],
-    ids=["grouped", "decimal", "thousands", "euro", "space-grouped", "narrow-space-grouped"],
+    ids=[
+        "grouped",
+        "decimal",
+        "thousands",
+        "euro",
+        "space-grouped",
+        "narrow-space-grouped",
+        "euro-before",
+        "euro-after",
+    ],
 )
 def test_number_reads_a_decimal_comma_when_the_rule_says_so(raw, expected):
     value = evaluate("number(raw, decimal=',')", raw=raw)
@@ -659,6 +694,72 @@ def test_a_blank_read_stays_missing_through_the_helpers_and_filters_that_round_o
         "not_evaluated",
         f"missing value for {read_paths(check).required[0]}",
     )
+
+
+@pytest.mark.parametrize(
+    ("check", "missing"),
+    [
+        ("text(doc.name) ~ '' == 'Ada'", "doc.name"),
+        ("text(doc.first) ~ ' ' ~ text(doc.last) == 'Ada Lovelace'", "doc.first"),
+        ("'Dr ' ~ text(doc.name) == 'Dr Ada'", "doc.name"),
+        ("[text(doc.name), 'x'] | join('-') == 'Ada-x'", "doc.name"),
+        ("'%s!' % text(doc.name) == 'Ada!'", "doc.name"),
+        ("'{}!'.format(text(doc.name)) == 'Ada!'", "doc.name"),
+        ("'%s!' | format(text(doc.name)) == 'Ada!'", "doc.name"),
+        ("'A-a' | replace('-', text(doc.name)) == 'AAdaa'", "doc.name"),
+        ("text(doc.name) | center(5) == ' Ada '", "doc.name"),
+        ("number(doc.amount) ~ '' == '12'", "doc.amount"),
+        ("date(doc.issued) ~ '' == '2026-10-01'", "doc.issued"),
+        ("first_present(doc.nick, doc.name) ~ '' == 'Ada'", "doc.nick"),
+    ],
+    ids=[
+        "concat",
+        "concat-names",
+        "concat-after",
+        "join",
+        "percent",
+        "str-format",
+        "format-filter",
+        "replace-argument",
+        "center",
+        "number",
+        "date",
+        "first-present",
+    ],
+)
+def test_a_blank_read_stays_missing_through_text_built_from_it(check, missing):
+    """`~`, `join`, `format` and every other filter or operator that turns a value into text would otherwise read a
+    blank as '', and the comparison after it would give a verdict on a value nobody gave."""
+    node = rules(Rule(id="R1", check=check), member="doc")
+    given = record("doc", name="Ada", first="Ada", last="Lovelace", nick=" ", amount="12", issued="Oct 1, 2026")
+    blank = record("doc", name="  ", first=" ", last="Lovelace", nick="", amount=" ", issued="")
+
+    assert statuses(run(node, given)) == {"R1": "pass"}
+    finding = by_id(run(node, blank))["R1"]
+    assert (finding["status"], finding["message"]) == ("not_evaluated", f"missing value for {missing}")
+
+
+def test_a_message_prints_a_blank_as_empty_text_and_falls_back_where_it_builds_text_from_one():
+    """A message decides nothing, so a blank it prints is the '' any undefined prints as; text it builds from a blank
+    raises as a check's would, and the message comes back as written."""
+    node = rules(
+        Rule(id="shown", check="doc.name == 'x'", message="name [{{ doc.name }}] nick [{{ text(doc.nick) }}]"),
+        Rule(id="built", check="doc.name == 'x'", message="nick {{ text(doc.nick) ~ '!' }}"),
+        member="doc",
+    )
+
+    findings = by_id(run(node, record("doc", name="Ada", nick="  ")))
+
+    assert findings["shown"]["message"] == "name [Ada] nick []"
+    assert findings["built"]["message"] == "nick {{ text(doc.nick) ~ '!' }}"
+
+
+def test_a_blank_in_text_built_by_an_expression_fails_its_run_as_arithmetic_on_it_does():
+    """An Expression node has no missing-data policy: a blank used where a value is needed fails the run, whether
+    it is added to or turned into text. A missing input read as '' by `~` stays as it was."""
+    assert "missing value: text() found no text" in failure("text(nickname) ~ '!'", nickname="  ")
+    assert "missing value: number() found no number" in failure("number(amount) + 1", amount="  ")
+    assert evaluate("missing ~ '!'") == "!"
 
 
 def test_a_reader_reads_its_argument_and_never_its_own_name():
@@ -840,6 +941,11 @@ def test_a_rule_reading_and_calling_number_is_held_when_it_runs_not_refused_at_b
         ("date(raw)", "Oct 1, 2026", date(2026, 10, 1)),
         ("date(raw)", "October 1, 2026", date(2026, 10, 1)),
         ("date(raw)", "Sept. 1 2026", date(2026, 9, 1)),
+        ("date(raw)", "August 7th, 2026", date(2026, 8, 7)),
+        ("date(raw)", "Aug 1st 2026", date(2026, 8, 1)),
+        ("date(raw)", "August 22nd, 2026", date(2026, 8, 22)),
+        ("date(raw)", "August 3rd 2026", date(2026, 8, 3)),
+        ("date(raw)", "AUGUST 7TH, 2026", date(2026, 8, 7)),
         # A month written as a word says which number is the day, so the day may come first.
         ("date(raw)", "1 Oct 2026", date(2026, 10, 1)),
         ("date(raw)", "7 August 2026", date(2026, 8, 7)),
@@ -861,6 +967,11 @@ def test_a_rule_reading_and_calling_number_is_held_when_it_runs_not_refused_at_b
         "short-month",
         "month",
         "sept-without-comma",
+        "ordinal",
+        "short-month-ordinal-without-comma",
+        "ordinal-nd",
+        "ordinal-rd-without-comma",
+        "ordinal-capitals",
         "day-first-short-month",
         "day-first",
         "day-first-abbreviated",
@@ -1017,14 +1128,14 @@ def test_a_blank_date_days_between_reads_is_missing_in_a_derived_value_and_an_ex
     ("placed", "shipped", "read", "message"),
     [
         ("", "TBD", "days_between(date(order.placed), order.shipped) <= 30", "not a date: 'TBD'"),
-        ("TBD", "", "days_between(order.placed, date(order.shipped)) <= 30", None),
+        ("TBD", "", "days_between(order.placed, date(order.shipped)) <= 30", "not a date: 'TBD'"),
     ],
     ids=["blank-start", "blank-end"],
 )
 def test_a_blank_date_beside_one_that_is_no_date_reads_as_date_would_make_it(placed, shipped, read, message):
-    """Raw text is read `end` first, as it always was, and blank text is missing where it is read, as what `date()`
-    makes of it is: beside a text that is no date, the check gives the reason it gives with `date()` around the blank,
-    the missing end or the unreadable end, whichever is read first."""
+    """Blank text is missing where it is read, as what `date()` makes of it is: beside a text that is no date, the
+    check gives the reason it gives with `date()` around the blank. That is the text nobody could read, on whichever
+    side it sits, since a missing value never hides one."""
     node = rules(
         Rule(id="raw", check="days_between(order.placed, order.shipped) <= 30"),
         Rule(id="read", check=read),
@@ -1033,7 +1144,7 @@ def test_a_blank_date_beside_one_that_is_no_date_reads_as_date_would_make_it(pla
 
     findings = by_id(run(node, record("order", placed=placed, shipped=shipped)))
 
-    reason = f"check could not be evaluated: {message}" if message else "missing value for order.shipped"
+    reason = f"check could not be evaluated: {message}"
     assert {rule_id: (finding["status"], finding["message"]) for rule_id, finding in findings.items()} == {
         "raw": ("not_evaluated", reason),
         "read": ("not_evaluated", reason),
@@ -1045,15 +1156,15 @@ def test_a_blank_date_beside_one_that_is_no_date_reads_as_date_would_make_it(pla
     [
         ("sometime", "TBD", "check could not be evaluated: not a date: 'sometime'"),
         ("TBD", "sometime", "check could not be evaluated: not a date: 'TBD'"),
-        (ABSENT, "TBD", "missing value for order.placed"),
-        ("TBD", ABSENT, "missing value for order.shipped"),
+        (ABSENT, "TBD", "check could not be evaluated: not a date: 'TBD'"),
+        ("TBD", ABSENT, "check could not be evaluated: not a date: 'TBD'"),
     ],
     ids=["both-unreadable", "both-unreadable-reversed", "placed-missing", "shipped-missing"],
 )
 def test_days_between_names_the_first_argument_when_both_dates_are_bad(placed, shipped, message):
     """`days_between(date(a), date(b))` reads `a` before `b`, so when both are unreadable the reason is `a`'s,
-    in reading order, whichever text it holds. A value the record lacks outright is caught before the check
-    ever runs, so it is named instead, on whichever side it sits."""
+    in reading order, whichever text it holds. A value the record lacks outright stops the check before either
+    reader runs, but it does not hide the text nobody could read on the other side, which is named instead."""
     node = rules(Rule(id="R1", check="days_between(date(order.placed), date(order.shipped)) <= 30"), member="order")
 
     finding = by_id(run(node, record("order", placed=placed, shipped=shipped)))["R1"]
@@ -1096,7 +1207,16 @@ def test_to_date_reads_the_new_formats_and_still_raises_on_what_it_cannot_read()
     assert to_date("17.07.2026", format="%d.%m.%Y") == date(2026, 7, 17)
     assert to_date("1 Oct 2026") == date(2026, 10, 1)
     # A day before a month written as a number is no more readable than it was: `7-8-2026` is 7 August or 8 July.
-    for text in ("March", "Oct 12026", "Octember 1, 2026", "7-8-2026", "7 Foo 2026", ""):
+    for text in (
+        "March",
+        "Oct 12026",
+        "Octember 1, 2026",
+        "7-8-2026",
+        "7 Foo 2026",
+        "",
+        "August 7xx, 2026",
+        "Aug 7t 2026",
+    ):
         with pytest.raises(ValueError, match=f"^not a date: {text!r}$"):
             to_date(text)
     with pytest.raises(ValueError):
