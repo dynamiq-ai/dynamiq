@@ -389,9 +389,9 @@ def test_what_the_engine_refuses_to_build_is_an_error_with_its_reason(check, ref
         "loan['a.__b'] is defined",
         # A method's name is no read of the record: the sandbox refuses this one when it runs, not the build.
         "loan.__len__() > 1",
-        # `text`, `number` and `first_present` came after flows that read inputs so named: the engine holds such a
-        # rule when it runs instead.
-        "text(text) == 'x'",
+        # `text`, `number` and `first_present` came after flows that read inputs so named: a rule that only reads one
+        # still builds.
+        "text == 'x'",
         # The engine reads neither what `sameas` compares with nor a keyword argument of `default`.
         "loan.x is sameas date and date(loan.a) > today()",
         "(loan.a | default(boolean=date)) and date(loan.b) > today()",
@@ -401,6 +401,30 @@ def test_what_the_engine_builds_is_not_refused(check):
     errors, _ = flowcheck.check_expressions(rules_node(rules=[rule(check=check)]), "screen")
 
     assert errors == []
+
+
+@pytest.mark.parametrize(
+    ("check", "clash"),
+    [
+        ("text(loan.name) == text", "text"),
+        ("text(text) == 'x'", "text"),
+        ("number(number) > 1", "number"),
+        ("first_present(first_present, loan.a) == 'x'", "first_present"),
+    ],
+    ids=["text", "text-of-itself", "number", "first-present"],
+)
+def test_reading_and_calling_a_helper_added_since_is_an_error(check, clash):
+    """The engine builds such a rule, so a flow that reads an input named `text` keeps building, but the rule then
+    fails on every record: no expression could call `text()` before it was a helper, so none that validated before
+    is refused now."""
+    node = rules_node(
+        input_fields=[{"id": "f1", "name": "loan"}, {"id": "f2", "name": clash}], rules=[rule(check=check)]
+    )
+
+    errors, warnings = flowcheck.check_expressions(node, "screen")
+
+    assert errors == [f"rules 'screen': rule 'R1' check reads {clash!r} as a value and calls it as a helper"]
+    assert warnings == []
 
 
 def test_an_expression_node_mirrors_the_refusals_its_engine_makes():

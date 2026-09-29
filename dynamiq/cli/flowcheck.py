@@ -89,7 +89,8 @@ RULE_TESTS = frozenset({"present", "blank"})
 # Mirrors dynamiq.nodes.operators.rules.RESERVED_NAMES - the helpers there were before the
 # vocabulary grew. The engine refuses to build a derived value named after one, and an expression
 # that calls one and reads the same name as a value; a name added since (`text`, `number`,
-# `first_present`) it lets a flow that already uses it keep building.
+# `first_present`) it lets a flow that already uses it keep building, though validate still
+# reports an expression that reads and calls it (`_Scan.clash`).
 RULE_RESERVED_NAMES = frozenset({"has", "days_between", "date", "today", "len", "abs", "min", "max", "sum", "round"})
 # Jinja binds this name inside every expression, so the engine refuses to build one that reads it
 # (rules.py's RESERVED_ROOT).
@@ -1049,12 +1050,13 @@ class _Scan:
         self.roots: list = []
 
     def clash(self) -> str | None:
-        """The name the engine refuses to build an expression over for reading it as a value and
-        calling it, or None: the first name both read and called, where that is one of the original
-        helpers or one of Jinja's own globals. A name the vocabulary added since, `text` say, the
-        engine lets through, holding the expression when it runs instead."""
-        clash = next((name for name in self.roots if name in self.called), None)
-        return clash if clash in RULE_RESERVED_NAMES or clash not in RULE_HELPERS else None
+        """The first name the expression both reads as a value and calls, or None. The engine
+        refuses to build over one of the original helpers or one of Jinja's own globals. A name the
+        vocabulary added since, `text` say, it builds, and holds the expression on every record
+        instead, so validate reports that as an error too: no expression could call the helper
+        before it existed, so nothing that validated before is refused now. An expression that only
+        reads an input named `text` is no clash."""
+        return next((name for name in self.roots if name in self.called), None)
 
     def read(self, path: str, segments: list) -> None:
         """Judges a path the engine reads as it does when it builds the node: a read of `self`, a
