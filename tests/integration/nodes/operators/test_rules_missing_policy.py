@@ -521,50 +521,43 @@ HELD = {
         "applies_when could not be evaluated: not a number: 'TBD'",
     ),
     # The check reads the text itself through `number()` or `date()`: the missing value stops it before the reader
-    # runs, and must not hide text nobody could read. The finding still names the missing value.
+    # runs, and must not hide text nobody could read, as it does not hide a derived value that reads it.
     "unreadable-number-beside-missing-data": Held(
         lambda **policy: screening("number(doc.amount) > doc.limit", inputs=("doc",), **policy),
         {"doc": {"amount": "TBD"}},
-        "missing value for doc.limit",
-        "doc.amount is not a number: 'TBD'",
+        "check could not be evaluated: not a number: 'TBD'",
     ),
     "unreadable-date-beside-missing-data": Held(
         lambda **policy: screening("date(doc.issued, format='%d.%m.%Y') <= date(doc.due)", inputs=("doc",), **policy),
         {"doc": {"issued": "March"}},
-        "missing value for doc.due",
-        "doc.issued is not a date: 'March' (format '%d.%m.%Y')",
+        "check could not be evaluated: not a date: 'March' (format '%d.%m.%Y')",
     ),
     "impossible-date-beside-missing-data": Held(
         lambda **policy: screening("date(doc.issued) <= date(doc.due)", inputs=("doc",), **policy),
         {"doc": {"issued": "2026-02-30"}},
-        "missing value for doc.due",
-        "doc.issued is not a date: '2026-02-30' (day is out of range for month)",
+        "check could not be evaluated: not a date: '2026-02-30' (day is out of range for month)",
     ),
     "unreadable-date-in-days-between": Held(
         lambda **policy: screening("days_between(doc.opened, doc.closed) <= 30", inputs=("doc",), **policy),
         {"doc": {"opened": "March"}},
-        "missing value for doc.closed",
-        "doc.opened is not a date: 'March'",
+        "check could not be evaluated: not a date: 'March'",
     ),
     "unreadable-number-as-a-fallback": Held(
         lambda **policy: screening("first_present(number(doc.net), 0) > doc.limit", inputs=("doc",), **policy),
         {"doc": {"net": "TBD"}},
-        "missing value for doc.limit",
-        "doc.net is not a number: 'TBD'",
+        "check could not be evaluated: not a number: 'TBD'",
     ),
     "number-told-a-decimal-it-cannot-read": Held(
         lambda **policy: screening("number(doc.amount, decimal=';') > doc.limit", inputs=("doc",), **policy),
         {"doc": {"amount": "5"}},
-        "missing value for doc.limit",
-        "doc.amount could not be read: number() reads a decimal point '.' or a decimal comma ',', not ';'",
+        "check could not be evaluated: number() reads a decimal point '.' or a decimal comma ',', not ';'",
     ),
     "derived-unreadable-inline": Held(
         lambda **policy: screening(
             "tax > 0", inputs=("doc",), derived=(("tax", "doc.rate * number(doc.net)"),), **policy
         ),
         {"doc": {"net": "TBD"}},
-        "missing value for tax",
-        "doc.net is not a number: 'TBD'",
+        "check could not be evaluated: not a number: 'TBD'",
     ),
     "derived-unreadable-fallback": Held(
         lambda **policy: screening(
@@ -632,8 +625,7 @@ HELD = {
             **policy,
         ),
         {"doc": {"net": "TBD"}},
-        "missing value for doc.limit",
-        "doc.net is not a number: 'TBD'",
+        "check could not be evaluated: not a number: 'TBD'",
     ),
     # A defect of the derived value's own expression speaks over a lookup that found nothing in it, whichever the
     # expression reads first, so a rule that only falls back on the value is still held.
@@ -780,6 +772,30 @@ def test_a_mistake_or_a_value_nobody_could_read_reports_the_severity_under_fail(
 
     assert outcome(output) == ("warn", case.reason)
     assert output["status"] == "warn"
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [{}, {"policy": "fail"}, {"policy": "not_applicable"}, {"node_policy": "not_applicable"}],
+    ids=["unset", "fail", "rule-skips", "node-skips"],
+)
+@pytest.mark.parametrize(
+    ("check", "derived"),
+    [
+        ("number(a) > b", ()),
+        ("d > b", (("d", "number(a)"),)),
+        ("c > 0", (("c", "number(a) - b"),)),
+        ("c > 0", (("d", "number(a)"), ("c", "d - b"))),
+    ],
+    ids=["inline", "derived", "inline-in-a-derived-value", "derived-in-a-derived-value"],
+)
+def test_text_nobody_could_read_speaks_over_a_missing_value_wherever_it_is_read(check, derived, policy):
+    """`number(a) > b` over `a` of `TBD` and no `b` names the text nobody could read, as the same reader in a derived
+    value does: a reviewer who filled in `b` would otherwise meet `TBD` on the next run."""
+    output = run(screening(check, inputs=("a", "b"), derived=derived, **policy), {"a": "TBD"})
+
+    status = "warn" if policy.get("policy") == "fail" else "not_evaluated"
+    assert outcome(output) == (status, "check could not be evaluated: not a number: 'TBD'")
 
 
 def test_an_input_the_selector_maps_is_declared_though_input_fields_does_not_list_it():

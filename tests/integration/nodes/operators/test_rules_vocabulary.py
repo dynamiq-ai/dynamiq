@@ -1118,14 +1118,14 @@ def test_a_blank_date_days_between_reads_is_missing_in_a_derived_value_and_an_ex
     ("placed", "shipped", "read", "message"),
     [
         ("", "TBD", "days_between(date(order.placed), order.shipped) <= 30", "not a date: 'TBD'"),
-        ("TBD", "", "days_between(order.placed, date(order.shipped)) <= 30", None),
+        ("TBD", "", "days_between(order.placed, date(order.shipped)) <= 30", "not a date: 'TBD'"),
     ],
     ids=["blank-start", "blank-end"],
 )
 def test_a_blank_date_beside_one_that_is_no_date_reads_as_date_would_make_it(placed, shipped, read, message):
-    """Raw text is read `end` first, as it always was, and blank text is missing where it is read, as what `date()`
-    makes of it is: beside a text that is no date, the check gives the reason it gives with `date()` around the blank,
-    the missing end or the unreadable end, whichever is read first."""
+    """Blank text is missing where it is read, as what `date()` makes of it is: beside a text that is no date, the
+    check gives the reason it gives with `date()` around the blank. That is the text nobody could read, on whichever
+    side it sits, since a missing value never hides one."""
     node = rules(
         Rule(id="raw", check="days_between(order.placed, order.shipped) <= 30"),
         Rule(id="read", check=read),
@@ -1134,7 +1134,7 @@ def test_a_blank_date_beside_one_that_is_no_date_reads_as_date_would_make_it(pla
 
     findings = by_id(run(node, record("order", placed=placed, shipped=shipped)))
 
-    reason = f"check could not be evaluated: {message}" if message else "missing value for order.shipped"
+    reason = f"check could not be evaluated: {message}"
     assert {rule_id: (finding["status"], finding["message"]) for rule_id, finding in findings.items()} == {
         "raw": ("not_evaluated", reason),
         "read": ("not_evaluated", reason),
@@ -1146,15 +1146,15 @@ def test_a_blank_date_beside_one_that_is_no_date_reads_as_date_would_make_it(pla
     [
         ("sometime", "TBD", "check could not be evaluated: not a date: 'sometime'"),
         ("TBD", "sometime", "check could not be evaluated: not a date: 'TBD'"),
-        (ABSENT, "TBD", "missing value for order.placed"),
-        ("TBD", ABSENT, "missing value for order.shipped"),
+        (ABSENT, "TBD", "check could not be evaluated: not a date: 'TBD'"),
+        ("TBD", ABSENT, "check could not be evaluated: not a date: 'TBD'"),
     ],
     ids=["both-unreadable", "both-unreadable-reversed", "placed-missing", "shipped-missing"],
 )
 def test_days_between_names_the_first_argument_when_both_dates_are_bad(placed, shipped, message):
     """`days_between(date(a), date(b))` reads `a` before `b`, so when both are unreadable the reason is `a`'s,
-    in reading order, whichever text it holds. A value the record lacks outright is caught before the check
-    ever runs, so it is named instead, on whichever side it sits."""
+    in reading order, whichever text it holds. A value the record lacks outright stops the check before either
+    reader runs, but it does not hide the text nobody could read on the other side, which is named instead."""
     node = rules(Rule(id="R1", check="days_between(date(order.placed), date(order.shipped)) <= 30"), member="order")
 
     finding = by_id(run(node, record("order", placed=placed, shipped=shipped)))["R1"]

@@ -1357,9 +1357,10 @@ class Rules(Node):
             except UndefinedError as e:
                 # So is one it used, arithmetic on a key the record lacks or on a blank `number()` read, unless
                 # it also reads a value nobody could read, which the missing one must not hide: `doc.rate * net`
-                # over a missing rate is as unreadable as `net`, for the same reason.
+                # over a missing rate is as unreadable as `net`, for the same reason, and so is
+                # `doc.rate * number(doc.net)` over a net of `TBD` (`_unread`).
                 undefined, blank = True, isinstance(e, MissingValue)
-                _, value = self._unreadable(reads.required, known)
+                value = self._unread(reads.required, reads, known)
             except UnreadableValue as e:
                 # A value nobody could read makes what is computed from it unreadable, whatever else is missing.
                 value = Unreadable(e.value, str(e))
@@ -1368,7 +1369,7 @@ class Rules(Node):
                 # is that value missing too, unless it also reads a value nobody could read. Any other failure
                 # is an error: as None it would read as a value nobody gave, one `first_present` or a guard skips.
                 if self._missing(reads.required, known):
-                    _, value = self._unreadable(reads.required, known)
+                    value = self._unread(reads.required, reads, known)
                 else:
                     value = Unreadable(None, str(e))
             values[name] = value
@@ -1540,12 +1541,13 @@ class Rules(Node):
         expression as well (`_why_held`), or no value it reads accounts for the stop, the rule is not evaluated and
         the reason says why it was not skipped. Under `fail` and `not_evaluated` the reason stays as it is. Where the
         expression reads a value nobody could read, whose reason a missing value must not hide (`ltv <=
-        appraisal.max_ltv` over a ratio divided by zero), the stop is an error instead, under every policy, and its
-        reason already names the cause.
+        appraisal.max_ltv` over a ratio divided by zero), or text a `number()` or `date()` in it cannot read
+        (`number(a) > b` over `a` of `TBD`, which the missing `b` stops before the reader runs), the stop is an error
+        instead, under every policy, with the reason the value or the reader gives (`_unread`).
         """
         reason = reason or f"missing value for {path}"
         # Compared with None: the marker refuses a truth test, as every other use.
-        _, unreadable = self._unreadable(reads.required + reads.optional, scope)
+        unreadable = self._unread(reads.required + reads.optional, reads, scope)
         if unreadable is not None:
             return self._error_status(compiled, f"{where} could not be evaluated: {unreadable.reason}")
         policy = self._policy(compiled)
@@ -1597,7 +1599,7 @@ class Rules(Node):
             kind, name = reads.unknown_names[0]
             return _Hold(f"{name} is not a {kind}")
         paths = reads.required + reads.optional
-        if (misread := self._misread(reads.readers, scope)) is not None:
+        if (misread := self._misread(reads.readers, scope)[0]) is not None:
             return _Hold(misread)
         # A defect holds wherever it is read and speaks over a lookup that found nothing, whichever the expression
         # reads first; a fallback stands in for the lookup, as its author meant (`first_present(limit, 0)`), so that
@@ -1663,9 +1665,10 @@ class Rules(Node):
         return None
 
     @staticmethod
-    def _misread(readers: tuple[Reader, ...], scope: dict[str, Any]) -> str | None:
+    def _misread(readers: tuple[Reader, ...], scope: dict[str, Any]) -> tuple[str, Unreadable] | tuple[None, None]:
         """Why a value an expression reads as a number or a date, and that is there, is one its reader cannot read,
-        or cannot read with the arguments it is given (`decimal=';'`), naming its path; None when every one reads.
+        or cannot read with the arguments it is given (`decimal=';'`), naming its path, and what the reader makes of
+        it: the unreadable value, with the reason the expression would raise; (None, None) when every one reads.
 
         The reader runs again on the value alone, as the expression would run it: a missing value stays missing,
         and one already unreadable is left to the scan for those.
@@ -1677,10 +1680,10 @@ class Rules(Node):
             try:
                 read = HELPERS[reader.helper](_ENVIRONMENT, value, *reader.args, **dict(reader.kwargs))
             except EVALUATION_ERRORS as e:
-                return f"{reader.path} could not be read: {e}"
+                return f"{reader.path} could not be read: {e}", Unreadable(value, str(e))
             if isinstance(read, Unreadable):
-                return _unreadable_because(reader.path, read.reason)
-        return None
+                return _unreadable_because(reader.path, read.reason), read
+        return None, None
 
     @staticmethod
     def _unreadable(paths: list[str], scope: dict[str, Any]) -> tuple[str, Unreadable] | tuple[None, None]:
@@ -1690,6 +1693,15 @@ class Rules(Node):
             if isinstance(value := resolve_path(scope, path), Unreadable):
                 return path, value
         return None, None
+
+    @classmethod
+    def _unread(cls, paths: list[str], reads: Reads, scope: dict[str, Any]) -> Unreadable | None:
+        """A value nobody could read that an expression stopped by a missing value reads, which the missing value
+        must not hide: one of `paths` that already is one, a derived value say, or one `number()` or `date()` in the
+        expression would make of text there (`_misread`), `number(a) > b` over `a` of `TBD` and no `b`, which the
+        missing `b` stops before the reader runs. None when there is none."""
+        _, unreadable = cls._unreadable(paths, scope)
+        return unreadable if unreadable is not None else cls._misread(reads.readers, scope)[1]
 
     @staticmethod
     def _missing_reason(reads: Reads, scope: dict[str, Any], error: MissingValue) -> tuple[str | None, str]:
