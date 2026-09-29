@@ -38,7 +38,11 @@ EVALUATION_ERRORS = (TemplateRuntimeError, TypeError, ValueError, ArithmeticErro
 _US_DATE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 _YEAR_FIRST_DATE = re.compile(r"^([0-9]{4})/([0-9]{1,2})/([0-9]{1,2})$")
-_NAMED_DATE = re.compile(r"^(?P<month>[A-Za-z]+)\.?\s+(?P<day>[0-9]{1,2})(?:,\s*|\s+)(?P<year>[0-9]{4})$")
+# The month written as a word first, the day after it, with an ordinal suffix or without: `Aug 7, 2026`, `August 7th,
+# 2026`.
+_NAMED_DATE = re.compile(
+    r"^(?P<month>[A-Za-z]+)\.?\s+(?P<day>[0-9]{1,2})(?i:st|nd|rd|th)?(?:,\s*|\s+)(?P<year>[0-9]{4})$"
+)
 # The day first, before a month written as a word, which says which number is the day: `7 Aug 2026`, `07-AUG-2026`.
 _DAY_FIRST_DATE = re.compile(
     r"^(?P<day>[0-9]{1,2})(?i:st|nd|rd|th)?(?:\s+|-)(?P<month>[A-Za-z]+)\.?(?:,?(?:\s+|-)|,)(?P<year>[0-9]{4})$"
@@ -239,9 +243,9 @@ def to_date(value: Any, format: str | None = None) -> date:
     """Reads a date from a date, a datetime or text written the way documents write one.
 
     The text may be ISO (`2026-08-07`, a time after it allowed), US month first (`08/07/2026`), year first with
-    slashes (`2026/08/07`) or an English month name, month first or day first: `Aug 7, 2026`, `7 Aug 2026`, read in
-    English whatever the process's locale. Given a `format`, the text is read as `datetime.strptime` reads that
-    format, and nothing else.
+    slashes (`2026/08/07`) or an English month name, month first or day first, the day with an ordinal suffix or
+    without: `Aug 7, 2026`, `August 7th, 2026`, `7 Aug 2026`, read in English whatever the process's locale. Given a
+    `format`, the text is read as `datetime.strptime` reads that format, and nothing else.
 
     Raises when there is no date to read: a value already missing raises its own undefined error and a value already
     unreadable its own error, so `days_between(date(a), b)` reports what `date()` found; anything else raises a

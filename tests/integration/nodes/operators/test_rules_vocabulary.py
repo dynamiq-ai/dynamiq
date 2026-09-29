@@ -941,6 +941,11 @@ def test_a_rule_reading_and_calling_number_is_held_when_it_runs_not_refused_at_b
         ("date(raw)", "Oct 1, 2026", date(2026, 10, 1)),
         ("date(raw)", "October 1, 2026", date(2026, 10, 1)),
         ("date(raw)", "Sept. 1 2026", date(2026, 9, 1)),
+        ("date(raw)", "August 7th, 2026", date(2026, 8, 7)),
+        ("date(raw)", "Aug 1st 2026", date(2026, 8, 1)),
+        ("date(raw)", "August 22nd, 2026", date(2026, 8, 22)),
+        ("date(raw)", "August 3rd 2026", date(2026, 8, 3)),
+        ("date(raw)", "AUGUST 7TH, 2026", date(2026, 8, 7)),
         # A month written as a word says which number is the day, so the day may come first.
         ("date(raw)", "1 Oct 2026", date(2026, 10, 1)),
         ("date(raw)", "7 August 2026", date(2026, 8, 7)),
@@ -962,6 +967,11 @@ def test_a_rule_reading_and_calling_number_is_held_when_it_runs_not_refused_at_b
         "short-month",
         "month",
         "sept-without-comma",
+        "ordinal",
+        "short-month-ordinal-without-comma",
+        "ordinal-nd",
+        "ordinal-rd-without-comma",
+        "ordinal-capitals",
         "day-first-short-month",
         "day-first",
         "day-first-abbreviated",
@@ -1197,7 +1207,16 @@ def test_to_date_reads_the_new_formats_and_still_raises_on_what_it_cannot_read()
     assert to_date("17.07.2026", format="%d.%m.%Y") == date(2026, 7, 17)
     assert to_date("1 Oct 2026") == date(2026, 10, 1)
     # A day before a month written as a number is no more readable than it was: `7-8-2026` is 7 August or 8 July.
-    for text in ("March", "Oct 12026", "Octember 1, 2026", "7-8-2026", "7 Foo 2026", ""):
+    for text in (
+        "March",
+        "Oct 12026",
+        "Octember 1, 2026",
+        "7-8-2026",
+        "7 Foo 2026",
+        "",
+        "August 7xx, 2026",
+        "Aug 7t 2026",
+    ):
         with pytest.raises(ValueError, match=f"^not a date: {text!r}$"):
             to_date(text)
     with pytest.raises(ValueError):
