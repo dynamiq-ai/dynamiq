@@ -821,6 +821,32 @@ def test_an_input_the_selector_maps_is_declared_though_input_fields_does_not_lis
     )
 
 
+@pytest.mark.parametrize(
+    "fields",
+    [[], [NamedField(name="doc")]],
+    ids=["selector-only", "selector-and-input-fields"],
+)
+def test_a_node_that_declares_its_inputs_only_through_the_selector_still_holds_a_typo(fields):
+    """The selector's keys declare the record as much as `input_fields` does, so a node that lists none of them in
+    `input_fields` still tells a name it never maps, a typo, from data the record lacks."""
+    node = Rules(
+        name="selected",
+        input_fields=fields,
+        input_transformer=InputTransformer(selector={"doc": "$.doc"}),
+        on_missing="not_applicable",
+        rules=[Rule(id="r", check="doc.x > 1 and lon > 2"), Rule(id="skipped", check="doc.y > 1")],
+    )
+
+    output = run(node, {"doc": {"x": 5}})
+
+    assert outcome(output, "r") == (
+        "not_evaluated",
+        "missing value for lon (not skipped: lon is not an input or a derived value)",
+    )
+    assert outcome(output, "skipped") == ("not_applicable", "does not apply: missing value for doc.y")
+    assert output["status"] == "not_evaluated"
+
+
 def test_a_lookup_that_found_nothing_is_judged_record_by_record():
     node = screening("loan.amount <= limit", "not_applicable", inputs=LENDING, derived=(LIMIT,))
 

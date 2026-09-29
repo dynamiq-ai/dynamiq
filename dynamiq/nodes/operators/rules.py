@@ -1189,9 +1189,10 @@ class Rules(Node):
 
     _compiled: list[CompiledRule] = PrivateAttr(default_factory=list)
     _derived: list[tuple[str, Callable[..., Any], Reads]] = PrivateAttr(default_factory=list)
-    # The names an expression may read from where the node declares its inputs: those, the keys its input transformer's
-    # selector maps, which the record holds whether or not `input_fields` lists them, the derived values and `as_of`.
-    # None where it declares no input, since a record read then cannot be told from a typo.
+    # The names an expression may read from where the node declares its inputs: those `input_fields` lists, the keys
+    # its input transformer's selector maps, which the record holds whether or not `input_fields` lists them, the
+    # derived values and `as_of`. None where it declares no input either way, since a record read then cannot be told
+    # from a typo.
     _declared: set[str] | None = PrivateAttr(default=None)
     # Whether some rule skips a missing value by its own policy, and whether some rule leaves its policy to the node.
     _rules_skip: bool = PrivateAttr(default=False)
@@ -1201,8 +1202,9 @@ class Rules(Node):
         super().__init__(**kwargs)
         self._derived = self._compile_derived()
         self._compiled = self._compile_rules()
-        if self.input_fields:
-            names = {field.name for field in self.input_fields} | set(self.input_transformer.selector or {})
+        # The selector's keys declare the record as much as `input_fields` does: a node may list its inputs in either.
+        names = {field.name for field in self.input_fields} | set(self.input_transformer.selector or {})
+        if names:
             self._declared = names | {name for name, _, _ in self._derived} | {AS_OF_KEY}
         self._rules_skip = any(item.rule.on_missing == RuleMissingPolicy.NOT_APPLICABLE for item in self._compiled)
         self._rules_defer = any(item.rule.on_missing is None for item in self._compiled)
