@@ -106,6 +106,13 @@ class Blank:
     Each sandbox derives its blank from its own undefined (`RecordSandbox.blank`), so a blank is as missing as
     anything undefined there: in a rule it raises on use, in an expression it comes out as None. The marker is how a
     text filter tells a blank, which it passes on, from any other undefined, which it keeps reading as ''.
+
+    Unlike any other undefined, a blank refuses to become text: `~`, `join`, `format`, a `%` format, `str.format`
+    and every filter that reads it as text raise the missing value, in both sandboxes, as arithmetic on it does.
+    Jinja's undefined reads as '' there, and the comparison after it would give a verdict on a value nobody gave:
+    `text(first) ~ ' ' ~ text(last) == name` over a blank `first`. The text filters that pass a blank on
+    (`_TEXT_FILTERS`) keep it blank instead, and a message prints one as the '' any undefined prints as (`_rendered`).
+    Only its repr is not refused, as for `Unreadable`.
     """
 
     __slots__ = ()
@@ -116,6 +123,9 @@ class Blank:
     # The numeric hooks Jinja's undefined lacks, where Python would raise a type error instead: a blank `number()`
     # rounded, `round(n, 2)` or `| abs`, is as missing as one added to.
     __round__ = __abs__ = __trunc__ = __floor__ = __ceil__ = __index__ = _raise_missing
+    # Every conversion to text: `str()` behind `~`, `join`, `%s` and the filters, `format()` behind `str.format`,
+    # and the markup hook Jinja's chainable undefined answers with `str()`.
+    __str__ = __format__ = __html__ = _raise_missing
 
 
 class UnreadableValue(TemplateRuntimeError):
@@ -448,8 +458,9 @@ RESERVED_NAMES = frozenset({"has", "days_between", "date", "today", "len", "abs"
 # The tests that ask about a value; like `is defined`, they may read one that is missing.
 TESTS: dict[str, Callable[[Any], bool]] = {"present": is_present, "blank": is_blank}
 
-# Jinja's text filters read an undefined value as '', which a comparison takes for an answer: `date(x) | string`
-# over a blank `x` as well.
+# The text filters that pass a blank on rather than raise at it (`Blank`), so a question after them still answers:
+# `text(x) | lower is blank`, `first_present(text(x) | lower, 'none')`. Any other conversion of a blank to text
+# raises it as missing.
 _TEXT_FILTERS = ("lower", "upper", "trim", "title", "capitalize", "replace", "string")
 
 
@@ -462,7 +473,7 @@ def _value_at(function: Callable[..., Any]) -> int:
 def _keeps_blank(filter_: Callable[..., Any]) -> Callable[..., Any]:
     """The filter, with a blank passed on untouched.
 
-    `text(x) | lower == 'purchase'` would otherwise fail a blank `x` that `text(x) == 'purchase'` holds as missing.
+    `text(x) | lower` is then as blank as `text(x)`, where the filter itself would raise at it as missing (`Blank`).
     Only a blank passes: any other undefined still reads as '', as the messages and expressions written before the
     marker expect. `wraps` copies the filter's attributes, Jinja's pass-argument marker among them, so `replace`
     still receives its eval context first and the value second.
@@ -576,6 +587,9 @@ def _rendered(value: Any) -> Any:
     """
     if isinstance(value, Unreadable):
         return value.value
+    # A blank refuses to become text anywhere a check could compare it; a message printing one decides nothing.
+    if isinstance(value, Blank):
+        return ""
     return _method_text(value) if callable(value) and not isinstance(value, Undefined) else value
 
 

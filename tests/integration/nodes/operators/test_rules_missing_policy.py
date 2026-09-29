@@ -148,8 +148,25 @@ def test_each_policy_reports_a_missing_value_its_own_way(policy, expected, statu
         ("app.b == '' and first_present(app.a, app.c) == 'x'", {"b": "", "a": "", "c": []}, "app.a"),
         # The fallback stands in for the blank `app.a`, so the blank that stops the check is `app.c`.
         ("first_present(app.a, 'x') == 'x' and text(app.c) == 'y'", {"a": " ", "c": ""}, "app.c"),
+        # A blank turned into text is as missing as a blank compared.
+        ("app.b == '' and text(app.a) ~ '' == 'x'", {"b": "", "a": "  "}, "app.a"),
+        ("app.b == '' and [text(app.a), 'y'] | join == 'xy'", {"b": "", "a": "  "}, "app.a"),
+        ("app.b == '' and '%s' | format(number(app.a)) == '1'", {"b": "", "a": ""}, "app.a"),
+        ("app.b == '' and 'on ' ~ date(app.a) == 'on 2026-10-01'", {"b": "", "a": " "}, "app.a"),
+        ("app.b == '' and first_present(app.a, app.c) ~ '' == 'x'", {"b": "", "a": "", "c": []}, "app.a"),
     ],
-    ids=["text", "number", "date", "first-present", "past-a-fallback"],
+    ids=[
+        "text",
+        "number",
+        "date",
+        "first-present",
+        "past-a-fallback",
+        "text-concat",
+        "text-join",
+        "number-format",
+        "date-concat",
+        "first-present-concat",
+    ],
 )
 @pytest.mark.parametrize(
     ("policy", "status", "prefix"),

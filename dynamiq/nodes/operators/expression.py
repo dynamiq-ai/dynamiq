@@ -43,8 +43,10 @@ class Expression(Node):
     `sum`, `round`, `text`, `number` and `first_present`; so are the tests `is present` and `is blank`.
     An input named like one of the helpers is the input where an expression reads it as a value and
     the helper where an expression calls it. A blank result, `text('  ')` or `date('')` say, comes out
-    as None, like a missing input; a value `number()` or `date()` cannot read fails the run instead,
-    `number('TBD')` as `date('March')` does, and so does a question about one, `has(date('March'))`.
+    as None, like a missing input, and so does one passed through a text filter such as `| lower`; a
+    blank used as a value, added to or turned into text with `~`, `join` or `format`, fails the run.
+    A value `number()` or `date()` cannot read fails the run too, `number('TBD')` as `date('March')`
+    does, and so does a question about one, `has(date('March'))`.
     The output holds one key per expression, plus every input when `pass_through` is set, with
     expressions winning on a clash.
     """

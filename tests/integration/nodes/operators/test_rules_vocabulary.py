@@ -661,6 +661,72 @@ def test_a_blank_read_stays_missing_through_the_helpers_and_filters_that_round_o
     )
 
 
+@pytest.mark.parametrize(
+    ("check", "missing"),
+    [
+        ("text(doc.name) ~ '' == 'Ada'", "doc.name"),
+        ("text(doc.first) ~ ' ' ~ text(doc.last) == 'Ada Lovelace'", "doc.first"),
+        ("'Dr ' ~ text(doc.name) == 'Dr Ada'", "doc.name"),
+        ("[text(doc.name), 'x'] | join('-') == 'Ada-x'", "doc.name"),
+        ("'%s!' % text(doc.name) == 'Ada!'", "doc.name"),
+        ("'{}!'.format(text(doc.name)) == 'Ada!'", "doc.name"),
+        ("'%s!' | format(text(doc.name)) == 'Ada!'", "doc.name"),
+        ("'A-a' | replace('-', text(doc.name)) == 'AAdaa'", "doc.name"),
+        ("text(doc.name) | center(5) == ' Ada '", "doc.name"),
+        ("number(doc.amount) ~ '' == '12'", "doc.amount"),
+        ("date(doc.issued) ~ '' == '2026-10-01'", "doc.issued"),
+        ("first_present(doc.nick, doc.name) ~ '' == 'Ada'", "doc.nick"),
+    ],
+    ids=[
+        "concat",
+        "concat-names",
+        "concat-after",
+        "join",
+        "percent",
+        "str-format",
+        "format-filter",
+        "replace-argument",
+        "center",
+        "number",
+        "date",
+        "first-present",
+    ],
+)
+def test_a_blank_read_stays_missing_through_text_built_from_it(check, missing):
+    """`~`, `join`, `format` and every other filter or operator that turns a value into text would otherwise read a
+    blank as '', and the comparison after it would give a verdict on a value nobody gave."""
+    node = rules(Rule(id="R1", check=check), member="doc")
+    given = record("doc", name="Ada", first="Ada", last="Lovelace", nick=" ", amount="12", issued="Oct 1, 2026")
+    blank = record("doc", name="  ", first=" ", last="Lovelace", nick="", amount=" ", issued="")
+
+    assert statuses(run(node, given)) == {"R1": "pass"}
+    finding = by_id(run(node, blank))["R1"]
+    assert (finding["status"], finding["message"]) == ("not_evaluated", f"missing value for {missing}")
+
+
+def test_a_message_prints_a_blank_as_empty_text_and_falls_back_where_it_builds_text_from_one():
+    """A message decides nothing, so a blank it prints is the '' any undefined prints as; text it builds from a blank
+    raises as a check's would, and the message comes back as written."""
+    node = rules(
+        Rule(id="shown", check="doc.name == 'x'", message="name [{{ doc.name }}] nick [{{ text(doc.nick) }}]"),
+        Rule(id="built", check="doc.name == 'x'", message="nick {{ text(doc.nick) ~ '!' }}"),
+        member="doc",
+    )
+
+    findings = by_id(run(node, record("doc", name="Ada", nick="  ")))
+
+    assert findings["shown"]["message"] == "name [Ada] nick []"
+    assert findings["built"]["message"] == "nick {{ text(doc.nick) ~ '!' }}"
+
+
+def test_a_blank_in_text_built_by_an_expression_fails_its_run_as_arithmetic_on_it_does():
+    """An Expression node has no missing-data policy: a blank used where a value is needed fails the run, whether
+    it is added to or turned into text. A missing input read as '' by `~` stays as it was."""
+    assert "missing value: text() found no text" in failure("text(nickname) ~ '!'", nickname="  ")
+    assert "missing value: number() found no number" in failure("number(amount) + 1", amount="  ")
+    assert evaluate("missing ~ '!'") == "!"
+
+
 def test_a_reader_reads_its_argument_and_never_its_own_name():
     reads = read_paths("number(doc.amount) > 1000 and date(doc.issued, format='%d.%m.%Y') < today()")
     assert (reads.required, reads.optional) == (["doc.amount", "doc.issued"], [])
