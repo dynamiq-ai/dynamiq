@@ -739,6 +739,14 @@ def test_a_blank_no_path_accounts_for_is_never_skipped_nor_named_after_another_b
         ),
         ("number(app.a) > 5 and app.b == 1", {"app": {"a": "TBD", "b": 0}}, "not a number: 'TBD'"),
         ("firstpresent(app.a) == 1 and app.b == 1", {"app": {"a": 1, "b": 0}}, "'firstpresent' is undefined"),
+        # Text a reader met before a missing value stopped its side is not hidden by it, whatever the other side holds.
+        ("number(app.a) > app.b or app.c == 1", {"app": {"a": "TBD", "c": 1}}, "not a number: 'TBD'"),
+        ("number(app.a) > app.b and app.c == 1", {"app": {"a": "TBD", "c": 0}}, "not a number: 'TBD'"),
+        (
+            "app.c == 1 or (number(app.a) > app.b or app.d == 1)",
+            {"app": {"a": "TBD", "d": 1}},
+            "not a number: 'TBD'",
+        ),
     ],
     ids=[
         "a-type-error-beside-a-missing-value",
@@ -751,6 +759,9 @@ def test_a_blank_no_path_accounts_for_is_never_skipped_nor_named_after_another_b
         "a-lookup-that-found-nothing-before-a-false-side-of-an-and",
         "an-unreadable-number-before-a-false-side-of-an-and",
         "a-mistyped-helper-before-a-false-side-of-an-and",
+        "an-unreadable-number-before-a-missing-value-beside-a-side-that-decides",
+        "an-unreadable-number-before-a-missing-value-beside-a-false-side-of-an-and",
+        "an-unreadable-number-before-a-missing-value-in-a-nested-or",
     ],
 )
 def test_only_a_missing_value_gives_way_to_the_other_side_and_an_error_on_either_side_is_an_error(

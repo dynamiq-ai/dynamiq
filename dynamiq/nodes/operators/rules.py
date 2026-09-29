@@ -635,11 +635,18 @@ def _decide(decider: bool, left: Callable[[], Any], right: Callable[[], Any]) ->
     alone a check uses (`_mark_deciding`), each side a function. Where the left side is there, this is Python's `or` or
     `and`. Where it stops at a missing value, a right side whose truth is `decider` decides and is returned, a lazy one,
     what `select` yields say, judged by its items and returned as their list; otherwise the left side's missing value
-    stands. Only a missing value gives way, a blank's included: an error is an error on either side."""
+    stands. Only a missing value gives way, a blank's included: an error is an error on either side, and so is text a
+    reader on the left side met and could not read before the missing value stopped it (`_reading`), which the missing
+    value would otherwise hide, as it does not anywhere else in a check: `number(a) > b or c` over `a` of `TBD` and no
+    `b` is that error, whatever `c` holds."""
+    misread = _MISREAD.get()
+    met = len(misread) if misread is not None else 0
     try:
         value = left()
         true = bool(value)
     except MissingValue as missing:
+        if misread is not None and len(misread) > met:
+            raise
         try:
             other = right()
             if isinstance(other, Iterator):
@@ -1422,9 +1429,10 @@ class Rules(Node):
     counts, or as a side of another such, either side decides where the other stops at a missing value. Where the check
     uses its value, `(app.fee or 100) > 50`, it is Python's: a missing side it reads holds the rule. The reason names
     the value the evaluation stopped at, the left of two, a helper's blank the first field it could have come from where
-    all are blank. Only a missing value gives way: an error is an error on either side. A rule that skipped a value, or
-    whose other side decided, cannot see an error raised past it: with `app.a` 1 and `app.q` 0, `app.b / app.q > 1 or
-    app.a == 1` passes without `app.b`.
+    all are blank. Only a missing value gives way: an error is an error on either side, and so is text a reader on the
+    stopped side met and could not read, `number(app.a) > app.b or app.c`. A rule that skipped a value, or whose other
+    side decided, cannot see an error raised past it: with `app.a` 1 and `app.q` 0, `app.b / app.q > 1 or app.a == 1`
+    passes without `app.b`.
 
     Derived values and messages are evaluated as written: `and` and `or` are Python's, and a missing value stops a
     derived value only where it is used. One computed from a missing value is missing, None under `derived`; one that
