@@ -3,6 +3,8 @@ import math
 import numbers
 import re
 from collections.abc import Callable, Container, ItemsView, Iterator, KeysView, Mapping, ValuesView
+from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
@@ -190,6 +192,31 @@ class Unreadable:
         return f"Unreadable({self.value!r}, {self.reason!r})"
 
 
+# What `number()`, `date()` and `days_between()` could not read while one expression was evaluated, in the order they
+# met it (`_reading`); None outside such an evaluation. A missing value that stops the expression must not hide text a
+# reader met before it, and only what a reader met counts: a reader in a branch the record never takes read nothing.
+# A context variable, so records evaluated at once on other threads or in other tasks each keep their own.
+_MISREAD: ContextVar[list["Unreadable"] | None] = ContextVar("rules_misread", default=None)
+
+
+@contextmanager
+def _reading() -> Iterator[list["Unreadable"]]:
+    """Collects what the readers could not read while the expressions inside are evaluated."""
+    misread: list[Unreadable] = []
+    token = _MISREAD.set(misread)
+    try:
+        yield misread
+    finally:
+        _MISREAD.reset(token)
+
+
+def _misread(value: "Unreadable") -> "Unreadable":
+    """Notes a value a reader could not read for the evaluation that asked for it (`_reading`), and returns it."""
+    if (misread := _MISREAD.get()) is not None:
+        misread.append(value)
+    return value
+
+
 def _is_missing(value: Any) -> bool:
     return value is None or value is _MISSING or isinstance(value, Undefined)
 
@@ -296,14 +323,26 @@ def days_between(start: Any, end: Any) -> int:
     for value in (start, end):
         if isinstance(value, Unreadable):
             raise value.error()
-    return (_day(end) - _day(start)).days
+    try:
+        last = _day(end)
+    except UndefinedError:
+        # The call is handed both dates: text in `start` it cannot read is met (`_misread`) before the missing `end`
+        # stops it, as `days_between(date(a), date(b))` meets it, and the error stays the missing end's.
+        with suppress(ValueError, UndefinedError):
+            _day(start)
+        raise
+    return (last - _day(start)).days
 
 
 def _day(value: Any) -> date:
     """A date `days_between` is handed, read as `to_date` reads it; blank text is missing, as `date()` makes it."""
     if isinstance(value, str) and not value.strip():
         raise MissingValue("missing value: days_between() found no date")
-    return to_date(value)
+    try:
+        return to_date(value)
+    except ValueError as e:
+        _misread(Unreadable(value, str(e)))
+        raise
 
 
 def today() -> date:
@@ -407,13 +446,15 @@ def number(environment: "RecordSandbox", value: Any, decimal: str = ".") -> Any:
     already missing or unreadable passes through as it is.
     """
     if decimal not in (".", ","):
-        raise ValueError(f"number() reads a decimal point '.' or a decimal comma ',', not {decimal!r}")
+        refusal = f"number() reads a decimal point '.' or a decimal comma ',', not {decimal!r}"
+        _misread(Unreadable(value, refusal))
+        raise ValueError(refusal)
     if isinstance(value, (Blank, Unreadable)):
         return value
     if is_blank(value):
         return environment.blank(hint="missing value: number() found no number", exc=MissingValue)
     read = _number_of(value, decimal)
-    return Unreadable(value, f"not a number: {_quoted(value)}") if read is None else read
+    return _misread(Unreadable(value, f"not a number: {_quoted(value)}")) if read is None else read
 
 
 @pass_environment
@@ -430,7 +471,7 @@ def read_date(environment: "RecordSandbox", value: Any, format: str | None = Non
     try:
         return to_date(value, format)
     except ValueError as e:
-        return Unreadable(value, str(e))
+        return _misread(Unreadable(value, str(e)))
 
 
 @pass_environment
@@ -684,16 +725,6 @@ def _path_of(node: nodes.Node) -> str | None:
 GLOBAL_NAMES = frozenset(_ENVIRONMENT.globals)
 
 
-class Reader(NamedTuple):
-    """A path an expression reads as a number or a date: the helper that reads it, `number` or `date`, and the
-    arguments after the value, where they are constants (`date(doc.issued, format='%d.%m.%Y')`)."""
-
-    path: str
-    helper: str
-    args: tuple[Any, ...] = ()
-    kwargs: tuple[tuple[str, Any], ...] = ()
-
-
 class _Asked(Enum):
     """What a value read inside a question is asked about. `has(x)` and a test such as `x is defined` ask whether it
     is MISSING and take blank text for a value; `x is present`, `x is blank` and any question over what `text()`,
@@ -716,16 +747,15 @@ class BlankSource(NamedTuple):
 class Reads(NamedTuple):
     """The paths an expression reads: the ones it needs, the ones it only asks about, the global names it calls
     and reads as values, which a record key of the same name would shadow, the paths it calls as if they were
-    helpers, a mistyped `firstpresent(x)` say, which are read like any member as well, the paths it reads as a
-    number or a date, the filters and tests it uses that the sandbox does not have, each as `(kind, name)`:
-    `("filter", "lowr")`, and the blanks the helpers it calls may stop it at (`BlankSource`)."""
+    helpers, a mistyped `firstpresent(x)` say, which are read like any member as well, the filters and tests it
+    uses that the sandbox does not have, each as `(kind, name)`: `("filter", "lowr")`, and the blanks the helpers it
+    calls may stop it at (`BlankSource`)."""
 
     required: list[str]
     optional: list[str]
     helpers_called: tuple[str, ...] = ()
     helpers_read: tuple[str, ...] = ()
     unknown_calls: tuple[str, ...] = ()
-    readers: tuple[Reader, ...] = ()
     unknown_names: tuple[tuple[str, str], ...] = ()
     blank_sources: tuple[BlankSource, ...] = ()
 
@@ -737,38 +767,11 @@ class _Collected(NamedTuple):
     # The fallbacks `first_present` reads: allowed to be missing, yet asked about by nothing, so they guard nothing.
     lenient: list[str]
     unknown_calls: list[str]
-    readers: list[Reader]
     unknown_names: list[tuple[str, str]]
     # The paths handed to a helper that turns a blank into a missing value, in groups whose blank stops a call whose
     # result the expression needs (`_blank_sources`), and the paths a question asked about, by what it asked (`_Asked`).
     blank_sources: list[tuple[str, ...]]
     asked: dict[_Asked, list[str]]
-
-
-def _readers_of(call: nodes.Call) -> list[Reader]:
-    """The paths a call of `number()`, `date()` or `days_between()` reads as a number or a date.
-
-    Only a path passed as it is, with constant arguments after it, is kept: that much can be read again without
-    evaluating the expression. `days_between(a, b)` reads each of its values as `date()` does.
-    """
-    name = call.node.name if isinstance(call.node, nodes.Name) else None
-    if call.dyn_args or call.dyn_kwargs:
-        return []
-    if name == "days_between":
-        return [Reader(path, "date") for argument in call.args if (path := _path_of(argument)) is not None]
-    if name not in ("number", "date") or not call.args or (path := _path_of(call.args[0])) is None:
-        return []
-    extra = call.args[1:]
-    if not all(isinstance(argument, nodes.Const) for argument in [*extra, *(item.value for item in call.kwargs)]):
-        return []
-    return [
-        Reader(
-            path,
-            name,
-            tuple(argument.value for argument in extra),
-            tuple((item.key, item.value.value) for item in call.kwargs),
-        )
-    ]
 
 
 def _blank_sources(call: nodes.Call) -> list[tuple[str, ...]]:
@@ -810,7 +813,6 @@ def _collect_paths(
     if isinstance(node, nodes.Call) and isinstance(node.node, nodes.Name) and node.node.name in GLOBAL_NAMES:
         name = node.node.name
         collected.called.append(name)
-        collected.readers.extend(reader for reader in _readers_of(node) if reader not in collected.readers)
         # A helper's blank stops the expression only where it needs what the helper returns: not inside `has`, a
         # test that asks about it, `| default` or `first_present`, each of which takes a blank for an answer.
         if required and not lenient:
@@ -870,7 +872,6 @@ def _reads_of(parsed: nodes.Template) -> Reads:
         called=[],
         lenient=[],
         unknown_calls=[],
-        readers=[],
         unknown_names=[],
         blank_sources=[],
         asked={question: [] for question in _Asked},
@@ -907,7 +908,6 @@ def _reads_of(parsed: nodes.Template) -> Reads:
         helpers_called=tuple(dict.fromkeys(collected.called)),
         helpers_read=tuple(root for root in roots if root in GLOBAL_NAMES),
         unknown_calls=tuple(collected.unknown_calls),
-        readers=tuple(collected.readers),
         unknown_names=tuple(collected.unknown_names),
         blank_sources=blank_sources,
     )
@@ -1051,6 +1051,26 @@ def resolve_path(context: dict[str, Any], path: str) -> Any:
         else:
             return _MISSING
     return _MISSING if isinstance(current, Undefined) else current
+
+
+def _without_nulls(scope: dict[str, Any], paths: list[str]) -> dict[str, Any]:
+    """The scope with the null at each of `paths` left out, as a key the record lacks, copying each mapping on the
+    way to it; the scope it is handed stays as it was. A null inside a list stays, since leaving it out would move
+    the items after it."""
+    for path in paths:
+        parts = _split_path(path)
+        if not parts or not isinstance(parts[-1], str) or resolve_path(scope, path) is not None:
+            continue
+        scope = dict(scope)
+        current = scope
+        for part in parts[:-1]:
+            inner = current.get(part) if isinstance(part, str) else None
+            if not isinstance(inner, dict):
+                break
+            current[part] = current = dict(inner)
+        else:
+            current.pop(parts[-1], None)
+    return scope
 
 
 def _unreadable_because(path: str, reason: str) -> str:
@@ -1354,30 +1374,32 @@ class Rules(Node):
             # How the value came out missing, where it did: undefined, as a key the record lacks or a lookup that
             # finds nothing does, and blank, as `number()` of blank text does.
             undefined = blank = False
-            try:
-                result = expression(scope_for(reads, known, RuleUndefined))
-                undefined, blank = isinstance(result, Undefined), isinstance(result, Blank)
-                # A value the expression could not find is missing, inside a list or a dict it built as well,
-                # and the output stays serializable.
-                value = concrete(result)
-            except UndefinedError as e:
-                # So is one it used, arithmetic on a key the record lacks or on a blank `number()` read, unless
-                # it also reads a value nobody could read, which the missing one must not hide: `doc.rate * net`
-                # over a missing rate is as unreadable as `net`, for the same reason, and so is
-                # `doc.rate * number(doc.net)` over a net of `TBD` (`_unread`).
-                undefined, blank = True, isinstance(e, MissingValue)
-                value = self._unread(reads.required, reads, known)
-            except UnreadableValue as e:
-                # A value nobody could read makes what is computed from it unreadable, whatever else is missing.
-                value = Unreadable(e.value, str(e))
-            except EVALUATION_ERRORS as e:
-                # A failure while a value the expression needs is missing, `amount / value` over a null `value`,
-                # is that value missing too, unless it also reads a value nobody could read. Any other failure
-                # is an error: as None it would read as a value nobody gave, one `first_present` or a guard skips.
-                if self._missing(reads.required, known):
-                    value = self._unread(reads.required, reads, known)
-                else:
-                    value = Unreadable(None, str(e))
+            with _reading() as misread:
+                try:
+                    result = expression(scope_for(reads, known, RuleUndefined))
+                    undefined, blank = isinstance(result, Undefined), isinstance(result, Blank)
+                    # A value the expression could not find is missing, inside a list or a dict it built as well,
+                    # and the output stays serializable.
+                    value = concrete(result)
+                except UndefinedError as e:
+                    # So is one it used, arithmetic on a key the record lacks or on a blank `number()` read, unless
+                    # it also reads a value nobody could read, which the missing one must not hide: `doc.rate * net`
+                    # over a missing rate is as unreadable as `net`, for the same reason, and so is
+                    # `doc.rate * number(doc.net)` over a net of `TBD`, where `number()` ran before the rate stopped it
+                    # (`_unread`).
+                    undefined, blank = True, isinstance(e, MissingValue)
+                    value = self._unread(reads.required, misread, known)
+                except UnreadableValue as e:
+                    # A value nobody could read makes what is computed from it unreadable, whatever else is missing.
+                    value = Unreadable(e.value, str(e))
+                except EVALUATION_ERRORS as e:
+                    # A failure while a value the expression needs is missing, `amount / value` over a null `value`,
+                    # is that value missing too, unless it also reads a value nobody could read. Any other failure
+                    # is an error: as None it would read as a value nobody gave, one `first_present` or a guard skips.
+                    if self._missing(reads.required, known):
+                        value = self._unread(reads.required, misread, known)
+                    else:
+                        value = Unreadable(None, str(e))
             values[name] = value
             if isinstance(value, Unreadable):
                 # The rules read it as unreadable, keeping the value the error names, if any, for a message to
@@ -1501,29 +1523,45 @@ class Rules(Node):
         """
         if compiled.applies is not None:
             reads = compiled.applies_reads
-            if missing := self._missing(reads.required, scope):
-                return self._missing_status(compiled, "applies_when", reads, scope, unskippable, missing)
-            try:
-                applies = holds(compiled.applies(scope_for(reads, scope, RuleUndefined)))
-            except MissingValue as e:
-                path, reason = self._missing_reason(reads, scope, e)
-                return self._missing_status(compiled, "applies_when", reads, scope, unskippable, path, reason)
-            except EVALUATION_ERRORS as e:
-                return self._error_status(compiled, f"applies_when could not be evaluated: {e}")
+            with _reading() as misread:
+                if missing := self._missing(reads.required, scope):
+                    self._probe(compiled.applies, reads, scope)
+                    return self._missing_status(compiled, "applies_when", reads, scope, unskippable, misread, missing)
+                try:
+                    applies = holds(compiled.applies(scope_for(reads, scope, RuleUndefined)))
+                except MissingValue as e:
+                    path, reason = self._missing_reason(reads, scope, e)
+                    return self._missing_status(
+                        compiled, "applies_when", reads, scope, unskippable, misread, path, reason
+                    )
+                except EVALUATION_ERRORS as e:
+                    return self._error_status(compiled, f"applies_when could not be evaluated: {e}")
             if not applies:
                 return STATUS_NOT_APPLICABLE, f"does not apply: {compiled.rule.applies_when.strip()}", True
 
         reads = compiled.check_reads
-        if missing := self._missing(reads.required, scope):
-            return self._missing_status(compiled, "check", reads, scope, unskippable, missing)
-        try:
-            held = holds(compiled.check(scope_for(reads, scope, RuleUndefined)))
-        except MissingValue as e:
-            path, reason = self._missing_reason(reads, scope, e)
-            return self._missing_status(compiled, "check", reads, scope, unskippable, path, reason)
-        except EVALUATION_ERRORS as e:
-            return self._error_status(compiled, f"check could not be evaluated: {e}")
+        with _reading() as misread:
+            if missing := self._missing(reads.required, scope):
+                self._probe(compiled.check, reads, scope)
+                return self._missing_status(compiled, "check", reads, scope, unskippable, misread, missing)
+            try:
+                held = holds(compiled.check(scope_for(reads, scope, RuleUndefined)))
+            except MissingValue as e:
+                path, reason = self._missing_reason(reads, scope, e)
+                return self._missing_status(compiled, "check", reads, scope, unskippable, misread, path, reason)
+            except EVALUATION_ERRORS as e:
+                return self._error_status(compiled, f"check could not be evaluated: {e}")
         return (STATUS_PASSED, None, True) if held else (compiled.rule.severity.value, None, True)
+
+    @staticmethod
+    def _probe(expression: Callable[..., Any], reads: Reads, scope: dict[str, Any]) -> None:
+        """Evaluates an expression that a missing value it needs stops before it runs, for what its readers meet
+        on the way to the stop (`_reading`): `number(a) > b` over `a` of `TBD` and no `b` reads `a` first. A null it
+        needs is left out, as a key the record lacks, which is how the missing value reads when the expression runs
+        to it; as a null it would reach a filter as the text 'None', `date(x | trim)` say, and a reader would report
+        text the record never held. What the expression comes to is left to the missing value to explain."""
+        with suppress(*EVALUATION_ERRORS):
+            expression(scope_for(reads, _without_nulls(scope, reads.required + reads.optional), RuleUndefined))
 
     def _policy(self, compiled: CompiledRule) -> RuleMissingPolicy:
         """What a missing value means for the rule: its own policy, or the node's where it sets none."""
@@ -1536,6 +1574,7 @@ class Rules(Node):
         reads: Reads,
         scope: dict[str, Any],
         unskippable: Mapping[str, _Hold],
+        misread: list[Unreadable],
         path: str | None,
         reason: str | None = None,
     ) -> tuple[str, str, bool]:
@@ -1547,13 +1586,14 @@ class Rules(Node):
         expression as well (`_why_held`), or no value it reads accounts for the stop, the rule is not evaluated and
         the reason says why it was not skipped. Under `fail` and `not_evaluated` the reason stays as it is. Where the
         expression reads a value nobody could read, whose reason a missing value must not hide (`ltv <=
-        appraisal.max_ltv` over a ratio divided by zero), or text a `number()` or `date()` in it cannot read
-        (`number(a) > b` over `a` of `TBD`, which the missing `b` stops before the reader runs), the stop is an error
-        instead, under every policy, with the reason the value or the reader gives (`_unread`).
+        appraisal.max_ltv` over a ratio divided by zero), or text a `number()` or `date()` in it met and could not read
+        on the way to the stop (`misread`: `number(a) > b` over `a` of `TBD` and no `b`), the stop is an error instead,
+        under every policy, with the reason the value or the reader gives (`_unread`). A reader in a branch the record
+        never took met nothing, so it holds nothing.
         """
         reason = reason or f"missing value for {path}"
         # Compared with None: the marker refuses a truth test, as every other use.
-        unreadable = self._unread(reads.required + reads.optional, reads, scope)
+        unreadable = self._unread(reads.required + reads.optional, misread, scope)
         if unreadable is not None:
             return self._error_status(compiled, f"{where} could not be evaluated: {unreadable.reason}")
         policy = self._policy(compiled)
@@ -1589,15 +1629,14 @@ class Rules(Node):
 
         The expression may call a name that is no helper and that the record does not hold, a mistyped
         `firstpresent`, or use a filter or a test the sandbox does not have, `x | lowr` inside a conditional, which
-        Jinja leaves to raise until that branch runs. It may read text through `number()` or `date()` that they
-        cannot read, which a missing value must not hide (`number(doc.amount) > doc.limit` over an amount of `TBD`);
-        a value that is already one nobody could read, an earlier derived value say, its callers look for first
-        (`_missing_status`, `_why_missing`). A value it finds missing may sit under a name outside `declared`, a
-        typo, where the node declares its inputs (None where it does not), or under a derived value in `pending`,
-        one computed after `reading`, the derived value this expression computes. Or it may read a derived value
-        held for any of these defects, wherever it reads it, or one a lookup found nothing for, where it needs the
-        value rather than falls back on it: a gap in a table or in the node, never in the record. A defect speaks
-        over a lookup that found nothing, whichever the expression reads first.
+        Jinja leaves to raise until that branch runs. Text a `number()` or `date()` in it met and could not read, and
+        a value that is already one nobody could read, an earlier derived value say, which a missing value must not
+        hide, its callers look for first (`_missing_status`, `_why_missing`). A value it finds missing may sit under
+        a name outside `declared`, a typo, where the node declares its inputs (None where it does not), or under a
+        derived value in `pending`, one computed after `reading`, the derived value this expression computes. Or it
+        may read a derived value held for any of these defects, wherever it reads it, or one a lookup found nothing
+        for, where it needs the value rather than falls back on it: a gap in a table or in the node, never in the
+        record. A defect speaks over a lookup that found nothing, whichever the expression reads first.
         """
         if (callee := self._missing(list(reads.unknown_calls), scope)) is not None:
             return _Hold(f"{callee} is not a helper")
@@ -1605,8 +1644,6 @@ class Rules(Node):
             kind, name = reads.unknown_names[0]
             return _Hold(f"{name} is not a {kind}")
         paths = reads.required + reads.optional
-        if (misread := self._misread(reads.readers, scope)[0]) is not None:
-            return _Hold(misread)
         # A defect holds wherever it is read and speaks over a lookup that found nothing, whichever the expression
         # reads first; a fallback stands in for the lookup, as its author meant (`first_present(limit, 0)`), so that
         # holds only where the value is needed.
@@ -1671,27 +1708,6 @@ class Rules(Node):
         return None
 
     @staticmethod
-    def _misread(readers: tuple[Reader, ...], scope: dict[str, Any]) -> tuple[str, Unreadable] | tuple[None, None]:
-        """Why a value an expression reads as a number or a date, and that is there, is one its reader cannot read,
-        or cannot read with the arguments it is given (`decimal=';'`), naming its path, and what the reader makes of
-        it: the unreadable value, with the reason the expression would raise; (None, None) when every one reads.
-
-        The reader runs again on the value alone, as the expression would run it: a missing value stays missing,
-        and one already unreadable is left to the scan for those.
-        """
-        for reader in readers:
-            value = resolve_path(scope, reader.path)
-            if is_blank(value) or isinstance(value, Unreadable):
-                continue
-            try:
-                read = HELPERS[reader.helper](_ENVIRONMENT, value, *reader.args, **dict(reader.kwargs))
-            except EVALUATION_ERRORS as e:
-                return f"{reader.path} could not be read: {e}", Unreadable(value, str(e))
-            if isinstance(read, Unreadable):
-                return _unreadable_because(reader.path, read.reason), read
-        return None, None
-
-    @staticmethod
     def _unreadable(paths: list[str], scope: dict[str, Any]) -> tuple[str, Unreadable] | tuple[None, None]:
         """The first path that reaches a value nobody could read, and the value with its reason; (None, None) when
         there is none."""
@@ -1701,13 +1717,15 @@ class Rules(Node):
         return None, None
 
     @classmethod
-    def _unread(cls, paths: list[str], reads: Reads, scope: dict[str, Any]) -> Unreadable | None:
+    def _unread(cls, paths: list[str], misread: list[Unreadable], scope: dict[str, Any]) -> Unreadable | None:
         """A value nobody could read that an expression stopped by a missing value reads, which the missing value
-        must not hide: one of `paths` that already is one, a derived value say, or one `number()` or `date()` in the
-        expression would make of text there (`_misread`), `number(a) > b` over `a` of `TBD` and no `b`, which the
-        missing `b` stops before the reader runs. None when there is none."""
+        must not hide: one of `paths` that already is one, a derived value say, or the first text a `number()` or
+        `date()` in it met and could not read while it was evaluated (`_reading`), `number(a) > b` over `a` of `TBD`
+        and no `b`. None when there is none."""
         _, unreadable = cls._unreadable(paths, scope)
-        return unreadable if unreadable is not None else cls._misread(reads.readers, scope)[1]
+        if unreadable is not None:
+            return unreadable
+        return misread[0] if misread else None
 
     @staticmethod
     def _missing_reason(reads: Reads, scope: dict[str, Any], error: MissingValue) -> tuple[str | None, str]:

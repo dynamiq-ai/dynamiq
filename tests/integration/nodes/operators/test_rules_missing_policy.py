@@ -14,10 +14,12 @@ raise on the values that are there; that surfaces on the records that carry the 
 that is no policy at all leaves the choice to the node, with a warning, rather than refusing the build.
 """
 
+import asyncio
 import json
 import logging
 import textwrap
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Callable, NamedTuple
 
@@ -796,6 +798,94 @@ def test_text_nobody_could_read_speaks_over_a_missing_value_wherever_it_is_read(
 
     status = "warn" if policy.get("policy") == "fail" else "not_evaluated"
     assert outcome(output) == (status, "check could not be evaluated: not a number: 'TBD'")
+
+
+BRANCHED = "(doc.kind == 'loan' or number(doc.amount) > 0) and doc.limit > 0"
+
+
+@pytest.mark.parametrize(
+    ("policy", "expected"),
+    [
+        ({}, ("not_evaluated", "missing value for doc.limit")),
+        ({"policy": "fail"}, ("warn", "missing value for doc.limit")),
+        ({"policy": "not_applicable"}, ("not_applicable", "does not apply: missing value for doc.limit")),
+    ],
+    ids=["unset", "fail", "not_applicable"],
+)
+def test_a_reader_in_a_branch_the_record_never_takes_does_not_speak_over_a_missing_value(policy, expected):
+    """`number(doc.amount)` sits behind an `or` a loan never reaches: the only thing that stopped the check is the
+    missing limit, so that is what the finding names, and a rule set to skip missing data skips it."""
+    output = run(screening(BRANCHED, inputs=("doc",), **policy), {"doc": {"kind": "loan", "amount": "TBD"}})
+
+    assert outcome(output) == expected
+
+
+def test_a_reader_in_a_branch_the_record_takes_still_speaks_over_a_missing_value():
+    output = run(screening(BRANCHED, "not_applicable", inputs=("doc",)), {"doc": {"kind": "card", "amount": "TBD"}})
+
+    assert outcome(output) == ("not_evaluated", "check could not be evaluated: not a number: 'TBD'")
+
+
+@pytest.mark.parametrize(
+    ("kind", "derived", "errors", "expected"),
+    [
+        ("loan", None, {}, ("not_applicable", "does not apply: missing value for x")),
+        (
+            "card",
+            None,
+            {"x": "not a number: 'TBD'"},
+            ("not_evaluated", "check could not be evaluated: not a number: 'TBD'"),
+        ),
+    ],
+    ids=["branch-not-taken", "branch-taken"],
+)
+def test_a_derived_value_is_unreadable_only_through_a_reader_it_ran(kind, derived, errors, expected):
+    """`x` reads the amount only for a record that is no loan; a loan's `x` is missing for its limit alone."""
+    node = screening(
+        "x > 1",
+        "not_applicable",
+        inputs=("doc",),
+        derived=(("x", "doc.limit * 2 if doc.kind == 'loan' else number(doc.amount)"),),
+    )
+
+    output = run(node, {"doc": {"kind": kind, "amount": "TBD"}})
+
+    assert (output["derived"], output["derived_errors"]) == ({"x": derived}, errors)
+    assert outcome(output) == expected
+
+
+# A loan never reaches the reader, so it is skipped for its missing limit; any other kind meets `TBD` first.
+CONCURRENT = [{"doc": {"kind": "loan" if index % 2 else "card", "amount": "TBD"}} for index in range(64)]
+CONCURRENT_OUTCOMES = [
+    (
+        ("not_applicable", "does not apply: missing value for doc.limit")
+        if record["doc"]["kind"] == "loan"
+        else ("not_evaluated", "check could not be evaluated: not a number: 'TBD'")
+    )
+    for record in CONCURRENT
+]
+
+
+def test_records_evaluated_at_once_on_threads_each_see_only_their_own_readers():
+    node = screening(BRANCHED, "not_applicable", inputs=("doc",))
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        outputs = list(pool.map(lambda record: run(node, record), CONCURRENT))
+
+    assert [outcome(output) for output in outputs] == CONCURRENT_OUTCOMES
+
+
+def test_records_evaluated_at_once_in_tasks_each_see_only_their_own_readers():
+    node = screening(BRANCHED, "not_applicable", inputs=("doc",))
+
+    async def screen_all() -> list:
+        config = RunnableConfig(callbacks=[])
+        return await asyncio.gather(*(node.run_async(input_data=record, config=config) for record in CONCURRENT))
+
+    results = asyncio.run(screen_all())
+
+    assert all(result.status == RunnableStatus.SUCCESS for result in results)
+    assert [outcome(result.output) for result in results] == CONCURRENT_OUTCOMES
 
 
 def test_an_input_the_selector_maps_is_declared_though_input_fields_does_not_list_it():
