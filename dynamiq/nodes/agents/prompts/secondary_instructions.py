@@ -76,7 +76,12 @@ relevant. Do not ask the user for something already recorded there."""
 
 ARTIFACTS_INSTRUCTIONS_TEMPLATE = """## Artifacts
 Your `{tool}` tool publishes deliverables the user opens, reviews and shares: they get a \
-link, a version history, and they outlive this conversation.
+link, a version history, and they outlive this conversation. It also holds documents already \
+published, by you in earlier conversations or by others.
+
+When the user asks about a report, record or document that is not in this conversation, look \
+for it with 'list' (narrow with 'query') and read it with 'get' before answering. Answer from \
+its content; never guess what it says.
 
 Use an artifact when the deliverable is text-based and viewable on its own: an HTML page or \
 report, a Markdown document, an SVG or Mermaid diagram, a CSV/JSON dataset, a code file. \

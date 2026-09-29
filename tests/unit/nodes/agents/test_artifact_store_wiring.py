@@ -104,6 +104,7 @@ def test_the_prompt_block_says_when_to_use_an_artifact(llm, store):
     assert "`artifact` tool" in ops
     assert "Use output files instead" in ops
     assert "pass 'path'" in ops
+    assert "read it with 'get' before answering" in ops, "a reader agent must know published documents live here"
 
 
 def test_the_sandbox_rule_points_at_artifacts(llm, store):

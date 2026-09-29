@@ -29,8 +29,10 @@ from dynamiq.utils.logger import logger
 
 MAX_CONTENT_BYTES = 25 * 1024 * 1024
 
-DESCRIPTION = """Publish deliverables the user opens, reviews and shares. Each artifact gets a link \
-and a version history, and outlives this conversation.
+DESCRIPTION = """Publish deliverables the user opens, reviews and shares, and read documents already \
+published, by you or by others. Each artifact gets a link and a version history, and outlives this \
+conversation. Look here with 'list' and 'get' when asked about a report, record or document you do \
+not have in this conversation.
 
 Actions:
 - create: publish a new artifact. Requires 'title' and exactly one of 'content' (the full text) or \
