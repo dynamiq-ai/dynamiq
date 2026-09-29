@@ -40,14 +40,14 @@ def get_atlascloud_workflow(
 
 
 @pytest.mark.parametrize(
-    "model",
+    ("model", "expected_model"),
     [
-        "openai/gpt-4.1-mini",
-        "anthropic/claude-sonnet-4.6",
-        "deepseek-ai/deepseek-v3.2",
+        ("openai/gpt-4.1-mini", "openai/gpt-4.1-mini"),
+        ("anthropic/claude-sonnet-4.6", "openai/anthropic/claude-sonnet-4.6"),
+        ("deepseek-ai/deepseek-v3.2", "openai/deepseek-ai/deepseek-v3.2"),
     ],
 )
-def test_workflow_with_atlascloud_llm(mock_llm_response_text, mock_llm_executor, model):
+def test_workflow_with_atlascloud_llm(mock_llm_response_text, mock_llm_executor, model, expected_model):
     connection = connections.AtlasCloud(
         id=str(uuid.uuid4()),
         api_key="api_key",
@@ -74,7 +74,7 @@ def test_workflow_with_atlascloud_llm(mock_llm_response_text, mock_llm_executor,
     mock_llm_executor.assert_called_once_with(
         tools=None,
         tool_choice=None,
-        model=f"openai/{model}",
+        model=expected_model,
         messages=wf_atlascloud_ai.flow.nodes[0].prompt.format_messages(),
         stream=False,
         temperature=0.1,
@@ -89,24 +89,23 @@ def test_workflow_with_atlascloud_llm(mock_llm_response_text, mock_llm_executor,
         response_format=None,
         drop_params=True,
     )
-    assert wf_atlascloud_ai.flow.nodes[0].model == model
+    assert wf_atlascloud_ai.flow.nodes[0].model == expected_model
 
 
 @pytest.mark.parametrize(
-    "model",
+    ("model", "sent_model"),
     [
-        "openai/gpt-4.1-mini",
-        "anthropic/claude-sonnet-4.6",
-        "deepseek-ai/deepseek-v3.2",
+        ("openai/gpt-4.1-mini", "gpt-4.1-mini"),
+        ("anthropic/claude-sonnet-4.6", "anthropic/claude-sonnet-4.6"),
+        ("deepseek-ai/deepseek-v3.2", "deepseek-ai/deepseek-v3.2"),
     ],
 )
-def test_atlascloud_model_id_reaches_api_unchanged(model):
+def test_atlascloud_routes_through_openai_compatible_client(model, sent_model):
     connection = connections.AtlasCloud(api_key="api_key")
     llm = AtlasCloud(model=model, connection=connection)
 
-    params = llm.update_completion_params({"model": llm.model, "api_base": connection.url})
-    sent_model, provider, _, api_base = get_llm_provider(model=params["model"], api_base=params["api_base"])
+    routed_model, provider, _, api_base = get_llm_provider(model=llm.model, api_base=connection.url)
 
     assert provider == "openai"
-    assert sent_model == model
+    assert routed_model == sent_model
     assert api_base == "https://api.atlascloud.ai/v1"
