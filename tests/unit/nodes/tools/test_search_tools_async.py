@@ -1,4 +1,4 @@
-"""Async unit tests for tavily, exa_search, scale_serp, zenrows."""
+"""Async unit tests for tavily, exa_search, scale_serp, serply, zenrows."""
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -7,6 +7,7 @@ from dynamiq import connections
 from dynamiq.nodes.node import Node
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
+from dynamiq.nodes.tools.serply import SerplyTool
 from dynamiq.nodes.tools.tavily import TavilyTool
 from dynamiq.nodes.tools.zenrows import ZenRowsTool
 
@@ -22,7 +23,7 @@ def _mock_response(status_code=200, json_payload=None, text="", content=b"", hea
     return resp
 
 
-@pytest.mark.parametrize("tool_cls", [TavilyTool, ExaTool, ScaleSerpTool, ZenRowsTool])
+@pytest.mark.parametrize("tool_cls", [TavilyTool, ExaTool, ScaleSerpTool, SerplyTool, ZenRowsTool])
 def test_tool_has_native_async(tool_cls):
     assert tool_cls.execute_async is not Node.execute_async
 
@@ -186,3 +187,49 @@ async def test_zenrows_execute_async_failed_status():
         result = await node.run_async(input_data={"url": "https://example.com"})
 
     assert result.status.value == "failure"
+
+
+@pytest.mark.asyncio
+async def test_serply_execute_async():
+    node = SerplyTool(connection=connections.Serply(api_key="k"))
+    payload = {"results": [{"title": "T", "link": "https://u", "description": "d"}]}
+    mock_client = MagicMock()
+    mock_client.request = AsyncMock(return_value=_mock_response(json_payload=payload))
+
+    with patch.object(SerplyTool, "get_async_client", AsyncMock(return_value=mock_client)):
+        result = await node.run_async(input_data={"query": "q", "limit": 3})
+
+    assert result.status.value == "success"
+    mock_client.request.assert_awaited_once()
+    call_kwargs = mock_client.request.call_args.kwargs
+    assert call_kwargs["headers"]["X-Api-Key"] == "k"
+    assert call_kwargs["params"] == {"q": "q", "num": 3}
+    assert result.output["content"]["urls"] == ["https://u"]
+
+
+@pytest.mark.asyncio
+async def test_serply_execute_async_failed_status():
+    node = SerplyTool(connection=connections.Serply(api_key="k"))
+    mock_client = MagicMock()
+    mock_client.request = AsyncMock(
+        return_value=_mock_response(status_code=401, json_payload={"detail": "Invalid API key"})
+    )
+
+    with patch.object(SerplyTool, "get_async_client", AsyncMock(return_value=mock_client)):
+        result = await node.run_async(input_data={"query": "q"})
+
+    assert result.status.value == "failure"
+    assert "Invalid API key" in result.error.message
+
+
+@pytest.mark.asyncio
+async def test_serply_execute_async_requires_query():
+    node = SerplyTool(connection=connections.Serply(api_key="k"))
+    mock_client = MagicMock()
+    mock_client.request = AsyncMock()
+
+    with patch.object(SerplyTool, "get_async_client", AsyncMock(return_value=mock_client)):
+        result = await node.run_async(input_data={})
+
+    assert result.status.value == "failure"
+    mock_client.request.assert_not_awaited()
