@@ -1,6 +1,7 @@
 from .ai21 import AI21
 from .anthropic import Anthropic, AnthropicCacheControl
 from .anyscale import Anyscale
+from .atlascloud import AtlasCloud
 from .azureai import AzureAI
 from .base import BaseLLM
 from .bedrock import Bedrock, BedrockCacheControl
@@ -11,7 +12,7 @@ from .databricks import Databricks
 from .deepinfra import DeepInfra
 from .deepseek import DeepSeek
 from .fireworksai import FireworksAI
-from .gemini import Gemini
+from .gemini import Gemini, GeminiCacheControl
 from .groq import Groq
 from .huggingface import HuggingFace
 from .mistral import Mistral

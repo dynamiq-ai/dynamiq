@@ -9,6 +9,7 @@ from dynamiq.connections import Deepgram as DeepgramConnection
 from dynamiq.connections import ElevenLabs as ElevenLabsConnection
 from dynamiq.connections import Groq as GroqConnection
 from dynamiq.connections import HttpApiKey as HttpApiKeyConnection
+from dynamiq.connections import MiniMax as MiniMaxConnection
 from dynamiq.connections import Mistral as MistralConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import Whisper as WhisperConnection
@@ -30,7 +31,7 @@ class TextToSpeech(ConnectionNode):
     Synthesizes speech with any supported speech provider.
 
     The connection type selects the provider: OpenAI, Groq, an OpenAI-compatible server (HttpApiKey or
-    Whisper connection), ElevenLabs, Mistral Voxtral or Deepgram Aura. The output matches the legacy
+    Whisper connection), ElevenLabs, Mistral Voxtral, Deepgram Aura or MiniMax. The output matches the legacy
     ElevenLabsTTS node (``content`` bytes plus a named file), so existing wiring keeps working.
 
     Attributes:
@@ -60,6 +61,7 @@ class TextToSpeech(ConnectionNode):
         | ElevenLabsConnection
         | MistralConnection
         | DeepgramConnection
+        | MiniMaxConnection
         | None
     ) = None
     model: str | None = Field(default=None, description="Provider model id. Defaults per provider.")
