@@ -2278,7 +2278,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             has_tools=bool(tools)
             or (self.skills.enabled and self.skills.source is not None)
             or ltm_enabled
-            or bool(self.memory_store_backend),
+            or bool(self.memory_store_backend)
+            or bool(self.artifact_store_backend),
             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
             delegation_allowed=self.delegation_allowed,
             context_compaction_enabled=self.summarization_config.enabled,
@@ -2290,6 +2291,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self.memory_store_backend.describe_namespaces() if self.memory_store_backend else {}
             ),
             memory_store_writable=bool(self.memory_store and self.memory_store.write_enabled),
+            artifacts_enabled=bool(self.artifact_store_backend),
+            artifacts_writable=bool(self.artifact_store and self.artifact_store.write_enabled),
             sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
             has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in tools),
             role=self.role,

@@ -2,12 +2,14 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from litellm import ModelResponse
 
 from dynamiq.connections import E2B, Dynamiq
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.runnables import RunnableStatus
 from dynamiq.sandboxes.base import SandboxConfig
 from dynamiq.sandboxes.e2b import E2BSandbox
 from dynamiq.storages.file import FileStoreConfig, InMemoryFileStore
@@ -331,3 +333,28 @@ class TestUploadKeepsTheMemoryProtocol:
         blocks = self._upload(agent)
 
         assert "Be terse." in "\n".join(str(v) for v in blocks.values())
+
+
+def test_a_repeated_read_is_not_served_from_the_tool_cache(llm, mocker):
+    """The agent caches tool results by input; a cached 'read' after an 'edit' would be stale."""
+    store = FakeMemoryStore()
+    store.write("prefs.md", "Prefers British English.")
+    read = {"action": "read", "path": "prefs.md"}
+    edit = {"action": "edit", "path": "prefs.md", "find": "British", "replace": "Australian"}
+    replies = [f"Thought: Next step.\nAction: memory-store\nAction Input: {json.dumps(a)}" for a in (read, edit, read)]
+    replies.append("Thought: Done.\nAnswer: Australian English.")
+
+    def respond(*args, **kwargs):
+        response = ModelResponse()
+        response["choices"][0]["message"]["content"] = replies.pop(0)
+        return response
+
+    mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=respond)
+    reads = mocker.spy(FakeMemoryStore, "read")
+    agent = Agent(name="a", llm=llm, memory_store=_memory(store), inference_mode=InferenceMode.DEFAULT)
+
+    result = agent.run({"input": "Which English do I prefer?"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    # read, the edit's own read, and the second read: all three must reach the store.
+    assert reads.call_count == 3

@@ -73,6 +73,7 @@ from dynamiq.skills.config import SkillsConfig
 from dynamiq.skills.registries.dynamiq import Dynamiq
 from dynamiq.skills.types import SkillMetadata
 from dynamiq.skills.utils import ingest_skills_into_sandbox, normalize_sandbox_skills_base_path
+from dynamiq.storages.artifact.base import ArtifactStore, ArtifactStoreConfig
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.storages.memory.base import MemoryStore, MemoryStoreConfig
@@ -296,6 +297,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             "cannot enable a file store. Pass a `CompositeMemoryStore` backend for several memories."
         ),
     )
+    artifact_store: ArtifactStoreConfig | None = Field(
+        default=None,
+        description="Where the agent publishes artifacts: versioned deliverables with a link, reached "
+        "through its own tool. Works with a sandbox, a file store or neither.",
+    )
     sandbox: SandboxConfig | None = Field(default=None, description="Configuration for sandbox used by the agent.")
     share_sandbox_with_subagents: bool = Field(
         default=False,
@@ -340,6 +346,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     _excluded_tool_ids: set[str] = PrivateAttr(default_factory=set)
     _own_sandbox_tool_ids: set[str] = PrivateAttr(default_factory=set)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
+    _run_artifacts: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
     _history_offset: int = PrivateAttr(
         default=DEFAULT_HISTORY_OFFSET,
     )
@@ -500,6 +507,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             "videos": True,
             "file_store": True,
             "memory_store": True,
+            "artifact_store": True,
             "skills": True,
             "sandbox": True,
             "system_prompt_manager": True,  # Runtime state container, not serializable
@@ -525,6 +533,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
         data["memory_store"] = self.memory_store.to_dict(**kwargs) if self.memory_store else None
+        data["artifact_store"] = self.artifact_store.to_dict(**kwargs) if self.artifact_store else None
         data["sandbox"] = self.sandbox.to_dict(**kwargs) if self.sandbox else None
         data["skills"] = self.skills.to_dict(**kwargs)
 
@@ -781,7 +790,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 len(ltm_tools),
                 ", ".join(t.name for t in ltm_tools),
             )
-        run_tools = ltm_tools + self._build_memory_store_tool(input_data)
+        artifact_tools = self._build_artifact_tool(input_data, kwargs)
+        run_tools = ltm_tools + self._build_memory_store_tool(input_data) + artifact_tools
         # Always set — a sub-agent without LTM would otherwise inherit the
         # parent's overlay via `ContextAwareThreadPoolExecutor`.
         ltm_token = _run_extra_tools.set(run_tools)
@@ -799,6 +809,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             # Always set the overlay (even to None, for non-borrowers) so a nested subagent does not
             # inherit this agent's overlay via ContextAwareThreadPoolExecutor.
             sandbox_overlay_token = _shared_sandbox_tools.set(self._maybe_borrow_shared_sandbox())
+            # Built before the borrow, so point 'path' reads at the view this run actually uses.
+            for tool in artifact_tools:
+                tool.file_source = self.sandbox_backend or self.file_store_backend
             if use_memory:
                 history_messages = self._retrieve_memory(input_data)
                 if len(history_messages) > 0:
@@ -968,6 +981,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                         f"returning {len(sandbox_files)} requested file(s) from sandbox"
                     )
 
+            if self._run_artifacts:
+                execution_result["artifacts"] = list(self._run_artifacts.values())
+
             self._maybe_surface_live_view(execution_result, shared_session_token)
             return execution_result
         finally:
@@ -1080,6 +1096,30 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 backend=self.memory_store_backend,
                 write_enabled=self.memory_store.write_enabled,
                 user_id=getattr(input_data, "user_id", None),
+            )
+        ]
+
+    def _build_artifact_tool(self, input_data: "AgentInputSchema", run_kwargs: dict) -> list[Node]:
+        """Construct the per-run artifact tool, or [] when no store is configured.
+
+        Per run so each version records the run that produced it, and so the If-Match checksums
+        the tool tracks never leak between concurrent runs of one agent.
+        """
+        if not self.artifact_store_backend:
+            return []
+        from dynamiq.nodes.tools.artifact_tool import ArtifactTool
+
+        source = {
+            "session_id": getattr(input_data, "session_id", None),
+            "run_id": str(run_kwargs["run_id"]) if run_kwargs.get("run_id") else None,
+            "agent_id": self.id,
+        }
+        return [
+            ArtifactTool(
+                backend=self.artifact_store_backend,
+                write_enabled=self.artifact_store.write_enabled,
+                file_source=self.sandbox_backend or self.file_store_backend,
+                source={k: v for k, v in source.items() if v},
             )
         ]
 
@@ -1895,8 +1935,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
             output_files = tool_result.output.get("files", [])
             tool_output_meta = {k: v for k, v in tool_result.output.items() if k not in ("content", "files")}
+            self._record_artifact(tool_output_meta)
 
-            if not isinstance(tool, ContextManagerTool):
+            # Local import: artifact_tool imports the agents package. Stores change between
+            # identical calls, so a cached read would return stale content.
+            from dynamiq.nodes.tools.artifact_tool import ArtifactTool
+
+            if not isinstance(tool, (ContextManagerTool, ArtifactTool, MemoryStoreTool)):
                 self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = (
                     tool_result_content_processed,
                     tool_output_meta,
@@ -2360,6 +2405,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         return self.memory_store.backend if self.memory_store and self.memory_store.enabled else None
 
     @property
+    def artifact_store_backend(self) -> ArtifactStore | None:
+        """The agent's artifact backend when one is enabled."""
+        return self.artifact_store.backend if self.artifact_store and self.artifact_store.enabled else None
+
+    @property
     def sandbox_backend(self) -> Sandbox | None:
         """The effective sandbox backend: a borrowed shared-sandbox view when set (so uploads,
         output collection, skills and cleanup target it too), else the own configured backend.
@@ -2606,6 +2656,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         """Returns a dictionary mapping tool names to their corresponding Node objects."""
         return {self.sanitize_tool_name(tool.name): tool for tool in self._runtime_tools}
 
+    def _record_artifact(self, tool_output_meta: dict[str, Any]) -> None:
+        """Keep the latest ref per artifact created or updated this run; the run output returns them."""
+        ref = tool_output_meta.get("artifact")
+        if isinstance(ref, dict) and ref.get("id"):
+            self._run_artifacts[ref["id"]] = ref
+
     def reset_run_state(self):
         """Resets the agent's run state.
 
@@ -2615,6 +2671,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         """
         self._run_depends = []
         self._tool_cache: dict[ToolCacheEntry, Any] = {}
+        self._run_artifacts: dict[str, dict[str, Any]] = {}
         self._completed_loops = 0
         self.system_prompt_manager.reset()
 
