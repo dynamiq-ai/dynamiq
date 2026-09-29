@@ -560,6 +560,11 @@ def test_the_reason_names_the_blank_the_evaluation_stopped_at(check, app, missin
         ("app.b == '' and text(app.get('Issue Date', '')) == 'z'", {"b": ""}, "app['Issue Date']"),
         ("app.b == '' and first_present(app.x, '') == 'z'", {"b": ""}, "app.x"),
         ("app.b == '' and number(first_present(app.x, '  ' | trim)) > 1", {"b": "", "x": " "}, "app.x"),
+        ("text(app.first ~ ' ' ~ app.last) == 'A B'", {"first": "", "last": ""}, "app.first"),
+        ("text(app.code[:3]) == 'ABC'", {"code": ""}, "app.code"),
+        ("number(app.a + app.b) > 1", {"a": "", "b": ""}, "app.a"),
+        ("text(app.a if app.c) == 'x'", {"a": "", "c": True}, "app.a"),
+        ("text((app.a ~ app.b) | trim | upper) == 'X'", {"a": " ", "b": ""}, "app.a"),
     ],
     ids=[
         "first-present-over-a-helper",
@@ -583,6 +588,11 @@ def test_the_reason_names_the_blank_the_evaluation_stopped_at(check, app, missin
         "a-get-by-a-key-no-name-writes",
         "a-literal-among-fallbacks",
         "a-literal-filtered-among-fallbacks",
+        "a-concatenation-of-blanks",
+        "a-slice-of-a-blank",
+        "arithmetic-on-blanks",
+        "an-if-without-an-else-over-a-blank",
+        "filters-over-a-concatenation-of-blanks",
     ],
 )
 def test_a_helpers_blank_names_the_path_it_came_from_through_filters_and_helpers(
@@ -591,8 +601,9 @@ def test_a_helpers_blank_names_the_path_it_came_from_through_filters_and_helpers
     """A blank a helper makes is data the record lacks where every value it could have come from is blank in the
     record: the path itself, a filter's value and a `default`'s, both sides of an `or` or an `and`, both branches of an
     `if`, the value a method is called on, and every value a helper inside it passes on. It names the first of them, and
-    a rule set to skip it does; a literal among them, `default('')` say, adds none, and `x.get('F')` reads `x.F`. The
-    blank `app.b` compared before it was never where the check stopped."""
+    a rule set to skip it does; a literal among them, `default('')` say, adds none, and `x.get('F')` reads `x.F`. Any
+    other shape it passes through, `~`, a slice, arithmetic or an `if` without an `else`, comes from every path read
+    inside it. The blank `app.b` compared before it was never where the check stopped."""
     node = screening(check, policy)
 
     assert outcome(run(node, {"app": app})) == (status, f"{prefix}missing value for {missing}")
@@ -672,6 +683,15 @@ NOTHING = "missing value: first_present() found nothing present"
             {"name": "Ann", "k": "zz"},
             f"{NO_TEXT} ('dict object' has no attribute 'zz')",
         ),
+        ("text(app.a ~ limits[app.k]) == 'x'", {"a": "", "k": "zz"}, NO_TEXT),
+        ("text(' ' ~ limits[app.k]) == 'x'", {"k": "zz"}, NO_TEXT),
+        ("number(app.a ~ limits[app.k] | trim) > 1", {"a": " ", "k": "zz"}, NO_NUMBER),
+        ("text(app.x[5:]) == 'y'", {"x": "abc"}, NO_TEXT),
+        (
+            "text(app.a if app.c) == 'x'",
+            {"a": "x", "c": False},
+            f"{NO_TEXT} (the inline if-expression on line 1 evaluated to false and no else section was defined.)",
+        ),
     ],
     ids=[
         "a-lookup-that-found-nothing",
@@ -688,6 +708,11 @@ NOTHING = "missing value: first_present() found nothing present"
         "a-get-by-a-key-read-at-run-time",
         "a-literal-alone",
         "the-second-of-two-helpers",
+        "a-concatenation-with-a-lookup-that-found-nothing",
+        "a-blank-literal-and-a-lookup-that-found-nothing",
+        "a-filtered-concatenation-with-a-lookup-that-found-nothing",
+        "a-slice-of-a-value-there",
+        "an-if-without-an-else-not-taken",
     ],
 )
 def test_a_blank_no_path_accounts_for_is_never_skipped_nor_named_after_another_blank(

@@ -1143,11 +1143,14 @@ def _call(name: str, node: nodes.Expr, *args: nodes.Expr) -> nodes.Call:
 
 
 def _sources(node: nodes.Node) -> tuple[str, ...] | None:
-    """Every path the value of `node` could have come from, or None where it could come from anything else: the path
-    itself, a filter's value and `default`'s fallback, both sides of an `or` or an `and`, both branches of an `if`, the
-    value a method is called on, and every value `text()`, `number()`, `date()` or `first_present()` passes on;
-    `x.get('F')` reads `x.F`, and then its default. A literal adds no path, so `default('')` leaves the value to the
-    path before it; a lookup by a key read when the check runs, arithmetic or `~` comes from no path."""
+    """Every path of the record the value of `node` could have come from, or None where something other than the
+    record could account for it: a lookup, `limits[app.k]` or `x.get(app.k)`, that may find nothing whatever the record
+    holds, or a call of anything but a helper. A filter's value and `default`'s fallback, both sides of an `or` or an
+    `and`, the branches of an `if`, the value a method is called on, and the value `text()`, `number()`, `date()` or
+    `first_present()` passes on; `x.get('F')` reads `x.F`, and then its default. Any other shape, `~`, a slice,
+    arithmetic or a helper such as `max()`, comes from every path read inside it. A literal adds no path, so
+    `default('')` leaves the value to the path before it, and neither does the `else` an `if` leaves out: `text(app.a
+    if app.c)` comes from `app.a` alone."""
     if isinstance(node, nodes.Const):
         return ()
     if (path := _path_of(node)) is not None:
@@ -1159,9 +1162,8 @@ def _sources(node: nodes.Node) -> tuple[str, ...] | None:
             # With none given, the fallback is '', a literal.
             fallback = next((item.value for item in node.kwargs if item.key == "default_value"), None)
             parts += node.args[:1] or ([fallback] if fallback is not None else [])
-    elif isinstance(node, (nodes.And, nodes.Or)):
-        parts = [node.left, node.right]
     elif isinstance(node, nodes.CondExpr):
+        # The test only picks a branch; its value is not passed on.
         parts = [node.expr1, node.expr2]
     elif isinstance(node, nodes.Call) and isinstance(node.node, nodes.Getattr) and node.node.attr == "get":
         # What `x['F']` reads, where the key is written in the check; one read when it runs is a lookup.
@@ -1176,10 +1178,20 @@ def _sources(node: nodes.Node) -> tuple[str, ...] | None:
     elif isinstance(node, nodes.Call) and isinstance(node.node, nodes.Name) and node.node.name in _BLANK_MAKERS:
         value = next((item.value for item in node.kwargs if item.key == "value"), None)
         parts = list(node.args) if node.node.name == "first_present" else [node.args[0] if node.args else value]
-    else:
+    elif isinstance(node, nodes.Call):
+        if not isinstance(node.node, nodes.Name):
+            return None
+        # A helper's result comes from the values it is handed; its name is no read.
+        parts = list(node.iter_child_nodes(exclude=("node",)))
+    elif isinstance(node, (nodes.Getattr, nodes.Getitem)) and not isinstance(getattr(node, "arg", None), nodes.Slice):
+        # A lookup that is no path: a key read when the check runs, or a member of a value computed in it.
         return None
+    else:
+        parts = list(node.iter_child_nodes())
     for part in parts:
-        if part is None or (paths := _sources(part)) is None:
+        if part is None:
+            continue
+        if (paths := _sources(part)) is None:
             return None
         found += paths
     return tuple(dict.fromkeys(found))
