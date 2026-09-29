@@ -69,8 +69,13 @@ _GROUPED_THOUSANDS = {
     ".": re.compile(r"[1-9][0-9]{0,2}(?:\.[0-9]{3})+"),
 }
 # The currency signs a document writes beside an amount, and only signs: `¢`, a hundredth of the unit, would read `¢50`
-# as 50, and a code, `USD 1,000`, leaves the amount unreadable.
-_CURRENCY = re.compile(r"[$€£¥₹₩₽₺₪₫₱₦₴]")
+# as 50, and a code, `USD 1,000`, leaves the amount unreadable. `¤`, the sign for any currency, is also the one every
+# sign is read as.
+_CURRENCY = re.compile(r"[$€£¥₹₩₽₺₪₫₱₦₴¤]")
+_ANY_CURRENCY = "¤"
+# A currency sign where an amount may carry one, once all spaces are gone: first, after an opening parenthesis or a
+# sign, `($5)`, `-$5`, or last, before a closing parenthesis, `5 €`. Anywhere else, `100$200`, it is no part of it.
+_CURRENCY_AT_AN_END = re.compile(rf"^(\(?[+-]?){_ANY_CURRENCY}|{_ANY_CURRENCY}(\)?)$")
 # Whitespace beside a comma or a point: `100, 200` may be two amounts as much as one.
 _SPACE_BESIDE_SEPARATOR = re.compile(r"\s[.,]|[.,]\s")
 # Whitespace between two digits, which groups thousands the way a grouping separator does: `1 234`.
@@ -321,9 +326,13 @@ def text(environment: "RecordSandbox", value: Any) -> Any:
 def _read_number(written: str, decimal: str) -> int | float | None:
     """The number the text writes, or None when it writes none, or writes one only a guess could read."""
     grouping = "," if decimal == "." else "."
-    # A currency sign says nothing about the amount; read as a space, it cannot join the digits on either side of it.
+    # A currency sign says nothing about the amount, but it is no space: read as one, it would group the digits on
+    # either side of it as thousands, `$100 $200` as 100200. Every sign reads as `¤`, which groups nothing, and one
+    # sign at an end of the amount is dropped once the spaces are gone; any other stays and leaves the text unreadable.
     # The minus sign a PDF prints, `−5`, is the hyphen a keyboard writes.
-    body = _CURRENCY.sub(" ", written.replace("\u2212", "-"))
+    body = _CURRENCY.sub(_ANY_CURRENCY, written.replace("\u2212", "-"))
+    if body.count(_ANY_CURRENCY) > 1:
+        return None
     if _SPACE_BESIDE_SEPARATOR.search(body):
         return None
     # Spaces group thousands in some documents, `1 234`, and count only where a grouping separator could stand; a
@@ -332,8 +341,9 @@ def _read_number(written: str, decimal: str) -> int | float | None:
         if grouping in body:
             return None
         body = _SPACE_BETWEEN_DIGITS.sub(grouping, body)
-    # Any other space, at either end or beside a sign, a parenthesis or `%`, says nothing about the amount either.
-    body = _SPACE.sub("", body)
+    # Any other space, at either end or beside a sign, a parenthesis, a currency sign or `%`, says nothing about the
+    # amount either.
+    body = _CURRENCY_AT_AN_END.sub(r"\1\2", _SPACE.sub("", body))
     # An amount in parentheses is negative, as an account writes a debit.
     negative = body.startswith("(") and body.endswith(")")
     if negative:
