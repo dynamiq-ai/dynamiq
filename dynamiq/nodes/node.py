@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, 
 from dynamiq.cache.utils import cache_wf_entity, cache_wf_entity_async
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingCallbackHandler
 from dynamiq.checkpoints.checkpoint import CheckpointNodeMixin
+from dynamiq.checkpoints.types import RunPausedException
 from dynamiq.connections import BaseConnection
 
 if TYPE_CHECKING:
@@ -38,7 +39,7 @@ from dynamiq.nodes.exceptions import (
     NodeSkippedException,
 )
 from dynamiq.nodes.schema_utils import apply_param_modes, strip_inaccessible_fields
-from dynamiq.nodes.types import ActionType, Behavior, ChoiceCondition, InputParamMode, NodeGroup
+from dynamiq.nodes.types import ActionType, Behavior, ChoiceCondition, DependencyTrigger, InputParamMode, NodeGroup
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
 from dynamiq.storages.vector.base import BaseVectorStoreParams
@@ -220,13 +221,31 @@ class NodeDependency(BaseModel):
     Attributes:
         node (Node): The dependent node.
         option (str | None): Optional condition for the dependency.
+        condition (ChoiceCondition | None): Condition on the upstream result that must hold.
+        trigger (DependencyTrigger): Which upstream outcome lets the dependent run; `failure` makes an error edge.
     """
     node: "Node"
     option: str | None = None
     condition: ChoiceCondition | None = None
+    trigger: DependencyTrigger = DependencyTrigger.SUCCESS
 
-    def __init__(self, node: "Node", option: str | None = None, condition: ChoiceCondition | None = None):
-        super().__init__(node=node, option=option, condition=condition)
+    def __init__(
+        self,
+        node: "Node",
+        option: str | None = None,
+        condition: ChoiceCondition | None = None,
+        trigger: DependencyTrigger = DependencyTrigger.SUCCESS,
+    ):
+        super().__init__(node=node, option=option, condition=condition, trigger=trigger)
+
+    @model_validator(mode="after")
+    def validate_trigger(self) -> "NodeDependency":
+        # A Choice reports its options in a successful result, so an option can only follow a success.
+        if self.trigger == DependencyTrigger.FAILURE and self.option:
+            raise ValueError(
+                f"Dependency on '{self.node.id}' cannot both select option '{self.option}' and trigger on failure."
+            )
+        return self
 
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary.
@@ -245,6 +264,7 @@ class NodeDependency(BaseModel):
             "node": node_value,
             "option": self.option,
             "condition": self.condition.model_dump() if self.condition else None,
+            "trigger": self.trigger.value,
         }
 
 
@@ -521,6 +541,11 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 message=f"Dependency {depend.node.id}: result missed",
             )
 
+        if depend.trigger == DependencyTrigger.FAILURE:
+            if dep_result.status != RunnableStatus.FAILURE:
+                raise NodeSkippedException(failed_depend=depend, message=f"Dependency {depend.node.id}: did not fail")
+            return
+
         if dep_result.status == RunnableStatus.FAILURE and depend.node.error_handling.behavior == Behavior.RAISE:
             raise NodeFailedException(
                 failed_depend=depend, message=f"Dependency {depend.node.id}: failed"
@@ -547,6 +572,9 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             and (isinstance(dep_output_data.output, dict))
             and (dep_condition_result := dep_output_data.output.get(depend.option))
         ):
+            # Restored from a checkpoint, a Choice's option results come back as plain dicts.
+            if isinstance(dep_condition_result, dict):
+                dep_condition_result = RunnableResult.model_validate(dep_condition_result)
             if dep_condition_result.status == RunnableStatus.FAILURE:
                 raise NodeConditionFailedException(
                     failed_depend=depend,
@@ -1285,9 +1313,14 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         from dynamiq.nodes.agents.exceptions import RecoverableAgentException
 
         self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
-        logger.error(
-            self._node_run_log(f"{log_prefix}execution failed in {format_duration(time_start, datetime.now())}. {e}")
-        )
+        if isinstance(e, RunPausedException):
+            logger.info(self._node_run_log(f"{log_prefix}execution paused the run. {e}"))
+        else:
+            logger.error(
+                self._node_run_log(
+                    f"{log_prefix}execution failed in {format_duration(time_start, datetime.now())}. {e}"
+                )
+            )
         recoverable = isinstance(e, RecoverableAgentException)
         return RunnableResult(
             status=RunnableStatus.FAILURE,
@@ -1633,7 +1666,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                     self.log_execution_finish(output)
                     self.run_on_node_execute_end(config.callbacks, output, **merged_kwargs)
                     return output
-                except CanceledException:
+                except (CanceledException, RunPausedException):
                     raise
                 except TimeoutError as e:
                     error = e
@@ -1754,7 +1787,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
                 self.log_execution_finish(output)
                 self.run_on_node_execute_end(config.callbacks, output, **merged_kwargs)
                 return output
-            except CanceledException:
+            except (CanceledException, RunPausedException):
                 raise
             except asyncio.TimeoutError as e:
                 error = e
@@ -2128,13 +2161,19 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             f"Node {type(self).__name__} does not provide a native async execute_async() implementation."
         )
 
-    def depends_on(self, nodes: Union["Node", list["Node"]], condition: ChoiceCondition | None = None) -> "Node":
+    def depends_on(
+        self,
+        nodes: Union["Node", list["Node"]],
+        condition: ChoiceCondition | None = None,
+        trigger: DependencyTrigger = DependencyTrigger.SUCCESS,
+    ) -> "Node":
         """
         Add dependencies for this node. Accepts either a single node or a list of nodes.
 
         Args:
             nodes (Node or list[Node]): A single node or list of nodes this node depends on.
             condition (ChoiceCondition, optional): The condition for the dependency.
+            trigger (DependencyTrigger, optional): `failure` runs this node only when the upstream node failed.
 
         Raises:
             TypeError: If the input is neither a Node nor a list of Node instances.
@@ -2157,7 +2196,7 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             raise ValueError("Cannot add an empty list of dependencies.")
 
         for node in nodes:
-            self.depends.append(NodeDependency(node=node, condition=condition))
+            self.depends.append(NodeDependency(node=node, condition=condition, trigger=trigger))
 
         return self
 

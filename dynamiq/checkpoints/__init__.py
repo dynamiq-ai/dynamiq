@@ -7,7 +7,7 @@ from dynamiq.checkpoints.checkpoint import (
     NodeCheckpointState,
 )
 from dynamiq.checkpoints.config import CheckpointBehavior, CheckpointConfig, CheckpointContext
-from dynamiq.checkpoints.types import CheckpointStatus, utc_now
+from dynamiq.checkpoints.types import CheckpointStatus, RunPausedException, utc_now
 
 __all__ = [
     "BaseCheckpointState",
@@ -20,5 +20,6 @@ __all__ = [
     "FlowCheckpoint",
     "IterativeCheckpointMixin",
     "NodeCheckpointState",
+    "RunPausedException",
     "utc_now",
 ]
