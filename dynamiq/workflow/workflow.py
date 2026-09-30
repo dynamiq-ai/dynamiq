@@ -8,6 +8,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, computed_field
 
 from dynamiq.callbacks import TracingCallbackHandler
+from dynamiq.checkpoints.types import RunPausedException
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.flows import BaseFlow, Flow
 from dynamiq.nodes import Node
@@ -239,7 +240,12 @@ class Workflow(BaseModel, Runnable):
             error = result.error.type(result.error.message)
             failed_nodes: list[RunnableFailedNodeInfo] = result.error.failed_nodes
             self.run_on_workflow_error(error, config, failed_nodes=failed_nodes, **merged_kwargs)
-            logger.error(f"Workflow {self.id}: execution failed in {format_duration(time_start, datetime.now())}.")
+            if isinstance(error, RunPausedException):
+                logger.info(
+                    f"Workflow {self.id}: execution paused after {format_duration(time_start, datetime.now())}."
+                )
+            else:
+                logger.error(f"Workflow {self.id}: execution failed in {format_duration(time_start, datetime.now())}.")
 
         return RunnableResult(status=result.status, input=input_data, output=result.output, error=result.error)
 
@@ -308,9 +314,12 @@ class Workflow(BaseModel, Runnable):
                 error = RuntimeError("Workflow execution failed with unknown error")
                 failed_nodes: list[RunnableFailedNodeInfo] = []
             self.run_on_workflow_error(error, config, failed_nodes=failed_nodes, **merged_kwargs)
-            logger.error(
-                f"Workflow {self.id}: execution failed in {format_duration(time_start, datetime.now())}."
-            )
+            if isinstance(error, RunPausedException):
+                logger.info(
+                    f"Workflow {self.id}: execution paused after {format_duration(time_start, datetime.now())}."
+                )
+            else:
+                logger.error(f"Workflow {self.id}: execution failed in {format_duration(time_start, datetime.now())}.")
 
         return RunnableResult(status=result.status, input=input_data, output=result.output, error=result.error)
 
