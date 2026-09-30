@@ -1095,15 +1095,21 @@ def resolve_path(context: dict[str, Any], path: str) -> Any:
 
 
 @pass_context
-def need(context: Context, value: Any, path: str) -> Any:
+def need(context: Context, value: Any, path: str, guarded: bool = False) -> Any:
     """What a read a check needs found, or a `MissingValue` naming the path where the record holds nothing: a null, or
     an undefined or a method Jinja found in place of a value the record lacks (`ticket.items` over a ticket without
     items finds the mapping's method). At a path the record holds, a method or an undefined goes on as it is and fails
-    where it is used: `invoice.items.count` reads the list's method."""
-    if value is None or (
-        (isinstance(value, Undefined) or callable(value)) and _is_missing(resolve_path(context.get_all(), path))
-    ):
+    where it is used: `invoice.items.count` reads the list's method.
+
+    A read under a path a guard elsewhere in the check asks about (`guarded`, `_reads_of`) is one the check may do
+    without, so a null there is a value, as it always was; only a path the record lacks is missing, which gives way
+    in an `and` or an `or` as any missing value does, where Jinja's undefined would fail the check."""
+    if value is None and not guarded:
         raise MissingValue.for_path(path)
+    if isinstance(value, Undefined) or callable(value):
+        held = resolve_path(context.get_all(), path)
+        if held is _MISSING or (held is None and not guarded):
+            raise MissingValue.for_path(path)
     return value
 
 
@@ -1303,17 +1309,19 @@ def _accounted(source: tuple, scope: Mapping[str, Any], taken: Mapping[int, Any]
     return tuple(dict.fromkeys((_accounted(left, scope, taken) or ()) + paths))
 
 
-def _needing(node: nodes.Node, needed: Mapping[int, str], names: set[str], called: bool = False) -> nodes.Node:
+def _needing(
+    node: nodes.Node, needed: Mapping[int, tuple[str, bool]], names: set[str], called: bool = False
+) -> nodes.Node:
     """`node` with each read under it that the expression needs, in `needed` by the node's id, handed to `need()`
     with its path, and each name it looks up added to `names`. A called name no helper or global has goes to
     `callee()`, so `firstpresent(x)`, where nothing defines the name, raises before `x` is read. The blank `text()`,
     `number()`, `date()` or `first_present()` makes, and each date `days_between()` is handed, goes to `blank_at()`
     with every path its value could have come from, where it could only have come from paths (`_sources`); each such
     date then goes to `hand()`, so a missing value in one waits for the call to meet the other."""
-    path = needed.get(id(node))
+    path, guarded = needed.get(id(node), (None, False))
     if path is not None and not called:
         names.add(_root(path))
-        return _call(_NEED, node, nodes.Const(path))
+        return _call(_NEED, node, nodes.Const(path), nodes.Const(guarded))
     if isinstance(node, nodes.Name):
         names.add(node.name)
         if called and node.name not in GLOBAL_NAMES:
@@ -1397,8 +1405,11 @@ def _compile_lazy(text: str) -> tuple[_Lazy, Reads]:
     reads = _reads_of(collected)
     required = set(reads.required)
     names: set[str] = set()
-    expression = _needing(expression, {id(node): path for node, path in collected.needed if path in required}, names)
+    # Marked before `_needing` wraps anything, so an `and` or an `or` in the test of an `if` a helper is handed still
+    # decides: `note()` wraps that test in a call, whose arguments are values.
     _mark_deciding(expression)
+    needed = {id(node): (path, path not in required) for node, path in collected.needed}
+    expression = _needing(expression, needed, names)
     template = nodes.Template([nodes.Assign(nodes.Name("result", "store"), expression, lineno=1)], lineno=1)
     template.set_environment(_CHECK_ENVIRONMENT)
     return _Lazy(TemplateExpression(_CHECK_ENVIRONMENT.from_string(template), False), frozenset(names)), reads

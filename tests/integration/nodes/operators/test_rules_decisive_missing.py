@@ -179,16 +179,67 @@ def test_a_fallback_stands_in_for_a_value_the_check_also_needs_where_it_reads_it
     [
         ({}, ("fail", None)),
         ({"cert": {"zone": "A"}}, ("pass", None)),
-        ({"cert": {}}, ("not_evaluated", "check could not be evaluated: 'dict object' has no attribute 'zone'")),
+        ({"cert": {}}, ("not_evaluated", "missing value for docs.cert.zone")),
+        ({"cert": {"zone": None}}, ("fail", None)),
     ],
-    ids=["guard-decides", "there", "missing-under-the-guard"],
+    ids=["guard-decides", "there", "missing-under-the-guard", "null-under-the-guard"],
 )
-def test_a_value_under_one_a_guard_asks_about_is_read_as_it_always_was(docs, expected):
+def test_a_value_under_one_a_guard_asks_about_is_missing_only_where_the_record_lacks_it(docs, expected):
     """`has(docs.cert)` guards every read under it, so none of them is a value the check needs: a zone missing from a
-    certificate that is there fails its comparison, as it always did."""
+    certificate that is there is a missing value, naming its path, as it is unguarded, while a null zone is a value
+    and fails its comparison, as it always did."""
     node = screening("has(docs.cert) and docs.cert.zone == 'A'", inputs=("docs",))
 
     assert outcome(run(node, {"docs": docs})) == expected
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+@pytest.mark.parametrize(
+    ("app", "expected"),
+    [
+        ({"f": True}, ("pass", None)),
+        ({"f": False}, "missing value for app.a.b"),
+        ({"a": {"c": False}, "f": False}, "missing value for app.a.b"),
+        ({"a": {"b": 2}}, ("pass", None)),
+    ],
+    ids=["the-other-side-decides", "nothing-decides", "the-guard-holds-yet-decides-nothing", "there"],
+)
+def test_a_path_a_guard_elsewhere_makes_optional_gives_way_in_an_and_or_an_or_as_any_missing_value_does(
+    app, expected, policy
+):
+    """`has(app.a)` on one side makes every read under `app.a` optional, `app.a.b` on the other side too, yet a
+    missing `app.a.b` is still a missing value: the side that decides decides, and where none does, the rule stops
+    at it under its policy, never with Jinja's error for an undefined."""
+    node = screening("app.a.b > 1 or (has(app.a) and app.a.c) or app.f", policy)
+
+    if isinstance(expected, str):
+        expected = {
+            None: ("not_evaluated", expected),
+            "not_evaluated": ("not_evaluated", expected),
+            "fail": ("fail", expected),
+            "not_applicable": ("not_applicable", f"does not apply: {expected}"),
+        }[policy]
+    assert outcome(run(node, {"app": app})) == expected
+
+
+@pytest.mark.parametrize(
+    ("check", "app"),
+    [
+        ("text(app.a if (app.c or app.d) else app.b) == 'x'", {"d": True, "a": "x"}),
+        ("number(app.a if (app.c and app.d) else app.b) > 1", {"c": False, "b": 2}),
+        (
+            "days_between(app.s if (app.c or app.d) else app.t, app.e) > 1",
+            {"d": True, "s": "2026-01-01", "e": "2026-02-01"},
+        ),
+    ],
+    ids=["text-over-an-or", "number-over-an-and", "days-between-over-an-or"],
+)
+def test_an_and_or_an_or_in_the_test_of_an_if_a_helper_is_handed_decides(check, app):
+    """The test of an `if` is used for its truth wherever the `if` sits, inside `text()`, `number()` or a date
+    `days_between()` is handed as well, so either side of an `and` or an `or` there decides past a missing one."""
+    node = screening(check, "not_applicable")
+
+    assert outcome(run(node, {"app": app})) == ("pass", None)
 
 
 @pytest.mark.parametrize(("strict", "expected"), [(True, ("pass", None)), (False, ("fail", None))])
