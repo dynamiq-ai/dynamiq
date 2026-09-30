@@ -1144,68 +1144,58 @@ def test_an_or_whose_value_applies_when_compares_holds_the_rule_at_a_missing_sid
     assert outcome(run(node, {"app": {"kind": "", "type": "fixed", "points": 1}})) == ("pass", None)
 
 
-@pytest.mark.parametrize(
-    ("check", "items", "expected"),
-    [
-        ("app.exempt or app.items | select('odd')", [2, 4], ("not_evaluated", "missing value for app.exempt")),
-        ("app.exempt or app.items | select('odd')", [1, 2], ("pass", None)),
-        ("app.exempt and app.items | select('odd')", [2, 4], ("fail", None)),
-        ("app.exempt and app.items | select('odd')", [1, 2], ("not_evaluated", "missing value for app.exempt")),
-    ],
-    ids=["or-yields-nothing", "or-yields-an-item", "and-yields-nothing", "and-yields-an-item"],
-)
-def test_a_lazy_side_that_stands_in_for_a_missing_one_decides_by_the_items_it_yields(check, items, expected):
-    """A filter that selects yields its items lazily, and a generator is true whatever it would yield: standing in for
-    the missing exemption, it is judged by its items, as the check's result is, so an `or` that selects nothing does
-    not fail the rule on a value nobody gave, and an `and` that does is false."""
-    node = screening(check)
-
-    assert outcome(run(node, {"app": {"items": items}})) == expected
-
-
-def test_a_lazy_side_that_stands_in_for_a_missing_one_in_applies_when_does_not_skip_the_rule_on_nothing():
-    """`applies_when` is judged the same way: with the flag missing and no document of the kind, the rule is held for
-    the flag, where a generator taken for true would have skipped it and let the record pass."""
-    node = screening(
-        "loan.addendum_signed",
-        applies_when="loan.is_jumbo or loan.docs | selectattr('kind', 'equalto', 'jumbo')",
-        inputs=("loan",),
-    )
-
-    held = run(node, {"loan": {"docs": [{"kind": "w2"}], "addendum_signed": False}})
-    applies = run(node, {"loan": {"docs": [{"kind": "jumbo"}], "addendum_signed": False}})
-    skipped = run(node, {"loan": {"docs": [{"kind": "w2"}], "addendum_signed": False, "is_jumbo": False}})
-
-    assert (held["status"], outcome(held)) == ("not_evaluated", ("not_evaluated", "missing value for loan.is_jumbo"))
-    assert (applies["status"], outcome(applies)) == ("fail", ("fail", None))
-    assert (skipped["status"], outcome(skipped)[0]) == ("pass", "not_applicable")
+LAZY = "(app.items | select('odd'))"
 
 
 @pytest.mark.parametrize("policy", POLICIES)
 @pytest.mark.parametrize(
-    ("check", "app", "expected"),
+    ("operator", "items", "expected"),
     [
-        ("app.items | select('odd') or app.exempt", {"items": [2, 4], "exempt": True}, ("pass", None)),
-        ("app.exempt or app.items | select('odd')", {"items": [2, 4], "exempt": False}, ("fail", None)),
-        ("(app.items | select('odd')) and app.x", {"items": [2, 4]}, ("fail", None)),
-        ("app.x and (app.items | select('odd'))", {"items": [2, 4]}, ("fail", None)),
-        ("(app.items | select('odd')) or app.y", {"items": [2, 4], "y": False}, ("fail", None)),
+        ("or", [2, 4], ("fail", None)),
+        ("or", [1, 2], ("pass", None)),
+        ("and", [2, 4], "missing value for app.x"),
+        ("and", [1, 2], "missing value for app.x"),
     ],
-    ids=[
-        "first-or",
-        "second-or",
-        "first-and-beside-a-missing-value",
-        "second-and-beside-a-missing-value",
-        "first-or-read",
-    ],
+    ids=["or-yields-nothing", "or-yields-an-item", "and-yields-nothing", "and-yields-an-item"],
 )
-def test_a_lazy_side_is_judged_by_its_items_on_either_side_of_an_and_or_an_or(check, app, expected, policy):
-    """A lazy side of an `and` or an `or` whose truth alone the check uses, what `select` yields say, is judged by its
-    items wherever it is written: an empty selection is false, so it decides an `and` before the missing side is
-    needed, and an `or` goes on to its other side, as it would written second."""
-    node = screening(check, policy)
+def test_a_lazy_side_beside_a_missing_one_gives_the_same_verdict_written_either_way(operator, items, expected, policy):
+    """What `select` yields is lazy, and its truth is Python's on either side, true whatever it would yield, as it is
+    on main: beside a missing value it decides an `or`, whose verdict is then judged by its items, as the check's
+    result always is, and never an `and`, so the missing value stands. Written first or second, the verdict is the
+    same."""
+    if isinstance(expected, str):
+        expected = {
+            None: ("not_evaluated", expected),
+            "not_evaluated": ("not_evaluated", expected),
+            "fail": ("fail", expected),
+            "not_applicable": ("not_applicable", f"does not apply: {expected}"),
+        }[policy]
+    first = screening(f"{LAZY} {operator} app.x", policy)
+    second = screening(f"app.x {operator} {LAZY}", policy)
 
-    assert outcome(run(node, {"app": app})) == expected
+    assert (outcome(run(first, {"app": {"items": items}})), outcome(run(second, {"app": {"items": items}}))) == (
+        expected,
+        expected,
+    )
+
+
+@pytest.mark.parametrize(
+    ("check", "expected"),
+    [
+        (f"not ({LAZY} and app.flag)", ("fail", None)),
+        (f"not (app.flag and {LAZY})", ("fail", None)),
+        (f"{LAZY} and app.flag", ("pass", None)),
+        (f"app.flag and {LAZY}", ("fail", None)),
+    ],
+    ids=["not-lazy-first", "not-lazy-second", "lazy-first", "lazy-second"],
+)
+def test_a_lazy_side_over_complete_data_gives_the_verdict_main_gives(check, expected):
+    """With every value there, an `and` or an `or` is Python's, as on main: a lazy side is true, and the value the
+    operator gives is what the check judges, so `lazy and flag` is the flag and `flag and lazy` the selection, judged
+    by its items, as main judges them."""
+    node = screening(check)
+
+    assert outcome(run(node, {"app": {"items": [2, 4], "flag": True}})) == expected
 
 
 @pytest.mark.parametrize(("check", "status"), [("false and app.x | lowr", "fail"), ("true or app.x | lowr", "pass")])
