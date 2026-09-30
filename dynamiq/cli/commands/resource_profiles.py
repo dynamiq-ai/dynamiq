@@ -27,14 +27,13 @@ def list_resource_profiles(*, api: ApiClient, settings: Settings, purpose: str, 
     if ok(response):
         profiles = response.json().get("data", [])
         click.echo(f"{len(profiles)} resource(s) found.")
+        # The API leaves an unset description out of the response.
+        descriptions = [p.get("description") or "" for p in profiles]
         max_name_len = max(len(p["name"]) for p in profiles) + 2 if profiles else 40
-        max_description_len = max(len(p["description"]) for p in profiles) + 2 if profiles else 40
+        max_description_len = max(len(d) for d in descriptions) + 2 if profiles else 40
         click.echo(f"{'ID':<40} {'Name':<{max_name_len}} {'Description':<{max_description_len}}")
-        for profile in profiles:
-            click.echo(
-                f"{profile['id']:<40} {profile['name']:<{max_name_len}} "
-                f"{profile['description']:<{max_description_len}}"
-            )
+        for profile, description in zip(profiles, descriptions):
+            click.echo(f"{profile['id']:<40} {profile['name']:<{max_name_len}} {description:<{max_description_len}}")
 
     else:
         click.echo("Failed to list resource profiles.")
