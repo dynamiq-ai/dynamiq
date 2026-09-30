@@ -14,6 +14,7 @@ from dynamiq.components.audio.tts import (
     DeepgramTTSAdapter,
     ElevenLabsTTSAdapter,
     GroqTTSAdapter,
+    MiniMaxTTSAdapter,
     MistralTTSAdapter,
     OpenAICompatibleTTSAdapter,
     OpenAITTSAdapter,
@@ -23,6 +24,7 @@ from dynamiq.connections import Deepgram as DeepgramConnection
 from dynamiq.connections import ElevenLabs as ElevenLabsConnection
 from dynamiq.connections import Groq as GroqConnection
 from dynamiq.connections import HttpApiKey as HttpApiKeyConnection
+from dynamiq.connections import MiniMax as MiniMaxConnection
 from dynamiq.connections import Mistral as MistralConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import Whisper as WhisperConnection
@@ -46,6 +48,7 @@ TTS_ADAPTERS: dict[type[BaseConnection], type[BaseTTSAdapter]] = {
     ElevenLabsConnection: ElevenLabsTTSAdapter,
     MistralConnection: MistralTTSAdapter,
     DeepgramConnection: DeepgramTTSAdapter,
+    MiniMaxConnection: MiniMaxTTSAdapter,
 }
 
 

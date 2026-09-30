@@ -21,9 +21,9 @@ from unittest.mock import patch
 from litellm import get_supported_openai_params
 
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.connections import TogetherAI as TogetherAIConnection
+from dynamiq.connections import SambaNova as SambaNovaConnection
 from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.nodes.llms.togetherai import TogetherAI
+from dynamiq.nodes.llms.sambanova import SambaNova
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig
 
@@ -47,8 +47,8 @@ PROMPT = Prompt(messages=[Message(role="user", content="What is the weather in P
 UNKNOWN_MODEL = "vendor/model-that-litellm-does-not-know"
 
 
-def _together(model: str = UNKNOWN_MODEL) -> TogetherAI:
-    return TogetherAI(name="llm", model=model, connection=TogetherAIConnection(api_key="x"))
+def _gated(model: str = UNKNOWN_MODEL) -> SambaNova:
+    return SambaNova(name="llm", model=model, connection=SambaNovaConnection(api_key="x"))
 
 
 def _params(llm, **kwargs) -> dict:
@@ -62,7 +62,7 @@ def _params(llm, **kwargs) -> dict:
 
 class TestToolParamsToForce:
     def test_forces_tools_for_a_model_litellm_would_strip(self):
-        llm = _together()
+        llm = _gated()
         assert "tools" not in (get_supported_openai_params(model=llm.model) or [])
         assert llm._tool_params_to_force() == ["tools", "tool_choice"]
 
@@ -76,14 +76,14 @@ class TestToolParamsToForce:
         with patch(
             "dynamiq.nodes.llms.base.get_supported_openai_params", side_effect=RuntimeError("boom")
         ):
-            assert _together()._tool_params_to_force() == []
+            assert _gated()._tool_params_to_force() == []
 
 
 class TestBuildCompletionParams:
     """The regression that would return silently: tools present but stripped in flight."""
 
     def test_unknown_model_gets_allowed_openai_params(self):
-        params = _params(_together(), tools=[TOOL])
+        params = _params(_gated(), tools=[TOOL])
         assert params["tools"], "tools must reach the request"
         assert params["allowed_openai_params"] == ["tools", "tool_choice"]
 
@@ -93,19 +93,19 @@ class TestBuildCompletionParams:
 
     def test_no_override_without_tools(self):
         """XML and DEFAULT inference modes send no tools; nothing should be forced."""
-        assert "allowed_openai_params" not in _params(_together())
+        assert "allowed_openai_params" not in _params(_gated())
 
     def test_drop_params_still_enabled(self):
         """Only `tools` is forced. Everything else must keep degrading gracefully, or
         `temperature` on an o-series model and `seed` on Claude become hard failures."""
-        params = _params(_together(), tools=[TOOL])
+        params = _params(_gated(), tools=[TOOL])
         assert params["drop_params"] is True
 
     def test_shared_litellm_state_is_untouched(self):
         """Parallel workflows must not race: the override rides on the request."""
         import litellm
 
-        llm = _together("vendor/unknown-model-no-global-writes")
+        llm = _gated("vendor/unknown-model-no-global-writes")
         _params(llm, tools=[TOOL])
 
         assert llm.model not in litellm.model_cost

@@ -783,7 +783,7 @@ class BaseLLM(ConnectionNode):
         ``tools`` is deleted rather than sent. The model never sees a tool, the agent loops,
         and the run fails with a max-loops error that names nothing. This affects models
         litellm has not catalogued on providers that gate tools per model -- currently
-        together_ai, bedrock, sambanova, perplexity, anyscale and ollama.
+        bedrock, sambanova, perplexity, anyscale and ollama.
 
         Dropping ``temperature`` is harmless: the request still means the same thing.
         Dropping ``tools`` changes what the request *is*, and the caller explicitly asked
