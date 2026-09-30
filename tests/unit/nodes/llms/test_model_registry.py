@@ -438,9 +438,9 @@ def test_sync_keeps_function_calling_params_under_drop_params(monkeypatch):
 
     monkeypatch.setenv("DYNAMIQ_SYNC_MODEL_REGISTRY_TO_LITELLM", "1")
 
-    # together_ai gates `tools` on per-model FC support, so an unknown model gets them
+    # sambanova gates `tools` on per-model FC support, so an unknown model gets them
     # dropped under drop_params (this is the bug this branch fixes).
-    model = "together_ai/unknown-fc-model"
+    model = "sambanova/unknown-fc-model"
     tools = [
         {
             "type": "function",
@@ -451,7 +451,7 @@ def test_sync_keeps_function_calling_params_under_drop_params(monkeypatch):
     def tools_survive() -> bool:
         params = litellm.utils.get_optional_params(
             model=model,
-            custom_llm_provider="together_ai",
+            custom_llm_provider="sambanova",
             tools=tools,
             tool_choice="auto",
             drop_params=True,
@@ -463,7 +463,7 @@ def test_sync_keeps_function_calling_params_under_drop_params(monkeypatch):
 
     reg = ModelRegistry()
     reg.sync_to_litellm(
-        models={model: ModelMetadata(supports_function_calling=True, mode="chat", litellm_provider="together_ai")}
+        models={model: ModelMetadata(supports_function_calling=True, mode="chat", litellm_provider="sambanova")}
     )
 
     # After sync: litellm now knows the model is FC-capable -> tools preserved.
