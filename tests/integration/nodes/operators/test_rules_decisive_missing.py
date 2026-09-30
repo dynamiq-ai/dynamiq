@@ -804,6 +804,38 @@ def test_only_a_missing_value_gives_way_to_the_other_side_and_an_error_on_either
     )
 
 
+@pytest.mark.parametrize("policy", POLICIES)
+@pytest.mark.parametrize(
+    ("check", "app"),
+    [
+        ("days_between(app.s, app.e) > 1", {"e": "TBD"}),
+        ("days_between(app.s | trim, app.e) > 1", {"e": "TBD"}),
+        ("days_between(app.s | string | upper, app.e) > 1", {"e": "TBD"}),
+        ("days_between(app.e, app.s | trim) > 1", {"e": "TBD"}),
+        ("days_between(app.s | trim, app.e | trim) > 1", {"e": "TBD"}),
+        ("days_between(start=app.s | trim, end=app.e) > 1", {"e": "TBD"}),
+    ],
+    ids=[
+        "bare",
+        "missing-start-filtered",
+        "missing-start-in-a-chain",
+        "missing-end-filtered",
+        "both-filtered",
+        "keywords",
+    ],
+)
+def test_a_missing_date_through_a_filter_does_not_hide_text_the_other_date_holds_that_is_no_date(check, app, policy):
+    """`days_between()` meets both dates it is handed however each is written: a missing one read through a filter,
+    `app.s | trim`, stops the check only where the call uses it, so the other date's text that is no date is still
+    read, and is an error under every policy, as it is beside a bare path."""
+    node = screening(check, policy)
+
+    assert outcome(run(node, {"app": app})) == (
+        "fail" if policy == "fail" else "not_evaluated",
+        "check could not be evaluated: not a date: 'TBD'",
+    )
+
+
 MISSPELLED_METHOD = ("not_evaluated", "check could not be evaluated: 'str object' has no attribute 'startwith'")
 
 

@@ -698,17 +698,23 @@ class RuleCodeGenerator(CodeGenerator):
     of the environment's `rule_and` or `rule_or` with each side as a function (`_deciding`), which reads the names its
     frame resolved, as it would inline; a lambda cannot hold an `await`, so the sandbox must stay synchronous. It calls
     this module's `need()`, with the context, `callee()` and `blank_at()` directly, as the sandbox has nothing to check
-    in them; anything else a check calls goes through the sandbox."""
+    in them, and `hand()` with the date it is handed as a function; anything else a check calls goes through the
+    sandbox."""
 
     visit_And = _deciding("and", "rule_and")
     visit_Or = _deciding("or", "rule_or")
 
     def visit_Call(self, node: nodes.Call, frame: Frame, forward_caller: bool = False) -> None:
         helper = node.node.importname if isinstance(node.node, nodes.ImportedName) else None
-        if helper not in (_NEED, _CALLEE, _BLANK_AT):
+        if helper not in (_NEED, _CALLEE, _BLANK_AT, _HAND):
             super().visit_Call(node, frame, forward_caller=forward_caller)
             return
         self.visit(node.node, frame)
+        if helper == _HAND:
+            self.write("(lambda: ")
+            self.visit(node.args[0], frame)
+            self.write(")")
+            return
         self.write("(context, " if helper in (_NEED, _BLANK_AT) else "(")
         for index, argument in enumerate(node.args):
             if index:
@@ -1085,24 +1091,28 @@ def resolve_path(context: dict[str, Any], path: str) -> Any:
 
 
 @pass_context
-def need(context: Context, value: Any, path: str, handed: bool = False) -> Any:
+def need(context: Context, value: Any, path: str) -> Any:
     """What a read a check needs found, or a `MissingValue` naming the path where the record holds nothing: a null, or
     an undefined or a method Jinja found in place of a value the record lacks (`ticket.items` over a ticket without
     items finds the mapping's method). At a path the record holds, a method or an undefined goes on as it is and fails
-    where it is used: `invoice.items.count` reads the list's method.
-
-    A date `days_between()` is `handed` (`_handed`) does not stop the check where it is read: it is an undefined that
-    raises the same `MissingValue` where `days_between()` uses it, so the call still meets the other date first, and
-    text there it cannot read is not hidden by the missing one (`_reading`)."""
+    where it is used: `invoice.items.count` reads the list's method."""
     if value is None or (
         (isinstance(value, Undefined) or callable(value)) and _is_missing(resolve_path(context.get_all(), path))
     ):
-        if handed:
-            return _CHECK_ENVIRONMENT.undefined(
-                hint=f"missing value for {path}", exc=lambda _: MissingValue.for_path(path)
-            )
         raise MissingValue.for_path(path)
     return value
+
+
+def hand(date: Callable[[], Any]) -> Any:
+    """A date `days_between()` is handed, as a function of the check (`_needing`): its value, or, where a missing value
+    stops it, however deep in the argument, `| trim` say, an undefined that raises that `MissingValue` where
+    `days_between()` uses it, so the call still meets the other date first, and text there it cannot read is not hidden
+    by the missing one (`_reading`)."""
+    try:
+        return date()
+    except MissingValue as e:
+        missing = e
+    return _CHECK_ENVIRONMENT.undefined(hint=str(missing), exc=lambda _: missing)
 
 
 def callee(value: Any) -> Any:
@@ -1126,11 +1136,12 @@ def blank_at(context: Context, value: Any, paths: tuple[str, ...], raw: bool = F
     return value
 
 
-# `need`, `callee` and `blank_at` as the compiled code imports them, under names of Jinja's own that no expression can
-# reach.
+# `need`, `callee`, `blank_at` and `hand` as the compiled code imports them, under names of Jinja's own that no
+# expression can reach.
 _NEED = f"{__name__}.need"
 _CALLEE = f"{__name__}.callee"
 _BLANK_AT = f"{__name__}.blank_at"
+_HAND = f"{__name__}.hand"
 
 
 # The helpers that turn a blank they are handed into one they return (`blank_at`); `days_between()` raises instead.
@@ -1202,7 +1213,8 @@ def _needing(node: nodes.Node, needed: Mapping[int, str], names: set[str], calle
     with its path, and each name it looks up added to `names`. A called name no helper or global has goes to
     `callee()`, so `firstpresent(x)`, where nothing defines the name, raises before `x` is read. The blank `text()`,
     `number()`, `date()` or `first_present()` makes, and each date `days_between()` is handed, goes to `blank_at()`
-    with every path its value could have come from, where it could only have come from paths (`_sources`)."""
+    with every path its value could have come from, where it could only have come from paths (`_sources`); each such
+    date then goes to `hand()`, so a missing value in one waits for the call to meet the other."""
     path = needed.get(id(node))
     if path is not None and not called:
         names.add(_root(path))
@@ -1225,29 +1237,11 @@ def _needing(node: nodes.Node, needed: Mapping[int, str], names: set[str], calle
             value[:] = [_needing(item, needed, names) if isinstance(item, nodes.Node) else item for item in value]
     if dated:
         # Each date is handed to it as the record holds it, and its blank text is missing where it is read.
-        node.args = [_blank_at(_handed(argument), paths, raw=True) for argument, paths in zip(node.args, dates)]
+        node.args = [_call(_HAND, _blank_at(argument, paths, raw=True)) for argument, paths in zip(node.args, dates)]
         for item in node.kwargs:
-            item.value = _blank_at(_handed(item.value), dates_by_name[item.key], raw=True)
+            item.value = _call(_HAND, _blank_at(item.value, dates_by_name[item.key], raw=True))
     elif helper in _BLANK_MAKERS:
         return _blank_at(node, sources)
-    return node
-
-
-def _handed(node: nodes.Expr) -> nodes.Expr:
-    """A date `days_between()` is handed, with the read `need()` makes of it marked as handed, where the call is handed
-    the path as it is or through `date()`: `days_between(a, b)` and `days_between(date(a), date(b))` meet both dates
-    before a missing one stops them, as the call reads them (`days_between`)."""
-    target = node
-    while isinstance(target, nodes.Call):
-        callee_ = target.node
-        if isinstance(callee_, nodes.ImportedName) and callee_.importname == _NEED:
-            target.args.append(nodes.Const(True))
-            break
-        is_date = isinstance(callee_, nodes.Name) and callee_.name == "date"
-        is_blank_at = isinstance(callee_, nodes.ImportedName) and callee_.importname == _BLANK_AT
-        if not (is_date or is_blank_at) or not target.args:
-            break
-        target = target.args[0]
     return node
 
 
