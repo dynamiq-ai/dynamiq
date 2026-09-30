@@ -1194,6 +1194,48 @@ def test_a_lazy_side_decides_past_a_missing_one_only_where_its_items_agree_with_
     assert outcome(run(node, {"app": {"items": items}})) == expected
 
 
+OR_OVER_A_LAZY_LEFT = "(app.a and app.l | select('odd')) or app.c"
+MISSING_A = ("not_evaluated", "missing value for app.a")
+
+
+@pytest.mark.parametrize(
+    ("check", "app", "expected"),
+    [
+        (OR_OVER_A_LAZY_LEFT, {"l": [2], "c": True}, ("not_evaluated", "missing value for app.a")),
+        (OR_OVER_A_LAZY_LEFT, {"a": True, "l": [2], "c": True}, ("fail", None)),
+        (OR_OVER_A_LAZY_LEFT, {"a": False, "l": [2], "c": True}, ("pass", None)),
+        ("(app.a or app.l | reject('even')) or app.c", {"l": [2], "c": True}, MISSING_A),
+        ("app.l | select('odd') | default(app.a) or app.c", {"c": True}, MISSING_A),
+        (f"not ({OR_OVER_A_LAZY_LEFT})", {"l": [2], "c": True}, ("fail", None)),
+        (f"({OR_OVER_A_LAZY_LEFT}) if app.k else false", {"l": [2], "c": True, "k": True}, MISSING_A),
+        ("(app.a and app.b) or app.c", {"b": 1, "c": True}, ("pass", None)),
+        ("(app.a and app.l | select('odd')) and app.c", {"l": [2], "c": False}, ("fail", None)),
+    ],
+    ids=[
+        "missing",
+        "filled-in-true",
+        "filled-in-false",
+        "under-an-or",
+        "under-a-default",
+        "under-not",
+        "in-a-branch-of-an-if",
+        "a-left-side-that-is-never-lazy",
+        "an-and",
+    ],
+)
+def test_an_or_gives_no_way_where_the_missing_left_side_could_have_been_lazy_and_its_value_is_the_verdict(
+    check, app, expected
+):
+    """Filled in, the left side could be a selection Python finds true, which the `or` then gives, and the verdict,
+    judging it by its items, false: `app.c` cannot decide in its place, and the check stops at the missing value, as
+    on main, where the value of the `or` is the verdict. Under `not` the truth is Python's, so `app.c` decides; a left
+    side that is never lazy gives way as any does, and so does the left side of an `and`, which only a false side
+    decides."""
+    node = screening(check)
+
+    assert outcome(run(node, {"app": app})) == expected
+
+
 @pytest.mark.parametrize("policy", POLICIES)
 def test_a_lazy_side_that_stands_in_for_a_missing_one_in_applies_when_does_not_skip_the_rule_on_nothing(policy):
     """`applies_when` is judged the same way: with the flag missing and no odd item, the rule stops at the flag under

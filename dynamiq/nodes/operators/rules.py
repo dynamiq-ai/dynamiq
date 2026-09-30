@@ -631,7 +631,7 @@ class RecordSandbox(ImmutableSandboxedEnvironment):
         return super().getattr(obj, attribute)
 
 
-def _decide(decider: bool, left: Callable[[], Any], right: Callable[[], Any]) -> Any:
+def _decide(decider: bool, left: Callable[[], Any], right: Callable[[], Any], lazy_left: bool = False) -> Any:
     """`left or right` where `decider` is true, `left and right` where it is false, for an `and` or an `or` whose truth
     alone a check uses (`_mark_deciding`), each side a function. Where the left side is there, this is Python's `or` or
     `and`. Where it stops at a missing value, a right side whose truth is `decider` decides and is returned; otherwise
@@ -639,10 +639,12 @@ def _decide(decider: bool, left: Callable[[], Any], right: Callable[[], Any]) ->
     complete data is main's: a lazy side, what `select` yields say, is true whatever it yields. One that stands in for
     a missing side decides only by a truth Python and the verdict agree on, which judges it by its items: it decides
     an `or` it yields an item to, and never an `and`, so a missing value never gives way to a side the verdict would
-    then find false. Only a missing value gives way, a blank's included: an error is an error on either side, and so
-    is text a reader on the left side met and could not read before the missing value stopped it (`_reading`), which
-    the missing value would otherwise hide, as it does not anywhere else in a check: `number(a) > b or c` over `a` of
-    `TBD` and no `b` is that error, whatever `c` holds."""
+    then find false. Nor does an `or` give way to its right side where the missing left one could have been lazy
+    (`lazy_left`, `_could_be_lazy`) and its value is the verdict: filled in, it could be a selection Python finds true
+    and the verdict false, `(a and x | select('odd')) or c`. Only a missing value gives way, a blank's included: an
+    error is an error on either side, and so is text a reader on the left side met and could not read before the
+    missing value stopped it (`_reading`), which the missing value would otherwise hide, as it does not anywhere else
+    in a check: `number(a) > b or c` over `a` of `TBD` and no `b` is that error, whatever `c` holds."""
     misread = _MISREAD.get()
     met = len(misread) if misread is not None else 0
     try:
@@ -662,7 +664,7 @@ def _decide(decider: bool, left: Callable[[], Any], right: Callable[[], Any]) ->
                 decides = bool(other) == decider
         except MissingValue:
             raise missing from None
-        if decides:
+        if decides and not (lazy_left and decider):
             return other
         raise missing from None
     return value if true == decider else right()
@@ -689,6 +691,8 @@ def _deciding(operator: str, helper: str) -> Callable[[CodeGenerator, nodes.BinE
             self.visit(node.left, frame)
             self.write(", lambda: ")
             self.visit(node.right, frame)
+            if getattr(node, "lazy_left", False):
+                self.write(", True")
         else:
             # Python's own `and` or `or`, which stops at a missing value on any side it reads, written as Jinja writes
             # an operator this sandbox does not intercept (`intercepted_binops`).
@@ -1361,20 +1365,49 @@ def _blank_at(node: nodes.Expr, source: tuple, raw: bool = False) -> nodes.Expr:
     return _call(_BLANK_AT, node, nodes.Const(source), nodes.Const(raw)) if _names_a_path(source) else node
 
 
-def _mark_deciding(node: nodes.Node, truth: bool = True) -> None:
+def _mark_deciding(node: nodes.Node, truth: bool = True, verdict: bool = True) -> None:
     """Sets `deciding` on each `and` and `or` under `node`: true where the expression uses only its truth, as the
     operand of `not`, the test of an `if`, or a branch of an `if` or a side of an `and` or an `or` whose truth alone
     counts; false where it uses the value, which Python's `and` and `or` give, so a missing side read there holds the
-    rule. `truth` says whether only the truth of `node` itself counts, as for a check and an `applies_when`."""
+    rule. `truth` says whether only the truth of `node` itself counts, as for a check and an `applies_when`. `verdict`
+    says whether that truth is the verdict's, which judges a lazy value by its items, rather than Python's, as `not`
+    and the test of an `if` take it: there, an `or` whose left side could be lazy is marked `lazy_left` (`_decide`)."""
     if isinstance(node, (nodes.And, nodes.Or)):
         node.deciding = truth
-        _mark_deciding(node.left, truth)
-        _mark_deciding(node.right, truth)
+        node.lazy_left = truth and verdict and isinstance(node, nodes.Or) and _could_be_lazy(node.left)
+        _mark_deciding(node.left, truth, verdict)
+        _mark_deciding(node.right, truth, verdict)
         return
     for child in node.iter_child_nodes():
         # A branch of an `if` is used as the `if` is; the operand of `not` and the test of an `if`, for their truth.
         branch = isinstance(node, nodes.CondExpr) and child is not node.test
-        _mark_deciding(child, truth if branch else isinstance(node, (nodes.Not, nodes.CondExpr)))
+        if branch:
+            _mark_deciding(child, truth, verdict)
+        else:
+            _mark_deciding(child, isinstance(node, (nodes.Not, nodes.CondExpr)), False)
+
+
+# The filters that hand back a generator, which Python finds true whatever it yields.
+_LAZY_FILTERS = frozenset(
+    {"select", "reject", "selectattr", "rejectattr", "map", "batch", "slice", "unique", "items", "reverse"}
+)
+
+
+def _could_be_lazy(node: nodes.Node) -> bool:
+    """Whether the value of `node` could be lazy whatever the record holds: a filter that hands back a generator, or
+    an `and`, an `or`, an `if`, a `default` or a `first_present` that could pass one on. A path, a literal, a
+    comparison, a test and any other helper's value never is."""
+    if isinstance(node, nodes.Filter):
+        if node.name in ("default", "d"):
+            return _could_be_lazy(node.node) or any(_could_be_lazy(argument) for argument in node.args[:1])
+        return node.name in _LAZY_FILTERS
+    if isinstance(node, (nodes.And, nodes.Or)):
+        return _could_be_lazy(node.left) or _could_be_lazy(node.right)
+    if isinstance(node, nodes.CondExpr):
+        return _could_be_lazy(node.expr1) or (node.expr2 is not None and _could_be_lazy(node.expr2))
+    if isinstance(node, nodes.Call) and isinstance(node.node, nodes.Name) and node.node.name == "first_present":
+        return any(_could_be_lazy(argument) for argument in node.args)
+    return False
 
 
 class _Lazy:
