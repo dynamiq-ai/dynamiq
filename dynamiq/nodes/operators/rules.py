@@ -635,13 +635,14 @@ def _decide(decider: bool, left: Callable[[], Any], right: Callable[[], Any]) ->
     """`left or right` where `decider` is true, `left and right` where it is false, for an `and` or an `or` whose truth
     alone a check uses (`_mark_deciding`), each side a function. Where the left side is there, this is Python's `or` or
     `and`. Where it stops at a missing value, a right side whose truth is `decider` decides and is returned; otherwise
-    the left side's missing value stands. Each side's truth is Python's, whichever side it is on: a lazy one, what
-    `select` yields say, is true, as it is on main, so a verdict over complete data is main's, and the order the sides
-    are written in never decides whether a missing one gives way. Only a missing value
-    gives way, a blank's included: an error is an error on either side, and so is text a reader on the left side met
-    and could not read before the missing value stopped it (`_reading`), which the missing value would otherwise hide,
-    as it does not anywhere else in a check: `number(a) > b or c` over `a` of `TBD` and no `b` is that error, whatever
-    `c` holds."""
+    the left side's missing value stands. With both sides there, each side's truth is Python's, so a verdict over
+    complete data is main's: a lazy side, what `select` yields say, is true whatever it yields. One that stands in for
+    a missing side decides only by a truth Python and the verdict agree on, which judges it by its items: it decides
+    an `or` it yields an item to, and never an `and`, so a missing value never gives way to a side the verdict would
+    then find false. Only a missing value gives way, a blank's included: an error is an error on either side, and so
+    is text a reader on the left side met and could not read before the missing value stopped it (`_reading`), which
+    the missing value would otherwise hide, as it does not anywhere else in a check: `number(a) > b or c` over `a` of
+    `TBD` and no `b` is that error, whatever `c` holds."""
     misread = _MISREAD.get()
     met = len(misread) if misread is not None else 0
     try:
@@ -652,7 +653,13 @@ def _decide(decider: bool, left: Callable[[], Any], right: Callable[[], Any]) ->
             raise
         try:
             other = right()
-            decides = bool(other) == decider
+            if isinstance(other, Iterator):
+                # True to Python whatever it yields, and judged by its items where the verdict is taken: it decides
+                # only where both agree, an `or` it yields an item to, and is returned as its items.
+                other = list(other)
+                decides = decider and bool(other)
+            else:
+                decides = bool(other) == decider
         except MissingValue:
             raise missing from None
         if decides:

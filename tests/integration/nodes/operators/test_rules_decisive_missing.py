@@ -1147,22 +1147,41 @@ def test_an_or_whose_value_applies_when_compares_holds_the_rule_at_a_missing_sid
 LAZY = "(app.items | select('odd'))"
 
 
+MISSING_X = "missing value for app.x"
+
+
 @pytest.mark.parametrize("policy", POLICIES)
 @pytest.mark.parametrize(
-    ("operator", "items", "expected"),
+    ("check", "items", "expected"),
     [
-        ("or", [2, 4], ("fail", None)),
-        ("or", [1, 2], ("pass", None)),
-        ("and", [2, 4], "missing value for app.x"),
-        ("and", [1, 2], "missing value for app.x"),
+        (f"app.x or {LAZY}", [2, 4], MISSING_X),
+        (f"app.x or {LAZY}", [1, 2], ("pass", None)),
+        (f"app.x and {LAZY}", [2, 4], MISSING_X),
+        (f"app.x and {LAZY}", [1, 2], MISSING_X),
+        (f"{LAZY} and app.x", [2, 4], MISSING_X),
+        (f"{LAZY} and app.x", [1, 2], MISSING_X),
+        (f"{LAZY} or app.x", [1, 2], ("pass", None)),
+        (f"{LAZY} or app.x", [2, 4], ("fail", None)),
     ],
-    ids=["or-yields-nothing", "or-yields-an-item", "and-yields-nothing", "and-yields-an-item"],
+    ids=[
+        "or-yields-nothing",
+        "or-yields-an-item",
+        "and-yields-nothing",
+        "and-yields-an-item",
+        "first-and-yields-nothing",
+        "first-and-yields-an-item",
+        "first-or-yields-an-item",
+        "first-or-never-reads-the-other-side",
+    ],
 )
-def test_a_lazy_side_beside_a_missing_one_gives_the_same_verdict_written_either_way(operator, items, expected, policy):
-    """What `select` yields is lazy, and its truth is Python's on either side, true whatever it would yield, as it is
-    on main: beside a missing value it decides an `or`, whose verdict is then judged by its items, as the check's
-    result always is, and never an `and`, so the missing value stands. Written first or second, the verdict is the
-    same."""
+def test_a_lazy_side_decides_past_a_missing_one_only_where_its_items_agree_with_pythons_truth(
+    check, items, expected, policy
+):
+    """What `select` yields is lazy: Python finds it true whatever it yields, and the verdict judges it by its items.
+    Standing in for a missing value, it decides only where the two agree, an `or` it yields an item to, and never an
+    `and`, so the missing value stands wherever the verdict would find the side false. Written first, it is there,
+    and the operator is Python's, as on main: an `or` is the selection, whatever the other side holds, which is never
+    read."""
     if isinstance(expected, str):
         expected = {
             None: ("not_evaluated", expected),
@@ -1170,13 +1189,26 @@ def test_a_lazy_side_beside_a_missing_one_gives_the_same_verdict_written_either_
             "fail": ("fail", expected),
             "not_applicable": ("not_applicable", f"does not apply: {expected}"),
         }[policy]
-    first = screening(f"{LAZY} {operator} app.x", policy)
-    second = screening(f"app.x {operator} {LAZY}", policy)
+    node = screening(check, policy)
 
-    assert (outcome(run(first, {"app": {"items": items}})), outcome(run(second, {"app": {"items": items}}))) == (
-        expected,
-        expected,
+    assert outcome(run(node, {"app": {"items": items}})) == expected
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+def test_a_lazy_side_that_stands_in_for_a_missing_one_in_applies_when_does_not_skip_the_rule_on_nothing(policy):
+    """`applies_when` is judged the same way: with the flag missing and no odd item, the rule stops at the flag under
+    its policy, never skipped as though it did not apply; with an odd item, it applies."""
+    node = screening("app.points <= 2", policy, applies_when=f"app.flag or {LAZY}")
+
+    held = outcome(run(node, {"app": {"items": [2, 4], "points": 1}}))
+    applies = outcome(run(node, {"app": {"items": [1, 2], "points": 3}}))
+
+    assert held == (
+        ("not_applicable", "does not apply: missing value for app.flag")
+        if policy == "not_applicable"
+        else ("fail" if policy == "fail" else "not_evaluated", "missing value for app.flag")
     )
+    assert applies == ("fail", None)
 
 
 @pytest.mark.parametrize(
