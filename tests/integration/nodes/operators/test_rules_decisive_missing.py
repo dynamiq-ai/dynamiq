@@ -565,6 +565,14 @@ def test_the_reason_names_the_blank_the_evaluation_stopped_at(check, app, missin
         ("number(app.a + app.b) > 1", {"a": "", "b": ""}, "app.a"),
         ("text(app.a if app.c) == 'x'", {"a": "", "c": True}, "app.a"),
         ("text((app.a ~ app.b) | trim | upper) == 'X'", {"a": " ", "b": ""}, "app.a"),
+        ("text(app.a if app.c else app.b) == 'x'", {"a": "", "c": True, "b": "y"}, "app.a"),
+        ("text(app.a if app.c else app.b) == 'x'", {"a": "y", "c": False, "b": " "}, "app.b"),
+        ("text(app.a | default(app.b)) == 'x'", {"a": "", "b": "y"}, "app.a"),
+        ("text(app.a | default(app.b, true)) == 'x'", {"a": "", "b": " "}, "app.a"),
+        ("text(app.a or app.b) == 'x'", {"a": " ", "b": "y"}, "app.a"),
+        ("text(app.a and app.b) == 'x'", {"a": "", "b": "y"}, "app.a"),
+        ("text(app.get('F', app.y)) == 'x'", {"F": "", "y": "y"}, "app.F"),
+        ("text(app.a or ' ') == 'x'", {"a": ""}, "app.a"),
     ],
     ids=[
         "first-present-over-a-helper",
@@ -593,17 +601,26 @@ def test_the_reason_names_the_blank_the_evaluation_stopped_at(check, app, missin
         "arithmetic-on-blanks",
         "an-if-without-an-else-over-a-blank",
         "filters-over-a-concatenation-of-blanks",
+        "an-if-that-took-its-blank-branch",
+        "an-if-that-took-its-blank-else",
+        "a-default-that-kept-a-blank",
+        "a-default-that-replaced-a-blank-with-a-blank",
+        "an-or-that-took-a-blank-with-spaces",
+        "an-and-that-took-a-blank",
+        "a-get-that-found-a-blank",
+        "an-or-that-fell-back-to-a-literal",
     ],
 )
 def test_a_helpers_blank_names_the_path_it_came_from_through_filters_and_helpers(
     check, app, missing, policy, status, prefix
 ):
-    """A blank a helper makes is data the record lacks where every value it could have come from is blank in the
-    record: the path itself, a filter's value and a `default`'s, both sides of an `or` or an `and`, both branches of an
-    `if`, the value a method is called on, and every value a helper inside it passes on. It names the first of them, and
-    a rule set to skip it does; a literal among them, `default('')` say, adds none, and `x.get('F')` reads `x.F`. Any
-    other shape it passes through, `~`, a slice, arithmetic or an `if` without an `else`, comes from every path read
-    inside it. The blank `app.b` compared before it was never where the check stopped."""
+    """A blank a helper makes is data the record lacks where every value it came from, the way the evaluation went, is
+    blank in the record: the path itself, a filter's value and a `default`'s where it replaced the value, the side of
+    an `or` or an `and` Python's operator gave, the branch of an `if` taken, the value a method is called on, and every
+    value a helper inside it passes on. A branch, a side or a fallback not taken counts for nothing, blank or not. It
+    names the first of them, and a rule set to skip it does; a literal among them, `default('')` say, adds none, and
+    `x.get('F')` reads `x.F`. Any other shape it passes through, `~`, a slice, arithmetic or an `if` without an `else`,
+    comes from every path read inside it. The blank `app.b` compared before it was never where the check stopped."""
     node = screening(check, policy)
 
     assert outcome(run(node, {"app": app})) == (status, f"{prefix}missing value for {missing}")
@@ -657,8 +674,7 @@ NOTHING = "missing value: first_present() found nothing present"
             {"b": "", "o": "x", "c": "2026-08-07"},
             "missing value: days_between() found no date",
         ),
-        ("app.b == '' and text(app.nickname or app.name) == 'Ann'", {"b": "", "nickname": " ", "name": "Ann"}, NO_TEXT),
-        ("app.b == '' and text(app.x if app.k else app.y) == 'z'", {"b": "", "x": "x", "y": " ", "k": False}, NO_TEXT),
+        ("app.b == '' and text(app.x if app.k else ' ') == 'z'", {"b": "", "x": " ", "k": False}, NO_TEXT),
         ("app.b == '' and number(app.x.replace('$', '')) > 1", {"b": "", "x": "$"}, NO_NUMBER),
         (
             "app.b == '' and text(app.x | default(limits[app.k])) == 'z'",
@@ -698,8 +714,7 @@ NOTHING = "missing value: first_present() found nothing present"
         "a-filter-over-a-value-there",
         "a-lookup-among-fallbacks",
         "days-between",
-        "an-or-with-a-side-there",
-        "an-if-with-a-branch-there",
+        "an-if-that-took-a-literal",
         "a-method-of-a-value-there",
         "a-default-that-is-a-lookup",
         "a-helper-over-a-lookup-among-fallbacks",
@@ -1115,13 +1130,31 @@ def test_a_lazy_side_that_stands_in_for_a_missing_one_in_applies_when_does_not_s
     assert (skipped["status"], outcome(skipped)[0]) == ("pass", "not_applicable")
 
 
-def test_a_lazy_first_side_that_is_there_keeps_the_truth_python_gives_it_as_it_always_did():
-    """Only a side that stands in for a missing one is judged by its items. A first side that is there keeps Python's
-    truth, as it always did: the selection is true whatever it yields, so it is the `or`, and the check, judged by its
-    items, fails though the exemption holds."""
-    node = screening("app.items | select('odd') or app.exempt")
+@pytest.mark.parametrize("policy", POLICIES)
+@pytest.mark.parametrize(
+    ("check", "app", "expected"),
+    [
+        ("app.items | select('odd') or app.exempt", {"items": [2, 4], "exempt": True}, ("pass", None)),
+        ("app.exempt or app.items | select('odd')", {"items": [2, 4], "exempt": False}, ("fail", None)),
+        ("(app.items | select('odd')) and app.x", {"items": [2, 4]}, ("fail", None)),
+        ("app.x and (app.items | select('odd'))", {"items": [2, 4]}, ("fail", None)),
+        ("(app.items | select('odd')) or app.y", {"items": [2, 4], "y": False}, ("fail", None)),
+    ],
+    ids=[
+        "first-or",
+        "second-or",
+        "first-and-beside-a-missing-value",
+        "second-and-beside-a-missing-value",
+        "first-or-read",
+    ],
+)
+def test_a_lazy_side_is_judged_by_its_items_on_either_side_of_an_and_or_an_or(check, app, expected, policy):
+    """A lazy side of an `and` or an `or` whose truth alone the check uses, what `select` yields say, is judged by its
+    items wherever it is written: an empty selection is false, so it decides an `and` before the missing side is
+    needed, and an `or` goes on to its other side, as it would written second."""
+    node = screening(check, policy)
 
-    assert outcome(run(node, {"app": {"items": [2, 4], "exempt": True}})) == ("fail", None)
+    assert outcome(run(node, {"app": app})) == expected
 
 
 @pytest.mark.parametrize(("check", "status"), [("false and app.x | lowr", "fail"), ("true or app.x | lowr", "pass")])

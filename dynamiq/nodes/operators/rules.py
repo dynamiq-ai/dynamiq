@@ -1,4 +1,5 @@
 import functools
+import itertools
 import math
 import numbers
 import re
@@ -633,16 +634,19 @@ class RecordSandbox(ImmutableSandboxedEnvironment):
 def _decide(decider: bool, left: Callable[[], Any], right: Callable[[], Any]) -> Any:
     """`left or right` where `decider` is true, `left and right` where it is false, for an `and` or an `or` whose truth
     alone a check uses (`_mark_deciding`), each side a function. Where the left side is there, this is Python's `or` or
-    `and`. Where it stops at a missing value, a right side whose truth is `decider` decides and is returned, a lazy one,
-    what `select` yields say, judged by its items and returned as their list; otherwise the left side's missing value
-    stands. Only a missing value gives way, a blank's included: an error is an error on either side, and so is text a
-    reader on the left side met and could not read before the missing value stopped it (`_reading`), which the missing
-    value would otherwise hide, as it does not anywhere else in a check: `number(a) > b or c` over `a` of `TBD` and no
-    `b` is that error, whatever `c` holds."""
+    `and`. Where it stops at a missing value, a right side whose truth is `decider` decides and is returned; otherwise
+    the left side's missing value stands. A lazy side, what `select` yields say, is judged by its items and returned as
+    their list, on either side, so the order the sides are written in never changes the verdict. Only a missing value
+    gives way, a blank's included: an error is an error on either side, and so is text a reader on the left side met
+    and could not read before the missing value stopped it (`_reading`), which the missing value would otherwise hide,
+    as it does not anywhere else in a check: `number(a) > b or c` over `a` of `TBD` and no `b` is that error, whatever
+    `c` holds."""
     misread = _MISREAD.get()
     met = len(misread) if misread is not None else 0
     try:
         value = left()
+        if isinstance(value, Iterator):
+            value = list(value)
         true = bool(value)
     except MissingValue as missing:
         if misread is not None and len(misread) > met:
@@ -706,7 +710,7 @@ class RuleCodeGenerator(CodeGenerator):
 
     def visit_Call(self, node: nodes.Call, frame: Frame, forward_caller: bool = False) -> None:
         helper = node.node.importname if isinstance(node.node, nodes.ImportedName) else None
-        if helper not in (_NEED, _CALLEE, _BLANK_AT, _HAND):
+        if helper not in (_NEED, _CALLEE, _BLANK_AT, _HAND, _NOTE):
             super().visit_Call(node, frame, forward_caller=forward_caller)
             return
         self.visit(node.node, frame)
@@ -715,7 +719,7 @@ class RuleCodeGenerator(CodeGenerator):
             self.visit(node.args[0], frame)
             self.write(")")
             return
-        self.write("(context, " if helper in (_NEED, _BLANK_AT) else "(")
+        self.write("(context, " if helper in (_NEED, _BLANK_AT, _NOTE) else "(")
         for index, argument in enumerate(node.args):
             if index:
                 self.write(", ")
@@ -1125,23 +1129,35 @@ def callee(value: Any) -> Any:
 
 
 @pass_context
-def blank_at(context: Context, value: Any, paths: tuple[str, ...], raw: bool = False) -> Any:
+def blank_at(context: Context, value: Any, source: tuple, raw: bool = False) -> Any:
     """`value`, or, where it is a blank a helper made, or with `raw` blank text, which `days_between()` counts as
-    missing, and the value at each of `paths` is blank as well, a blank that stops a check naming the first path
-    (`_needing`): the record lacks the value the blank came from. Any other blank stays the helper's own."""
+    missing, and the paths the value came from by the way the evaluation went (`_accounted`) are blank as well, a
+    blank that stops a check naming the first of them (`_needing`): the record lacks the value the blank came from.
+    Any other blank stays the helper's own."""
     if isinstance(value, Blank) or (raw and isinstance(value, str) and not value.strip()):
-        scope = context.get_all()
-        if all(is_blank(resolve_path(scope, path)) for path in paths):
+        paths = _accounted(source, context.get_all(), context.vars.get(_TAKEN, {}))
+        if paths:
             return _CHECK_ENVIRONMENT.blank(exc=lambda _: MissingValue.for_path(paths[0]))
     return value
 
 
-# `need`, `callee`, `blank_at` and `hand` as the compiled code imports them, under names of Jinja's own that no
-# expression can reach.
+@pass_context
+def note(context: Context, value: Any, key: int) -> Any:
+    """`value`, kept under `key` for `blank_at()`: the test of an `if`, the left side of an `or` or an `and`, or the
+    value `default` is handed, which says which way the evaluation went there (`_sources`)."""
+    context.vars.setdefault(_TAKEN, {})[key] = value
+    return value
+
+
+# `need`, `callee`, `blank_at`, `hand` and `note` as the compiled code imports them, under names of Jinja's own that
+# no expression can reach.
 _NEED = f"{__name__}.need"
 _CALLEE = f"{__name__}.callee"
 _BLANK_AT = f"{__name__}.blank_at"
 _HAND = f"{__name__}.hand"
+_NOTE = f"{__name__}.note"
+# Where `note()` keeps what it is handed for one evaluation, under a name no expression can reach.
+_TAKEN = " taken"
 
 
 # The helpers that turn a blank they are handed into one they return (`blank_at`); `days_between()` raises instead.
@@ -1153,59 +1169,138 @@ def _call(name: str, node: nodes.Expr, *args: nodes.Expr) -> nodes.Call:
     return nodes.Call(nodes.ImportedName(name), [node, *args], [], None, None, lineno=node.lineno)
 
 
-def _sources(node: nodes.Node) -> tuple[str, ...] | None:
-    """Every path of the record the value of `node` could have come from, or None where something other than the
-    record could account for it: a lookup, `limits[app.k]` or `x.get(app.k)`, that may find nothing whatever the record
-    holds, or a call of anything but a helper. A filter's value and `default`'s fallback, both sides of an `or` or an
-    `and`, the branches of an `if`, the value a method is called on, and the value `text()`, `number()`, `date()` or
-    `first_present()` passes on; `x.get('F')` reads `x.F`, and then its default. Any other shape, `~`, a slice,
-    arithmetic or a helper such as `max()`, comes from every path read inside it. A literal adds no path, so
-    `default('')` leaves the value to the path before it, and neither does the `else` an `if` leaves out: `text(app.a
-    if app.c)` comes from `app.a` alone."""
+# Where a value a helper is handed could have come from (`_sources`), as `blank_at()` reads it once the check has run:
+# `("path", p)`; `("all", *parts)`, every part at once; `("if", key, then, else)`, `("or", key, left, right)`,
+# `("and", key, left, right)` and `("default", key, boolean, value, fallback)`, whichever the evaluation took, by what
+# `note()` kept under `key`; `("get", p, fallback)`, `p`, or the fallback where the record lacks `p`; and `("none",)`,
+# a value the record may not account for.
+_UNACCOUNTED = ("none",)
+_NOTE_KEYS = itertools.count()
+
+
+def _all(parts: list[tuple]) -> tuple:
+    """The source of a value made of every one of `parts`, or `_UNACCOUNTED` where any part is."""
+    if _UNACCOUNTED in parts:
+        return _UNACCOUNTED
+    return ("all", *parts)
+
+
+def _noted(node: nodes.Node) -> int:
+    """The key `note()` keeps what the evaluation took at `node` under, the same for each helper that reads it."""
+    if getattr(node, "note_key", None) is None:
+        node.note_key = next(_NOTE_KEYS)
+    return node.note_key
+
+
+def _sources(node: nodes.Node | None) -> tuple:
+    """Where the value of `node` could have come from in the record, as `blank_at()` reads it once the check has run:
+    the branch of an `if` it took, the side of an `or` or an `and` Python's operator returned, a filter's value, and
+    `default`'s fallback where it replaced the value, the value a method is called on, and the value `text()`,
+    `number()`, `date()` or `first_present()` passes on; `x.get('F')` reads `x.F`, and its default where the record
+    lacks `x.F`. Any other shape, `~`, a slice, arithmetic or a helper such as `max()`, comes from every path read
+    inside it. A literal adds no path, so `default('')` leaves the value to the path before it; the `else` an `if`
+    leaves out, a lookup, `limits[app.k]` or `x.get(app.k)`, that may find nothing whatever the record holds, and a call
+    of anything but a helper are `_UNACCOUNTED`. A branch, a side or a fallback the evaluation did not take counts for
+    nothing (`_accounted`)."""
+    if node is None:
+        return _UNACCOUNTED
     if isinstance(node, nodes.Const):
-        return ()
+        return ("all",)
     if (path := _path_of(node)) is not None:
-        return (path,)
-    found: list[str] = []
+        return ("path", path)
+    if isinstance(node, nodes.Filter) and node.name in ("default", "d"):
+        # With none given, the fallback is '', a literal; a `boolean` written as anything but a literal is unknown.
+        fallback = next((item.value for item in node.kwargs if item.key == "default_value"), None)
+        boolean = next((item.value for item in node.kwargs if item.key == "boolean"), None)
+        fallback, boolean = (node.args + [fallback, boolean][len(node.args) :])[:2]
+        flag = boolean.value if isinstance(boolean, nodes.Const) else False if boolean is None else None
+        replacement = _sources(fallback) if fallback is not None else ("all",)
+        return ("default", _noted(node), flag, _sources(node.node), replacement)
     if isinstance(node, nodes.Filter):
-        parts = [node.node]
-        if node.name in ("default", "d"):
-            # With none given, the fallback is '', a literal.
-            fallback = next((item.value for item in node.kwargs if item.key == "default_value"), None)
-            parts += node.args[:1] or ([fallback] if fallback is not None else [])
-    elif isinstance(node, nodes.CondExpr):
+        return _all([_sources(node.node)])
+    if isinstance(node, nodes.CondExpr):
         # The test only picks a branch; its value is not passed on.
-        parts = [node.expr1, node.expr2]
-    elif isinstance(node, nodes.Call) and isinstance(node.node, nodes.Getattr) and node.node.attr == "get":
+        return ("if", _noted(node), _sources(node.expr1), _sources(node.expr2))
+    if isinstance(node, (nodes.Or, nodes.And)):
+        kind = "or" if isinstance(node, nodes.Or) else "and"
+        return (kind, _noted(node), _sources(node.left), _sources(node.right))
+    if isinstance(node, nodes.Call) and isinstance(node.node, nodes.Getattr) and node.node.attr == "get":
         # What `x['F']` reads, where the key is written in the check; one read when it runs is a lookup.
         key = node.args[0] if node.args else None
         path = _path_of(nodes.Getitem(node.node.node, key, "load")) if isinstance(key, nodes.Const) else None
         if path is None or len(node.args) > 2 or node.kwargs or node.dyn_args or node.dyn_kwargs:
-            return None
-        found.append(path)
-        parts = node.args[1:]
-    elif isinstance(node, nodes.Call) and isinstance(node.node, nodes.Getattr):
+            return _UNACCOUNTED
+        return ("get", path, _sources(node.args[1]) if len(node.args) > 1 else ("all",))
+    if isinstance(node, nodes.Call) and isinstance(node.node, nodes.Getattr):
         parts = [node.node.node]
     elif isinstance(node, nodes.Call) and isinstance(node.node, nodes.Name) and node.node.name in _BLANK_MAKERS:
         value = next((item.value for item in node.kwargs if item.key == "value"), None)
         parts = list(node.args) if node.node.name == "first_present" else [node.args[0] if node.args else value]
     elif isinstance(node, nodes.Call):
         if not isinstance(node.node, nodes.Name):
-            return None
+            return _UNACCOUNTED
         # A helper's result comes from the values it is handed; its name is no read.
         parts = list(node.iter_child_nodes(exclude=("node",)))
     elif isinstance(node, (nodes.Getattr, nodes.Getitem)) and not isinstance(getattr(node, "arg", None), nodes.Slice):
         # A lookup that is no path: a key read when the check runs, or a member of a value computed in it.
-        return None
+        return _UNACCOUNTED
     else:
         parts = list(node.iter_child_nodes())
-    for part in parts:
-        if part is None:
-            continue
-        if (paths := _sources(part)) is None:
-            return None
-        found += paths
-    return tuple(dict.fromkeys(found))
+    return _all([_sources(part) for part in parts if part is not None])
+
+
+def _names_a_path(source: tuple) -> bool:
+    """Whether some way the evaluation could go through `source` ends at a path of the record."""
+    return source[0] in ("path", "get") or any(isinstance(part, tuple) and _names_a_path(part) for part in source[1:])
+
+
+def _truth(value: Any) -> bool | None:
+    """The truth Python's operators saw in `value`, or None where it has none to give."""
+    try:
+        return bool(value)
+    except Exception:
+        return None
+
+
+def _accounted(source: tuple, scope: Mapping[str, Any], taken: Mapping[int, Any]) -> tuple[str, ...] | None:
+    """The paths of the record that account for a blank that came from `source`, each blank in `scope`, following
+    the branch, the side and the fallback the evaluation took, as `note()` kept them in `taken`; None where the record
+    does not account for it. Where an `or` or an `and` took its right side, a left side that is blank too comes first,
+    as the value the check read first."""
+    kind = source[0]
+    if kind == "path":
+        return (source[1],) if is_blank(resolve_path(scope, source[1])) else None
+    if kind == "all":
+        found: list[str] = []
+        for part in source[1:]:
+            if (paths := _accounted(part, scope, taken)) is None:
+                return None
+            found += paths
+        return tuple(dict.fromkeys(found))
+    if kind == "get":
+        value = resolve_path(scope, source[1])
+        replaced = value is _MISSING
+        return _accounted(("all", ("path", source[1]), source[2]) if replaced else ("path", source[1]), scope, taken)
+    if kind not in ("if", "or", "and", "default") or source[1] not in taken:
+        return None
+    value = taken[source[1]]
+    if kind == "if":
+        truth = _truth(value)
+        return None if truth is None else _accounted(source[2] if truth else source[3], scope, taken)
+    if kind == "default":
+        _, _, boolean, original, fallback = source
+        truth = None if isinstance(value, Undefined) else _truth(value)
+        replaced = isinstance(value, Undefined) or (boolean is not False and truth is False)
+        return _accounted(("all", original, fallback) if replaced else original, scope, taken)
+    _, _, left, right = source
+    truth = _truth(value)
+    if truth is None:
+        return None
+    if truth == (kind == "or"):
+        return _accounted(left, scope, taken)
+    if (paths := _accounted(right, scope, taken)) is None:
+        return None
+    return tuple(dict.fromkeys((_accounted(left, scope, taken) or ()) + paths))
 
 
 def _needing(node: nodes.Node, needed: Mapping[int, str], names: set[str], called: bool = False) -> nodes.Node:
@@ -1227,7 +1322,7 @@ def _needing(node: nodes.Node, needed: Mapping[int, str], names: set[str], calle
     helper = node.node.name if isinstance(node, nodes.Call) and isinstance(node.node, nodes.Name) else None
     dated = helper == "days_between"
     # Read before `need()` wraps the reads, which are then no longer paths.
-    sources = _sources(node) if helper in _BLANK_MAKERS else None
+    sources = _sources(node) if helper in _BLANK_MAKERS else _UNACCOUNTED
     dates = [_sources(argument) for argument in node.args] if dated else []
     dates_by_name = {item.key: _sources(item.value) for item in node.kwargs} if dated else {}
     for field, value in node.iter_fields():
@@ -1235,6 +1330,10 @@ def _needing(node: nodes.Node, needed: Mapping[int, str], names: set[str], calle
             setattr(node, field, _needing(value, needed, names, isinstance(node, nodes.Call) and field == "node"))
         elif isinstance(value, list):
             value[:] = [_needing(item, needed, names) if isinstance(item, nodes.Node) else item for item in value]
+    if (key := getattr(node, "note_key", None)) is not None:
+        # What decides which way the evaluation goes here, kept for `blank_at()`.
+        field = "test" if isinstance(node, nodes.CondExpr) else "left" if isinstance(node, nodes.BinExpr) else "node"
+        setattr(node, field, _call(_NOTE, getattr(node, field), nodes.Const(key)))
     if dated:
         # Each date is handed to it as the record holds it, and its blank text is missing where it is read.
         node.args = [_call(_HAND, _blank_at(argument, paths, raw=True)) for argument, paths in zip(node.args, dates)]
@@ -1245,9 +1344,9 @@ def _needing(node: nodes.Node, needed: Mapping[int, str], names: set[str], calle
     return node
 
 
-def _blank_at(node: nodes.Expr, paths: tuple[str, ...] | None, raw: bool = False) -> nodes.Expr:
-    """`node` handed to `blank_at()` with `paths`, or as it is where there are none to name."""
-    return _call(_BLANK_AT, node, nodes.Const(paths), nodes.Const(raw)) if paths else node
+def _blank_at(node: nodes.Expr, source: tuple, raw: bool = False) -> nodes.Expr:
+    """`node` handed to `blank_at()` with its `source`, or as it is where no way through it names a path."""
+    return _call(_BLANK_AT, node, nodes.Const(source), nodes.Const(raw)) if _names_a_path(source) else node
 
 
 def _mark_deciding(node: nodes.Node, truth: bool = True) -> None:
