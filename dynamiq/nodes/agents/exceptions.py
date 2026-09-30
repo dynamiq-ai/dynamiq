@@ -38,6 +38,40 @@ class ToolExecutionException(RecoverableAgentException):
     pass
 
 
+class HookStopException(Exception):
+    """
+    Raised by a hook to end the agent run.
+
+    Deliberately not a RecoverableAgentException: the agent must not turn it into an observation and continue.
+    """
+
+    pass
+
+
+class ToolHookStopException(HookStopException):
+    """Raised by a tool hook configured with ``stop_agent=True`` (or ``on_error="stop"``) to end the agent run."""
+
+    pass
+
+
+class ModelHookStopException(HookStopException):
+    """Raised by a model hook that blocks the model call with ``on_block="fail"`` (or ``on_error="stop"``)."""
+
+    pass
+
+
+class ModelCallBlockedException(Exception):
+    """
+    Raised by a model hook with ``on_block="answer"``: the run ends successfully with ``message`` as the answer.
+
+    Caught once, in ``Agent.execute``. Not a RecoverableAgentException, so the ReAct loop never swallows it.
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
 class InvalidActionException(RecoverableAgentException):
     """
     Exception raised when invalid action is chosen. Raising this exeption will allow Agent to reiterate.

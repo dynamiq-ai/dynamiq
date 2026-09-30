@@ -19,7 +19,14 @@ from dynamiq.memory import Memory, MemoryRetrievalStrategy, MemorySaveMode
 from dynamiq.memory.long_term import LongTermMemoryConfig
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentIterativeCheckpointMixin
-from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
+from dynamiq.nodes.agents.exceptions import (
+    AgentUnknownToolException,
+    InvalidActionException,
+    ModelCallBlockedException,
+    ToolExecutionException,
+)
+from dynamiq.nodes.agents.hooks import ToolHook, apply_after_tool_hooks, resolve_hook, resolve_tool_hook
+from dynamiq.nodes.agents.model_hooks import ModelHook, apply_after_model_hooks, apply_before_model_hooks
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.agents.shared_session import (
@@ -252,6 +259,20 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     max_loops: int = 1
     tool_output_max_length: int = TOOL_MAX_TOKENS
     tool_output_truncate_enabled: bool = True
+    tool_hooks: list[ToolHook] = Field(
+        default_factory=list,
+        description=(
+            "Before/after hooks for tool calls: rewrite tool input/output with transformers or block a call. "
+            "Not applied to the context manager tool or sub-agent tools."
+        ),
+    )
+    model_hooks: list[ModelHook] = Field(
+        default_factory=list,
+        description=(
+            "Before/after hooks for LLM calls: rewrite messages or replies, or block a call. "
+            "Python subclasses via `type`, or the built-in regex redact/guard hooks."
+        ),
+    )
     tool_output_sandbox_persistence: ToolOutputSandboxPersistenceConfig = Field(
         default_factory=ToolOutputSandboxPersistenceConfig,
         description="Configuration for saving large tool outputs to sandbox files.",
@@ -350,6 +371,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     # {node_id: {param: value}} from each tool's input_transformer; only selected values are kept.
     _tool_input_overrides: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
     _sandbox_is_shared: bool = PrivateAttr(default=False)
+    # Set by _run_llm when a model hook rewrote the reply, so streamed-chunk accumulation must not override it.
+    _model_output_rewritten: bool = PrivateAttr(default=False)
     # A borrowed per-agent view of an owner's shared sandbox; when set it is this
     # agent's effective sandbox_backend for the whole run (tools, uploads, output).
     _shared_sandbox_view: Sandbox | None = PrivateAttr(default=None)
@@ -364,6 +387,21 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
     _json_schema_fields: ClassVar[list[str]] = ["role", "description"]
+
+    @field_validator("tool_hooks", mode="before")
+    @classmethod
+    def _resolve_tool_hooks(cls, value):
+        """Load ``type: pkg.module.Class`` entries (from YAML) as ToolHook subclasses."""
+        if isinstance(value, list):
+            return [resolve_tool_hook(item) for item in value]
+        return value
+
+    @field_validator("model_hooks", mode="before")
+    @classmethod
+    def _resolve_model_hooks(cls, value):
+        if isinstance(value, list):
+            return [resolve_hook(item, ModelHook) for item in value]
+        return value
 
     @classmethod
     def _generate_json_schema(
@@ -891,8 +929,17 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
             kwargs.pop("run_depends", None)
 
+            model_call_blocked = False
             try:
-                result = self._run_agent(input_message, history_messages, config=config, **kwargs)
+                try:
+                    result = self._run_agent(input_message, history_messages, config=config, **kwargs)
+                except ModelCallBlockedException as blocked:
+                    # A model hook ended the run with its block_message as the answer (on_block="answer").
+                    result, model_call_blocked = blocked.message, True
+                    if self.streaming.enabled:
+                        self.stream_content(
+                            content=result, source=self.name, step="answer", config=config, **kwargs
+                        )
             except CanceledException:
                 if use_memory:
                     try:
@@ -938,6 +985,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             execution_result = {
                 "content": result,
             }
+            if model_call_blocked:
+                execution_result["blocked"] = True
 
             requested_paths = getattr(self, "_requested_output_files", None)
 
@@ -1344,6 +1393,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         """
         try:
             check_cancellation(config)
+            self._model_output_rewritten = False
+            if self.model_hooks:
+                hook_trace: list[dict] = []
+                try:
+                    messages = apply_before_model_hooks(self.model_hooks, messages, hook_trace)
+                finally:
+                    self._emit_model_hook_trace(hook_trace, config, **kwargs)
             llm_result = self.llm.run(
                 input_data={},
                 config=config,
@@ -1357,6 +1413,15 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if llm_result.status != RunnableStatus.SUCCESS:
                 error_message = f"LLM '{self.llm.name}' failed: {llm_result.error.message}"
                 raise ValueError(error_message)
+
+            if self.model_hooks:
+                hook_trace = []
+                try:
+                    llm_result.output, self._model_output_rewritten = apply_after_model_hooks(
+                        self.model_hooks, llm_result.output, hook_trace
+                    )
+                finally:
+                    self._emit_model_hook_trace(hook_trace, config, **kwargs)
 
             return llm_result
 
@@ -1659,6 +1724,16 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         if isinstance(tool, Python):
             merged_input["files"] = files
 
+    def _emit_tool_hook_trace(self, trace: list[dict], config: RunnableConfig | None, **kwargs) -> None:
+        """Attach tool hook activity to this agent's run in tracing (run.metadata["tool_hooks"])."""
+        if trace:
+            self.run_on_node_execute_run(ensure_config(config).callbacks, tool_hooks=trace, **kwargs)
+
+    def _emit_model_hook_trace(self, trace: list[dict], config: RunnableConfig | None, **kwargs) -> None:
+        """Attach model hook activity to this agent's run in tracing (run.metadata["model_hooks"])."""
+        if trace:
+            self.run_on_node_execute_run(ensure_config(config).callbacks, model_hooks=trace, **kwargs)
+
     def _run_tool(
         self,
         tool: Node,
@@ -1867,6 +1942,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 tool.increment_call_count()
 
             tool_result_output_content = tool_result.output.get("content")
+            # Before truncation/persistence and the tool cache, on the raw (possibly structured) content.
+            if self.tool_hooks and not (is_child_agent or isinstance(tool, ContextManagerTool)):
+                hook_trace: list[dict] = []
+                tool_result_output_content = apply_after_tool_hooks(
+                    self.tool_hooks, tool.name, tool_result_output_content, hook_trace
+                )
+                self._emit_tool_hook_trace(hook_trace, config, **kwargs)
 
             saved_files = self._handle_tool_generated_files(tool, tool_result)
 

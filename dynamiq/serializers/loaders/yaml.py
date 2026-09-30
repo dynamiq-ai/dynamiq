@@ -625,7 +625,7 @@ class WorkflowYAMLLoader:
             # TODO: dummy fix, revisit this!
             # We had to add this condition because some nodes have a `schema`/`response_format` params,
             # that have a `type` field that contains types supported by JSON schema (e.g., string, object).
-            if param_name in ("schema", "response_format", "agent_factory"):
+            if param_name in ("schema", "response_format", "agent_factory", "tool_hooks", "model_hooks"):
                 updated_node_init_data[param_name] = param_data
 
             elif isinstance(param_data, dict):

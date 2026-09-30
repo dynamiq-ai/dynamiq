@@ -21,7 +21,9 @@ from dynamiq.nodes.agents.exceptions import (
     ParsingError,
     RecoverableAgentException,
     TagNotFoundError,
+    ToolExecutionException,
 )
+from dynamiq.nodes.agents.hooks import apply_before_tool_hooks, check_tool_hooks_block
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager, ReactPromptConfig
 from dynamiq.nodes.agents.utils import (
     SummarizationConfig,
@@ -1321,6 +1323,18 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     "these fields are not accessible to the agent (is_accessible_to_agent=False)."
                 )
 
+        # Hooks skip the context manager and sub-agent tools.
+        use_hooks = bool(self.tool_hooks) and not isinstance(tool, (ContextManagerTool, SubAgentTool))
+        hook_error: ToolExecutionException | None = None
+        if use_hooks:
+            hook_trace: list[dict] = []
+            try:
+                action_input = apply_before_tool_hooks(self.tool_hooks, tool.name, action_input, hook_trace)
+            except ToolExecutionException as e:
+                hook_error = e  # re-raised inside the try below, so it is streamed and returned as an observation
+            finally:
+                self._emit_tool_hook_trace(hook_trace, config, **kwargs)
+
         tool_run_id = tool_run_id or self._streaming_tool_run_id or generate_uuid()
         self._streaming_tool_run_id = None
         self._streaming_tool_run_ids = []
@@ -1345,6 +1359,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
         )
         try:
             check_cancellation(config)
+            if hook_error:
+                raise hook_error
+            if use_hooks:
+                hook_trace = []
+                try:
+                    check_tool_hooks_block(self.tool_hooks, tool.name, action_input, hook_trace)
+                finally:
+                    self._emit_tool_hook_trace(hook_trace, config, **kwargs)
             if isinstance(tool, ContextManagerTool):
                 tool_result = None
                 to_summarize, to_preserve = self._split_history()
@@ -1811,7 +1833,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         check_cancellation(config)
 
-        if streaming_callback and streaming_callback.accumulated_content:
+        if streaming_callback and streaming_callback.accumulated_content and not self._model_output_rewritten:
             llm_generated_output = streaming_callback.accumulated_content
         else:
             llm_generated_output = llm_result.output.get("content", "")
