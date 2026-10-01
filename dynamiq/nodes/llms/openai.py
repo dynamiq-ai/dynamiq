@@ -13,6 +13,7 @@ class ReasoningEffort(str, enum.Enum):
     """
 
     AUTO = "auto"
+    NONE = "none"
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -37,15 +38,18 @@ _MODELS_DEFAULTING_TO_NONE: frozenset[str] = frozenset(
 )
 
 
-def _resolve_default_reasoning_effort(model_lower: str) -> ReasoningEffort | None:
-    """Return the implicit default for ``model_lower``, or ``None`` to omit the param.
+def _resolve_default_reasoning_effort(model_lower: str) -> ReasoningEffort:
+    """Return the effort ``AUTO`` resolves to for ``model_lower``.
 
     ``model_lower`` is the model identifier with the ``openai/`` prefix stripped
-    and lowercased. Models not on the explicit "defaults to none" list fall back
+    and lowercased. Models on the "defaults to none" list get ``NONE`` sent
+    explicitly rather than the param left out: litellm takes an unset effort on
+    gpt-5.4+ models as reasoning on, and then routes any call with function tools
+    through the Responses API instead of Chat Completions. Other models fall back
     to the historical default of ``MEDIUM``.
     """
     if model_lower in _MODELS_DEFAULTING_TO_NONE:
-        return None
+        return ReasoningEffort.NONE
     return ReasoningEffort.MEDIUM
 
 
