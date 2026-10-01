@@ -664,16 +664,26 @@ class BaseLLM(ConnectionNode):
         chunks = []
         # A stream forced by a streaming-only model is transport: its chunks are not for clients.
         emit_chunks = self.streaming.enabled
-        for chunk in response:
-            check_cancellation(config)
-            chunks.append(chunk)
+        try:
+            for chunk in response:
+                check_cancellation(config)
+                chunks.append(chunk)
 
-            if emit_chunks:
-                self.run_on_node_execute_stream(
-                    config.callbacks,
-                    chunk.model_dump(),
-                    **kwargs,
-                )
+                if emit_chunks:
+                    self.run_on_node_execute_stream(
+                        config.callbacks,
+                        chunk.model_dump(),
+                        **kwargs,
+                    )
+        finally:
+            # LiteLLM 包装器的同步关闭接口位于底层 provider stream。
+            stream = getattr(response, "completion_stream", response)
+            close = getattr(stream, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    logger.warning("Could not close the LLM completion stream", exc_info=True)
 
         full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
@@ -699,15 +709,24 @@ class BaseLLM(ConnectionNode):
         chunks = []
         # A stream forced by a streaming-only model is transport: its chunks are not for clients.
         emit_chunks = self.streaming.enabled
-        async for chunk in response:
-            check_cancellation(config)
-            chunks.append(chunk)
-            if emit_chunks:
-                self.run_on_node_execute_stream(
-                    config.callbacks,
-                    chunk.model_dump(),
-                    **kwargs,
-                )
+        try:
+            async for chunk in response:
+                check_cancellation(config)
+                chunks.append(chunk)
+                if emit_chunks:
+                    self.run_on_node_execute_stream(
+                        config.callbacks,
+                        chunk.model_dump(),
+                        **kwargs,
+                    )
+        finally:
+            # 即使取消或回调失败，也释放连接；清理错误不覆盖原始异常。
+            aclose = getattr(response, "aclose", None)
+            if callable(aclose):
+                try:
+                    await aclose()
+                except Exception:
+                    logger.warning("Could not close the async LLM completion stream", exc_info=True)
 
         full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
