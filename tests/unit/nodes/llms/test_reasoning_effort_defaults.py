@@ -25,7 +25,7 @@ def _build(llm: OpenAI) -> dict:
 class TestResolveDefaultReasoningEffort:
     @pytest.mark.parametrize("model", sorted(_MODELS_DEFAULTING_TO_NONE))
     def test_models_in_none_set_resolve_to_none(self, model):
-        assert _resolve_default_reasoning_effort(model) is None
+        assert _resolve_default_reasoning_effort(model) == ReasoningEffort.NONE
 
     @pytest.mark.parametrize(
         "model",
@@ -54,9 +54,9 @@ class TestAutoResolutionInCompletionParams:
         "model",
         ["gpt-5.1", "gpt-5.2", "gpt-5.4", "gpt-5.1-2025-11-13", "gpt-5.2-2025-12-11"],
     )
-    def test_auto_omits_reasoning_effort_for_native_none_models(self, model):
+    def test_auto_sends_none_explicitly_for_native_none_models(self, model):
         params = _build(_llm(model))
-        assert "reasoning_effort" not in params
+        assert params["reasoning_effort"] == ReasoningEffort.NONE
 
     @pytest.mark.parametrize("model", ["gpt-5", "gpt-5-mini", "gpt-5-nano"])
     def test_auto_falls_back_to_medium_for_other_gpt5_models(self, model):
@@ -110,7 +110,25 @@ class TestExplicitOverrideRespected:
 class TestPrefixedModelIds:
     def test_openai_prefix_is_stripped_before_resolution(self):
         params = _build(_llm("openai/gpt-5.1"))
-        assert "reasoning_effort" not in params
+        assert params["reasoning_effort"] == ReasoningEffort.NONE
+
+
+class TestFunctionToolsStayOnChatCompletions:
+    """An unset effort on gpt-5.4+ reads to litellm as reasoning on, so a call with function tools
+    would go to the Responses API instead of Chat Completions, where agents ran before."""
+
+    TOOLS = [{"type": "function", "function": {"name": "f", "parameters": {"type": "object", "properties": {}}}}]
+
+    @pytest.mark.parametrize("model", ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"])
+    def test_default_effort_keeps_function_tool_calls_on_chat_completions(self, model):
+        from litellm.main import responses_api_bridge_check
+
+        params = _build(_llm(model))
+        model_info, _ = responses_api_bridge_check(
+            model=model, custom_llm_provider="openai", tools=self.TOOLS, reasoning_effort=params.get("reasoning_effort")
+        )
+
+        assert model_info.get("mode") != "responses"
 
 
 class TestGpt6Family:
