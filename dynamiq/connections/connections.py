@@ -1,6 +1,7 @@
 import enum
 import json
 import os
+import re
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from enum import Enum
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from openai import OpenAI as OpenAIClient
     from pinecone import Pinecone as PineconeClient
     from qdrant_client import QdrantClient
+    from turbopuffer import Turbopuffer as TurbopufferClient
     from weaviate import WeaviateClient
 
 
@@ -1045,6 +1047,49 @@ class Weaviate(BaseApiKeyConnection):
             return weaviate_client
         else:
             raise ValueError("Invalid deployment type")
+
+
+class Turbopuffer(BaseApiKeyConnection):
+    """
+    Represents a connection to the Turbopuffer service.
+
+    Attributes:
+        api_key (str): The API key for the service.
+            Defaults to the environment variable 'TURBOPUFFER_API_KEY'.
+        region (str | None): The region of the service, such as "aws-us-east-1".
+            Defaults to the environment variable 'TURBOPUFFER_REGION'.
+        base_url (str | None): The API URL of a dedicated or self-hosted cluster. Replaces the regional
+            URL when set.
+    """
+
+    REGION_PATTERN: ClassVar[re.Pattern] = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
+    api_key: str = Field(default_factory=partial(get_env_var, "TURBOPUFFER_API_KEY"))
+    region: str | None = Field(default_factory=partial(get_env_var, "TURBOPUFFER_REGION"))
+    base_url: str | None = None
+
+    @property
+    def api_url(self) -> str:
+        """The URL of the API the connection talks to."""
+        if self.base_url:
+            return self.base_url
+        if not self.region or not self.REGION_PATTERN.fullmatch(self.region):
+            raise ValueError(f"Invalid Turbopuffer region '{self.region}'. Expected a region such as 'aws-us-east-1'.")
+        return f"https://{self.region}.turbopuffer.com"
+
+    def connect(self) -> "TurbopufferClient":
+        """
+        Connects to the Turbopuffer service.
+
+        The URL is always passed explicitly, so TURBOPUFFER_BASE_URL and TURBOPUFFER_REGION set in the
+        environment cannot override the connection's own settings.
+
+        Returns:
+            TurbopufferClient: An instance of the Turbopuffer client.
+        """
+        from turbopuffer import Turbopuffer as TurbopufferClient
+
+        return TurbopufferClient(api_key=self.api_key, base_url=self.api_url)
 
 
 class Chroma(BaseConnection):
