@@ -1,28 +1,30 @@
 import posixpath
 import re
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
+from dynamiq.artifacts import (
+    TEXT_KINDS,
+    Artifact,
+    ArtifactBackend,
+    ArtifactConflictError,
+    ArtifactError,
+    ArtifactKind,
+    ArtifactNotFoundError,
+    default_extension,
+    infer_kind,
+)
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.tools.file_tools import EditOperation
+from dynamiq.nodes.tools.utils import find_positions
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.sandboxes.base import Sandbox
-from dynamiq.storages.artifact.base import (
-    TEXT_KINDS,
-    Artifact,
-    ArtifactConflictError,
-    ArtifactKind,
-    ArtifactNotFoundError,
-    ArtifactStore,
-    ArtifactStoreError,
-    default_extension,
-    infer_kind,
-)
 from dynamiq.storages.file.base import FileStore
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.utils.logger import logger
@@ -35,22 +37,24 @@ conversation. Look here with 'list' and 'get' when asked about a report, record 
 not have in this conversation.
 
 Actions:
-- create: publish a new artifact. Requires 'title' and exactly one of 'content' (the full text) or \
-'path' (a file already in your workspace). Optional 'name' (filename-like, e.g. 'q3-report.html'), \
-'kind' and 'summary'.
+- create: publish a new artifact. Requires 'name' and exactly one of 'content' (the full text) or \
+'path' (a file already in your workspace). Optional 'file_name' (e.g. 'q3-report.html'), 'kind' and \
+'description'. A site of several files is a zip passed by 'path' with kind 'bundle'; 'entry_path' \
+names its page (default 'index.html').
 - update: add a new version of an existing artifact. Requires 'artifact_id' and one of 'content', \
-'path' or 'edits' (literal find/replace pairs on the latest version). Optional 'title', 'summary'.
+'path' or 'edits' (literal find/replace pairs on the latest version). Optional 'name', 'description'.
 - get: read an artifact. Requires 'artifact_id'; optional 'version' (default latest).
-- list: artifacts you can see. Optional 'kind' and 'query'.
+- list: the most recently updated artifacts. Optional 'kind'.
+- share: make a link anyone can open, only when the user asks for one. Requires 'artifact_id'; \
+optional 'pinned_version' (default: the link follows the latest version) and 'expires_in_days'.
 
 Usage examples:
-- {"action": "create", "title": "Q3 pipeline report", "name": "q3-report.html", "content": "<!doctype html>..."}
-- {"action": "create", "title": "Churn by region", "path": "output/churn.csv"}
+- {"action": "create", "name": "Q3 pipeline report", "file_name": "q3-report.html", "content": "<!doctype html>..."}
+- {"action": "create", "name": "Churn by region", "path": "output/churn.csv"}
 - {"action": "update", "artifact_id": "a1b2", "edits": [{"find": "Q2", "replace": "Q3"}], \
-"summary": "Fix quarter label"}
-- {"action": "get", "artifact_id": "a1b2"}"""
-
-READ_ONLY_NOTE = "\n\nArtifacts are READ-ONLY here: 'create' and 'update' are unavailable."
+"description": "Fix quarter label"}
+- {"action": "get", "artifact_id": "a1b2"}
+- {"action": "share", "artifact_id": "a1b2", "expires_in_days": 30}"""
 
 
 class ArtifactAction(str, Enum):
@@ -60,33 +64,38 @@ class ArtifactAction(str, Enum):
     UPDATE = "update"
     GET = "get"
     LIST = "list"
-
-
-MUTATING_ACTIONS = {ArtifactAction.CREATE, ArtifactAction.UPDATE}
+    SHARE = "share"
 
 
 class ArtifactToolInputSchema(BaseModel):
     """Input schema for the artifact tool."""
 
-    action: ArtifactAction = Field(..., description="What to do: create, update, get or list.")
-    artifact_id: str | None = Field(default=None, description="Artifact to update or get.")
-    title: str | None = Field(default=None, description="Display title. Required for create.")
-    name: str | None = Field(
+    action: ArtifactAction = Field(..., description="What to do: create, update, get, list or share.")
+    artifact_id: str | None = Field(default=None, description="Artifact to update, get or share.")
+    name: str | None = Field(default=None, description="Display name. Required for create.")
+    file_name: str | None = Field(
         default=None,
-        description="Stable filename-like name, e.g. 'q3-report.html'. Defaults to the path's basename "
-        "or a slug of the title.",
+        description="File name, e.g. 'q3-report.html'. Defaults to the path's basename or a slug of the name.",
     )
     kind: ArtifactKind | None = Field(
-        default=None, description="Artifact kind. Inferred from the name or content when omitted."
+        default=None, description="Artifact kind. Inferred from the file name or content when omitted."
     )
     content: str | None = Field(default=None, description="Full text of the artifact.")
     path: str | None = Field(default=None, description="File in your workspace to publish instead of 'content'.")
+    entry_path: str | None = Field(
+        default=None, description="Page a bundle opens on, relative to the zip's root. Bundles only."
+    )
     edits: list[EditOperation] | None = Field(
         default=None, description="Literal find/replace operations applied to the latest version (update only)."
     )
-    summary: str | None = Field(default=None, description="One line: what this version is or what changed.")
+    description: str | None = Field(default=None, description="One line: what this version is or what changed.")
     version: int | None = Field(default=None, description="Version to read with get. Defaults to the latest.")
-    query: str | None = Field(default=None, description="Text to filter list results by.")
+    pinned_version: int | None = Field(
+        default=None, description="Version a shared link shows. Unset: the link follows the latest version."
+    )
+    expires_in_days: int | None = Field(
+        default=None, ge=1, description="Days until a shared link stops working. Unset: it does not expire."
+    )
     brief: str = Field(default="Working on an artifact", description="Short description of what you are doing.")
 
     @model_validator(mode="after")
@@ -94,8 +103,8 @@ class ArtifactToolInputSchema(BaseModel):
         """Fail fast on the arguments each action needs, rather than part-way through execution."""
         sources = [s for s in (self.content, self.path) if s is not None]
         if self.action == ArtifactAction.CREATE:
-            if not self.title:
-                raise ValueError("'title' is required for action 'create'")
+            if not self.name:
+                raise ValueError("'name' is required for action 'create'")
             if len(sources) != 1:
                 raise ValueError("action 'create' needs exactly one of 'content' or 'path'")
             if self.edits:
@@ -105,16 +114,16 @@ class ArtifactToolInputSchema(BaseModel):
                 raise ValueError("'artifact_id' is required for action 'update'")
             if len(sources) + bool(self.edits) != 1:
                 raise ValueError("action 'update' needs exactly one of 'content', 'path' or 'edits'")
-        elif self.action == ArtifactAction.GET and not self.artifact_id:
-            raise ValueError("'artifact_id' is required for action 'get'")
+        elif self.action in (ArtifactAction.GET, ArtifactAction.SHARE) and not self.artifact_id:
+            raise ValueError(f"'artifact_id' is required for action '{self.action.value}'")
         return self
 
 
 class ArtifactTool(Node):
-    """Create, update, read and list artifacts: versioned deliverables with a link.
+    """Create, update, read, list and share artifacts: versioned deliverables with a link.
 
     Output carries a small reference under ``artifact`` and never bytes, so tool results, streamed
-    events and checkpoints stay small. An agent rebuilds this tool per run, binding ``source``.
+    events and checkpoints stay small. An agent rebuilds this tool per run.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -123,26 +132,16 @@ class ArtifactTool(Node):
     is_mockable: ClassVar[bool] = False
     name: str = "artifact"
     description: str = DESCRIPTION
-    backend: ArtifactStore = Field(..., description="Store holding artifacts.")
+    backend: ArtifactBackend = Field(..., description="Backend holding the artifacts.")
     file_source: FileStore | Sandbox | None = Field(
         default=None, description="Workspace that 'path' is read from: the agent's sandbox or file store."
-    )
-    write_enabled: bool = Field(default=True, description="Whether the agent may create and update artifacts.")
-    source: dict[str, Any] | None = Field(
-        default=None, description="Provenance recorded on each version, e.g. session and run ids."
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[ArtifactToolInputSchema]] = ArtifactToolInputSchema
 
-    # Checksum last seen per artifact in this run; sent as If-Match so concurrent writers fail fast.
-    _seen_checksums: dict[str, str] = PrivateAttr(default_factory=dict)
-
-    @model_validator(mode="after")
-    def describe_mode(self):
-        if not self.write_enabled and READ_ONLY_NOTE not in self.description:
-            self.description += READ_ONLY_NOTE
-        return self
+    # Latest version id seen per artifact in this run; sent as If-Match so concurrent writers fail fast.
+    _seen_versions: dict[str, str] = PrivateAttr(default_factory=dict)
 
     @property
     def to_dict_exclude_params(self):
@@ -164,12 +163,6 @@ class ArtifactTool(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         action = input_data.action
-        if action in MUTATING_ACTIONS and not self.write_enabled:
-            raise ToolExecutionException(
-                f"Artifacts are read-only here; '{action.value}' is not available. You can list and get them.",
-                recoverable=True,
-            )
-
         try:
             if action == ArtifactAction.CREATE:
                 return self._create(input_data)
@@ -177,6 +170,8 @@ class ArtifactTool(Node):
                 return self._update(input_data)
             if action == ArtifactAction.GET:
                 return self._get(input_data)
+            if action == ArtifactAction.SHARE:
+                return self._share(input_data)
             return self._list(input_data)
         except ToolExecutionException:
             raise
@@ -186,11 +181,11 @@ class ArtifactTool(Node):
             ) from None
         except ArtifactConflictError as e:
             if input_data.artifact_id:
-                self._seen_checksums.pop(input_data.artifact_id, None)
+                self._seen_versions.pop(input_data.artifact_id, None)
             raise ToolExecutionException(
                 f"{e} Use action 'get' to read the latest version, then retry the update.", recoverable=True
             ) from e
-        except ArtifactStoreError as e:
+        except ArtifactError as e:
             raise ToolExecutionException(str(e), recoverable=True) from e
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: {action.value} failed. Error: {e}")
@@ -200,29 +195,42 @@ class ArtifactTool(Node):
             ) from e
 
     def _create(self, input_data: ArtifactToolInputSchema) -> dict[str, Any]:
-        content, name, kind = self._resolve_content(input_data)
+        content, file_name, kind = self._resolve_content(input_data)
         artifact = self.backend.create(
-            name=name,
-            title=input_data.title,
+            file_name=file_name,
+            name=input_data.name,
             kind=kind,
             content=content,
-            summary=input_data.summary,
-            source=self.source,
+            description=input_data.description,
+            entry_path=input_data.entry_path,
         )
         return self._result(artifact, "created")
 
     def _update(self, input_data: ArtifactToolInputSchema) -> dict[str, Any]:
-        content = None
-        if input_data.content is not None or input_data.path is not None:
+        artifact_id = input_data.artifact_id
+        if input_data.edits:
+            # The platform stores full versions, so edits apply to the latest one here. If-Match names
+            # that version, so a write that landed in between fails instead of being overwritten.
+            current, text = self.backend.get(artifact_id)
+            if not isinstance(text, str):
+                raise ToolExecutionException(
+                    f"'edits' apply to text artifacts; '{artifact_id}' is {current.kind.value}. "
+                    "Pass the full content or a 'path' instead.",
+                    recoverable=True,
+                )
+            content: str | bytes = _apply_edits(text, input_data.edits)
+            if_match = current.latest_version.id if current.latest_version else None
+        else:
             content, _, _ = self._resolve_content(input_data)
+            if_match = self._seen_versions.get(artifact_id)
+
         artifact = self.backend.update(
-            input_data.artifact_id,
+            artifact_id,
             content=content,
-            edits=input_data.edits,
-            title=input_data.title,
-            summary=input_data.summary,
-            if_match=self._seen_checksums.get(input_data.artifact_id),
-            source=self.source,
+            name=input_data.name,
+            description=input_data.description,
+            entry_path=input_data.entry_path,
+            if_match=if_match,
         )
         return self._result(artifact, "updated")
 
@@ -232,7 +240,7 @@ class ArtifactTool(Node):
             self._remember(artifact)
         version = input_data.version or artifact.version
         latest = "" if version == artifact.version else f", latest is v{artifact.version}"
-        header = f"Artifact '{artifact.title}' ({artifact.kind.value}, v{version}{latest}, id {artifact.id})"
+        header = f"Artifact '{artifact.name}' ({artifact.kind.value}, v{version}{latest}, id {artifact.id})"
         if isinstance(content, str):
             # Whoever wrote this artifact, its text is data to work on, not instructions to follow.
             text = (
@@ -246,29 +254,42 @@ class ArtifactTool(Node):
         return {"content": text}
 
     def _list(self, input_data: ArtifactToolInputSchema) -> dict[str, Any]:
-        artifacts = self.backend.list(kind=input_data.kind, query=input_data.query)
+        artifacts = self.backend.list(kind=input_data.kind)
         if not artifacts:
             return {"content": "No artifacts found."}
-        lines = [f"- {a.id}: '{a.title}' ({a.kind.value}, v{a.version}) {a.url or ''}".rstrip() for a in artifacts]
+        lines = [f"- {a.id}: '{a.name}' ({a.kind.value}, v{a.version}) {a.url or ''}".rstrip() for a in artifacts]
         return {"content": "\n".join(lines), "artifact_ids": [a.id for a in artifacts]}
+
+    def _share(self, input_data: ArtifactToolInputSchema) -> dict[str, Any]:
+        expires_at = None
+        if input_data.expires_in_days:
+            expires_at = datetime.now(timezone.utc) + timedelta(days=input_data.expires_in_days)
+        share = self.backend.share(
+            input_data.artifact_id, pinned_version=input_data.pinned_version, expires_at=expires_at
+        )
+        pinned = f" It shows v{input_data.pinned_version}." if input_data.pinned_version else ""
+        expiry = f" It expires on {share.expires_at.date().isoformat()}." if share.expires_at else ""
+        link = f"Anyone with this link can open artifact '{input_data.artifact_id}': {share.url}."
+        # No "artifact" key: sharing adds no version.
+        return {"content": f"{link}{pinned}{expiry}"}
 
     def _result(self, artifact: Artifact, verb: str) -> dict[str, Any]:
         self._remember(artifact)
         ref = artifact.to_ref()
         link = f": {ref['url']}" if ref["url"] else ""
-        text = f"Artifact '{artifact.title}' v{artifact.version} {verb} (id {artifact.id}){link}"
+        text = f"Artifact '{artifact.name}' v{artifact.version} {verb} (id {artifact.id}){link}"
         return {"content": text, "artifact": ref}
 
     def _remember(self, artifact: Artifact) -> None:
-        if artifact.latest and artifact.latest.checksum:
-            self._seen_checksums[artifact.id] = artifact.latest.checksum
+        if artifact.latest_version:
+            self._seen_versions[artifact.id] = artifact.latest_version.id
 
     def _resolve_content(self, input_data: ArtifactToolInputSchema) -> tuple[str | bytes, str, ArtifactKind]:
-        """Content, name and kind from inline text or a workspace file."""
+        """Content, file name and kind from inline text or a workspace file."""
         if input_data.path is not None:
             raw = self._read_path(input_data.path)
-            name = input_data.name or posixpath.basename(input_data.path.rstrip("/"))
-            kind = input_data.kind or infer_kind(name)
+            file_name = input_data.file_name or posixpath.basename(input_data.path.rstrip("/"))
+            kind = input_data.kind or infer_kind(file_name)
             content: str | bytes = raw
             if kind in TEXT_KINDS:
                 try:
@@ -280,17 +301,17 @@ class ArtifactTool(Node):
                     ) from None
         else:
             content = input_data.content
-            kind = input_data.kind or (infer_kind(input_data.name) if input_data.name else None)
+            kind = input_data.kind or (infer_kind(input_data.file_name) if input_data.file_name else None)
             if kind in (None, ArtifactKind.FILE):
                 kind = _sniff_text_kind(content)
-            name = input_data.name or f"{_slugify(input_data.title or 'artifact')}{default_extension(kind)}"
+            file_name = input_data.file_name or f"{_slugify(input_data.name or 'artifact')}{default_extension(kind)}"
 
         size = len(content.encode("utf-8")) if isinstance(content, str) else len(content)
         if size > MAX_CONTENT_BYTES:
             raise ToolExecutionException(
                 f"Artifact content is {size} bytes; the limit is {MAX_CONTENT_BYTES} bytes.", recoverable=True
             )
-        return content, name, kind
+        return content, file_name, kind
 
     def _read_path(self, path: str) -> bytes:
         if self.file_source is None:
@@ -309,8 +330,31 @@ class ArtifactTool(Node):
         return data if isinstance(data, bytes) else str(data).encode("utf-8")
 
 
-def _slugify(title: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+def _apply_edits(content: str, edits: list[EditOperation]) -> str:
+    """Apply find/replace edits in order; any edit that misses or is ambiguous aborts them all."""
+    for edit in edits:
+        positions = find_positions(content, edit.find)
+        if not positions:
+            raise ToolExecutionException(
+                f"Edit not applied: {edit.find[:80]!r} is not in the latest version. "
+                "Use action 'get' to read it, then retry.",
+                recoverable=True,
+            )
+        if len(positions) > 1 and not edit.replace_all:
+            raise ToolExecutionException(
+                f"Edit not applied: {edit.find[:80]!r} matches {len(positions)} places. Include enough "
+                "surrounding text to match exactly one, or set 'replace_all': true.",
+                recoverable=True,
+            )
+        if edit.replace_all:
+            content = content.replace(edit.find, edit.replace)
+        else:
+            content = content.replace(edit.find, edit.replace, 1)
+    return content
+
+
+def _slugify(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     return slug[:80] or "artifact"
 
 

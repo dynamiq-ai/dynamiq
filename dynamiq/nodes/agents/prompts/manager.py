@@ -25,7 +25,6 @@ from dynamiq.nodes.agents.prompts.react import (
 from dynamiq.nodes.agents.prompts.registry import get_prompt_constant
 from dynamiq.nodes.agents.prompts.secondary_instructions import (
     ARTIFACTS_INSTRUCTIONS_TEMPLATE,
-    ARTIFACTS_READONLY_INSTRUCTIONS_TEMPLATE,
     CONTEXT_MANAGER_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS_XML,
@@ -91,7 +90,6 @@ class ReactPromptConfig(BaseModel):
     memory_store_writable: bool = True
     artifacts_enabled: bool = False
     artifacts_tool_name: str = "artifact"
-    artifacts_writable: bool = True
     sandbox_base_path: str | None = None
     has_sub_agent_tools: bool = False
     role: str | None = None
@@ -373,12 +371,7 @@ class AgentPromptManager:
                 ops_parts.append(SANDBOX_VS_MEMORY_STORE_TEMPLATE.format(tool=config.memory_store_tool_name))
             ops_parts.append(_build_memory_store_instructions(config))
         if config.artifacts_enabled:
-            template = (
-                ARTIFACTS_INSTRUCTIONS_TEMPLATE
-                if config.artifacts_writable
-                else ARTIFACTS_READONLY_INSTRUCTIONS_TEMPLATE
-            )
-            ops_parts.append(template.format(tool=config.artifacts_tool_name))
+            ops_parts.append(ARTIFACTS_INSTRUCTIONS_TEMPLATE.format(tool=config.artifacts_tool_name))
         if config.has_sub_agent_tools:
             ops_parts.append(SUB_AGENT_INSTRUCTIONS)
 
@@ -397,7 +390,7 @@ class AgentPromptManager:
             prompt_blocks["environment"] = SANDBOX_INSTRUCTIONS_TEMPLATE.format(
                 base_path=config.sandbox_base_path,
             )
-            if config.artifacts_enabled and config.artifacts_writable:
+            if config.artifacts_enabled:
                 prompt_blocks["environment"] = prompt_blocks["environment"].replace(
                     SANDBOX_OUTPUT_FILES_RULE, SANDBOX_OUTPUT_FILES_RULE_WITH_ARTIFACTS
                 )

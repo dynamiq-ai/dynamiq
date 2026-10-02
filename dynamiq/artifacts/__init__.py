@@ -1,16 +1,17 @@
-from .base import (
+from .backends import ArtifactBackend
+from .config import ArtifactConfig
+from .types import (
     TEXT_KINDS,
     Artifact,
     ArtifactConflictError,
+    ArtifactError,
     ArtifactKind,
     ArtifactNotFoundError,
     ArtifactPermissionError,
-    ArtifactStore,
-    ArtifactStoreConfig,
-    ArtifactStoreError,
+    ArtifactShare,
     ArtifactVersion,
+    ArtifactVisibility,
     default_extension,
-    default_media_type,
+    default_mime_type,
     infer_kind,
 )
-from .dynamiq import DynamiqArtifactStore

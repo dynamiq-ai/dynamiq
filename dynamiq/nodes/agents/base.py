@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer, model_validator
 
+from dynamiq.artifacts import ArtifactBackend, ArtifactConfig
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy, MemorySaveMode
 from dynamiq.memory.long_term import LongTermMemoryConfig
@@ -73,7 +74,6 @@ from dynamiq.skills.config import SkillsConfig
 from dynamiq.skills.registries.dynamiq import Dynamiq
 from dynamiq.skills.types import SkillMetadata
 from dynamiq.skills.utils import ingest_skills_into_sandbox, normalize_sandbox_skills_base_path
-from dynamiq.storages.artifact.base import ArtifactStore, ArtifactStoreConfig
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.storages.memory.base import MemoryStore, MemoryStoreConfig
@@ -297,7 +297,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             "cannot enable a file store. Pass a `CompositeMemoryStore` backend for several memories."
         ),
     )
-    artifact_store: ArtifactStoreConfig | None = Field(
+    artifacts: ArtifactConfig | None = Field(
         default=None,
         description="Where the agent publishes artifacts: versioned deliverables with a link, reached "
         "through its own tool. Works with a sandbox, a file store or neither.",
@@ -507,7 +507,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             "videos": True,
             "file_store": True,
             "memory_store": True,
-            "artifact_store": True,
+            "artifacts": True,
             "skills": True,
             "sandbox": True,
             "system_prompt_manager": True,  # Runtime state container, not serializable
@@ -533,7 +533,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
         data["memory_store"] = self.memory_store.to_dict(**kwargs) if self.memory_store else None
-        data["artifact_store"] = self.artifact_store.to_dict(**kwargs) if self.artifact_store else None
+        data["artifacts"] = self.artifacts.to_dict(**kwargs) if self.artifacts else None
         data["sandbox"] = self.sandbox.to_dict(**kwargs) if self.sandbox else None
         data["skills"] = self.skills.to_dict(**kwargs)
 
@@ -790,7 +790,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 len(ltm_tools),
                 ", ".join(t.name for t in ltm_tools),
             )
-        artifact_tools = self._build_artifact_tool(input_data, kwargs)
+        artifact_tools = self._build_artifact_tool()
         run_tools = ltm_tools + self._build_memory_store_tool(input_data) + artifact_tools
         # Always set — a sub-agent without LTM would otherwise inherit the
         # parent's overlay via `ContextAwareThreadPoolExecutor`.
@@ -1099,29 +1099,18 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             )
         ]
 
-    def _build_artifact_tool(self, input_data: "AgentInputSchema", run_kwargs: dict) -> list[Node]:
-        """Construct the per-run artifact tool, or [] when no store is configured.
+    def _build_artifact_tool(self) -> list[Node]:
+        """Construct the per-run artifact tool, or [] when artifacts are not enabled.
 
-        Per run so each version records the run that produced it, and so the If-Match checksums
-        the tool tracks never leak between concurrent runs of one agent.
+        Per run so the If-Match versions the tool tracks never leak between concurrent runs of one
+        agent.
         """
-        if not self.artifact_store_backend:
+        if not self.artifacts_backend:
             return []
         from dynamiq.nodes.tools.artifact_tool import ArtifactTool
 
-        source = {
-            "session_id": getattr(input_data, "session_id", None),
-            "run_id": str(run_kwargs["run_id"]) if run_kwargs.get("run_id") else None,
-            "agent_id": self.id,
-        }
-        return [
-            ArtifactTool(
-                backend=self.artifact_store_backend,
-                write_enabled=self.artifact_store.write_enabled,
-                file_source=self.sandbox_backend or self.file_store_backend,
-                source={k: v for k, v in source.items() if v},
-            )
-        ]
+        file_source = self.sandbox_backend or self.file_store_backend
+        return [ArtifactTool(backend=self.artifacts_backend, file_source=file_source)]
 
     def _is_input_output_trace_message(self, message: Message) -> bool:
         """Return True when a message is an internal ReAct/tool-trace entry."""
@@ -2405,9 +2394,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         return self.memory_store.backend if self.memory_store and self.memory_store.enabled else None
 
     @property
-    def artifact_store_backend(self) -> ArtifactStore | None:
-        """The agent's artifact backend when one is enabled."""
-        return self.artifact_store.backend if self.artifact_store and self.artifact_store.enabled else None
+    def artifacts_backend(self) -> ArtifactBackend | None:
+        """The agent's artifact backend when artifacts are enabled."""
+        return self.artifacts.backend if self.artifacts and self.artifacts.enabled else None
 
     @property
     def sandbox_backend(self) -> Sandbox | None:

@@ -2,24 +2,28 @@
 
 An artifact is a deliverable the user opens, reviews and shares: a named, typed document with
 immutable versions and a link that outlives the conversation. The agent reaches it through one tool
-with actions create, update, get and list. Binaries and office formats still go out as output files.
+with actions create, update, get, list and share. Binaries and office formats still go out as output
+files.
 
 The first run publishes an HTML report. The second run gives the agent the artifact id and asks for
 a change, which becomes v2 of the same artifact rather than a new one.
 
-Requires ``DYNAMIQ_API_KEY`` (and ``DYNAMIQ_URL`` if not the default).
+Requires ``DYNAMIQ_API_KEY`` (and ``DYNAMIQ_URL`` if not the default). With a personal access token
+the artifacts go to the artifact store named by ``DYNAMIQ_ARTIFACT_STORE_ID``; a conversation token
+can leave it unset, and the artifacts then belong to its user.
 """
 
 import os
 
+from dynamiq.artifacts import ArtifactConfig
+from dynamiq.artifacts.backends import Dynamiq as DynamiqArtifacts
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.types import InferenceMode
-from dynamiq.storages.artifact import ArtifactStoreConfig, DynamiqArtifactStore
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
-PROJECT_ID = os.getenv("DYNAMIQ_PROJECT_ID")
+ARTIFACT_STORE_ID = os.getenv("DYNAMIQ_ARTIFACT_STORE_ID")
 
 FIRST_RUN = (
     "Build a one-page HTML report on the quarterly pipeline: Q1 $1.2M, Q2 $1.5M, Q3 $1.9M. "
@@ -35,10 +39,9 @@ def agent_with_artifacts() -> Agent:
         role="You are an analyst who delivers polished, self-contained reports.",
         inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=8,
-        artifact_store=ArtifactStoreConfig(
+        artifacts=ArtifactConfig(
             enabled=True,
-            # Unset project_id: artifacts belong to the user behind the API key.
-            backend=DynamiqArtifactStore(connection=DynamiqConnection(), project_id=PROJECT_ID),
+            backend=DynamiqArtifacts(connection=DynamiqConnection(), artifact_store_id=ARTIFACT_STORE_ID),
         ),
     )
 
