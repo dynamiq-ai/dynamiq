@@ -15,6 +15,7 @@ from .http_api_call import HttpApiCall, ResponseType
 from .human_feedback import HumanFeedbackTool
 from .jina import JinaResponseFormat, JinaScrapeTool, JinaSearchTool
 from .judgement import ConfidenceMode, Judgement, JudgementOption, JudgementQuestion, QuestionType
+from .linkup_search import LinkupTool
 from .llm_summarizer import SummarizerTool
 from .long_term_memory import LongTermMemoryBackend, RecallFactsTool, RememberFactTool, build_long_term_memory_tools
 from .mcp import MCPServer, MCPTool
