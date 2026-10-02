@@ -8,7 +8,11 @@ import pytest
 import turbopuffer
 from turbopuffer.types import Row
 
-from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException, VectorStoreException
+from dynamiq.storages.vector.exceptions import (
+    VectorStoreDuplicateDocumentException,
+    VectorStoreException,
+    VectorStoreFilterException,
+)
 from dynamiq.storages.vector.policies import DuplicatePolicy
 from dynamiq.storages.vector.turbopuffer import TurbopufferVectorStore
 from dynamiq.types import Document
@@ -352,3 +356,58 @@ def test_replace_document_metadata(store, namespace):
 def test_replace_document_metadata_raises_for_missing_ids(store, namespace):
     with pytest.raises(VectorStoreException):
         store.replace_document_metadata(["d1"], {"file_id": "f9"})
+
+
+def _schema(**attributes):
+    return {name: SimpleNamespace(model_dump=lambda exclude_none, c=config: c) for name, config in attributes.items()}
+
+
+def test_filters_refresh_a_schema_missing_the_attribute(store, namespace):
+    namespace.schema.side_effect = [{}, _schema(file_id={"type": "string", "filterable": True})]
+    namespace.query.return_value = SimpleNamespace(rows=[_row("d1", dist=0.0)])
+
+    documents = store._embedding_retrieval([0.1, 0.2, 0.3], filters={"file_id": "f1"})
+
+    assert namespace.schema.call_count == 2
+    assert namespace.query.call_args.kwargs["filters"] == ["file_id", "Eq", "f1"]
+    assert [d.id for d in documents] == ["d1"]
+
+
+def test_keyword_retrieval_refreshes_a_schema_without_searchable_content(store, namespace):
+    namespace.schema.side_effect = [{}, _schema(content={"type": "string", "full_text_search": {"k1": 1.2}})]
+    namespace.query.return_value = SimpleNamespace(rows=[_row("d1", dist=1.5)])
+
+    documents = store._keyword_retrieval("fox")
+
+    assert namespace.query.call_args.kwargs["rank_by"] == ["content", "BM25", "fox"]
+    assert [d.id for d in documents] == ["d1"]
+
+
+def test_rejected_read_is_rebuilt_from_a_fresh_schema(store, namespace):
+    stale = _schema(file_id={"type": "string", "filterable": True})
+    fresh = _schema(file_id={"type": "string", "filterable": False})
+    namespace.schema.side_effect = [stale, fresh]
+    namespace.query.side_effect = _error(turbopuffer.BadRequestError, 400)
+
+    with pytest.raises(VectorStoreFilterException, match="not filterable"):
+        store._embedding_retrieval([0.1, 0.2, 0.3], filters={"file_id": "f1"})
+
+    assert namespace.query.call_count == 1
+
+
+def test_read_rejected_twice_raises(store, namespace):
+    namespace.query.side_effect = _error(turbopuffer.BadRequestError, 400)
+
+    with pytest.raises(VectorStoreException):
+        store._embedding_retrieval([0.1, 0.2, 0.3])
+
+    assert namespace.query.call_count == 2
+
+
+def test_delete_by_unfilterable_attribute_raises_instead_of_deleting(store, namespace):
+    namespace.schema.return_value = _schema(notes={"type": "string", "filterable": False})
+
+    with pytest.raises(VectorStoreFilterException):
+        store.delete_documents_by_filters({"field": "notes", "operator": "!=", "value": "x"})
+
+    namespace.write.assert_not_called()

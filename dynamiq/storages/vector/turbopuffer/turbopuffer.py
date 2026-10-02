@@ -1,6 +1,6 @@
 import base64
 import re
-from typing import TYPE_CHECKING, Any, Iterator, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import numpy as np
 from turbopuffer import BadRequestError, NotFoundError
@@ -16,7 +16,7 @@ from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.logger import logger
 
 from .attributes import MAX_FILTERABLE_BYTES, STRING, coerce_value, infer_type, longest_string_bytes, normalize_value
-from .filters import MATCH_ALL, MATCH_NONE, combine_and, convert_filters, to_turbopuffer_filter
+from .filters import MATCH_ALL, MATCH_NONE, combine_and, convert_filters, referenced_fields, to_turbopuffer_filter
 
 if TYPE_CHECKING:
     from turbopuffer import Turbopuffer as TurbopufferClient
@@ -152,8 +152,12 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
 
     def _full_text_fields(self, content_key: str | None = None) -> list[str]:
         """Return the attributes keyword search runs over, content first."""
+        content_key = content_key or self.content_key
         schema = self._load_schema()
-        preferred = (content_key or self.content_key, *DEFAULT_SEARCHABLE_TEXT_METADATA_FIELDS)
+        if not schema.get(content_key, {}).get("full_text_search"):
+            # Content written by another process since the schema was cached is searchable.
+            schema = self._load_schema(refresh=True)
+        preferred = (content_key, *DEFAULT_SEARCHABLE_TEXT_METADATA_FIELDS)
         return [name for name in dict.fromkeys(preferred) if schema.get(name, {}).get("full_text_search")]
 
     # Writing
@@ -376,7 +380,36 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
         """Convert filters against the namespace schema."""
         if not filters:
             return MATCH_ALL
-        return convert_filters(filters, self._load_schema())
+        schema = self._load_schema()
+        if not referenced_fields(filters) <= schema.keys():
+            # The cached schema would read the attribute as missing, but another process may have
+            # written it since.
+            schema = self._load_schema(refresh=True)
+        return convert_filters(filters, schema)
+
+    def _read(self, build: Callable[[], Any], execute: Callable[[Any], list]) -> list:
+        """Run a read built against the cached schema, retrying once against a fresh one.
+
+        Turbopuffer rejects a read built from a stale schema, for example after another writer made
+        an attribute unfilterable, so a rejected read is rebuilt before the error is raised. A build
+        that returns None matches nothing and returns an empty list without a query.
+
+        Raises:
+            VectorStoreException: If Turbopuffer rejects the rebuilt read too.
+        """
+        for attempt in range(2):
+            if attempt:
+                self._load_schema(refresh=True)
+            request = build()
+            if request is None:
+                return []
+            try:
+                return execute(request)
+            except BadRequestError as e:
+                if attempt:
+                    raise VectorStoreException(f"Turbopuffer rejected the query: {e}") from e
+                logger.debug(f"Turbopuffer rejected a query on '{self.index_name}', retrying: {e}")
+        return []
 
     @staticmethod
     def _with_filter(params: dict[str, Any], converted: Any) -> dict[str, Any]:
@@ -413,28 +446,32 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
             return 0
         return int((response.aggregations or {}).get("count", 0))
 
-    def _iterate(
+    def _collect(
         self,
         filters: dict[str, Any] | None,
         include_embeddings: bool,
         content_key: str | None,
-    ) -> Iterator[Document]:
-        """Yield every matching document, paging through ids in order."""
-        converted = self._filter(filters)
-        if converted is MATCH_NONE:
-            return
+    ) -> list[Document]:
+        """Return every matching document, paging through ids in order."""
 
-        last_id = None
-        while True:
-            cursor = [ID_ATTRIBUTE, "Gt", last_id] if last_id is not None else None
-            params: dict[str, Any] = {"rank_by": [ID_ATTRIBUTE, "asc"], "top_k": MAX_TOP_K}
-            params.update(self._attributes(include_embeddings))
-            rows = self._query_rows(**self._with_filter(params, combine_and(converted, cursor)))
-            for row in rows:
-                yield self._to_document(row, content_key=content_key)
-            if len(rows) < MAX_TOP_K:
-                return
-            last_id = rows[-1].id
+        def build() -> Any:
+            converted = self._filter(filters)
+            return None if converted is MATCH_NONE else converted
+
+        def execute(converted: Any) -> list[Document]:
+            documents: list[Document] = []
+            last_id = None
+            while True:
+                cursor = [ID_ATTRIBUTE, "Gt", last_id] if last_id is not None else None
+                params: dict[str, Any] = {"rank_by": [ID_ATTRIBUTE, "asc"], "top_k": MAX_TOP_K}
+                params.update(self._attributes(include_embeddings))
+                rows = self._query_rows(**self._with_filter(params, combine_and(converted, cursor)))
+                documents.extend(self._to_document(row, content_key=content_key) for row in rows)
+                if len(rows) < MAX_TOP_K:
+                    return documents
+                last_id = rows[-1].id
+
+        return self._read(build, execute)
 
     def filter_documents(self, filters: dict[str, Any] | None = None, content_key: str | None = None) -> list[Document]:
         """
@@ -448,7 +485,7 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
         Returns:
             list[Document]: The matching documents.
         """
-        return list(self._iterate(filters, include_embeddings=True, content_key=content_key))
+        return self._collect(filters, include_embeddings=True, content_key=content_key)
 
     def list_documents(self, include_embeddings: bool = False, content_key: str | None = None) -> list[Document]:
         """
@@ -461,7 +498,7 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
         Returns:
             list[Document]: All documents in the namespace.
         """
-        return list(self._iterate(None, include_embeddings=include_embeddings, content_key=content_key))
+        return self._collect(None, include_embeddings=include_embeddings, content_key=content_key)
 
     def get_documents_by_id(
         self,
@@ -587,17 +624,20 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
         Returns:
             list[Document]: The retrieved documents, most similar first.
         """
-        converted = self._filter(filters)
-        if converted is MATCH_NONE:
-            return []
 
-        params: dict[str, Any] = {
-            "rank_by": [VECTOR_ATTRIBUTE, "ANN", list(query_embedding)],
-            "top_k": self._top_k(top_k),
-            **self._attributes(not exclude_document_embeddings),
-        }
+        def build() -> dict[str, Any] | None:
+            converted = self._filter(filters)
+            if converted is MATCH_NONE:
+                return None
+            params: dict[str, Any] = {
+                "rank_by": [VECTOR_ATTRIBUTE, "ANN", list(query_embedding)],
+                "top_k": self._top_k(top_k),
+                **self._attributes(not exclude_document_embeddings),
+            }
+            return self._with_filter(params, converted)
+
         documents = []
-        for row in self._query_rows(**self._with_filter(params, converted)):
+        for row in self._read(build, lambda params: self._query_rows(**params)):
             distance = self._distance(row)
             if max_distance is not None and distance > max_distance:
                 continue
@@ -640,21 +680,23 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
         if not query or not query.strip():
             return []
 
-        converted = self._filter(filters)
-        if converted is MATCH_NONE:
-            return []
-        rank_by = self._bm25_rank_by(query, content_key)
-        if rank_by is None:
-            return []
+        def build() -> dict[str, Any] | None:
+            converted = self._filter(filters)
+            if converted is MATCH_NONE:
+                return None
+            rank_by = self._bm25_rank_by(query, content_key)
+            if rank_by is None:
+                return None
+            params: dict[str, Any] = {
+                "rank_by": rank_by,
+                "top_k": self._top_k(top_k),
+                **self._attributes(not exclude_document_embeddings),
+            }
+            return self._with_filter(params, converted)
 
-        params: dict[str, Any] = {
-            "rank_by": rank_by,
-            "top_k": self._top_k(top_k),
-            **self._attributes(not exclude_document_embeddings),
-        }
         return [
             self._to_document(row, content_key=content_key, score=self._distance(row))
-            for row in self._query_rows(**self._with_filter(params, converted))
+            for row in self._read(build, lambda params: self._query_rows(**params))
         ]
 
     def _hybrid_retrieval(
@@ -691,21 +733,27 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
             list[Document]: The retrieved documents, highest fused score first.
         """
         alpha = self.alpha if alpha is None else alpha
-        converted = self._filter(filters)
-        if converted is MATCH_NONE:
-            return []
-
         top_k = self._top_k(top_k)
-        common = self._with_filter({"top_k": top_k, **self._attributes(not exclude_document_embeddings)}, converted)
 
-        queries = [{"rank_by": [VECTOR_ATTRIBUTE, "ANN", list(query_embedding)], **common}]
-        rank_by = self._bm25_rank_by(query, content_key) if query and query.strip() else None
-        if rank_by is not None:
-            queries.append({"rank_by": rank_by, **common})
+        def build() -> list[dict[str, Any]] | None:
+            converted = self._filter(filters)
+            if converted is MATCH_NONE:
+                return None
+            common = self._with_filter({"top_k": top_k, **self._attributes(not exclude_document_embeddings)}, converted)
+            queries = [{"rank_by": [VECTOR_ATTRIBUTE, "ANN", list(query_embedding)], **common}]
+            rank_by = self._bm25_rank_by(query, content_key) if query and query.strip() else None
+            if rank_by is not None:
+                queries.append({"rank_by": rank_by, **common})
+            return queries
 
-        try:
-            results = self._namespace.multi_query(queries=queries).results
-        except NotFoundError:
+        def execute(queries: list[dict[str, Any]]) -> list:
+            try:
+                return list(self._namespace.multi_query(queries=queries).results)
+            except NotFoundError:
+                return []
+
+        results = self._read(build, execute)
+        if not results:
             return []
 
         vector_rows = list(results[0].rows or [])

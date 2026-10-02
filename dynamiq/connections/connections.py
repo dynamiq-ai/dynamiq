@@ -1073,23 +1073,35 @@ class Turbopuffer(BaseApiKeyConnection):
         """The URL of the API the connection talks to."""
         if self.base_url:
             return self.base_url
+        return f"https://{self._valid_region()}.turbopuffer.com"
+
+    def _valid_region(self) -> str:
         if not self.region or not self.REGION_PATTERN.fullmatch(self.region):
             raise ValueError(f"Invalid Turbopuffer region '{self.region}'. Expected a region such as 'aws-us-east-1'.")
-        return f"https://{self.region}.turbopuffer.com"
+        return self.region
 
     def connect(self) -> "TurbopufferClient":
         """
         Connects to the Turbopuffer service.
 
-        The URL is always passed explicitly, so TURBOPUFFER_BASE_URL and TURBOPUFFER_REGION set in the
-        environment cannot override the connection's own settings.
+        The SDK reads TURBOPUFFER_REGION and TURBOPUFFER_BASE_URL from the environment whenever they
+        are not passed, and rejects a region next to a base URL without a "{region}" placeholder. Both
+        are always passed, so the connection's own settings are the only ones used.
 
         Returns:
             TurbopufferClient: An instance of the Turbopuffer client.
+
+        Raises:
+            ValueError: If no base URL is set and the region is missing or invalid.
         """
         from turbopuffer import Turbopuffer as TurbopufferClient
 
-        return TurbopufferClient(api_key=self.api_key, base_url=self.api_url)
+        if self.base_url:
+            # An empty region fills the trailing placeholder, which leaves the custom URL unchanged.
+            return TurbopufferClient(api_key=self.api_key, base_url=self.base_url + "{region}", region="")
+        return TurbopufferClient(
+            api_key=self.api_key, base_url="https://{region}.turbopuffer.com", region=self._valid_region()
+        )
 
 
 class Chroma(BaseConnection):

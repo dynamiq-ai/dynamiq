@@ -8,6 +8,7 @@ from dynamiq.storages.vector.turbopuffer.filters import (
     MATCH_NONE,
     combine_and,
     convert_filters,
+    referenced_fields,
     to_turbopuffer_filter,
 )
 
@@ -72,11 +73,30 @@ def test_convert_array_conditions(filters, expected):
         ({"field": "missing", "operator": "<", "value": 1}, MATCH_NONE),
         ({"field": "missing", "operator": "not in", "value": ["a"]}, MATCH_ALL),
         ({"field": "missing", "operator": "contains_any", "value": ["a"]}, MATCH_NONE),
-        ({"field": "content", "operator": "==", "value": "a"}, MATCH_NONE),
     ],
 )
-def test_convert_unreadable_attribute(filters, expected):
+def test_convert_missing_attribute(filters, expected):
     assert convert_filters(filters, SCHEMA) == expected
+
+
+@pytest.mark.parametrize("operator, value", [("==", "a"), ("!=", "a"), ("in", ["a"]), ("not in", ["a"])])
+def test_convert_rejects_unfilterable_attribute(operator, value):
+    with pytest.raises(VectorStoreFilterException, match="not filterable"):
+        convert_filters({"field": "content", "operator": operator, "value": value}, SCHEMA)
+
+
+def test_referenced_fields():
+    filters = {
+        "operator": "AND",
+        "conditions": [
+            {"field": "metadata.s", "operator": "==", "value": "a"},
+            {"operator": "NOT", "conditions": [{"field": "num", "operator": "<", "value": 1}]},
+        ],
+    }
+
+    assert referenced_fields(filters) == {"s", "num"}
+    assert referenced_fields({"file_id": ["f1"]}) == {"file_id"}
+    assert referenced_fields(None) == set()
 
 
 @pytest.mark.parametrize(

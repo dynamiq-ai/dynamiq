@@ -234,11 +234,30 @@ def test_turbopuffer_rejects_invalid_region(region, monkeypatch):
         _ = Turbopuffer(api_key="key", region=region).api_url
 
 
-def test_turbopuffer_connect_ignores_environment_url(monkeypatch):
+@pytest.mark.parametrize(
+    "settings, expected",
+    [
+        ({"region": "aws-us-east-1"}, "https://aws-us-east-1.turbopuffer.com"),
+        ({"region": None, "base_url": "https://tpuf.example.com"}, "https://tpuf.example.com"),
+    ],
+)
+def test_turbopuffer_connect_ignores_environment(settings, expected, monkeypatch):
     from dynamiq.connections import Turbopuffer
 
+    monkeypatch.setenv("TURBOPUFFER_REGION", "gcp-us-central1")
     monkeypatch.setenv("TURBOPUFFER_BASE_URL", "https://wrong.example.com")
 
-    client = Turbopuffer(api_key="key", region="aws-us-east-1").connect()
+    client = Turbopuffer(api_key="key", **settings).connect()
 
-    assert str(client.base_url).rstrip("/") == "https://aws-us-east-1.turbopuffer.com"
+    assert str(client.base_url).rstrip("/") == expected
+
+
+def test_turbopuffer_connect_reads_region_from_environment(monkeypatch):
+    from dynamiq.connections import Turbopuffer
+
+    monkeypatch.setenv("TURBOPUFFER_API_KEY", "key")
+    monkeypatch.setenv("TURBOPUFFER_REGION", "aws-eu-central-1")
+
+    client = Turbopuffer().connect()
+
+    assert str(client.base_url).rstrip("/") == "https://aws-eu-central-1.turbopuffer.com"

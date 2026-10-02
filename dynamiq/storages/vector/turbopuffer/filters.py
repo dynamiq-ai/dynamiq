@@ -3,7 +3,8 @@
 Turbopuffer rejects a filter on an attribute the namespace has never stored, compares an array
 attribute only through Contains operators, and matches nulls with Lt and Lte. Given the namespace
 schema, the converter evaluates conditions on missing attributes itself and picks the operator
-that matches the attribute's type, so results match the other vector stores.
+that matches the attribute's type, so results match the other vector stores. A condition on an
+attribute that holds values but is not filterable cannot be answered, so it raises instead.
 """
 
 from typing import Any
@@ -46,7 +47,8 @@ def convert_filters(filters: dict[str, Any] | None, schema: dict[str, dict] | No
         they match none.
 
     Raises:
-        VectorStoreFilterException: If the filters are malformed.
+        VectorStoreFilterException: If the filters are malformed or use an attribute that is not
+            filterable.
     """
     if filters is None:
         return MATCH_ALL
@@ -128,15 +130,37 @@ def _convert(condition: dict[str, Any], schema: dict[str, dict] | None) -> Any:
     raise VectorStoreFilterException(f"Unknown logical operator '{operator}'")
 
 
+def referenced_fields(filters: dict[str, Any] | None) -> set[str]:
+    """Return the attributes the filters read."""
+    if not isinstance(filters, dict):
+        return set()
+
+    fields: set[str] = set()
+
+    def walk(condition: Any) -> None:
+        if not isinstance(condition, dict):
+            return
+        if isinstance(field := condition.get("field"), str):
+            fields.add(field[len("metadata.") :] if field.startswith("metadata.") else field)
+        for nested in condition.get("conditions") or []:
+            walk(nested)
+
+    walk(normalize_filters(filters))
+    return fields
+
+
 def _attribute(field: str, schema: dict[str, dict] | None) -> tuple[bool, str | None]:
-    """Return whether a filter can read the attribute, and the attribute's type when known."""
+    """Return whether the attribute exists, and its type when known."""
     if schema is None:
         return True, None
     config = schema.get(field)
     if config is None:
         return False, None
-    if field != "id" and config.get("filterable") is False:
-        return False, config.get("type")
+    filterable = config.get("filterable", not config.get("full_text_search"))
+    if field != "id" and not filterable:
+        raise VectorStoreFilterException(
+            f"Attribute '{field}' is not filterable in this namespace, so filters cannot use it."
+        )
     return True, config.get("type")
 
 
@@ -163,8 +187,8 @@ def _convert_comparison(condition: dict[str, Any], schema: dict[str, dict] | Non
     if operator in ("in", "not in", "contains_any", "contains_all"):
         value = _require_list(field, operator, value)
 
-    readable, attribute_type = _attribute(field, schema)
-    if not readable:
+    exists, attribute_type = _attribute(field, schema)
+    if not exists:
         # The attribute is missing on every document, so each condition is evaluated against null.
         return _MISSING_ATTRIBUTE[operator](value)
 
