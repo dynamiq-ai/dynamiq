@@ -24,6 +24,7 @@ from dynamiq.nodes.agents.prompts.react import (
 )
 from dynamiq.nodes.agents.prompts.registry import get_prompt_constant
 from dynamiq.nodes.agents.prompts.secondary_instructions import (
+    ARTIFACTS_INSTRUCTIONS_TEMPLATE,
     CONTEXT_MANAGER_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS_XML,
@@ -32,6 +33,8 @@ from dynamiq.nodes.agents.prompts.secondary_instructions import (
     PERSISTENT_NOTES_INSTRUCTIONS_TEMPLATE,
     REACT_BLOCK_MULTI_TOOL_PLANNING,
     SANDBOX_INSTRUCTIONS_TEMPLATE,
+    SANDBOX_OUTPUT_FILES_RULE,
+    SANDBOX_OUTPUT_FILES_RULE_WITH_ARTIFACTS,
     SANDBOX_VS_MEMORY_STORE_TEMPLATE,
     SUB_AGENT_INSTRUCTIONS,
     TODO_TOOLS_INSTRUCTIONS,
@@ -85,6 +88,8 @@ class ReactPromptConfig(BaseModel):
     memory_store_tool_name: str = "memory-store"
     memory_store_namespaces: dict[str, str] = {}
     memory_store_writable: bool = True
+    artifacts_enabled: bool = False
+    artifacts_tool_name: str = "artifact"
     sandbox_base_path: str | None = None
     has_sub_agent_tools: bool = False
     role: str | None = None
@@ -365,6 +370,8 @@ class AgentPromptManager:
             if config.sandbox_base_path:
                 ops_parts.append(SANDBOX_VS_MEMORY_STORE_TEMPLATE.format(tool=config.memory_store_tool_name))
             ops_parts.append(_build_memory_store_instructions(config))
+        if config.artifacts_enabled:
+            ops_parts.append(ARTIFACTS_INSTRUCTIONS_TEMPLATE.format(tool=config.artifacts_tool_name))
         if config.has_sub_agent_tools:
             ops_parts.append(SUB_AGENT_INSTRUCTIONS)
 
@@ -383,6 +390,10 @@ class AgentPromptManager:
             prompt_blocks["environment"] = SANDBOX_INSTRUCTIONS_TEMPLATE.format(
                 base_path=config.sandbox_base_path,
             )
+            if config.artifacts_enabled:
+                prompt_blocks["environment"] = prompt_blocks["environment"].replace(
+                    SANDBOX_OUTPUT_FILES_RULE, SANDBOX_OUTPUT_FILES_RULE_WITH_ARTIFACTS
+                )
 
         # 5. Role block (with raw wrapping)
         if config.role:
