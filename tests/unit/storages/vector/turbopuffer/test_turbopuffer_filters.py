@@ -1,3 +1,8 @@
+from datetime import datetime
+from decimal import Decimal
+from enum import Enum
+
+import numpy as np
 import pytest
 
 from dynamiq.storages.vector.exceptions import VectorStoreFilterException
@@ -11,6 +16,11 @@ from dynamiq.storages.vector.turbopuffer.filters import (
     referenced_fields,
     to_turbopuffer_filter,
 )
+
+
+class Color(Enum):
+    RED = "red"
+
 
 SCHEMA = {
     "id": {"type": "string"},
@@ -107,6 +117,11 @@ def test_referenced_fields():
         ({"field": "num", "operator": "!=", "value": "five"}, MATCH_ALL),
         ({"field": "num", "operator": "in", "value": ["1", "x"]}, ["num", "In", [1]]),
         ({"field": "s", "operator": "==", "value": 5}, ["s", "Eq", "5"]),
+        ({"field": "s", "operator": "==", "value": datetime(2024, 1, 1)}, ["s", "Eq", "2024-01-01T00:00:00"]),
+        ({"field": "s", "operator": "==", "value": Color.RED}, ["s", "Eq", "red"]),
+        ({"field": "num", "operator": "!=", "value": Decimal(3)}, ["num", "NotEq", 3]),
+        ({"field": "num", "operator": "==", "value": np.int64(3)}, ["num", "Eq", 3]),
+        ({"field": "num", "operator": "in", "value": [Decimal(1), np.float64(2.0)]}, ["num", "In", [1, 2]]),
     ],
 )
 def test_convert_coerces_values_to_attribute_type(filters, expected):

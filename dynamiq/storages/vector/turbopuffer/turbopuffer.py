@@ -8,7 +8,11 @@ from turbopuffer import BadRequestError, NotFoundError
 from dynamiq.connections import Turbopuffer
 from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
-from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException, VectorStoreException
+from dynamiq.storages.vector.exceptions import (
+    VectorStoreDuplicateDocumentException,
+    VectorStoreException,
+    VectorStoreFilterException,
+)
 from dynamiq.storages.vector.policies import DuplicatePolicy
 from dynamiq.storages.vector.utils import DEFAULT_SEARCHABLE_TEXT_METADATA_FIELDS
 from dynamiq.types import Document
@@ -565,6 +569,8 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
 
         Raises:
             ValueError: If no filters are provided.
+            VectorStoreFilterException: If the filters match every document, or use an attribute
+                that is not filterable.
         """
         if not filters:
             raise ValueError("No filters provided to delete documents.")
@@ -573,6 +579,13 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
         converted = convert_filters(filters, self._load_schema(refresh=True))
         if converted is MATCH_NONE:
             return
+        if converted is MATCH_ALL:
+            # A filter reduces to "every document" when it compares against values no document holds,
+            # which is far more likely a mistake than a request to empty the namespace.
+            raise VectorStoreFilterException(
+                "The filters match every document in the namespace. Use delete_documents(delete_all=True) "
+                "to delete all documents."
+            )
 
         try:
             self._namespace.write(delete_by_filter=to_turbopuffer_filter(converted))

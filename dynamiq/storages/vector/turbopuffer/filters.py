@@ -12,7 +12,7 @@ from typing import Any
 from dynamiq.storages.vector.exceptions import VectorStoreFilterException
 from dynamiq.storages.vector.utils import normalize_filters
 
-from .attributes import coerce_value, element_type, is_array_type
+from .attributes import coerce_value, element_type, is_array_type, normalize_value
 
 
 class _Constant:
@@ -205,15 +205,17 @@ def _convert_comparison(condition: dict[str, Any], schema: dict[str, dict] | Non
 def _coerce_filter_value(value: Any, attribute_type: str, operator: str) -> Any:
     """Convert a filter value to the attribute's type.
 
-    Returns MATCH_NONE when no stored value can match: a single value of another type, a list with
-    no value of the attribute's type, or a contains_all list with any value of another type.
+    Values go through the same normalization as written values, so a datetime, Decimal, Enum or
+    NumPy scalar matches what was stored for it. Returns MATCH_NONE when no stored value can match:
+    a single value of another type, a list with no value of the attribute's type, or a contains_all
+    list with any value of another type.
     """
     scalar_type = element_type(attribute_type) if is_array_type(attribute_type) else attribute_type
     if not isinstance(value, list):
-        coerced = coerce_value(value, scalar_type)
+        coerced = coerce_value(normalize_value(value), scalar_type)
         return MATCH_NONE if coerced is None else coerced
 
-    coerced = [coerce_value(v, scalar_type) for v in value]
+    coerced = [coerce_value(normalize_value(v), scalar_type) for v in value]
     kept = [v for v in coerced if v is not None]
     if operator == "contains_all" and len(kept) < len(coerced):
         return MATCH_NONE

@@ -1,5 +1,6 @@
 import base64
 import struct
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -411,3 +412,16 @@ def test_delete_by_unfilterable_attribute_raises_instead_of_deleting(store, name
         store.delete_documents_by_filters({"field": "notes", "operator": "!=", "value": "x"})
 
     namespace.write.assert_not_called()
+
+
+def test_delete_by_filters_matching_every_document_raises(store, namespace):
+    with pytest.raises(VectorStoreFilterException, match="match every document"):
+        store.delete_documents_by_filters({"field": "page_number", "operator": "!=", "value": "five"})
+
+    namespace.write.assert_not_called()
+
+
+def test_delete_by_filters_normalizes_values_like_writes(store, namespace):
+    store.delete_documents_by_filters({"field": "page_number", "operator": "!=", "value": Decimal(3)})
+
+    assert namespace.write.call_args.kwargs == {"delete_by_filter": ["page_number", "NotEq", 3]}
