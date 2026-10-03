@@ -1,36 +1,42 @@
 """Integration tests for in-memory file store contents in agent checkpoints.
 
-Verifies that the files an agent wrote to its in-memory file store survive a
-checkpoint round-trip, as a sandbox's files do by reconnecting:
+Verifies that the files in an agent's in-memory file store survive a checkpoint
+round-trip, as a sandbox's files do by reconnecting:
 
 - the files are captured in ``AgentCheckpointState.file_store_state``
 - the state survives JSON serialization and the InMemory / FileSystem backends
 - an agent restored from that checkpoint, with a new empty store, has the files
   again, and its file tools read them
 - an agent that writes a file, then waits on the user past the input timeout,
-  returns the file after a new process resumes the run with the answer
-- a store the agent cannot write to, an empty store, and files over the budget
-  are left out
+  returns the file after a new process resumes the run with the answer, with
+  and without a configured store
+- files the agent's tools returned are carried whether or not it may write files
+- an empty store and files over the budget are left out
 - files the agent got from its input are left out, so a resumed run that stores
   them again keeps one copy
+- an agent whose store is created only when input files arrive gets it back on
+  restore, with its file tools
 """
 
 import io
 import json
 from queue import Queue
+from typing import Any, ClassVar, Literal
 
 import pytest
 from litellm import ModelResponse
+from pydantic import BaseModel
 
 from dynamiq import connections, flows
 from dynamiq.checkpoints.backends.filesystem import FileSystem
 from dynamiq.checkpoints.backends.in_memory import InMemory
 from dynamiq.checkpoints.checkpoint import CheckpointStatus
 from dynamiq.checkpoints.config import CheckpointConfig
-from dynamiq.nodes import llms
+from dynamiq.nodes import NodeGroup, llms
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents import checkpoint as agent_checkpoint
 from dynamiq.nodes.agents.checkpoint import AgentCheckpointState
+from dynamiq.nodes.node import Node
 from dynamiq.nodes.tools.file_tools import FileListTool
 from dynamiq.nodes.tools.human_feedback import (
     HFStreamingInputEventMessage,
@@ -38,7 +44,9 @@ from dynamiq.nodes.tools.human_feedback import (
     HumanFeedbackAction,
     HumanFeedbackTool,
 )
-from dynamiq.runnables import RunnableStatus
+from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.sandboxes.base import SandboxConfig
+from dynamiq.sandboxes.e2b import E2BSandbox
 from dynamiq.storages.file.base import FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.types.feedback import FeedbackMethod
@@ -81,6 +89,41 @@ def make_file_store_agent(agent_id: str = AGENT_ID, writable: bool = True, tools
 def write_files(agent: Agent) -> None:
     agent.file_store_backend.store(REPORT_PATH, REPORT_CONTENT, metadata={"description": "Quarterly report"})
     agent.file_store_backend.store(IMAGE_PATH, IMAGE_CONTENT, content_type="image/png")
+
+
+FILE_TOOL_NAMES = {"file-read", "file-search", "file-list"}
+
+
+class ChartSchema(BaseModel):
+    model_config = {"extra": "allow"}
+
+
+class ChartTool(Node):
+    """Returns a chart as a file, as tools such as the code interpreter do."""
+
+    group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    name: str = "chart"
+    description: str = "Draws a chart."
+    input_schema: ClassVar[type[ChartSchema]] = ChartSchema
+
+    def execute(self, input_data: ChartSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+        return {"content": "Chart drawn.", "files": [chart_file()]}
+
+
+def chart_file() -> io.BytesIO:
+    file = io.BytesIO(IMAGE_CONTENT)
+    file.name = IMAGE_PATH
+    return file
+
+
+def store_chart_from_tool(agent: Agent) -> None:
+    agent._handle_tool_generated_files(
+        ChartTool(), RunnableResult(status=RunnableStatus.SUCCESS, output={"content": "", "files": [chart_file()]})
+    )
+
+
+def make_agent_without_store(agent_id: str = AGENT_ID, tools: list | None = None) -> Agent:
+    return Agent(id=agent_id, name="Agent", llm=make_llm(f"{agent_id}-llm"), tools=tools or [], role="Test")
 
 
 def input_file() -> io.BytesIO:
@@ -148,19 +191,13 @@ class TestFileStoreCheckpointRoundTrip:
         list_tool = next(tool for tool in agent_b.tools if isinstance(tool, FileListTool))
         assert list_tool.file_store is store
 
-    def test_todo_only_store_is_captured(self):
-        agent = make_file_store_agent(writable=False)
-        agent.file_store.todo_enabled = True
-        agent.file_store_backend.store("._agent/todos.json", b"[]")
-        assert set(agent.to_checkpoint_state().file_store_state["files"]) == {"._agent/todos.json"}
-
     def test_empty_store_is_not_captured(self):
         assert make_file_store_agent().to_checkpoint_state().file_store_state is None
 
-    def test_read_only_store_is_not_captured(self):
+    def test_files_from_tools_are_captured_without_the_write_flags(self):
         agent = make_file_store_agent(writable=False)
-        write_files(agent)
-        assert agent.to_checkpoint_state().file_store_state is None
+        store_chart_from_tool(agent)
+        assert set(agent.to_checkpoint_state().file_store_state["files"]) == {IMAGE_PATH}
 
     def test_input_files_are_left_out_and_stored_once_after_restore(self):
         agent_a = make_file_store_agent("agent-a")
@@ -196,12 +233,36 @@ class TestFileStoreCheckpointRoundTrip:
         write_files(agent)
         assert agent.to_checkpoint_state().file_store_state is None
 
-    def test_restore_is_skipped_without_an_in_memory_store(self):
+    def test_restore_creates_the_store_an_agent_makes_for_input_files(self):
+        agent_a = make_agent_without_store("agent-a")
+        # What the agent does when input files arrive, before a tool returns a file.
+        agent_a._setup_in_memory_file_store_and_tools()
+        agent_a._upload_files_to_file_store([input_file()])
+        store_chart_from_tool(agent_a)
+        state_dict = json.loads(json.dumps(agent_a.to_checkpoint_state().model_dump()))
+        assert set(state_dict["file_store_state"]["files"]) == {IMAGE_PATH}
+
+        agent_b = make_agent_without_store("agent-b")
+        assert agent_b.file_store_backend is None
+        agent_b.from_checkpoint_state(state_dict)
+
+        assert agent_b.file_store_backend.retrieve(IMAGE_PATH) == IMAGE_CONTENT
+        tool_names = [tool.name for tool in agent_b.tools]
+        assert FILE_TOOL_NAMES <= set(tool_names)
+        assert len(tool_names) == len(set(tool_names))
+
+    def test_restore_is_skipped_for_an_agent_with_a_sandbox(self):
         agent_a = make_file_store_agent("agent-a")
         write_files(agent_a)
         state_dict = agent_a.to_checkpoint_state().model_dump()
 
-        agent_b = Agent(id="agent-b", name="No Store Agent", llm=make_llm("agent-b-llm"), role="Test")
+        agent_b = Agent(
+            id="agent-b",
+            name="Sandbox Agent",
+            llm=make_llm("agent-b-llm"),
+            role="Test",
+            sandbox=SandboxConfig(enabled=True, backend=E2BSandbox(connection=connections.E2B(api_key=TEST_API_KEY))),
+        )
         agent_b.from_checkpoint_state(state_dict)
         assert agent_b.file_store_backend is None
 
@@ -257,8 +318,8 @@ class TestFileStoreSurvivesInputTimeout:
     ASK_TOOL_ID = "ask-user"
     STREAMING_TIMEOUT = 0.3
 
-    def _make_agent(self, answers: Queue) -> Agent:
-        ask_user = HumanFeedbackTool(
+    def _ask_user(self, answers: Queue) -> HumanFeedbackTool:
+        return HumanFeedbackTool(
             id=self.ASK_TOOL_ID,
             name="ask-user",
             action=HumanFeedbackAction.ASK,
@@ -266,7 +327,18 @@ class TestFileStoreSurvivesInputTimeout:
             output_method=FeedbackMethod.STREAM,
             streaming=StreamingConfig(enabled=True, input_queue=answers, timeout=self.STREAMING_TIMEOUT),
         )
-        return make_file_store_agent(tools=[ask_user])
+
+    def _make_agent(self, answers: Queue) -> Agent:
+        return make_file_store_agent(tools=[self._ask_user(answers)])
+
+    def _answered(self) -> Queue:
+        answers = Queue()
+        answers.put(
+            HFStreamingInputEventMessage(
+                entity_id=self.ASK_TOOL_ID, data=HFStreamingInputEventMessageData(content="Yes")
+            ).model_dump_json()
+        )
+        return answers
 
     def _make_flow(self, backend, agent: Agent) -> flows.Flow:
         return flows.Flow(
@@ -283,17 +355,16 @@ class TestFileStoreSurvivesInputTimeout:
             ),
         )
 
-    def _mock_write_ask_then_answer(self, mocker):
-        """The LLM writes the report, asks the user, then answers with the report as an output file.
+    def _mock_llm(self, mocker, first_action: str, output_file: str):
+        """The LLM takes the first action, asks the user, then answers with the given output file.
 
         The question is replayed from the checkpoint on resume, without an LLM call.
         """
         replies = iter(
             [
-                "Thought: Write the report first.\nAction: file-write\n"
-                f"Action Input: {json.dumps({'file_path': REPORT_PATH, 'content': REPORT_CONTENT.decode()})}",
+                first_action,
                 'Thought: Check with the user.\nAction: ask-user\nAction Input: {"input": "Send it as is?"}',
-                f"Thought: The user agreed.\nOutput Files: {REPORT_PATH}\nAnswer: The report is attached.",
+                f"Thought: The user agreed.\nOutput Files: {output_file}\nAnswer: The file is attached.",
             ]
         )
 
@@ -306,7 +377,11 @@ class TestFileStoreSurvivesInputTimeout:
 
     def test_file_written_before_the_question_is_returned_after_resume(self, mocker, tmp_path):
         backend = FileSystem(base_path=str(tmp_path / ".dynamiq" / "checkpoints"))
-        self._mock_write_ask_then_answer(mocker)
+        write_report = (
+            "Thought: Write the report first.\nAction: file-write\n"
+            f"Action Input: {json.dumps({'file_path': REPORT_PATH, 'content': REPORT_CONTENT.decode()})}"
+        )
+        self._mock_llm(mocker, write_report, REPORT_PATH)
 
         first = self._make_flow(backend, self._make_agent(Queue())).run_sync(
             input_data={"input": "Draft the report", "files": [input_file()]}
@@ -315,13 +390,7 @@ class TestFileStoreSurvivesInputTimeout:
         saved = backend.get_latest_by_flow(FLOW_ID)
         assert set(saved.node_states[AGENT_ID].internal_state["file_store_state"]["files"]) == {REPORT_PATH}
 
-        answers = Queue()
-        answers.put(
-            HFStreamingInputEventMessage(
-                entity_id=self.ASK_TOOL_ID, data=HFStreamingInputEventMessageData(content="Yes")
-            ).model_dump_json()
-        )
-        resumed_agent = self._make_agent(answers)
+        resumed_agent = self._make_agent(self._answered())
         # The input is replayed on resume, attached file included.
         second = self._make_flow(backend, resumed_agent).run_sync(
             input_data={"input": "Draft the report", "files": [input_file()]}, resume_from=saved.id
@@ -331,6 +400,33 @@ class TestFileStoreSurvivesInputTimeout:
         files = second.output[AGENT_ID]["output"]["files"]
         assert [(f.name, f.getvalue()) for f in files] == [(REPORT_PATH, REPORT_CONTENT)]
         assert stored_paths(resumed_agent) == [INPUT_PATH, REPORT_PATH]
+
+    def test_file_from_a_tool_is_returned_after_resume_without_a_configured_store(self, mocker, tmp_path):
+        """The agent creates its store when the input file arrives, and only then can keep a tool's file."""
+        backend = FileSystem(base_path=str(tmp_path / ".dynamiq" / "checkpoints"))
+        self._mock_llm(mocker, 'Thought: Draw it.\nAction: chart\nAction Input: {"data": "data.csv"}', IMAGE_PATH)
+
+        def agent(answers: Queue) -> Agent:
+            return make_agent_without_store(tools=[ChartTool(id="chart"), self._ask_user(answers)])
+
+        first = self._make_flow(backend, agent(Queue())).run_sync(
+            input_data={"input": "Chart the data", "files": [input_file()]}
+        )
+        assert first.status == RunnableStatus.FAILURE
+        saved = backend.get_latest_by_flow(FLOW_ID)
+        assert set(saved.node_states[AGENT_ID].internal_state["file_store_state"]["files"]) == {IMAGE_PATH}
+
+        resumed_agent = agent(self._answered())
+        second = self._make_flow(backend, resumed_agent).run_sync(
+            input_data={"input": "Chart the data", "files": [input_file()]}, resume_from=saved.id
+        )
+
+        assert second.status == RunnableStatus.SUCCESS
+        files = second.output[AGENT_ID]["output"]["files"]
+        assert [(f.name, f.getvalue()) for f in files] == [(IMAGE_PATH, IMAGE_CONTENT)]
+        assert stored_paths(resumed_agent) == [IMAGE_PATH, INPUT_PATH]
+        tool_names = [tool.name for tool in resumed_agent.tools]
+        assert len(tool_names) == len(set(tool_names))
 
 
 class TestFileStoreCheckpointStateModel:

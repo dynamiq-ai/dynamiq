@@ -64,7 +64,7 @@ class AgentCheckpointState(BaseCheckpointState):
     )
     file_store_state: dict | None = Field(
         default=None,
-        description="Files the agent wrote to its in-memory file store, which a resumed run would otherwise lose",
+        description="Files in the agent's in-memory file store that a resumed run would otherwise lose",
     )
 
 
@@ -78,7 +78,7 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
 
     Designed to be mixed into ``Agent``; the methods read host attributes
     (``llm``, ``tools``, ``state``, ``sandbox``, ``file_store``, ``_prompt``, ``_history_offset``)
-    provided by the concrete class.
+    and call ``_setup_in_memory_file_store_and_tools``, provided by the concrete class.
     """
 
     # Loop-level progress and the in-flight tool call captured before tool
@@ -175,36 +175,39 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
         return None
 
     def _file_store_checkpoint_state(self) -> dict | None:
-        """Files the agent wrote to its in-memory file store, or None if there are none to carry.
+        """Files in the agent's in-memory file store that a resumed run would lose, or None.
 
         A sandbox's files survive a resume because the agent reconnects to the sandbox, but an
-        in-memory store ends with the process, so the agent's files go into the checkpoint, up to
-        ``MAX_CHECKPOINT_FILE_STORE_BYTES``. Files it got from its input are left out: a resumed
-        run stores them again from its input, so carrying them would store each one twice. A store
-        the agent cannot write to is left out too, since nothing in it came from the agent.
+        in-memory store ends with the process, so its files go into the checkpoint, up to
+        ``MAX_CHECKPOINT_FILE_STORE_BYTES``: the ones the agent wrote, the ones its tools returned
+        and any others. Files it got from its input are left out, since a resumed run stores them
+        again from its input and carrying them would store each one twice.
         """
         store = self._own_in_memory_file_store()
         if store is None or store.is_empty():
             return None
-        if not (self.file_store.agent_file_write_enabled or self.file_store.todo_enabled):
-            return None
-        written = {
+        kept = {
             info.path
             for info in store.list_files(recursive=True)
             if (info.metadata or {}).get("source") != USER_UPLOAD_SOURCE
         }
-        if not written:
+        if not kept:
             return None
-        state = store.to_checkpoint_state(max_bytes=MAX_CHECKPOINT_FILE_STORE_BYTES, file_paths=written)
+        state = store.to_checkpoint_state(max_bytes=MAX_CHECKPOINT_FILE_STORE_BYTES, file_paths=kept)
         return state if state["files"] else None
 
     def _restore_file_store_state(self, file_store_state: dict) -> None:
         """Put checkpointed files back into the agent's in-memory file store.
 
-        Skipped with a warning when the agent no longer has an in-memory file store, for example
-        because it now runs with a sandbox.
+        An agent that creates its store only when input files arrive gets that store and its file
+        tools now, as it had them when the checkpoint was taken. Skipped with a warning when the
+        agent has a sandbox or another kind of file store instead.
         """
         store = self._own_in_memory_file_store()
+        file_store = getattr(self, "file_store", None)
+        if store is None and not (file_store and file_store.enabled) and not getattr(self, "sandbox_backend", None):
+            self._setup_in_memory_file_store_and_tools()
+            store = self._own_in_memory_file_store()
         if store is None:
             logger.warning(
                 f"Agent checkpoint restore: no in-memory file store to restore "
