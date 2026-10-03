@@ -16,12 +16,17 @@ from dynamiq.checkpoints.checkpoint import (
     IterativeCheckpointMixin,
 )
 from dynamiq.prompts import Prompt
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
 
 # Default prompt prefix length: [system_message, user_message].
 # At runtime, _history_offset is recalculated to len(prompt.messages) before the ReAct loop,
 # which may be larger when memory history messages are injected.
 DEFAULT_HISTORY_OFFSET = 1
+
+# How much of an in-memory file store's content a checkpoint carries. The files travel base64-encoded,
+# a third larger, beside the conversation history, and a checkpoint that is too large cannot be saved.
+MAX_CHECKPOINT_FILE_STORE_BYTES = 10 * 1024 * 1024
 
 
 class AgentIterationData(BaseModel):
@@ -54,6 +59,10 @@ class AgentCheckpointState(BaseCheckpointState):
         default=None,
         description="Reconnect info (type, sandbox_id, base_path) for the agent's own sandbox, if one was started",
     )
+    file_store_state: dict | None = Field(
+        default=None,
+        description="Files in the agent's in-memory file store, which a resumed run would otherwise start without",
+    )
 
 
 class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
@@ -61,10 +70,11 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
 
     Extends ``IterativeCheckpointMixin`` (per-iteration resume) with the
     Agent-specific pieces: LLM and tool sub-state, serialized prompt messages,
-    and the pending tool call replayed after an input-streaming timeout.
+    the pending tool call replayed after an input-streaming timeout, and the
+    files of an in-memory file store.
 
     Designed to be mixed into ``Agent``; the methods read host attributes
-    (``llm``, ``tools``, ``state``, ``sandbox``, ``_prompt``, ``_history_offset``)
+    (``llm``, ``tools``, ``state``, ``sandbox``, ``file_store``, ``_prompt``, ``_history_offset``)
     provided by the concrete class.
     """
 
@@ -93,6 +103,7 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
             llm_state=llm_checkpoint.model_dump() if hasattr(llm_checkpoint, "model_dump") else llm_checkpoint,
             tool_states=tool_states,
             sandbox_state=self._sandbox_checkpoint_state(),
+            file_store_state=self._file_store_checkpoint_state(),
             **base_fields,
         )
         self._save_iteration_to_checkpoint(state)
@@ -152,6 +163,44 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
 
         sandbox.sandbox_id = saved_id
         logger.info(f"Agent checkpoint restore: sandbox will reconnect to {saved_id} on first use.")
+
+    def _own_in_memory_file_store(self) -> InMemoryFileStore | None:
+        """The agent's enabled in-memory file store, or None."""
+        file_store = getattr(self, "file_store", None)
+        if file_store is not None and file_store.enabled and isinstance(file_store.backend, InMemoryFileStore):
+            return file_store.backend
+        return None
+
+    def _file_store_checkpoint_state(self) -> dict | None:
+        """Files in the agent's in-memory file store, or None if there are none to carry.
+
+        A sandbox's files survive a resume because the agent reconnects to the sandbox, but an
+        in-memory store ends with the process, so its files go into the checkpoint, up to
+        ``MAX_CHECKPOINT_FILE_STORE_BYTES``. Only a store the agent can write to is carried: one it
+        can only read holds the files it was given, which a resumed run gets again from its input.
+        """
+        store = self._own_in_memory_file_store()
+        if store is None or store.is_empty():
+            return None
+        if not (self.file_store.agent_file_write_enabled or self.file_store.todo_enabled):
+            return None
+        state = store.to_checkpoint_state(max_bytes=MAX_CHECKPOINT_FILE_STORE_BYTES)
+        return state if state["files"] else None
+
+    def _restore_file_store_state(self, file_store_state: dict) -> None:
+        """Put checkpointed files back into the agent's in-memory file store.
+
+        Skipped with a warning when the agent no longer has an in-memory file store, for example
+        because it now runs with a sandbox.
+        """
+        store = self._own_in_memory_file_store()
+        if store is None:
+            logger.warning(
+                f"Agent checkpoint restore: no in-memory file store to restore "
+                f"{len(file_store_state.get('files') or {})} file(s) into."
+            )
+            return
+        store.from_checkpoint_state(file_store_state)
 
     def set_pending_tool_call(self, action: str | None, action_input: Any, thought: str | None) -> None:
         """Record the tool call about to run so it can be checkpointed on interruption."""
@@ -216,6 +265,8 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
             self._restore_tool_states(tool_states)
         if (sandbox_state := state_dict.get("sandbox_state")) is not None:
             self._restore_sandbox_state(sandbox_state)
+        if (file_store_state := state_dict.get("file_store_state")) is not None:
+            self._restore_file_store_state(file_store_state)
 
         self._restore_iteration_from_checkpoint(state_dict)
 

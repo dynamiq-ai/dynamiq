@@ -1,5 +1,6 @@
 """In-memory file storage implementation."""
 
+import base64
 import mimetypes
 import os
 from datetime import datetime
@@ -148,6 +149,46 @@ class InMemoryFileStore(FileStore):
             files_list.append(self._create_file_info(file_path, self._files[file_path]))
 
         return files_list
+
+    def to_checkpoint_state(self, max_bytes: int) -> dict[str, Any]:
+        """Return the stored files in a JSON-safe form, for a checkpoint to carry.
+
+        Files are taken in the order they were stored while their contents fit in ``max_bytes``.
+        A file that does not fit is left out with a warning, so the checkpoint stays small enough
+        to save.
+        """
+        files: dict[str, dict[str, Any]] = {}
+        skipped: list[str] = []
+        total = 0
+        for file_path, file_data in self._files.items():
+            if total + file_data["size"] > max_bytes:
+                skipped.append(file_path)
+                continue
+            total += file_data["size"]
+            files[file_path] = {
+                "content": base64.b64encode(file_data["content"]).decode("ascii"),
+                "content_type": file_data["content_type"],
+                "created_at": file_data["created_at"].isoformat(),
+                "metadata": file_data["metadata"],
+            }
+        if skipped:
+            logger.warning(
+                f"InMemoryFileStore: {len(skipped)} file(s) do not fit the {max_bytes}-byte checkpoint "
+                f"budget and are not saved: {skipped}"
+            )
+        return {"files": files}
+
+    def from_checkpoint_state(self, state: dict[str, Any]) -> None:
+        """Store the files saved by ``to_checkpoint_state``, replacing any file at the same path."""
+        for file_path, file_data in (state.get("files") or {}).items():
+            content = base64.b64decode(file_data["content"])
+            self._files[file_path] = {
+                "content": content,
+                "size": len(content),
+                "content_type": file_data["content_type"],
+                "created_at": datetime.fromisoformat(file_data["created_at"]),
+                "metadata": file_data["metadata"],
+            }
 
     def _create_file_info(self, file_path: str, file_data: dict[str, Any]) -> FileInfo:
         """Create a FileInfo object from internal file data."""
