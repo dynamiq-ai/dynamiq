@@ -11,8 +11,11 @@ checkpoint round-trip, as a sandbox's files do by reconnecting:
   returns the file after a new process resumes the run with the answer
 - a store the agent cannot write to, an empty store, and files over the budget
   are left out
+- files the agent got from its input are left out, so a resumed run that stores
+  them again keeps one copy
 """
 
+import io
 import json
 from queue import Queue
 
@@ -50,6 +53,8 @@ REPORT_CONTENT = b"# Report\nwritten before checkpoint"
 # Not valid UTF-8, so a text round-trip would corrupt it.
 IMAGE_PATH = "charts/chart.png"
 IMAGE_CONTENT = bytes(range(256))
+INPUT_PATH = "data.csv"
+INPUT_CONTENT = b"a,b\n1,2\n"
 
 
 def make_llm(node_id: str) -> llms.OpenAI:
@@ -76,6 +81,16 @@ def make_file_store_agent(agent_id: str = AGENT_ID, writable: bool = True, tools
 def write_files(agent: Agent) -> None:
     agent.file_store_backend.store(REPORT_PATH, REPORT_CONTENT, metadata={"description": "Quarterly report"})
     agent.file_store_backend.store(IMAGE_PATH, IMAGE_CONTENT, content_type="image/png")
+
+
+def input_file() -> io.BytesIO:
+    file = io.BytesIO(INPUT_CONTENT)
+    file.name = INPUT_PATH
+    return file
+
+
+def stored_paths(agent: Agent) -> list[str]:
+    return sorted(info.path for info in agent.file_store_backend.list_files(recursive=True))
 
 
 def make_flow(backend, agent: Agent) -> flows.Flow:
@@ -145,6 +160,25 @@ class TestFileStoreCheckpointRoundTrip:
     def test_read_only_store_is_not_captured(self):
         agent = make_file_store_agent(writable=False)
         write_files(agent)
+        assert agent.to_checkpoint_state().file_store_state is None
+
+    def test_input_files_are_left_out_and_stored_once_after_restore(self):
+        agent_a = make_file_store_agent("agent-a")
+        assert agent_a._upload_files_to_file_store([input_file()]) == [INPUT_PATH]
+        agent_a.file_store_backend.store(REPORT_PATH, REPORT_CONTENT)
+
+        state_dict = json.loads(json.dumps(agent_a.to_checkpoint_state().model_dump()))
+        assert set(state_dict["file_store_state"]["files"]) == {REPORT_PATH}
+
+        agent_b = make_file_store_agent("agent-b")
+        agent_b.from_checkpoint_state(state_dict)
+        # A resumed run stores its input files again, under their own names.
+        assert agent_b._upload_files_to_file_store([input_file()]) == [INPUT_PATH]
+        assert stored_paths(agent_b) == [INPUT_PATH, REPORT_PATH]
+
+    def test_store_with_only_input_files_is_not_captured(self):
+        agent = make_file_store_agent()
+        agent._upload_files_to_file_store([input_file()])
         assert agent.to_checkpoint_state().file_store_state is None
 
     def test_files_over_the_budget_are_left_out(self, monkeypatch):
@@ -274,7 +308,9 @@ class TestFileStoreSurvivesInputTimeout:
         backend = FileSystem(base_path=str(tmp_path / ".dynamiq" / "checkpoints"))
         self._mock_write_ask_then_answer(mocker)
 
-        first = self._make_flow(backend, self._make_agent(Queue())).run_sync(input_data={"input": "Draft the report"})
+        first = self._make_flow(backend, self._make_agent(Queue())).run_sync(
+            input_data={"input": "Draft the report", "files": [input_file()]}
+        )
         assert first.status == RunnableStatus.FAILURE
         saved = backend.get_latest_by_flow(FLOW_ID)
         assert set(saved.node_states[AGENT_ID].internal_state["file_store_state"]["files"]) == {REPORT_PATH}
@@ -286,13 +322,15 @@ class TestFileStoreSurvivesInputTimeout:
             ).model_dump_json()
         )
         resumed_agent = self._make_agent(answers)
+        # The input is replayed on resume, attached file included.
         second = self._make_flow(backend, resumed_agent).run_sync(
-            input_data={"input": "Draft the report"}, resume_from=saved.id
+            input_data={"input": "Draft the report", "files": [input_file()]}, resume_from=saved.id
         )
 
         assert second.status == RunnableStatus.SUCCESS
         files = second.output[AGENT_ID]["output"]["files"]
         assert [(f.name, f.getvalue()) for f in files] == [(REPORT_PATH, REPORT_CONTENT)]
+        assert stored_paths(resumed_agent) == [INPUT_PATH, REPORT_PATH]
 
 
 class TestFileStoreCheckpointStateModel:

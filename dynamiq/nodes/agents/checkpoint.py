@@ -28,6 +28,9 @@ DEFAULT_HISTORY_OFFSET = 1
 # a third larger, beside the conversation history, and a checkpoint that is too large cannot be saved.
 MAX_CHECKPOINT_FILE_STORE_BYTES = 10 * 1024 * 1024
 
+# The source recorded for a file the agent stored from its input.
+USER_UPLOAD_SOURCE = "user_upload"
+
 
 class AgentIterationData(BaseModel):
     """Typed iteration data for Agent loop-level checkpoints."""
@@ -61,7 +64,7 @@ class AgentCheckpointState(BaseCheckpointState):
     )
     file_store_state: dict | None = Field(
         default=None,
-        description="Files in the agent's in-memory file store, which a resumed run would otherwise start without",
+        description="Files the agent wrote to its in-memory file store, which a resumed run would otherwise lose",
     )
 
 
@@ -172,19 +175,27 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
         return None
 
     def _file_store_checkpoint_state(self) -> dict | None:
-        """Files in the agent's in-memory file store, or None if there are none to carry.
+        """Files the agent wrote to its in-memory file store, or None if there are none to carry.
 
         A sandbox's files survive a resume because the agent reconnects to the sandbox, but an
-        in-memory store ends with the process, so its files go into the checkpoint, up to
-        ``MAX_CHECKPOINT_FILE_STORE_BYTES``. Only a store the agent can write to is carried: one it
-        can only read holds the files it was given, which a resumed run gets again from its input.
+        in-memory store ends with the process, so the agent's files go into the checkpoint, up to
+        ``MAX_CHECKPOINT_FILE_STORE_BYTES``. Files it got from its input are left out: a resumed
+        run stores them again from its input, so carrying them would store each one twice. A store
+        the agent cannot write to is left out too, since nothing in it came from the agent.
         """
         store = self._own_in_memory_file_store()
         if store is None or store.is_empty():
             return None
         if not (self.file_store.agent_file_write_enabled or self.file_store.todo_enabled):
             return None
-        state = store.to_checkpoint_state(max_bytes=MAX_CHECKPOINT_FILE_STORE_BYTES)
+        written = {
+            info.path
+            for info in store.list_files(recursive=True)
+            if (info.metadata or {}).get("source") != USER_UPLOAD_SOURCE
+        }
+        if not written:
+            return None
+        state = store.to_checkpoint_state(max_bytes=MAX_CHECKPOINT_FILE_STORE_BYTES, file_paths=written)
         return state if state["files"] else None
 
     def _restore_file_store_state(self, file_store_state: dict) -> None:

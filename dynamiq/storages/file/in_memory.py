@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Collection
 
 from pydantic import ConfigDict
 
@@ -150,17 +150,19 @@ class InMemoryFileStore(FileStore):
 
         return files_list
 
-    def to_checkpoint_state(self, max_bytes: int) -> dict[str, Any]:
+    def to_checkpoint_state(self, max_bytes: int, file_paths: Collection[str] | None = None) -> dict[str, Any]:
         """Return the stored files in a JSON-safe form, for a checkpoint to carry.
 
-        Files are taken in the order they were stored while their contents fit in ``max_bytes``.
-        A file that does not fit is left out with a warning, so the checkpoint stays small enough
-        to save.
+        Only the files at ``file_paths`` are taken when it is given. Files are taken in the order
+        they were stored while their contents fit in ``max_bytes``. A file that does not fit is
+        left out with a warning, so the checkpoint stays small enough to save.
         """
         files: dict[str, dict[str, Any]] = {}
         skipped: list[str] = []
         total = 0
         for file_path, file_data in self._files.items():
+            if file_paths is not None and file_path not in file_paths:
+                continue
             if total + file_data["size"] > max_bytes:
                 skipped.append(file_path)
                 continue

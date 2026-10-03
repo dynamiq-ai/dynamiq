@@ -18,7 +18,7 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy, MemorySaveMode
 from dynamiq.memory.long_term import LongTermMemoryConfig
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
-from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, AgentIterativeCheckpointMixin
+from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, USER_UPLOAD_SOURCE, AgentIterativeCheckpointMixin
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
@@ -2197,7 +2197,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     file_path=unique_file_name,
                     content=content,
                     content_type=getattr(file_obj, "content_type", "application/octet-stream"),
-                    metadata={"description": description, "source": "user_upload"},
+                    metadata={"description": description, "source": USER_UPLOAD_SOURCE},
                     overwrite=False,
                 )
                 file_paths[index] = unique_file_name
