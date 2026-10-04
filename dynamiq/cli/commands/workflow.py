@@ -673,6 +673,9 @@ def add_requirement(*, api: ApiClient, settings: Settings, workflow_id: str, pay
       type "pipedream_account" -> spec {"app_slug": "notion"}
       type "connection"        -> spec {"type": "dynamiq.connections.<X>"}
 
+    `"optional": true` is for an account only an agent's tools use: a user who has not connected
+    it can still run, and the agent goes without those tools.
+
     `form.title` is what the end user reads on the connect screen, so write it for them.
     Reference the returned id from the flow as
     {"$type": "requirement", "$id": "<id>", "value_path": "$.account_id"}.
@@ -697,7 +700,11 @@ def get_requirement(*, api: ApiClient, settings: Settings, workflow_id: str, req
 def update_requirement(
     *, api: ApiClient, settings: Settings, workflow_id: str, requirement_id: str, payload: str
 ):
-    """Change a requirement's `form` (its title/description). Body: {"form": {...}}."""
+    """Replace a requirement's `form` (its title/description) and `optional` flag.
+
+    Body: {"form": {...}, "optional": true}. `form` is REQUIRED, and leaving `optional` out makes
+    the requirement required, so send its current value (see requirement-get) to keep it.
+    """
     echo_response(
         api.put(f"/v1/workflows/{workflow_id}/requirements/{requirement_id}", json=read_json_arg(payload))
     )

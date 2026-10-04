@@ -825,6 +825,46 @@ class ElevenLabs(Http):
         return self
 
 
+class MiniMaxRegion(str, enum.Enum):
+    """MiniMax API platforms: global (minimax.io) or mainland China (minimax.cn)."""
+
+    GLOBAL = "global"
+    CHINA = "china"
+
+
+MINIMAX_API_BASE_BY_REGION = {
+    MiniMaxRegion.GLOBAL: "https://api.minimax.io/v1",
+    MiniMaxRegion.CHINA: "https://api.minimax.cn/v1",
+}
+
+
+class MiniMax(Http):
+    """
+    Represents an HTTP connection to the MiniMax API.
+
+    Attributes:
+        region (MiniMaxRegion): Platform the API key belongs to; picks the default base URL.
+        url (str): Base API URL, fetched from the environment variable "MINIMAX_URL". Defaults to the region's URL.
+        method (str): HTTP method used for the request, defaults to HTTPMethod.POST.
+        api_key (str): API key for authentication, fetched from the environment variable "MINIMAX_API_KEY".
+    """
+
+    region: MiniMaxRegion = MiniMaxRegion.GLOBAL
+    url: str = Field(default_factory=partial(get_env_var, "MINIMAX_URL", ""))
+    method: HTTPMethod = HTTPMethod.POST
+    api_key: str = Field(default_factory=partial(get_env_var, "MINIMAX_API_KEY"))
+
+    @model_validator(mode="after")
+    def setup_connection(self) -> "MiniMax":
+        """Select the regional base URL and configure bearer authentication."""
+        if not self.url:
+            self.url = MINIMAX_API_BASE_BY_REGION[self.region]
+        self.headers.update({"Content-Type": "application/json"})
+        if self.api_key:
+            self.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        return self
+
+
 class Pinecone(BaseApiKeyConnection):
     """
     Represents a connection to the Pinecone service.
@@ -1960,6 +2000,24 @@ class DatabricksSQL(BaseConnection):
 class OpenRouter(BaseApiKeyConnection):
     api_key: str = Field(default_factory=partial(get_env_var, "OPENROUTER_API_KEY"))
     url: str = Field(default_factory=partial(get_env_var, "OPENROUTER_API_BASE", "https://openrouter.ai/api/v1"))
+
+    def connect(self):
+        pass
+
+    @property
+    def conn_params(self) -> dict:
+        """
+        Returns the parameters required for connection.
+        """
+        return {
+            "api_base": self.url,
+            "api_key": self.api_key,
+        }
+
+
+class AtlasCloud(BaseApiKeyConnection):
+    api_key: str = Field(default_factory=partial(get_env_var, "ATLASCLOUD_API_KEY"))
+    url: str = Field(default_factory=partial(get_env_var, "ATLASCLOUD_API_BASE", "https://api.atlascloud.ai/v1"))
 
     def connect(self):
         pass
