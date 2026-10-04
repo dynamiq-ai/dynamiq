@@ -700,9 +700,10 @@ def get_requirement(*, api: ApiClient, settings: Settings, workflow_id: str, req
 def update_requirement(
     *, api: ApiClient, settings: Settings, workflow_id: str, requirement_id: str, payload: str
 ):
-    """Change a requirement's `form` (its title/description) and/or `optional` flag.
+    """Replace a requirement's `form` (its title/description) and `optional` flag.
 
-    Body: {"form": {...}, "optional": true}; a key left out keeps its value.
+    Body: {"form": {...}, "optional": true}. `form` is REQUIRED, and leaving `optional` out makes
+    the requirement required, so send its current value (see requirement-get) to keep it.
     """
     echo_response(
         api.put(f"/v1/workflows/{workflow_id}/requirements/{requirement_id}", json=read_json_arg(payload))
