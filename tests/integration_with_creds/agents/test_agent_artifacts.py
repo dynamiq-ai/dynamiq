@@ -5,7 +5,11 @@ same client, URLs, multipart bodies, If-Match headers and status codes. Each tes
 """
 
 import hashlib
+import io
 import json as json_lib
+import mimetypes
+import posixpath
+import zipfile
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -24,16 +28,37 @@ from dynamiq.connections import E2B as E2BConnection
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.llms.openai import OpenAI
+from dynamiq.nodes.tools import ArtifactTool
+from dynamiq.nodes.tools.artifact_tool import ArtifactToolInputSchema
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.sandboxes import SandboxConfig
 from dynamiq.sandboxes.e2b import E2BSandbox
+from dynamiq.storages.file import InMemoryFileStore
 
 MODEL = "gpt-5.4"
 API_URL = "https://artifacts.simulated"
 KINDS = {kind.value for kind in ArtifactKind}
 TEXT_KIND_VALUES = {kind.value for kind in TEXT_KINDS}
+
+# The platform's content rules (nexus artifacts/service/content.go): limits and MIME types per kind.
+MAX_BYTES = {"html": 16 << 20, "bundle": 100 << 20}
+DEFAULT_MAX_BYTES = 25 << 20
+KIND_MIME_TYPES = {
+    "html": "text/html",
+    "markdown": "text/markdown",
+    "svg": "image/svg+xml",
+    "mermaid": "text/plain",
+    "json": "application/json",
+    "chart": "application/json",
+    "csv": "text/csv",
+    "pdf": "application/pdf",
+    "bundle": "application/zip",
+}
+IMAGE_SIGNATURES = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a")
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
 # Arbitrary on purpose: a model invents plausible metrics, so only these prove the record was read.
 EMPLOYEE = "Dana Okafor"
@@ -92,10 +117,61 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _invalid_input(message: str) -> _Response:
+    return _error(400, "bad_request", message)
+
+
+def _check_content(kind: str, content: bytes, entry_path: str | None) -> tuple[_Response | None, str | None]:
+    """Validate a version's bytes against the artifact's kind, as the platform does.
+
+    Returns the error response, or None and the bundle's entry path (index.html unless given).
+    """
+    if len(content) > MAX_BYTES.get(kind, DEFAULT_MAX_BYTES):
+        return _error(413, "payload_too_large", "The content is too large."), None
+    if not content:
+        return _invalid_input("The content is empty."), None
+    if kind in TEXT_KIND_VALUES:
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            return _invalid_input("The content is not valid UTF-8 text."), None
+        if kind in ("json", "chart"):
+            try:
+                spec = json_lib.loads(text)
+            except ValueError:
+                return _invalid_input("The content is not valid JSON."), None
+            if kind == "chart" and "vega-lite" not in str((spec if isinstance(spec, dict) else {}).get("$schema")):
+                return _invalid_input('A chart must be a Vega-Lite spec with a "$schema" naming Vega-Lite.'), None
+    if kind == "image" and not (
+        content.startswith(IMAGE_SIGNATURES) or (content[:4] == b"RIFF" and content[8:12] == b"WEBP")
+    ):
+        return _invalid_input("The content is not an image."), None
+    if kind == "pdf" and not content.startswith(b"%PDF-"):
+        return _invalid_input("The content is not a PDF."), None
+    if kind != "bundle":
+        return None, None
+    try:
+        names = [i.filename for i in zipfile.ZipFile(io.BytesIO(content)).infolist() if not i.is_dir()]
+    except zipfile.BadZipFile:
+        return _invalid_input("The bundle is not a valid zip archive."), None
+    if any(n.startswith("/") or ".." in n.split("/") for n in names):
+        return _invalid_input("The bundle has an entry outside the archive or a symbolic link."), None
+    entry = posixpath.normpath(entry_path) if entry_path else "index.html"
+    if entry not in names:
+        return _invalid_input("The bundle has no file at entry_path."), None
+    return None, entry
+
+
+def _mime_type(kind: str, file_name: str, declared: str | None) -> str:
+    """The declared type, else the one the kind fixes, else a guess from the file name."""
+    return declared or KIND_MIME_TYPES.get(kind) or mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+
+
 class ArtifactAPISimulator:
     """In-process implementation of the platform's /v1/artifacts routes.
 
     Deliberately strict where the platform is: bearer token, known kinds, text kinds only as JSON,
+    content validated against the artifact's kind, a MIME type and bundle entry page per version,
     immutable versions, a repeated upload returning the latest version, and If-Match on the latest
     version id.
     """
@@ -103,6 +179,7 @@ class ArtifactAPISimulator:
     def __init__(self):
         self.artifacts: dict[str, dict] = {}
         self.calls: list[tuple[str, str]] = []
+        self.if_matches: list[str | None] = []
 
     # -- transport ---------------------------------------------------------
     def request(self, verb, url, headers=None, params=None, json=None, data=None, files=None, timeout=None):
@@ -161,6 +238,10 @@ class ArtifactAPISimulator:
                 "The request could not be processed due to invalid input.",
                 {"kind": "must be a valid value"},
             )
+        content = body["content"].encode() if isinstance(body["content"], str) else body["content"]
+        problem, entry_path = _check_content(body["kind"], content, body.get("entry_path"))
+        if problem:
+            return problem
         artifact_id = str(uuid4())
         self.artifacts[artifact_id] = {
             "id": artifact_id,
@@ -169,13 +250,12 @@ class ArtifactAPISimulator:
             "file_name": file_name,
             "name": body["name"],
             "kind": body["kind"],
-            "mime_type": body.get("mime_type") or "application/octet-stream",
             "visibility": "private",
             "versions": [],
             "share": None,
         }
-        content = body["content"].encode() if isinstance(body["content"], str) else body["content"]
-        self._record(artifact_id, content, body, client)
+        mime_type = _mime_type(body["kind"], file_name, body.get("mime_type"))
+        self._record(artifact_id, content, body, client, mime_type, entry_path)
         return _Response(201, {"data": self._as_json(artifact_id)})
 
     def _add(self, artifact_id, body, if_match, client, upload):
@@ -183,6 +263,7 @@ class ArtifactAPISimulator:
         if artifact is None:
             return _error(404, "not_found", "The requested resource was not found.")
         latest = artifact["versions"][-1]
+        self.if_matches.append(if_match)
         if if_match and if_match.strip('"') != latest["id"]:
             return _error(
                 412,
@@ -198,9 +279,19 @@ class ArtifactAPISimulator:
                 {"content": "cannot be blank"},
             )
         content = content.encode() if isinstance(content, str) else content
-        if _checksum(content) == latest["checksum"] and body.get("name") is None and body.get("description") is None:
+        # Every version is checked against the artifact's kind, which never changes, and a bundle
+        # opens on index.html unless this version names another page.
+        problem, entry_path = _check_content(artifact["kind"], content, body.get("entry_path"))
+        if problem:
+            return problem
+        repeats = _checksum(content) == latest["checksum"] and all(
+            body.get(field) is None or body[field] == latest[field]
+            for field in ("name", "description", "mime_type", "entry_path")
+        )
+        if repeats:
             return _Response(200, {"data": self._version_json(artifact_id, latest)})
-        version = self._record(artifact_id, content, body, client)
+        mime_type = body.get("mime_type") or KIND_MIME_TYPES.get(artifact["kind"]) or latest["mime_type"]
+        version = self._record(artifact_id, content, body, client, mime_type, entry_path)
         return _Response(201, {"data": self._version_json(artifact_id, version)})
 
     def _get(self, artifact_id):
@@ -254,7 +345,15 @@ class ArtifactAPISimulator:
         return _Response(200, {"data": artifact["share"]})
 
     # -- helpers -----------------------------------------------------------
-    def _record(self, artifact_id, content: bytes, body: dict, client: str | None) -> dict:
+    def _record(
+        self,
+        artifact_id,
+        content: bytes,
+        body: dict,
+        client: str | None,
+        mime_type: str,
+        entry_path: str | None,
+    ) -> dict:
         artifact = self.artifacts[artifact_id]
         versions = artifact["versions"]
         version = {
@@ -262,6 +361,8 @@ class ArtifactAPISimulator:
             "version": len(versions) + 1,
             "name": body.get("name") or artifact["name"],
             "description": body.get("description"),
+            "mime_type": mime_type,
+            "entry_path": entry_path,
             "content": content,
             "checksum": _checksum(content),
             "client": client,
@@ -272,17 +373,16 @@ class ArtifactAPISimulator:
         return version
 
     def _version_json(self, artifact_id, version):
-        artifact = self.artifacts[artifact_id]
         return {
             "id": version["id"],
             "artifact_id": artifact_id,
             "version": version["version"],
             "name": version["name"],
             "description": version["description"],
-            "mime_type": artifact["mime_type"],
+            "mime_type": version["mime_type"],
             "size": len(version["content"]),
             "checksum": version["checksum"],
-            "entry_path": None,
+            "entry_path": version["entry_path"],
             "source": {"client": version["client"]},
             "created_at": version["created_at"],
         }
@@ -291,7 +391,8 @@ class ArtifactAPISimulator:
         artifact = self.artifacts[artifact_id]
         latest = artifact["versions"][-1]
         return {
-            **{k: artifact[k] for k in ("id", "store_id", "user_id", "file_name", "name", "kind", "mime_type")},
+            **{k: artifact[k] for k in ("id", "store_id", "user_id", "file_name", "name", "kind")},
+            "mime_type": latest["mime_type"],
             "visibility": artifact["visibility"],
             "latest_version_id": latest["id"],
             "latest_version": self._version_json(artifact_id, latest),
@@ -343,9 +444,9 @@ def test_backend_crud_against_the_api(backend, api):
     _, first = backend.get(created.id, version=1)
     assert first == "Revenue Q2", "Earlier versions must stay readable."
 
-    image = backend.create(file_name="chart.png", name="Chart", kind=ArtifactKind.IMAGE, content=b"\x89PNG\r\n")
+    image = backend.create(file_name="chart.png", name="Chart", kind=ArtifactKind.IMAGE, content=PNG)
     _, raw = backend.get(image.id)
-    assert raw == b"\x89PNG\r\n", "Binary content must round-trip as bytes."
+    assert raw == PNG, "Binary content must round-trip as bytes."
 
     assert [a.id for a in backend.list(kind=ArtifactKind.MARKDOWN)] == [created.id]
 
@@ -371,6 +472,122 @@ def test_backend_error_branches(backend, api):
 
     with pytest.raises(ArtifactError, match="file_name"):
         backend.create(file_name="", name="Doc", kind=ArtifactKind.MARKDOWN, content="x")
+
+
+def _zip(files: dict[str, str]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, text in files.items():
+            archive.writestr(name, text)
+    return buffer.getvalue()
+
+
+def _tool_run(tool: ArtifactTool, **input_data) -> dict:
+    return tool.execute(ArtifactToolInputSchema(**input_data))
+
+
+SPEC = '{"$schema": "https://vega.github.io/schema/vega-lite/v5.json", "mark": "%s"}'
+JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 16
+DOCX = b"PK\x03\x04docx-bytes"
+XLSX = b"PK\x03\x04xlsx-bytes"
+
+# One case per kind: (file, v1, explicit kind, file published as v2 or None for the loaded copy, v2).
+EVERY_KIND = [
+    pytest.param("q3.html", "<!doctype html><p>v1</p>", None, None, "<!doctype html><p>v2</p>", id="html"),
+    pytest.param("notes.md", "# Notes v1", None, None, "# Notes v2", id="markdown"),
+    pytest.param("etl.py", "print('v1')\n", None, None, "print('v2')\n", id="code"),
+    pytest.param("bars.svg", "<svg xmlns='http://www.w3.org/2000/svg'>v1</svg>", None, None, "<svg>v2</svg>", id="svg"),
+    pytest.param("deploy.mmd", "flowchart LR\n  a --> b", None, None, "flowchart LR\n  a --> c", id="mermaid"),
+    pytest.param("metrics.json", '{"version": 1}', None, None, '{"version": 2}', id="json"),
+    pytest.param("data.csv", "quarter,revenue\nQ1,1.2\n", None, None, "quarter,revenue\nQ2,1.5\n", id="csv"),
+    pytest.param("spec.json", SPEC % "bar", "chart", None, SPEC % "line", id="chart"),
+    pytest.param("chart.png", PNG, None, "out/chart.jpg", JPEG, id="image-png-then-jpeg"),
+    pytest.param("review.pdf", b"%PDF-1.7\nv1", None, None, b"%PDF-1.7\nv2", id="pdf"),
+    pytest.param("deck.docx", DOCX, None, "out/numbers.xlsx", XLSX, id="file-docx-then-xlsx"),
+    pytest.param(
+        "site.zip",
+        _zip({"report.html": "<p>v1</p>", "style.css": "p {}"}),
+        "bundle",
+        None,
+        _zip({"report.html": "<p>v2</p>", "style.css": "p {}"}),
+        id="bundle",
+    ),
+]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("file_name, v1, kind, v2_path, v2", EVERY_KIND)
+def test_every_kind_is_created_loaded_and_updated_through_the_tool(api, backend, file_name, v1, kind, v2_path, v2):
+    """The tool's requests for each kind are ones the platform accepts, and its bytes come back intact.
+
+    No model: this pins the file-to-API path per kind, so a failure is the tool's or the contract's.
+    """
+    v1_bytes = v1.encode() if isinstance(v1, str) else v1
+    v2_bytes = v2.encode() if isinstance(v2, str) else v2
+    workspace = InMemoryFileStore()
+    workspace.store(file_name, v1_bytes, overwrite=True)
+
+    entry_path = "report.html" if kind == "bundle" else None
+    created = _tool_run(
+        ArtifactTool(backend=backend, workspace=workspace),
+        action="create",
+        path=file_name,
+        name=f"{file_name} sample",
+        kind=kind,
+        entry_path=entry_path,
+    )
+
+    artifact_id = created["artifact"]["id"]
+    record = api.artifacts[artifact_id]
+    first = record["versions"][0]
+    is_text = record["kind"] in TEXT_KIND_VALUES
+    assert ("POST", "" if is_text else "/upload") in api.calls, "text kinds go as JSON, the rest as an upload"
+    assert first["content"] == v1_bytes
+    assert first["entry_path"] == entry_path
+
+    # A later conversation: a fresh tool loads the artifact and publishes a changed file as v2.
+    later = ArtifactTool(backend=backend, workspace=workspace)
+    loaded = _tool_run(later, action="get", artifact_id=artifact_id)
+    assert workspace.retrieve(loaded["path"]) == v1_bytes, "the loaded copy is the published bytes"
+
+    target = v2_path or loaded["path"]
+    workspace.store(target, v2_bytes, overwrite=True)
+    updated = _tool_run(later, action="update", path=target, artifact_id=artifact_id, description="v2")
+
+    assert updated["artifact"]["version"] == 2
+    second = record["versions"][-1]
+    assert second["content"] == v2_bytes
+    assert api.if_matches[-1] == f'"{first["id"]}"', "built on the version loaded"
+    assert ("POST", f"/{artifact_id}/versions" + ("" if is_text else "/upload")) in api.calls
+    if kind == "bundle":
+        assert second["entry_path"] == "report.html", "a bundle keeps the page it opens on"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "file_name, content, kind, message",
+    [
+        pytest.param("bad.json", "{not json", None, "The content is not valid JSON.", id="json"),
+        pytest.param("spec.json", '{"mark": "bar"}', "chart", "A chart must be a Vega-Lite spec", id="chart"),
+        pytest.param("photo.png", b"not an image", None, "The content is not an image.", id="image"),
+        pytest.param("doc.pdf", b"not a pdf", None, "The content is not a PDF.", id="pdf"),
+        pytest.param("site.zip", b"not a zip", "bundle", "The bundle is not a valid zip archive.", id="bundle-zip"),
+        pytest.param("site.zip", _zip({"about.html": "x"}), "bundle", "no file at entry_path", id="bundle-entry"),
+    ],
+)
+def test_content_the_platform_rejects_reaches_the_model_as_a_recoverable_error(
+    api, backend, file_name, content, kind, message
+):
+    workspace = InMemoryFileStore()
+    workspace.store(file_name, content.encode() if isinstance(content, str) else content, overwrite=True)
+
+    with pytest.raises(ToolExecutionException, match=message) as exc:
+        _tool_run(
+            ArtifactTool(backend=backend, workspace=workspace), action="create", path=file_name, name="X", kind=kind
+        )
+
+    assert exc.value.recoverable
+    assert api.artifacts == {}, "nothing is stored"
 
 
 @pytest.mark.flaky(reruns=2)
@@ -403,7 +620,8 @@ def test_a_deliverable_is_published_then_read_by_another_agent(openai_llm, run_c
     html = api.latest_text(artifact_id)
     assert record["kind"] == "html", f"Published as {record['kind']}, not html."
     for fact in (EMPLOYEE, "142", MTTR.split()[0], "211", RATING):
-        assert fact in html, f"'{fact}' is missing from the published record: {html[:500]}"
+        # A model may title-case a rating; the facts are what matter, not their capitalization.
+        assert fact.lower() in html.lower(), f"'{fact}' is missing from the published record: {html[:500]}"
     assert record["versions"][-1]["client"].startswith("dynamiq-python/"), "The platform records the client."
 
     refs = written.output.get("artifacts") or []

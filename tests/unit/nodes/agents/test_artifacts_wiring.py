@@ -71,13 +71,27 @@ def test_the_workspace_is_the_file_store_or_the_sandbox(llm, store):
     with_files = Agent(
         name="a",
         llm=llm,
-        file_store=FileStoreConfig(enabled=True, backend=InMemoryFileStore()),
+        file_store=FileStoreConfig(enabled=True, backend=InMemoryFileStore(), agent_file_write_enabled=True),
         artifacts=_artifacts(store),
     )
     with_sandbox = Agent(name="b", llm=llm, sandbox=_sandbox(), artifacts=_artifacts(store))
 
-    assert _artifact_tool(with_files).file_source is with_files.file_store_backend
-    assert _artifact_tool(with_sandbox).file_source is with_sandbox.sandbox_backend
+    for agent, workspace in [(with_files, with_files.file_store_backend), (with_sandbox, with_sandbox.sandbox_backend)]:
+        tools = agent._build_artifact_tool()
+        assert agent._attach_artifact_workspace(tools) == [], "the agent's own workspace, no extra tools"
+        assert tools[0].workspace is workspace
+
+
+def test_an_agent_without_a_workspace_gets_a_scratch_one_per_run(llm, store):
+    agent = Agent(name="a", llm=llm, artifacts=_artifacts(store))
+    tools = agent._build_artifact_tool()
+
+    extra = agent._attach_artifact_workspace(tools)
+
+    assert [t.name for t in extra] == ["file-read", "file-write", "file-list"]
+    assert all(t.file_store is tools[0].workspace for t in extra), "the tools and the artifact share one workspace"
+    assert not agent.file_store.enabled, "attached per run, not configured: shared-sandbox borrowing is unaffected"
+    assert agent.to_dict()["file_store"]["enabled"] is False
 
 
 def test_disabled_config_attaches_nothing(llm, store):
@@ -94,8 +108,12 @@ def test_the_prompt_block_says_when_to_use_an_artifact(llm, store):
     assert "## Artifacts" in ops
     assert "`artifact` tool" in ops
     assert "Use output files instead" in ops
-    assert "pass 'path'" in ops
+    assert "'get' the artifact (it is saved into your workspace)" in ops
+    assert "then 'update' with that file and the artifact's 'artifact_id'" in ops
+    assert "Never 'create' a changed copy" in ops
     assert "read it with 'get' before answering" in ops, "a reader agent must know published documents live here"
+    assert "You cannot make a public link" in ops, "the agent points the user at sharing instead of improvising"
+    assert "'share'" not in ops
 
 
 def test_the_sandbox_rule_points_at_artifacts(llm, store):
@@ -179,12 +197,20 @@ def _action(tool_input: dict) -> str:
     return f"Thought: I will publish it.\nAction: artifact\nAction Input: {json.dumps(tool_input)}"
 
 
-def test_a_run_returns_every_artifact_it_touched(llm, store, mocker):
-    _replies(
+def _file_write(tool_input: dict) -> str:
+    return f"Thought: I will write the file.\nAction: file-write\nAction Input: {json.dumps(tool_input)}"
+
+
+def test_a_run_writes_files_and_returns_every_artifact_it_published(llm, store, mocker):
+    """No sandbox or file store: the run gets a scratch workspace, and the model sees its file tools."""
+    completion = _replies(
         mocker,
-        _action({"action": "create", "name": "Report", "content": "<!doctype html><p>v1</p>"}),
-        _action({"action": "create", "name": "Notes", "content": "# Notes"}),
-        _action({"action": "update", "artifact_id": "a1", "edits": [{"find": "v1", "replace": "v2"}]}),
+        _file_write({"action": "write", "file_path": "report.html", "content": "<!doctype html><p>v1</p>"}),
+        _action({"action": "create", "path": "report.html", "name": "Report"}),
+        _file_write({"action": "write", "file_path": "notes.md", "content": "# Notes"}),
+        _action({"action": "create", "path": "notes.md", "name": "Notes"}),
+        _file_write({"action": "edit", "file_path": "report.html", "edits": [{"find": "v1", "replace": "v2"}]}),
+        _action({"action": "update", "path": "report.html", "artifact_id": "a1"}),
         "Thought: Done.\nAnswer: Published the report and notes.",
     )
     recorder = _StreamRecorder()
@@ -199,18 +225,20 @@ def test_a_run_returns_every_artifact_it_touched(llm, store, mocker):
     result = agent.run({"input": "Make a report"}, config=RunnableConfig(callbacks=[recorder]))
 
     assert result.status == RunnableStatus.SUCCESS
+    assert "file-write" in json.dumps(completion.call_args_list[0].kwargs["messages"], default=str)
     artifacts = result.output["artifacts"]
     assert [(a["id"], a["version_id"], a["version"]) for a in artifacts] == [("a1", "a1-v2", 2), ("a2", "a2-v1", 1)]
     assert json.dumps(artifacts), "refs only: JSON-serializable, no bytes"
+    assert store.get("a1")[1] == "<!doctype html><p>v2</p>"
 
     tool_events = [
         c["choices"][0]["delta"]["content"]
         for c in recorder.chunks
         if c and c.get("choices") and c["choices"][0]["delta"].get("step") == "tool"
     ]
-    assert len(tool_events) == 3
-    assert all(e["tool"]["action_type"] == "artifact" for e in tool_events)
-    assert tool_events[-1]["output"]["artifact"]["version"] == 2
+    artifact_events = [e for e in tool_events if e["tool"]["action_type"] == "artifact"]
+    assert len(artifact_events) == 3
+    assert artifact_events[-1]["output"]["artifact"]["version"] == 2
 
 
 def test_a_run_without_artifacts_has_no_artifacts_key(llm, store, mocker):
@@ -227,9 +255,13 @@ def test_repeated_gets_are_not_served_from_the_tool_cache(llm, store, mocker):
     """The agent caches tool results by input; a cached 'get' would hide a newer version."""
     _replies(
         mocker,
-        _action({"action": "create", "name": "Doc", "content": "first"}),
+        _file_write({"action": "write", "file_path": "doc.md", "content": "first"}),
+        _action({"action": "create", "path": "doc.md", "name": "Doc"}),
         _action({"action": "get", "artifact_id": "a1"}),
-        _action({"action": "update", "artifact_id": "a1", "content": "second"}),
+        _file_write(
+            {"action": "edit", "file_path": "artifacts/a1/v1/doc.md", "edits": [{"find": "first", "replace": "second"}]}
+        ),
+        _action({"action": "update", "path": "artifacts/a1/v1/doc.md", "artifact_id": "a1"}),
         _action({"action": "get", "artifact_id": "a1"}),
         "Thought: Done.\nAnswer: ok",
     )
@@ -239,7 +271,9 @@ def test_repeated_gets_are_not_served_from_the_tool_cache(llm, store, mocker):
     result = agent.run({"input": "go"})
 
     assert result.status == RunnableStatus.SUCCESS
-    assert gets.call_count == 2, "the second identical 'get' must reach the store"
+    # The update reads metadata too, to check it builds on the latest; count the content reads only.
+    reads = [call for call in gets.call_args_list if call.kwargs.get("include_content", True)]
+    assert len(reads) == 2, "the second identical 'get' must reach the store"
     assert result.output["artifacts"][0]["version"] == 2
 
 

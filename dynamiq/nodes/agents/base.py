@@ -461,6 +461,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             )
             if self.file_store.agent_file_write_enabled:
                 self.tools.append(FileWriteTool(file_store=self.file_store_backend))
+            elif self.artifacts_backend:
+                logger.warning(
+                    f"Agent {self.name} - {self.id}: artifacts move as files, but agent_file_write_enabled is off, "
+                    "so the agent can publish only files already in its file store and cannot edit loaded ones."
+                )
 
         if self._skills_should_init():
             self._init_skills()
@@ -809,9 +814,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             # Always set the overlay (even to None, for non-borrowers) so a nested subagent does not
             # inherit this agent's overlay via ContextAwareThreadPoolExecutor.
             sandbox_overlay_token = _shared_sandbox_tools.set(self._maybe_borrow_shared_sandbox())
-            # Built before the borrow, so point 'path' reads at the view this run actually uses.
-            for tool in artifact_tools:
-                tool.file_source = self.sandbox_backend or self.file_store_backend
+            # Built before the borrow, so point the tool at the workspace this run actually uses.
+            run_tools.extend(self._attach_artifact_workspace(artifact_tools))
             if use_memory:
                 history_messages = self._retrieve_memory(input_data)
                 if len(history_messages) > 0:
@@ -1102,15 +1106,37 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     def _build_artifact_tool(self) -> list[Node]:
         """Construct the per-run artifact tool, or [] when artifacts are not enabled.
 
-        Per run so the If-Match versions the tool tracks never leak between concurrent runs of one
+        Per run so the files and versions the tool tracks never leak between concurrent runs of one
         agent.
         """
         if not self.artifacts_backend:
             return []
         from dynamiq.nodes.tools.artifact_tool import ArtifactTool
 
-        file_source = self.sandbox_backend or self.file_store_backend
-        return [ArtifactTool(backend=self.artifacts_backend, file_source=file_source)]
+        workspace = self.sandbox_backend or self.file_store_backend
+        return [ArtifactTool(backend=self.artifacts_backend, workspace=workspace)]
+
+    def _attach_artifact_workspace(self, artifact_tools: list[Node]) -> list[Node]:
+        """Point the artifact tool at this run's workspace, returning file tools for one it adds.
+
+        Artifacts move as files, so a run with no sandbox (own or borrowed) and no file store gets a
+        scratch in-memory one. It is attached per run rather than as a configured file store: a
+        file-store agent never borrows a shared sandbox, and the agent's serialized form stays as is.
+        """
+        workspace = self.sandbox_backend or self.file_store_backend
+        if not artifact_tools or workspace is not None:
+            for tool in artifact_tools:
+                tool.workspace = workspace
+            return []
+
+        scratch = InMemoryFileStore()
+        for tool in artifact_tools:
+            tool.workspace = scratch
+        return [
+            FileReadTool(file_store=scratch, llm=self.llm),
+            FileWriteTool(file_store=scratch),
+            FileListTool(file_store=scratch),
+        ]
 
     def _is_input_output_trace_message(self, message: Message) -> bool:
         """Return True when a message is an internal ReAct/tool-trace entry."""

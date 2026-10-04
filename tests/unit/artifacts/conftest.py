@@ -42,17 +42,30 @@ class FakeArtifactBackend(ArtifactBackend):
             url=f"https://app.example/artifacts/{artifact_id}",
         )
         self._artifacts[artifact_id] = artifact
-        self._add_version(artifact, content, name, description)
+        self._add_version(artifact, content, name, description, entry_path=entry_path)
         return artifact.model_copy(deep=True)
 
     def update(
         self, artifact_id, *, content, name=None, description=None, mime_type=None, entry_path=None, if_match=None
     ):
-        self.calls.append(("update", {"artifact_id": artifact_id, "content": content, "if_match": if_match}))
+        self.calls.append(
+            (
+                "update",
+                {
+                    "artifact_id": artifact_id,
+                    "content": content,
+                    "if_match": if_match,
+                    "mime_type": mime_type,
+                    "entry_path": entry_path,
+                },
+            )
+        )
         artifact = self._find(artifact_id)
         if if_match and if_match != artifact.latest_version.id:
             raise ArtifactConflictError(f"Artifact '{artifact_id}' changed", "update", artifact_id)
-        self._add_version(artifact, content, name or artifact.name, description)
+        if mime_type:
+            artifact.mime_type = mime_type
+        self._add_version(artifact, content, name or artifact.name, description, entry_path=entry_path)
         return artifact.model_copy(deep=True)
 
     def get(self, artifact_id, version=None, include_content=True):
@@ -99,10 +112,20 @@ class FakeArtifactBackend(ArtifactBackend):
             raise ArtifactNotFoundError(f"Artifact '{artifact_id}' not found", "get", artifact_id)
         return artifact
 
-    def _add_version(self, artifact: Artifact, content: str | bytes, name: str, description: str | None = None):
+    def _add_version(
+        self,
+        artifact: Artifact,
+        content: str | bytes,
+        name: str,
+        description: str | None = None,
+        entry_path: str | None = None,
+    ):
         versions = self._versions.setdefault(artifact.id, [])
         raw = content.encode() if isinstance(content, str) else content
         number = len(versions) + 1
+        # The platform opens a bundle on index.html unless told otherwise, on every version.
+        if artifact.kind == ArtifactKind.BUNDLE and entry_path is None:
+            entry_path = "index.html"
         version = ArtifactVersion(
             id=f"{artifact.id}-v{number}",
             artifact_id=artifact.id,
@@ -112,6 +135,7 @@ class FakeArtifactBackend(ArtifactBackend):
             mime_type=artifact.mime_type,
             size=len(raw),
             checksum="sha256:" + hashlib.sha256(raw).hexdigest(),
+            entry_path=entry_path,
         )
         versions.append((version, content))
         artifact.name = name

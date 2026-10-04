@@ -84,19 +84,28 @@ for it with 'list' (narrow with 'kind') and read it with 'get' before answering.
 its content; never guess what it says.
 
 Use an artifact when the deliverable is text-based and viewable on its own: an HTML page or \
-report, a Markdown document, an SVG or Mermaid diagram, a CSV/JSON dataset, a code file. \
-Create it once with 'create'; when the user asks for changes, 'update' the SAME artifact_id \
-(use 'edits' for small changes) instead of creating a new one. If the user refers to an \
-artifact from earlier, find it with 'list' rather than creating another.
-If the file already exists in your workspace, pass 'path' instead of retyping its content. \
-A site of several files goes up as one zip with index.html at its root, by 'path' with kind 'bundle'.
+report, a Markdown document, an SVG or Mermaid diagram, a CSV/JSON dataset, a code file.
+
+Artifacts move as files in your workspace:
+- New: write the file with your file tools, then 'create' it with a 'name'. Writing a file is not \
+delivering it: the user cannot see your workspace. A deliverable reaches the user only when you \
+'create' it (or 'update' an existing one) before you answer.
+- Change: 'get' the artifact (it is saved into your workspace), change that file with your file \
+tools or a script, then 'update' with that file and the artifact's 'artifact_id'. It becomes the \
+next version. Never 'create' a changed copy: that makes a second artifact. If the user refers to \
+an artifact from earlier, find it with 'list' first.
+- Any file can become an artifact's next version with 'update', including one a program wrote \
+elsewhere (a regenerated chart or report), once you have loaded the artifact with 'get' or \
+created it in this conversation.
+An artifact's kind never changes. A site of several files is one zip with index.html at its root, \
+created with kind 'bundle'.
 
 Use output files instead for binaries and office formats (xlsx, docx, pptx, pdf, a zip that is \
 not a site, images produced by tools), and for anything the user did not ask to keep.
 
 Never return the same deliverable both ways. Do not paste an artifact's content into your \
-answer; mention its name and link. Use 'share' only when the user asks for a link others can \
-open: anyone with it can read the artifact.
+answer; mention its name and link. You cannot make a public link: when the user wants one, tell \
+them to share the artifact from its page.
 HTML must be self-contained: inline CSS and JS."""
 
 SANDBOX_OUTPUT_FILES_RULE = "- Always return requested files as output files so the user can access them."
