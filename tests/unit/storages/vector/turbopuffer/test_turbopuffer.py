@@ -268,14 +268,30 @@ def test_hybrid_retrieval_fuses_relative_scores(store, namespace):
     assert [(d.id, round(d.score, 4)) for d in documents] == [("a", 0.75), ("b", 0.375), ("c", 0.25)]
 
 
-def test_hybrid_retrieval_drops_distant_vector_matches(store, namespace):
-    namespace.multi_query.return_value = SimpleNamespace(
-        results=[SimpleNamespace(rows=[_row("a", dist=0.1), _row("b", dist=0.9)]), SimpleNamespace(rows=[])]
-    )
+def test_hybrid_retrieval_with_alpha_one_runs_only_the_vector_search(store, namespace):
+    namespace.query.return_value = SimpleNamespace(rows=[_row("a", dist=0.1), _row("b", dist=0.9)])
 
     documents = store._hybrid_retrieval([0.1, 0.2, 0.3], "fox", alpha=1.0, max_vector_distance=0.5)
 
+    namespace.multi_query.assert_not_called()
+    assert namespace.query.call_args.kwargs["rank_by"][:2] == ["vector", "ANN"]
     assert [(d.id, d.score) for d in documents] == [("a", 1.0)]
+
+
+def test_hybrid_retrieval_with_alpha_zero_runs_only_the_keyword_search(store, namespace):
+    namespace.query.return_value = SimpleNamespace(rows=[_row("c", dist=4.0), _row("d", dist=2.0)])
+
+    documents = store._hybrid_retrieval([0.1, 0.2, 0.3], "fox", top_k=10, alpha=0.0)
+
+    namespace.multi_query.assert_not_called()
+    assert namespace.query.call_args.kwargs["rank_by"][0] == "Sum"
+    assert [(d.id, d.score) for d in documents] == [("c", 1.0), ("d", 0.0)]
+
+
+def test_hybrid_retrieval_with_alpha_zero_and_blank_query_returns_nothing(store, namespace):
+    assert store._hybrid_retrieval([0.1, 0.2, 0.3], " ", alpha=0.0) == []
+    namespace.query.assert_not_called()
+    namespace.multi_query.assert_not_called()
 
 
 def test_get_documents_by_id(store, namespace):
@@ -425,3 +441,18 @@ def test_delete_by_filters_normalizes_values_like_writes(store, namespace):
     store.delete_documents_by_filters({"field": "page_number", "operator": "!=", "value": Decimal(3)})
 
     assert namespace.write.call_args.kwargs == {"delete_by_filter": ["page_number", "NotEq", 3]}
+
+
+def test_write_documents_declares_new_numbers_as_floats(store, namespace):
+    store.write_documents(
+        [
+            Document(id="d1", content="c", metadata={"rating": 4, "ids": [1, 2]}),
+            Document(id="d2", content="c", metadata={"rating": 4.5, "ids": [3.5]}),
+        ]
+    )
+
+    params = namespace.write.call_args.kwargs
+    assert params["schema"]["rating"] == {"type": "float"}
+    assert params["schema"]["ids"] == {"type": "[]float"}
+    assert [row["rating"] for row in params["upsert_rows"]] == [4.0, 4.5]
+    assert [row["ids"] for row in params["upsert_rows"]] == [[1.0, 2.0], [3.5]]

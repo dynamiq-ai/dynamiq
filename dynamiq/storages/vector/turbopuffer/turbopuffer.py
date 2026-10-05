@@ -729,6 +729,8 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
         Both searches run in one request. Their scores are fused like Weaviate's relative score
         fusion: each result list is scaled to [0, 1], and the fused score is alpha times the vector
         score plus (1 - alpha) times the keyword score, so fused scores stay comparable to Weaviate's.
+        As in Weaviate, an alpha of 0.0 runs only the keyword search and 1.0 only the vector search,
+        so the other search cannot fill the results.
 
         Args:
             query_embedding (list[float]): The query embedding.
@@ -748,31 +750,38 @@ class TurbopufferVectorStore(BaseVectorStore, DryRunMixin):
         alpha = self.alpha if alpha is None else alpha
         top_k = self._top_k(top_k)
 
-        def build() -> list[dict[str, Any]] | None:
+        def build() -> list[tuple[str, dict[str, Any]]] | None:
             converted = self._filter(filters)
             if converted is MATCH_NONE:
                 return None
             common = self._with_filter({"top_k": top_k, **self._attributes(not exclude_document_embeddings)}, converted)
-            queries = [{"rank_by": [VECTOR_ATTRIBUTE, "ANN", list(query_embedding)], **common}]
-            rank_by = self._bm25_rank_by(query, content_key) if query and query.strip() else None
-            if rank_by is not None:
-                queries.append({"rank_by": rank_by, **common})
-            return queries
+            queries = []
+            if alpha > 0:
+                queries.append(("vector", {"rank_by": [VECTOR_ATTRIBUTE, "ANN", list(query_embedding)], **common}))
+            if alpha < 1 and query and query.strip():
+                rank_by = self._bm25_rank_by(query, content_key)
+                if rank_by is not None:
+                    queries.append(("keyword", {"rank_by": rank_by, **common}))
+            return queries or None
 
-        def execute(queries: list[dict[str, Any]]) -> list:
+        def execute(queries: list[tuple[str, dict[str, Any]]]) -> list[tuple[str, list["Row"]]]:
+            kinds = [kind for kind, _ in queries]
             try:
-                return list(self._namespace.multi_query(queries=queries).results)
+                if len(queries) == 1:
+                    results = [self._namespace.query(**queries[0][1])]
+                else:
+                    results = self._namespace.multi_query(queries=[params for _, params in queries]).results
             except NotFoundError:
                 return []
+            return [(kind, list(result.rows or [])) for kind, result in zip(kinds, results)]
 
-        results = self._read(build, execute)
-        if not results:
-            return []
-
-        vector_rows = list(results[0].rows or [])
+        results = dict(self._read(build, execute))
+        vector_rows = results.get("vector", [])
         if max_vector_distance is not None:
             vector_rows = [row for row in vector_rows if self._distance(row) <= max_vector_distance]
-        keyword_rows = list(results[1].rows or []) if len(results) > 1 else []
+        keyword_rows = results.get("keyword", [])
+        if not vector_rows and not keyword_rows:
+            return []
 
         vector_scores = self._relative_scores(vector_rows, lower_is_better=True)
         keyword_scores = self._relative_scores(keyword_rows, lower_is_better=False)

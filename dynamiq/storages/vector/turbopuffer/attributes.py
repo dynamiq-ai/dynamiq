@@ -13,8 +13,8 @@ from enum import Enum
 from typing import Any
 
 MAX_FILTERABLE_BYTES = 4096
-MAX_INT = 2**63 - 1
-MIN_INT = -(2**63)
+# Numbers are stored as floats, which hold integers exactly only up to this magnitude.
+MAX_EXACT_INT = 2**53
 
 STRING = "string"
 INT = "int"
@@ -43,7 +43,8 @@ def _scalar(value: Any) -> Any:
     """Return a plain Python scalar for value, or None when it has no usable value.
 
     Subclasses of str, int and float (as returned by PDF parsers, for example) become their base
-    type, so they serialize like ordinary values.
+    type, so they serialize like ordinary values. Integers too large for a float to hold exactly
+    become strings, so they keep every digit.
     """
     if value is None:
         return None
@@ -53,7 +54,7 @@ def _scalar(value: Any) -> Any:
         return _scalar(value.value)
     if isinstance(value, int):
         value = int(value)
-        return value if MIN_INT <= value <= MAX_INT else str(value)
+        return value if abs(value) <= MAX_EXACT_INT else str(value)
     if isinstance(value, float):
         value = float(value)
         return value if math.isfinite(value) else None
@@ -104,8 +105,11 @@ def normalize_value(value: Any) -> Any:
 def infer_type(value: Any) -> str:
     """Return the Turbopuffer type for a normalized value.
 
-    An empty list is typed as a list of strings, the most common list in document metadata, so an
-    empty access list still declares a filterable attribute.
+    Every number is typed as a float, as Weaviate's auto-schema does. The first value fixes an
+    attribute's type, and a field such as a rating often starts with a whole number before holding
+    fractional ones, which an int attribute would drop. An empty list is typed as a list of strings,
+    the most common list in document metadata, so an empty access list still declares a filterable
+    attribute.
     """
     if isinstance(value, list):
         if not value:
@@ -113,9 +117,7 @@ def infer_type(value: Any) -> str:
         return f"[]{infer_type(value[0])}"
     if isinstance(value, bool):
         return BOOL
-    if isinstance(value, int):
-        return INT
-    if isinstance(value, float):
+    if isinstance(value, (int, float)):
         return FLOAT
     return STRING
 
