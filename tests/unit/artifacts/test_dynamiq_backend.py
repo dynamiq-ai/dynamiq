@@ -12,6 +12,7 @@ from dynamiq.artifacts import (
     ArtifactKind,
     ArtifactNotFoundError,
     ArtifactPermissionError,
+    default_mime_type,
     infer_kind,
 )
 from dynamiq.artifacts.backends import Dynamiq
@@ -356,3 +357,27 @@ def test_serialization_withholds_credentials_unless_asked(backend):
 )
 def test_infer_kind_from_extension(file_name, kind):
     assert infer_kind(file_name) == kind
+
+
+@pytest.mark.parametrize(
+    "file_name, host_guess",
+    [
+        ("main.rs", "application/rls-services+xml"),
+        ("app.ts", "text/vnd.trolltech.linguist"),
+        ("app.ts", "video/mp2t"),
+        ("run.sh", "application/x-sh"),
+        ("query.sql", "application/x-sql"),
+    ],
+)
+def test_code_is_plain_text_whatever_the_host_guesses(file_name, host_guess, mocker):
+    mocker.patch("dynamiq.artifacts.types.mimetypes.guess_type", return_value=(host_guess, None))
+
+    assert default_mime_type(ArtifactKind.CODE, file_name) == "text/plain"
+
+
+@pytest.mark.parametrize("kind", [ArtifactKind.FILE, ArtifactKind.IMAGE])
+def test_files_and_images_take_the_file_names_type(kind, mocker):
+    mocker.patch("dynamiq.artifacts.types.mimetypes.guess_type", return_value=("application/x-guessed", None))
+
+    assert default_mime_type(kind, "any.bin") == "application/x-guessed"
+    assert default_mime_type(kind, None) == ("application/octet-stream" if kind == ArtifactKind.FILE else "image/png")

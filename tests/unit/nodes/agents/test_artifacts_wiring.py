@@ -1,3 +1,4 @@
+import io
 import json
 
 import pytest
@@ -88,7 +89,7 @@ def test_an_agent_without_a_workspace_gets_a_scratch_one_per_run(llm, store):
 
     extra = agent._attach_artifact_workspace(tools)
 
-    assert [t.name for t in extra] == ["file-read", "file-write", "file-list"]
+    assert [t.name for t in extra] == ["file-read", "file-search", "file-write", "file-list"]
     assert all(t.file_store is tools[0].workspace for t in extra), "the tools and the artifact share one workspace"
     assert not agent.file_store.enabled, "attached per run, not configured: shared-sandbox borrowing is unaffected"
     assert agent.to_dict()["file_store"]["enabled"] is False
@@ -201,6 +202,16 @@ def _file_write(tool_input: dict) -> str:
     return f"Thought: I will write the file.\nAction: file-write\nAction Input: {json.dumps(tool_input)}"
 
 
+def _file_read(tool_input: dict) -> str:
+    return f"Thought: I will read the file.\nAction: file-read\nAction Input: {json.dumps(tool_input)}"
+
+
+def _csv_upload():
+    upload = io.BytesIO(b"region,total\nnorth,42\n")
+    upload.name = "data.csv"
+    return upload
+
+
 def test_a_run_writes_files_and_returns_every_artifact_it_published(llm, store, mocker):
     """No sandbox or file store: the run gets a scratch workspace, and the model sees its file tools."""
     completion = _replies(
@@ -239,6 +250,44 @@ def test_a_run_writes_files_and_returns_every_artifact_it_published(llm, store, 
     artifact_events = [e for e in tool_events if e["tool"]["action_type"] == "artifact"]
     assert len(artifact_events) == 3
     assert artifact_events[-1]["output"]["artifact"]["version"] == 2
+
+
+def test_an_upload_lands_in_the_scratch_workspace(llm, store, mocker):
+    """No sandbox or file store: the upload shares the scratch store, so the file tools and the artifact reach it."""
+    completion = _replies(
+        mocker,
+        _file_read({"file_path": "data.csv"}),
+        _action({"action": "create", "path": "data.csv", "name": "Data"}),
+        "Thought: Done.\nAnswer: Published.",
+    )
+    agent = Agent(name="a", llm=llm, artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT)
+
+    result = agent.run({"input": "Publish the attached data", "files": [_csv_upload()]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    system_prompt = completion.call_args_list[0].kwargs["messages"][0]["content"]
+    for name in ["file-read", "file-search", "file-write", "file-list"]:
+        assert system_prompt.count(f"- {name}:") == 1, f"{name} is attached once"
+    assert "north,42" in json.dumps(completion.call_args_list[1].kwargs["messages"], default=str)
+    assert store.get("a1")[1] == "region,total\nnorth,42\n"
+    assert not agent.file_store.enabled, "the upload did not turn the agent into a file-store agent"
+
+
+def test_a_later_run_still_gets_a_writable_scratch_workspace(llm, store, mocker):
+    _replies(
+        mocker,
+        "Thought: Nothing to do.\nAnswer: Received.",
+        _file_write({"action": "write", "file_path": "notes.md", "content": "# Notes"}),
+        _action({"action": "create", "path": "notes.md", "name": "Notes"}),
+        "Thought: Done.\nAnswer: Published.",
+    )
+    agent = Agent(name="a", llm=llm, artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT)
+
+    agent.run({"input": "Keep this file", "files": [_csv_upload()]})
+    result = agent.run({"input": "Write and publish notes"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert store.get("a1")[1] == "# Notes"
 
 
 def test_a_run_without_artifacts_has_no_artifacts_key(llm, store, mocker):

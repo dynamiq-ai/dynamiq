@@ -1,12 +1,11 @@
 import json
-import mimetypes
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import click
 
-from dynamiq.artifacts import ArtifactKind, infer_kind
+from dynamiq.artifacts import ArtifactKind, default_mime_type, infer_kind
 from dynamiq.cli.client import ApiClient, ok
 from dynamiq.cli.commands.context import with_api_and_settings
 from dynamiq.cli.commands.workflow import echo_list, echo_response, pagination_options
@@ -26,7 +25,7 @@ artifact = click.Group(
 def _upload(api: ApiClient, path: str, file_path: str, fields: dict, *, headers: dict | None, retry: bool):
     """Send one file with its fields as the JSON `data` part; None-valued fields are left out."""
     name = os.path.basename(file_path)
-    mime_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    mime_type = default_mime_type(ArtifactKind(fields.get("kind") or infer_kind(name)), name)
     data = {"data": json.dumps({k: v for k, v in fields.items() if v is not None})}
     with open(file_path, "rb") as handle:
         return api.post(path, headers=headers, data=data, files={"file": (name, handle, mime_type)}, retry=retry)

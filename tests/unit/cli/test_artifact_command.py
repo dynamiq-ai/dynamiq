@@ -122,6 +122,18 @@ def test_publish_with_artifact_id_adds_a_version(report):
     assert kwargs["retry"] is True, "the same content returns the latest version, so a retry is harmless"
 
 
+def test_code_is_uploaded_as_plain_text_whatever_the_host_guesses(tmp_path, mocker):
+    mocker.patch("dynamiq.artifacts.types.mimetypes.guess_type", return_value=("application/rls-services+xml", None))
+    source = tmp_path / "main.rs"
+    source.write_text("fn main() {}")
+
+    for args in (["publish", str(source), "--name", "Main"], ["update", "a1", str(source)]):
+        result, api = invoke(args)
+
+        assert result.exit_code == 0, result.output
+        assert api.calls[0][2]["files"]["file"][2] == "text/plain"
+
+
 def test_update_sends_if_match(report):
     result, api = invoke(["update", "a1", report, "--if-match", "v2"])
 

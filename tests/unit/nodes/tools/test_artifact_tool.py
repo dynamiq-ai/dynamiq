@@ -298,6 +298,19 @@ def test_a_file_artifact_takes_another_format_with_its_type(backend, workspace):
     assert update["mime_type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
+def test_code_is_published_as_plain_text_whatever_the_host_guesses(tool, backend, workspace, mocker):
+    """Some hosts map .rs to an XML type; the share link would then serve Rust source as XML."""
+    mocker.patch("dynamiq.artifacts.types.mimetypes.guess_type", return_value=("application/rls-services+xml", None))
+    _write(workspace, "main.rs", "fn main() {}")
+
+    _run(tool, action="create", path="main.rs", name="Main")
+    assert backend.get("a1")[0].mime_type == "text/plain"
+
+    _write(workspace, "main.rs", 'fn main() { println!("hi"); }')
+    _run(tool, action="update", path="main.rs", artifact_id="a1")
+    assert backend.calls[-1][1]["mime_type"] == "text/plain", "a new version keeps the type"
+
+
 def test_a_binary_artifact_changes_through_its_file(backend, workspace):
     _existing(backend, file_name="q3.png", kind=ArtifactKind.IMAGE, content=PNG)
     tool = ArtifactTool(backend=backend, workspace=workspace)

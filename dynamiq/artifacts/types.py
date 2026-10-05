@@ -148,10 +148,14 @@ def infer_kind(file_name: str | None, mime_type: str | None = None) -> ArtifactK
 
 
 def default_mime_type(kind: ArtifactKind, file_name: str | None = None) -> str:
-    """MIME type for a kind, preferring what the file name says when it is more specific."""
-    guessed = mimetypes.guess_type(file_name)[0] if file_name else None
-    if guessed and kind in (ArtifactKind.CODE, ArtifactKind.IMAGE, ArtifactKind.FILE):
-        return guessed
+    """MIME type for a kind; images and plain files take the file name's type when it has one.
+
+    Code is always text/plain: the host's MIME database maps some code extensions to unrelated types.
+    """
+    if kind in (ArtifactKind.IMAGE, ArtifactKind.FILE) and file_name:
+        guessed = mimetypes.guess_type(file_name)[0]
+        if guessed:
+            return guessed
     return _DEFAULT_MIME_TYPES[kind]
 
 

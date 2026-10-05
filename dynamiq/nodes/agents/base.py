@@ -890,10 +890,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 if self.sandbox_backend:
                     file_paths = self._upload_files_to_sandbox(normalized_files)
                 else:
-                    if not self.file_store_backend:
+                    # An artifact run's scratch workspace takes the uploads too: one store, one set of file tools.
+                    file_store = self.file_store_backend or (artifact_tools[0].workspace if artifact_tools else None)
+                    if not file_store:
                         self._setup_in_memory_file_store_and_tools()
-                    if self.file_store_backend:
-                        file_paths = self._upload_files_to_file_store(normalized_files)
+                        file_store = self.file_store_backend
+                    if file_store:
+                        file_paths = self._upload_files_to_file_store(normalized_files, file_store)
                 input_message = self._inject_attached_files_into_message(
                     input_message, normalized_files, file_paths=file_paths
                 )
@@ -1120,8 +1123,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         """Point the artifact tool at this run's workspace, returning file tools for one it adds.
 
         Artifacts move as files, so a run with no sandbox (own or borrowed) and no file store gets a
-        scratch in-memory one. It is attached per run rather than as a configured file store: a
-        file-store agent never borrows a shared sandbox, and the agent's serialized form stays as is.
+        scratch in-memory one, which also takes the run's uploads. It is attached per run rather than
+        as a configured file store: a file-store agent never borrows a shared sandbox, and the agent's
+        serialized form stays as is.
         """
         workspace = self.sandbox_backend or self.file_store_backend
         if not artifact_tools or workspace is not None:
@@ -1134,6 +1138,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             tool.workspace = scratch
         return [
             FileReadTool(file_store=scratch, llm=self.llm),
+            FileSearchTool(file_store=scratch),
             FileWriteTool(file_store=scratch),
             FileListTool(file_store=scratch),
         ]
@@ -2230,14 +2235,15 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     logger.warning(f"Failed to upload file {file_name} to sandbox: {e}")
         return file_paths
 
-    def _upload_files_to_file_store(self, normalized_files: list) -> list[str]:
-        """Store file-like objects in the file store backend."""
+    def _upload_files_to_file_store(self, normalized_files: list, file_store: FileStore | None = None) -> list[str]:
+        """Store file-like objects in ``file_store``, by default the agent's file store backend."""
+        file_store = file_store or self.file_store_backend
         file_paths = [""] * len(normalized_files)
         seen_names: set[str] = set()
 
         def file_exists(candidate: str) -> bool:
             try:
-                return bool(self.file_store_backend.exists(candidate))
+                return bool(file_store.exists(candidate))
             except Exception:
                 return False
 
@@ -2253,7 +2259,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     content = content.encode("utf-8")
                 description = getattr(file_obj, "description", "User-provided file")
                 unique_file_name = self._get_unique_upload_filename(file_name, seen_names, exists_check=file_exists)
-                self.file_store_backend.store(
+                file_store.store(
                     file_path=unique_file_name,
                     content=content,
                     content_type=getattr(file_obj, "content_type", "application/octet-stream"),
