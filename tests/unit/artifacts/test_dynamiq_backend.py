@@ -256,6 +256,43 @@ def test_list_sends_the_owner_and_filters(client):
     assert [a.id for a in artifacts] == ["a1"]
 
 
+@pytest.mark.parametrize("configured", [None, "default-user"])
+def test_a_calls_end_user_overrides_the_configured_one(client, configured):
+    """An agent passes the run's user_id per call: one backend serves every end user of an app."""
+    backend = _backend(artifact_store_id="s1", user_id=configured)
+    client.request.return_value = _response({"data": {**ARTIFACT, "store_id": "s1", "user_id": "customer-a"}})
+
+    backend.create(file_name="q3.html", name="Q3", kind=ArtifactKind.HTML, content="<html/>", user_id="customer-a")
+    assert client.request.call_args.kwargs["json"]["user_id"] == "customer-a"
+
+    backend.get("a1", include_content=False, user_id="customer-a")
+    with pytest.raises(ArtifactNotFoundError):
+        backend.get("a1", include_content=False, user_id="customer-b")
+
+    client.request.return_value = _response({"data": []})
+    backend.list(user_id="customer-a")
+    assert client.request.call_args.kwargs["params"]["user_id"] == "customer-a"
+
+
+def test_without_a_call_end_user_the_configured_one_applies(client):
+    backend = _backend(artifact_store_id="s1", user_id="customer-42")
+    client.request.return_value = _response({"data": []})
+
+    backend.list()
+
+    assert client.request.call_args.kwargs["params"]["user_id"] == "customer-42"
+
+
+def test_outside_a_store_a_calls_end_user_does_not_apply(backend, client):
+    """Without a store the artifacts belong to the token's user; a chat run's user_id names no end user."""
+    client.request.return_value = _response({"data": ARTIFACT})
+
+    backend.create(file_name="q3.html", name="Q3", kind=ArtifactKind.HTML, content="<html/>", user_id="chat-user")
+    backend.get("a1", include_content=False, user_id="chat-user")
+
+    assert "user_id" not in client.request.call_args_list[0].kwargs["json"]
+
+
 def test_share_pins_a_version_and_an_expiry(backend, client):
     share = {"id": "sh1", "artifact_id": "a1", "pinned_version_id": "v2", "url": "https://app.example/a/sh1"}
     client.request.side_effect = [

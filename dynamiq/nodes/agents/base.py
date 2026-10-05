@@ -795,7 +795,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 len(ltm_tools),
                 ", ".join(t.name for t in ltm_tools),
             )
-        artifact_tools = self._build_artifact_tool()
+        artifact_tools = self._build_artifact_tool(input_data)
         run_tools = ltm_tools + self._build_memory_store_tool(input_data) + artifact_tools
         # Always set — a sub-agent without LTM would otherwise inherit the
         # parent's overlay via `ContextAwareThreadPoolExecutor`.
@@ -1106,18 +1106,25 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             )
         ]
 
-    def _build_artifact_tool(self) -> list[Node]:
+    def _build_artifact_tool(self, input_data: "AgentInputSchema") -> list[Node]:
         """Construct the per-run artifact tool, or [] when artifacts are not enabled.
 
         Per run so the files and versions the tool tracks never leak between concurrent runs of one
-        agent.
+        agent, and so the run's ``user_id`` is bound into the instance, as for the memory-store tool:
+        within an artifact store, one end user must not reach another's artifacts.
         """
         if not self.artifacts_backend:
             return []
         from dynamiq.nodes.tools.artifact_tool import ArtifactTool
 
         workspace = self.sandbox_backend or self.file_store_backend
-        return [ArtifactTool(backend=self.artifacts_backend, workspace=workspace)]
+        return [
+            ArtifactTool(
+                backend=self.artifacts_backend,
+                workspace=workspace,
+                user_id=getattr(input_data, "user_id", None),
+            )
+        ]
 
     def _attach_artifact_workspace(self, artifact_tools: list[Node]) -> list[Node]:
         """Point the artifact tool at this run's workspace, returning file tools for one it adds.

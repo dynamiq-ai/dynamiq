@@ -12,6 +12,8 @@ class ArtifactBackend(abc.ABC, BaseModel):
 
     Every write creates a new immutable version; nothing is mutated in place. Ownership and access
     are derived from the backend's credentials and configuration, never supplied by the agent.
+    ``user_id`` on each call is the end user it is for, the run's own; it overrides whatever default
+    the backend was configured with, and a backend without end users ignores it.
 
     ``_clone_shared`` tells ``Node.clone()`` to share this instance by reference rather than
     deep-copying it, so parallel cloned tools reach the same backend.
@@ -52,6 +54,7 @@ class ArtifactBackend(abc.ABC, BaseModel):
         mime_type: str | None = None,
         description: str | None = None,
         entry_path: str | None = None,
+        user_id: str | None = None,
     ) -> Artifact:
         """Create an artifact with its first version. ``entry_path`` applies to bundles only."""
 
@@ -66,6 +69,7 @@ class ArtifactBackend(abc.ABC, BaseModel):
         mime_type: str | None = None,
         entry_path: str | None = None,
         if_match: str | None = None,
+        user_id: str | None = None,
     ) -> Artifact:
         """Add a version with the full content and return the artifact at that version.
 
@@ -76,7 +80,7 @@ class ArtifactBackend(abc.ABC, BaseModel):
 
     @abc.abstractmethod
     def get(
-        self, artifact_id: str, version: int | None = None, include_content: bool = True
+        self, artifact_id: str, version: int | None = None, include_content: bool = True, user_id: str | None = None
     ) -> tuple[Artifact, str | bytes | None]:
         """Return an artifact and, when asked, the content of the requested (default latest) version.
 
@@ -87,12 +91,17 @@ class ArtifactBackend(abc.ABC, BaseModel):
         """
 
     @abc.abstractmethod
-    def list(self, *, kind: ArtifactKind | None = None, limit: int = 50) -> list[Artifact]:
+    def list(self, *, kind: ArtifactKind | None = None, limit: int = 50, user_id: str | None = None) -> list[Artifact]:
         """List the artifacts the backend reaches, most recently updated first."""
 
     @abc.abstractmethod
     def share(
-        self, artifact_id: str, *, pinned_version: int | None = None, expires_at: datetime | None = None
+        self,
+        artifact_id: str,
+        *,
+        pinned_version: int | None = None,
+        expires_at: datetime | None = None,
+        user_id: str | None = None,
     ) -> ArtifactShare:
         """Create the artifact's link share, or update the active one, and return it.
 
@@ -101,5 +110,5 @@ class ArtifactBackend(abc.ABC, BaseModel):
         """
 
     @abc.abstractmethod
-    def unshare(self, artifact_id: str) -> None:
+    def unshare(self, artifact_id: str, *, user_id: str | None = None) -> None:
         """Revoke the artifact's link share. Sharing again creates a new link."""

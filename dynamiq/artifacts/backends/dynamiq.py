@@ -43,10 +43,10 @@ class Dynamiq(ArtifactBackend):
     Without ``artifact_store_id`` the artifacts belong to the user behind the connection's token, in
     the token's org: a conversation token in a chat. With it they belong to that artifact store,
     which the platform's own connection reaches in app runs, and ``user_id`` keeps one end user's
-    artifacts apart from another's. The platform does not check the store or the end user when an
-    artifact is read by id, so this backend does: another store's or end user's artifact reads as
-    not found. Requests go through ``connection.connect()`` synchronously, as in
-    ``DynamiqMemoryStore``.
+    artifacts apart from another's; a call's own ``user_id``, the run's, overrides it. The platform
+    does not check the store or the end user when an artifact is read by id, so this backend does:
+    another store's or end user's artifact reads as not found. Requests go through
+    ``connection.connect()`` synchronously, as in ``DynamiqMemoryStore``.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -57,7 +57,8 @@ class Dynamiq(ArtifactBackend):
     )
     user_id: str | None = Field(
         default=None,
-        description="End user of the app the artifacts belong to, within the store. Not a Dynamiq user.",
+        description="Default end user of the app the artifacts belong to, within the store. Not a Dynamiq user. "
+        "A run's user_id overrides it.",
     )
     timeout: float = Field(default=60, description="Timeout in seconds for API requests.")
 
@@ -92,12 +93,13 @@ class Dynamiq(ArtifactBackend):
         mime_type: str | None = None,
         description: str | None = None,
         entry_path: str | None = None,
+        user_id: str | None = None,
     ) -> Artifact:
         """Create an artifact: text kinds as JSON, everything else as an upload."""
         kind = ArtifactKind(kind)
         mime_type = mime_type or default_mime_type(kind, file_name)
         fields = {
-            **self._owner(),
+            **self._owner(user_id),
             "file_name": file_name,
             "name": name,
             "description": description,
@@ -125,9 +127,10 @@ class Dynamiq(ArtifactBackend):
         mime_type: str | None = None,
         entry_path: str | None = None,
         if_match: str | None = None,
+        user_id: str | None = None,
     ) -> Artifact:
         """Add a version: text kinds as JSON, everything else as an upload."""
-        artifact = self._fetch(artifact_id, operation="update")
+        artifact = self._fetch(artifact_id, operation="update", user_id=user_id)
         fields = {"name": name, "description": description, "mime_type": mime_type}
         headers = {"If-Match": f'"{if_match}"'} if if_match else None
         if isinstance(content, str) and artifact.kind in TEXT_KINDS:
@@ -160,10 +163,10 @@ class Dynamiq(ArtifactBackend):
         )
 
     def get(
-        self, artifact_id: str, version: int | None = None, include_content: bool = True
+        self, artifact_id: str, version: int | None = None, include_content: bool = True, user_id: str | None = None
     ) -> tuple[Artifact, str | bytes | None]:
         """Fetch the artifact, then the version's bytes when asked; text kinds come back decoded."""
-        artifact = self._fetch(artifact_id, operation="get")
+        artifact = self._fetch(artifact_id, operation="get", user_id=user_id)
         if not include_content:
             return artifact, None
 
@@ -184,20 +187,25 @@ class Dynamiq(ArtifactBackend):
             content = content.decode("utf-8", errors="replace")
         return artifact, content
 
-    def list(self, *, kind: ArtifactKind | None = None, limit: int = 50) -> list[Artifact]:
+    def list(self, *, kind: ArtifactKind | None = None, limit: int = 50, user_id: str | None = None) -> list[Artifact]:
         """List the store's artifacts, or the token user's own, most recently updated first."""
         # The platform pages between 10 and 500 items.
-        params: dict[str, Any] = {**self._owner(), "page_size": min(max(limit, 10), 500), "sort": "-updated_at"}
+        params: dict[str, Any] = {**self._owner(user_id), "page_size": min(max(limit, 10), 500), "sort": "-updated_at"}
         if kind:
             params["kind"] = ArtifactKind(kind).value
         data = self._request(HTTPMethod.GET, operation="list", params=params)
         return [self._to_artifact(item) for item in (data or [])][:limit]
 
     def share(
-        self, artifact_id: str, *, pinned_version: int | None = None, expires_at: datetime | None = None
+        self,
+        artifact_id: str,
+        *,
+        pinned_version: int | None = None,
+        expires_at: datetime | None = None,
+        user_id: str | None = None,
     ) -> ArtifactShare:
         """Create or update the link share. A naive ``expires_at`` is taken as UTC."""
-        self._fetch(artifact_id, operation="share")
+        self._fetch(artifact_id, operation="share", user_id=user_id)
         body: dict[str, Any] = {}
         if pinned_version is not None:
             body["pinned_version_id"] = self._version_id(artifact_id, pinned_version, operation="share")
@@ -217,21 +225,27 @@ class Dynamiq(ArtifactBackend):
             expires_at=_parse_datetime(data.get("expires_at")),
         )
 
-    def unshare(self, artifact_id: str) -> None:
+    def unshare(self, artifact_id: str, *, user_id: str | None = None) -> None:
         """Revoke the link share; the artifact becomes private."""
-        self._fetch(artifact_id, operation="unshare")
+        self._fetch(artifact_id, operation="unshare", user_id=user_id)
         self._request(HTTPMethod.DELETE, f"/{artifact_id}/share", operation="unshare", artifact_id=artifact_id)
 
-    def _owner(self) -> dict[str, str]:
-        """The store and end user fields of a create or a list, when set."""
-        return _compact({"store_id": self.artifact_store_id, "user_id": self.user_id})
+    def _scope(self, user_id: str | None) -> str | None:
+        """The end user a call is for: the run's, else the configured default. End users exist only
+        in a store; without one the artifacts belong to the token's user."""
+        return (user_id or self.user_id) if self.artifact_store_id is not None else None
 
-    def _fetch(self, artifact_id: str, operation: str) -> Artifact:
+    def _owner(self, user_id: str | None = None) -> dict[str, str]:
+        """The store and end user fields of a create or a list, when set."""
+        return _compact({"store_id": self.artifact_store_id, "user_id": self._scope(user_id)})
+
+    def _fetch(self, artifact_id: str, operation: str, user_id: str | None = None) -> Artifact:
         """Fetch an artifact, refusing one outside the backend's store or end user."""
         data = self._request(HTTPMethod.GET, f"/{artifact_id}", operation=operation, artifact_id=artifact_id)
         artifact = self._to_artifact(data or {})
+        scope = self._scope(user_id)
         outside_store = self.artifact_store_id is not None and artifact.store_id != self.artifact_store_id
-        other_user = self.user_id is not None and artifact.user_id != self.user_id
+        other_user = scope is not None and artifact.user_id != scope
         if not data or outside_store or other_user:
             raise ArtifactNotFoundError(
                 f"Artifact '{artifact_id}' not found", operation=operation, artifact_id=artifact_id

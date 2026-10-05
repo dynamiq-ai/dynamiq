@@ -1,5 +1,6 @@
 import io
 import json
+from types import SimpleNamespace
 
 import pytest
 from litellm import ModelResponse
@@ -40,8 +41,8 @@ def _artifacts(backend):
     return ArtifactConfig(enabled=True, backend=backend)
 
 
-def _artifact_tool(agent):
-    tools = agent._build_artifact_tool()
+def _artifact_tool(agent, user_id=None):
+    tools = agent._build_artifact_tool(SimpleNamespace(user_id=user_id))
     return tools[0] if tools else None
 
 
@@ -78,14 +79,14 @@ def test_the_workspace_is_the_file_store_or_the_sandbox(llm, store):
     with_sandbox = Agent(name="b", llm=llm, sandbox=_sandbox(), artifacts=_artifacts(store))
 
     for agent, workspace in [(with_files, with_files.file_store_backend), (with_sandbox, with_sandbox.sandbox_backend)]:
-        tools = agent._build_artifact_tool()
+        tools = agent._build_artifact_tool(SimpleNamespace(user_id=None))
         assert agent._attach_artifact_workspace(tools) == [], "the agent's own workspace, no extra tools"
         assert tools[0].workspace is workspace
 
 
 def test_an_agent_without_a_workspace_gets_a_scratch_one_per_run(llm, store):
     agent = Agent(name="a", llm=llm, artifacts=_artifacts(store))
-    tools = agent._build_artifact_tool()
+    tools = agent._build_artifact_tool(SimpleNamespace(user_id=None))
 
     extra = agent._attach_artifact_workspace(tools)
 
@@ -93,6 +94,40 @@ def test_an_agent_without_a_workspace_gets_a_scratch_one_per_run(llm, store):
     assert all(t.file_store is tools[0].workspace for t in extra), "the tools and the artifact share one workspace"
     assert not agent.file_store.enabled, "attached per run, not configured: shared-sandbox borrowing is unaffected"
     assert agent.to_dict()["file_store"]["enabled"] is False
+
+
+def test_the_tool_acts_for_the_runs_end_user(llm, store):
+    """One agent serves every end user of an app; each run's tool is bound to that run's user."""
+    agent = Agent(name="a", llm=llm, artifacts=_artifacts(store))
+
+    assert _artifact_tool(agent, user_id="customer-a").user_id == "customer-a"
+    assert _artifact_tool(agent, user_id="customer-b").user_id == "customer-b"
+    assert _artifact_tool(agent).user_id is None
+
+
+def test_one_end_user_cannot_reach_anothers_artifacts(llm, store, mocker):
+    _replies(
+        mocker,
+        _file_write({"action": "write", "file_path": "plan.md", "content": "# A's plan"}),
+        _action({"action": "create", "path": "plan.md", "name": "A's plan"}),
+        "Thought: Done.\nAnswer: Published.",
+        _action({"action": "list"}),
+        _action({"action": "get", "artifact_id": "a1"}),
+        "Thought: Nothing of theirs.\nAnswer: Nothing found.",
+    )
+    agent = Agent(name="a", llm=llm, artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT)
+
+    agent.run({"input": "Publish my plan", "user_id": "customer-a"})
+    result = agent.run({"input": "Show me the plans", "user_id": "customer-b"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert store.get("a1")[0].user_id == "customer-a", "the artifact belongs to the run's end user"
+    assert store.list(user_id="customer-b") == []
+    observations = json.dumps(result.output, default=str) + json.dumps(
+        [m.content for m in agent._prompt.messages], default=str
+    )
+    assert "A's plan" not in observations, "B's list and get must not reveal A's artifact"
+    assert "not found" in observations.lower()
 
 
 def test_disabled_config_attaches_nothing(llm, store):

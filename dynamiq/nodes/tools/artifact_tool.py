@@ -134,6 +134,11 @@ class ArtifactTool(Node):
         default=None,
         description="Where artifacts are loaded to and published from: the agent's sandbox or file store.",
     )
+    user_id: str | None = Field(
+        default=None,
+        description="End user whose artifacts these are, bound at construction. An agent rebuilds "
+        "the tool per run from the run's user_id, so callers only pass it to `agent.run(...)`.",
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[ArtifactToolInputSchema]] = ArtifactToolInputSchema
@@ -212,6 +217,7 @@ class ArtifactTool(Node):
             content=_content_for(kind, raw, input_data.path),
             description=input_data.description,
             entry_path=input_data.entry_path,
+            user_id=self.user_id,
         )
         return self._published(artifact, key, "created")
 
@@ -229,7 +235,7 @@ class ArtifactTool(Node):
 
         # Checked before writing, so a version the agent did not see is never replaced. The platform
         # repeats the check under its row lock through If-Match, for a write landing meanwhile.
-        current, _ = self.backend.get(artifact_id, include_content=False)
+        current, _ = self.backend.get(artifact_id, include_content=False, user_id=self.user_id)
         if current.latest_version is None or current.latest_version.id != base:
             raise ToolExecutionException(
                 f"Artifact '{artifact_id}' changed since you loaded it: the latest is v{current.version}. "
@@ -264,6 +270,7 @@ class ArtifactTool(Node):
             mime_type=mime_type,
             entry_path=entry_path,
             if_match=base,
+            user_id=self.user_id,
         )
         # The platform adds no version for content equal to the latest one.
         verb = "updated" if artifact.version != current.version else "unchanged (same as the latest version)"
@@ -271,7 +278,7 @@ class ArtifactTool(Node):
 
     def _get(self, input_data: ArtifactToolInputSchema) -> dict[str, Any]:
         workspace = self._require_workspace()
-        artifact, content = self.backend.get(input_data.artifact_id, version=input_data.version)
+        artifact, content = self.backend.get(input_data.artifact_id, version=input_data.version, user_id=self.user_id)
         version = input_data.version or artifact.version
         is_latest = version == artifact.version
         raw = content.encode("utf-8") if isinstance(content, str) else (content or b"")
@@ -301,7 +308,7 @@ class ArtifactTool(Node):
         return {"content": text, "path": path}
 
     def _list(self, input_data: ArtifactToolInputSchema) -> dict[str, Any]:
-        artifacts = self.backend.list(kind=input_data.kind)
+        artifacts = self.backend.list(kind=input_data.kind, user_id=self.user_id)
         if not artifacts:
             return {"content": "No artifacts found."}
         lines = [f"- {a.id}: '{a.name}' ({a.kind.value}, v{a.version}) {a.url or ''}".rstrip() for a in artifacts]

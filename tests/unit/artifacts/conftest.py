@@ -18,7 +18,11 @@ from dynamiq.artifacts import (
 
 
 class FakeArtifactBackend(ArtifactBackend):
-    """A local stand-in for the platform: immutable versions, If-Match on the latest version id."""
+    """A local stand-in for the platform: immutable versions, If-Match on the latest version id.
+
+    A call with a ``user_id`` acts for that end user: it reaches only that user's artifacts, as the
+    Dynamiq backend does within a store.
+    """
 
     calls: list[tuple[str, dict[str, Any]]] = Field(default_factory=list, exclude=True)
 
@@ -27,7 +31,9 @@ class FakeArtifactBackend(ArtifactBackend):
         self._artifacts: dict[str, Artifact] = {}
         self._versions: dict[str, list[tuple[ArtifactVersion, str | bytes]]] = {}
 
-    def create(self, *, file_name, name, kind, content, mime_type=None, description=None, entry_path=None):
+    def create(
+        self, *, file_name, name, kind, content, mime_type=None, description=None, entry_path=None, user_id=None
+    ):
         self.calls.append(
             ("create", {"file_name": file_name, "kind": kind, "content": content, "entry_path": entry_path})
         )
@@ -40,13 +46,23 @@ class FakeArtifactBackend(ArtifactBackend):
             kind=kind,
             mime_type=mime_type or default_mime_type(kind, file_name),
             url=f"https://app.example/artifacts/{artifact_id}",
+            user_id=user_id,
         )
         self._artifacts[artifact_id] = artifact
         self._add_version(artifact, content, name, description, entry_path=entry_path)
         return artifact.model_copy(deep=True)
 
     def update(
-        self, artifact_id, *, content, name=None, description=None, mime_type=None, entry_path=None, if_match=None
+        self,
+        artifact_id,
+        *,
+        content,
+        name=None,
+        description=None,
+        mime_type=None,
+        entry_path=None,
+        if_match=None,
+        user_id=None,
     ):
         self.calls.append(
             (
@@ -60,7 +76,7 @@ class FakeArtifactBackend(ArtifactBackend):
                 },
             )
         )
-        artifact = self._find(artifact_id)
+        artifact = self._find(artifact_id, user_id)
         if if_match and if_match != artifact.latest_version.id:
             raise ArtifactConflictError(f"Artifact '{artifact_id}' changed", "update", artifact_id)
         if mime_type:
@@ -68,21 +84,25 @@ class FakeArtifactBackend(ArtifactBackend):
         self._add_version(artifact, content, name or artifact.name, description, entry_path=entry_path)
         return artifact.model_copy(deep=True)
 
-    def get(self, artifact_id, version=None, include_content=True):
-        artifact = self._find(artifact_id)
+    def get(self, artifact_id, version=None, include_content=True, user_id=None):
+        artifact = self._find(artifact_id, user_id)
         versions = self._versions[artifact_id]
         resolved = version or artifact.version
         if not 1 <= resolved <= len(versions):
             raise ArtifactNotFoundError(f"Version {resolved} not found", "get", artifact_id)
         return artifact.model_copy(deep=True), versions[resolved - 1][1] if include_content else None
 
-    def list(self, *, kind=None, limit=50):
-        found = [a for a in self._artifacts.values() if kind is None or a.kind == kind]
+    def list(self, *, kind=None, limit=50, user_id=None):
+        found = [
+            a
+            for a in self._artifacts.values()
+            if (kind is None or a.kind == kind) and (user_id is None or a.user_id == user_id)
+        ]
         return [a.model_copy(deep=True) for a in reversed(found)][:limit]
 
-    def share(self, artifact_id, *, pinned_version=None, expires_at=None):
+    def share(self, artifact_id, *, pinned_version=None, expires_at=None, user_id=None):
         self.calls.append(("share", {"pinned_version": pinned_version, "expires_at": expires_at}))
-        artifact = self._find(artifact_id)
+        artifact = self._find(artifact_id, user_id)
         pinned_version_id = None
         if pinned_version is not None:
             versions = self._versions[artifact_id]
@@ -98,17 +118,17 @@ class FakeArtifactBackend(ArtifactBackend):
             expires_at=expires_at,
         )
 
-    def unshare(self, artifact_id):
-        self._find(artifact_id).visibility = ArtifactVisibility.PRIVATE
+    def unshare(self, artifact_id, *, user_id=None):
+        self._find(artifact_id, user_id).visibility = ArtifactVisibility.PRIVATE
 
     def bump_behind_the_tools_back(self, artifact_id: str, content: str) -> None:
         """Simulate another writer, e.g. a teammate editing in the UI."""
         artifact = self._artifacts[artifact_id]
         self._add_version(artifact, content, artifact.name)
 
-    def _find(self, artifact_id: str) -> Artifact:
+    def _find(self, artifact_id: str, user_id: str | None = None) -> Artifact:
         artifact = self._artifacts.get(artifact_id)
-        if artifact is None:
+        if artifact is None or (user_id is not None and artifact.user_id != user_id):
             raise ArtifactNotFoundError(f"Artifact '{artifact_id}' not found", "get", artifact_id)
         return artifact
 
