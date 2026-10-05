@@ -654,6 +654,34 @@ class BaseLLM(ConnectionNode):
 
         return result
 
+    @staticmethod
+    def _close_stream(response: Union["ModelResponse", "CustomStreamWrapper"]) -> None:
+        """Release the provider connection of a sync stream, even if it was not fully consumed.
+
+        LiteLLM's stream wrapper has no sync close, so this closes the provider stream beneath it.
+        A cleanup failure is logged, not raised, so it never replaces the original exception.
+        """
+        stream = getattr(response, "completion_stream", response)
+        close = getattr(stream, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                logger.warning("Could not close the LLM completion stream", exc_info=True)
+
+    @staticmethod
+    async def _aclose_stream(response: Union["ModelResponse", "CustomStreamWrapper"]) -> None:
+        """Release the provider connection of an async stream, even if it was not fully consumed.
+
+        A cleanup failure is logged, not raised, so it never replaces the original exception.
+        """
+        aclose = getattr(response, "aclose", None)
+        if callable(aclose):
+            try:
+                await aclose()
+            except Exception:
+                logger.warning("Could not close the LLM completion stream", exc_info=True)
+
     def _handle_streaming_completion_response(
         self,
         response: Union["ModelResponse", "CustomStreamWrapper"],
@@ -675,16 +703,19 @@ class BaseLLM(ConnectionNode):
         chunks = []
         # A stream forced by a streaming-only model is transport: its chunks are not for clients.
         emit_chunks = self.streaming.enabled
-        for chunk in response:
-            check_cancellation(config)
-            chunks.append(chunk)
+        try:
+            for chunk in response:
+                check_cancellation(config)
+                chunks.append(chunk)
 
-            if emit_chunks:
-                self.run_on_node_execute_stream(
-                    config.callbacks,
-                    chunk.model_dump(),
-                    **kwargs,
-                )
+                if emit_chunks:
+                    self.run_on_node_execute_stream(
+                        config.callbacks,
+                        chunk.model_dump(),
+                        **kwargs,
+                    )
+        finally:
+            self._close_stream(response)
 
         full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
@@ -710,15 +741,18 @@ class BaseLLM(ConnectionNode):
         chunks = []
         # A stream forced by a streaming-only model is transport: its chunks are not for clients.
         emit_chunks = self.streaming.enabled
-        async for chunk in response:
-            check_cancellation(config)
-            chunks.append(chunk)
-            if emit_chunks:
-                self.run_on_node_execute_stream(
-                    config.callbacks,
-                    chunk.model_dump(),
-                    **kwargs,
-                )
+        try:
+            async for chunk in response:
+                check_cancellation(config)
+                chunks.append(chunk)
+                if emit_chunks:
+                    self.run_on_node_execute_stream(
+                        config.callbacks,
+                        chunk.model_dump(),
+                        **kwargs,
+                    )
+        finally:
+            await self._aclose_stream(response)
 
         full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
