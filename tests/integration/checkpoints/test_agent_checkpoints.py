@@ -5,6 +5,7 @@ import pytest
 from litellm import ModelResponse
 
 from dynamiq import connections, flows
+from dynamiq.artifacts import ArtifactConfig
 from dynamiq.checkpoints.backends.filesystem import FileSystem
 from dynamiq.checkpoints.backends.in_memory import InMemory
 from dynamiq.checkpoints.checkpoint import CheckpointStatus
@@ -30,6 +31,7 @@ from dynamiq.types.feedback import (
     FeedbackMethod,
 )
 from dynamiq.types.streaming import StreamingConfig
+from tests.unit.artifacts.conftest import FakeArtifactBackend
 
 TEST_API_KEY = "test-api-key"
 LLM_MODEL = "gpt-4o-mini"
@@ -826,3 +828,74 @@ class TestPromptRoundtrip:
             f"straight: {straight}\nresumed : {resumed}"
         )
         assert any(RT_ANSWER in str(m.get("content", "")) for m in resumed), "the human's answer must reach the prompt"
+
+
+# ---------------------------------------------------------------- artifacts across a resume
+
+
+class TestArtifactsSurviveResume:
+    """An artifact published before a pause must still be in the resumed run's output.
+
+    The resume restores the loop past the 'create' call, so it never runs again: only the
+    checkpoint can carry the artifact's ref to the end of the run.
+    """
+
+    HF_TOOL_ID = "artifact-run-approval"
+    HF_TOOL_NAME = "human-input"
+
+    def _patch_llm(self, mocker):
+        script = [
+            'Thought: Write it.\nAction: file-write\nAction Input: {"action": "write", "file_path": "report.md", '
+            '"content": "# Q3"}',
+            'Thought: Publish it.\nAction: artifact\nAction Input: {"action": "create", "path": "report.md", '
+            '"name": "Q3"}',
+            f"Thought: Check before finishing.\nAction: {self.HF_TOOL_NAME}\nAction Input: {_ASK}",
+            "Thought: Done.\nAnswer: Published.",
+        ]
+        calls = {"n": 0}
+
+        def side_effect(stream: bool, *args, **kwargs):
+            response = ModelResponse()
+            response["choices"][0]["message"]["content"] = script[min(calls["n"], len(script) - 1)]
+            calls["n"] += 1
+            return response
+
+        mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=side_effect)
+
+    def test_an_artifact_published_before_a_pause_is_returned_after_resume(self, mocker):
+        queue, backend, store = Queue(), InMemory(), FakeArtifactBackend()
+        approval = HumanFeedbackTool(
+            id=self.HF_TOOL_ID,
+            name=self.HF_TOOL_NAME,
+            action=HumanFeedbackAction.ASK,
+            input_method=FeedbackMethod.STREAM,
+            output_method=FeedbackMethod.STREAM,
+            streaming=StreamingConfig(enabled=True, input_queue=queue, timeout=RT_TIMEOUT),
+        )
+        agent = Agent(
+            id=AGENT_ID,
+            name="Artifact Agent",
+            llm=make_agent_llm(),
+            tools=[approval],
+            role="Assistant",
+            max_loops=6,
+            artifacts=ArtifactConfig(enabled=True, backend=store),
+        )
+        flow = flows.Flow(id=FLOW_ID, nodes=[agent], checkpoint=_input_timeout_only_config(backend))
+        self._patch_llm(mocker)
+
+        first = flow.run_sync(input_data={"input": "Publish the Q3 report"})
+        assert first.status == RunnableStatus.FAILURE, "an unanswered HITL prompt must time out"
+        assert [a.id for a in store.list()] == ["a1"], "published before the pause"
+
+        queue.put(
+            HFStreamingInputEventMessage(
+                entity_id=self.HF_TOOL_ID, data=HFStreamingInputEventMessageData(content="yes")
+            ).model_dump_json()
+        )
+        saved = backend.get_latest_by_flow(FLOW_ID)
+        second = flow.run_sync(input_data={"input": "Publish the Q3 report"}, resume_from=saved.id)
+
+        assert second.status == RunnableStatus.SUCCESS
+        assert [a["id"] for a in second.output[AGENT_ID]["output"]["artifacts"]] == ["a1"]
+        assert len(store.list()) == 1, "the create is not replayed on resume"

@@ -290,6 +290,60 @@ def test_a_later_run_still_gets_a_writable_scratch_workspace(llm, store, mocker)
     assert store.get("a1")[1] == "# Notes"
 
 
+def _new_llm():
+    return OpenAI(connection=OpenAIConnection(api_key="test-api-key"), model="gpt-4o", max_tokens=100, temperature=0)
+
+
+def _delegate(tool_input: dict) -> str:
+    return f"Thought: The writer does this.\nAction: Writer\nAction Input: {json.dumps(tool_input)}"
+
+
+@pytest.mark.parametrize("delegate_final", [False, True])
+def test_a_sub_agents_artifacts_are_in_the_parents_output(llm, store, mocker, delegate_final):
+    """The platform attaches the parent's artifacts to the chat message, so a delegated publish must reach them."""
+    replies = [
+        _delegate({"input": "Write and publish the Q3 notes", "delegate_final": delegate_final}),
+        _file_write({"action": "write", "file_path": "notes.md", "content": "# Q3"}),
+        _action({"action": "create", "path": "notes.md", "name": "Q3 notes"}),
+        "Thought: Done.\nAnswer: Published the Q3 notes.",
+    ]
+    if not delegate_final:
+        replies.append("Thought: The writer published it.\nAnswer: The Q3 notes are published.")
+    _replies(mocker, *replies)
+    writer = Agent(name="Writer", llm=_new_llm(), artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT)
+    parent = Agent(
+        name="Manager", llm=llm, tools=[writer], delegation_allowed=True, inference_mode=InferenceMode.DEFAULT
+    )
+
+    result = parent.run({"input": "Get the Q3 notes published"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert [(a["id"], a["version"]) for a in result.output["artifacts"]] == [("a1", 1)]
+
+
+def test_an_artifact_changed_by_parent_and_sub_agent_is_listed_once_at_its_latest_version(llm, store, mocker):
+    _replies(
+        mocker,
+        _file_write({"action": "write", "file_path": "notes.md", "content": "# Q3"}),
+        _action({"action": "create", "path": "notes.md", "name": "Q3 notes"}),
+        _delegate({"input": "Add the Q4 forecast to artifact a1"}),
+        _action({"action": "get", "artifact_id": "a1"}),
+        _file_write({"action": "write", "file_path": "artifacts/a1/v1/notes.md", "content": "# Q3\n# Q4 forecast"}),
+        _action({"action": "update", "path": "artifacts/a1/v1/notes.md", "artifact_id": "a1"}),
+        "Thought: Done.\nAnswer: Added the forecast.",
+        "Thought: Done.\nAnswer: The notes have the Q4 forecast.",
+    )
+    writer = Agent(name="Writer", llm=_new_llm(), artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT)
+    parent = Agent(
+        name="Manager", llm=llm, tools=[writer], artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT
+    )
+
+    result = parent.run({"input": "Publish the Q3 notes, then have the writer add Q4"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert [(a["id"], a["version"]) for a in result.output["artifacts"]] == [("a1", 2)]
+
+
 def test_a_run_without_artifacts_has_no_artifacts_key(llm, store, mocker):
     _replies(mocker, "Thought: Nothing to publish.\nAnswer: Hi.")
     agent = Agent(name="a", llm=llm, artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT)

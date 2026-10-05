@@ -2678,10 +2678,14 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         return {self.sanitize_tool_name(tool.name): tool for tool in self._runtime_tools}
 
     def _record_artifact(self, tool_output_meta: dict[str, Any]) -> None:
-        """Keep the latest ref per artifact created or updated this run; the run output returns them."""
-        ref = tool_output_meta.get("artifact")
-        if isinstance(ref, dict) and ref.get("id"):
-            self._run_artifacts[ref["id"]] = ref
+        """Keep the latest ref per artifact created or updated this run; the run output returns them.
+
+        The artifact tool returns one ref under ``artifact``; a sub-agent returns its run's refs under ``artifacts``.
+        """
+        refs = [tool_output_meta.get("artifact"), *(tool_output_meta.get("artifacts") or [])]
+        for ref in refs:
+            if isinstance(ref, dict) and ref.get("id"):
+                self._run_artifacts[ref["id"]] = ref
 
     def reset_run_state(self):
         """Resets the agent's run state.
