@@ -170,6 +170,10 @@ class LLMCheckpointState(BaseCheckpointState):
     is_fallback_run: bool = Field(default=False, description="Whether LLM is in fallback mode")
 
 
+class LLMContentFilteredError(ValueError):
+    """The provider's content filter blocked the response before it produced any output."""
+
+
 SAMPLING_PARAMS: tuple[str, ...] = ("temperature", "top_p", "top_k")
 
 # Model families where every version rejects sampling params.
@@ -640,6 +644,13 @@ class BaseLLM(ConnectionNode):
 
         usage_data = self.get_usage_data(model=self.model, completion=response).model_dump()
         self.run_on_node_execute_run(callbacks=config.callbacks, usage_data=usage_data, **kwargs)
+
+        # A blocked reply otherwise looks like an empty answer, which agents retry until max_loops.
+        if response.choices[0].finish_reason == "content_filter" and not content and not result.get("tool_calls"):
+            raise LLMContentFilteredError(
+                f"Model '{self.model}' returned no output because the provider's content filter blocked "
+                "the response. Review the system prompt and input for content the provider rejects."
+            )
 
         return result
 
