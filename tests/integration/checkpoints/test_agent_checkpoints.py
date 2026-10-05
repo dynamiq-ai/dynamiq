@@ -23,6 +23,7 @@ from dynamiq.nodes.tools.human_feedback import (
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.nodes.utils import Input, Output
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.storages.file import FileStoreConfig, InMemoryFileStore
 from dynamiq.types.feedback import (
     APPROVAL_EVENT,
     ApprovalConfig,
@@ -879,6 +880,7 @@ class TestArtifactsSurviveResume:
             tools=[approval],
             role="Assistant",
             max_loops=6,
+            file_store=FileStoreConfig(enabled=True, backend=InMemoryFileStore(), agent_file_write_enabled=True),
             artifacts=ArtifactConfig(enabled=True, backend=store),
         )
         flow = flows.Flow(id=FLOW_ID, nodes=[agent], checkpoint=_input_timeout_only_config(backend))

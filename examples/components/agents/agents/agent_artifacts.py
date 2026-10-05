@@ -3,8 +3,8 @@
 An artifact is a deliverable the user opens, reviews and shares: a named, typed document with
 immutable versions and a link that outlives the conversation. Artifacts move as files: the agent
 writes a file in its workspace and publishes it with 'create', and changes one by loading it with
-'get', editing the saved copy and publishing it with 'update' and the artifact's id. This agent has
-no sandbox or file store, so each run gets an in-memory workspace with file tools.
+'get', editing the saved copy and publishing it with 'update' and the artifact's id. That workspace is
+the agent's sandbox or file store, here an in-memory file store the agent can write to.
 
 The first run publishes an HTML report. The second run gives the agent the artifact id and asks for
 a change: it loads the report, edits it and publishes it as v2 of the same artifact.
@@ -21,6 +21,7 @@ from dynamiq.artifacts.backends import Dynamiq as DynamiqArtifacts
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.storages.file import FileStoreConfig, InMemoryFileStore
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
@@ -40,6 +41,7 @@ def agent_with_artifacts() -> Agent:
         role="You are an analyst who delivers polished, self-contained reports.",
         inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=8,
+        file_store=FileStoreConfig(enabled=True, backend=InMemoryFileStore(), agent_file_write_enabled=True),
         artifacts=ArtifactConfig(
             enabled=True,
             backend=DynamiqArtifacts(connection=DynamiqConnection(), artifact_store_id=ARTIFACT_STORE_ID),

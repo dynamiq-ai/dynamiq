@@ -36,7 +36,7 @@ from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.sandboxes import SandboxConfig
 from dynamiq.sandboxes.e2b import E2BSandbox
-from dynamiq.storages.file import InMemoryFileStore
+from dynamiq.storages.file import FileStoreConfig, InMemoryFileStore
 
 MODEL = "gpt-5.4"
 API_URL = "https://artifacts.simulated"
@@ -637,6 +637,7 @@ def test_a_deliverable_is_published_then_read_by_another_agent(openai_llm, run_c
         role="You answer HR questions from the team's published documents.",
         inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=8,
+        file_store=FileStoreConfig(enabled=True, backend=InMemoryFileStore(), agent_file_write_enabled=True),
         artifacts=ArtifactConfig(enabled=True, backend=backend),
     )
     calls_before = len(api.calls)

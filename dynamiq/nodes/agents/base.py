@@ -300,7 +300,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     artifacts: ArtifactConfig | None = Field(
         default=None,
         description="Where the agent publishes artifacts: versioned deliverables with a link, reached "
-        "through its own tool. Works with a sandbox, a file store or neither.",
+        "through its own tool. Artifacts move as files, so the agent needs a sandbox or a file store; "
+        "without one the tool is not added.",
     )
     sandbox: SandboxConfig | None = Field(default=None, description="Configuration for sandbox used by the agent.")
     share_sandbox_with_subagents: bool = Field(
@@ -347,6 +348,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     _own_sandbox_tool_ids: set[str] = PrivateAttr(default_factory=set)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
     _run_artifacts: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
+    # Set at init when artifacts are enabled but the agent has no workspace to move them as files.
+    _artifacts_skipped: bool = PrivateAttr(default=False)
     _history_offset: int = PrivateAttr(
         default=DEFAULT_HISTORY_OFFSET,
     )
@@ -466,6 +469,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     f"Agent {self.name} - {self.id}: artifacts move as files, but agent_file_write_enabled is off, "
                     "so the agent can publish only files already in its file store and cannot edit loaded ones."
                 )
+
+        if self.artifacts_backend and not (tools_sandbox or self.file_store_backend):
+            logger.warning(
+                f"Agent {self.name} - {self.id}: artifacts move as files, but the agent has neither a sandbox nor "
+                "a file store, so the artifact tool is not added. Enable one to publish artifacts."
+            )
+            self._artifacts_skipped = True
 
         if self._skills_should_init():
             self._init_skills()
@@ -795,8 +805,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 len(ltm_tools),
                 ", ".join(t.name for t in ltm_tools),
             )
-        artifact_tools = self._build_artifact_tool(input_data)
-        run_tools = ltm_tools + self._build_memory_store_tool(input_data) + artifact_tools
+        run_tools = ltm_tools + self._build_memory_store_tool(input_data)
         # Always set — a sub-agent without LTM would otherwise inherit the
         # parent's overlay via `ContextAwareThreadPoolExecutor`.
         ltm_token = _run_extra_tools.set(run_tools)
@@ -814,8 +823,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             # Always set the overlay (even to None, for non-borrowers) so a nested subagent does not
             # inherit this agent's overlay via ContextAwareThreadPoolExecutor.
             sandbox_overlay_token = _shared_sandbox_tools.set(self._maybe_borrow_shared_sandbox())
-            # Built before the borrow, so point the tool at the workspace this run actually uses.
-            run_tools.extend(self._attach_artifact_workspace(artifact_tools))
+            # Built after the borrow, so the tool works in the workspace this run actually uses.
+            run_tools.extend(self._build_artifact_tool(input_data))
             if use_memory:
                 history_messages = self._retrieve_memory(input_data)
                 if len(history_messages) > 0:
@@ -890,13 +899,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 if self.sandbox_backend:
                     file_paths = self._upload_files_to_sandbox(normalized_files)
                 else:
-                    # An artifact run's scratch workspace takes the uploads too: one store, one set of file tools.
-                    file_store = self.file_store_backend or (artifact_tools[0].workspace if artifact_tools else None)
-                    if not file_store:
+                    if not self.file_store_backend:
                         self._setup_in_memory_file_store_and_tools()
-                        file_store = self.file_store_backend
-                    if file_store:
-                        file_paths = self._upload_files_to_file_store(normalized_files, file_store)
+                    if self.file_store_backend:
+                        file_paths = self._upload_files_to_file_store(normalized_files)
                 input_message = self._inject_attached_files_into_message(
                     input_message, normalized_files, file_paths=file_paths
                 )
@@ -1111,43 +1117,19 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
         Per run so the files and versions the tool tracks never leak between concurrent runs of one
         agent, and so the run's ``user_id`` is bound into the instance, as for the memory-store tool:
-        within an artifact store, one end user must not reach another's artifacts.
+        within an artifact store, one end user must not reach another's artifacts. Its workspace is
+        the run's sandbox, borrowed or own, or the agent's file store.
         """
         if not self.artifacts_backend:
             return []
         from dynamiq.nodes.tools.artifact_tool import ArtifactTool
 
-        workspace = self.sandbox_backend or self.file_store_backend
         return [
             ArtifactTool(
                 backend=self.artifacts_backend,
-                workspace=workspace,
+                workspace=self.sandbox_backend or self.file_store_backend,
                 user_id=getattr(input_data, "user_id", None),
             )
-        ]
-
-    def _attach_artifact_workspace(self, artifact_tools: list[Node]) -> list[Node]:
-        """Point the artifact tool at this run's workspace, returning file tools for one it adds.
-
-        Artifacts move as files, so a run with no sandbox (own or borrowed) and no file store gets a
-        scratch in-memory one, which also takes the run's uploads. It is attached per run rather than
-        as a configured file store: a file-store agent never borrows a shared sandbox, and the agent's
-        serialized form stays as is.
-        """
-        workspace = self.sandbox_backend or self.file_store_backend
-        if not artifact_tools or workspace is not None:
-            for tool in artifact_tools:
-                tool.workspace = workspace
-            return []
-
-        scratch = InMemoryFileStore()
-        for tool in artifact_tools:
-            tool.workspace = scratch
-        return [
-            FileReadTool(file_store=scratch, llm=self.llm),
-            FileSearchTool(file_store=scratch),
-            FileWriteTool(file_store=scratch),
-            FileListTool(file_store=scratch),
         ]
 
     def _is_input_output_trace_message(self, message: Message) -> bool:
@@ -2242,15 +2224,14 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     logger.warning(f"Failed to upload file {file_name} to sandbox: {e}")
         return file_paths
 
-    def _upload_files_to_file_store(self, normalized_files: list, file_store: FileStore | None = None) -> list[str]:
-        """Store file-like objects in ``file_store``, by default the agent's file store backend."""
-        file_store = file_store or self.file_store_backend
+    def _upload_files_to_file_store(self, normalized_files: list) -> list[str]:
+        """Store file-like objects in the file store backend."""
         file_paths = [""] * len(normalized_files)
         seen_names: set[str] = set()
 
         def file_exists(candidate: str) -> bool:
             try:
-                return bool(file_store.exists(candidate))
+                return bool(self.file_store_backend.exists(candidate))
             except Exception:
                 return False
 
@@ -2266,7 +2247,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     content = content.encode("utf-8")
                 description = getattr(file_obj, "description", "User-provided file")
                 unique_file_name = self._get_unique_upload_filename(file_name, seen_names, exists_check=file_exists)
-                file_store.store(
+                self.file_store_backend.store(
                     file_path=unique_file_name,
                     content=content,
                     content_type=getattr(file_obj, "content_type", "application/octet-stream"),
@@ -2434,8 +2415,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
     @property
     def artifacts_backend(self) -> ArtifactBackend | None:
-        """The agent's artifact backend when artifacts are enabled."""
-        return self.artifacts.backend if self.artifacts and self.artifacts.enabled else None
+        """The agent's artifact backend when artifacts are enabled and the agent has a workspace for them."""
+        if self._artifacts_skipped or not (self.artifacts and self.artifacts.enabled):
+            return None
+        return self.artifacts.backend
 
     @property
     def sandbox_backend(self) -> Sandbox | None:

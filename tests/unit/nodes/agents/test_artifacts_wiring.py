@@ -1,5 +1,6 @@
 import io
 import json
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -41,6 +42,10 @@ def _artifacts(backend):
     return ArtifactConfig(enabled=True, backend=backend)
 
 
+def _files():
+    return FileStoreConfig(enabled=True, backend=InMemoryFileStore(), agent_file_write_enabled=True)
+
+
 def _artifact_tool(agent, user_id=None):
     tools = agent._build_artifact_tool(SimpleNamespace(user_id=user_id))
     return tools[0] if tools else None
@@ -59,7 +64,7 @@ def _sandbox():
 
 
 def test_the_tool_is_built_per_run(llm, store):
-    agent = Agent(name="a", llm=llm, artifacts=_artifacts(store))
+    agent = Agent(name="a", llm=llm, file_store=_files(), artifacts=_artifacts(store))
 
     first = _artifact_tool(agent)
     second = _artifact_tool(agent)
@@ -70,35 +75,26 @@ def test_the_tool_is_built_per_run(llm, store):
 
 
 def test_the_workspace_is_the_file_store_or_the_sandbox(llm, store):
-    with_files = Agent(
-        name="a",
-        llm=llm,
-        file_store=FileStoreConfig(enabled=True, backend=InMemoryFileStore(), agent_file_write_enabled=True),
-        artifacts=_artifacts(store),
-    )
+    with_files = Agent(name="a", llm=llm, file_store=_files(), artifacts=_artifacts(store))
     with_sandbox = Agent(name="b", llm=llm, sandbox=_sandbox(), artifacts=_artifacts(store))
 
-    for agent, workspace in [(with_files, with_files.file_store_backend), (with_sandbox, with_sandbox.sandbox_backend)]:
-        tools = agent._build_artifact_tool(SimpleNamespace(user_id=None))
-        assert agent._attach_artifact_workspace(tools) == [], "the agent's own workspace, no extra tools"
-        assert tools[0].workspace is workspace
+    assert _artifact_tool(with_files).workspace is with_files.file_store_backend
+    assert _artifact_tool(with_sandbox).workspace is with_sandbox.sandbox_backend
 
 
-def test_an_agent_without_a_workspace_gets_a_scratch_one_per_run(llm, store):
-    agent = Agent(name="a", llm=llm, artifacts=_artifacts(store))
-    tools = agent._build_artifact_tool(SimpleNamespace(user_id=None))
+def test_without_a_workspace_the_tool_is_skipped_with_a_warning(llm, store, caplog):
+    """Artifacts move as files: with nowhere to keep them, the agent is not offered the tool at all."""
+    with caplog.at_level(logging.WARNING):
+        agent = Agent(name="a", llm=llm, artifacts=_artifacts(store))
 
-    extra = agent._attach_artifact_workspace(tools)
-
-    assert [t.name for t in extra] == ["file-read", "file-search", "file-write", "file-list"]
-    assert all(t.file_store is tools[0].workspace for t in extra), "the tools and the artifact share one workspace"
-    assert not agent.file_store.enabled, "attached per run, not configured: shared-sandbox borrowing is unaffected"
-    assert agent.to_dict()["file_store"]["enabled"] is False
+    assert _artifact_tool(agent) is None
+    assert "## Artifacts" not in _ops(agent), "the prompt does not describe a tool the agent lacks"
+    assert any("neither a sandbox nor a file store" in r.getMessage() for r in caplog.records)
 
 
 def test_the_tool_acts_for_the_runs_end_user(llm, store):
     """One agent serves every end user of an app; each run's tool is bound to that run's user."""
-    agent = Agent(name="a", llm=llm, artifacts=_artifacts(store))
+    agent = Agent(name="a", llm=llm, file_store=_files(), artifacts=_artifacts(store))
 
     assert _artifact_tool(agent, user_id="customer-a").user_id == "customer-a"
     assert _artifact_tool(agent, user_id="customer-b").user_id == "customer-b"
@@ -115,7 +111,9 @@ def test_one_end_user_cannot_reach_anothers_artifacts(llm, store, mocker):
         _action({"action": "get", "artifact_id": "a1"}),
         "Thought: Nothing of theirs.\nAnswer: Nothing found.",
     )
-    agent = Agent(name="a", llm=llm, artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT)
+    agent = Agent(
+        name="a", llm=llm, file_store=_files(), artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT
+    )
 
     agent.run({"input": "Publish my plan", "user_id": "customer-a"})
     result = agent.run({"input": "Show me the plans", "user_id": "customer-b"})
@@ -138,7 +136,7 @@ def test_disabled_config_attaches_nothing(llm, store):
 
 
 def test_the_prompt_block_says_when_to_use_an_artifact(llm, store):
-    agent = Agent(name="a", llm=llm, artifacts=_artifacts(store))
+    agent = Agent(name="a", llm=llm, file_store=_files(), artifacts=_artifacts(store))
 
     ops = _ops(agent)
     assert "## Artifacts" in ops
@@ -172,17 +170,19 @@ def test_an_agent_without_artifacts_is_byte_identical(llm, store, mode):
 
 
 def test_an_artifact_only_agent_is_told_it_has_tools(llm, store):
-    agent = Agent(name="a", llm=llm, tools=[], artifacts=_artifacts(store), inference_mode=InferenceMode.XML)
+    agent = Agent(
+        name="a", llm=llm, tools=[], file_store=_files(), artifacts=_artifacts(store), inference_mode=InferenceMode.XML
+    )
 
     assert "{{ tool_description }}" in _blocks(agent).get("tools", "")
 
 
 def test_the_tool_is_not_serialized_and_credentials_are_hidden(llm, remote):
-    agent = Agent(name="a", llm=llm, artifacts=_artifacts(remote))
+    agent = Agent(name="a", llm=llm, file_store=_files(), artifacts=_artifacts(remote))
 
     data = agent.to_dict()
 
-    assert data["tools"] == []
+    assert "artifact" not in [tool["name"] for tool in data["tools"]], "built per run, never serialized"
     assert data["artifacts"]["enabled"] is True
     assert data["artifacts"]["backend"]["type"] == "dynamiq.artifacts.backends.Dynamiq"
     assert "secret-token" not in json.dumps(data, default=str)
@@ -193,7 +193,7 @@ def test_yaml_round_trip(llm, remote, tmp_path):
     from dynamiq.flows import Flow
 
     remote = DynamiqArtifacts(connection=remote.connection, artifact_store_id="s1", user_id="customer-42")
-    agent = Agent(name="a", llm=llm, artifacts=_artifacts(remote))
+    agent = Agent(name="a", llm=llm, sandbox=_sandbox(), artifacts=_artifacts(remote))
     path = str(tmp_path / "wf.yaml")
     Workflow(flow=Flow(nodes=[agent])).to_yaml_file(path)
 
@@ -248,7 +248,7 @@ def _csv_upload():
 
 
 def test_a_run_writes_files_and_returns_every_artifact_it_published(llm, store, mocker):
-    """No sandbox or file store: the run gets a scratch workspace, and the model sees its file tools."""
+    """The agent writes files in its file store and publishes them; the run output lists every artifact."""
     completion = _replies(
         mocker,
         _file_write({"action": "write", "file_path": "report.html", "content": "<!doctype html><p>v1</p>"}),
@@ -263,6 +263,7 @@ def test_a_run_writes_files_and_returns_every_artifact_it_published(llm, store, 
     agent = Agent(
         name="a",
         llm=llm,
+        file_store=_files(),
         artifacts=_artifacts(store),
         inference_mode=InferenceMode.DEFAULT,
         streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL),
@@ -287,15 +288,17 @@ def test_a_run_writes_files_and_returns_every_artifact_it_published(llm, store, 
     assert artifact_events[-1]["output"]["artifact"]["version"] == 2
 
 
-def test_an_upload_lands_in_the_scratch_workspace(llm, store, mocker):
-    """No sandbox or file store: the upload shares the scratch store, so the file tools and the artifact reach it."""
+def test_an_upload_can_be_read_and_published(llm, store, mocker):
+    """The upload lands in the agent's file store, the same workspace the file tools and the artifact use."""
     completion = _replies(
         mocker,
         _file_read({"file_path": "data.csv"}),
         _action({"action": "create", "path": "data.csv", "name": "Data"}),
         "Thought: Done.\nAnswer: Published.",
     )
-    agent = Agent(name="a", llm=llm, artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT)
+    agent = Agent(
+        name="a", llm=llm, file_store=_files(), artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT
+    )
 
     result = agent.run({"input": "Publish the attached data", "files": [_csv_upload()]})
 
@@ -305,24 +308,23 @@ def test_an_upload_lands_in_the_scratch_workspace(llm, store, mocker):
         assert system_prompt.count(f"- {name}:") == 1, f"{name} is attached once"
     assert "north,42" in json.dumps(completion.call_args_list[1].kwargs["messages"], default=str)
     assert store.get("a1")[1] == "region,total\nnorth,42\n"
-    assert not agent.file_store.enabled, "the upload did not turn the agent into a file-store agent"
 
 
-def test_a_later_run_still_gets_a_writable_scratch_workspace(llm, store, mocker):
+def test_an_output_file_beside_artifacts_reaches_the_run_output(llm, store, mocker):
+    """The prompt sends binaries and office formats to output files; they must not be dropped."""
     _replies(
         mocker,
-        "Thought: Nothing to do.\nAnswer: Received.",
-        _file_write({"action": "write", "file_path": "notes.md", "content": "# Notes"}),
-        _action({"action": "create", "path": "notes.md", "name": "Notes"}),
-        "Thought: Done.\nAnswer: Published.",
+        _file_write({"action": "write", "file_path": "totals.csv", "content": "region,total\nnorth,42\n"}),
+        "Thought: Done.\nOutput Files: totals.csv\nAnswer: Here are the totals.",
     )
-    agent = Agent(name="a", llm=llm, artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT)
+    agent = Agent(
+        name="a", llm=llm, file_store=_files(), artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT
+    )
 
-    agent.run({"input": "Keep this file", "files": [_csv_upload()]})
-    result = agent.run({"input": "Write and publish notes"})
+    result = agent.run({"input": "Give me the totals as a file"})
 
     assert result.status == RunnableStatus.SUCCESS
-    assert store.get("a1")[1] == "# Notes"
+    assert [f.name for f in result.output["files"]] == ["totals.csv"]
 
 
 def _new_llm():
@@ -345,7 +347,13 @@ def test_a_sub_agents_artifacts_are_in_the_parents_output(llm, store, mocker, de
     if not delegate_final:
         replies.append("Thought: The writer published it.\nAnswer: The Q3 notes are published.")
     _replies(mocker, *replies)
-    writer = Agent(name="Writer", llm=_new_llm(), artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT)
+    writer = Agent(
+        name="Writer",
+        llm=_new_llm(),
+        file_store=_files(),
+        artifacts=_artifacts(store),
+        inference_mode=InferenceMode.DEFAULT,
+    )
     parent = Agent(
         name="Manager", llm=llm, tools=[writer], delegation_allowed=True, inference_mode=InferenceMode.DEFAULT
     )
@@ -368,9 +376,20 @@ def test_an_artifact_changed_by_parent_and_sub_agent_is_listed_once_at_its_lates
         "Thought: Done.\nAnswer: Added the forecast.",
         "Thought: Done.\nAnswer: The notes have the Q4 forecast.",
     )
-    writer = Agent(name="Writer", llm=_new_llm(), artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT)
+    writer = Agent(
+        name="Writer",
+        llm=_new_llm(),
+        file_store=_files(),
+        artifacts=_artifacts(store),
+        inference_mode=InferenceMode.DEFAULT,
+    )
     parent = Agent(
-        name="Manager", llm=llm, tools=[writer], artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT
+        name="Manager",
+        llm=llm,
+        tools=[writer],
+        file_store=_files(),
+        artifacts=_artifacts(store),
+        inference_mode=InferenceMode.DEFAULT,
     )
 
     result = parent.run({"input": "Publish the Q3 notes, then have the writer add Q4"})
@@ -381,7 +400,9 @@ def test_an_artifact_changed_by_parent_and_sub_agent_is_listed_once_at_its_lates
 
 def test_a_run_without_artifacts_has_no_artifacts_key(llm, store, mocker):
     _replies(mocker, "Thought: Nothing to publish.\nAnswer: Hi.")
-    agent = Agent(name="a", llm=llm, artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT)
+    agent = Agent(
+        name="a", llm=llm, file_store=_files(), artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT
+    )
 
     result = agent.run({"input": "Say hi"})
 
@@ -403,7 +424,9 @@ def test_repeated_gets_are_not_served_from_the_tool_cache(llm, store, mocker):
         _action({"action": "get", "artifact_id": "a1"}),
         "Thought: Done.\nAnswer: ok",
     )
-    agent = Agent(name="a", llm=llm, artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT)
+    agent = Agent(
+        name="a", llm=llm, file_store=_files(), artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT
+    )
     gets = mocker.spy(FakeArtifactBackend, "get")
 
     result = agent.run({"input": "go"})
@@ -422,7 +445,9 @@ def test_reading_an_artifact_does_not_make_it_a_deliverable(llm, store, mocker):
         _action({"action": "get", "artifact_id": existing.id}),
         "Thought: Read it.\nAnswer: It says 'from yesterday'.",
     )
-    agent = Agent(name="a", llm=llm, artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT)
+    agent = Agent(
+        name="a", llm=llm, file_store=_files(), artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT
+    )
 
     result = agent.run({"input": "What does the old note say?"})
 
