@@ -1168,6 +1168,42 @@ class Serply(Http):
         return self
 
 
+class FXMacroData(Http):
+    """
+    Connection class for the FXMacroData API.
+
+    The API key is optional. USD release data, the USD release calendar and the data catalogue
+    answer without one; other currencies and FX rates need a key.
+    """
+
+    url: str = "https://api.fxmacrodata.com"
+    api_key: str | None = Field(default_factory=partial(get_env_var, "FXMACRODATA_API_KEY"))
+    method: str = HTTPMethod.GET
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @property
+    def has_valid_api_key(self) -> bool:
+        """True when the key is printable ASCII with no whitespace (checked without echoing it)."""
+        key = self.api_key
+        return bool(key) and key.isascii() and key.isprintable() and " " not in key
+
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Setup headers after model validation.
+
+        The key is stripped, and only a well-formed key is put in the header. A malformed key is
+        reported by the tool at call time, so the HTTP library never sees it (its errors would
+        include the header value).
+        """
+        self.headers.update({"User-Agent": "dynamiq"})
+        if self.api_key is not None:
+            self.api_key = self.api_key.strip() or None
+        if self.has_valid_api_key:
+            self.headers.update({"X-API-Key": self.api_key})
+        return self
+
+
 class ZenRows(Http):
     """
     Connection class for ZenRows Scrape API.
