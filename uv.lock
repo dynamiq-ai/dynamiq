@@ -1008,13 +1008,13 @@ name = "cua-computer"
 version = "0.4.19"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "aiohttp", marker = "python_full_version >= '3.12'" },
-    { name = "cua-core", marker = "python_full_version >= '3.12'" },
-    { name = "mslex", marker = "python_full_version >= '3.12'" },
-    { name = "pillow", marker = "python_full_version >= '3.12'" },
-    { name = "pydantic", marker = "python_full_version >= '3.12'" },
-    { name = "websocket-client", marker = "python_full_version >= '3.12'" },
-    { name = "websockets", marker = "python_full_version >= '3.12'" },
+    { name = "aiohttp" },
+    { name = "cua-core" },
+    { name = "mslex" },
+    { name = "pillow" },
+    { name = "pydantic" },
+    { name = "websocket-client" },
+    { name = "websockets" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a4/ab/4834a349fb1b9f743b8cc41c1dda5cee3ce3930641f390d118c9d5198fae/cua_computer-0.4.19.tar.gz", hash = "sha256:e477c37ea42ccea1c3c0b815aa71a972c436509fbeef3888cd2e74d5f2ea14c1", size = 94383, upload-time = "2025-12-18T04:00:05.232Z" }
 wheels = [
@@ -1026,7 +1026,7 @@ name = "cua-core"
 version = "0.1.18"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "posthog", marker = "python_full_version >= '3.12'" },
+    { name = "posthog" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/62/07/92955e3643fc41f090b41cd7dc699c7dd4a50c873557e060bb2fa19ccc1b/cua_core-0.1.18.tar.gz", hash = "sha256:8c05c96b3942214769d1ef79d09265b416de4a7c7d647d21541878c744221858", size = 10499, upload-time = "2026-02-25T20:43:02.752Z" }
 wheels = [
@@ -1069,43 +1069,43 @@ wheels = [
 
 [package.optional-dependencies]
 cublas = [
-    { name = "nvidia-cublas", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
-    { name = "nvidia-cuda-nvrtc", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+    { name = "nvidia-cublas", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-cuda-nvrtc", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
 ]
 cudart = [
-    { name = "nvidia-cuda-runtime", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+    { name = "nvidia-cuda-runtime", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
 ]
 cufft = [
-    { name = "nvidia-cufft", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
-    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+    { name = "nvidia-cufft", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-nvjitlink", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
 ]
 cufile = [
-    { name = "nvidia-cufile", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nvidia-cufile", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
 ]
 cupti = [
-    { name = "nvidia-cuda-cupti", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+    { name = "nvidia-cuda-cupti", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
 ]
 curand = [
-    { name = "nvidia-curand", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+    { name = "nvidia-curand", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
 ]
 cusolver = [
-    { name = "nvidia-cublas", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
-    { name = "nvidia-cusolver", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
-    { name = "nvidia-cusparse", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
-    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+    { name = "nvidia-cublas", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-cusolver", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-cusparse", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-nvjitlink", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
 ]
 cusparse = [
-    { name = "nvidia-cusparse", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
-    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+    { name = "nvidia-cusparse", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
+    { name = "nvidia-nvjitlink", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
 ]
 nvjitlink = [
-    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+    { name = "nvidia-nvjitlink", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
 ]
 nvrtc = [
-    { name = "nvidia-cuda-nvrtc", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+    { name = "nvidia-cuda-nvrtc", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
 ]
 nvtx = [
-    { name = "nvidia-nvtx", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
+    { name = "nvidia-nvtx", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
 ]
 
 [[package]]
@@ -1672,7 +1672,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+    { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -5969,15 +5969,14 @@ wheels = [
 
 [[package]]
 name = "python-discovery"
-version = "1.2.0"
+version = "1.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
-    { name = "platformdirs" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9c/90/bcce6b46823c9bec1757c964dc37ed332579be512e17a30e9698095dcae4/python_discovery-1.2.0.tar.gz", hash = "sha256:7d33e350704818b09e3da2bd419d37e21e7c30db6e0977bb438916e06b41b5b1", size = 58055, upload-time = "2026-03-19T01:43:08.248Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0c/57/250bd238b966cece44328235eb85290045d059265fdaf7527a3a958123db/python_discovery-1.6.1.tar.gz", hash = "sha256:cf87d3627dfb4412437fdd5b13eae402607722998d21567993aedbc59b23c15e", size = 84338, upload-time = "2026-09-18T01:31:53.971Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c2/3c/2005227cb951df502412de2fa781f800663cccbef8d90ec6f1b371ac2c0d/python_discovery-1.2.0-py3-none-any.whl", hash = "sha256:1e108f1bbe2ed0ef089823d28805d5ad32be8e734b86a5f212bf89b71c266e4a", size = 31524, upload-time = "2026-03-19T01:43:07.045Z" },
+    { url = "https://files.pythonhosted.org/packages/16/7d/e9ffbadfbf89c93848412d04594135c4ae8c1d37d9e053b9c3ed718fabc4/python_discovery-1.6.1-py3-none-any.whl", hash = "sha256:d43fcdef879fe795352bd13ccf8d185ba5a9f86f36cfcd00529f596e737442b3", size = 38664, upload-time = "2026-09-18T01:31:52.448Z" },
 ]
 
 [[package]]
@@ -7442,7 +7441,7 @@ wheels = [
 
 [[package]]
 name = "virtualenv"
-version = "21.2.0"
+version = "21.7.13"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "distlib" },
@@ -7451,9 +7450,9 @@ dependencies = [
     { name = "python-discovery" },
     { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/aa/92/58199fe10049f9703c2666e809c4f686c54ef0a68b0f6afccf518c0b1eb9/virtualenv-21.2.0.tar.gz", hash = "sha256:1720dc3a62ef5b443092e3f499228599045d7fea4c79199770499df8becf9098", size = 5840618, upload-time = "2026-03-09T17:24:38.013Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/13/50/c9b84eb106d0db420b9878dac0a386c5791726f127ce20b06897f6e3a1e9/virtualenv-21.7.13.tar.gz", hash = "sha256:0355558b6f33619aab31347e43643b0ebc97f61ea3acf617b2b69e1f8a843d11", size = 5360306, upload-time = "2026-09-18T04:35:49.354Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c6/59/7d02447a55b2e55755011a647479041bc92a82e143f96a8195cb33bd0a1c/virtualenv-21.2.0-py3-none-any.whl", hash = "sha256:1bd755b504931164a5a496d217c014d098426cddc79363ad66ac78125f9d908f", size = 5825084, upload-time = "2026-03-09T17:24:35.378Z" },
+    { url = "https://files.pythonhosted.org/packages/9a/ce/e74453531b0c49a58d0e8a4f9bab4495705859fee4a4f7de27d58f4a791a/virtualenv-21.7.13-py3-none-any.whl", hash = "sha256:1bea5af7463f59c4719db48fe739579a2a4f569c96f26c086edda85c96da9f59", size = 5328680, upload-time = "2026-09-18T04:35:47.194Z" },
 ]
 
 [[package]]
