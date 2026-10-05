@@ -654,6 +654,34 @@ class BaseLLM(ConnectionNode):
 
         return result
 
+    @staticmethod
+    def _close_stream(response: Union["ModelResponse", "CustomStreamWrapper"]) -> None:
+        """Release the provider connection of a sync stream, even if it was not fully consumed.
+
+        LiteLLM's stream wrapper has no sync close, so this closes the provider stream beneath it.
+        A cleanup failure is logged, not raised, so it never replaces the original exception.
+        """
+        stream = getattr(response, "completion_stream", response)
+        close = getattr(stream, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                logger.warning("Could not close the LLM completion stream", exc_info=True)
+
+    @staticmethod
+    async def _aclose_stream(response: Union["ModelResponse", "CustomStreamWrapper"]) -> None:
+        """Release the provider connection of an async stream, even if it was not fully consumed.
+
+        A cleanup failure is logged, not raised, so it never replaces the original exception.
+        """
+        aclose = getattr(response, "aclose", None)
+        if callable(aclose):
+            try:
+                await aclose()
+            except Exception:
+                logger.warning("Could not close the LLM completion stream", exc_info=True)
+
     def _handle_streaming_completion_response(
         self,
         response: Union["ModelResponse", "CustomStreamWrapper"],
@@ -687,14 +715,7 @@ class BaseLLM(ConnectionNode):
                         **kwargs,
                     )
         finally:
-            # LiteLLM 包装器的同步关闭接口位于底层 provider stream。
-            stream = getattr(response, "completion_stream", response)
-            close = getattr(stream, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except Exception:
-                    logger.warning("Could not close the LLM completion stream", exc_info=True)
+            self._close_stream(response)
 
         full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
@@ -731,13 +752,7 @@ class BaseLLM(ConnectionNode):
                         **kwargs,
                     )
         finally:
-            # 即使取消或回调失败，也释放连接；清理错误不覆盖原始异常。
-            aclose = getattr(response, "aclose", None)
-            if callable(aclose):
-                try:
-                    await aclose()
-                except Exception:
-                    logger.warning("Could not close the async LLM completion stream", exc_info=True)
+            await self._aclose_stream(response)
 
         full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
