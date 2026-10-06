@@ -141,3 +141,34 @@ async def test_get_async_connection_client_unsupported_connection():
 
     with pytest.raises(ConnectionManagerException):
         await cm.get_async_connection_client(FakeConnection())
+
+
+def test_client_cache_drops_the_least_recently_used_client():
+    from dynamiq.connections.connections import OpenAI as OpenAIConnection
+
+    cm = ConnectionManager(max_connection_clients=2)
+    first = cm.get_connection_client(OpenAIConnection(id="first", api_key="key"))
+    cm.get_connection_client(OpenAIConnection(id="second", api_key="key"))
+    cm.get_connection_client(OpenAIConnection(id="first", api_key="key"))
+
+    rotated = cm.get_connection_client(OpenAIConnection(id="first", api_key="rotated-key"))
+
+    assert list(cm.connection_clients.values()) == [first, rotated]
+
+
+@pytest.mark.asyncio
+async def test_async_client_cache_is_bounded():
+    cm = ConnectionManager(max_connection_clients=1)
+
+    def connection(token: str) -> HttpConnection:
+        return HttpConnection(
+            id="rotated", method=HTTPMethod.GET, url="https://example.com", headers={"Authorization": token}
+        )
+
+    first = await cm.get_async_connection_client(connection("key-1"))
+    second = await cm.get_async_connection_client(connection("key-2"))
+    try:
+        assert list(cm.connection_clients.values()) == [second]
+    finally:
+        await first.aclose()
+        await cm.aclose()
