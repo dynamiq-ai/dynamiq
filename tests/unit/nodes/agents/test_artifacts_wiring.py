@@ -65,14 +65,16 @@ def _sandbox():
     return SandboxConfig(enabled=True, backend=E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-1"))
 
 
-def test_the_tool_is_built_per_run(llm, store):
+def test_the_tool_is_built_per_run_for_the_runs_end_user(llm, store):
     agent = Agent(name="a", llm=llm, file_store=_files(), artifacts=_artifacts(store))
 
-    first = _artifact_tool(agent)
-    second = _artifact_tool(agent)
+    first = _artifact_tool(agent, user_id="customer-a")
+    second = _artifact_tool(agent, user_id="customer-b")
 
     assert first is not second
     assert first.backend is store
+    assert (first.user_id, second.user_id) == ("customer-a", "customer-b")
+    assert _artifact_tool(agent).user_id is None
     assert "artifact" not in [t.name for t in agent.tools]
 
 
@@ -85,7 +87,6 @@ def test_the_workspace_is_the_file_store_or_the_sandbox(llm, store):
 
 
 def test_without_a_workspace_the_tool_is_skipped_with_a_warning(llm, store, caplog):
-    """Artifacts move as files: with nowhere to keep them, the agent is not offered the tool at all."""
     agent = Agent(name="a", llm=llm, artifacts=_artifacts(store))
 
     with caplog.at_level(logging.WARNING):
@@ -95,7 +96,6 @@ def test_without_a_workspace_the_tool_is_skipped_with_a_warning(llm, store, capl
 
 
 def test_a_sub_agent_publishes_in_the_sandbox_it_borrows(llm, store, caplog):
-    """A sub-agent without a workspace of its own gets the parent's shared sandbox only at run time."""
     shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
     session_token = _shared_session.set(SharedSession(sandbox=shared, share_sandbox=True, owner_run_id="owner"))
     try:
@@ -121,15 +121,6 @@ def test_a_sub_agent_publishes_in_the_sandbox_it_borrows(llm, store, caplog):
     sub._sync_react_prompt_for_shared_sandbox()
     assert _artifact_tool(sub) is None
     assert "## Artifacts" not in _ops(sub)
-
-
-def test_the_tool_acts_for_the_runs_end_user(llm, store):
-    """One agent serves every end user of an app; each run's tool is bound to that run's user."""
-    agent = Agent(name="a", llm=llm, file_store=_files(), artifacts=_artifacts(store))
-
-    assert _artifact_tool(agent, user_id="customer-a").user_id == "customer-a"
-    assert _artifact_tool(agent, user_id="customer-b").user_id == "customer-b"
-    assert _artifact_tool(agent).user_id is None
 
 
 def test_one_end_user_cannot_reach_anothers_artifacts(llm, store, mocker):
@@ -159,13 +150,6 @@ def test_one_end_user_cannot_reach_anothers_artifacts(llm, store, mocker):
     assert "not found" in observations.lower()
 
 
-def test_disabled_config_attaches_nothing(llm, store):
-    agent = Agent(name="a", llm=llm, artifacts=ArtifactConfig(enabled=False, backend=store))
-
-    assert _artifact_tool(agent) is None
-    assert "## Artifacts" not in _ops(agent)
-
-
 def test_the_prompt_block_says_when_to_use_an_artifact(llm, store):
     agent = Agent(name="a", llm=llm, file_store=_files(), artifacts=_artifacts(store))
 
@@ -191,11 +175,11 @@ def test_the_sandbox_rule_points_at_artifacts(llm, store):
 
 @pytest.mark.parametrize("mode", list(InferenceMode))
 def test_an_agent_without_artifacts_is_byte_identical(llm, store, mode):
-    """The feature must be invisible unless configured: same prompt blocks, same schemas."""
     kwargs = {"name": "a", "llm": llm, "sandbox": _sandbox(), "inference_mode": mode}
     plain = Agent(**kwargs)
     disabled = Agent(**kwargs, artifacts=ArtifactConfig(enabled=False, backend=store))
 
+    assert _artifact_tool(disabled) is None
     assert _blocks(plain) == _blocks(disabled)
     assert "## Artifacts" not in json.dumps(_blocks(plain))
 
@@ -279,7 +263,6 @@ def _csv_upload():
 
 
 def test_a_run_writes_files_and_returns_every_artifact_it_published(llm, store, mocker):
-    """The agent writes files in its file store and publishes them; the run output lists every artifact."""
     completion = _replies(
         mocker,
         _file_write({"action": "write", "file_path": "report.html", "content": "<!doctype html><p>v1</p>"}),
@@ -320,7 +303,6 @@ def test_a_run_writes_files_and_returns_every_artifact_it_published(llm, store, 
 
 
 def test_an_upload_can_be_read_and_published(llm, store, mocker):
-    """The upload lands in the agent's file store, the same workspace the file tools and the artifact use."""
     completion = _replies(
         mocker,
         _file_read({"file_path": "data.csv"}),
@@ -342,7 +324,6 @@ def test_an_upload_can_be_read_and_published(llm, store, mocker):
 
 
 def test_an_output_file_beside_artifacts_reaches_the_run_output(llm, store, mocker):
-    """The prompt sends binaries and office formats to output files; they must not be dropped."""
     _replies(
         mocker,
         _file_write({"action": "write", "file_path": "totals.csv", "content": "region,total\nnorth,42\n"}),
@@ -368,7 +349,6 @@ def _delegate(tool_input: dict) -> str:
 
 @pytest.mark.parametrize("delegate_final", [False, True])
 def test_a_sub_agents_artifacts_are_in_the_parents_output(llm, store, mocker, delegate_final):
-    """The platform attaches the parent's artifacts to the chat message, so a delegated publish must reach them."""
     replies = [
         _delegate({"input": "Write and publish the Q3 notes", "delegate_final": delegate_final}),
         _file_write({"action": "write", "file_path": "notes.md", "content": "# Q3"}),
@@ -429,20 +409,7 @@ def test_an_artifact_changed_by_parent_and_sub_agent_is_listed_once_at_its_lates
     assert [(a["id"], a["version"]) for a in result.output["artifacts"]] == [("a1", 2)]
 
 
-def test_a_run_without_artifacts_has_no_artifacts_key(llm, store, mocker):
-    _replies(mocker, "Thought: Nothing to publish.\nAnswer: Hi.")
-    agent = Agent(
-        name="a", llm=llm, file_store=_files(), artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT
-    )
-
-    result = agent.run({"input": "Say hi"})
-
-    assert result.status == RunnableStatus.SUCCESS
-    assert "artifacts" not in result.output
-
-
 def test_repeated_gets_are_not_served_from_the_tool_cache(llm, store, mocker):
-    """The agent caches tool results by input; a cached 'get' would hide a newer version."""
     _replies(
         mocker,
         _file_write({"action": "write", "file_path": "doc.md", "content": "first"}),

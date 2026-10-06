@@ -303,7 +303,6 @@ class ArtifactTool(Node):
     def _list(self, input_data: ArtifactToolInputSchema) -> dict[str, Any]:
         artifacts = self.backend.list(kind=input_data.kind, user_id=self.user_id)
         if not artifacts and input_data.kind:
-            # A guessed kind must not read as "nothing is published".
             return {
                 "content": f"No {input_data.kind.value} artifacts found. "
                 "Call 'list' without 'kind' to see every artifact."

@@ -45,8 +45,7 @@ class Dynamiq(ArtifactBackend):
     which the platform's own connection reaches in app runs, and ``user_id`` keeps one end user's
     artifacts apart from another's; a call's own ``user_id``, the run's, overrides it. The platform
     does not check the store or the end user when an artifact is read by id, so this backend does:
-    another store's or end user's artifact reads as not found. Requests go through
-    ``connection.connect()`` synchronously, as in ``DynamiqMemoryStore``.
+    another store's or end user's artifact reads as not found.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

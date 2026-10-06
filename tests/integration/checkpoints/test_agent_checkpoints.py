@@ -835,11 +835,7 @@ class TestPromptRoundtrip:
 
 
 class TestArtifactsSurviveResume:
-    """An artifact published before a pause must still be in the resumed run's output.
-
-    The resume restores the loop past the 'create' call, so it never runs again: only the
-    checkpoint can carry the artifact's ref to the end of the run.
-    """
+    """An artifact published before a pause must still be in the resumed run's output."""
 
     HF_TOOL_ID = "artifact-run-approval"
     HF_TOOL_NAME = "human-input"

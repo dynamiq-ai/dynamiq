@@ -336,7 +336,6 @@ class TestUploadKeepsTheMemoryProtocol:
 
 
 def test_a_repeated_read_is_not_served_from_the_tool_cache(llm, mocker):
-    """The agent caches tool results by input; a cached 'read' after an 'edit' would be stale."""
     store = FakeMemoryStore()
     store.write("prefs.md", "Prefers British English.")
     read = {"action": "read", "path": "prefs.md"}

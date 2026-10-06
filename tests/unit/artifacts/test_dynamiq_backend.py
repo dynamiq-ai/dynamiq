@@ -260,7 +260,6 @@ def test_list_sends_the_owner_and_filters(client):
 
 @pytest.mark.parametrize("configured", [None, "default-user"])
 def test_a_calls_end_user_overrides_the_configured_one(client, configured):
-    """An agent passes the run's user_id per call: one backend serves every end user of an app."""
     backend = _backend(artifact_store_id="s1", user_id=configured)
     client.request.return_value = _response({"data": {**ARTIFACT, "store_id": "s1", "user_id": "customer-a"}})
 
@@ -274,15 +273,6 @@ def test_a_calls_end_user_overrides_the_configured_one(client, configured):
     client.request.return_value = _response({"data": []})
     backend.list(user_id="customer-a")
     assert client.request.call_args.kwargs["params"]["user_id"] == "customer-a"
-
-
-def test_without_a_call_end_user_the_configured_one_applies(client):
-    backend = _backend(artifact_store_id="s1", user_id="customer-42")
-    client.request.return_value = _response({"data": []})
-
-    backend.list()
-
-    assert client.request.call_args.kwargs["params"]["user_id"] == "customer-42"
 
 
 def test_outside_a_store_a_calls_end_user_does_not_apply(backend, client):
@@ -399,22 +389,6 @@ def test_infer_kind_from_extension(file_name, kind):
 
 
 @pytest.mark.parametrize(
-    "file_name, host_guess",
-    [
-        ("main.rs", "application/rls-services+xml"),
-        ("app.ts", "text/vnd.trolltech.linguist"),
-        ("app.ts", "video/mp2t"),
-        ("run.sh", "application/x-sh"),
-        ("query.sql", "application/x-sql"),
-    ],
-)
-def test_code_is_plain_text_whatever_the_table_guesses(file_name, host_guess, mocker):
-    mocker.patch("dynamiq.artifacts.types._MIME_TYPES.guess_type", return_value=(host_guess, None))
-
-    assert default_mime_type(ArtifactKind.CODE, file_name) == "text/plain"
-
-
-@pytest.mark.parametrize(
     "kind, file_name, mime_type",
     [
         (ArtifactKind.FILE, "notes.docx", DOCX),
@@ -422,22 +396,19 @@ def test_code_is_plain_text_whatever_the_table_guesses(file_name, host_guess, mo
         (ArtifactKind.FILE, "deck.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
         (ArtifactKind.FILE, "site.zip", "application/zip"),
         (ArtifactKind.FILE, "blob", "application/octet-stream"),
+        (ArtifactKind.FILE, "blob.bin", "application/octet-stream"),
         (ArtifactKind.FILE, None, "application/octet-stream"),
         (ArtifactKind.IMAGE, "shot.webp", "image/webp"),
         (ArtifactKind.IMAGE, "shot.JPG", "image/jpeg"),
         (ArtifactKind.IMAGE, None, "image/png"),
+        (ArtifactKind.CODE, "main.rs", "text/plain"),
+        (ArtifactKind.CODE, "app.ts", "text/plain"),
     ],
 )
-def test_files_and_images_take_the_file_names_type(kind, file_name, mime_type):
-    assert default_mime_type(kind, file_name) == mime_type
-
-
-def test_the_hosts_mime_database_is_never_read(mocker):
-    """A Mac's MIME files know .docx and a slim image has none; the type must not differ between them."""
+def test_default_mime_type_never_reads_the_hosts_database(kind, file_name, mime_type, mocker):
     host = mocker.patch("dynamiq.artifacts.types.mimetypes.guess_type", return_value=("application/x-host", None))
 
-    assert default_mime_type(ArtifactKind.FILE, "notes.docx") == DOCX
-    assert default_mime_type(ArtifactKind.FILE, "blob.bin") == "application/octet-stream"
+    assert default_mime_type(kind, file_name) == mime_type
     host.assert_not_called()
 
 

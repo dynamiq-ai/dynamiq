@@ -814,7 +814,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             # Always set the overlay (even to None, for non-borrowers) so a nested subagent does not
             # inherit this agent's overlay via ContextAwareThreadPoolExecutor.
             sandbox_overlay_token = _shared_sandbox_tools.set(self._maybe_borrow_shared_sandbox())
-            # Built after the borrow, so the tool works in the workspace this run actually uses.
             run_tools.extend(self._build_artifact_tool(input_data))
             if use_memory:
                 history_messages = self._retrieve_memory(input_data)
@@ -1104,17 +1103,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         ]
 
     def _build_artifact_tool(self, input_data: "AgentInputSchema") -> list[Node]:
-        """Construct the per-run artifact tool, or [] when artifacts are not enabled.
-
-        Per run so the files and versions the tool tracks never leak between concurrent runs of one
-        agent, and so the run's ``user_id`` is bound into the instance, as for the memory-store tool:
-        within an artifact store, one end user must not reach another's artifacts. Its workspace is
-        the run's sandbox, borrowed or own, or the agent's file store.
-        """
+        """Construct the per-run artifact tool, or [] when artifacts are not enabled."""
         if not (self.artifacts and self.artifacts.enabled):
             return []
         if not self.artifacts_backend:
-            # Checked here, after execute() borrows a shared sandbox, since a borrower has none at init.
             logger.warning(
                 f"Agent {self.name} - {self.id}: artifacts move as files, but this run has neither a sandbox nor "
                 "a file store, so the artifact tool is not added. Enable one to publish artifacts."
@@ -2413,10 +2405,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
     @property
     def artifacts_backend(self) -> ArtifactBackend | None:
-        """The artifact backend when artifacts are enabled and the current run has a workspace for them.
-
-        Decided per call, not at init: a sub-agent's sandbox may be one it borrows only at run time.
-        """
+        """The artifact backend when artifacts are enabled and the current run has a workspace for them."""
         if not (self.artifacts and self.artifacts.enabled):
             return None
         if not (self.sandbox_backend or self.file_store_backend):

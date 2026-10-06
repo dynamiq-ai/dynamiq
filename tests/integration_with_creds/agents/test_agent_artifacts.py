@@ -613,7 +613,6 @@ def test_a_deliverable_is_published_then_read_by_another_agent(openai_llm, run_c
     html = api.latest_text(artifact_id)
     assert record["kind"] == "html", f"Published as {record['kind']}, not html."
     for fact in (EMPLOYEE, "142", MTTR.split()[0], "211", RATING):
-        # A model may title-case a rating; the facts are what matter, not their capitalization.
         assert fact.lower() in html.lower(), f"'{fact}' is missing from the published record: {html[:500]}"
     assert record["versions"][-1]["client"].startswith("dynamiq-python/"), "The platform records the client."
 

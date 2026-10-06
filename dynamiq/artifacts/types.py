@@ -1,8 +1,7 @@
 """Artifact types, errors and kind helpers.
 
 An artifact is a deliverable an agent hands over: a named, typed document with immutable integer
-versions and a URL that outlives the conversation. It is deliberately neither a ``FileStore`` (the
-agent's workbench) nor a ``MemoryStore`` (what the agent remembers).
+versions and a URL that outlives the conversation.
 """
 
 import mimetypes
@@ -90,7 +89,6 @@ _DEFAULT_MIME_TYPES = {
     ArtifactKind.BUNDLE: "application/zip",
 }
 
-# Python's built-in table only, so a file's type never depends on the host; plus formats it lacks.
 _MIME_TYPES = mimetypes.MimeTypes()
 _EXTENSION_MIME_TYPES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -162,10 +160,7 @@ def infer_kind(file_name: str | None, mime_type: str | None = None) -> ArtifactK
 
 
 def default_mime_type(kind: ArtifactKind, file_name: str | None = None) -> str:
-    """MIME type for a kind; images and plain files take the file name's type when it has one.
-
-    Code is always text/plain: MIME tables map some code extensions to unrelated types.
-    """
+    """MIME type for a kind; images and plain files take the file name's type when it has one."""
     if kind in (ArtifactKind.IMAGE, ArtifactKind.FILE) and file_name:
         ext = posixpath.splitext(file_name.lower())[1]
         guessed = _EXTENSION_MIME_TYPES.get(ext) or _MIME_TYPES.guess_type(file_name)[0]

@@ -2308,8 +2308,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         borrowing = self._shared_sandbox_view is not None
         if borrowing == self._prompt_reflects_shared_sandbox:
             return
-        # build_react_prompt sets operational instructions only when it has some; drop the previous run's
-        # (artifacts, todo) so a sub-agent that stops borrowing does not keep advertising them.
         self.system_prompt_manager.set_block("operational_instructions", "")
         self.system_prompt_manager.build_react_prompt(self._react_prompt_config(self._runtime_tools))
         # build_react_prompt only *sets* the environment block when a sandbox is present; it never
