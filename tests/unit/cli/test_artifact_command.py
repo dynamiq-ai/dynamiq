@@ -9,7 +9,14 @@ from dynamiq.cli.commands.artifact import artifact
 from dynamiq.cli.commands.context import DynamiqCtx
 from dynamiq.cli.config import Settings
 
-ARTIFACT = {"id": "a1", "name": "Q3", "latest_version": {"id": "v3", "version": 3}, "url": "https://x/a1"}
+ARTIFACT = {
+    "id": "a1",
+    "name": "Q3",
+    "kind": "html",
+    "latest_version": {"id": "v3", "version": 3},
+    "url": "https://x/a1",
+}
+DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 VERSIONS = [{"id": "v3", "version": 3}, {"id": "v2", "version": 2}, {"id": "v1", "version": 1}]
 
 
@@ -70,7 +77,12 @@ def test_publish_uploads_the_file_with_inferred_kind(report):
     method, path, kwargs = api.calls[0]
     assert (method, path) == ("POST", "/v1/artifacts/upload")
     assert kwargs["files"]["file"] == ("q3-report.html", b"<html>Q3</html>", "text/html")
-    assert json.loads(kwargs["data"]["data"]) == {"file_name": "q3-report.html", "name": "Q3 report", "kind": "html"}
+    assert json.loads(kwargs["data"]["data"]) == {
+        "file_name": "q3-report.html",
+        "name": "Q3 report",
+        "kind": "html",
+        "mime_type": "text/html",
+    }
     assert kwargs["retry"] is False, "a retried create could publish a duplicate"
     assert '"id": "a1"' in result.output
 
@@ -115,31 +127,56 @@ def test_publish_with_artifact_id_adds_a_version(report):
     result, api = invoke(["publish", report, "--artifact-id", "a1", "--description", "new numbers"])
 
     assert result.exit_code == 0, result.output
-    method, path, kwargs = api.calls[0]
+    assert api.calls[0][:2] == ("GET", "/v1/artifacts/a1")
+    method, path, kwargs = api.calls[1]
     assert (method, path) == ("POST", "/v1/artifacts/a1/versions/upload")
-    assert json.loads(kwargs["data"]["data"]) == {"description": "new numbers"}
+    assert json.loads(kwargs["data"]["data"]) == {"description": "new numbers"}, "html: the kind fixes the type"
     assert kwargs["headers"] is None
     assert kwargs["retry"] is True, "the same content returns the latest version, so a retry is harmless"
 
 
-def test_code_is_uploaded_as_plain_text_whatever_the_host_guesses(tmp_path, mocker):
-    mocker.patch("dynamiq.artifacts.types.mimetypes.guess_type", return_value=("application/rls-services+xml", None))
+def test_code_is_uploaded_as_plain_text_whatever_the_table_guesses(tmp_path, mocker):
+    mocker.patch("dynamiq.artifacts.types._MIME_TYPES.guess_type", return_value=("application/rls-services+xml", None))
     source = tmp_path / "main.rs"
     source.write_text("fn main() {}")
 
     for args in (["publish", str(source), "--name", "Main"], ["update", "a1", str(source)]):
-        result, api = invoke(args)
+        api = RecordingApi([_response({"data": {**ARTIFACT, "kind": "code"}})])
+        result, api = invoke(args, api=api)
 
         assert result.exit_code == 0, result.output
-        assert api.calls[0][2]["files"]["file"][2] == "text/plain"
+        upload = api.calls[-1][2]
+        assert json.loads(upload["data"]["data"])["mime_type"] == "text/plain"
+        assert upload["files"]["file"][2] == "text/plain"
+
+
+def test_update_of_a_file_artifact_declares_the_new_files_type(tmp_path):
+    notes = tmp_path / "notes.docx"
+    notes.write_bytes(b"PK\x03\x04docx")
+    api = RecordingApi([_response({"data": {**ARTIFACT, "kind": "file"}})])
+
+    result, api = invoke(["update", "a1", str(notes)], api=api)
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(api.calls[1][2]["data"]["data"]) == {"mime_type": DOCX}
+
+
+def test_update_of_a_missing_artifact_uploads_nothing(report):
+    api = RecordingApi([_response({"error": {"message": "not found"}}, status_code=404)])
+
+    result, api = invoke(["update", "a1", report], api=api)
+
+    assert result.exit_code != 0
+    assert "HTTP 404" in result.output
+    assert [c[0] for c in api.calls] == ["GET"]
 
 
 def test_update_sends_if_match(report):
     result, api = invoke(["update", "a1", report, "--if-match", "v2"])
 
     assert result.exit_code == 0, result.output
-    assert api.calls[0][1] == "/v1/artifacts/a1/versions/upload"
-    assert api.calls[0][2]["headers"] == {"If-Match": '"v2"'}
+    assert api.calls[1][1] == "/v1/artifacts/a1/versions/upload"
+    assert api.calls[1][2]["headers"] == {"If-Match": '"v2"'}
 
 
 def test_list_passes_filters():

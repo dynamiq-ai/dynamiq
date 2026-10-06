@@ -5,7 +5,7 @@ from pathlib import Path
 
 import click
 
-from dynamiq.artifacts import ArtifactKind, default_mime_type, infer_kind
+from dynamiq.artifacts import ArtifactKind, default_mime_type, infer_kind, version_mime_type
 from dynamiq.cli.client import ApiClient, ok
 from dynamiq.cli.commands.context import with_api_and_settings
 from dynamiq.cli.commands.workflow import echo_list, echo_response, pagination_options
@@ -23,9 +23,12 @@ artifact = click.Group(
 
 
 def _upload(api: ApiClient, path: str, file_path: str, fields: dict, *, headers: dict | None, retry: bool):
-    """Send one file with its fields as the JSON `data` part; None-valued fields are left out."""
+    """Send one file with its fields as the JSON `data` part; None-valued fields are left out.
+
+    The platform reads the type from `mime_type` in `data`, never from the file part's header.
+    """
     name = os.path.basename(file_path)
-    mime_type = default_mime_type(ArtifactKind(fields.get("kind") or infer_kind(name)), name)
+    mime_type = fields.get("mime_type") or "application/octet-stream"
     data = {"data": json.dumps({k: v for k, v in fields.items() if v is not None})}
     with open(file_path, "rb") as handle:
         return api.post(path, headers=headers, data=data, files={"file": (name, handle, mime_type)}, retry=retry)
@@ -100,13 +103,15 @@ def publish_artifact(
     if user_id and not store_id:
         raise click.UsageError("--user-id requires --store-id.")
     file_name = Path(file_path).name
+    kind = ArtifactKind(kind or infer_kind(file_name))
     fields = {
         "store_id": store_id,
         "user_id": user_id,
         "file_name": file_name,
         "name": name,
         "description": description,
-        "kind": kind or infer_kind(file_name).value,
+        "kind": kind.value,
+        "mime_type": default_mime_type(kind, file_name),
         "entry_path": entry_path,
     }
     # No retry: a create that reached the platform before the response was lost would be duplicated.
@@ -139,7 +144,17 @@ def update_artifact(
 
 
 def _publish_version(api: ApiClient, artifact_id: str, file_path: str, *, name, description, entry_path, if_match):
-    fields = {"name": name, "description": description, "entry_path": entry_path}
+    # The kind, fixed at create, decides whether the new file's type travels with the version.
+    response = api.get(f"/v1/artifacts/{artifact_id}")
+    if not ok(response):
+        echo_response(response)
+    kind = ArtifactKind(response.json()["data"]["kind"])
+    fields = {
+        "name": name,
+        "description": description,
+        "mime_type": version_mime_type(kind, os.path.basename(file_path)),
+        "entry_path": entry_path,
+    }
     headers = {"If-Match": f'"{if_match}"'} if if_match else None
     # Retried: the platform returns the latest version instead of adding one for the same content.
     echo_response(

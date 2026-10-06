@@ -298,9 +298,9 @@ def test_a_file_artifact_takes_another_format_with_its_type(backend, workspace):
     assert update["mime_type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
-def test_code_is_published_as_plain_text_whatever_the_host_guesses(tool, backend, workspace, mocker):
-    """Some hosts map .rs to an XML type; the share link would then serve Rust source as XML."""
-    mocker.patch("dynamiq.artifacts.types.mimetypes.guess_type", return_value=("application/rls-services+xml", None))
+def test_code_is_published_as_plain_text_whatever_the_table_guesses(tool, backend, workspace, mocker):
+    """Some MIME tables map .rs to an XML type; the share link would then serve Rust source as XML."""
+    mocker.patch("dynamiq.artifacts.types._MIME_TYPES.guess_type", return_value=("application/rls-services+xml", None))
     _write(workspace, "main.rs", "fn main() {}")
 
     _run(tool, action="create", path="main.rs", name="Main")
@@ -399,3 +399,16 @@ def test_list(tool, backend, workspace):
 
     assert result["artifact_ids"] == ["a2", "a1"]
     assert "'Second'" in result["content"]
+
+
+def test_list_with_a_kind_that_matches_nothing_points_to_the_full_list(tool, backend):
+    _existing(backend)
+
+    result = _run(tool, action="list", kind="markdown")
+
+    assert result["content"] == "No markdown artifacts found. Call 'list' without 'kind' to see every artifact."
+    assert _run(tool, action="list")["artifact_ids"] == ["a1"]
+
+
+def test_list_with_nothing_published(tool):
+    assert _run(tool, action="list")["content"] == "No artifacts found."

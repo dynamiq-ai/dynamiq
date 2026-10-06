@@ -14,11 +14,13 @@ from dynamiq.artifacts import (
     ArtifactPermissionError,
     default_mime_type,
     infer_kind,
+    version_mime_type,
 )
 from dynamiq.artifacts.backends import Dynamiq
 from dynamiq.connections import Dynamiq as DynamiqConnection
 
 BASE = "https://api.example.ai/v1/artifacts"
+DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 VERSION = {
     "id": "v2",
@@ -406,15 +408,47 @@ def test_infer_kind_from_extension(file_name, kind):
         ("query.sql", "application/x-sql"),
     ],
 )
-def test_code_is_plain_text_whatever_the_host_guesses(file_name, host_guess, mocker):
-    mocker.patch("dynamiq.artifacts.types.mimetypes.guess_type", return_value=(host_guess, None))
+def test_code_is_plain_text_whatever_the_table_guesses(file_name, host_guess, mocker):
+    mocker.patch("dynamiq.artifacts.types._MIME_TYPES.guess_type", return_value=(host_guess, None))
 
     assert default_mime_type(ArtifactKind.CODE, file_name) == "text/plain"
 
 
-@pytest.mark.parametrize("kind", [ArtifactKind.FILE, ArtifactKind.IMAGE])
-def test_files_and_images_take_the_file_names_type(kind, mocker):
-    mocker.patch("dynamiq.artifacts.types.mimetypes.guess_type", return_value=("application/x-guessed", None))
+@pytest.mark.parametrize(
+    "kind, file_name, mime_type",
+    [
+        (ArtifactKind.FILE, "notes.docx", DOCX),
+        (ArtifactKind.FILE, "q3.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        (ArtifactKind.FILE, "deck.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+        (ArtifactKind.FILE, "site.zip", "application/zip"),
+        (ArtifactKind.FILE, "blob", "application/octet-stream"),
+        (ArtifactKind.FILE, None, "application/octet-stream"),
+        (ArtifactKind.IMAGE, "shot.webp", "image/webp"),
+        (ArtifactKind.IMAGE, "shot.JPG", "image/jpeg"),
+        (ArtifactKind.IMAGE, None, "image/png"),
+    ],
+)
+def test_files_and_images_take_the_file_names_type(kind, file_name, mime_type):
+    assert default_mime_type(kind, file_name) == mime_type
 
-    assert default_mime_type(kind, "any.bin") == "application/x-guessed"
-    assert default_mime_type(kind, None) == ("application/octet-stream" if kind == ArtifactKind.FILE else "image/png")
+
+def test_the_hosts_mime_database_is_never_read(mocker):
+    """A Mac's MIME files know .docx and a slim image has none; the type must not differ between them."""
+    host = mocker.patch("dynamiq.artifacts.types.mimetypes.guess_type", return_value=("application/x-host", None))
+
+    assert default_mime_type(ArtifactKind.FILE, "notes.docx") == DOCX
+    assert default_mime_type(ArtifactKind.FILE, "blob.bin") == "application/octet-stream"
+    host.assert_not_called()
+
+
+def test_plain_text_is_not_taken_for_mermaid():
+    assert default_mime_type(ArtifactKind.MERMAID) == "text/plain", "the platform's type for mermaid"
+    assert infer_kind("notes", "text/plain") == ArtifactKind.FILE
+
+
+@pytest.mark.parametrize(
+    "kind, mime_type",
+    [(ArtifactKind.FILE, DOCX), (ArtifactKind.CODE, "text/plain"), (ArtifactKind.HTML, None), (ArtifactKind.PDF, None)],
+)
+def test_only_kinds_typed_by_their_file_declare_a_versions_type(kind, mime_type):
+    assert version_mime_type(kind, "notes.docx") == mime_type

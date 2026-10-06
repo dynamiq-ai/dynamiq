@@ -12,8 +12,8 @@ from dynamiq.artifacts import (
     ArtifactError,
     ArtifactKind,
     ArtifactNotFoundError,
-    default_mime_type,
     infer_kind,
+    version_mime_type,
 )
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -255,19 +255,12 @@ class ArtifactTool(Node):
         if current.kind == ArtifactKind.BUNDLE and entry_path is None and current.latest_version:
             # The platform opens every version on index.html unless told, so keep the page it opened on.
             entry_path = current.latest_version.entry_path
-        # Where the file type can differ between versions, the new file's own type travels with it.
-        mime_type = (
-            default_mime_type(current.kind, file_name)
-            if current.kind in (ArtifactKind.FILE, ArtifactKind.IMAGE, ArtifactKind.CODE)
-            else None
-        )
-
         artifact = self.backend.update(
             artifact_id,
             content=_content_for(current.kind, raw, input_data.path),
             name=input_data.name,
             description=input_data.description,
-            mime_type=mime_type,
+            mime_type=version_mime_type(current.kind, file_name),
             entry_path=entry_path,
             if_match=base,
             user_id=self.user_id,
@@ -309,6 +302,12 @@ class ArtifactTool(Node):
 
     def _list(self, input_data: ArtifactToolInputSchema) -> dict[str, Any]:
         artifacts = self.backend.list(kind=input_data.kind, user_id=self.user_id)
+        if not artifacts and input_data.kind:
+            # A guessed kind must not read as "nothing is published".
+            return {
+                "content": f"No {input_data.kind.value} artifacts found. "
+                "Call 'list' without 'kind' to see every artifact."
+            }
         if not artifacts:
             return {"content": "No artifacts found."}
         lines = [f"- {a.id}: '{a.name}' ({a.kind.value}, v{a.version}) {a.url or ''}".rstrip() for a in artifacts]

@@ -300,8 +300,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     artifacts: ArtifactConfig | None = Field(
         default=None,
         description="Where the agent publishes artifacts: versioned deliverables with a link, reached "
-        "through its own tool. Artifacts move as files, so the agent needs a sandbox or a file store; "
-        "without one the tool is not added.",
+        "through its own tool. Artifacts move as files, so a run needs a sandbox (its own or one a parent "
+        "shares) or a file store; without one the tool is not added.",
     )
     sandbox: SandboxConfig | None = Field(default=None, description="Configuration for sandbox used by the agent.")
     share_sandbox_with_subagents: bool = Field(
@@ -348,8 +348,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     _own_sandbox_tool_ids: set[str] = PrivateAttr(default_factory=set)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
     _run_artifacts: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
-    # Set at init when artifacts are enabled but the agent has no workspace to move them as files.
-    _artifacts_skipped: bool = PrivateAttr(default=False)
     _history_offset: int = PrivateAttr(
         default=DEFAULT_HISTORY_OFFSET,
     )
@@ -469,13 +467,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     f"Agent {self.name} - {self.id}: artifacts move as files, but agent_file_write_enabled is off, "
                     "so the agent can publish only files already in its file store and cannot edit loaded ones."
                 )
-
-        if self.artifacts_backend and not (tools_sandbox or self.file_store_backend):
-            logger.warning(
-                f"Agent {self.name} - {self.id}: artifacts move as files, but the agent has neither a sandbox nor "
-                "a file store, so the artifact tool is not added. Enable one to publish artifacts."
-            )
-            self._artifacts_skipped = True
 
         if self._skills_should_init():
             self._init_skills()
@@ -1120,7 +1111,14 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         within an artifact store, one end user must not reach another's artifacts. Its workspace is
         the run's sandbox, borrowed or own, or the agent's file store.
         """
+        if not (self.artifacts and self.artifacts.enabled):
+            return []
         if not self.artifacts_backend:
+            # Checked here, after execute() borrows a shared sandbox, since a borrower has none at init.
+            logger.warning(
+                f"Agent {self.name} - {self.id}: artifacts move as files, but this run has neither a sandbox nor "
+                "a file store, so the artifact tool is not added. Enable one to publish artifacts."
+            )
             return []
         from dynamiq.nodes.tools.artifact_tool import ArtifactTool
 
@@ -2415,8 +2413,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
     @property
     def artifacts_backend(self) -> ArtifactBackend | None:
-        """The agent's artifact backend when artifacts are enabled and the agent has a workspace for them."""
-        if self._artifacts_skipped or not (self.artifacts and self.artifacts.enabled):
+        """The artifact backend when artifacts are enabled and the current run has a workspace for them.
+
+        Decided per call, not at init: a sub-agent's sandbox may be one it borrows only at run time.
+        """
+        if not (self.artifacts and self.artifacts.enabled):
+            return None
+        if not (self.sandbox_backend or self.file_store_backend):
             return None
         return self.artifacts.backend
 

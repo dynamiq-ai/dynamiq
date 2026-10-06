@@ -14,4 +14,5 @@ from .types import (
     default_extension,
     default_mime_type,
     infer_kind,
+    version_mime_type,
 )

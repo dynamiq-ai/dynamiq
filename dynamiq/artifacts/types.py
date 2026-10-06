@@ -80,7 +80,7 @@ _DEFAULT_MIME_TYPES = {
     ArtifactKind.MARKDOWN: "text/markdown",
     ArtifactKind.CODE: "text/plain",
     ArtifactKind.SVG: "image/svg+xml",
-    ArtifactKind.MERMAID: "text/vnd.mermaid",
+    ArtifactKind.MERMAID: "text/plain",
     ArtifactKind.JSON: "application/json",
     ArtifactKind.CSV: "text/csv",
     ArtifactKind.CHART: "application/json",
@@ -89,6 +89,18 @@ _DEFAULT_MIME_TYPES = {
     ArtifactKind.FILE: "application/octet-stream",
     ArtifactKind.BUNDLE: "application/zip",
 }
+
+# Python's built-in table only, so a file's type never depends on the host; plus formats it lacks.
+_MIME_TYPES = mimetypes.MimeTypes()
+_EXTENSION_MIME_TYPES = {
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".webp": "image/webp",
+}
+
+# Kinds whose type follows the file, so each version declares its own.
+_FILE_TYPED_KINDS = frozenset({ArtifactKind.FILE, ArtifactKind.IMAGE, ArtifactKind.CODE})
 
 _DEFAULT_EXTENSIONS = {
     ArtifactKind.HTML: ".html",
@@ -140,7 +152,9 @@ def infer_kind(file_name: str | None, mime_type: str | None = None) -> ArtifactK
         return ArtifactKind.CODE
     if mime_type:
         for kind, default in _DEFAULT_MIME_TYPES.items():
-            if kind not in (ArtifactKind.CODE, ArtifactKind.CHART, ArtifactKind.BUNDLE) and mime_type == default:
+            if kind not in (ArtifactKind.CODE, ArtifactKind.MERMAID, ArtifactKind.CHART, ArtifactKind.BUNDLE) and (
+                mime_type == default
+            ):
                 return kind
         if mime_type.startswith("image/"):
             return ArtifactKind.IMAGE
@@ -150,13 +164,19 @@ def infer_kind(file_name: str | None, mime_type: str | None = None) -> ArtifactK
 def default_mime_type(kind: ArtifactKind, file_name: str | None = None) -> str:
     """MIME type for a kind; images and plain files take the file name's type when it has one.
 
-    Code is always text/plain: the host's MIME database maps some code extensions to unrelated types.
+    Code is always text/plain: MIME tables map some code extensions to unrelated types.
     """
     if kind in (ArtifactKind.IMAGE, ArtifactKind.FILE) and file_name:
-        guessed = mimetypes.guess_type(file_name)[0]
+        ext = posixpath.splitext(file_name.lower())[1]
+        guessed = _EXTENSION_MIME_TYPES.get(ext) or _MIME_TYPES.guess_type(file_name)[0]
         if guessed:
             return guessed
     return _DEFAULT_MIME_TYPES[kind]
+
+
+def version_mime_type(kind: ArtifactKind, file_name: str) -> str | None:
+    """The type a new version declares: its file's for file, image and code; else None, so the kind fixes it."""
+    return default_mime_type(kind, file_name) if kind in _FILE_TYPED_KINDS else None
 
 
 def default_extension(kind: ArtifactKind) -> str:

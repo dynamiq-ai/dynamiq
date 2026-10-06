@@ -13,6 +13,8 @@ from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.connections import E2B, Dynamiq
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents.base import _shared_sandbox_tools
+from dynamiq.nodes.agents.shared_session import SharedSession, _shared_session
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -84,12 +86,41 @@ def test_the_workspace_is_the_file_store_or_the_sandbox(llm, store):
 
 def test_without_a_workspace_the_tool_is_skipped_with_a_warning(llm, store, caplog):
     """Artifacts move as files: with nowhere to keep them, the agent is not offered the tool at all."""
-    with caplog.at_level(logging.WARNING):
-        agent = Agent(name="a", llm=llm, artifacts=_artifacts(store))
+    agent = Agent(name="a", llm=llm, artifacts=_artifacts(store))
 
-    assert _artifact_tool(agent) is None
+    with caplog.at_level(logging.WARNING):
+        assert _artifact_tool(agent) is None
     assert "## Artifacts" not in _ops(agent), "the prompt does not describe a tool the agent lacks"
     assert any("neither a sandbox nor a file store" in r.getMessage() for r in caplog.records)
+
+
+def test_a_sub_agent_publishes_in_the_sandbox_it_borrows(llm, store, caplog):
+    """A sub-agent without a workspace of its own gets the parent's shared sandbox only at run time."""
+    shared = E2BSandbox(connection=E2B(api_key="t"), sandbox_id="sbx-shared", base_path="/home/user")
+    session_token = _shared_session.set(SharedSession(sandbox=shared, share_sandbox=True, owner_run_id="owner"))
+    try:
+        with caplog.at_level(logging.WARNING):
+            sub = Agent(name="Writer", llm=llm, role="r", artifacts=_artifacts(store))
+        assert not any("neither a sandbox nor a file store" in r.getMessage() for r in caplog.records)
+
+        overlay = sub._maybe_borrow_shared_sandbox()  # what execute() does before building the tool
+        overlay_token = _shared_sandbox_tools.set(overlay)
+        try:
+            tool = _artifact_tool(sub)
+            sub._sync_react_prompt_for_shared_sandbox()
+            assert tool.workspace is sub.sandbox_backend, "the tool works in the borrowed sandbox"
+            assert tool.workspace.sandbox_id == "sbx-shared"
+            assert "## Artifacts" in _ops(sub)
+        finally:
+            _shared_sandbox_tools.reset(overlay_token)
+        sub._release_shared_sandbox_view()
+    finally:
+        _shared_session.reset(session_token)
+
+    # Reused later on its own: no workspace, so neither the tool nor its instructions.
+    sub._sync_react_prompt_for_shared_sandbox()
+    assert _artifact_tool(sub) is None
+    assert "## Artifacts" not in _ops(sub)
 
 
 def test_the_tool_acts_for_the_runs_end_user(llm, store):

@@ -1,4 +1,4 @@
-"""Integration tests for agent artifacts (OPENAI_API_KEY and E2B_API_KEY required).
+"""Integration tests for agent artifacts (OPENAI_API_KEY required).
 
 ``ArtifactAPISimulator`` stands in for the platform, so everything above the socket is real: the
 same client, URLs, multipart bodies, If-Match headers and status codes. Each test gets a fresh one.
@@ -24,7 +24,6 @@ from dynamiq.artifacts import (
     ArtifactNotFoundError,
 )
 from dynamiq.artifacts.backends import Dynamiq as DynamiqArtifacts
-from dynamiq.connections import E2B as E2BConnection
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents import Agent
@@ -34,8 +33,6 @@ from dynamiq.nodes.tools import ArtifactTool
 from dynamiq.nodes.tools.artifact_tool import ArtifactToolInputSchema
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
-from dynamiq.sandboxes import SandboxConfig
-from dynamiq.sandboxes.e2b import E2BSandbox
 from dynamiq.storages.file import FileStoreConfig, InMemoryFileStore
 
 MODEL = "gpt-5.4"
@@ -593,26 +590,22 @@ def test_content_the_platform_rejects_reaches_the_model_as_a_recoverable_error(
 @pytest.mark.flaky(reruns=2)
 @pytest.mark.integration
 def test_a_deliverable_is_published_then_read_by_another_agent(openai_llm, run_config, backend, api):
-    """One agent writes a performance record in its sandbox and publishes it; a fresh one reads it.
+    """One agent writes a performance record in its workspace and publishes it; a fresh one reads it.
 
     Nothing in the first request mentions artifacts: the agent has to recognise a shareable HTML
     page as one. The second agent gets no id and no shared conversation, only the same backend, so
     it has to find the record and read it rather than guess.
     """
-    sandbox = E2BSandbox(connection=E2BConnection())
-    try:
-        writer = Agent(
-            name="ReviewWriter",
-            llm=openai_llm,
-            role="You are an engineering manager's assistant who prepares polished review documents.",
-            inference_mode=InferenceMode.FUNCTION_CALLING,
-            max_loops=12,
-            sandbox=SandboxConfig(enabled=True, backend=sandbox),
-            artifacts=ArtifactConfig(enabled=True, backend=backend),
-        )
-        written = writer.run(input_data={"input": REVIEW_REQUEST}, config=run_config)
-    finally:
-        sandbox.close(kill=True)
+    writer = Agent(
+        name="ReviewWriter",
+        llm=openai_llm,
+        role="You are an engineering manager's assistant who prepares polished review documents.",
+        inference_mode=InferenceMode.FUNCTION_CALLING,
+        max_loops=12,
+        file_store=FileStoreConfig(enabled=True, backend=InMemoryFileStore(), agent_file_write_enabled=True),
+        artifacts=ArtifactConfig(enabled=True, backend=backend),
+    )
+    written = writer.run(input_data={"input": REVIEW_REQUEST}, config=run_config)
 
     assert written.status == RunnableStatus.SUCCESS, written.error
     assert len(api.artifacts) == 1, f"Expected one artifact, the server holds {len(api.artifacts)}."
