@@ -2278,7 +2278,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             has_tools=bool(tools)
             or (self.skills.enabled and self.skills.source is not None)
             or ltm_enabled
-            or bool(self.memory_store_backend),
+            or bool(self.memory_store_backend)
+            or bool(self.artifacts_backend),
             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
             delegation_allowed=self.delegation_allowed,
             context_compaction_enabled=self.summarization_config.enabled,
@@ -2290,6 +2291,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self.memory_store_backend.describe_namespaces() if self.memory_store_backend else {}
             ),
             memory_store_writable=bool(self.memory_store and self.memory_store.write_enabled),
+            artifacts_enabled=bool(self.artifacts_backend),
             sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
             has_sub_agent_tools=any(isinstance(t, SubAgentTool) for t in tools),
             role=self.role,
@@ -2306,6 +2308,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         borrowing = self._shared_sandbox_view is not None
         if borrowing == self._prompt_reflects_shared_sandbox:
             return
+        self.system_prompt_manager.set_block("operational_instructions", "")
         self.system_prompt_manager.build_react_prompt(self._react_prompt_config(self._runtime_tools))
         # build_react_prompt only *sets* the environment block when a sandbox is present; it never
         # clears a stale one. Clear it explicitly when this run has no sandbox so a reused subagent

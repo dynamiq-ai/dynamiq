@@ -44,6 +44,8 @@ class AgentIterationData(BaseModel):
     pending_action: str | None = None
     pending_action_input: Any = None
     pending_thought: str | None = None
+    # Artifacts this run created or updated, so a resumed run still returns them.
+    artifacts: dict[str, dict] = Field(default_factory=dict)
 
 
 class AgentCheckpointState(BaseCheckpointState):
@@ -77,8 +79,8 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
     files of an in-memory file store.
 
     Designed to be mixed into ``Agent``; the methods read host attributes
-    (``llm``, ``tools``, ``state``, ``sandbox``, ``file_store``, ``_prompt``, ``_history_offset``)
-    and call ``_setup_in_memory_file_store_and_tools``, provided by the concrete class.
+    (``llm``, ``tools``, ``state``, ``sandbox``, ``file_store``, ``_prompt``, ``_history_offset``,
+    ``_run_artifacts``) and call ``_setup_in_memory_file_store_and_tools``, provided by the concrete class.
     """
 
     # Loop-level progress and the in-flight tool call captured before tool
@@ -239,6 +241,7 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
             pending_action=self._pending_action,
             pending_action_input=self._pending_action_input,
             pending_thought=self._pending_thought,
+            artifacts=dict(self._run_artifacts),
         )
         return IterationState(completed_iterations=self._completed_loops, iteration_data=data.model_dump())
 
@@ -255,6 +258,7 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
         self._pending_action = data.pending_action
         self._pending_action_input = data.pending_action_input
         self._pending_thought = data.pending_thought
+        self._run_artifacts = dict(data.artifacts)
         # Mirror the completed-loop count back onto the instance so a snapshot
         # taken before any new loop finishes (e.g. an input timeout during the
         # replayed tool call) doesn't overwrite the saved progress with 0.

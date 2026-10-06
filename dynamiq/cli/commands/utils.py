@@ -4,6 +4,7 @@ from dynamiq.cli.client import HTTPError
 from dynamiq.cli.commands.context import DynamiqCtx, pass_dctx
 
 from .app import app
+from .artifact import artifact
 from .config import config
 from .connection import connection
 from .dataset import dataset
@@ -54,6 +55,8 @@ cli.add_command(knowledgebase, name="knowledge-base")
 cli.add_command(knowledgebase, name="knowledge-bases")
 cli.add_command(skill, name="skill")
 cli.add_command(skill, name="skills")
+cli.add_command(artifact, name="artifact")
+cli.add_command(artifact, name="artifacts")
 cli.add_command(finetuning, name="fine-tuning")
 cli.add_command(inference, name="inference")
 cli.add_command(inference, name="inferences")
