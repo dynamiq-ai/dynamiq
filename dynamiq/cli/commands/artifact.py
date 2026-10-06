@@ -163,24 +163,19 @@ def _publish_version(api: ApiClient, artifact_id: str, file_path: str, *, name, 
 
 
 @artifact.command("list")
-@click.option("--store-id", help="List this artifact store's artifacts. Omitted: your own.")
-@click.option("--org-id", help="Org of your own artifacts when --store-id is omitted. Defaults to the configured org.")
+@click.option("--store-id", help="List this artifact store's artifacts. Omitted: your own, in the configured org.")
 @click.option("--user-id", help="Only the artifacts of this end user of an app, within --store-id.")
 @click.option("--kind", type=KIND_CHOICE, help="Only artifacts of this kind.")
 @pagination_options
 @with_api_and_settings
-def list_artifacts(
-    *, api: ApiClient, settings: Settings, store_id, org_id, user_id, kind, page, page_size, fetch_all, compact
-):
+def list_artifacts(*, api: ApiClient, settings: Settings, store_id, user_id, kind, page, page_size, fetch_all, compact):
     """List artifacts, most recently updated first. Check here before publishing a duplicate."""
     if user_id and not store_id:
         raise click.UsageError("--user-id requires --store-id.")
-    if org_id and store_id:
-        raise click.UsageError("--org-id lists your own artifacts; it does not apply with --store-id.")
     # The platform scopes a list by store or org; a personal access token carries no org of its own.
     params = {
         "store_id": store_id,
-        "org_id": None if store_id else org_id or settings.org_id,
+        "org_id": None if store_id else settings.org_id,
         "user_id": user_id,
         "kind": kind,
     }

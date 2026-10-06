@@ -190,24 +190,20 @@ def test_list_passes_filters():
     assert kwargs["params"] == {"store_id": "s1", "user_id": "customer-42", "kind": "html"}
 
 
-@pytest.mark.parametrize(
-    "args, org_id",
-    [([], "00000000-0000-4000-8000-000000000001"), (["--org-id", "o2"], "o2")],
-)
-def test_list_of_your_own_artifacts_is_scoped_by_org(args, org_id):
+def test_list_of_your_own_artifacts_is_scoped_by_the_configured_org():
     api = RecordingApi([_response({"data": [], "pagination": {"total_count": 0, "page_count": 1}})])
 
-    result, api = invoke(["list", "--kind", "image", *args], api=api)
+    result, api = invoke(["list", "--kind", "image"], api=api)
 
     assert result.exit_code == 0, result.output
-    assert api.calls[0][2]["params"] == {"org_id": org_id, "kind": "image"}
+    assert api.calls[0][2]["params"] == {"org_id": "00000000-0000-4000-8000-000000000001", "kind": "image"}
 
 
-def test_list_refuses_an_org_with_a_store():
-    result, api = invoke(["list", "--store-id", "s1", "--org-id", "o2"])
+def test_the_org_is_not_an_option():
+    result, api = invoke(["list", "--org-id", "o2"])
 
     assert result.exit_code != 0
-    assert "does not apply with --store-id" in result.output
+    assert "No such option: --org-id" in result.output
     assert api.calls == []
 
 
