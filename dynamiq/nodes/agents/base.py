@@ -814,7 +814,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             # Always set the overlay (even to None, for non-borrowers) so a nested subagent does not
             # inherit this agent's overlay via ContextAwareThreadPoolExecutor.
             sandbox_overlay_token = _shared_sandbox_tools.set(self._maybe_borrow_shared_sandbox())
-            run_tools.extend(self._build_artifact_tool(input_data))
             if use_memory:
                 history_messages = self._retrieve_memory(input_data)
                 if len(history_messages) > 0:
@@ -896,6 +895,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 input_message = self._inject_attached_files_into_message(
                     input_message, normalized_files, file_paths=file_paths
                 )
+
+            # Built after the borrow and the attached files, which may give the run its workspace.
+            run_tools.extend(self._build_artifact_tool(input_data))
 
             if images or videos:
                 input_message = self._inject_attached_media_into_message(input_message, images=images, videos=videos)
@@ -2251,6 +2253,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
     def _setup_in_memory_file_store_and_tools(self) -> None:
         """Create in-memory file store and file tools when files are uploaded and no sandbox/file store exists."""
+        had_artifacts = bool(self.artifacts_backend)
         self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
         self.tools.extend(
             [
@@ -2261,7 +2264,9 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         )
         new_tool_description = self.tool_description
         self.system_prompt_manager.set_initial_variable("tool_description", new_tool_description)
-        if self.system_prompt_manager._prompt_blocks.get("tools") == "":
+        # The store is also the artifacts' workspace: rebuild so the prompt gains the Artifacts block.
+        gained_artifacts = bool(self.artifacts_backend) and not had_artifacts
+        if self.system_prompt_manager._prompt_blocks.get("tools") == "" or gained_artifacts:
             from dynamiq.nodes.agents.agent import Agent
 
             if isinstance(self, Agent):

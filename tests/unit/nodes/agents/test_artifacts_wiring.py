@@ -323,6 +323,29 @@ def test_an_upload_can_be_read_and_published(llm, store, mocker):
     assert store.get("a1")[1] == "region,total\nnorth,42\n"
 
 
+@pytest.mark.parametrize("other_tools", [False, True])
+def test_an_upload_gives_a_workspace_less_agent_the_tool_and_its_instructions(llm, store, mocker, other_tools):
+    from dynamiq.nodes.tools.python import Python
+
+    completion = _replies(
+        mocker,
+        _action({"action": "create", "path": "data.csv", "name": "Data"}),
+        "Thought: Done.\nAnswer: Published.",
+    )
+    tools = [Python(name="dummy", description="dummy tool", code="def run(inputs): return {}")] if other_tools else []
+    agent = Agent(name="a", llm=llm, tools=tools, artifacts=_artifacts(store), inference_mode=InferenceMode.DEFAULT)
+    assert "## Artifacts" not in _ops(agent), "no workspace at init"
+
+    result = agent.run({"input": "Publish the attached data", "files": [_csv_upload()]})
+
+    assert result.status == RunnableStatus.SUCCESS
+    system_prompt = completion.call_args_list[0].kwargs["messages"][0]["content"]
+    assert "## Artifacts" in system_prompt
+    assert "- artifact:" in system_prompt
+    assert [a["id"] for a in result.output["artifacts"]] == ["a1"]
+    assert store.get("a1")[1] == "region,total\nnorth,42\n"
+
+
 def test_an_output_file_beside_artifacts_reaches_the_run_output(llm, store, mocker):
     _replies(
         mocker,
