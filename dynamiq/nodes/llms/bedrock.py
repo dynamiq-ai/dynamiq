@@ -3,7 +3,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, model_validator
 
 from dynamiq.connections import AWS as AWSConnection
-from dynamiq.nodes.llms.base import BaseLLM
+from dynamiq.nodes.llms.base import BaseLLM, provider_error_text
 from dynamiq.utils.logger import logger
 
 _BEDROCK_STOP_UNSUPPORTED_INDICATORS = (
@@ -116,7 +116,7 @@ class Bedrock(BaseLLM):
         calls do not repeat the same failing first attempt. Anything else falls through to
         the base sampling-param backstop.
         """
-        msg = str(exc)
+        msg = provider_error_text(exc)
         if any(ind in msg for ind in _BEDROCK_STOP_UNSUPPORTED_INDICATORS) and common_params.get("stop"):
             logger.warning(
                 "LLM '%s': Bedrock rejected stopSequences for model '%s'; "

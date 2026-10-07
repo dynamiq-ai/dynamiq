@@ -199,6 +199,16 @@ _SAMPLING_UNSUPPORTED_INDICATORS: tuple[str, ...] = (
     "unrecognized",
 )
 
+
+def provider_error_text(exc: BaseException) -> str:
+    """The error's text with the backslash escapes a bytes repr adds removed.
+
+    LiteLLM renders the body of a failed streamed call as a bytes repr, so the provider's
+    "doesn't support" arrives as "doesn\\'t support" and phrase matching misses it.
+    """
+    return str(exc).replace("\\'", "'")
+
+
 # Streaming-only endpoints reject `stream: false` with a 400 (no provider exposes this as metadata).
 _STREAMING_REQUIRED_INDICATORS: tuple[str, ...] = (
     "only supports streaming",
@@ -1078,7 +1088,7 @@ class BaseLLM(ConnectionNode):
         sampling param and looks like an unsupported-param error, so genuine validation
         errors (e.g. out-of-range temperature) still surface.
         """
-        msg = str(exc).lower()
+        msg = provider_error_text(exc).lower()
         if not common_params.get("stream") and any(ind in msg for ind in _STREAMING_REQUIRED_INDICATORS):
             logger.warning(
                 "LLM '%s': model '%s' is served streaming-only; retrying the request as a stream.",
