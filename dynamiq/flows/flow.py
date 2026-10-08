@@ -27,6 +27,7 @@ from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.types.mocking import RunMockConfig
 from dynamiq.utils.duration import format_duration
 from dynamiq.utils.logger import logger
+from dynamiq.utils.run_context import reset_run_identity, set_run_identity_from_input
 
 # The flows being copied on this thread, so a flow that holds itself is copied once.
 _cloning = threading.local()
@@ -652,6 +653,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         time_start = datetime.now()
 
         run_executor = None
+        identity_token = set_run_identity_from_input(input_data)
         try:
             if self.nodes:
                 max_workers = (
@@ -777,6 +779,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 error=RunnableResultError.from_exception(e, failed_nodes=failed_nodes),
             )
         finally:
+            reset_run_identity(identity_token)
             if run_executor is not None:
                 try:
                     run_executor.shutdown()
@@ -883,6 +886,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
         self.run_on_flow_start(input_data, config, **merged_kwargs)
         time_start = datetime.now()
 
+        identity_token = set_run_identity_from_input(input_data)
         try:
             if self.nodes:
                 node_run_kwargs = merged_kwargs | {"parent_run_id": run_id}
@@ -1027,6 +1031,7 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 error=RunnableResultError.from_exception(e, failed_nodes=failed_nodes),
             )
         finally:
+            reset_run_identity(identity_token)
             # wait=False is safe: all node tasks have been awaited via asyncio.gather()
             executor.shutdown(wait=False)
             if cleanup_dry_run:

@@ -79,6 +79,7 @@ from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.storages.memory.base import MemoryStore, MemoryStoreConfig
 from dynamiq.types.cancellation import CanceledException, check_cancellation
 from dynamiq.utils.logger import logger
+from dynamiq.utils.run_context import current_run_identity
 from dynamiq.utils.utils import TRACING_REDACTED_KEYS, TRACING_REDACTED_PLACEHOLDER, deep_merge
 
 # Per-call tool overlay (e.g. LTM tools bound to a request's user_id); isolated
@@ -767,6 +768,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
+        input_data = self._apply_run_identity(input_data)
         custom_metadata = self._prepare_metadata(input_data)
         self._current_call_context = {
             "user_id": input_data.user_id,
@@ -1000,6 +1002,29 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             _current_agent_run.reset(agent_run_token)
             self._exit_shared_session(shared_session_token)
 
+    def _apply_run_identity(self, input_data: AgentInputSchema) -> AgentInputSchema:
+        """Fill ``user_id`` / ``session_id`` from the run when this agent's own input has neither.
+
+        A selector replaces the agent's input, so ids the run was started with vanish unless the
+        selector maps them, and memory would quietly switch off. Identity is not payload: when the
+        input carries neither id, the enclosing run's pair is used. Ids on the input always win and
+        are never mixed with the run's, so an input that names only one keeps its current scope.
+        """
+        if input_data.user_id or input_data.session_id:
+            return input_data
+
+        identity = current_run_identity()
+        if identity:
+            return input_data.model_copy(update={"user_id": identity.user_id, "session_id": identity.session_id})
+
+        if self.memory:
+            logger.warning(
+                f"Agent {self.name} - {self.id}: conversation memory is configured, but this run has no "
+                "user_id or session_id, so memory is not read or saved. Pass user_id or session_id on the "
+                "run input (or map them in the agent's input selector)."
+            )
+        return input_data
+
     def retrieve_conversation_history(
         self,
         user_query: str = None,
@@ -1065,17 +1090,17 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     def _build_long_term_memory_tools(self, input_data: "AgentInputSchema") -> list[Node]:
         """Construct per-run long-term-memory tools, or [] when LTM is off/absent.
 
-        Raises if LTM is enabled but `input_data.user_id` is missing — the prompt
-        already advertises tool blocks at that point, so silently dropping the
-        tools would leave the LLM with an empty `tool_description`.
+        Raises if LTM is enabled but `input_data.user_id` is missing (after the run's identity has
+        been applied, see `_apply_run_identity`) — the prompt already advertises tool blocks at that
+        point, so silently dropping the tools would leave the LLM with an empty `tool_description`.
         """
         if self.long_term_memory is None or not self.long_term_memory.enabled:
             return []
         user_id = getattr(input_data, "user_id", None)
         if not user_id:
             raise ValueError(
-                "long_term_memory is enabled but input_data.user_id is missing; "
-                "pass user_id or disable long_term_memory for this call"
+                "long_term_memory is enabled but there is no user_id for this call: neither the agent input "
+                "nor the run it belongs to has one; pass user_id or disable long_term_memory for this call"
             )
         from dynamiq.nodes.tools.long_term_memory import build_long_term_memory_tools
 
