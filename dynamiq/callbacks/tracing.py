@@ -398,12 +398,16 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             run = self._get_node_base_run(serialized, **kwargs)
             self.runs[run_id] = run
 
+        from dynamiq.runnables.base import get_error_code
+
         run.end_time = datetime.now(UTC)
         run.status = RunStatus.FAILED
         run.error = {
             "message": str(error),
             "traceback": traceback.format_exc(),
         }
+        if error_code := get_error_code(error):
+            run.error["code"] = error_code
         run.metadata["is_mocked"] = kwargs.get("is_mocked", False)
 
         # If parent_run_id is None, the run is the highest in the execution tree
@@ -506,6 +510,9 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         run = ensure_run(get_run_id(kwargs), self.runs)
         if usage := kwargs.get("usage_data"):
             run.metadata["usage"] = usage
+
+        if finish_reason := kwargs.get("finish_reason"):
+            run.metadata["finish_reason"] = finish_reason
 
         if prompt_messages := kwargs.get("prompt_messages"):
             run.metadata["node"]["prompt"]["messages"] = prompt_messages

@@ -45,6 +45,7 @@ from dynamiq.nodes.agents.utils import (
 )
 from dynamiq.nodes.cloning import carry_mock_exclusions, regenerate_node_ids
 from dynamiq.nodes.llms import BaseLLM
+from dynamiq.nodes.llms.base import LLMContentFilteredError
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.schema_utils import strip_inaccessible_fields
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
@@ -1397,6 +1398,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 raise CanceledException()
             if llm_result.status != RunnableStatus.SUCCESS:
                 error_message = f"LLM '{self.llm.name}' failed: {llm_result.error.message}"
+                # Keep the refusal type so its error code reaches the agent's result.
+                error_type = llm_result.error.type
+                if isinstance(error_type, type) and issubclass(error_type, LLMContentFilteredError):
+                    raise LLMContentFilteredError(error_message)
                 raise ValueError(error_message)
 
             return llm_result

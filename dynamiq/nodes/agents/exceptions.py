@@ -1,3 +1,6 @@
+from dynamiq.runnables.base import RunnableErrorCode
+
+
 class RecoverableAgentException(Exception):
     """
     Base exception class for recoverable agent errors.
@@ -55,6 +58,8 @@ class MaxLoopsExceededException(RecoverableAgentException):
     This exception is recoverable, meaning the agent can continue after catching this exception.
     """
 
+    error_code = RunnableErrorCode.MAX_LOOPS_EXCEEDED
+
     def __init__(
         self, message: str = "Maximum number of loops reached without finding a final answer.", recoverable: bool = True
     ):
@@ -89,3 +94,12 @@ class OutputFileNotFoundError(RecoverableAgentException):
     """Exception raised when files listed in <output_files> do not exist on the backend."""
 
     pass
+
+
+class EmptyCompletionError(Exception):
+    """Exception raised when the LLM keeps replying with neither content nor tool calls.
+
+    Not recoverable: another loop with the same prompt is unlikely to produce a different reply.
+    """
+
+    error_code = RunnableErrorCode.EMPTY_COMPLETION

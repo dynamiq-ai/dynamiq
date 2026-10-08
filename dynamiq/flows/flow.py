@@ -242,8 +242,14 @@ class Flow(CheckpointFlowMixin, BaseFlow):
                 continue
             node = self._node_by_id.get(node_id)
             if node and result.status == RunnableStatus.FAILURE and node.error_handling.behavior == Behavior.RAISE:
-                error_message = result.error.message if result.error else None
-                failed_nodes.append(RunnableFailedNodeInfo(id=node_id, name=node.name, error_message=error_message))
+                failed_nodes.append(
+                    RunnableFailedNodeInfo(
+                        id=node_id,
+                        name=node.name,
+                        error_message=result.error.message if result.error else None,
+                        error_code=result.error.code if result.error else None,
+                    )
+                )
         return failed_nodes
 
     def _handled_failure_node_ids(self) -> set[str]:

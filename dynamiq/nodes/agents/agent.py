@@ -15,6 +15,7 @@ from dynamiq.nodes.agents.components import parser, schema_generator
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
+    EmptyCompletionError,
     JSONParsingError,
     MaxLoopsExceededException,
     OutputFileNotFoundError,
@@ -38,7 +39,7 @@ from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, Parallel
 from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
 from dynamiq.nodes.types import ActionType, Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage
-from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import (
@@ -242,6 +243,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
         description="Enable direct tool output capability. "
         "When True, the agent can return raw tool outputs directly without summarization.",
     )
+    max_consecutive_empty_completions: int = Field(
+        default=3,
+        ge=1,
+        description="Fail the run after this many consecutive LLM replies with neither content nor tool calls, "
+        "instead of looping until max_loops.",
+    )
 
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
@@ -265,6 +272,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
     # Raw text of the most recent LLM call; kept so loop-level recovery
     # handlers can echo it back to the model after a parsing failure.
     _last_llm_output: str = PrivateAttr(default="")
+    _consecutive_empty_completions: int = PrivateAttr(default=0)
 
     @field_validator("response_format", mode="before")
     @classmethod
@@ -1761,6 +1769,28 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         return None
 
+    def _track_empty_completion(self, content: Any, llm_result: RunnableResult) -> None:
+        """Count consecutive replies with neither content nor tool calls, and fail once there are too many.
+
+        Raises:
+            EmptyCompletionError: After ``max_consecutive_empty_completions`` empty replies in a row.
+        """
+        has_content = bool(content.strip()) if isinstance(content, str) else bool(content)
+        if has_content or llm_result.output.get("tool_calls"):
+            self._consecutive_empty_completions = 0
+            return
+
+        self._consecutive_empty_completions += 1
+        logger.warning(
+            f"Agent {self.name} - {self.id}: LLM returned an empty reply "
+            f"({self._consecutive_empty_completions}/{self.max_consecutive_empty_completions} in a row)."
+        )
+        if self._consecutive_empty_completions >= self.max_consecutive_empty_completions:
+            raise EmptyCompletionError(
+                f"Agent {self.name} (ID: {self.id}): LLM '{self.llm.name}' returned "
+                f"{self._consecutive_empty_completions} empty replies in a row, with no content and no tool calls."
+            )
+
     def _run_react_llm_step(self, config: RunnableConfig | None, loop_num: int, **kwargs) -> ReactStep:
         """Run one ReAct LLM call and resolve it to a ReactStep.
 
@@ -1815,6 +1845,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             llm_generated_output = streaming_callback.accumulated_content
         else:
             llm_generated_output = llm_result.output.get("content", "")
+        self._track_empty_completion(llm_generated_output, llm_result)
         if self.inference_mode == InferenceMode.XML and llm_generated_output:
             # Drop fabricated trailing <output> blocks so history and parsing see only the real step.
             first_block = self._first_output_block(llm_generated_output)
@@ -1884,6 +1915,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         completed = self.get_start_iteration()
         start_loop = completed + 1 if completed > 0 else 1
         self._requested_output_files = []
+        self._consecutive_empty_completions = 0
 
         # Resume the restored prompt/state when either previous loops completed
         # or a tool call was checkpointed mid-loop (e.g. a HITL input timeout).

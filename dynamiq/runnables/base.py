@@ -77,6 +77,30 @@ class RunnableStatus(str, Enum):
     CANCELED = "canceled"
 
 
+class RunnableErrorCode(str, Enum):
+    """Stable, machine-readable reasons a run can fail with, for clients that branch on them.
+
+    An exception opts in by setting an ``error_code`` attribute to one of these values.
+
+    Attributes:
+        MODEL_REFUSAL: The provider's content filter blocked the model's reply.
+        EMPTY_COMPLETION: The model kept returning replies with no content and no tool calls.
+        MAX_LOOPS_EXCEEDED: The agent hit its loop limit without a final answer.
+    """
+
+    MODEL_REFUSAL = "model_refusal"
+    EMPTY_COMPLETION = "empty_completion"
+    MAX_LOOPS_EXCEEDED = "max_loops_exceeded"
+
+
+def get_error_code(exception: BaseException) -> str | None:
+    """Return the stable error code an exception declares, or None when it declares none."""
+    code = getattr(exception, "error_code", None)
+    if isinstance(code, RunnableErrorCode):
+        return code.value
+    return code if isinstance(code, str) else None
+
+
 class RunnableFailedNodeInfo(BaseModel):
     """Information about a failed node with RAISE error behavior.
 
@@ -84,11 +108,13 @@ class RunnableFailedNodeInfo(BaseModel):
         id (str): Node ID.
         name (str | None): Node name.
         error_message (str | None): Error message from the node.
+        error_code (str | None): Stable error code of the node failure, if it has one.
     """
 
     id: str
     name: str | None = None
     error_message: str | None = None
+    error_code: str | None = None
 
     def to_dict(self) -> dict:
         return self.model_dump()
@@ -97,6 +123,7 @@ class RunnableFailedNodeInfo(BaseModel):
 class RunnableResultError(BaseModel):
     type: type[Exception]
     message: str
+    code: str | None = None
     recoverable: bool = False
     failed_nodes: list[RunnableFailedNodeInfo] = []
 
@@ -107,6 +134,7 @@ class RunnableResultError(BaseModel):
         return cls(
             type=type(exception),
             message=str(exception),
+            code=get_error_code(exception),
             recoverable=recoverable,
             failed_nodes=failed_nodes or [],
         )

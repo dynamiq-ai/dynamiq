@@ -28,7 +28,7 @@ from dynamiq.nodes.llms.utils import litellm_video_input_flag
 from dynamiq.nodes.node import ConnectionNode, NodeDependency, ensure_config
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Prompt
-from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.runnables import RunnableConfig, RunnableErrorCode, RunnableResult, RunnableStatus
 from dynamiq.types.cancellation import check_cancellation
 from dynamiq.types.llm_tool import Tool
 from dynamiq.utils.logger import logger
@@ -172,6 +172,8 @@ class LLMCheckpointState(BaseCheckpointState):
 
 class LLMContentFilteredError(ValueError):
     """The provider's content filter blocked the response before it produced any output."""
+
+    error_code = RunnableErrorCode.MODEL_REFUSAL
 
 
 SAMPLING_PARAMS: tuple[str, ...] = ("temperature", "top_p", "top_k")
@@ -642,11 +644,20 @@ class BaseLLM(ConnectionNode):
                 tool_calls_parsed.append(call)
             result["tool_calls"] = tool_calls_parsed
 
+        finish_reason = response.choices[0].finish_reason
         usage_data = self.get_usage_data(model=self.model, completion=response).model_dump()
-        self.run_on_node_execute_run(callbacks=config.callbacks, usage_data=usage_data, **kwargs)
+        self.run_on_node_execute_run(
+            callbacks=config.callbacks, usage_data=usage_data, finish_reason=finish_reason, **kwargs
+        )
+
+        if finish_reason == "length":
+            logger.warning(
+                f"LLM {self.name} - {self.id}: model '{self.model}' stopped at the max_tokens limit, "
+                "so the reply is truncated."
+            )
 
         # A blocked reply otherwise looks like an empty answer, which agents retry until max_loops.
-        if response.choices[0].finish_reason == "content_filter" and not content and not result.get("tool_calls"):
+        if finish_reason == "content_filter" and not content and not result.get("tool_calls"):
             raise LLMContentFilteredError(
                 f"Model '{self.model}' returned no output because the provider's content filter blocked "
                 "the response. Review the system prompt and input for content the provider rejects."
