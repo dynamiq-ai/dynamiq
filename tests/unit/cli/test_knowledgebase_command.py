@@ -34,3 +34,11 @@ def test_update_rejects_fields_the_api_does_not_accept(cli_ctx, recording_api):
     assert result.exit_code != 0
     assert "cannot update name" in result.output
     assert recording_api.calls == []
+
+
+def test_source_add_help_says_when_connection_id_is_required():
+    result = CliRunner().invoke(knowledgebase, ["source-add", "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "connection_id" in result.output
+    assert "except `website`" in result.output

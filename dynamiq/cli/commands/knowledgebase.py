@@ -177,7 +177,11 @@ def list_sources(*, api: ApiClient, settings: Settings, knowledgebase_id: str, p
 @click.argument("payload")
 @with_api_and_settings
 def add_source(*, api: ApiClient, settings: Settings, knowledgebase_id: str, payload: str):
-    """Connect a syncing source. REQUIRED: `name`, `provider`, `config`.
+    """Connect a syncing source. REQUIRED: `name`, `provider`, `config`, and `connection_id`
+    (a Nexus connection UUID) for every provider except `website`.
+
+    `provider` is one of `google_drive`, `dropbox`, `box`, `website`, `notion`, `onedrive`,
+    `sharepoint`, `confluence`, `jira`, and decides the shape of `config`.
 
     A source keeps ingesting on its own; `upload` is a one-off. Use a source when the user
     wants a folder kept in sync, not when they hand you a file.

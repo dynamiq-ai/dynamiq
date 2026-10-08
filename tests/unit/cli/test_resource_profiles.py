@@ -34,3 +34,15 @@ def test_list_prints_profiles_without_a_description():
     assert "2 CPU, 4 GiB" in result.output
     assert "medium" in result.output
     assert "large" in result.output
+
+
+def test_list_accepts_database_purpose(cli_ctx, recording_api):
+    recording_api.responses[("GET", "/v1/resource-profiles?purpose=database&page_size=100&sort=sort_order")] = {
+        "data": [{"id": "p1", "name": "db-small"}]
+    }
+
+    result = CliRunner().invoke(profile, ["list", "--purpose", "database"], obj=cli_ctx)
+
+    assert result.exit_code == 0, result.output
+    assert recording_api.calls[0][1] == "/v1/resource-profiles?purpose=database&page_size=100&sort=sort_order"
+    assert "db-small" in result.output
