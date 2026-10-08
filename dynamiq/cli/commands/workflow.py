@@ -612,7 +612,8 @@ def test_workflow(
     """Run a flow with the given input, without saving or releasing.
 
     This endpoint takes a FORM (not a JSON body): `flow` and `input` are sent as
-    JSON-encoded strings. FLOW/INPUT_DATA are inline JSON or @file. No project_id needed.
+    JSON-encoded strings. FLOW/INPUT_DATA are inline JSON or @file. `project_id` is
+    REQUIRED by the endpoint and is filled in automatically from the current project.
 
     `dry_run` is on by default, as it is on the endpoint. It is not a simulation: the flow
     executes and its tools really act, so a Notion tool creates a real page. What it governs is
@@ -620,8 +621,10 @@ def test_workflow(
     are deleted once the run ends. --no-dry-run sends dry_run=false and keeps them; a field left
     out would not, since the runtime's own default is on. Choose an obviously-test input.
     """
+    project_id = require_project(settings)
     form = {
-        "flow": json.dumps(normalize_flow(read_json_arg(flow), settings.project_id)),
+        "project_id": project_id,
+        "flow": json.dumps(normalize_flow(read_json_arg(flow), project_id)),
         "input": json.dumps(read_json_arg(input_data)),
         "stream": "false",
         "dry_run": "true" if dry_run else "false",
