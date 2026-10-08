@@ -184,6 +184,7 @@ _SAMPLING_UNSUPPORTED_MIN_VERSION: dict[str, tuple[int, int]] = {
     "opus": (4, 7),
     "sonnet": (5, 0),
     "fable": (5, 0),
+    "haiku": (5, 5),
 }
 
 # Matches `claude-<family>-<major>[-<minor>]` anywhere in a model id
@@ -197,7 +198,18 @@ _SAMPLING_UNSUPPORTED_INDICATORS: tuple[str, ...] = (
     "unsupported",
     "unexpected keyword",
     "unrecognized",
+    "deprecated",
 )
+
+
+def provider_error_text(exc: BaseException) -> str:
+    """The error's text with the backslash escapes a bytes repr adds removed.
+
+    LiteLLM renders the body of a failed streamed call as a bytes repr, so the provider's
+    "doesn't support" arrives as "doesn\\'t support" and phrase matching misses it.
+    """
+    return str(exc).replace("\\'", "'")
+
 
 # Streaming-only endpoints reject `stream: false` with a 400 (no provider exposes this as metadata).
 _STREAMING_REQUIRED_INDICATORS: tuple[str, ...] = (
@@ -805,7 +817,7 @@ class BaseLLM(ConnectionNode):
 
         Recognizes Anthropic models by family and version, so future releases that follow
         the existing naming scheme are handled without a code change (e.g. claude-opus-5 and
-        claude-sonnet-6 reject; claude-haiku-5 does not, matching current Haiku behavior).
+        claude-sonnet-6 reject; claude-haiku-5 does not, but claude-haiku-5-5 does).
         Models not matched here that nonetheless reject are caught at runtime by
         ``_recover_completion_params``.
         """
@@ -1078,7 +1090,7 @@ class BaseLLM(ConnectionNode):
         sampling param and looks like an unsupported-param error, so genuine validation
         errors (e.g. out-of-range temperature) still surface.
         """
-        msg = str(exc).lower()
+        msg = provider_error_text(exc).lower()
         if not common_params.get("stream") and any(ind in msg for ind in _STREAMING_REQUIRED_INDICATORS):
             logger.warning(
                 "LLM '%s': model '%s' is served streaming-only; retrying the request as a stream.",
