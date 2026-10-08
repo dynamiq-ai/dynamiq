@@ -471,22 +471,10 @@ def validate(flow, known_types: set | None = None):
                             f"agent {label!r}: memory.save_mode {memory.get('save_mode')!r} is not valid. "
                             'Use "full" or "input_output".'
                         )
-                    # Memory switches on when the agent RECEIVES user_id or session_id, not
-                    # when a selector maps them: Agent.run reads them off its own input schema
-                    # (`self.memory and (input_data.user_id or input_data.session_id)`), and
-                    # transform_input has two shapes that deliver them without any selector -
-                    # no transformer at all passes the flow payload straight through, and a
-                    # `path` alone hands over that whole sub-tree. Only an explicit selector
-                    # can drop them, and even then the flow may supply them another way, so
-                    # this is a warning.
-                    explicit = bool(selector) and not transformer.get("path")
-                    if explicit and not ({"user_id", "session_id"} & set(selector)):
-                        warnings.append(
-                            f"agent {label!r} has `memory`, and its selector lists neither `user_id` nor "
-                            "`session_id`. Memory only engages when the agent receives one of them, and a "
-                            "selector replaces the input rather than adding to it - so unless the caller "
-                            'supplies them another way, add "user_id": "$.input.output.user_id" here.'
-                        )
+                    # No selector check for user_id/session_id: an agent whose input carries
+                    # neither falls back to the ids its flow run was started with, so a selector
+                    # that leaves them out no longer switches memory off. A run with no ids at all
+                    # is only visible at run time, where the agent logs a warning.
 
             # STRUCTURED_OUTPUT without a schema is the mode change without the guarantee.
             response_format = node.get("response_format")
