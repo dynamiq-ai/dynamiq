@@ -67,8 +67,12 @@ def get_voice_agent(*, api: ApiClient, settings: Settings, agent_id: str):
 @click.argument("payload")
 @with_api_and_settings
 def update_voice_agent(*, api: ApiClient, settings: Settings, agent_id: str, payload: str):
-    """Update name, description or config. A deployed agent needs redeploying to pick it up."""
-    echo_response(api.put(f"{BASE}/agents/{agent_id}", json=read_json_arg(payload)))
+    """Partially update a voice agent: send only the fields to change.
+
+    Accepted fields: `name`, `description`, `config`. A deployed agent needs redeploying to
+    pick up the change.
+    """
+    echo_response(api.patch(f"{BASE}/agents/{agent_id}", json=read_json_arg(payload)))
 
 
 @voice.command("deploy")
