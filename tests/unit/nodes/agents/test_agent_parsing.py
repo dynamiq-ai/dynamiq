@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.components import parser
 from dynamiq.nodes.agents.exceptions import ActionParsingException
+from dynamiq.prompts import Message, MessageRole
 
 
 def test_parse_default_action_extra_newlines():
@@ -828,3 +829,28 @@ def test_normalize_fields_coerces_nested_model():
     assert action_input["filters"]["metadata"] == {"source": "web", "score": 1}
     # Non-string nested values are left untouched.
     assert action_input["filters"]["min_score"] == 0.5
+
+
+@pytest.mark.parametrize("content", [None, "", "   "])
+def test_max_loops_fallback_never_returns_the_string_none(mocker, content):
+    from types import SimpleNamespace
+
+    agent = _make_agent()
+    mocker.patch.object(agent, "_run_llm", return_value=SimpleNamespace(output={"content": content}))
+    warning = mocker.patch("dynamiq.nodes.agents.agent.logger.warning")
+
+    answer = agent._handle_max_loops_exceeded(Message(role=MessageRole.USER, content="task"))
+
+    assert answer == ""
+    assert any("no answer" in str(call.args[0]) for call in warning.call_args_list)
+
+
+def test_max_loops_fallback_returns_the_extracted_answer(mocker):
+    from types import SimpleNamespace
+
+    agent = _make_agent()
+    mocker.patch.object(
+        agent, "_run_llm", return_value=SimpleNamespace(output={"content": "<answer>Partial result</answer>"})
+    )
+
+    assert agent._handle_max_loops_exceeded(Message(role=MessageRole.USER, content="task")) == "Partial result"
