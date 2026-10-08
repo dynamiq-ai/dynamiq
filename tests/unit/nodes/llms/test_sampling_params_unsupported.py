@@ -12,6 +12,13 @@ from dynamiq.nodes.llms.custom_llm import CustomLLM
 from dynamiq.prompts import Prompt
 from dynamiq.runnables import RunnableConfig
 
+# The error Bedrock returns to a streamed call: litellm renders the body as a bytes repr.
+STREAMED_TEMPERATURE_ERROR = (
+    "litellm.BadRequestError: BedrockException - "
+    'b\'{"message":"This model doesn\\\'t support the temperature field. '
+    "Remove temperature and try again.\"}'"
+)
+
 
 def _mock_response(content="ok"):
     """Minimal litellm ModelResponse stand-in for _handle_completion_response."""
@@ -189,6 +196,16 @@ class TestReactiveBackstop:
         assert recovered is not None
         assert "temperature" not in recovered
 
+    def test_recovers_when_streamed_error_escapes_the_apostrophe(self, anthropic_supported):
+        # A streamed call's error carries the raw response body as a bytes repr, which
+        # escapes the apostrophe in "doesn't".
+        anthropic_supported.temperature = 1.0
+        common = {"model": "anthropic/claude-opus-4-6", "temperature": 1.0, "stream": True}
+        exc = Exception(STREAMED_TEMPERATURE_ERROR)
+        recovered = anthropic_supported._recover_completion_params(exc, common)
+        assert recovered is not None
+        assert "temperature" not in recovered
+
 
 class TestBedrockBackstop:
     @pytest.fixture
@@ -222,6 +239,17 @@ class TestBedrockBackstop:
         # Persisted only after a successful retry.
         bedrock._persist_completion_recovery(common, recovered)
         assert bedrock.stop is None
+
+    def test_bedrock_stop_recovery_on_streamed_error(self, bedrock):
+        common = {"model": bedrock.model, "stop": ["STOP"], "stream": True}
+        exc = Exception(
+            "litellm.BadRequestError: BedrockException - "
+            'b\'{"message":"This model doesn\\\'t support the stopSequences field. '
+            "Remove stopSequences and try again.\"}'"
+        )
+        recovered = bedrock._recover_completion_params(exc, common)
+        assert recovered is not None
+        assert "stop" not in recovered
 
 
 class TestRecoveryLoop:
