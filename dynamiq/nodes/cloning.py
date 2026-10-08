@@ -9,7 +9,7 @@ id-keyed config field only has to be handled once.
 """
 
 import re
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Collection, Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -19,7 +19,9 @@ if TYPE_CHECKING:
     from dynamiq.runnables import RunnableConfig
 
 
-def regenerate_node_ids(obj: Any, id_map: dict[str, set[str]] | None = None) -> Any:
+def regenerate_node_ids(
+    obj: Any, id_map: dict[str, set[str]] | None = None, keep_ids: Collection[str] = frozenset()
+) -> Any:
     """Recursively assign new ids to a cloned node and its nested models, in place.
 
     Transformer paths that address a node by id (``$.<id>.output``), such as the ones between the
@@ -41,20 +43,28 @@ def regenerate_node_ids(obj: Any, id_map: dict[str, set[str]] | None = None) -> 
         id_map: Optional collector, populated with ``{old_id: {new_id, ...}}``. A single
             original can yield several clones — a tool reachable by two paths in a cloned
             subtree, say — so each old id maps to a set rather than the last writer.
+        keep_ids: Node ids to leave as they are, while what the nodes hold is still renamed. A path
+            to a kept node keeps naming it, and the node does not appear in ``id_map``.
 
     Returns:
-        Any: ``obj``, with every nested ``id`` replaced.
+        Any: ``obj``, with every nested ``id`` outside ``keep_ids`` replaced.
     """
     if id_map is None:
         id_map = {}
     renamed: dict[int, tuple[str, str]] = {}
-    _regenerate_ids(obj, id_map, renamed, seen=set())
+    _regenerate_ids(obj, id_map, renamed, seen=set(), keep_ids=keep_ids)
     _remap_paths(obj, renamed)
     _remap_dependency_options(obj, renamed)
     return obj
 
 
-def _regenerate_ids(obj: Any, id_map: dict[str, set[str]], renamed: dict[int, tuple[str, str]], seen: set[int]) -> Any:
+def _regenerate_ids(
+    obj: Any,
+    id_map: dict[str, set[str]],
+    renamed: dict[int, tuple[str, str]],
+    seen: set[int],
+    keep_ids: Collection[str] = frozenset(),
+) -> Any:
     # Imported here: the node and operator modules import this one.
     from dynamiq.nodes.node import Node
     from dynamiq.nodes.operators.operators import ChoiceOption
@@ -68,7 +78,7 @@ def _regenerate_ids(obj: Any, id_map: dict[str, set[str]], renamed: dict[int, tu
         # A rule, a row or a field keeps the id the user wrote, and holds nothing else to rename.
         if getattr(obj, "keeps_id", False):
             return obj
-        if hasattr(obj, "id"):
+        if hasattr(obj, "id") and getattr(obj, "id") not in keep_ids:
             previous_id = getattr(obj, "id")
             new_id = str(uuid4())
             setattr(obj, "id", new_id)
@@ -82,16 +92,18 @@ def _regenerate_ids(obj: Any, id_map: dict[str, set[str]], renamed: dict[int, tu
         for field_name in getattr(obj, "model_fields", {}):
             value = getattr(obj, field_name)
             if isinstance(value, list):
-                setattr(obj, field_name, [_regenerate_ids(item, id_map, renamed, seen) for item in value])
+                setattr(obj, field_name, [_regenerate_ids(item, id_map, renamed, seen, keep_ids) for item in value])
             elif isinstance(value, dict):
-                setattr(obj, field_name, {k: _regenerate_ids(v, id_map, renamed, seen) for k, v in value.items()})
+                setattr(
+                    obj, field_name, {k: _regenerate_ids(v, id_map, renamed, seen, keep_ids) for k, v in value.items()}
+                )
             else:
-                setattr(obj, field_name, _regenerate_ids(value, id_map, renamed, seen))
+                setattr(obj, field_name, _regenerate_ids(value, id_map, renamed, seen, keep_ids))
         return obj
     if isinstance(obj, list):
-        return [_regenerate_ids(item, id_map, renamed, seen) for item in obj]
+        return [_regenerate_ids(item, id_map, renamed, seen, keep_ids) for item in obj]
     if isinstance(obj, dict):
-        return {k: _regenerate_ids(v, id_map, renamed, seen) for k, v in obj.items()}
+        return {k: _regenerate_ids(v, id_map, renamed, seen, keep_ids) for k, v in obj.items()}
     return obj
 
 
@@ -212,6 +224,24 @@ def _models(obj: Any, seen: set[int] | None = None) -> Iterator[BaseModel]:
     elif isinstance(obj, dict):
         for item in obj.values():
             yield from _models(item, seen)
+
+
+def reply_waiting_node_ids(obj: Any) -> set[str]:
+    """The ids of the nodes in ``obj`` that wait for a human reply: feedback tools and approval-gated nodes.
+
+    A reply finds its node by the id the node asked under, which is the id its caller registered the
+    node's input queue for. A copy that renamed such a node would ask under an id nobody registered,
+    and the reply would never reach it.
+    """
+    # Imported here: the node and tool modules import this one.
+    from dynamiq.nodes.node import Node
+    from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
+
+    return {
+        model.id
+        for model in _models(obj)
+        if isinstance(model, HumanFeedbackTool) or (isinstance(model, Node) and model.approval.enabled)
+    }
 
 
 def carry_mock_exclusions(config: "RunnableConfig", id_map: dict[str, set[str]]) -> "RunnableConfig":
