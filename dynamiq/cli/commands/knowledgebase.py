@@ -2,7 +2,14 @@ import click
 
 from dynamiq.cli.client import ApiClient
 from dynamiq.cli.commands.context import with_api_and_settings
-from dynamiq.cli.commands.workflow import echo_list, echo_response, pagination_options, read_json_arg, require_project
+from dynamiq.cli.commands.workflow import (
+    echo_list,
+    echo_response,
+    fetch_data,
+    pagination_options,
+    read_json_arg,
+    require_project,
+)
 from dynamiq.cli.config import Settings
 
 knowledgebase = click.Group(
@@ -48,13 +55,35 @@ def get_knowledgebase(*, api: ApiClient, settings: Settings, knowledgebase_id: s
     echo_response(api.get(f"/v1/knowledgebases/{knowledgebase_id}"))
 
 
+# The update endpoint replaces these three: an omitted description is cleared and an omitted
+# runtime falls back to the latest one, so the CLI always sends all of them.
+KNOWLEDGEBASE_UPDATE_FIELDS = {"description", "runtime_id", "workflow_version_id"}
+
+
 @knowledgebase.command("update")
 @click.argument("knowledgebase_id")
 @click.argument("payload")
 @with_api_and_settings
 def update_knowledgebase(*, api: ApiClient, settings: Settings, knowledgebase_id: str, payload: str):
-    """Update a knowledge base (name, description, ingestion flow)."""
-    echo_response(api.put(f"/v1/knowledgebases/{knowledgebase_id}", json=read_json_arg(payload)))
+    """Update a knowledge base and redeploy it.
+
+    Accepted fields: `description`, `runtime_id`, `workflow_version_id`. Any field left out
+    keeps its current value (the knowledge base is fetched first and your fields are laid over
+    it), so `{"description": "..."}` alone is enough.
+
+    The name cannot be changed, and the ingestion flow is not sent here directly: release a new
+    version of the knowledge base's own workflow (`workflow_id` in `knowledge-base get`), then
+    pass that version's id as `workflow_version_id`.
+    """
+    changes = read_json_arg(payload)
+    unknown = sorted(set(changes) - KNOWLEDGEBASE_UPDATE_FIELDS)
+    if unknown:
+        raise click.ClickException(
+            f"cannot update {', '.join(unknown)}; accepted fields: {', '.join(sorted(KNOWLEDGEBASE_UPDATE_FIELDS))}"
+        )
+    current = fetch_data(api, f"/v1/knowledgebases/{knowledgebase_id}")
+    body = {field: current.get(field) for field in KNOWLEDGEBASE_UPDATE_FIELDS} | changes
+    echo_response(api.put(f"/v1/knowledgebases/{knowledgebase_id}", json=body))
 
 
 @knowledgebase.command("upload")
