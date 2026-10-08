@@ -184,6 +184,7 @@ _SAMPLING_UNSUPPORTED_MIN_VERSION: dict[str, tuple[int, int]] = {
     "opus": (4, 7),
     "sonnet": (5, 0),
     "fable": (5, 0),
+    "haiku": (5, 5),
 }
 
 # Matches `claude-<family>-<major>[-<minor>]` anywhere in a model id
@@ -197,6 +198,7 @@ _SAMPLING_UNSUPPORTED_INDICATORS: tuple[str, ...] = (
     "unsupported",
     "unexpected keyword",
     "unrecognized",
+    "deprecated",
 )
 
 
@@ -815,7 +817,7 @@ class BaseLLM(ConnectionNode):
 
         Recognizes Anthropic models by family and version, so future releases that follow
         the existing naming scheme are handled without a code change (e.g. claude-opus-5 and
-        claude-sonnet-6 reject; claude-haiku-5 does not, matching current Haiku behavior).
+        claude-sonnet-6 reject; claude-haiku-5 does not, but claude-haiku-5-5 does).
         Models not matched here that nonetheless reject are caught at runtime by
         ``_recover_completion_params``.
         """
