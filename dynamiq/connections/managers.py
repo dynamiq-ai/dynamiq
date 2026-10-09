@@ -260,16 +260,21 @@ class ConnectionManager:
         closed; callers using async clients should use ``await manager.aclose()`` instead.
         """
         logger.debug("Close connection clients")
-        for conn_client in self.connection_clients.values():
+        # Closed from a snapshot: a cache hit while closing reorders the cache, which breaks iterating it.
+        with self._connection_locks_guard:
+            conn_clients, self.connection_clients = list(self.connection_clients.values()), {}
+        for conn_client in conn_clients:
             close_method = getattr(conn_client, "close", None)
             if callable(close_method) and not asyncio.iscoroutinefunction(close_method):
                 close_method()
-        self.connection_clients = {}
 
     async def aclose(self):
         """Close every cached connection client, awaiting async clients."""
         logger.debug("Async-close connection clients")
-        for conn_client in self.connection_clients.values():
+        # Closed from a snapshot: a cache hit while closing reorders the cache, which breaks iterating it.
+        with self._connection_locks_guard:
+            conn_clients, self.connection_clients = list(self.connection_clients.values()), {}
+        for conn_client in conn_clients:
             aclose = getattr(conn_client, "aclose", None)
             if callable(aclose):
                 try:
@@ -280,7 +285,6 @@ class ConnectionManager:
             close_method = getattr(conn_client, "close", None)
             if callable(close_method) and not asyncio.iscoroutinefunction(close_method):
                 close_method()
-        self.connection_clients = {}
 
     @staticmethod
     def hash(data: str) -> str:

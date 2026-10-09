@@ -172,3 +172,25 @@ async def test_async_client_cache_is_bounded():
     finally:
         await first.aclose()
         await cm.aclose()
+
+
+def test_close_closes_every_client_while_the_cache_is_hit():
+    cm = ConnectionManager()
+    closed = []
+
+    class Client:
+        def __init__(self, conn_id: str):
+            self.conn_id = conn_id
+
+        def close(self):
+            # A run still using the manager hits the cache while the clients close.
+            cm._get_cached_client("first")
+            closed.append(self.conn_id)
+
+    for conn_id in ("first", "second"):
+        cm.connection_clients[conn_id] = Client(conn_id)
+
+    cm.close()
+
+    assert closed == ["first", "second"]
+    assert cm.connection_clients == {}
