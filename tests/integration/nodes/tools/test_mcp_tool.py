@@ -5,7 +5,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from mcp.types import CallToolResult, ImageContent, TextContent
+from mcp.types import CallToolResult, ImageContent, ListToolsResult, TextContent, Tool
 from pydantic import Field, ValidationError, create_model
 
 from dynamiq import connections
@@ -607,6 +607,58 @@ async def test_initialize_tools_unwraps_nested_exception_group(sse_server_connec
     assert "TimeoutError" in message
     assert "handshake timed out" in message
     assert "unhandled errors in a TaskGroup" not in message
+
+
+@pytest.mark.asyncio
+async def test_initialize_tools_reads_every_page_of_tools(sse_server_connection):
+    """A server that pages tools/list contributes the tools on every page, not only the first."""
+    pages = {
+        None: ListToolsResult(tools=[Tool(name="add", inputSchema={"type": "object"})], nextCursor="page-2"),
+        "page-2": ListToolsResult(tools=[Tool(name="multiply", inputSchema={"type": "object"})]),
+    }
+
+    @contextlib.asynccontextmanager
+    async def fake_connect(self, headers=None):
+        yield (object(), object())
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def initialize(self):
+            return None
+
+        async def list_tools(self, params=None):
+            return pages[params.cursor if params else None]
+
+    server = MCPServer(connection=sse_server_connection)
+    with (
+        patch.object(MCPSse, "connect", new=fake_connect),
+        patch("dynamiq.nodes.tools.mcp.ClientSession", return_value=FakeSession()),
+    ):
+        await server.initialize_tools()
+
+    assert set(server._mcp_tools) == {"add", "multiply"}
+
+
+def test_split_mcp_http_headers_leaves_out_unset_optional_arguments():
+    """Servers that validate their schema reject null for an optional argument the caller left out."""
+    model_cls = MCPTool.get_input_schema(
+        {
+            "type": "object",
+            "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}},
+            "required": ["query"],
+        }
+    )
+
+    args, _ = split_mcp_http_headers(model_cls(query="refund"))
+    assert args == {"query": "refund"}
+
+    args, _ = split_mcp_http_headers(model_cls(query="refund", limit=None))
+    assert args == {"query": "refund", "limit": None}
 
 
 def test_map_node_resolves_mcp_server_to_single_tool(sse_server_connection, mock_mcp_tools):
