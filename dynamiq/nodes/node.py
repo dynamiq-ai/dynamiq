@@ -114,7 +114,6 @@ def is_retryable_error(exc: BaseException) -> bool:
     Only certainly-permanent failures are non-retryable; anything unrecognised is retried
     as before. Every node type runs through this loop, not only LLMs.
     """
-    # An exception can declare itself permanent (hook stops do).
     if getattr(exc, "retryable", True) is False:
         return False
     try:
@@ -243,7 +242,6 @@ class NodeDependency(BaseModel):
 
     @model_validator(mode="after")
     def validate_trigger(self) -> "NodeDependency":
-        # A Choice reports its options in a successful result, so an option can only follow a success.
         if self.trigger == DependencyTrigger.FAILURE and self.option:
             raise ValueError(
                 f"Dependency on '{self.node.id}' cannot both select option '{self.option}' and trigger on failure."
@@ -575,7 +573,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             and (isinstance(dep_output_data.output, dict))
             and (dep_condition_result := dep_output_data.output.get(depend.option))
         ):
-            # Restored from a checkpoint, a Choice's option results come back as plain dicts.
             if isinstance(dep_condition_result, dict):
                 dep_condition_result = RunnableResult.model_validate(dep_condition_result)
             if dep_condition_result.status == RunnableStatus.FAILURE:

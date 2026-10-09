@@ -250,7 +250,6 @@ class ToolPolicyHook(GuardHook):
         return {HookPoint.BEFORE_TOOL}
 
     def hides_tool(self, tool_name: str, group: str | None = None) -> bool:
-        # Only an observation can be shown to the model; a deny that ends the run must be able to fire.
         return self.deny and self.on_violation == BlockAs.OBSERVATION and self.matches_tool(tool_name, group)
 
     @staticmethod
@@ -413,7 +412,6 @@ class RegexHook(TextGuardHook):
 
 PIIEntity = Literal["email", "phone", "credit_card", "ssn", "ip_address"]
 
-# Most specific first, so that a card number is not also taken for a phone number.
 _PII_PATTERNS: dict[str, str] = {
     "credit_card": (r"(?<![\d-])(?:\d{4}([ -])\d{4}\1\d{4}\1\d{1,7}|\d{4}([ -])\d{6}\2\d{5}|\d{13,19})(?![\d-]|[ ]\d)"),
     "ssn": r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)",
@@ -438,7 +436,6 @@ def _is_valid_match(entity: str | None, text: str) -> bool:
     if entity == "credit_card":
         return 13 <= len(digits) <= 19 and _luhn_ok(digits)
     if entity == "phone":
-        # Phone-like formatting only: a bare run of digits (order id, epoch, "2026 1006 1844") is not a phone number.
         formatted = text.lstrip().startswith(("+", "(", "0")) or bool(
             re.search(r"\d[-.]\d|\b\d{3} \d{3} \d{4}\b|\b(?:\d{2} ){4}\d{2}\b", text)
         )
@@ -684,8 +681,6 @@ class PIIHook(TextGuardHook):
             if isinstance(decision, Modify):
                 value = decision.value
         if self.restore_in_output:
-            # Memory keeps the placeholders: the real values must not come back through saved history. Registered
-            # as a transform of the final answer, so hooks that run after this one are reflected in memory too.
             ctx.memory_transforms.append(lambda final: map_strings(final, lambda text: self._unrestore(ctx, text)))
             value = map_strings(value, lambda text: self._restore(ctx, text, only_origin="input"))
         return Modify(value) if value != answer else ALLOW
@@ -757,7 +752,6 @@ class PromptInjectionHook(GuardHook):
     def detect(self, ctx: HookContext, text: str) -> bool:
         """Whether the detector flags ``text``. Override to plug another detector."""
         config = ctx.config or RunnableConfig(callbacks=[])
-        # Run under the agent's run, so the detector shows up in its trace instead of being a root run of its own.
         options = {"parent_run_id": ctx.run_id} if ctx.run_id else {}
         result = self._detector_node().run_sync(input_data={"message": text}, config=config, **options)
         if result.status != RunnableStatus.SUCCESS:

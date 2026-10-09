@@ -443,8 +443,6 @@ class CheckpointFlowMixin(BaseModel):
                     )
 
         def on_pause_run(node_id: str, resume_at: datetime | None) -> bool:
-            # Only a node of this flow can pause the run: a nested one (a Map item, an agent tool, a sub-workflow
-            # step) would be resumed through its owner, whose restore does not bring the nested node's state back.
             if node_id not in self._node_by_id:
                 return False
             if resume_at is not None and resume_at.tzinfo is None:

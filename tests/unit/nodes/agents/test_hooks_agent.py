@@ -662,9 +662,6 @@ def test_every_builtin_hook_publishes_a_json_schema_for_ui_forms():
     assert all(s.get("additionalProperties") is False for s in schemas.values())  # unknown fields are rejected
 
 
-# --- human approval (Ask) ----------------------------------------------------------------------------------------
-
-
 class Approvals:
     """Scripted human: answers console approval prompts in turn and remembers what it was shown."""
 
@@ -829,9 +826,6 @@ def test_parallel_calls_of_the_same_tool_are_each_asked_and_never_share_an_answe
     assert len(approvals.shown) == 2 and len(tool_inputs("search")) == 1
 
 
-# --- inherit -----------------------------------------------------------------------------------------------------
-
-
 def parent_with_child(hooks, child_hooks=()):
     child = build_agent(list(child_hooks), tools=[], name="Researcher", id="child")
     parent = build_agent(
@@ -874,9 +868,6 @@ def test_a_call_limit_with_inherit_counts_the_parents_and_the_sub_agents_calls_t
     assert [args["query"] for args in tool_inputs("search")] == ["parent"]
 
 
-# --- pii scope ---------------------------------------------------------------------------------------------------
-
-
 @modes
 def test_pii_scope_request_masks_only_what_each_llm_call_is_sent(mode, session_placeholders):
     from dynamiq.memory import Memory
@@ -916,9 +907,6 @@ def test_pii_scope_request_only_applies_to_masking_and_needs_no_input_or_tool_re
         HookPoint.ON_OUTPUT,
     }
     assert PIIHook(scope="request").points() == {HookPoint.BEFORE_MODEL}
-
-
-# --- live streaming of a masked answer -------------------------------------------------------------------------
 
 
 @modes
@@ -963,9 +951,6 @@ def test_from_context_sets_what_the_model_must_not_choose_even_against_tool_para
         input_extra={"metadata": {"tenant": "acme"}, "tool_params": {"by_name": {"search": {"mode": "from-params"}}}},
     )
     assert tool_inputs("search") == [{"query": "x", "mode": "acme"}]
-
-
-# --- review round 2 ---------------------------------------------------------------------------------------------
 
 
 def test_a_stale_checkpoint_state_never_leaks_into_a_fresh_run():
@@ -1088,9 +1073,6 @@ def test_inherited_hooks_see_the_callers_user_id_inside_a_sub_agent():
     assert [args["query"] for args in tool_inputs("search")] == ["c"]
 
 
-# --- review of dff416f ---------------------------------------------------------------------------------------------
-
-
 @modes
 def test_memory_keeps_placeholders_when_the_answer_is_restored_for_the_caller(mode, session_placeholders):
     from dynamiq.memory import Memory
@@ -1118,7 +1100,6 @@ def test_memory_reflects_on_output_hooks_that_run_after_the_pii_restore(mode, se
     from dynamiq.memory.memory import MemorySaveMode
 
     memory = Memory(backend=InMemory(), save_mode=MemorySaveMode.INPUT_OUTPUT)
-    # on_output runs in reverse: pii restores first, the regex hook (listed before it) masks afterwards.
     hooks = [RegexHook(patterns=[r"sk-\w+"], on=["output"], action="mask"), PIIHook(restore_in_output=True)]
     agent = build_agent(hooks, memory=memory)
     result, _ = run_scripted(
@@ -1235,9 +1216,6 @@ def test_the_live_filter_keeps_the_text_after_a_match_longer_than_the_lookback()
     assert streamed.startswith("Contact: ")
 
 
-# --- review of 091fdcc ---------------------------------------------------------------------------------------------
-
-
 def test_a_pending_approval_in_one_run_does_not_block_another_run(monkeypatch):
     from dynamiq.nodes.agents import Agent
     from dynamiq.types.feedback import ApprovalInputData, FeedbackMethod
@@ -1317,9 +1295,6 @@ def test_a_vetoed_delegated_answer_is_not_in_the_tool_event():
     assert ("answer", "Withheld.") in streamed
 
 
-# --- review of e7d8d3a ---------------------------------------------------------------------------------------------
-
-
 def test_an_input_hook_that_fails_the_run_does_not_save_the_previous_runs_message():
     from dynamiq.memory import Memory
     from dynamiq.memory.backends import InMemory
@@ -1357,9 +1332,6 @@ def test_a_sub_agents_own_hooks_keep_a_fresh_state_per_run_even_with_an_inherite
     assert len(tool_inputs("search")) == 2  # one per delegation: the budget is per sub-agent run
 
 
-# --- review of c53bed9 ---------------------------------------------------------------------------------------------
-
-
 def _stream_agent(hooks, **kwargs):
     from queue import Queue
 
@@ -1391,7 +1363,6 @@ def test_an_approval_answer_for_another_request_is_ignored(monkeypatch):
     def answer_late_then_right(self, callbacks, event=None, **kwargs):
         if isinstance(event, ApprovalStreamingOutputEventMessage):
             requests.append(event.data.request_id)
-            # the answer to an earlier request (declined) arrives first, then the one for this request
             for request_id, approved in (("an-earlier-call", False), (event.data.request_id, True)):
                 message = ApprovalStreamingInputEventMessage(
                     event="approval", data=ApprovalInputData(is_approved=approved, feedback="", request_id=request_id)
@@ -1505,7 +1476,6 @@ def test_a_delegated_final_answer_is_not_streamed_raw_by_the_sub_agent():
 def test_a_tool_that_is_always_denied_is_not_offered_to_the_model():
     agent = build_agent([ToolPolicyHook(tools=["send-email"], deny=True)])
     assert "send-email" not in agent.tool_description and "search" in agent.tool_description
-    # a deny that ends the run has to be able to fire, so that tool stays visible
     stopping = build_agent([ToolPolicyHook(tools=["send-email"], deny=True, on_violation=BlockAs.FAIL)])
     assert "send-email" in stopping.tool_description
 

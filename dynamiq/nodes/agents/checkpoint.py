@@ -24,11 +24,8 @@ from dynamiq.utils.logger import logger
 # which may be larger when memory history messages are injected.
 DEFAULT_HISTORY_OFFSET = 1
 
-# How much of an in-memory file store's content a checkpoint carries. The files travel base64-encoded,
-# a third larger, beside the conversation history, and a checkpoint that is too large cannot be saved.
 MAX_CHECKPOINT_FILE_STORE_BYTES = 10 * 1024 * 1024
 
-# The source recorded for a file the agent stored from its input.
 USER_UPLOAD_SOURCE = "user_upload"
 
 
@@ -44,11 +41,9 @@ class AgentIterationData(BaseModel):
     pending_action: str | None = None
     pending_action_input: Any = None
     pending_thought: str | None = None
-    # Id of the pending call, so an approval asked for it is still answered after the replay.
     pending_tool_run_id: str | None = None
-    # Run state of the agent's hooks (e.g. the PII placeholder mapping).
+    pending_tool_run_ids: list[str] = Field(default_factory=list)
     hook_state: dict | None = None
-    # Artifacts this run created or updated, so a resumed run still returns them.
     artifacts: dict[str, dict] = Field(default_factory=dict)
 
 
@@ -94,6 +89,7 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
     _pending_action_input: Any = None
     _pending_thought: str | None = None
     _pending_tool_run_id: str | None = None
+    _pending_tool_run_ids: list[str] = []  # only ever reassigned, never mutated in place
 
     def to_checkpoint_state(self) -> AgentCheckpointState:
         """Extract agent state for checkpointing, including LLM, tool, and loop-level states."""
@@ -238,6 +234,7 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
         self._pending_action_input = None
         self._pending_thought = None
         self._pending_tool_run_id = None
+        self._pending_tool_run_ids = []
 
     def get_iteration_state(self) -> IterationState:
         """Serialize ReAct loop progress for checkpoint persistence."""
@@ -251,6 +248,7 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
             pending_action_input=self._pending_action_input,
             pending_thought=self._pending_thought,
             pending_tool_run_id=self._pending_tool_run_id,
+            pending_tool_run_ids=list(self._pending_tool_run_ids),
             hook_state=self._snapshot_hook_state(),
             artifacts=dict(self._run_artifacts),
         )
@@ -270,6 +268,7 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
         self._pending_action_input = data.pending_action_input
         self._pending_thought = data.pending_thought
         self._pending_tool_run_id = data.pending_tool_run_id
+        self._pending_tool_run_ids = list(data.pending_tool_run_ids)
         self._restored_hook_state = data.hook_state
         self._run_artifacts = dict(data.artifacts)
         # Mirror the completed-loop count back onto the instance so a snapshot

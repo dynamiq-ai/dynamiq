@@ -77,7 +77,6 @@ def test_hook_by_hook_a_guard_before_a_masker_sees_the_raw_value():
 
     with pytest.raises(HookAnswerException):
         run([BlockIf(), Mask()], HookPoint.ON_INPUT, "my SSN")
-    # Masker first: the guard only sees the masked text and lets it through.
     assert run([Mask(), BlockIf()], HookPoint.ON_INPUT, "my SSN")[0].value == "my [X]"
 
 
@@ -86,7 +85,6 @@ def test_hook_by_hook_a_guard_before_a_masker_sees_the_raw_value():
     [
         (BlockAs.FAIL, HookStopException),
         (BlockAs.ANSWER, HookAnswerException),
-        # observation only exists at tool points; anywhere else it ends the run with the reason as the answer
         (BlockAs.OBSERVATION, HookAnswerException),
     ],
 )

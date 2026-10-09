@@ -141,7 +141,6 @@ def test_hooks_survive_when_the_agent_is_nested_as_a_tool_and_inside_map(tmp_pat
     assert [type(h) for h in sub_tool.agent.hooks] == [type(h) for h in child.hooks]
     assert [type(h) for h in loaded_map.node.hooks] == [type(h) for h in child.hooks]
     assert dump_hooks(sub_tool.agent.hooks)[:5] == dump_hooks(child.hooks)[:5]
-    # the detector connection was resolved to the workflow connection, also when nested
     assert isinstance(sub_tool.agent.hooks[5].detector.connection, HuggingFace)
 
 

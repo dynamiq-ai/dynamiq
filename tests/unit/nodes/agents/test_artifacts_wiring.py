@@ -117,7 +117,6 @@ def test_a_sub_agent_publishes_in_the_sandbox_it_borrows(llm, store, caplog):
     finally:
         _shared_session.reset(session_token)
 
-    # Reused later on its own: no workspace, so neither the tool nor its instructions.
     sub._sync_react_prompt_for_shared_sandbox()
     assert _artifact_tool(sub) is None
     assert "## Artifacts" not in _ops(sub)
@@ -453,7 +452,6 @@ def test_repeated_gets_are_not_served_from_the_tool_cache(llm, store, mocker):
     result = agent.run({"input": "go"})
 
     assert result.status == RunnableStatus.SUCCESS
-    # The update reads metadata too, to check it builds on the latest; count the content reads only.
     reads = [call for call in gets.call_args_list if call.kwargs.get("include_content", True)]
     assert len(reads) == 2, "the second identical 'get' must reach the store"
     assert result.output["artifacts"][0]["version"] == 2

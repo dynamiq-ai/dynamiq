@@ -831,9 +831,6 @@ class TestPromptRoundtrip:
         assert any(RT_ANSWER in str(m.get("content", "")) for m in resumed), "the human's answer must reach the prompt"
 
 
-# ---------------------------------------------------------------- artifacts across a resume
-
-
 class TestArtifactsSurviveResume:
     """An artifact published before a pause must still be in the resumed run's output."""
 

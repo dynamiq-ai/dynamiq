@@ -12,7 +12,6 @@ from dynamiq.nodes.llms.custom_llm import CustomLLM
 from dynamiq.prompts import Prompt
 from dynamiq.runnables import RunnableConfig
 
-# The error Bedrock returns to a streamed call: litellm renders the body as a bytes repr.
 STREAMED_TEMPERATURE_ERROR = (
     "litellm.BadRequestError: BedrockException - "
     'b\'{"message":"This model doesn\\\'t support the temperature field. '
@@ -93,7 +92,6 @@ class TestDetection:
             "claude-haiku-4-5",
             # Dated full id for Opus 4.0 — the date must not be read as a minor version above the cutoff.
             "claude-opus-4-20250514",
-            # Haiku starts rejecting at 5.5.
             "claude-haiku-5",
             # Retired pre-4 naming and non-Anthropic models must not false-positive.
             "claude-3-5-sonnet-20241022",
@@ -200,8 +198,6 @@ class TestReactiveBackstop:
         assert "temperature" not in recovered
 
     def test_recovers_when_streamed_error_escapes_the_apostrophe(self, anthropic_supported):
-        # A streamed call's error carries the raw response body as a bytes repr, which
-        # escapes the apostrophe in "doesn't".
         anthropic_supported.temperature = 1.0
         common = {"model": "anthropic/claude-opus-4-6", "temperature": 1.0, "stream": True}
         exc = Exception(STREAMED_TEMPERATURE_ERROR)
@@ -210,7 +206,6 @@ class TestReactiveBackstop:
         assert "temperature" not in recovered
 
     def test_recovers_on_deprecated_error(self, anthropic_supported):
-        # Bedrock's wording for Haiku 5.5, which says neither "supported" nor "permitted".
         anthropic_supported.temperature = 0.5
         common = {"model": "anthropic/claude-opus-4-6", "temperature": 0.5}
         exc = Exception(

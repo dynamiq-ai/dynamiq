@@ -172,7 +172,6 @@ def test_tool_policy_allow_if_uses_the_run_context():
         run_policy(hook, "delete-customer", trusted={"metadata": {"role": "viewer"}})
     with pytest.raises(ToolBlockedException):
         run_policy(hook, "delete-customer")
-    # what the client put in the run input does not count
     with pytest.raises(ToolBlockedException):
         run_policy(hook, "delete-customer", metadata={"role": "admin"})
     assert run_policy(hook, "delete-customer", trusted={"metadata": {"role": "admin"}}).value == {}
@@ -350,9 +349,6 @@ def test_transform_sets_arguments_from_the_run_context_overriding_the_model():
     out = hook.before_tool(ctx, ToolCall(name="crm", input={"tenant": "spoofed", "q": "x"})).value
     assert out == {"tenant": "acme", "user": "u1", "q": "x"}
     assert hook.points() == {HookPoint.BEFORE_TOOL}
-
-
-# --- review of c53bed9 ---------------------------------------------------------------------------------------------
 
 
 def test_tool_patterns_match_names_mcp_servers_and_globs():

@@ -4,7 +4,6 @@ from uuid import UUID
 
 from dynamiq.utils import REVERSIBLE_MARKERS, decode_reversible, encode_reversible
 
-# The integers orjson writes as JSON numbers; larger ones are kept as text.
 _INT64_MIN, _UINT64_MAX = -(2**63), 2**64 - 1
 
 
@@ -50,13 +49,11 @@ def encode_checkpoint_data(obj: Any) -> Any:
     if isinstance(obj, (set, frozenset)):
         return {"__set__": [encode_checkpoint_data(item) for item in obj]}
     if isinstance(obj, type):
-        # A class, such as the type of an error a result holds: kept by name, as results record it.
         return obj.__name__
 
     encoded = encode_reversible(obj)
     if encoded is obj or _is_marker(encoded):
         return encoded
-    # A model's dump, an object's attributes or an enum's value: data like any other.
     return encode_checkpoint_data(encoded)
 
 

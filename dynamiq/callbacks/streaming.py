@@ -361,9 +361,7 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self.config = config
         self.loop_num = loop_num
         self.kwargs = kwargs
-        # Set when an output hook may rewrite or veto the answer: the agent streams it once, after the hooks.
         self.suppress_answer = suppress_answer
-        # Masks the answer while it streams (see LiveAnswerFilter); held-back text is sent when the answer ends.
         self.answer_filter = answer_filter
 
         self.accumulated_content: str = ""
@@ -491,7 +489,6 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._flush_remaining_buffer()
         self._reset_text_decoder()
         if self.answer_filter and (tail := self.answer_filter.finish()):
-            # The tail is the end of the answer: what is still waiting in the chunk buffer goes out first.
             self._flush_chunk_buffer()
             self._emit(tail, step=StreamingState.ANSWER, force=True, filtered=True)
         self._flush_chunk_buffer()
@@ -618,7 +615,6 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
     def _flush_chunk_buffer(self) -> None:
         """Flush the accumulated chunk buffer, emitting whatever is buffered."""
         if self._chunk_buffer and self._chunk_buffer_step:
-            # Buffered answer text already went through the answer filter: feeding it again would hold it back.
             self._emit(self._chunk_buffer, step=self._chunk_buffer_step, force=True, filtered=True)
         self._chunk_buffer = ""
         self._chunk_buffer_step = None

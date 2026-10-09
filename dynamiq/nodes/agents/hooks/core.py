@@ -354,7 +354,6 @@ def resolve_hook(item: Any) -> Hook:
     hook_type = str(hook_type)
     fields = {key: value for key, value in item.items() if key != "type"}
     if True in fields and "on" not in fields:
-        # YAML 1.1 reads an unquoted `on:` key as the boolean True.
         fields["on"] = fields.pop(True)
 
     if hook_type in HOOK_REGISTRY:

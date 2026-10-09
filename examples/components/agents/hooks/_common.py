@@ -16,7 +16,6 @@ from dynamiq.nodes.llms import OpenAI
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types.feedback import ApprovalInputData
 
-# override=True: values from .env win over ones already exported in the shell (often stale).
 load_dotenv(find_dotenv(), override=True)
 
 
@@ -123,8 +122,6 @@ def run_scenario(workflow: Workflow, agent: Agent, title: str, input_data: dict,
     tracing, sent_to_ui = make_tracing(ui)
     print(f"\n=== {title}")
     print(f"input: {input_data.get('input')!r}  (metadata: {input_data.get('metadata', {})})")
-    # The example plays the server: it vouches for the caller's role. `tool_policy` rules (allow_if, approval_unless)
-    # read this trusted context, never the metadata of the request, which a client could set to anything.
     trusted = {"user_id": input_data.get("user_id"), "metadata": input_data.get("metadata", {})}
     result = workflow.run_sync(
         input_data=input_data, config=RunnableConfig(callbacks=[tracing], trusted_context=trusted)

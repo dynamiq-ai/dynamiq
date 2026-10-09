@@ -32,7 +32,6 @@ OFFLINE_SCRIPTS = {
         _common.step_final("That id is not valid, could you give me the numeric customer id?"),
     ],
     "Delete is denied": [
-        # Deliberately try a tool that deny: true removed, to demonstrate rejection of a hallucinated call.
         _common.step_tool("delete-customer", customer_id="42"),
         _common.step_final("I can't delete customers; please contact an administrator."),
     ],

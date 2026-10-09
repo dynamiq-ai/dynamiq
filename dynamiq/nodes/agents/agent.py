@@ -768,6 +768,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 ).model_dump()
             )
 
+        self._pending_tool_run_ids = [tp["tool_run_id"] for tp in prepared_tools]
         batch_tool_run_id = (
             generate_uuid() if self._streaming_tool_run_ids else self._streaming_tool_run_id or generate_uuid()
         )
@@ -1378,8 +1379,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         **kwargs,
                     )
                     return skip_message, [], False, True, None
-                # The summarizer calls its LLM itself: its messages go through the `before_model` hooks (a `pii` hook
-                # with `scope: request` keeps the raw history out of it).
                 to_summarize = self._run_hooks(HookPoint.BEFORE_MODEL, to_summarize, config, **kwargs).value
                 tool_input = {**(action_input if isinstance(action_input, dict) else {}), "messages": to_summarize}
             else:
@@ -1416,8 +1415,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             if delegate_final:
                 self.log_final_output(thought, tool_result, loop_num)
-                # The delegated answer is the final answer: the tool event gets it under the same rules as the answer
-                # stream (masked live, or held back for the one streamed after the on_output hooks).
                 shown_result = tool_result
                 if self.streaming.enabled:
                     live_filter = self._live_answer_filter()
@@ -1479,7 +1476,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return tool_result, tool_files, False, True, dependency
 
         except ToolBlockedException as e:
-            # A hook refused the call: reported as a skip with `blocked_by`, not as a failed tool call.
             self._blocked_tool_run_ids.add(tool_run_id)
             self._stream_agent_event(
                 AgentToolResultEventMessageData(
@@ -1969,6 +1965,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         f"Agent {self.name} - {self.id}: Loop {loop_num}, "
                         f"replaying checkpointed tool call '{step.action}' after resume"
                     )
+                    self._streaming_tool_run_ids = list(self._pending_tool_run_ids)
                     self.log_reasoning(step.thought, step.action, step.action_input, loop_num)
                 else:
                     step = self._run_react_llm_step(config, loop_num, **kwargs)
@@ -1984,7 +1981,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 # Capture the tool call so an interruption during execution
                 # (e.g. HITL input timeout) can persist it to the checkpoint.
-                # A replayed call keeps its id, so the answer to an approval the human saw still matches.
                 replayed_id = self._pending_tool_run_id if replay_pending else None
                 self._streaming_tool_run_id = self._streaming_tool_run_id or replayed_id or generate_uuid()
                 self.set_pending_tool_call(action, action_input, thought, self._streaming_tool_run_id)

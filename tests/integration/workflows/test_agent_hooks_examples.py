@@ -58,7 +58,6 @@ def test_tool_policy_example():
 def test_transform_and_python_hook_example():
     out = run_example("transform_and_python_hook")
     assert "[numeric-id] before_tool tool=lookup-customer -> block" in out
-    # Unconditionally denied tools are hidden; attempted calls fail before before_tool hooks run.
     assert "Delete tool available: False" in out
     assert "Denied tool call rejected: True" in out
     assert out.count("status: success") == 4

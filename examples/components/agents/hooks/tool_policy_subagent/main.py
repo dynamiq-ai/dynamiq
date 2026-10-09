@@ -46,7 +46,6 @@ REFUND_SCRIPT = [
     step_tool("refund-customer", customer_id="42", amount="20"),
     step_final("Done. See the tool observation for the outcome of the refund."),
 ]
-# (title, question, metadata, parent script, answers of the scripted human to approval questions)
 SCENARIOS = [
     (
         "viewer: delete is refused",
