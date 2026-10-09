@@ -20,6 +20,7 @@ from .service import service
 from .skill import skill
 from .trigger import trigger
 from .voice import voice
+from .whoami import whoami
 from .workflow import workflow
 
 
@@ -69,6 +70,7 @@ cli.add_command(app, name="apps")
 cli.add_command(trigger, name="trigger")
 cli.add_command(trigger, name="triggers")
 cli.add_command(config)
+cli.add_command(whoami)
 
 
 def main() -> None:

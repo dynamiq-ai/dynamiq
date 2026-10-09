@@ -1,6 +1,7 @@
 import click
 
 from dynamiq.cli.client import ApiClient, ok
+from dynamiq.cli.commands.access import access_failure
 from dynamiq.cli.commands.context import with_api_and_settings
 from dynamiq.cli.config import Settings
 
@@ -25,9 +26,8 @@ def list_orgs(*, api: ApiClient, **__):
 @with_api_and_settings
 def set_org(*, api: ApiClient, settings: Settings, org_id: str):
     response = api.get(f"/v1/orgs/{org_id}")
-    if ok(response):
-        settings.org_id = org_id
-        settings.save_settings()
-        click.echo(f"Current organization set to: {org_id}")
-    else:
-        click.echo(f"Organization ID {org_id} was not found.")
+    if not ok(response):
+        raise click.ClickException(access_failure(settings, "Organization", org_id, response.status_code))
+    settings.org_id = org_id
+    settings.save_settings()
+    click.echo(f"Current organization set to: {org_id}")

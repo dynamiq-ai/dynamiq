@@ -1,6 +1,7 @@
 import click
 
 from dynamiq.cli.client import ApiClient, ok
+from dynamiq.cli.commands.access import access_failure
 from dynamiq.cli.commands.context import with_api_and_settings
 from dynamiq.cli.config import Settings
 
@@ -34,9 +35,8 @@ def set_project(*, api: ApiClient, settings: Settings, proj_id: str):
         return
 
     response = api.get(f"/v1/projects/{proj_id}?org_id={org_id}")
-    if ok(response):
-        settings.project_id = proj_id
-        settings.save_settings()
-        click.echo(f"Current project set to: {proj_id}")
-    else:
-        click.echo(f"Project ID {proj_id} was not found.")
+    if not ok(response):
+        raise click.ClickException(access_failure(settings, "Project", proj_id, response.status_code))
+    settings.project_id = proj_id
+    settings.save_settings()
+    click.echo(f"Current project set to: {proj_id}")
