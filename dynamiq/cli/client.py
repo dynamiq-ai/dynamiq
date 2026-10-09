@@ -8,6 +8,7 @@ import requests
 from tenacity import retry, retry_if_exception_type, retry_if_result, stop_after_attempt, wait_exponential
 
 from dynamiq.connections import HTTPMethod
+from dynamiq.utils.user_agent import CLI_USER_AGENT
 
 from .config import Settings
 
@@ -71,6 +72,7 @@ class ApiClient:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._client = requests.Session()
+        self._client.headers["User-Agent"] = CLI_USER_AGENT
 
     def get(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
         return self._request("GET", path, params=params)

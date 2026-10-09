@@ -4,12 +4,14 @@ import httpx
 import pytest
 
 from dynamiq.connections.connections import AWS as AWSConnection
+from dynamiq.connections.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections.connections import Http as HttpConnection
 from dynamiq.connections.connections import HttpApiKey as HttpApiKeyConnection
 from dynamiq.connections.connections import HTTPMethod
 from dynamiq.connections.connections import Milvus as MilvusConnection
 from dynamiq.connections.connections import MilvusDeploymentType
 from dynamiq.connections.connections import Qdrant as QdrantConnection
+from dynamiq.utils.user_agent import USER_AGENT
 
 
 @pytest.fixture
@@ -261,3 +263,16 @@ def test_turbopuffer_connect_reads_region_from_environment(monkeypatch):
     client = Turbopuffer().connect()
 
     assert str(client.base_url).rstrip("/") == "https://aws-eu-central-1.turbopuffer.com"
+
+
+def test_dynamiq_connection_names_the_sdk():
+    connection = DynamiqConnection(url="https://api.example.test", api_key="key")
+
+    assert connection.headers == {"Authorization": "Bearer key", "User-Agent": USER_AGENT}
+    assert USER_AGENT.startswith("dynamiq-python/")
+
+
+def test_dynamiq_connection_keeps_a_given_user_agent():
+    connection = DynamiqConnection(url="https://api.example.test", api_key="key", headers={"User-Agent": "custom/1.0"})
+
+    assert connection.headers["User-Agent"] == "custom/1.0"
