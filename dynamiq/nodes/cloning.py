@@ -227,20 +227,21 @@ def _models(obj: Any, seen: set[int] | None = None) -> Iterator[BaseModel]:
 
 
 def reply_waiting_node_ids(obj: Any) -> set[str]:
-    """The ids of the nodes in ``obj`` that wait for a human reply: feedback tools and approval-gated nodes.
+    """The ids of the nodes in ``obj`` that wait for a human reply: asking feedback tools and approval-gated nodes.
 
     A reply finds its node by the id the node asked under, which is the id its caller registered the
     node's input queue for. A copy that renamed such a node would ask under an id nobody registered,
-    and the reply would never reach it.
+    and the reply would never reach it. A feedback tool fixed to send information never waits.
     """
     # Imported here: the node and tool modules import this one.
     from dynamiq.nodes.node import Node
-    from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
+    from dynamiq.nodes.tools.human_feedback import HumanFeedbackAction, HumanFeedbackTool
 
     return {
         model.id
         for model in _models(obj)
-        if isinstance(model, HumanFeedbackTool) or (isinstance(model, Node) and model.approval.enabled)
+        if (isinstance(model, HumanFeedbackTool) and model.action != HumanFeedbackAction.INFO)
+        or (isinstance(model, Node) and model.approval.enabled)
     }
 
 

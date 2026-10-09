@@ -80,8 +80,8 @@ def test_a_feedback_tool_in_a_map_asks_under_its_registered_id_so_each_reply_rea
     # that renamed the tool asked under a fresh id, and its reply was lost.
     assert client.asked_ids == ["ask", "ask"]
     assert result.status == RunnableStatus.SUCCESS
-    output = str(result.output)
-    assert "answer to first?" in output and "answer to second?" in output
+    first, second = (str(item) for item in result.output["map"]["output"]["output"])
+    assert "answer to first?" in first and "answer to second?" in second
 
 
 def test_a_map_holding_a_feedback_tool_runs_its_items_one_at_a_time():

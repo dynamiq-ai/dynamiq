@@ -3,7 +3,7 @@ from dynamiq.nodes import InputTransformer, OutputTransformer
 from dynamiq.nodes.cloning import regenerate_node_ids, reply_waiting_node_ids
 from dynamiq.nodes.node import NodeDependency, NodeOutputReference
 from dynamiq.nodes.operators import Choice, ChoiceOption, DecisionTable, Expression, Pass, Rules, SubWorkflow
-from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
+from dynamiq.nodes.tools.human_feedback import HumanFeedbackAction, HumanFeedbackTool
 from dynamiq.nodes.types import (
     ChoiceCondition,
     ConditionOperator,
@@ -455,8 +455,9 @@ def test_a_kept_node_keeps_its_id_and_the_paths_naming_it_while_the_rest_of_the_
 
 def test_the_nodes_waiting_for_a_reply_are_the_feedback_tools_and_the_approval_gated_nodes_at_any_depth():
     ask = HumanFeedbackTool(id="ask")
+    notify = HumanFeedbackTool(id="notify", action=HumanFeedbackAction.INFO)
     gate = Pass(id="gate", name="gate", approval=ApprovalConfig(enabled=True))
     plain = Pass(id="plain", name="plain")
-    node = SubWorkflow(id="sub", name="sub", flow=Flow(id="flow", nodes=[ask, gate, plain]))
+    node = SubWorkflow(id="sub", name="sub", flow=Flow(id="flow", nodes=[ask, notify, gate, plain]))
 
     assert reply_waiting_node_ids(node) == {"ask", "gate"}

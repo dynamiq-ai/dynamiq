@@ -341,6 +341,8 @@ class Map(Node):
         # and the items run one at a time: copies asking under one id could not tell their replies apart.
         keep_ids = frozenset(reply_waiting_node_ids(run_node))
         max_workers = 1 if keep_ids else self.max_workers
+        if max_workers < self.max_workers:
+            logger.info(f"Map {self.id} runs its items one at a time: nodes {sorted(keep_ids)} wait for human replies")
 
         try:
             check_cancellation(config)
