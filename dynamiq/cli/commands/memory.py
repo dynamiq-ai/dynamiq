@@ -52,16 +52,29 @@ def get_memory(*, api: ApiClient, settings: Settings, memory_id: str):
 
 def _scope_params(user_id: str, session_id: str | None) -> dict:
     params = {"user_id": user_id}
-    if session_id:
+    if session_id is not None:
         params["session_id"] = session_id
     return params
 
 
+def _reject_blank(ctx: click.Context, param: click.Parameter, value: str | None) -> str | None:
+    # An empty id (e.g. an unset shell variable) must fail rather than silently widen the scope.
+    if value is not None and not value.strip():
+        raise click.BadParameter("must not be empty.")
+    return value
+
+
 user_id_option = click.option(
-    "--user-id", required=True, help="The `user_id` the agent run carried. Items are stored per user."
+    "--user-id",
+    required=True,
+    callback=_reject_blank,
+    help="The `user_id` the agent run carried. Items are stored per user.",
 )
 session_id_option = click.option(
-    "--session-id", default=None, help="Narrow to one conversation (the run's `session_id`)."
+    "--session-id",
+    default=None,
+    callback=_reject_blank,
+    help="Narrow to one conversation (the run's `session_id`).",
 )
 
 

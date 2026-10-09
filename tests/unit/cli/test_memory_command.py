@@ -1,3 +1,4 @@
+import pytest
 from click.testing import CliRunner
 
 from dynamiq.cli.commands.memory import memory
@@ -42,6 +43,28 @@ def test_clear_sends_user_and_session_id(cli_ctx, recording_api):
 
 def test_clear_requires_user_id(cli_ctx, recording_api):
     result = CliRunner().invoke(memory, ["clear", MEMORY_ID, "--yes"], obj=cli_ctx)
+
+    assert result.exit_code != 0
+    assert recording_api.calls == []
+
+
+@pytest.mark.parametrize("option", ["--session-id", "--user-id"])
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_clear_rejects_blank_scope_id(cli_ctx, recording_api, option, blank):
+    args = {"--user-id": "u-1", "--session-id": "s-1", option: blank}
+    result = CliRunner().invoke(
+        memory,
+        ["clear", MEMORY_ID, "--user-id", args["--user-id"], "--session-id", args["--session-id"], "--yes"],
+        obj=cli_ctx,
+    )
+
+    assert result.exit_code != 0
+    assert "must not be empty" in result.output
+    assert recording_api.calls == []
+
+
+def test_items_rejects_blank_session_id(cli_ctx, recording_api):
+    result = CliRunner().invoke(memory, ["items", MEMORY_ID, "--user-id", "u-1", "--session-id", ""], obj=cli_ctx)
 
     assert result.exit_code != 0
     assert recording_api.calls == []
