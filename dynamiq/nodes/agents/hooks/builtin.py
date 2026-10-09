@@ -450,10 +450,11 @@ _MAX_SESSION_STORES = 1000
 
 @contextmanager
 def _locked_store(ctx: HookContext) -> Iterator[dict]:
-    """The placeholder mapping. With a ``session_id`` it is kept per session (in process), so that the placeholders
-    of earlier turns, which the history holds, keep their meaning and numbering continues; otherwise per run.
+    """The placeholder mapping. With a ``session_id`` or ``user_id`` (the ids memory is keyed by) it is kept per
+    user and session (in process), so that the placeholders of earlier turns, which the history holds, keep their
+    meaning and numbering continues; otherwise per run.
     The key has no ``agent_id``: an inherited hook runs in sub-agents under their own ids but shares one store."""
-    if not ctx.session_id:
+    if not (ctx.session_id or ctx.user_id):
         with ctx.lock:
             yield ctx.hook_state
         return
@@ -503,15 +504,6 @@ class PIIHook(TextGuardHook):
             value into another argument such as the body.
         restore_in_output: Put the real values back in the final answer, only those the user supplied (never values
             that came from a tool result).
-
-    Limits: the mapping lives in the run (and is saved in clear text in the agent's checkpoint, as a resume needs it),
-    or, with a ``session_id``, in the process for that session (so numbering continues across turns); after a restart
-    a reloaded history holds placeholders without their mapping. Session placeholders include a random store namespace
-    so those old placeholders remain unresolved rather than restoring to a new value. Tools that call LLMs inside,
-    and their traces, see what the tool received. Detection is regex-based: names and addresses are not detected.
-
-    ``on`` defaults to ``input`` and ``tool_result``. Add ``output`` to also mask what the model writes (the answer
-    is then buffered and sent once at the end; it catches PII from the agent's own prompt).
     """
 
     message: str = "The request contains personal data and was blocked."
@@ -626,7 +618,7 @@ class PIIHook(TextGuardHook):
         stream leave no placeholder behind in the real mapping."""
         with _locked_store(ctx) as store:
             snapshot = {"hooks": {ctx.hook_key: copy.deepcopy(store)}}
-        preview = dataclasses.replace(ctx, state=snapshot, lock=threading.RLock(), session_id=None)
+        preview = dataclasses.replace(ctx, state=snapshot, lock=threading.RLock(), session_id=None, user_id=None)
         if "output" in self.on:
             text = self._mask(preview, text, "output")
         if self.restore_in_output:

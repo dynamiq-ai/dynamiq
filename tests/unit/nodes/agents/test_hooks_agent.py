@@ -1216,6 +1216,27 @@ def test_the_live_filter_keeps_the_text_after_a_match_longer_than_the_lookback()
     assert streamed.startswith("Contact: ")
 
 
+def test_the_live_filter_still_streams_a_second_match_in_the_held_back_window():
+    from dynamiq.nodes.agents.hooks.core import LiveAnswerFilter
+
+    email = re.compile(r"[\w.]+@\w+(?:\.\w+)?")
+    live = LiveAnswerFilter([lambda text: email.sub("<EMAIL>", text)], lookback=8)
+    chunks = ["Hi aaaaaaaaaaaa@bbbbbbbbbbbb", ".com x bob@cc.com and more text", " end"]
+    streamed = "".join(live.feed(chunk) for chunk in chunks) + live.finish()
+    assert streamed.endswith("<EMAIL> x <EMAIL> and more text end")
+
+
+def test_pii_numbering_continues_for_a_user_without_a_session_id():
+    from dynamiq.nodes.agents.hooks.core import HookContext
+
+    hook = PIIHook()
+    run1 = HookContext(hook_key="pii", agent_id="a", user_id="numbering-user")
+    run2 = HookContext(hook_key="pii", agent_id="a", user_id="numbering-user")
+    first = hook._mask(run1, "a@x.com", "input")
+    second = hook._mask(run2, "b@y.com", "input")
+    assert first.endswith("_1>") and second == first[:-3] + "_2>"
+
+
 def test_a_pending_approval_in_one_run_does_not_block_another_run(monkeypatch):
     from dynamiq.nodes.agents import Agent
     from dynamiq.types.feedback import ApprovalInputData, FeedbackMethod

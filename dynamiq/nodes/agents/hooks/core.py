@@ -397,6 +397,7 @@ class LiveAnswerFilter:
         self.lookback = lookback
         self.raw = ""
         self.sent = ""
+        self.floor = 0
 
     def _masked(self) -> str:
         text = self.raw
@@ -406,17 +407,24 @@ class LiveAnswerFilter:
 
     def _resync(self, masked: str) -> None:
         """A match longer than the lookback: part of it went out raw before it was recognised. Count the masked
-        replacement as sent too, so the text after the match still streams (the raw part is the documented leak)."""
+        replacement as sent too, so the text after the match still streams (the raw part is the documented leak).
+        Only the raw text up to the end of that match counts as sent: the first point at or after the held-back
+        window where the masked raw prefix agrees with the new masked text. Whatever follows, a second match
+        included, was never streamed and still goes out."""
         if masked.startswith(self.sent):
             return
-        limit = min(len(self.raw), len(masked))
-        prefix = 0
-        while prefix < limit and masked[prefix] == self.sent[prefix : prefix + 1]:
-            prefix += 1
-        suffix = 0
-        while suffix < limit - prefix and masked[-1 - suffix] == self.raw[-1 - suffix]:
-            suffix += 1
-        self.sent = masked[: len(masked) - suffix]
+        for end in range(min(self.floor, len(self.raw)), len(self.raw) + 1):
+            head = self._mask(self.raw[:end])
+            if masked.startswith(head):
+                self.sent = head
+                self.floor = end
+                return
+        self.sent = masked
+
+    def _mask(self, text: str) -> str:
+        for step in self.steps:
+            text = step(text)
+        return text
 
     def feed(self, chunk: str) -> str:
         self.raw += chunk
@@ -426,6 +434,7 @@ class LiveAnswerFilter:
         if not safe.startswith(self.sent):
             return ""
         out, self.sent = safe[len(self.sent) :], safe
+        self.floor = max(len(self.raw) - self.lookback, 0)
         return out
 
     def finish(self) -> str:
@@ -433,6 +442,7 @@ class LiveAnswerFilter:
         self._resync(masked)
         out = masked[len(self.sent) :]
         self.raw = self.sent = ""
+        self.floor = 0
         return out
 
     def mask_all(self, text: str) -> str:
@@ -440,6 +450,7 @@ class LiveAnswerFilter:
         self.raw = text
         masked = self._masked()
         self.raw = self.sent = ""
+        self.floor = 0
         return masked
 
 
