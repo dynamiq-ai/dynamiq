@@ -250,3 +250,68 @@ def test_empty_json_object_and_array():
     # Just confirm that empty objects/arrays parse without error.
     assert parse_llm_json_output("{}") == {}
     assert parse_llm_json_output("[]") == []
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "True False None",
+        "literal ,} and ,]",
+        "It's 'quoted'",
+        'He said "True" and then "None"',
+        "path\\True\\None",
+        "中文 True // text /* text */",
+    ],
+)
+def test_json_corrections_preserve_double_quoted_strings(message):
+    quoted = json.dumps(message, ensure_ascii=False)
+    response = f'{{"message": {quoted}, "active": True, "missing": None,}}'
+    expected = {"message": message, "active": True, "missing": None}
+
+    assert json.loads(clean_json_string(response)) == expected
+    assert parse_llm_json_output(response) == expected
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "True False None",
+        "literal ,} and ,]",
+        "It's 'quoted'",
+        'He said "True" and then "None"',
+    ],
+)
+def test_json_corrections_preserve_single_quoted_strings(message):
+    quoted = "'" + message.replace("'", "\\'") + "'"
+    response = f"{{'message': {quoted}, 'active': False, 'missing': None,}}"
+    expected = {"message": message, "active": False, "missing": None}
+
+    assert json.loads(clean_json_string(response)) == expected
+    assert parse_llm_json_output(response) == expected
+
+
+def test_json_corrections_preserve_quoted_keys_and_nested_values():
+    response = """{
+        "True": ["False", "None", "keep ,]",],
+        'None': {'False': "keep ,}",},
+    }"""
+    expected = {"True": ["False", "None", "keep ,]"], "None": {"False": "keep ,}"}}
+
+    assert json.loads(clean_json_string(response)) == expected
+    assert parse_llm_json_output(response) == expected
+
+
+@pytest.mark.parametrize("comment_text", ["Don't change this value", "'quoted' comment"])
+@pytest.mark.parametrize("comment_style", ["line", "block"])
+def test_json_extraction_ignores_apostrophes_in_comments(comment_text, comment_style):
+    comment = f"// {comment_text}" if comment_style == "line" else f"/* {comment_text} */"
+    response = f'{{\n{comment}\n"message": "hello", "active": True,\n}}'
+
+    assert parse_llm_json_output(response) == {"message": "hello", "active": True}
+
+
+@pytest.mark.parametrize("n", [2000, 4000, 8000, 16000])
+def test_json_cleanup_preserves_repeated_escaped_quotes(n):
+    response = "{" + ('\\"' + "\n") * n + "}"
+
+    assert clean_json_string(response) == response
