@@ -1,6 +1,7 @@
 import enum
 import json
 import os
+import re
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from enum import Enum
@@ -14,6 +15,7 @@ from pydantic_core.core_schema import ValidationInfo
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.env import get_env_var
 from dynamiq.utils.logger import logger
+from dynamiq.utils.user_agent import USER_AGENT
 
 if TYPE_CHECKING:
     from chromadb import ClientAPI as ChromaClient
@@ -22,6 +24,7 @@ if TYPE_CHECKING:
     from openai import OpenAI as OpenAIClient
     from pinecone import Pinecone as PineconeClient
     from qdrant_client import QdrantClient
+    from turbopuffer import Turbopuffer as TurbopufferClient
     from weaviate import WeaviateClient
 
 
@@ -203,9 +206,10 @@ class Dynamiq(HttpApiKey):
 
     @model_validator(mode="after")
     def setup_headers(self):
-        """Ensure bearer token is included in default headers."""
+        """Ensure bearer token and the SDK's User-Agent are included in default headers."""
         if self.api_key:
             self.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        self.headers.setdefault("User-Agent", USER_AGENT)
         return self
 
     @property
@@ -1045,6 +1049,61 @@ class Weaviate(BaseApiKeyConnection):
             return weaviate_client
         else:
             raise ValueError("Invalid deployment type")
+
+
+class Turbopuffer(BaseApiKeyConnection):
+    """
+    Represents a connection to the Turbopuffer service.
+
+    Attributes:
+        api_key (str): The API key for the service.
+            Defaults to the environment variable 'TURBOPUFFER_API_KEY'.
+        region (str | None): The region of the service, such as "aws-us-east-1".
+            Defaults to the environment variable 'TURBOPUFFER_REGION'.
+        base_url (str | None): The API URL of a dedicated or self-hosted cluster. Replaces the regional
+            URL when set.
+    """
+
+    REGION_PATTERN: ClassVar[re.Pattern] = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
+    api_key: str = Field(default_factory=partial(get_env_var, "TURBOPUFFER_API_KEY"))
+    region: str | None = Field(default_factory=partial(get_env_var, "TURBOPUFFER_REGION"))
+    base_url: str | None = None
+
+    @property
+    def api_url(self) -> str:
+        """The URL of the API the connection talks to."""
+        if self.base_url:
+            return self.base_url
+        return f"https://{self._valid_region()}.turbopuffer.com"
+
+    def _valid_region(self) -> str:
+        if not self.region or not self.REGION_PATTERN.fullmatch(self.region):
+            raise ValueError(f"Invalid Turbopuffer region '{self.region}'. Expected a region such as 'aws-us-east-1'.")
+        return self.region
+
+    def connect(self) -> "TurbopufferClient":
+        """
+        Connects to the Turbopuffer service.
+
+        The SDK reads TURBOPUFFER_REGION and TURBOPUFFER_BASE_URL from the environment whenever they
+        are not passed, and rejects a region next to a base URL without a "{region}" placeholder. Both
+        are always passed, so the connection's own settings are the only ones used.
+
+        Returns:
+            TurbopufferClient: An instance of the Turbopuffer client.
+
+        Raises:
+            ValueError: If no base URL is set and the region is missing or invalid.
+        """
+        from turbopuffer import Turbopuffer as TurbopufferClient
+
+        if self.base_url:
+            # An empty region fills the trailing placeholder, which leaves the custom URL unchanged.
+            return TurbopufferClient(api_key=self.api_key, base_url=self.base_url + "{region}", region="")
+        return TurbopufferClient(
+            api_key=self.api_key, base_url="https://{region}.turbopuffer.com", region=self._valid_region()
+        )
 
 
 class Chroma(BaseConnection):

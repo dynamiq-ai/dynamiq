@@ -4,12 +4,14 @@ import httpx
 import pytest
 
 from dynamiq.connections.connections import AWS as AWSConnection
+from dynamiq.connections.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections.connections import Http as HttpConnection
 from dynamiq.connections.connections import HttpApiKey as HttpApiKeyConnection
 from dynamiq.connections.connections import HTTPMethod
 from dynamiq.connections.connections import Milvus as MilvusConnection
 from dynamiq.connections.connections import MilvusDeploymentType
 from dynamiq.connections.connections import Qdrant as QdrantConnection
+from dynamiq.utils.user_agent import USER_AGENT
 
 
 @pytest.fixture
@@ -208,3 +210,69 @@ def test_aws_profile_takes_precedence_over_session_token(mock_aws_temporary_cred
 
     mock_session.assert_called_once_with(profile_name="some-profile", region_name="us-east-1")
     assert "aws_session_token" not in aws.conn_params
+
+
+def test_turbopuffer_api_url_from_region():
+    from dynamiq.connections import Turbopuffer
+
+    assert Turbopuffer(api_key="key", region="aws-us-east-1").api_url == "https://aws-us-east-1.turbopuffer.com"
+
+
+def test_turbopuffer_api_url_prefers_base_url():
+    from dynamiq.connections import Turbopuffer
+
+    connection = Turbopuffer(api_key="key", region="aws-us-east-1", base_url="https://tpuf.example.com")
+
+    assert connection.api_url == "https://tpuf.example.com"
+
+
+@pytest.mark.parametrize("region", [None, "", "evil.com/x", "AWS-US"])
+def test_turbopuffer_rejects_invalid_region(region, monkeypatch):
+    from dynamiq.connections import Turbopuffer
+
+    monkeypatch.delenv("TURBOPUFFER_REGION", raising=False)
+
+    with pytest.raises(ValueError):
+        _ = Turbopuffer(api_key="key", region=region).api_url
+
+
+@pytest.mark.parametrize(
+    "settings, expected",
+    [
+        ({"region": "aws-us-east-1"}, "https://aws-us-east-1.turbopuffer.com"),
+        ({"region": None, "base_url": "https://tpuf.example.com"}, "https://tpuf.example.com"),
+    ],
+)
+def test_turbopuffer_connect_ignores_environment(settings, expected, monkeypatch):
+    from dynamiq.connections import Turbopuffer
+
+    monkeypatch.setenv("TURBOPUFFER_REGION", "gcp-us-central1")
+    monkeypatch.setenv("TURBOPUFFER_BASE_URL", "https://wrong.example.com")
+
+    client = Turbopuffer(api_key="key", **settings).connect()
+
+    assert str(client.base_url).rstrip("/") == expected
+
+
+def test_turbopuffer_connect_reads_region_from_environment(monkeypatch):
+    from dynamiq.connections import Turbopuffer
+
+    monkeypatch.setenv("TURBOPUFFER_API_KEY", "key")
+    monkeypatch.setenv("TURBOPUFFER_REGION", "aws-eu-central-1")
+
+    client = Turbopuffer().connect()
+
+    assert str(client.base_url).rstrip("/") == "https://aws-eu-central-1.turbopuffer.com"
+
+
+def test_dynamiq_connection_names_the_sdk():
+    connection = DynamiqConnection(url="https://api.example.test", api_key="key")
+
+    assert connection.headers == {"Authorization": "Bearer key", "User-Agent": USER_AGENT}
+    assert USER_AGENT.startswith("dynamiq-python/")
+
+
+def test_dynamiq_connection_keeps_a_given_user_agent():
+    connection = DynamiqConnection(url="https://api.example.test", api_key="key", headers={"User-Agent": "custom/1.0"})
+
+    assert connection.headers["User-Agent"] == "custom/1.0"
