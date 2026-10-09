@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 import dynamiq.utils.jsonpath as jsonpath
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes import Behavior, Node, NodeGroup
-from dynamiq.nodes.cloning import carry_mock_exclusions, regenerate_node_ids
+from dynamiq.nodes.cloning import carry_mock_exclusions, regenerate_node_ids, reply_waiting_node_ids
 from dynamiq.nodes.node import Transformer, ensure_config
 from dynamiq.nodes.tools.mcp import resolve_mcp_node
 from dynamiq.nodes.types import ChoiceCondition, ChoiceHitPolicy, ConditionOperator
@@ -281,10 +281,10 @@ class Map(Node):
             except Exception as e:
                 logger.error(f"Map: failed to clean up dry run resources for node {node.id}: {e}")
 
-    def execute_workflow(self, index, data, config, merged_kwargs, node):
+    def execute_workflow(self, index, data, config, merged_kwargs, node, keep_ids: frozenset[str] = frozenset()):
         """Execute a single workflow and handle errors."""
         id_map: dict[str, set[str]] = {}
-        node_copy = regenerate_node_ids(node.clone(), id_map)
+        node_copy = regenerate_node_ids(node.clone(), id_map, keep_ids=keep_ids)
         # Only a clone that overrides the base hook holds anything to clean; keeping the rest would
         # retain one node per item for a whole run, and a dry run is the default.
         if (
@@ -337,13 +337,19 @@ class Map(Node):
 
         # Resolve an MCPServer to its single MCPTool.
         run_node = resolve_mcp_node(self.node)
+        # A node waiting for a human reply is found by the id it asks under, so each item's copy keeps that id,
+        # and the items run one at a time: copies asking under one id could not tell their replies apart.
+        keep_ids = frozenset(reply_waiting_node_ids(run_node))
+        max_workers = 1 if keep_ids else self.max_workers
+        if max_workers < self.max_workers:
+            logger.info(f"Map {self.id} runs its items one at a time: nodes {sorted(keep_ids)} wait for human replies")
 
         try:
             check_cancellation(config)
-            with ContextAwareThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            with ContextAwareThreadPoolExecutor(max_workers=max_workers) as executor:
                 results = list(
                     executor.map(
-                        lambda args: self.execute_workflow(args[0], args[1], config, merged_kwargs, run_node),
+                        lambda args: self.execute_workflow(args[0], args[1], config, merged_kwargs, run_node, keep_ids),
                         enumerate(input_data),
                     )
                 )
