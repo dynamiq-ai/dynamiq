@@ -184,6 +184,7 @@ _SAMPLING_UNSUPPORTED_MIN_VERSION: dict[str, tuple[int, int]] = {
     "opus": (4, 7),
     "sonnet": (5, 0),
     "fable": (5, 0),
+    "haiku": (5, 5),
 }
 
 # Matches `claude-<family>-<major>[-<minor>]` anywhere in a model id
@@ -197,7 +198,18 @@ _SAMPLING_UNSUPPORTED_INDICATORS: tuple[str, ...] = (
     "unsupported",
     "unexpected keyword",
     "unrecognized",
+    "deprecated",
 )
+
+
+def provider_error_text(exc: BaseException) -> str:
+    """The error's text with the backslash escapes a bytes repr adds removed.
+
+    LiteLLM renders the body of a failed streamed call as a bytes repr, so the provider's
+    "doesn't support" arrives as "doesn\\'t support" and phrase matching misses it.
+    """
+    return str(exc).replace("\\'", "'")
+
 
 # Streaming-only endpoints reject `stream: false` with a 400 (no provider exposes this as metadata).
 _STREAMING_REQUIRED_INDICATORS: tuple[str, ...] = (
@@ -658,16 +670,25 @@ class BaseLLM(ConnectionNode):
     def _close_stream(response: Union["ModelResponse", "CustomStreamWrapper"]) -> None:
         """Release the provider connection of a sync stream, even if it was not fully consumed.
 
-        LiteLLM's stream wrapper has no sync close, so this closes the provider stream beneath it.
+        LiteLLM's stream wrapper has no sync close, so this closes the provider stream beneath it. LiteLLM's line
+        iterators for Anthropic and several other providers have no close either, so the response's line generator
+        they read from is closed as well.
+
+        This must happen here, in the caller's thread. LiteLLM stops reading at the last event, before the end of the
+        response body, so an unclosed stream keeps its connection in use until the garbage collector finalizes it.
+        That finalizer takes the connection pool's lock, which LiteLLM's shared client holds while it starts a
+        request: a collection that runs there deadlocks the thread, and every later request on the client waits.
+
         A cleanup failure is logged, not raised, so it never replaces the original exception.
         """
         stream = getattr(response, "completion_stream", response)
-        close = getattr(stream, "close", None)
-        if callable(close):
-            try:
-                close()
-            except Exception:
-                logger.warning("Could not close the LLM completion stream", exc_info=True)
+        for target in (stream, getattr(stream, "response_iterator", None), getattr(stream, "streaming_response", None)):
+            close = getattr(target, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    logger.warning("Could not close the LLM completion stream", exc_info=True)
 
     @staticmethod
     async def _aclose_stream(response: Union["ModelResponse", "CustomStreamWrapper"]) -> None:
@@ -805,7 +826,7 @@ class BaseLLM(ConnectionNode):
 
         Recognizes Anthropic models by family and version, so future releases that follow
         the existing naming scheme are handled without a code change (e.g. claude-opus-5 and
-        claude-sonnet-6 reject; claude-haiku-5 does not, matching current Haiku behavior).
+        claude-sonnet-6 reject; claude-haiku-5 does not, but claude-haiku-5-5 does).
         Models not matched here that nonetheless reject are caught at runtime by
         ``_recover_completion_params``.
         """
@@ -1078,7 +1099,7 @@ class BaseLLM(ConnectionNode):
         sampling param and looks like an unsupported-param error, so genuine validation
         errors (e.g. out-of-range temperature) still surface.
         """
-        msg = str(exc).lower()
+        msg = provider_error_text(exc).lower()
         if not common_params.get("stream") and any(ind in msg for ind in _STREAMING_REQUIRED_INDICATORS):
             logger.warning(
                 "LLM '%s': model '%s' is served streaming-only; retrying the request as a stream.",
