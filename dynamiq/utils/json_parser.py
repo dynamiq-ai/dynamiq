@@ -17,18 +17,36 @@ def extract_json_string(s: str) -> str | None:
     """
     bracket_stack: list[str] = []
     start_index: int | None = None
-    in_string = False
+    string_delimiter: str | None = None
     escape = False
+    comment_end = 0
 
     for i, char in enumerate(s):
-        # Toggle in_string when encountering an unescaped double quote
-        if char == '"' and not escape:
-            in_string = not in_string
+        if i < comment_end:
+            continue
+        if string_delimiter is None and bracket_stack:
+            if s.startswith("//", i):
+                line_end = re.compile(r"[\r\n]").search(s, i + 2)
+                comment_end = line_end.start() if line_end else len(s)
+                escape = False
+                continue
+            if s.startswith("/*", i):
+                block_end = s.find("*/", i + 2)
+                comment_end = block_end + 2 if block_end >= 0 else len(s)
+                escape = False
+                continue
+
+        # Only interpret quotes inside the candidate JSON, using its opening delimiter.
+        if char in ('"', "'") and not escape:
+            if char == string_delimiter:
+                string_delimiter = None
+            elif string_delimiter is None and bracket_stack:
+                string_delimiter = char
         elif char == "\\" and not escape:
             escape = True
             continue
 
-        if not in_string:
+        if string_delimiter is None:
             if char in "{[":
                 if not bracket_stack:
                     start_index = i
@@ -173,6 +191,8 @@ def single_quoted_replacer(match: Match[str]) -> str:
         The corresponding double-quoted string literal.
     """
     content = match.group(1)
+    if content is None:
+        return match.group(0)
     # Convert escaped \' to an actual apostrophe
     content = content.replace("\\'", "'")
     # Escape any double quotes inside
@@ -201,16 +221,26 @@ def clean_json_string(json_str: str) -> str:
     # 1. Remove comments
     json_str = _remove_comments_outside_strings(json_str)
 
+    # Protect complete strings without starting a scan at each escaped quote.
+    double_quoted_pattern = r'(?<!\\)"(?:\\.|[^"\\])*"'
+
     # 2. Convert single‐quoted string literals -> double‐quoted
-    pattern = r"'((?:\\'|[^'])*)'"
+    pattern = double_quoted_pattern + r"|'((?:\\'|[^'])*)'"
     json_str = re.sub(pattern, single_quoted_replacer, json_str)
 
     # 3. Replace Python-specific boolean/null with JSON equivalents
-    json_str = re.sub(r"\bTrue\b", "true", json_str)
-    json_str = re.sub(r"\bFalse\b", "false", json_str)
-    json_str = re.sub(r"\bNone\b", "null", json_str)
+    replacements = {"True": "true", "False": "false", "None": "null"}
+    json_str = re.sub(
+        double_quoted_pattern + r"|\b(True|False|None)\b",
+        lambda match: replacements.get(match.group(1), match.group(0)),
+        json_str,
+    )
 
     # 4. Remove trailing commas before a closing bracket or brace
-    json_str = re.sub(r",\s*(\]|\})", r"\1", json_str)
+    json_str = re.sub(
+        double_quoted_pattern + r"|,\s*(\]|\})",
+        lambda match: match.group(1) or match.group(0),
+        json_str,
+    )
 
     return json_str
