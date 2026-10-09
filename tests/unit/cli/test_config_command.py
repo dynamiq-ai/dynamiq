@@ -29,3 +29,17 @@ def test_config_prompt_saves_typed_key(config_dir, monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert config_dir.creds() == {"api_host": HOST, "api_key": "typed-key"}
+
+
+def test_config_show_masks_token_and_names_sources(config_dir, monkeypatch):
+    config_dir.write(config={"org_id": "org-1"}, creds={"api_key": "tok-file-0123456789"})
+    monkeypatch.setenv("DYNAMIQ_PROJECT_ID", "proj-env")
+
+    result = run("show")
+
+    assert result.exit_code == 0, result.stderr
+    assert "tok-file-0123456789" not in result.stdout
+    assert "DYNAMIQ API KEY: tok-... (credentials file)" in result.stdout
+    assert "DYNAMIQ API HOST: https://api.getdynamiq.ai (default)" in result.stdout
+    assert "DYNAMIQ ORG ID: org-1 (config file)" in result.stdout
+    assert "DYNAMIQ PROJECT ID: proj-env (env DYNAMIQ_PROJECT_ID)" in result.stdout
