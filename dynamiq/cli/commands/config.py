@@ -3,7 +3,7 @@ import click
 from dynamiq.cli.client import ApiClient
 from dynamiq.cli.commands.access import mask_token
 from dynamiq.cli.commands.context import with_api_and_settings
-from dynamiq.cli.config import DYNAMIQ_BASE_URL, SOURCE_NOT_SET, Settings
+from dynamiq.cli.config import _CREDS_FILE_PATH, DYNAMIQ_BASE_URL, SOURCE_NOT_SET, Settings
 
 
 @click.group(help="Manage configuration", invoke_without_command=True)
@@ -25,7 +25,7 @@ def config(ctx: click.Context):
             settings.api_key = api_key
         settings.save_settings()
 
-        click.echo("\n✅ Configuration saved to .dynamiq/config.json")
+        click.echo(f"\n✅ Configuration saved to {_CREDS_FILE_PATH}")
         click.echo("These values will be used automatically when you run Dynamiq commands.")
 
 

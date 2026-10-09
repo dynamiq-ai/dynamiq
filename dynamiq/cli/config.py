@@ -21,7 +21,7 @@ _XDG_CONFIG_HOME = Path(os.getenv("XDG_CONFIG_HOME", os.path.join(Path.home(), "
 _CONFIG_FILE_PATH = Path(os.path.join(_XDG_CONFIG_HOME, "dynamiq", "config.json"))
 _CREDS_FILE_PATH = Path(os.path.join(_XDG_CONFIG_HOME, "dynamiq", "credentials.json"))
 DYNAMIQ_BASE_URL = "https://api.getdynamiq.ai"
-# Expected structure of `.dynamiq/config.json`:
+# Expected structure of `$XDG_CONFIG_HOME/dynamiq/config.json` (default ~/.config):
 # {
 #   "org_id": "your-org-id",
 #   "project_id": "your-project-id"
