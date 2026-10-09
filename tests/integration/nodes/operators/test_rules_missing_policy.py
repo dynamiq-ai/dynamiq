@@ -406,7 +406,6 @@ HELD = {
         {"loan": {"amount": 300000, "program": "jumbo"}, "limits": LIMITS},
         "check could not be evaluated: 'dict object' has no attribute 'jumbo'",
     ),
-    # A blank no field of the record accounts for: the lookup inside `text()` found nothing, which the reason quotes.
     "lookup-inside-text": Held(
         lambda **policy: screening(
             "text(categories[claim.code]) == 'dental'", inputs=("claim", "categories"), **policy
@@ -460,15 +459,11 @@ HELD = {
         "missing value for loan.exempt",
         "the lookup for limit found nothing",
     ),
-    # No input is declared, so only the call itself tells the mistyped helper from data the record lacks. An error the
-    # check reaches before a missing value is reported: the name a call calls is judged before its arguments are read.
     "mistyped-helper": Held(
         lambda **policy: screening("firstpresent(order.coupon, order.promo) == 'SPRING'", **policy),
         {"order": {"coupon": "SPRING"}},
         "check could not be evaluated: 'firstpresent' is undefined",
     ),
-    # An error the check reaches on the other side of an `and` the missing total gives way to is reported: the name a
-    # call calls is judged before its arguments are read.
     "mistyped-helper-beside-missing-data": Held(
         lambda **policy: screening(
             "order.total > 100 and firstpresent(order.coupon) == 'SPRING'", inputs=("order",), **policy
@@ -528,9 +523,6 @@ HELD = {
         {"doc": {"net": "TBD"}},
         "applies_when could not be evaluated: not a number: 'TBD'",
     ),
-    # The check reads the text itself through `number()` or `date()`: the missing value stops it before it uses what
-    # the reader made of the text, and must not hide text nobody could read, as it does not hide a derived value that
-    # reads it.
     "unreadable-number-beside-missing-data": Held(
         lambda **policy: screening("number(doc.amount) > doc.limit", inputs=("doc",), **policy),
         {"doc": {"amount": "TBD"}},
@@ -556,8 +548,6 @@ HELD = {
         {"doc": {"net": "TBD"}},
         "check could not be evaluated: not a number: 'TBD'",
     ),
-    # An error the check reaches before a missing value is reported: `number()` refuses the decimal before the limit
-    # is read.
     "number-told-a-decimal-it-cannot-read": Held(
         lambda **policy: screening("number(doc.amount, decimal=';') > doc.limit", inputs=("doc",), **policy),
         {"doc": {"amount": "5"}},
@@ -975,8 +965,6 @@ def test_a_lookup_that_found_nothing_is_judged_record_by_record():
             {"loan": {"amount": 300000}, "appraisal": {"value": 0}},
             {"loan": {"amount": 300000}, "appraisal": {"value": 0, "max_ltv": 0.8}},
             "division by zero",
-            # An error the check reaches before a missing value is reported: the division fails before the limit is
-            # read.
             True,
         ),
         (
@@ -985,7 +973,6 @@ def test_a_lookup_that_found_nothing_is_judged_record_by_record():
             {"loan": {"amount": 300000}, "appraisal": {"value": 0}},
             {"loan": {"amount": 300000}, "appraisal": {"value": 0, "max_ltv": 0.8}},
             "division by zero",
-            # The missing limit is read first, and stops the comparison before the division fails.
             False,
         ),
         (
@@ -994,8 +981,6 @@ def test_a_lookup_that_found_nothing_is_judged_record_by_record():
             {"app": {"name": "Ann"}},
             {"app": {"name": "Ann", "age": 30}},
             "'str object' has no attribute 'startwith'",
-            # An error the check reaches on the other side of an `and` the missing age gives way to is reported: the
-            # misspelled method fails whether or not the age is there.
             True,
         ),
         (
@@ -1004,7 +989,6 @@ def test_a_lookup_that_found_nothing_is_judged_record_by_record():
             {"doc": {"total": 5, "label": "x"}},
             {"doc": {"total": 5, "label": "x", "limit": 1}},
             "unsupported operand type(s) for +: 'int' and 'str'",
-            # An error the check reaches before a missing value is reported: the sum fails before the limit is read.
             True,
         ),
     ],

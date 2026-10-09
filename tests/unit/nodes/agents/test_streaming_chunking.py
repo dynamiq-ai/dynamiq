@@ -378,3 +378,15 @@ def test_fc_tool_input_emits_when_thought_is_missing():
     assert tool_inputs, "TOOL_INPUT must be emitted as a fallback even without thought"
     parsed = json.loads("".join(tool_inputs))
     assert parsed == {"query": "weather", "model": "gpt"}
+
+
+def test_a_live_filters_tail_comes_after_the_text_still_in_the_chunk_buffer():
+    from dynamiq.nodes.agents.hooks.core import LiveAnswerFilter
+
+    cb = _make_callback_for_mode(InferenceMode.STRUCTURED_OUTPUT, min_chunk_chars=50)
+    cb.answer_filter = LiveAnswerFilter([lambda text: text], lookback=8)
+    text = "The quick brown fox jumps over the lazy dog, again and again."
+    for i in range(0, len(text), 5):
+        cb._emit(text[i : i + 5], step=StreamingState.ANSWER)
+    cb._flush_buffer()
+    assert "".join(_emitted_by_step(cb, StreamingState.ANSWER)) == text

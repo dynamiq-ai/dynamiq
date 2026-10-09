@@ -1,0 +1,107 @@
+# Tool policy, per-user rules, a call budget and a sub-agent, all with the same hooks list.
+#
+#   admin-only-delete   tool_policy on delete-customer: allowed only when the run's metadata has role=admin
+#                       (the run context carries user_id / session_id / metadata, so the rule is per user).
+#   researcher-access   a sub-agent call is an ordinary tool call for the parent's hooks: the same policy applies,
+#                       and a blocked delegation never starts the child.
+#   refund-approval     tool_policy with `approval: true`: a human approves each refund before it runs (the call is
+#                       paused on the agent's approval flow: console here, or `feedback_method: stream`), unless
+#                       the user is an admin. The human sees the real arguments; a refusal reaches the model as an
+#                       observation; `editable_params` would let the human change an argument.
+#   search-budget       call_limit: at most 2 web-search calls per RUN. The counter lives in the run context, so it
+#                       is exact with parallel tool calls and separate for every Map item / every run.
+#
+# A blocked call is an observation: the model is told why (the hook's message) and the run continues. Use
+# `on_violation: fail` to end the run instead (a hook stop is never retried by error_handling.max_retries).
+# The sub-agent inherits no hooks from the parent (an `inherit` option may come later).
+
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+nodes:
+  ops-agent:
+    type: dynamiq.nodes.agents.Agent
+    name: Ops Agent
+    role: |
+      Operations assistant. Use web-search to look things up (be thrifty), delete-customer to delete a customer,
+      refund-customer to refund one,
+      and the Researcher sub-agent for deeper research.
+    inference_mode: STRUCTURED_OUTPUT
+    llm:
+      id: ops-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o-mini
+    max_loops: 8
+    tools:
+      - id: web-search-tool
+        type: dynamiq.nodes.tools.python.Python
+        name: web-search
+        description: Search the web. Input field - query.
+        code: |
+          def run(input_data):
+              return "results for %s" % input_data.get("query")
+      - id: refund-customer-tool
+        type: dynamiq.nodes.tools.python.Python
+        name: refund-customer
+        description: Refund a customer. Input fields - customer_id, amount.
+        code: |
+          def run(input_data):
+              return "refunded %s to customer %s" % (input_data.get("amount"), input_data.get("customer_id"))
+      - id: delete-customer-tool
+        type: dynamiq.nodes.tools.python.Python
+        name: delete-customer
+        description: Delete a customer by customer_id.
+        code: |
+          def run(input_data):
+              return "deleted customer %s" % input_data.get("customer_id")
+      - type: dynamiq.nodes.tools.agent_tool.SubAgentTool
+        name: Researcher
+        description: Does deeper research on a topic and reports findings.
+        agent_factory:
+          name: Researcher
+          role: You are a research sub-agent. Investigate the topic you are given and report findings.
+          inference_mode: STRUCTURED_OUTPUT
+          llm:
+            type: dynamiq.nodes.llms.OpenAI
+            connection:
+              type: dynamiq.connections.OpenAI
+              api_key: ${oc.env:OPENAI_API_KEY}
+            model: gpt-4o-mini
+          max_loops: 6
+    hooks:
+      - type: tool_policy
+        name: admin-only-delete
+        tools: [delete-customer]
+        allow_if:
+          metadata.role: admin
+        message: "Deleting customers is restricted to admins. Tell the user to ask an administrator."
+      - type: tool_policy
+        name: researcher-access
+        tools: [Researcher]
+        allow_if:
+          metadata.role: [admin, analyst]
+        message: "Your role may not use the Researcher. Answer from what you already know."
+      - type: tool_policy
+        name: refund-approval
+        tools: [refund-customer]
+        approval: true
+        approval_unless:
+          metadata.role: admin
+        approval_message: "Approve this refund?"
+      - type: call_limit
+        name: search-budget
+        tools: [web-search]
+        max_per_run: 2
+        message: "Search budget used up for this run. Answer with what you have."
+
+flows:
+  ops-flow:
+    name: Tool policy flow
+    nodes: [ops-agent]
+
+workflows:
+  ops-workflow:
+    flow: ops-flow

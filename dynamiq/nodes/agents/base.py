@@ -4,6 +4,9 @@ import io
 import json
 import mimetypes
 import re
+import threading
+import weakref
+from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
 from enum import Enum
@@ -12,7 +15,17 @@ from typing import Any, Callable, ClassVar, Union
 from urllib.parse import unquote_to_bytes
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer, model_validator
+from jinja2.sandbox import SandboxedEnvironment
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    SerializeAsAny,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from dynamiq.artifacts import ArtifactBackend, ArtifactConfig
 from dynamiq.connections.managers import ConnectionManager
@@ -20,7 +33,29 @@ from dynamiq.memory import Memory, MemoryRetrievalStrategy, MemorySaveMode
 from dynamiq.memory.long_term import LongTermMemoryConfig
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.checkpoint import DEFAULT_HISTORY_OFFSET, USER_UPLOAD_SOURCE, AgentIterativeCheckpointMixin
-from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
+from dynamiq.nodes.agents.exceptions import (
+    AgentUnknownToolException,
+    HookAnswerException,
+    HookBlockedException,
+    HookStopException,
+    InvalidActionException,
+    ToolBlockedException,
+    ToolExecutionException,
+)
+from dynamiq.nodes.agents.hooks import (
+    Ask,
+    Hook,
+    HookContext,
+    HookPoint,
+    HookRun,
+    HookRunner,
+    LiveAnswerFilter,
+    Skip,
+    ToolCall,
+    ToolResult,
+    current_hook_ctx,
+    resolve_hook,
+)
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.agents.shared_session import (
@@ -78,8 +113,32 @@ from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.storages.memory.base import MemoryStore, MemoryStoreConfig
 from dynamiq.types.cancellation import CanceledException, check_cancellation
+from dynamiq.types.feedback import ApprovalConfig, FeedbackMethod
+from dynamiq.types.streaming import InputStreamingTimeoutError, StreamingMode
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import TRACING_REDACTED_KEYS, TRACING_REDACTED_PLACEHOLDER, deep_merge
+
+_APPROVAL_LOCKS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+_APPROVAL_LOCKS_GUARD = threading.Lock()
+_agent_hook_contexts: ContextVar[dict[int, HookContext]] = ContextVar("agent_hook_contexts", default={})
+
+
+_hold_answer_stream: ContextVar[bool] = ContextVar("dynamiq_agent_hold_answer_stream", default=False)
+
+
+def _approval_lock_for(approver: "Node", config: RunnableConfig | None) -> threading.Lock | None:
+    """The lock of the input stream the approvals go through, shared by every run that uses the stream (Map items,
+    sub-agents); ``None`` for a run without one (the console: each run keeps its own lock)."""
+    streaming = getattr(getattr(config, "nodes_override", {}).get(approver.id), "streaming", None) or approver.streaming
+    queue = streaming.input_queue if streaming.input_streaming_enabled else None
+    if queue is None:
+        return None
+    with _APPROVAL_LOCKS_GUARD:
+        return _APPROVAL_LOCKS.setdefault(queue.not_empty, threading.Lock())
+
+
+_model_output_rewritten: ContextVar[bool] = ContextVar("dynamiq_agent_model_output_rewritten", default=False)
+
 
 # Per-call tool overlay (e.g. LTM tools bound to a request's user_id); isolated
 # per thread / per asyncio task via ContextVar.
@@ -253,6 +312,14 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     max_loops: int = 1
     tool_output_max_length: int = TOOL_MAX_TOKENS
     tool_output_truncate_enabled: bool = True
+    hooks: list[SerializeAsAny[Hook]] = Field(
+        default_factory=list,
+        description=(
+            "Hooks around user input, LLM calls, tool calls (sub-agents included) and the final answer. "
+            "Built-in `type`s: pii, prompt_injection, tool_policy, call_limit, regex, transform; "
+            "or a Python subclass of Hook via a dotted `type`."
+        ),
+    )
     tool_output_sandbox_persistence: ToolOutputSandboxPersistenceConfig = Field(
         default_factory=ToolOutputSandboxPersistenceConfig,
         description="Configuration for saving large tool outputs to sandbox files.",
@@ -358,6 +425,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     # {node_id: {param: value}} from each tool's input_transformer; only selected values are kept.
     _tool_input_overrides: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
     _sandbox_is_shared: bool = PrivateAttr(default=False)
+    _restored_hook_state: dict[str, Any] | None = PrivateAttr(default=None)
+    _hook_tools_checked: bool = PrivateAttr(default=False)
     # A borrowed per-agent view of an owner's shared sandbox; when set it is this
     # agent's effective sandbox_backend for the whole run (tools, uploads, output).
     _shared_sandbox_view: Sandbox | None = PrivateAttr(default=None)
@@ -372,6 +441,22 @@ class Agent(AgentIterativeCheckpointMixin, Node):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
     _json_schema_fields: ClassVar[list[str]] = ["role", "description"]
+
+    @field_validator("hooks", mode="before")
+    @classmethod
+    def _resolve_hooks(cls, value):
+        """Build hooks from dicts (YAML): ``type: pii`` for built-ins, ``type: pkg.module.Class`` for Python hooks."""
+        if isinstance(value, list):
+            return [resolve_hook(item) for item in value]
+        return value
+
+    @field_validator("hooks")
+    @classmethod
+    def _hook_names_are_unique(cls, value):
+        names = [hook.name for hook in value if hook.name]
+        if duplicates := sorted({name for name in names if names.count(name) > 1}):
+            raise ValueError(f"hook names must be unique (a name keys the hook's saved state): {duplicates}")
+        return value
 
     @classmethod
     def _generate_json_schema(
@@ -410,6 +495,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             "items": {"anyOf": [{"type": "object", **tool._generate_json_schema()} for tool in tools]},
         }
 
+        from dynamiq.nodes.agents.hooks import hook_json_schemas
+
+        hook_schemas = list(hook_json_schemas().values())
+        for hook_schema in hook_schemas:
+            schema.setdefault("$defs", {}).update(hook_schema.pop("$defs", {}))
+        schema["properties"]["hooks"] = {"type": "array", "items": {"anyOf": hook_schemas}}
+
         schema["required"] += ["tools", "llm"]
         return schema
 
@@ -417,6 +509,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         super().__init__(**kwargs)
         from dynamiq.nodes.tools.agent_tool import SubAgentTool
         self._run_depends: list[dict] = []
+        self._blocked_tool_run_ids: set[str] = set()
         self._prompt = Prompt(messages=[])
         # Added for backward compatibility with old Agent tools
 
@@ -527,6 +620,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         tools_to_serialize = [t for t in self.tools if t.id not in self._excluded_tool_ids]
         data["tools"] = [tool.to_dict(**kwargs) for tool in tools_to_serialize]
         data["tools"] = data["tools"] + [mcp_server.to_dict(**kwargs) for mcp_server in self._mcp_servers]
+
+        data["hooks"] = [self._hook_to_dict(hook, dumped, **kwargs) for hook, dumped in zip(self.hooks, data["hooks"])]
 
         data["memory"] = self.memory.to_dict(**kwargs) if self.memory else None
         data["long_term_memory"] = self.long_term_memory.to_dict(**kwargs) if self.long_term_memory else None
@@ -802,6 +897,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         ltm_token = _run_extra_tools.set(run_tools)
         my_run_key = f"{self.sanitize_tool_name(self.name) or 'agent'}-{uuid4().hex[:8]}"
         agent_run_token = _current_agent_run.set(my_run_key)
+        hook_ctx = self._new_hook_context(input_data, custom_metadata, config)
+        hook_ctx_token = current_hook_ctx.set(hook_ctx)
+        hook_contexts_token = _agent_hook_contexts.set({**_agent_hook_contexts.get(), id(self): hook_ctx})
+        self._warn_about_unknown_hook_tools()
         # Session/borrow setup lives INSIDE the try so the finally always resets the ContextVars and
         # releases any borrowed view, even if setup raises. Tokens stay None until each set succeeds.
         # Capture any view already active on this instance so a nested execute() restores it rather
@@ -896,7 +995,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     input_message, normalized_files, file_paths=file_paths
                 )
 
-            # Built after the borrow and the attached files, which may give the run its workspace.
             run_tools.extend(self._build_artifact_tool(input_data))
 
             if images or videos:
@@ -909,8 +1007,21 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
             kwargs.pop("run_depends", None)
 
+            hook_blocked: HookAnswerException | None = None
+            self._pinned_input = None
             try:
-                result = self._run_agent(input_message, history_messages, config=config, **kwargs)
+                try:
+                    input_message = self._apply_input_hooks(input_message, config, **kwargs)
+                    result = self._run_agent(input_message, history_messages, config=config, **kwargs)
+                    result = self._run_hooks(HookPoint.ON_OUTPUT, result, config, **kwargs).value
+                except HookAnswerException as blocked:
+                    hook_blocked, result = blocked, blocked.message
+                if self.streaming.enabled and not _hold_answer_stream.get() and (
+                    hook_blocked or self._buffers_final_answer()
+                ):
+                    self.stream_content(
+                        content=self._answer_as_text(result), source=self.name, step="answer", config=config, **kwargs
+                    )
             except CanceledException:
                 if use_memory:
                     try:
@@ -942,9 +1053,13 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 self._current_call_context = None
                 self._clear_todos_file()
 
-            if use_memory:
+            memory_result = result
+            if not hook_blocked:
+                for transform in current_hook_ctx.get().memory_transforms:
+                    memory_result = transform(memory_result)
+            if use_memory and not (hook_blocked and hook_blocked.point == HookPoint.ON_INPUT.value):
                 try:
-                    self._save_history_to_memory(custom_metadata, final_output=result)
+                    self._save_history_to_memory(custom_metadata, final_output=memory_result)
                 except Exception as save_error:
                     logger.error(
                         "Agent %s - %s: failed to save history to memory: %s",
@@ -956,8 +1071,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             execution_result = {
                 "content": result,
             }
+            execution_result["blocked"] = hook_blocked is not None
+            if hook_blocked is not None:
+                execution_result["blocked_by"] = hook_blocked.hook
 
-            requested_paths = getattr(self, "_requested_output_files", None)
+            requested_paths = None if hook_blocked else getattr(self, "_requested_output_files", None)
 
             if self.file_store_backend and requested_paths:
                 try:
@@ -998,6 +1116,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             self._teardown_shared_browser(shared_session_token)
             _run_extra_tools.reset(ltm_token)
             _current_agent_run.reset(agent_run_token)
+            current_hook_ctx.reset(hook_ctx_token)
+            _agent_hook_contexts.reset(hook_contexts_token)
             self._exit_shared_session(shared_session_token)
 
     def retrieve_conversation_history(
@@ -1385,6 +1505,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         """
         try:
             check_cancellation(config)
+            _model_output_rewritten.set(False)
+            messages = self._run_hooks(HookPoint.BEFORE_MODEL, messages, config, **kwargs).value
             llm_result = self.llm.run(
                 input_data={},
                 config=config,
@@ -1398,6 +1520,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if llm_result.status != RunnableStatus.SUCCESS:
                 error_message = f"LLM '{self.llm.name}' failed: {llm_result.error.message}"
                 raise ValueError(error_message)
+
+            hooked_output = self._run_hooks(HookPoint.AFTER_MODEL, deepcopy(llm_result.output), config, **kwargs).value
+            if hooked_output != llm_result.output:
+                llm_result.output = hooked_output
+                _model_output_rewritten.set(True)
 
             return llm_result
 
@@ -1700,6 +1827,266 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         if isinstance(tool, Python):
             merged_input["files"] = files
 
+    def _own_hook_pairs(self) -> list[tuple[str, Hook]]:
+        """``(state key, hook)``: the key is the hook's name and its rank among the hooks of that name, not its list
+        position, so adding a hook of another name between a pause and its resume keeps every saved state."""
+        seen: dict[str, int] = {}
+        pairs = []
+        for hook in self.hooks:
+            seen[hook.display_name] = rank = seen.get(hook.display_name, 0) + 1
+            pairs.append((f"{self.id}:{hook.display_name}:{rank}", hook))
+        return pairs
+
+    def _hook_runner(self) -> HookRunner:
+        ctx = current_hook_ctx.get()
+        pairs = ctx.hooks if ctx is not None else self._own_hook_pairs()
+        return HookRunner([hook for _, hook in pairs], [key for key, _ in pairs])
+
+    def _new_hook_context(self, input_data: AgentInputSchema, metadata: dict, config) -> HookContext:
+        """The per-run hook context (one per ``execute``: Map items and sub-agent runs each get their own)."""
+        parent = current_hook_ctx.get()
+        inherited = [(key, hook) for key, hook in parent.hooks if hook.inherit] if parent is not None else []
+        ctx = HookContext(
+            agent_name=self.name,
+            agent_id=self.id,
+            user_id=parent.user_id if parent is not None else input_data.user_id,
+            session_id=parent.session_id if parent is not None else input_data.session_id,
+            metadata=dict(metadata),
+            config=config,
+            hooks=[*inherited, *self._own_hook_pairs()],
+            trusted=dict(getattr(config, "trusted_context", None) or {}),
+        )
+        if parent is not None:
+            ctx.lock = parent.lock
+            ctx.pending_approvals = parent.pending_approvals
+        if inherited:
+            with parent.lock:
+                parent_slices = parent.state.setdefault("hooks", {})
+                ctx.state["hooks"] = {key: parent_slices.setdefault(key, {}) for key, _ in inherited}
+        streaming = getattr(getattr(config, "nodes_override", {}).get(self.id), "streaming", None) or self.streaming
+        own_stream = streaming.input_streaming_enabled
+        ctx.approver = self if own_stream or parent is None or parent.approver is None else parent.approver
+        if (stream_lock := _approval_lock_for(ctx.approver, config)) is not None:
+            ctx.approval_lock = stream_lock
+        elif parent is not None:
+            ctx.approval_lock = parent.approval_lock
+        self._restored_hook_state = None  # never carry a previous run's checkpoint into this one
+        return ctx
+
+    def _adopt_restored_hook_state(self) -> None:
+        """Load the checkpointed hook state into the running context.
+
+        The checkpoint is read inside ``_run_agent`` (``get_start_iteration``), after ``execute`` built the context,
+        so this runs right after it.
+        """
+        ctx = current_hook_ctx.get()
+        if ctx is not None and self._restored_hook_state:
+            with ctx.lock:
+                ctx.state.update(deepcopy(self._restored_hook_state))
+        self._restored_hook_state = None
+
+    @staticmethod
+    def _hook_to_dict(hook: Hook, dumped: dict, include_secure_params: bool = False, **kwargs) -> dict:
+        detector = getattr(hook, "detector", None)
+        if detector is None or include_secure_params:
+            return dumped
+        return {**dumped, "detector": {**dumped["detector"], "connection": detector.connection.to_dict(**kwargs)}}
+
+    def _snapshot_hook_state(self) -> dict | None:
+        """JSON-safe copy of the run's hook state for checkpoints."""
+        ctx = _agent_hook_contexts.get().get(id(self))
+        if ctx is None:
+            return self._restored_hook_state
+        with ctx.lock:
+            snapshot = ctx.for_call(state=deepcopy(ctx.state))
+            own_slices = ctx.state.get("hooks", {})
+            for pending_ctx, call in ctx.pending_approvals.values():
+                pending_slices = pending_ctx.state.get("hooks", {})
+                pairs = [
+                    (key, hook)
+                    for key, hook in pending_ctx.hooks
+                    if key in own_slices and own_slices[key] is pending_slices.get(key)
+                ]
+                HookRunner([hook for _, hook in pairs], [key for key, _ in pairs]).refund(snapshot, call)
+            return json.loads(json.dumps(snapshot.state, default=str)) or None
+
+    def _warn_about_unknown_hook_tools(self) -> None:
+        """A hook naming a tool the agent does not have never matches; warn once (a deployment may drop tools)."""
+        if self._hook_tools_checked or not self.hooks:
+            return
+        self._hook_tools_checked = True
+        tools = [
+            (name, getattr(getattr(tool, "_owner_server", None), "name", None))
+            for name, tool in self.tool_by_names.items()
+        ]
+        for hook in self.hooks:
+            for entry in hook.tools:
+                probe = hook.model_copy(update={"tools": [entry]})
+                if entry != "*" and not any(probe.matches_tool(name, group) for name, group in tools):
+                    logger.warning(
+                        f"Agent {self.name} - {self.id}: hook '{hook.display_name}' lists tool '{entry}', "
+                        f"which this agent does not have; it will never match."
+                    )
+
+    def _live_answer_filter(self) -> LiveAnswerFilter | None:
+        """A filter that masks the answer while it streams, when every hook that touches it can do that."""
+        ctx = current_hook_ctx.get()
+        return self._hook_runner().live_answer_filter(ctx) if ctx is not None else None
+
+    def _buffers_final_answer(self) -> bool:
+        """True when a hook may rewrite or veto the answer and cannot do it while streaming: the answer is then
+        streamed once, after the hooks, never live."""
+        if _hold_answer_stream.get():
+            return True
+        touches_answer = self._hook_runner().has(HookPoint.ON_OUTPUT, HookPoint.AFTER_MODEL)
+        return touches_answer and self._live_answer_filter() is None
+
+    @staticmethod
+    def _answer_as_text(answer: Any) -> str:
+        return answer if isinstance(answer, str) else json.dumps(answer, ensure_ascii=False, default=str)
+
+    def _run_hooks(
+        self,
+        point: HookPoint,
+        value: Any,
+        config: RunnableConfig | None,
+        *,
+        call: ToolCall | None = None,
+        tool_call_id: str | None = None,
+        **kwargs,
+    ) -> HookRun:
+        """Run one hook point, record its events on this agent's run (trace) and stream a block if there is one."""
+        runner = self._hook_runner()
+        if not runner.has(point):
+            return HookRun(value=value)
+        ctx = current_hook_ctx.get() or HookContext(agent_name=self.name, agent_id=self.id)
+        state = getattr(self, "state", None)
+        ctx = ctx.for_call(
+            loop=getattr(state, "current_loop", None) or None, tool_call_id=tool_call_id, run_id=kwargs.get("run_id")
+        )
+        events: list[dict] = []
+        try:
+            return runner.run(point, ctx, value, call=call, events=events)
+        except (HookBlockedException, ToolBlockedException) as blocked:
+            self._stream_hook_block(blocked, config, **kwargs)
+            raise
+        finally:
+            if events:
+                self.run_on_node_execute_run(ensure_config(config).callbacks, hook_events=events, **kwargs)
+
+    def _stream_hook_block(
+        self, blocked: HookBlockedException | ToolBlockedException, config: RunnableConfig | None, **kwargs
+    ) -> None:
+        """Stream a ``hook`` event (hook, point, outcome; no payload) when a hook blocks."""
+        if not (self.streaming.enabled and self.streaming.mode == StreamingMode.ALL):
+            return
+        self.stream_content(
+            content={"hook": blocked.hook, "point": blocked.point, "decision": "block", "outcome": blocked.outcome},
+            source=blocked.hook or self.name,
+            step="hook",
+            config=config,
+            **kwargs,
+        )
+
+    @contextmanager
+    def _one_approval_at_a_time(self, config: RunnableConfig | None):
+        """Serialize the approval requests of this run (parallel tool calls must not interleave prompts or take each
+        other's answer). The lock belongs to the run, so another run's pending human never blocks this one, and a
+        waiting call still notices cancellation."""
+        ctx = current_hook_ctx.get()
+        lock = ctx.approval_lock if ctx is not None else threading.Lock()
+        while not lock.acquire(timeout=0.5):
+            check_cancellation(config)
+        try:
+            yield
+        finally:
+            lock.release()
+
+    def _request_tool_approval(
+        self,
+        tool_name: str,
+        tool_input: dict,
+        ask: Ask,
+        hook: Hook,
+        config: RunnableConfig | None,
+        request_id: str | None = None,
+        hidden_keys: frozenset[str] = frozenset(),
+        **kwargs,
+    ) -> dict:
+        """Ask a human to approve a tool call (``Ask`` from a hook). Returns the input to run the tool with.
+
+        Uses the agent's own approval transport (console, or the input stream of the agent that has one: a sub-agent
+        asks on its parent's). Requests of an input stream are asked one at a time. Every request carries the id of
+        the tool call and the answer has to echo it, so an answer that arrives late (after a timeout) or for another
+        call is ignored, never taken for this request. Nothing is stored between calls; after a resume the call is
+        asked again. ``hidden_keys`` (values that came from ``tool_params``) are not shown to the human.
+        Raises ``ToolBlockedException`` if the human declines or no answer can be obtained (fail closed).
+        """
+        config = ensure_config(config)
+        ctx = current_hook_ctx.get()
+        approver = ctx.approver if ctx is not None and ctx.approver is not None else self
+        shown = {key: value for key, value in tool_input.items() if key not in hidden_keys}
+        try:
+            prompt = (
+                SandboxedEnvironment().from_string(ask.prompt).render(input_data=shown, tool=tool_name)
+                if ask.prompt
+                else f"Approve calling '{tool_name}' with these arguments?"
+            )
+        except Exception as e:
+            logger.warning(f"Agent {self.name} - {self.id}: approval message of '{hook.display_name}' failed: {e}")
+            prompt = ask.prompt
+        event = {"hook": hook.display_name, "type": hook.type_name, "point": "before_tool", "decision": "ask"}
+        event["tool"] = tool_name
+        try:
+            if ask.feedback_method == FeedbackMethod.STREAM:
+                approval_config = ApprovalConfig(
+                    enabled=True, feedback_method=FeedbackMethod.STREAM, mutable_data_params=list(ask.editable_params)
+                )
+                with self._one_approval_at_a_time(config):
+                    answer = approver.send_streaming_approval_message(
+                        prompt, shown, approval_config, config, request_id=request_id or str(uuid4()), **kwargs
+                    )
+            else:
+                arguments = json.dumps(shown, indent=2, ensure_ascii=False, default=str)
+                text = f"{prompt}\n{arguments}\nPress Enter to approve, or type your feedback to decline: "
+                with self._one_approval_at_a_time(config):
+                    answer = self.send_console_approval_message(text, config=config)
+        except InputStreamingTimeoutError:
+            raise  # as for a node-level approval: the run stops with a resumable checkpoint
+        except (EOFError, ValueError) as e:
+            logger.warning(f"Agent {self.name} - {self.id}: no approval for '{tool_name}' ({type(e).__name__}): {e}")
+            self.run_on_node_execute_run(config.callbacks, hook_events=[{**event, "outcome": "unavailable"}], **kwargs)
+            raise ToolBlockedException(
+                "The call needs a human approval that could not be obtained, so it was not run.",
+                hook=hook.display_name,
+                point=HookPoint.BEFORE_TOOL.value,
+            ) from e
+
+        approved = answer.is_approved if answer.is_approved is not None else answer.feedback == ""
+        edited = {name: answer.data[name] for name in ask.editable_params if name in answer.data}
+        outcome = {"outcome": "approved" if approved else "declined", "edited": sorted(edited)}
+        self.run_on_node_execute_run(config.callbacks, hook_events=[{**event, **outcome}], **kwargs)
+        if not approved:
+            raise ToolBlockedException(
+                "The call was declined by a human" + (f": {answer.feedback}" if answer.feedback else "."),
+                hook=hook.display_name,
+                point=HookPoint.BEFORE_TOOL.value,
+            )
+        return {**tool_input, **edited}
+
+    def _apply_input_hooks(self, message: Message | VisionMessage, config, **kwargs) -> Message | VisionMessage:
+        """``on_input``: once per run, on the user's message text."""
+        if not self._hook_runner().has(HookPoint.ON_INPUT):
+            return message
+        text = extract_message_text(message)
+        hooked = self._run_hooks(HookPoint.ON_INPUT, text, config, **kwargs).value
+        if hooked == text:
+            return message
+        if isinstance(message, Message):
+            return message.model_copy(update={"content": hooked})
+        media = [part for part in message.content if not isinstance(part, VisionMessageTextContent)]
+        return message.model_copy(update={"content": [VisionMessageTextContent(text=hooked), *media]})
+
     def _run_tool(
         self,
         tool: Node,
@@ -1739,6 +2126,16 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         )
 
         is_child_agent = isinstance(tool, SubAgentTool)
+
+        def hook_call(tool_input: Any) -> ToolCall:
+            return ToolCall(
+                name=tool.name,
+                input=tool_input,
+                tool_id=tool.id,
+                is_sub_agent=is_child_agent,
+                group=getattr(getattr(tool, "_owner_server", None), "name", None),
+            )
+
         # Resolved before the sub-agent is built: a mocked delegation suppresses the whole
         # sub-agent, so constructing it (LLM clients, tools, factory blueprints) just to throw
         # it away would be wasted work on every suppressed call.
@@ -1762,6 +2159,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
 
             # Before tool_params, so explicitly passed parameters still win over the declaration.
             transformer_applied = self._apply_tool_input_transformer(resolved_agent or tool, merged_input)
+            before_params = dict(merged_input)
 
             if tool_params:
                 debug_info = []
@@ -1827,6 +2225,10 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 if self.verbose and debug_info:
                     logger.debug("\n".join(debug_info))
 
+            param_keys = frozenset(
+                key for key, value in merged_input.items() if key not in before_params or before_params[key] != value
+            )
+
             child_kwargs = kwargs | {"recoverable_error": True}
             if transformer_applied:
                 # Already resolved above, against a richer source; run_sync would re-apply it with
@@ -1881,16 +2283,65 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     target_id=tool_run_id,
                 )
 
+            skipped: Skip | None = None
+            if not isinstance(tool, ContextManagerTool):
+                hooked = self._run_hooks(
+                    HookPoint.BEFORE_TOOL,
+                    merged_input,
+                    config,
+                    call=hook_call(merged_input),
+                    tool_call_id=tool_run_id,
+                    **kwargs,
+                )
+                merged_input, skipped = hooked.value, hooked.skip
+                if hooked.ask is not None and skipped is None:
+                    approval_ctx = current_hook_ctx.get() or HookContext()
+                    reservation_id = uuid4().hex
+                    with approval_ctx.lock:
+                        approval_ctx.pending_approvals[reservation_id] = (approval_ctx, hook_call(merged_input))
+                    try:
+                        merged_input = self._request_tool_approval(
+                            tool.name,
+                            merged_input,
+                            hooked.ask,
+                            hooked.asked_by,
+                            config,
+                            request_id=tool_run_id,
+                            hidden_keys=param_keys,
+                            **kwargs,
+                        )
+                    except BaseException:
+                        with approval_ctx.lock:
+                            self._hook_runner().refund(approval_ctx, hook_call(merged_input))
+                            approval_ctx.pending_approvals.pop(reservation_id, None)
+                        raise
+                    finally:
+                        with approval_ctx.lock:
+                            approval_ctx.pending_approvals.pop(reservation_id, None)
+
             check_cancellation(config)
             # Parked in a delegate call we can't drive the page — hand it to the subagent. Skipped
             # for parallel batches: a sibling browser call of ours may be mid-command on that page.
             self._release_shared_browser_for_delegate(is_child_agent and not is_parallel)
-            tool_result = tool_to_run.run(
-                input_data=merged_input,
-                config=tool_config,
-                run_depends=deepcopy(self._run_depends),
-                **child_kwargs,
-            )
+            if skipped is not None:
+                tool_result = RunnableResult(
+                    status=RunnableStatus.SUCCESS, input=merged_input, output={"content": skipped.result}
+                )
+            else:
+                hold_stream = effective_delegate_final and self._hook_runner().has(
+                    HookPoint.ON_OUTPUT, HookPoint.AFTER_MODEL
+                )
+                hold_token = _hold_answer_stream.set(True) if hold_stream else None
+                try:
+                    tool_result = tool_to_run.run(
+                        input_data=merged_input,
+                        config=tool_config,
+                        run_depends=deepcopy(self._run_depends),
+                        **child_kwargs,
+                    )
+                finally:
+                    if hold_token is not None:
+                        _hold_answer_stream.reset(hold_token)
             dependency_node = tool_to_run if tool_to_run is not tool else tool
             dependency_dict = NodeDependency(node=dependency_node).to_dict(for_tracing=True)
             if update_run_depends:
@@ -1900,7 +2351,19 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             if tool_result.status != RunnableStatus.SUCCESS:
                 error_message = f"Tool '{tool.name}' failed: {tool_result.error.to_dict()}"
                 if tool_result.error.recoverable:
+                    if not isinstance(tool, ContextManagerTool):
+                        failed = self._run_hooks(
+                            HookPoint.AFTER_TOOL,
+                            ToolResult(error=error_message),
+                            config,
+                            call=hook_call(merged_input),
+                            tool_call_id=tool_run_id,
+                            **kwargs,
+                        ).value
+                        error_message = failed.error if failed.error is not None else str(failed.content)
                     raise ToolExecutionException(error_message)
+                elif issubclass(tool_result.error.type, HookStopException):
+                    raise HookStopException(error_message)
                 else:
                     raise ValueError(error_message)
 
@@ -1908,6 +2371,17 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 tool.increment_call_count()
 
             tool_result_output_content = tool_result.output.get("content")
+            tool_output_meta = {k: v for k, v in tool_result.output.items() if k not in ("content", "files")}
+            if not isinstance(tool, ContextManagerTool):
+                hooked_result = self._run_hooks(
+                    HookPoint.AFTER_TOOL,
+                    ToolResult(content=tool_result_output_content, output=tool_output_meta),
+                    config,
+                    call=hook_call(merged_input),
+                    tool_call_id=tool_run_id,
+                    **kwargs,
+                ).value
+                tool_result_output_content, tool_output_meta = hooked_result.content, hooked_result.output
 
             saved_files = self._handle_tool_generated_files(tool, tool_result)
 
@@ -1935,11 +2409,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                 tool_result_content_processed = f"{tool_result_content_processed}\n\nFiles saved: {paths}"
 
             output_files = tool_result.output.get("files", [])
-            tool_output_meta = {k: v for k, v in tool_result.output.items() if k not in ("content", "files")}
             self._record_artifact(tool_output_meta)
 
-            # Local import: artifact_tool imports the agents package. Stores change between
-            # identical calls, so a cached read would return stale content.
             from dynamiq.nodes.tools.artifact_tool import ArtifactTool
 
             if not isinstance(tool, (ContextManagerTool, ArtifactTool, MemoryStoreTool)):
@@ -2264,7 +2735,6 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         )
         new_tool_description = self.tool_description
         self.system_prompt_manager.set_initial_variable("tool_description", new_tool_description)
-        # The store is also the artifacts' workspace: rebuild so the prompt gains the Artifacts block.
         gained_artifacts = bool(self.artifacts_backend) and not had_artifacts
         if self.system_prompt_manager._prompt_blocks.get("tools") == "" or gained_artifacts:
             from dynamiq.nodes.agents.agent import Agent
@@ -2642,7 +3112,22 @@ class Agent(AgentIterativeCheckpointMixin, Node):
             result += ltm_overlay
         if sandbox_overlay:
             result += sandbox_overlay
-        return result
+        return self._offered_tools(result)
+
+    def _offered_tools(self, tools: list[Node]) -> list[Node]:
+        """The tools minus those a hook always refuses (``tool_policy`` ``deny``): the model is not told about them,
+        so it does not keep calling a tool that can only be refused."""
+        hiding = [hook for hook in self.hooks if type(hook).hides_tool is not Hook.hides_tool]
+        if not hiding:
+            return tools
+        return [
+            tool
+            for tool in tools
+            if not any(
+                hook.hides_tool(tool.name, getattr(getattr(tool, "_owner_server", None), "name", None))
+                for hook in hiding
+            )
+        ]
 
     @property
     def tool_description(self) -> str:
@@ -2752,6 +3237,13 @@ class AgentManager(Agent):
     _actions: dict[str, Callable] = PrivateAttr(default_factory=dict)
     name: str = "agent-manager"
     input_schema: ClassVar[type[AgentManagerInputSchema]] = AgentManagerInputSchema
+
+    @field_validator("hooks")
+    @classmethod
+    def _hooks_are_not_run(cls, value):
+        if value:
+            raise ValueError("A manager does not run hooks: set them on the agents it manages.")
+        return value
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

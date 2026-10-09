@@ -73,9 +73,6 @@ def screening(
     )
 
 
-# --- a check reads only what its evaluation reaches -------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("app", "expected"),
     [
@@ -395,9 +392,6 @@ def test_a_check_reads_the_paths_read_paths_names_in_the_same_order(check):
     (finding,) = run(node, {})["findings"]
 
     assert list(finding["evaluated"]) == reads.required + reads.optional
-
-
-# --- either side of an `and` or an `or` whose truth alone counts decides ----------------------------------------
 
 
 @pytest.mark.parametrize("policy", POLICIES)
@@ -830,7 +824,6 @@ def test_a_blank_no_path_accounts_for_is_never_skipped_nor_named_after_another_b
         ),
         ("number(app.a) > 5 and app.b == 1", {"app": {"a": "TBD", "b": 0}}, "not a number: 'TBD'"),
         ("firstpresent(app.a) == 1 and app.b == 1", {"app": {"a": 1, "b": 0}}, "'firstpresent' is undefined"),
-        # Text a reader met before a missing value stopped its side is not hidden by it, whatever the other side holds.
         ("number(app.a) > app.b or app.c == 1", {"app": {"a": "TBD", "c": 1}}, "not a number: 'TBD'"),
         ("number(app.a) > app.b and app.c == 1", {"app": {"a": "TBD", "c": 0}}, "not a number: 'TBD'"),
         (
@@ -1437,9 +1430,6 @@ def test_a_check_still_calls_what_the_record_holds_through_the_sandbox():
     assert message.startswith("check could not be evaluated: ") and message.endswith(" is not safely callable")
 
 
-# --- a path reads what Jinja reads ------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("policy", POLICIES)
 @pytest.mark.parametrize(
     ("check", "record", "evaluated"),
@@ -1545,9 +1535,6 @@ def test_a_derived_value_does_not_pass_off_a_character_that_is_there_as_missing(
 
     assert (output["derived"], output["derived_errors"]) == ({"d": None}, errors)
     assert outcome(output) == expected
-
-
-# --- a derived value is computed as it always was ---------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -1657,9 +1644,6 @@ def test_a_derived_value_reads_an_and_or_an_or_as_it_always_did(expression, inli
     assert (output["derived"], output["derived_errors"]) == ({"d": None}, {})
     assert outcome(output) == named
     assert outcome(run(screening(expression, policy), record)) == inline
-
-
-# --- what decides nothing reads as it always did ----------------------------------------------------------------
 
 
 def test_a_message_reads_a_missing_value_as_it_always_did():

@@ -1,0 +1,67 @@
+# PII that never reaches the model, and an agent that keeps working anyway.
+#
+#   input        "email ann.lee@example.com ... call +1 415 555 0100" is masked ONCE, before the model sees it:
+#                the model gets "<EMAIL_1>" / "<PHONE_1>". History, memory and checkpoints only ever hold
+#                placeholders (nothing is re-scanned on later LLM calls); one mapping per run lives in the hook
+#                state and is checkpointed with the agent.
+#   send-email   listed in restore_in_tools: it receives the REAL address (placeholders in its arguments are
+#                replaced right before the call, after tool_params/input_transformer were merged).
+#   tool results masked once too (lookup-customer returns another person's email: it becomes <EMAIL_2>).
+#   output       PII the model produces on its own is masked; restore_in_output puts back only the values the USER
+#                supplied, never ones that came from a tool result.
+#
+# Hand-written YAML note: `on:` is read by YAML 1.1 as the boolean true; the hook loader accepts both.
+
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+nodes:
+  support-agent:
+    type: dynamiq.nodes.agents.Agent
+    name: Support Agent
+    role: |
+      Customer support assistant. Use lookup-customer to read a customer's record and send-email to send mail.
+      Text such as <EMAIL_1> or <PHONE_1> stands for a real value you must not guess: pass placeholders through
+      unchanged, the platform replaces them where needed.
+    inference_mode: STRUCTURED_OUTPUT
+    llm:
+      id: support-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o-mini
+    max_loops: 6
+    tools:
+      - id: lookup-customer-tool
+        type: dynamiq.nodes.tools.python.Python
+        name: lookup-customer
+        description: Look up a customer by customer_id. Returns their record as JSON text.
+        code: |
+          def run(input_data):
+              return '{"name": "Ann Lee", "account_manager": "boss@example.com", "plan": "pro"}'
+      - id: send-email-tool
+        type: dynamiq.nodes.tools.python.Python
+        name: send-email
+        description: Send an email. Input fields - to, subject, body.
+        code: |
+          def run(input_data):
+              # Real code would call a mail API. This shows what the tool actually receives.
+              return "EMAIL SENT to=%s" % input_data.get("to")
+    hooks:
+      - type: pii
+        name: pii
+        entities: [email, phone, credit_card, ssn]
+        on: [input, tool_result, output]
+        action: mask
+        restore_in_tools: [send-email]
+        restore_in_output: true
+
+flows:
+  support-flow:
+    name: PII flow
+    nodes: [support-agent]
+
+workflows:
+  support-workflow:
+    flow: support-flow
