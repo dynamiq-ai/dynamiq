@@ -35,6 +35,14 @@ Then set your desired project:
 dynamiq project set --id <PROJECT_ID>
 ```
 
+Check which user, organization and project the CLI will use, and where each value comes from
+(environment variables such as `DYNAMIQ_API_TOKEN` or `DYNAMIQ_PROJECT_ID` take precedence over
+the saved config):
+
+```bash
+dynamiq whoami
+```
+
 ### 3. Create a New Service
 
 ```bash
