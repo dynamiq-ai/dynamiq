@@ -39,6 +39,9 @@ SOURCE_DEFAULT = "default"
 SOURCE_EXPLICIT = "set explicitly"
 SOURCE_NOT_SET = "not set"
 
+_CONFIG_FILE_KEYS = ("org_id", "project_id")
+_CREDS_FILE_KEYS = ("api_key", "api_host")
+
 # Each setting and the env vars that can supply it; the first one set wins.
 # DYNAMIQ_API_TOKEN / DYNAMIQ_API_BASE_URL are what catalyst injects into sandboxes;
 # DYNAMIQ_API_KEY / DYNAMIQ_API_HOST are kept as fallbacks for existing setups.
@@ -75,6 +78,16 @@ class Settings(BaseModel):
 
     # Where each loaded value came from: "env <VAR>", "config file" or "credentials file".
     _sources: dict[str, str] = PrivateAttr(default_factory=dict)
+    # What the files held at load time; None when the instance was built directly rather
+    # than loaded, in which case saving writes every field as it always has.
+    _stored: dict[str, Any] | None = PrivateAttr(default=None)
+    # Fields assigned after construction: the values a command asked to keep.
+    _assigned: set[str] = PrivateAttr(default_factory=set)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in type(self).model_fields:
+            self._assigned.add(name)
+        super().__setattr__(name, value)
 
     @property
     def base_url(self) -> str:
@@ -87,11 +100,13 @@ class Settings(BaseModel):
         """Where `field`'s effective value came from.
 
         "env <VAR>", "config file" or "credentials file" for loaded values; "set explicitly"
-        for a value passed to the constructor; "default" for a field left at its default;
+        for a value passed to the constructor or assigned afterwards; "default" for a field left at its default;
         "not set" when there is no value at all.
         """
         if field not in type(self).model_fields:
             raise KeyError(field)
+        if field in self._assigned:
+            return SOURCE_EXPLICIT
         if field in self._sources:
             return self._sources[field]
         if getattr(self, field) is None:
@@ -104,6 +119,10 @@ class Settings(BaseModel):
     def sources(self) -> dict[str, str]:
         """`source_of` for every field."""
         return {field: self.source_of(field) for field in type(self).model_fields}
+
+    def stored_value(self, field: str) -> Any:
+        """What the files on disk hold for `field`, ignoring env overrides."""
+        return (self._stored or {}).get(field)
 
     @classmethod
     def _env_with_names(cls) -> dict[str, tuple[str, str]]:
@@ -154,13 +173,28 @@ class Settings(BaseModel):
         except ValidationError as exc:
             raise SystemExit(f"❌ Invalid configuration: {exc}") from exc
         settings._sources = sources
+        settings._stored = stored
         return settings
 
+    def _payload(self, keys: tuple[str, ...]) -> dict[str, Any]:
+        if self._stored is None:
+            return {key: getattr(self, key) for key in keys}
+        payload = {}
+        for key in keys:
+            value = getattr(self, key) if key in self._assigned else self._stored.get(key)
+            if value is not None:
+                payload[key] = value
+        return payload
+
     def save_settings(self) -> None:
+        """Write what the files already held plus the fields assigned since loading.
+
+        A value that only came from an env var is never written: `org set` in a shell with
+        DYNAMIQ_API_TOKEN exported must not copy that token into credentials.json in
+        plaintext, nor pin an env-supplied host or project for every later run.
+        """
         _CONFIG_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        payload = self.model_dump(include={"org_id", "project_id"})
-        _CONFIG_FILE_PATH.write_text(json.dumps(payload, indent=2))
+        _CONFIG_FILE_PATH.write_text(json.dumps(self._payload(_CONFIG_FILE_KEYS), indent=2))
 
         _CREDS_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        payload = self.model_dump(include={"api_key", "api_host"})
-        _CREDS_FILE_PATH.write_text(json.dumps(payload, indent=2))
+        _CREDS_FILE_PATH.write_text(json.dumps(self._payload(_CREDS_FILE_KEYS), indent=2))

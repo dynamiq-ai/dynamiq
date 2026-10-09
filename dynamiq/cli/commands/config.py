@@ -9,12 +9,19 @@ from dynamiq.cli.config import DYNAMIQ_BASE_URL, Settings
 @click.pass_context
 def config(ctx: click.Context):
     if ctx.invoked_subcommand is None:
-        host = click.prompt("Enter API host (press Enter to use default)", default=DYNAMIQ_BASE_URL, show_default=True)
+        settings = Settings.load_settings()
+        # Offer what is on disk, not the effective value: an env-supplied host accepted with
+        # Enter would otherwise be written to the credentials file.
+        default_host = settings.stored_value("api_host") or DYNAMIQ_BASE_URL
+        host = click.prompt("Enter API host (press Enter to use default)", default=default_host, show_default=True)
         api_key = click.prompt("Enter API key", default="", show_default=False)
 
-        settings = Settings.load_settings()
-        settings.api_host = host or settings.api_host
-        settings.api_key = api_key or settings.api_key
+        if host:
+            settings.api_host = host
+        # Empty input keeps the stored key; assigning the current value would persist a token
+        # that came only from the environment.
+        if api_key:
+            settings.api_key = api_key
         settings.save_settings()
 
         click.echo("\n✅ Configuration saved to .dynamiq/config.json")

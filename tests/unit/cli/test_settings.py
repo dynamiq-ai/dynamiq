@@ -117,3 +117,66 @@ def test_warning_can_be_silenced(config_dir, monkeypatch, capsys):
     Settings.load_settings(warn=False)
 
     assert capsys.readouterr().err == ""
+
+
+def test_save_never_persists_env_token(config_dir, monkeypatch):
+    config_dir.write(config={"org_id": "org-1"}, creds={"api_host": HOST})
+    monkeypatch.setenv("DYNAMIQ_API_TOKEN", "secret-from-env")
+    monkeypatch.setenv("DYNAMIQ_PROJECT_ID", "proj-env")
+
+    settings = Settings.load_settings()
+    settings.org_id = "org-2"
+    settings.save_settings()
+
+    assert config_dir.config() == {"org_id": "org-2"}
+    assert config_dir.creds() == {"api_host": HOST}
+    assert "secret-from-env" not in config_dir.creds_path.read_text()
+
+
+def test_save_keeps_disk_value_overridden_by_env(config_dir, monkeypatch):
+    config_dir.write(config={"org_id": "org-1", "project_id": "proj-file"}, creds={"api_key": "tok-file"})
+    monkeypatch.setenv("DYNAMIQ_API_TOKEN", "tok-env")
+    monkeypatch.setenv("DYNAMIQ_PROJECT_ID", "proj-env")
+
+    settings = Settings.load_settings()
+    settings.save_settings()
+
+    assert config_dir.config() == {"org_id": "org-1", "project_id": "proj-file"}
+    assert config_dir.creds() == {"api_key": "tok-file"}
+
+
+def test_save_persists_explicit_assignment_even_if_it_equals_env(config_dir, monkeypatch):
+    monkeypatch.setenv("DYNAMIQ_ORG_ID", "org-env")
+
+    settings = Settings.load_settings()
+    settings.org_id = "org-env"
+    settings.save_settings()
+
+    assert config_dir.config() == {"org_id": "org-env"}
+    assert settings.source_of("org_id") == "set explicitly"
+
+
+def test_save_without_disk_does_not_write_default_host(config_dir):
+    settings = Settings.load_settings()
+    settings.project_id = "proj-1"
+    settings.save_settings()
+
+    assert config_dir.config() == {"project_id": "proj-1"}
+    assert config_dir.creds() == {}
+
+
+def test_save_of_constructed_settings_writes_every_field(config_dir):
+    Settings(api_host=HOST, api_key="tok", org_id="o").save_settings()
+
+    assert config_dir.config() == {"org_id": "o", "project_id": None}
+    assert config_dir.creds() == {"api_key": "tok", "api_host": HOST}
+
+
+def test_stored_value_ignores_env(config_dir, monkeypatch):
+    config_dir.write(creds={"api_host": HOST})
+    monkeypatch.setenv("DYNAMIQ_API_BASE_URL", "https://env.example.test")
+
+    settings = Settings.load_settings(warn=False)
+
+    assert settings.api_host == "https://env.example.test"
+    assert settings.stored_value("api_host") == HOST
