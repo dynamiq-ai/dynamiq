@@ -1984,7 +1984,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 # Capture the tool call so an interruption during execution
                 # (e.g. HITL input timeout) can persist it to the checkpoint.
-                self.set_pending_tool_call(action, action_input, thought)
+                # A replayed call keeps its id, so the answer to an approval the human saw still matches.
+                replayed_id = self._pending_tool_run_id if replay_pending else None
+                self._streaming_tool_run_id = self._streaming_tool_run_id or replayed_id or generate_uuid()
+                self.set_pending_tool_call(action, action_input, thought, self._streaming_tool_run_id)
 
                 final_answer = self._execute_tools_and_update_prompt(
                     action, action_input, thought, loop_num, config, **kwargs

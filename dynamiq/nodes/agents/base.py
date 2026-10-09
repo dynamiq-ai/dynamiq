@@ -138,7 +138,8 @@ def _approval_lock_for(approver: "Node", config: RunnableConfig | None) -> threa
     if queue is None:
         return None
     with _APPROVAL_LOCKS_GUARD:
-        return _APPROVAL_LOCKS.setdefault(queue, threading.Lock())
+        # Map items hold shallow copies of the queue that share its condition, so key by that.
+        return _APPROVAL_LOCKS.setdefault(queue.not_empty, threading.Lock())
 
 
 _model_output_rewritten: ContextVar[bool] = ContextVar("dynamiq_agent_model_output_rewritten", default=False)

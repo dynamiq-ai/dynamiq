@@ -44,6 +44,8 @@ class AgentIterationData(BaseModel):
     pending_action: str | None = None
     pending_action_input: Any = None
     pending_thought: str | None = None
+    # Id of the pending call, so an approval asked for it is still answered after the replay.
+    pending_tool_run_id: str | None = None
     # Run state of the agent's hooks (e.g. the PII placeholder mapping).
     hook_state: dict | None = None
     # Artifacts this run created or updated, so a resumed run still returns them.
@@ -91,6 +93,7 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
     _pending_action: str | None = None
     _pending_action_input: Any = None
     _pending_thought: str | None = None
+    _pending_tool_run_id: str | None = None
 
     def to_checkpoint_state(self) -> AgentCheckpointState:
         """Extract agent state for checkpointing, including LLM, tool, and loop-level states."""
@@ -220,17 +223,21 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
             return
         store.from_checkpoint_state(file_store_state)
 
-    def set_pending_tool_call(self, action: str | None, action_input: Any, thought: str | None) -> None:
+    def set_pending_tool_call(
+        self, action: str | None, action_input: Any, thought: str | None, tool_run_id: str | None = None
+    ) -> None:
         """Record the tool call about to run so it can be checkpointed on interruption."""
         self._pending_action = action
         self._pending_action_input = action_input
         self._pending_thought = thought
+        self._pending_tool_run_id = tool_run_id
 
     def clear_pending_tool_call(self) -> None:
         """Drop the recorded tool call once execution has completed."""
         self._pending_action = None
         self._pending_action_input = None
         self._pending_thought = None
+        self._pending_tool_run_id = None
 
     def get_iteration_state(self) -> IterationState:
         """Serialize ReAct loop progress for checkpoint persistence."""
@@ -243,6 +250,7 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
             pending_action=self._pending_action,
             pending_action_input=self._pending_action_input,
             pending_thought=self._pending_thought,
+            pending_tool_run_id=self._pending_tool_run_id,
             hook_state=self._snapshot_hook_state(),
             artifacts=dict(self._run_artifacts),
         )
@@ -261,6 +269,7 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
         self._pending_action = data.pending_action
         self._pending_action_input = data.pending_action_input
         self._pending_thought = data.pending_thought
+        self._pending_tool_run_id = data.pending_tool_run_id
         self._restored_hook_state = data.hook_state
         self._run_artifacts = dict(data.artifacts)
         # Mirror the completed-loop count back onto the instance so a snapshot

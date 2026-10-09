@@ -439,7 +439,9 @@ def _is_valid_match(entity: str | None, text: str) -> bool:
         return 13 <= len(digits) <= 19 and _luhn_ok(digits)
     if entity == "phone":
         # Phone-like formatting only: a bare run of digits (order id, epoch, "2026 1006 1844") is not a phone number.
-        formatted = text.lstrip().startswith(("+", "(")) or bool(re.search(r"\d[-.]\d", text))
+        formatted = text.lstrip().startswith(("+", "(", "0")) or bool(
+            re.search(r"\d[-.]\d|\b\d{3} \d{3} \d{4}\b|\b(?:\d{2} ){4}\d{2}\b", text)
+        )
         return formatted and 9 <= len(digits) <= 15 and not re.match(r"\d{4}-\d{2}-\d{2}", text.strip())
     return True
 
