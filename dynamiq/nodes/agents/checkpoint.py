@@ -44,6 +44,8 @@ class AgentIterationData(BaseModel):
     pending_action: str | None = None
     pending_action_input: Any = None
     pending_thought: str | None = None
+    # Run state of the agent's hooks (e.g. the PII placeholder mapping).
+    hook_state: dict | None = None
     # Artifacts this run created or updated, so a resumed run still returns them.
     artifacts: dict[str, dict] = Field(default_factory=dict)
 
@@ -241,6 +243,7 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
             pending_action=self._pending_action,
             pending_action_input=self._pending_action_input,
             pending_thought=self._pending_thought,
+            hook_state=self._snapshot_hook_state(),
             artifacts=dict(self._run_artifacts),
         )
         return IterationState(completed_iterations=self._completed_loops, iteration_data=data.model_dump())
@@ -258,6 +261,7 @@ class AgentIterativeCheckpointMixin(IterativeCheckpointMixin):
         self._pending_action = data.pending_action
         self._pending_action_input = data.pending_action_input
         self._pending_thought = data.pending_thought
+        self._restored_hook_state = data.hook_state
         self._run_artifacts = dict(data.artifacts)
         # Mirror the completed-loop count back onto the instance so a snapshot
         # taken before any new loop finishes (e.g. an input timeout during the

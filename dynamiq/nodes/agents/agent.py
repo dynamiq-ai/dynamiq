@@ -10,7 +10,7 @@ from pydantic_core import from_json
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes.agents.base import Agent as BaseAgent
-from dynamiq.nodes.agents.base import _run_extra_tools, _shared_sandbox_tools
+from dynamiq.nodes.agents.base import _model_output_rewritten, _run_extra_tools, _shared_sandbox_tools
 from dynamiq.nodes.agents.components import parser, schema_generator
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
@@ -21,7 +21,9 @@ from dynamiq.nodes.agents.exceptions import (
     ParsingError,
     RecoverableAgentException,
     TagNotFoundError,
+    ToolBlockedException,
 )
+from dynamiq.nodes.agents.hooks import HookPoint
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager, ReactPromptConfig
 from dynamiq.nodes.agents.utils import (
     SummarizationConfig,
@@ -832,7 +834,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     input=tp["input"],
                     result=None,
                     loop_num=loop_num,
-                    status=RunnableStatus.SUCCESS if result_entry.get("success") else RunnableStatus.FAILURE,
+                    status=(
+                        RunnableStatus.SKIP
+                        if tp.get("tool_run_id") in self._blocked_tool_run_ids
+                        else RunnableStatus.SUCCESS if result_entry.get("success") else RunnableStatus.FAILURE
+                    ),
                 ).model_dump()
             )
 
@@ -844,7 +850,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         overall_status = (
             RunnableStatus.SUCCESS
-            if all(s.get("status") == RunnableStatus.SUCCESS for s in per_tool_summary)
+            if all(s.get("status") in (RunnableStatus.SUCCESS, RunnableStatus.SKIP) for s in per_tool_summary)
             else RunnableStatus.FAILURE
         )
 
@@ -1261,6 +1267,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 agent=self,
                 config=config,
                 loop_num=loop_num,
+                suppress_answer=self._buffers_final_answer(),
+                answer_filter=self._live_answer_filter(),
                 **kwargs,
             )
 
@@ -1370,6 +1378,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         **kwargs,
                     )
                     return skip_message, [], False, True, None
+                # The summarizer calls its LLM itself: its messages go through the `before_model` hooks (a `pii` hook
+                # with `scope: request` keeps the raw history out of it).
+                to_summarize = self._run_hooks(HookPoint.BEFORE_MODEL, to_summarize, config, **kwargs).value
                 tool_input = {**(action_input if isinstance(action_input, dict) else {}), "messages": to_summarize}
             else:
                 tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
@@ -1405,6 +1416,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             if delegate_final:
                 self.log_final_output(thought, tool_result, loop_num)
+                # The delegated answer is the final answer: the tool event gets it under the same rules as the answer
+                # stream (masked live, or held back for the one streamed after the on_output hooks).
+                shown_result = tool_result
+                if self.streaming.enabled:
+                    live_filter = self._live_answer_filter()
+                    if self._buffers_final_answer():
+                        shown_result = ""
+                    elif live_filter and isinstance(tool_result, str):
+                        shown_result = live_filter.mask_all(tool_result)
                 # Stream tool result (with files) before streaming final answer
                 self._stream_agent_event(
                     AgentToolResultEventMessageData(
@@ -1412,7 +1432,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         name=tool.name,
                         tool=tool_data,
                         input=action_input,
-                        result=tool_result,
+                        result=shown_result,
                         files=tool_files,
                         loop_num=loop_num,
                         output=tool_output_meta,
@@ -1421,9 +1441,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     config,
                     **kwargs,
                 )
-                if self.streaming.enabled:
+                if self.streaming.enabled and not self._buffers_final_answer():
+                    live_filter = self._live_answer_filter()
                     self.stream_content(
-                        content=tool_result,
+                        content=live_filter.mask_all(tool_result) if live_filter else tool_result,
                         source=tool.name,
                         step="answer",
                         config=config,
@@ -1456,6 +1477,27 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
 
             return tool_result, tool_files, False, True, dependency
+
+        except ToolBlockedException as e:
+            # A hook refused the call: reported as a skip with `blocked_by`, not as a failed tool call.
+            self._blocked_tool_run_ids.add(tool_run_id)
+            self._stream_agent_event(
+                AgentToolResultEventMessageData(
+                    tool_run_id=tool_run_id,
+                    name=tool.name,
+                    tool=tool_data,
+                    input=action_input,
+                    result=str(e),
+                    files=[],
+                    loop_num=loop_num,
+                    output={"blocked": True, "blocked_by": e.hook},
+                    status=RunnableStatus.SKIP,
+                ),
+                "tool",
+                config,
+                **kwargs,
+            )
+            return str(e), [], False, False, None
 
         except RecoverableAgentException as e:
             # Stream error result with the same tool_run_id used for reasoning
@@ -1811,7 +1853,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         check_cancellation(config)
 
-        if streaming_callback and streaming_callback.accumulated_content:
+        if streaming_callback and streaming_callback.accumulated_content and not _model_output_rewritten.get():
             llm_generated_output = streaming_callback.accumulated_content
         else:
             llm_generated_output = llm_result.output.get("content", "")
@@ -1882,6 +1924,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self.state.max_loops = self.max_loops
 
         completed = self.get_start_iteration()
+        self._adopt_restored_hook_state()
         start_loop = completed + 1 if completed > 0 else 1
         self._requested_output_files = []
 
@@ -2029,9 +2072,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
         else:
             max_loop_final_answer = self._handle_max_loops_exceeded(input_message, config, **kwargs)
             self._resolve_requested_output_files(strict=False)
-            if self.streaming.enabled:
+            if self.streaming.enabled and not self._buffers_final_answer():
+                live_filter = self._live_answer_filter()
                 self.stream_content(
-                    content=max_loop_final_answer,
+                    content=(
+                        live_filter.mask_all(max_loop_final_answer)
+                        if live_filter and isinstance(max_loop_final_answer, str)
+                        else max_loop_final_answer
+                    ),
                     source=self.name,
                     step="answer",
                     config=config,
@@ -2240,14 +2288,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
         # Generate inference-mode schemas
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
             self._tools = schema_generator.generate_function_calling_schemas(
-                self.tools,
+                self._offered_tools(self.tools),
                 self.delegation_allowed,
                 self.sanitize_tool_name,
                 response_format=self.response_format,
             )
         elif self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
             self._response_format = schema_generator.generate_structured_output_schemas(
-                self.tools, self.sanitize_tool_name, self.delegation_allowed
+                self._offered_tools(self.tools), self.sanitize_tool_name, self.delegation_allowed
             )
 
         # Build the entire prompt in one call
@@ -2271,7 +2319,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         The run-time sandbox sync passes ``_runtime_tools`` so a borrower advertises the sandbox
         tools it only receives at run time.
         """
-        tools = self.tools if tools is None else tools
+        tools = self._offered_tools(self.tools) if tools is None else tools
         ltm_enabled = self.long_term_memory is not None and self.long_term_memory.enabled
         return ReactPromptConfig(
             inference_mode=self.inference_mode,
