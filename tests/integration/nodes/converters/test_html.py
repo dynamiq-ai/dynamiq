@@ -286,6 +286,7 @@ def test_html_converter_header_row_of_th_cells_only():
     wf_html = Workflow(flow=Flow(nodes=[HTMLConverter()]))
     response = wf_html.run(input_data={"files": [html_buffer]})
 
+    assert response.status == RunnableStatus.SUCCESS
     node_id = wf_html.flow.nodes[0].id
     document = response.output[node_id]["output"]["documents"][0]
     assert "| A | B |\n| --- | --- |\n| 1 | 2 |" in document["content"]
