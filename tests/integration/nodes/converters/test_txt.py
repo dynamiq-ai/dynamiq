@@ -133,3 +133,15 @@ def test_workflow_with_txt_converter_keeps_metadata_aligned_with_files(tmp_path)
     assert [(doc["content"], doc["metadata"]["i"]) for doc in documents] == [
         (f"content-{letter}", letter) for letter in letters
     ]
+
+
+def test_workflow_with_txt_converter_dedups_repeated_paths(tmp_path):
+    path_a = write_txt_to_path(tmp_path / "a.txt", "content-a")
+    path_b = write_txt_to_path(tmp_path / "b.txt", "content-b")
+    wf_txt = Workflow(flow=Flow(nodes=[TextFileConverter()]))
+
+    response = wf_txt.run(input_data={"file_paths": [path_b, path_a, path_b], "metadata": {"tag": "x"}})
+
+    assert response.status == RunnableStatus.SUCCESS
+    documents = response.output[wf_txt.flow.nodes[0].id]["output"]["documents"]
+    assert [doc["content"] for doc in documents] == ["content-b", "content-a"]
