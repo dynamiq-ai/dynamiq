@@ -119,3 +119,17 @@ def test_workflow_with_txt_node_file_not_found(workflow, txt_node, output_node, 
 
     output_result = result.output[output_node.id]
     assert output_result["status"] == RunnableStatus.SKIP.value
+
+
+def test_workflow_with_txt_converter_keeps_metadata_aligned_with_files(tmp_path):
+    letters = "abcdefgh"
+    paths = [write_txt_to_path(tmp_path / f"{letter}.txt", f"content-{letter}") for letter in letters]
+    wf_txt = Workflow(flow=Flow(nodes=[TextFileConverter()]))
+
+    response = wf_txt.run(input_data={"file_paths": paths, "metadata": [{"i": letter} for letter in letters]})
+
+    assert response.status == RunnableStatus.SUCCESS
+    documents = response.output[wf_txt.flow.nodes[0].id]["output"]["documents"]
+    assert [(doc["content"], doc["metadata"]["i"]) for doc in documents] == [
+        (f"content-{letter}", letter) for letter in letters
+    ]
