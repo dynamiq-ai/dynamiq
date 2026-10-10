@@ -411,7 +411,7 @@ class MarkdownConverter:
         self.current_row = []
         self.process_children(element)
 
-        if element.findall("th"):
+        if element.findall("th") and not element.findall("td") and not self.table_headers:
             self.table_headers = self.current_row
         else:
             self.table_rows.append(self.current_row)

@@ -258,6 +258,57 @@ def test_html_converter_with_xml_declaration():
     assert "Declared page" in document["content"]
 
 
+def test_html_converter_keeps_table_rows_with_th_cells():
+    content = (
+        b"<html><body><table>"
+        b"<tr><th>R1</th><td>1</td></tr><tr><th>R2</th><td>2</td></tr><tr><th>R3</th><td>3</td></tr>"
+        b"</table></body></html>"
+    )
+    html_buffer = BytesIO(content)
+    html_buffer.name = "th_rows.html"
+
+    wf_html = Workflow(flow=Flow(nodes=[HTMLConverter()]))
+    response = wf_html.run(input_data={"files": [html_buffer]})
+
+    assert response.status == RunnableStatus.SUCCESS
+    node_id = wf_html.flow.nodes[0].id
+    document = response.output[node_id]["output"]["documents"][0]
+    assert "| R1 | 1 |\n| --- | --- |\n| R2 | 2 |\n| R3 | 3 |" in document["content"]
+
+
+def test_html_converter_header_row_of_th_cells_only():
+    content = b"<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>"
+    html_buffer = BytesIO(content)
+    html_buffer.name = "header.html"
+
+    wf_html = Workflow(flow=Flow(nodes=[HTMLConverter()]))
+    response = wf_html.run(input_data={"files": [html_buffer]})
+
+    assert response.status == RunnableStatus.SUCCESS
+    node_id = wf_html.flow.nodes[0].id
+    document = response.output[node_id]["output"]["documents"][0]
+    assert "| A | B |\n| --- | --- |\n| 1 | 2 |" in document["content"]
+
+
+def test_html_converter_header_row_of_th_cells_after_leading_rows():
+    content = (
+        b"<table><tr></tr><tr><td>Title</td><td></td></tr>"
+        b"<tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>"
+    )
+    html_buffer = BytesIO(content)
+    html_buffer.name = "leading.html"
+
+    wf_html = Workflow(flow=Flow(nodes=[HTMLConverter()]))
+    response = wf_html.run(input_data={"files": [html_buffer]})
+
+    assert response.status == RunnableStatus.SUCCESS
+    node_id = wf_html.flow.nodes[0].id
+    document = response.output[node_id]["output"]["documents"][0]
+    assert "| A | B |\n| --- | --- |" in document["content"]
+    assert "| Title |  |" in document["content"]
+    assert "| 1 | 2 |" in document["content"]
+
+
 def test_html_converter_with_non_utf8_charset():
     content = '<html><head><meta charset="iso-8859-1"></head><body><p>café</p></body></html>'.encode("iso-8859-1")
     html_buffer = BytesIO(content)
