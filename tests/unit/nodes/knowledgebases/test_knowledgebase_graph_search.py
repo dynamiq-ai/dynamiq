@@ -12,6 +12,7 @@ from dynamiq.nodes.knowledgebases.knowledgebase_graph import (
     DynamiqKnowledgebaseGraphSearchInputSchema,
 )
 from dynamiq.runnables import RunnableConfig
+from dynamiq.utils.user_agent import USER_AGENT
 
 
 @pytest.fixture
@@ -63,7 +64,7 @@ def test_execute_builds_request_and_forwards_body(retriever):
     _, kwargs = retriever.client.request.call_args
     assert kwargs["method"] == "POST"
     assert kwargs["url"] == "https://api.example.ai/v1/knowledgebases/kb-123/graph-search"
-    assert kwargs["headers"] == {"Authorization": "Bearer secret-token"}
+    assert kwargs["headers"] == {"Authorization": "Bearer secret-token", "User-Agent": USER_AGENT}
     assert kwargs["json"] == {
         "query": "what systems does Acme use",
         "limit": 3,
