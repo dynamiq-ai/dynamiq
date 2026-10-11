@@ -111,7 +111,7 @@ def test_token_splitter_chunks_never_contain_replacement_character(chunk_size, c
 
     assert spans
     for chunk, start_index, end_index in spans:
-        assert "�" not in chunk
+        assert "\ufffd" not in chunk
         assert chunk == text[start_index:end_index]
     assert spans[0][1] == 0
     assert spans[-1][2] == len(text)
