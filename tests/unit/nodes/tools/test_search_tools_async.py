@@ -1,4 +1,4 @@
-"""Async unit tests for tavily, exa_search, scale_serp, serply, zenrows."""
+"""Async unit tests for tavily, exa_search, scale_serp, serply, zenrows, fxmacrodata."""
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -6,6 +6,7 @@ import pytest
 from dynamiq import connections
 from dynamiq.nodes.node import Node
 from dynamiq.nodes.tools.exa_search import ExaTool
+from dynamiq.nodes.tools.fxmacrodata import FXMacroDataTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.nodes.tools.serply import SerplyTool
 from dynamiq.nodes.tools.tavily import TavilyTool
@@ -23,7 +24,7 @@ def _mock_response(status_code=200, json_payload=None, text="", content=b"", hea
     return resp
 
 
-@pytest.mark.parametrize("tool_cls", [TavilyTool, ExaTool, ScaleSerpTool, SerplyTool, ZenRowsTool])
+@pytest.mark.parametrize("tool_cls", [TavilyTool, ExaTool, ScaleSerpTool, SerplyTool, ZenRowsTool, FXMacroDataTool])
 def test_tool_has_native_async(tool_cls):
     assert tool_cls.execute_async is not Node.execute_async
 
@@ -233,3 +234,38 @@ async def test_serply_execute_async_requires_query():
 
     assert result.status.value == "failure"
     mock_client.request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fxmacrodata_execute_async():
+    node = FXMacroDataTool(connection=connections.FXMacroData(api_key="test-key"))
+    payload = {"currency": "USD", "name": "Policy Rate", "source": "FRB", "data": [{"date": "2026-09-17", "val": 3.75}]}
+    mock_client = MagicMock()
+    mock_client.request = AsyncMock(return_value=_mock_response(json_payload=payload))
+
+    with patch.object(FXMacroDataTool, "get_async_client", AsyncMock(return_value=mock_client)):
+        result = await node.run_async(input_data={"currency": "usd", "indicator": "policy_rate", "limit": 1})
+
+    assert result.status.value == "success"
+    mock_client.request.assert_awaited_once()
+    call_kwargs = mock_client.request.call_args.kwargs
+    assert call_kwargs["url"] == "https://api.fxmacrodata.com/v1/announcements/usd/policy_rate"
+    assert call_kwargs["headers"]["X-API-Key"] == "test-key"
+    assert call_kwargs["params"] == {"limit": 1}
+    assert call_kwargs["follow_redirects"] is False
+    assert "2026-09-17: 3.75" in result.output["content"]["result"]
+
+
+@pytest.mark.asyncio
+async def test_fxmacrodata_execute_async_failed_status():
+    node = FXMacroDataTool(connection=connections.FXMacroData(api_key="test-key"))
+    mock_client = MagicMock()
+    mock_client.request = AsyncMock(
+        return_value=_mock_response(status_code=404, json_payload={"detail": "Unknown indicator"})
+    )
+
+    with patch.object(FXMacroDataTool, "get_async_client", AsyncMock(return_value=mock_client)):
+        result = await node.run_async(input_data={"currency": "usd", "indicator": "nope"})
+
+    assert result.status.value == "failure"
+    assert "Unknown indicator" in result.error.message
