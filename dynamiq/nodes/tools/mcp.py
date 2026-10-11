@@ -6,6 +6,7 @@ from types import GenericAlias
 from typing import Any, ForwardRef, Literal, Union
 
 from mcp import ClientSession
+from mcp.types import PaginatedRequestParams
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, create_model
 
 from dynamiq.connections import MCPSse, MCPStdio, MCPStreamableHTTP
@@ -369,8 +370,12 @@ def is_mcp_http_headers_field(field: Any) -> bool:
 
 
 def split_mcp_http_headers(input_data: BaseModel) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Split Dynamiq HTTP headers off the payload that will be sent as MCP tool arguments."""
-    input_dict = input_data.model_dump(by_alias=True)
+    """Split Dynamiq HTTP headers off the payload that will be sent as MCP tool arguments.
+
+    Only the arguments the caller set are sent. An optional argument left out stays absent rather
+    than going out as ``null``, which servers that validate their input schema reject.
+    """
+    input_dict = input_data.model_dump(by_alias=True, exclude_unset=True)
     field = type(input_data).model_fields.get(MCP_HTTP_HEADERS_FIELD)
     if field is None or not is_mcp_http_headers_field(field):
         return input_dict, None
@@ -633,8 +638,12 @@ Usage Strategy:
                 read, write = result[:2]
                 async with ClientSession(read, write) as session:
                     await session.initialize()
-                    tools = await session.list_tools()
-                    for tool in tools.tools:
+                    page = await session.list_tools()
+                    tools = list(page.tools)
+                    while page.nextCursor:
+                        page = await session.list_tools(params=PaginatedRequestParams(cursor=page.nextCursor))
+                        tools.extend(page.tools)
+                    for tool in tools:
                         mcp_tool = MCPTool(
                             name=tool.name,
                             description=tool.description or "MCP Tool",
