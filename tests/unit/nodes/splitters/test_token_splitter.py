@@ -99,3 +99,17 @@ def test_token_splitter_node_accepts_special_token_sets():
 
     assert kwargs["allowed_special"] == {"<|endoftext|>"}
     assert kwargs["disallowed_special"] == {"<|fim_prefix|>"}
+
+
+def test_token_splitter_chunks_never_contain_replacement_character():
+    text = "你好世界，这是一个测试句子。😀😀😀😀 émoji"
+    splitter = TokenSplitterComponent(chunk_size=5, chunk_overlap=1)
+
+    spans = splitter._split_text_with_offsets(text)
+
+    assert spans
+    for chunk, start_index, end_index in spans:
+        assert "�" not in chunk
+        assert chunk == text[start_index:end_index]
+    assert spans[0][1] == 0
+    assert spans[-1][2] == len(text)
