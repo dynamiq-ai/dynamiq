@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 import dynamiq.utils.jsonpath as jsonpath
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes import Behavior, Node, NodeGroup
-from dynamiq.nodes.cloning import carry_mock_exclusions, regenerate_node_ids, reply_waiting_nodes
+from dynamiq.nodes.cloning import carry_mock_exclusions, has_timed_reply_wait, regenerate_node_ids, reply_waiting_nodes
 from dynamiq.nodes.node import Transformer, ensure_config, share_input_queues
 from dynamiq.nodes.tools.mcp import resolve_mcp_node
 from dynamiq.nodes.types import ChoiceCondition, ChoiceHitPolicy, ConditionOperator
@@ -338,15 +338,19 @@ class Map(Node):
         # Resolve an MCPServer to its single MCPTool.
         run_node = resolve_mcp_node(self.node)
         # A node waiting for a human reply is found by the id it asks under, so each item's copy keeps that id,
-        # and the copies take turns on the input queue they then share.
+        # and the copies take turns on the input queue they then share. An item waiting for its turn under a node
+        # timeout would use up that timeout, so the items then run one at a time.
         waiting_nodes = reply_waiting_nodes(run_node)
         keep_ids = frozenset(node.id for node in waiting_nodes)
+        max_workers = 1 if has_timed_reply_wait(run_node) else self.max_workers
+        if max_workers < self.max_workers:
+            logger.info(f"Map {self.id} runs its items one at a time: a node timeout covers a human reply wait")
 
         try:
             check_cancellation(config)
             with (
                 share_input_queues(waiting_nodes, config),
-                ContextAwareThreadPoolExecutor(max_workers=self.max_workers) as executor,
+                ContextAwareThreadPoolExecutor(max_workers=max_workers) as executor,
             ):
                 results = list(
                     executor.map(

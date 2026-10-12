@@ -8,7 +8,7 @@ import pytest
 from dynamiq import Workflow
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.flows import Flow
-from dynamiq.nodes import Node, NodeGroup
+from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.operators import Map, Pass, SubWorkflow
 from dynamiq.nodes.tools.human_feedback import (
     HFStreamingInputEventMessage,
@@ -131,6 +131,24 @@ def test_the_items_of_a_parallel_map_ask_one_at_a_time_and_each_reads_its_own_re
     # A reply names only the node it answers, so copies asking at the same time could each read another's
     # reply: each item asks once the request before it has its reply.
     assert client.most_open == 1
+    outputs = [str(output) for output in result.output["map"]["output"]["output"]]
+    assert all(f"answer to item {i}?" in output for i, output in enumerate(outputs))
+
+
+def test_a_map_runs_its_items_one_at_a_time_when_a_node_timeout_covers_a_request():
+    queue = Queue()
+    client = ReplyByAskingId({"ask": queue}, hold=0.5)
+    config = RunnableConfig(callbacks=[client], nodes_override={"ask": input_override(queue, timeout=1)})
+    ask = HumanFeedbackTool(
+        id="ask", input_method=FeedbackMethod.STREAM, error_handling=ErrorHandling(timeout_seconds=1.2)
+    )
+
+    result = Workflow(flow=Flow(nodes=[Map(id="map", node=ask, max_workers=3)])).run(
+        input_data={"input": [{"input": f"item {i}?"} for i in range(3)]}, config=config
+    )
+
+    # Each reply takes 0.5 s. In parallel, the third item would wait 1 s for its turn under its own 1.2 s
+    # timeout and fail although every reply came in time; one at a time, each timeout starts with its item.
     outputs = [str(output) for output in result.output["map"]["output"]["output"]]
     assert all(f"answer to item {i}?" in output for i, output in enumerate(outputs))
 
