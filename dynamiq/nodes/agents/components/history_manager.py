@@ -173,7 +173,12 @@ class HistoryManagerMixin:
             if pinned_content is not None:
                 preserved_has_pinned = any(extract_message_text(m) == pinned_content for m in preserved)
                 if not preserved_has_pinned:
-                    summary = f"{summary}\n\nOriginal request: {pinned_content}"
+                    # Framed as context: a bare restatement after the summary reads as a new task,
+                    # and the model starts over on steps the summary reports as done.
+                    summary = (
+                        f"{summary}\n\nOriginal request (kept for reference; the work summarized above is "
+                        f"already done, so continue from there instead of starting over): {pinned_content}"
+                    )
 
             if notes_path := self.get_notes_file_path():
                 summary = f"{summary}\n\n{NOTES_REVISIT_INSTRUCTION_TEMPLATE.format(notes_path=notes_path)}"

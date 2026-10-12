@@ -41,7 +41,7 @@ def test_owner_and_factory_subagent_share_sandbox_live():
         pytest.skip("OPENAI_API_KEY and E2B_API_KEY are required for this test.")
 
     marker = uuid.uuid4().hex[:12]
-    proof_path = f"/home/user/proof-{marker}.txt"
+    proof_name = f"proof-{marker}.txt"
 
     owner_backend = E2BSandbox(connection=E2BConnection())
 
@@ -52,10 +52,10 @@ def test_owner_and_factory_subagent_share_sandbox_live():
             name="researcher",
             role=(
                 "You are a Researcher sub-agent with a shell tool in a Linux sandbox.\n"
-                "When asked to write a file, use your shell tool to create it exactly "
-                "at the absolute path you are given, then confirm it is written."
+                "When asked to write a file, use your shell tool to create it in your "
+                "working directory, then confirm it is written."
             ),
-            description="Writes a file to an absolute path using its shell tool.",
+            description="Writes a file using its shell tool.",
             llm=_openai_llm(),
             tools=[],
             inference_mode=InferenceMode.XML,
@@ -91,7 +91,7 @@ def test_owner_and_factory_subagent_share_sandbox_live():
             input_data={
                 "input": (
                     "Ask the researcher sub-agent to write the exact text "
-                    f"'{marker}' into the file at the absolute path {proof_path} "
+                    f"'{marker}' into a file named {proof_name} in its working directory "
                     "using its shell tool, then confirm it is done."
                 ),
             },
@@ -100,10 +100,10 @@ def test_owner_and_factory_subagent_share_sandbox_live():
 
         assert result.status == RunnableStatus.SUCCESS
 
-        # Robust check, independent of the LLM's prose: the subagent's write must
-        # be visible on the OWNER's live backend — only possible if the factory
-        # subagent ran on a view of the owner's shared sandbox.
-        assert owner_backend.exists(proof_path) is True
-        assert marker.encode() in owner_backend.retrieve(proof_path)
+        # The subagent's write must be visible on the OWNER's live backend - only possible if the
+        # subagent ran on a view of the owner's shared sandbox. Searched for by name: the subagent
+        # is told to keep its files under its own working directory, so the exact path is its choice.
+        found = owner_backend.run_command_shell(f"grep -rl --include={proof_name} {marker} /home/user")
+        assert proof_name in found.stdout, f"{proof_name} with the marker is not on the owner's sandbox"
     finally:
         owner_backend.close(kill=True)

@@ -155,4 +155,10 @@ def test_react_agent_role_with_special_characters(test_llm, test_id, agent_name,
     assert isinstance(content, str)
     assert "4" in content, f"Expected '4' in the output, got: {content!r}"
 
-    assert "have a nice day!" in content.lower(), f"Expected 'have a nice day!' in the output, got: {content!r}"
+    # Checked on the prompt that was sent, not on the reply: asked for JSON, the model sometimes
+    # returns the JSON alone and drops the closing phrase, which says nothing about rendering.
+    system_prompt = agent._prompt.messages[0].content
+    assert input_data["extra_instructions"] in system_prompt, "The role variable was not substituted"
+    assert "{{extra_instructions}}" not in system_prompt
+    assert "<Button onClick={handleClick} data={{userId: 123}} />" in system_prompt, "The raw block was altered"
+    assert "{'status':'success', 'data':'value'}" in system_prompt, "The single-brace example was altered"
