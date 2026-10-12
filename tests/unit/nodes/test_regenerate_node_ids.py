@@ -1,6 +1,6 @@
 from dynamiq.flows import Flow
 from dynamiq.nodes import InputTransformer, OutputTransformer
-from dynamiq.nodes.cloning import regenerate_node_ids, reply_waiting_node_ids
+from dynamiq.nodes.cloning import regenerate_node_ids, reply_waiting_nodes
 from dynamiq.nodes.node import NodeDependency, NodeOutputReference
 from dynamiq.nodes.operators import Choice, ChoiceOption, DecisionTable, Expression, Pass, Rules, SubWorkflow
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackAction, HumanFeedbackTool
@@ -460,4 +460,4 @@ def test_the_nodes_waiting_for_a_reply_are_the_feedback_tools_and_the_approval_g
     plain = Pass(id="plain", name="plain")
     node = SubWorkflow(id="sub", name="sub", flow=Flow(id="flow", nodes=[ask, notify, gate, plain]))
 
-    assert reply_waiting_node_ids(node) == {"ask", "gate"}
+    assert {waiting.id for waiting in reply_waiting_nodes(node)} == {"ask", "gate"}

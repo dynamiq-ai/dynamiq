@@ -8,7 +8,8 @@ import pytest
 from dynamiq import Workflow
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.flows import Flow
-from dynamiq.nodes.operators import Map, SubWorkflow
+from dynamiq.nodes import Node, NodeGroup
+from dynamiq.nodes.operators import Map, Pass, SubWorkflow
 from dynamiq.nodes.tools.human_feedback import (
     HFStreamingInputEventMessage,
     HFStreamingInputEventMessageData,
@@ -17,7 +18,13 @@ from dynamiq.nodes.tools.human_feedback import (
 )
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.runnables.base import NodeRunnableConfig
-from dynamiq.types.feedback import FeedbackMethod
+from dynamiq.types.feedback import (
+    ApprovalConfig,
+    ApprovalInputData,
+    ApprovalStreamingInputEventMessage,
+    ApprovalStreamingOutputEventMessage,
+    FeedbackMethod,
+)
 from dynamiq.types.streaming import StreamingConfig
 
 
@@ -57,10 +64,37 @@ class ReplyByAskingId(BaseCallbackHandler):
             self._open -= 1
 
 
-def input_override(queue: Queue) -> NodeRunnableConfig:
+class Approve(BaseCallbackHandler):
+    """Approves each approval request through ``queue``, or, if ``late``, just after the request has timed out."""
+
+    def __init__(self, queue: Queue, late: bool = False):
+        self.queue = queue
+        self.late = late
+        self.asked: list[dict] = []
+        self._unanswered: list[str] = []
+
+    def on_node_execute_stream(self, serialized, chunk=None, **kwargs):
+        event = kwargs.get("event")
+        if not isinstance(event, ApprovalStreamingOutputEventMessage):
+            return
+        self.asked.append(event.data.data)
+        reply = ApprovalStreamingInputEventMessage(
+            entity_id=event.entity_id, data=ApprovalInputData(feedback="", is_approved=True), event=event.event
+        ).model_dump_json()
+        if self.late:
+            self._unanswered.append(reply)
+        else:
+            self.queue.put(reply)
+
+    def on_node_error(self, serialized, error, **kwargs):
+        while self._unanswered:
+            self.queue.put(self._unanswered.pop())
+
+
+def input_override(queue: Queue, timeout: float = 1) -> NodeRunnableConfig:
     """The override a server registers for a node so that it reads its reply from ``queue``."""
     return NodeRunnableConfig(
-        streaming=StreamingConfig(enabled=True, input_queue=queue, input_queue_done_event=Event(), timeout=1)
+        streaming=StreamingConfig(enabled=True, input_queue=queue, input_queue_done_event=Event(), timeout=timeout)
     )
 
 
@@ -84,17 +118,65 @@ def test_a_feedback_tool_in_a_map_asks_under_its_registered_id_so_each_reply_rea
     assert "answer to first?" in first and "answer to second?" in second
 
 
-def test_a_map_holding_a_feedback_tool_runs_its_items_one_at_a_time():
+def test_the_items_of_a_parallel_map_ask_one_at_a_time_and_each_reads_its_own_reply():
     queue = Queue()
     client = ReplyByAskingId({"ask": queue}, hold=0.05)
     config = RunnableConfig(callbacks=[client], nodes_override={"ask": input_override(queue)})
     map_node = Map(id="map", node=HumanFeedbackTool(id="ask", input_method=FeedbackMethod.STREAM), max_workers=3)
 
-    Workflow(flow=Flow(nodes=[map_node])).run(
+    result = Workflow(flow=Flow(nodes=[map_node])).run(
         input_data={"input": [{"input": f"item {i}?"} for i in range(3)]}, config=config
     )
 
-    # Copies asking under one id at the same time could each read the other's reply, so a Map holding a
-    # node that waits for a reply asks one item at a time whatever its max_workers.
-    assert client.asked_ids == ["ask"] * 3
+    # A reply names only the node it answers, so copies asking at the same time could each read another's
+    # reply: each item asks once the request before it has its reply.
     assert client.most_open == 1
+    outputs = [str(output) for output in result.output["map"]["output"]["output"]]
+    assert all(f"answer to item {i}?" in output for i, output in enumerate(outputs))
+
+
+def test_the_items_of_a_map_that_never_ask_run_in_parallel():
+    all_started = threading.Barrier(3, timeout=5)
+
+    class Worker(Node):
+        """Holds a feedback tool it never calls, as an agent with nothing to ask."""
+
+        group: NodeGroup = NodeGroup.UTILS
+        tool: HumanFeedbackTool
+
+        def execute(self, input_data, config=None, **kwargs):
+            all_started.wait()
+            return {"done": input_data["item"]}
+
+    worker = Worker(tool=HumanFeedbackTool(id="ask", input_method=FeedbackMethod.STREAM))
+    result = Workflow(flow=Flow(nodes=[Map(id="map", node=worker, max_workers=3)])).run(
+        input_data={"input": [{"item": i} for i in range(3)]}
+    )
+
+    # Each item waits until all three have started, which only items running at the same time can do.
+    assert result.output["map"]["output"]["output"] == [{"done": 0}, {"done": 1}, {"done": 2}]
+
+
+@pytest.mark.parametrize("max_workers", [1, 2])
+def test_an_approval_given_too_late_is_not_taken_for_another_items_request(max_workers):
+    queue = Queue()
+    refund = Pass(id="refund", approval=ApprovalConfig(enabled=True, feedback_method=FeedbackMethod.STREAM))
+    workflow = Workflow(flow=Flow(nodes=[Map(id="map", node=refund, max_workers=max_workers)]))
+
+    def run(client: Approve) -> list:
+        config = RunnableConfig(callbacks=[client], nodes_override={"refund": input_override(queue, timeout=0.2)})
+        result = workflow.run(input_data={"input": [{"refund": "A"}, {"refund": "B"}]}, config=config)
+        return result.output["map"]["output"]["output"]
+
+    late = Approve(queue, late=True)
+    outputs = run(late)
+
+    # The first request timed out, so no other item asked: the approval given late for it stays unread,
+    # where the next request would have taken it for its own.
+    assert len(late.asked) == 1
+    assert outputs == [None, None]
+    assert queue.qsize() == 1
+
+    # A missed reply stops the asking only in the Map run that missed it.
+    queue.get_nowait()
+    assert run(Approve(queue)) == [{"refund": "A"}, {"refund": "B"}]

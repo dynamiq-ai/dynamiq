@@ -6,9 +6,12 @@ import inspect
 import logging
 import random
 import reprlib
+import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Iterable, Iterator
 from concurrent.futures import TimeoutError
+from contextlib import contextmanager
 from datetime import datetime
 from functools import cached_property
 from queue import Empty
@@ -131,6 +134,48 @@ def is_retryable_error(exc: BaseException) -> bool:
         exc,
         (AuthenticationError, PermissionDeniedError, BadRequestError, NotFoundError, BudgetExceededError),
     )
+
+
+class _SharedInputQueue:
+    """The state of an input queue while ``maps`` running Maps share it; ``missed`` is set once a request times out."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.maps = 0
+        self.missed = False
+
+
+# Keyed by the queue's not_empty condition, which the shallow copy of the queue in a node's clone shares.
+_shared_input_queues: dict[threading.Condition, _SharedInputQueue] = {}
+_shared_input_queues_guard = threading.Lock()
+
+
+@contextmanager
+def share_input_queues(nodes: Iterable["Node"], config: RunnableConfig) -> Iterator[None]:
+    """Make the copies of ``nodes`` take turns on their input queues while the block runs.
+
+    A Map's copies of a node keep its id, and a reply names only the node it answers, so it cannot tell their
+    requests apart. A request on one of these queues waits until the one before it has its reply, and once a
+    request times out, later ones raise InputStreamingTimeoutError without asking: the reply to the missed request
+    may still come, and would be taken for theirs.
+    """
+    keys = set()
+    for node in nodes:
+        streaming = getattr(config.nodes_override.get(node.id), "streaming", None) or node.streaming
+        if streaming.input_streaming_enabled:
+            keys.add(streaming.input_queue.not_empty)
+    with _shared_input_queues_guard:
+        for key in keys:
+            _shared_input_queues.setdefault(key, _SharedInputQueue()).maps += 1
+    try:
+        yield
+    finally:
+        with _shared_input_queues_guard:
+            for key in keys:
+                shared = _shared_input_queues[key]
+                shared.maps -= 1
+                if not shared.maps:
+                    del _shared_input_queues[key]
 
 
 class ErrorHandling(BaseModel):
@@ -934,11 +979,12 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         logger.info(self._node_run_log("sending approval."))
         check_cancellation(config)
 
-        self.run_on_node_execute_stream(callbacks=config.callbacks, event=event, **kwargs)
+        with self._input_queue_turn(config):
+            self.run_on_node_execute_stream(callbacks=config.callbacks, event=event, **kwargs)
 
-        output: ApprovalInputData = self.get_input_streaming_event(
-            event=approval_config.event, event_msg_type=ApprovalStreamingInputEventMessage, config=config
-        ).data
+            output: ApprovalInputData = self.get_input_streaming_event(
+                event=approval_config.event, event_msg_type=ApprovalStreamingInputEventMessage, config=config
+            ).data
 
         return output
 
@@ -1814,6 +1860,32 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""
         return {}
+
+    @contextmanager
+    def _input_queue_turn(self, config: RunnableConfig) -> Iterator[None]:
+        """Hold the node's input queue for one request and its reply, if a Map shares it (see share_input_queues)."""
+        streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
+        with _shared_input_queues_guard:
+            shared = _shared_input_queues.get(getattr(streaming.input_queue, "not_empty", None))
+        if shared is None:
+            yield
+            return
+        while not shared.lock.acquire(timeout=0.5):
+            check_cancellation(config)
+        try:
+            check_cancellation(config)
+            if shared.missed:
+                logger.warning(
+                    self._node_run_log("not asking: the reply to an earlier request on its input queue never came.")
+                )
+                raise InputStreamingTimeoutError(node_id=self.id, timeout=streaming.timeout)
+            try:
+                yield
+            except InputStreamingTimeoutError:
+                shared.missed = True
+                raise
+        finally:
+            shared.lock.release()
 
     def get_input_streaming_event(
         self,

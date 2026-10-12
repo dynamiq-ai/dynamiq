@@ -16,6 +16,7 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from dynamiq.nodes.node import Node
     from dynamiq.runnables import RunnableConfig
 
 
@@ -226,8 +227,8 @@ def _models(obj: Any, seen: set[int] | None = None) -> Iterator[BaseModel]:
             yield from _models(item, seen)
 
 
-def reply_waiting_node_ids(obj: Any) -> set[str]:
-    """The ids of the nodes in ``obj`` that wait for a human reply: asking feedback tools and approval-gated nodes.
+def reply_waiting_nodes(obj: Any) -> list["Node"]:
+    """The nodes in ``obj`` that wait for a human reply: asking feedback tools and approval-gated nodes.
 
     A reply finds its node by the id the node asked under, which is the id its caller registered the
     node's input queue for. A copy that renamed such a node would ask under an id nobody registered,
@@ -237,12 +238,12 @@ def reply_waiting_node_ids(obj: Any) -> set[str]:
     from dynamiq.nodes.node import Node
     from dynamiq.nodes.tools.human_feedback import HumanFeedbackAction, HumanFeedbackTool
 
-    return {
-        model.id
+    return [
+        model
         for model in _models(obj)
         if (isinstance(model, HumanFeedbackTool) and model.action != HumanFeedbackAction.INFO)
         or (isinstance(model, Node) and model.approval.enabled)
-    }
+    ]
 
 
 def carry_mock_exclusions(config: "RunnableConfig", id_map: dict[str, set[str]]) -> "RunnableConfig":

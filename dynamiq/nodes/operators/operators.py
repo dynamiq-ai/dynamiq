@@ -7,8 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 import dynamiq.utils.jsonpath as jsonpath
 from dynamiq.executors.context import ContextAwareThreadPoolExecutor
 from dynamiq.nodes import Behavior, Node, NodeGroup
-from dynamiq.nodes.cloning import carry_mock_exclusions, regenerate_node_ids, reply_waiting_node_ids
-from dynamiq.nodes.node import Transformer, ensure_config
+from dynamiq.nodes.cloning import carry_mock_exclusions, regenerate_node_ids, reply_waiting_nodes
+from dynamiq.nodes.node import Transformer, ensure_config, share_input_queues
 from dynamiq.nodes.tools.mcp import resolve_mcp_node
 from dynamiq.nodes.types import ChoiceCondition, ChoiceHitPolicy, ConditionOperator
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
@@ -338,15 +338,16 @@ class Map(Node):
         # Resolve an MCPServer to its single MCPTool.
         run_node = resolve_mcp_node(self.node)
         # A node waiting for a human reply is found by the id it asks under, so each item's copy keeps that id,
-        # and the items run one at a time: copies asking under one id could not tell their replies apart.
-        keep_ids = frozenset(reply_waiting_node_ids(run_node))
-        max_workers = 1 if keep_ids else self.max_workers
-        if max_workers < self.max_workers:
-            logger.info(f"Map {self.id} runs its items one at a time: nodes {sorted(keep_ids)} wait for human replies")
+        # and the copies take turns on the input queue they then share.
+        waiting_nodes = reply_waiting_nodes(run_node)
+        keep_ids = frozenset(node.id for node in waiting_nodes)
 
         try:
             check_cancellation(config)
-            with ContextAwareThreadPoolExecutor(max_workers=max_workers) as executor:
+            with (
+                share_input_queues(waiting_nodes, config),
+                ContextAwareThreadPoolExecutor(max_workers=self.max_workers) as executor,
+            ):
                 results = list(
                     executor.map(
                         lambda args: self.execute_workflow(args[0], args[1], config, merged_kwargs, run_node, keep_ids),
