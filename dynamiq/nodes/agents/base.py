@@ -1315,6 +1315,36 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     )
         return history
 
+    @staticmethod
+    def _with_final_output(
+        metadata: dict,
+        snapshot_messages: list[Message],
+        final_output: Any | None,
+    ) -> list[Message]:
+        """Make the trailing assistant turn carry ``final_output`` (FULL save mode).
+
+        ``final_output`` is the answer after on_output hooks / memory transforms, while
+        the prompt still holds the raw model message (and, for function calling, the
+        ``provide_final_answer`` call plus its stub results). Swap that tail for a plain
+        assistant message so blocked or masked content never reaches memory.
+        """
+        text = str(final_output) if final_output is not None else ""
+        if not text:
+            return snapshot_messages
+
+        end = len(snapshot_messages)
+        while (
+            end > 0
+            and snapshot_messages[end - 1].role == MessageRole.TOOL
+            and getattr(snapshot_messages[end - 1], "name", None) == "provide_final_answer"
+        ):
+            end -= 1
+        if end > 0 and snapshot_messages[end - 1].role == MessageRole.ASSISTANT:
+            end -= 1
+        return snapshot_messages[:end] + [
+            Message(role=MessageRole.ASSISTANT, content=text, metadata=metadata.copy())
+        ]
+
     def _fallback_input_output_pair(
         self,
         metadata: dict,
@@ -1449,6 +1479,8 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         snapshot_messages = raw_snapshot_messages
         if self.memory.save_mode == MemorySaveMode.INPUT_OUTPUT:
             snapshot_messages = self._input_output_history(metadata, snapshot_messages, final_output=final_output)
+        else:
+            snapshot_messages = self._with_final_output(metadata, snapshot_messages, final_output)
 
         saved = len(snapshot_messages)
         scope_filters = {"user_id": user_id, "session_id": session_id}
