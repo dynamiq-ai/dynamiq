@@ -1059,7 +1059,11 @@ class Agent(AgentIterativeCheckpointMixin, Node):
                     memory_result = transform(memory_result)
             if use_memory and not (hook_blocked and hook_blocked.point == HookPoint.ON_INPUT.value):
                 try:
-                    self._save_history_to_memory(custom_metadata, final_output=memory_result)
+                    self._save_history_to_memory(
+                        custom_metadata,
+                        final_output=memory_result,
+                        answer_rewritten=bool(hook_blocked or self.hooks or current_hook_ctx.get().hooks),
+                    )
                 except Exception as save_error:
                     logger.error(
                         "Agent %s - %s: failed to save history to memory: %s",
@@ -1426,8 +1430,12 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         self,
         metadata: dict,
         final_output: Any | None = None,
+        answer_rewritten: bool = True,
     ) -> None:
         """Snapshot prompt state into memory for current user/session scope.
+
+        ``answer_rewritten`` tells FULL mode whether ``final_output`` may differ from the model's own final
+        message (hooks or memory transforms ran); when False the prompt's final message is stored as is.
 
         Replaces only the messages matching current ``user_id``/``session_id``
         filters. What gets written depends on ``memory.save_mode``: FULL stores
@@ -1480,7 +1488,7 @@ class Agent(AgentIterativeCheckpointMixin, Node):
         snapshot_messages = raw_snapshot_messages
         if self.memory.save_mode == MemorySaveMode.INPUT_OUTPUT:
             snapshot_messages = self._input_output_history(metadata, snapshot_messages, final_output=final_output)
-        else:
+        elif answer_rewritten:
             snapshot_messages = self._with_final_output(metadata, snapshot_messages, final_output)
 
         saved = len(snapshot_messages)
