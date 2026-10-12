@@ -69,8 +69,9 @@ def get_voice_agent(*, api: ApiClient, settings: Settings, agent_id: str):
 def update_voice_agent(*, api: ApiClient, settings: Settings, agent_id: str, payload: str):
     """Partially update a voice agent: send only the fields to change.
 
-    Accepted fields: `name`, `description`, `config`. A deployed agent needs redeploying to
-    pick up the change.
+    Accepted fields: `name`, `description`, `config`. `config` is replaced as a whole, so send
+    the complete config (take it from `voice get`), not just the keys that change. A deployed
+    agent needs redeploying to pick up the change.
     """
     echo_response(api.patch(f"{BASE}/agents/{agent_id}", json=read_json_arg(payload)))
 

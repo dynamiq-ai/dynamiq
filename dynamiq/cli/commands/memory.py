@@ -70,11 +70,14 @@ user_id_option = click.option(
     callback=_reject_blank,
     help="The `user_id` the agent run carried. Items are stored per user.",
 )
+# Without a session id the API matches only items stored with no session, so `items` asks for
+# both scopes to list everything the user has.
+ALL_SCOPES = ["user", "session"]
 session_id_option = click.option(
     "--session-id",
     default=None,
     callback=_reject_blank,
-    help="Narrow to one conversation (the run's `session_id`).",
+    help="Only the items of one conversation (the run's `session_id`).",
 )
 
 
@@ -98,14 +101,19 @@ def list_memory_items(
 ):
     """The stored messages for one user - proof an agent is actually remembering.
 
-    Items are stored per `user_id` (and optionally per `session_id`), so pass the same ids
-    the run carried. Empty after a run usually means the run carried no `user_id`/`session_id`,
-    so memory never switched on. That is silent at run time; this is where you see it.
+    Items are stored per `user_id` (and optionally per `session_id`), so pass the `user_id`
+    the run carried. Without --session-id this lists everything stored for the user, across
+    all sessions; with it, only that session's items. Empty after a run usually means the run
+    carried no `user_id`/`session_id`, so memory never switched on. That is silent at run
+    time; this is where you see it.
     """
+    params = _scope_params(user_id, session_id)
+    if session_id is None:
+        params["include_scope"] = ALL_SCOPES
     echo_list(
         api,
         f"/v1/memories/{memory_id}/items",
-        _scope_params(user_id, session_id),
+        params,
         page,
         page_size,
         fetch_all,
@@ -117,10 +125,14 @@ def list_memory_items(
 @click.argument("memory_id")
 @user_id_option
 @session_id_option
-@click.confirmation_option(prompt="Delete the stored messages for this user?")
+@click.confirmation_option(prompt="Delete these stored messages?")
 @with_api_and_settings
 def delete_memory_items(*, api: ApiClient, settings: Settings, memory_id: str, user_id: str, session_id: str | None):
-    """Delete one user's stored messages (or one session's, with --session-id).
+    """Delete one session's stored messages for a user (--user-id with --session-id).
+
+    Without --session-id this deletes only the messages stored with no session; messages that
+    belong to a session stay. To remove everything a user has, run it once per session (find
+    the session ids with `memory items`) and once without --session-id.
 
     The memory itself is kept and its id stays valid.
     """
