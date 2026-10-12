@@ -204,6 +204,9 @@ _SAMPLING_UNSUPPORTED_INDICATORS: tuple[str, ...] = (
 # `stop` named as a parameter (also `stop_sequences` / `stopSequences`), not as part of another word.
 _STOP_PARAM_RE = re.compile(r"(?<![a-z_])stop(?:[_ ]?sequences?)?(?![a-z])")
 
+# "only `"auto"` is supported for `tool_choice`": the provider naming the one value it accepts.
+_ONLY_AUTO_TOOL_CHOICE_RE = re.compile(r"only\W*auto\b")
+
 
 def provider_error_text(exc: BaseException) -> str:
     """The error's text with the backslash escapes a bytes repr adds removed.
@@ -1101,8 +1104,8 @@ class BaseLLM(ConnectionNode):
         with the sampling params stripped. That one only fires when the error both names a present
         sampling param and looks like an unsupported-param error, so genuine validation
         errors (e.g. out-of-range temperature) still surface. ``stop`` gets the same treatment
-        under the same two conditions, and a forced ``tool_choice`` falls back to ``"auto"`` when
-        the error says that is the only value accepted.
+        under the same two conditions, and a ``tool_choice`` that forces a call (``"required"`` or a
+        named function) falls back to ``"auto"`` when the error says the forced choice is unsupported.
         """
         msg = provider_error_text(exc).lower()
         if not common_params.get("stream") and any(ind in msg for ind in _STREAMING_REQUIRED_INDICATORS):
@@ -1141,7 +1144,12 @@ class BaseLLM(ConnectionNode):
             return recovered
 
         # Some endpoints accept only tool_choice="auto" and say so; a forced or named choice gets a 400.
-        if common_params.get("tool_choice") not in (None, "auto") and "tool_choice" in msg and "auto" in msg:
+        # Limited to a choice that forces a call: "none" rules tool calls out and must never become
+        # "auto", and any other value is a misconfiguration that has to surface.
+        tool_choice = common_params.get("tool_choice")
+        forces_a_call = tool_choice == "required" or isinstance(tool_choice, dict)
+        rejects_forced_choice = looks_unsupported or bool(_ONLY_AUTO_TOOL_CHOICE_RE.search(msg))
+        if forces_a_call and "tool_choice" in msg and rejects_forced_choice:
             logger.warning(
                 "LLM '%s': model '%s' accepts only tool_choice='auto'; retrying with it.",
                 self.name,

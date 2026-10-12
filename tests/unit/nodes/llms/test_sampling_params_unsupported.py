@@ -278,6 +278,28 @@ class TestToolChoiceBackstop:
         common = {"model": custom.model, "tools": [{}], "tool_choice": "auto", "max_tokens": 100}
         assert custom._recover_completion_params(Exception(self.AUTO_ONLY_ERROR), common) is None
 
+    def test_named_function_choice_falls_back_to_auto(self, custom):
+        named = {"type": "function", "function": {"name": "t"}}
+        common = {"model": custom.model, "tools": [{}], "tool_choice": named, "max_tokens": 100}
+        exc = Exception("litellm.BadRequestError: tool_choice with a named function is not supported")
+        assert custom._recover_completion_params(exc, common)["tool_choice"] == "auto"
+
+    def test_none_is_never_rewritten_to_auto(self, custom):
+        # "none" rules tool calls out; switching it to "auto" would turn them back on.
+        common = {"model": custom.model, "tools": [{}], "tool_choice": "none", "max_tokens": 100}
+        assert custom._recover_completion_params(Exception(self.AUTO_ONLY_ERROR), common) is None
+
+    def test_no_recovery_on_a_validation_error_listing_allowed_values(self, custom):
+        common = {"model": custom.model, "tools": [{}], "tool_choice": "required", "max_tokens": 100}
+        exc = Exception(
+            "litellm.BadRequestError: Invalid value for tool_choice. Supported values are: 'none', 'auto', 'required'"
+        )
+        assert custom._recover_completion_params(exc, common) is None
+
+    def test_no_recovery_for_a_misconfigured_value(self, custom):
+        common = {"model": custom.model, "tools": [{}], "tool_choice": "requierd", "max_tokens": 100}
+        assert custom._recover_completion_params(Exception(self.AUTO_ONLY_ERROR), common) is None
+
     def test_no_recovery_on_another_tool_choice_error(self, custom):
         common = {"model": custom.model, "tools": [{}], "tool_choice": "required", "max_tokens": 100}
         exc = Exception("litellm.BadRequestError: tool_choice is set but no tools were provided")
