@@ -77,12 +77,22 @@ def compact_items(items: list) -> list:
     return out
 
 
+MAX_PAGES = 200
+
+
 def iter_pages(api: ApiClient, path: str, params: dict | None = None, page_size: int = 500):
     """Yield each page of a list endpoint until the last one.
 
     page_size caps at 500, so a single request is not the catalogue - it is the first 500 of
     it. Anything that reads one page and treats the result as complete reports whatever falls
     beyond it as not existing.
+
+    Termination cannot be left to the server alone. An endpoint that serves a fixed list
+    (/v1/agent-builder/nodes is one) ignores `page` and answers every request with the same
+    full payload and no `pagination` block, so "data is empty" and "page_count reached" both
+    never happen and the walk runs forever. A missing `pagination` block therefore ends it:
+    an endpoint that does not report pages does not have a second one. MAX_PAGES is the last
+    resort, and raises rather than returning a silently truncated list.
     """
     params = dict(params or {})
     seen, current = 0, 1
@@ -97,12 +107,19 @@ def iter_pages(api: ApiClient, path: str, params: dict | None = None, page_size:
         yield batch
         seen += len(batch)
         pagination = body.get("pagination") or {}
+        if not pagination:
+            return
         page_count = pagination.get("page_count")
         total = pagination.get("total_count")
         if page_count and current >= page_count:
             return
         if total is not None and seen >= total:
             return
+        if current >= MAX_PAGES:
+            raise click.ClickException(
+                f"{path} is still paging after {MAX_PAGES} pages ({seen} items); refusing to keep going. "
+                f"Narrow the query, or pass --page/--page-size to read it a page at a time."
+            )
         current += 1
 
 
