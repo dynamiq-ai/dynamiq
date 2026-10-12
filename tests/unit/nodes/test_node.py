@@ -1025,3 +1025,30 @@ def test_dump_for_log_survives_unrenderable_value():
             raise RuntimeError("boom")
 
     assert Node._dump_for_log({"bad": Exploding()})
+
+
+def test_approval_message_does_not_render_connection_secrets(mocker):
+    from dynamiq.connections import Http, HTTPMethod
+    from dynamiq.nodes.tools.http_api_call import HttpApiCall
+    from dynamiq.types.feedback import ApprovalConfig, ApprovalInputData, FeedbackMethod
+
+    tool = HttpApiCall(
+        name="crm",
+        connection=Http(
+            method=HTTPMethod.POST, url="https://crm.example.com", headers={"Authorization": "Bearer secret"}
+        ),
+        approval=ApprovalConfig(
+            enabled=True, feedback_method=FeedbackMethod.CONSOLE, msg_template="{{ name }} {{ connection }}"
+        ),
+    )
+    send = mocker.patch.object(
+        HttpApiCall,
+        "send_console_approval_message",
+        return_value=ApprovalInputData(feedback="", is_approved=True, data={}),
+    )
+
+    tool.get_approved_data_or_origin(input_data={}, config=RunnableConfig())
+
+    message = send.call_args.args[0]
+    assert message.startswith("crm ")
+    assert "Bearer secret" not in message
