@@ -117,6 +117,8 @@ def is_retryable_error(exc: BaseException) -> bool:
     Only certainly-permanent failures are non-retryable; anything unrecognised is retried
     as before. Every node type runs through this loop, not only LLMs.
     """
+    if getattr(exc, "retryable", True) is False:
+        return False
     try:
         from litellm.exceptions import (
             AuthenticationError,
@@ -307,7 +309,6 @@ class NodeDependency(BaseModel):
 
     @model_validator(mode="after")
     def validate_trigger(self) -> "NodeDependency":
-        # A Choice reports its options in a successful result, so an option can only follow a success.
         if self.trigger == DependencyTrigger.FAILURE and self.option:
             raise ValueError(
                 f"Dependency on '{self.node.id}' cannot both select option '{self.option}' and trigger on failure."
@@ -639,7 +640,6 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             and (isinstance(dep_output_data.output, dict))
             and (dep_condition_result := dep_output_data.output.get(depend.option))
         ):
-            # Restored from a checkpoint, a Choice's option results come back as plain dicts.
             if isinstance(dep_condition_result, dict):
                 dep_condition_result = RunnableResult.model_validate(dep_condition_result)
             if dep_condition_result.status == RunnableStatus.FAILURE:
@@ -969,7 +969,13 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         return data
 
     def send_streaming_approval_message(
-        self, template: str, input_data: dict, approval_config: ApprovalConfig, config: RunnableConfig = None, **kwargs
+        self,
+        template: str,
+        input_data: dict,
+        approval_config: ApprovalConfig,
+        config: RunnableConfig = None,
+        request_id: str | None = None,
+        **kwargs,
     ) -> ApprovalInputData:
         """
         Sends approval message and waits for response.
@@ -979,6 +985,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             input_data (dict): Data that will be sent.
             approval_config (ApprovalConfig): Configuration for approval.
             config (RunnableConfig, optional): Configuration for the runnable.
+            request_id (str, optional): Id of the request. The answer has to echo it; answers with another id are
+                ignored (they belong to an earlier request).
             **kwargs: Additional keyword arguments.
 
         Return:
@@ -988,7 +996,12 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         event = ApprovalStreamingOutputEventMessage(
             wf_run_id=config.run_id,
             entity_id=self.id,
-            data={"template": template, "data": input_data, "mutable_data_params": approval_config.mutable_data_params},
+            data={
+                "template": template,
+                "data": input_data,
+                "mutable_data_params": approval_config.mutable_data_params,
+                "request_id": request_id,
+            },
             event=approval_config.event,
             source=StreamingEntitySource(
                 id=self.id,
@@ -1004,11 +1017,15 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         with self._input_queue_turn(config):
             self.run_on_node_execute_stream(callbacks=config.callbacks, event=event, **kwargs)
 
-            output: ApprovalInputData = self.get_input_streaming_event(
-                event=approval_config.event, event_msg_type=ApprovalStreamingInputEventMessage, config=config
-            ).data
-
-        return output
+            while True:
+                output: ApprovalInputData = self.get_input_streaming_event(
+                    event=approval_config.event, event_msg_type=ApprovalStreamingInputEventMessage, config=config
+                ).data
+                if request_id is None or output.request_id == request_id:
+                    return output
+                logger.warning(
+                    self._node_run_log(f"ignoring an approval answer that is not for request {request_id}.")
+                )
 
     def send_console_approval_message(self, template: str, config: RunnableConfig = None) -> ApprovalInputData:
         """
@@ -1028,7 +1045,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
         result = {}
 
         def _read_input():
-            result["feedback"] = input(template)
+            try:
+                result["feedback"] = input(template)
+            except BaseException as e:  # noqa: BLE001 - re-raised in the caller; a thread would swallow it
+                result["error"] = e
 
         input_thread = _threading.Thread(target=_read_input, daemon=True)
         input_thread.start()
@@ -1037,6 +1057,8 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointNodeMixin, ABC):
             check_cancellation(config)
             input_thread.join(timeout=0.5)
 
+        if "error" in result:
+            raise result["error"]
         return ApprovalInputData(feedback=result.get("feedback", ""))
 
     def send_approval_message(

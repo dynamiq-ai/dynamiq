@@ -1,0 +1,89 @@
+# JSONPath transforms and a Python hook (the original tool-hooks example, on the single `hooks` list).
+#
+#   transform (lookup-customer)   input: `selector` is MERGED into the model's arguments (listed keys are set,
+#                                 everything else is kept; a path that matches nothing is skipped with a warning).
+#                                 Here it forces include_internal="false". output: keeps only `$.content.public`,
+#                                 so the model never sees `internal` even though the tool returned it.
+#   custom_hooks.Require...       a Python Hook subclass (custom_hooks.py): blocks non-numeric customer ids.
+#   tool_policy (delete-customer) always denied: removed from the available tools. A hallucinated call is rejected.
+#   regex (output)                masks email addresses in the final answer.
+#   regex (input)                 refuses a prompt-injection style request with a canned answer (the model is
+#                                 never called; the output has blocked=true).
+#
+# Hooks run in list order before a call and in reverse order after it, at every point.
+
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+nodes:
+  hooked-agent:
+    type: dynamiq.nodes.agents.Agent
+    name: Support Agent
+    role: |
+      Customer support assistant. Use lookup-customer to answer questions about a customer.
+      Deleting customers is unavailable; refer deletion requests to an administrator.
+    inference_mode: STRUCTURED_OUTPUT
+    llm:
+      id: hooked-agent-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o-mini
+    max_loops: 6
+    tools:
+      - id: lookup-customer-tool
+        type: dynamiq.nodes.tools.python.Python
+        name: lookup-customer
+        description: Look up a customer by customer_id. Returns their profile.
+        code: |
+          def run(input_data):
+              # Tools such as HTTP/MCP return JSON text; the transform hook parses it so JSONPath can select from it.
+              flag = input_data.get("include_internal")
+              return '{"public": {"name": "Ann Lee", "plan": "pro", "contact": "ann.lee@example.com"}, "internal": {"notes": "SECRET-INTERNAL-NOTE", "include_internal": "%s"}}' % flag
+      - id: delete-customer-tool
+        type: dynamiq.nodes.tools.python.Python
+        name: delete-customer
+        description: Delete a customer by customer_id.
+        code: |
+          def run(input_data):
+              return "deleted"
+    hooks:
+      - type: regex
+        name: input-guard
+        presets: [injection_basic]
+        on: [input]
+        on_violation: answer
+        message: "I can't help with that request."
+      - type: custom_hooks.RequireNumericCustomerId
+        name: numeric-id
+        tools: [lookup-customer]
+      - type: transform
+        name: public-profile-only
+        tools: [lookup-customer]
+        input_transformer:
+          selector:
+            include_internal: "false"
+        output_transformer:
+          selector:
+            content: $.content.public
+      - type: tool_policy
+        name: no-delete
+        tools: [delete-customer]
+        deny: true
+        message: "Deleting customers is disabled. Tell the user to contact an administrator."
+      - type: regex
+        name: mask-emails
+        patterns: ['[\w.+-]+@[\w-]+(?:\.[\w-]+)+']
+        on: [output]
+        action: mask
+        replacement: "[EMAIL]"
+
+flows:
+  hooked-flow:
+    name: Transform and Python hook flow
+    nodes: [hooked-agent]
+
+workflows:
+  hooked-workflow:
+    flow: hooked-flow

@@ -166,7 +166,6 @@ def test_load_edit_publish_makes_the_next_version(backend, workspace):
     assert backend.calls[-1][1]["if_match"] == "a1-v1", "built on the version loaded"
     assert backend.get("a1")[1] == "<p>Q3</p>"
 
-    # Publishing made v2 the base, so the next change needs no other load.
     _write(workspace, path, "<p>Q3, final</p>")
     result = _run(tool, action="update", path=path, artifact_id="a1")
     assert result["artifact"]["version"] == 3
@@ -251,7 +250,6 @@ def test_an_old_version_is_restored_through_artifact_id(backend, workspace):
     old = _run(tool, action="get", artifact_id="a1", version=1)
     assert "v1 of 'Q3 report' (html, latest is v2" in old["content"]
 
-    # Loading an old version to read it is no base for a new one: the latest must be loaded first.
     with pytest.raises(ToolExecutionException, match="Load 'a1' with action 'get' before updating it"):
         _run(tool, action="update", path=old["path"], artifact_id="a1")
 
