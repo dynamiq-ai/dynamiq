@@ -8,7 +8,7 @@ from dynamiq.artifacts import ArtifactConflictError, ArtifactKind
 from dynamiq.connections import E2B
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.tools import ArtifactTool, artifact_tool
-from dynamiq.nodes.tools.artifact_tool import ArtifactAction, ArtifactToolInputSchema
+from dynamiq.nodes.tools.artifact_tool import STATE_PATH, ArtifactAction, ArtifactToolInputSchema
 from dynamiq.nodes.types import ActionType
 from dynamiq.sandboxes.e2b import E2BSandbox
 from dynamiq.storages.file import InMemoryFileStore
@@ -259,6 +259,88 @@ def test_an_old_version_is_restored_through_artifact_id(backend, workspace):
     result = _run(tool, action="update", path=old["path"], artifact_id="a1")
     assert result["artifact"]["version"] == 3
     assert backend.get("a1")[1] == "<p>v1</p>"
+
+
+def test_a_later_run_on_the_same_workspace_updates_without_a_get(backend, workspace):
+    _write(workspace, "report.md", "# v1")
+    _run(ArtifactTool(backend=backend, workspace=workspace), action="create", path="report.md", name="Report")
+
+    # The next chat turn: the agent builds a new tool on the workspace the first one left.
+    later = ArtifactTool(backend=backend, workspace=workspace)
+    _write(workspace, "report.md", "# v2")
+    result = _run(later, action="update", path="report.md", artifact_id="a1")
+
+    assert result["artifact"]["version"] == 2
+    assert backend.calls[-1][1]["if_match"] == "a1-v1", "built on the version the earlier run published"
+    assert not workspace.exists("artifacts/a1/v1/report.md"), "nothing was loaded again"
+    assert json.loads(workspace.retrieve(STATE_PATH)) == {
+        "files": {"report.md": "a1"},
+        "seen_versions": {"a1": "a1-v2"},
+    }
+    with pytest.raises(ToolExecutionException, match="'report.md' is artifact 'a1'"):
+        _run(later, action="create", path="report.md", name="Report again")
+
+
+def test_a_later_run_still_refuses_a_version_it_never_saw(backend, workspace):
+    _write(workspace, "report.md", "# v1")
+    _run(ArtifactTool(backend=backend, workspace=workspace), action="create", path="report.md", name="Report")
+    backend.bump_behind_the_tools_back("a1", "# v2 from a teammate")
+
+    later = ArtifactTool(backend=backend, workspace=workspace)
+    _write(workspace, "report.md", "# my v2")
+    with pytest.raises(ToolExecutionException, match="changed since you loaded it: the latest is v2"):
+        _run(later, action="update", path="report.md", artifact_id="a1")
+
+    assert _writes(backend) == ["create"], "the teammate's version is never replaced"
+
+
+@pytest.mark.parametrize(
+    "state",
+    [b"not json", b'{"seen_versions": ["a1"]}', b'{"seen_versions": {"a1": 3}}', b'["a1-v1"]'],
+)
+def test_an_unreadable_state_falls_back_to_a_get(backend, workspace, state):
+    _existing(backend)
+    _write(workspace, STATE_PATH, state)
+    _write(workspace, "q3.html", "<p>Q3</p>")
+    tool = ArtifactTool(backend=backend, workspace=workspace)
+
+    with pytest.raises(ToolExecutionException, match="Load 'a1' with action 'get' before updating it"):
+        _run(tool, action="update", path="q3.html", artifact_id="a1")
+
+    _run(tool, action="get", artifact_id="a1")
+    assert _run(tool, action="update", path="q3.html", artifact_id="a1")["artifact"]["version"] == 2
+
+
+def test_tools_sharing_a_workspace_keep_each_others_records(backend, workspace):
+    # A parent and a sub-agent, both alive, on one workspace.
+    parent = ArtifactTool(backend=backend, workspace=workspace)
+    child = ArtifactTool(backend=backend, workspace=workspace)
+    for tool, path in ((child, "child.md"), (parent, "parent.md"), (child, "child-2.md")):
+        _write(workspace, path, f"# {path}")
+        _run(tool, action="create", path=path, name=path)
+
+    later = ArtifactTool(backend=backend, workspace=workspace)
+    for artifact_id, path in (("a1", "child.md"), ("a2", "parent.md"), ("a3", "child-2.md")):
+        _write(workspace, path, "# changed")
+        assert _run(later, action="update", path=path, artifact_id=artifact_id)["artifact"]["version"] == 2
+
+
+def test_a_failed_state_save_does_not_fail_the_publish(backend, workspace, monkeypatch):
+    store = InMemoryFileStore.store
+
+    def failing_store(self, file_path, *args, **kwargs):
+        if file_path == STATE_PATH:
+            raise OSError("disk full")
+        return store(self, file_path, *args, **kwargs)
+
+    monkeypatch.setattr(InMemoryFileStore, "store", failing_store)
+    _write(workspace, "report.md", "# v1")
+
+    created = _run(ArtifactTool(backend=backend, workspace=workspace), action="create", path="report.md", name="R")
+
+    assert created["artifact"]["version"] == 1
+    with pytest.raises(ToolExecutionException, match="Load 'a1' with action 'get' before updating it"):
+        _run(ArtifactTool(backend=backend, workspace=workspace), action="update", path="report.md", artifact_id="a1")
 
 
 def test_an_artifacts_kind_never_changes(backend, workspace):
