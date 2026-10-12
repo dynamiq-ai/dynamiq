@@ -143,6 +143,20 @@ def test_regex_mask_action_masks_every_string_leaf():
     }
 
 
+def test_regex_mask_leaves_text_without_a_match_unchanged():
+    hook = RegexHook(patterns=[r"secret"], action="mask", on=["input"])
+    from dynamiq.nodes.agents.hooks import ALLOW
+
+    text = "\u0928\u0930\u094d\u200d family \U0001f468\u200d\U0001f469 rtl\u200f soft\u00adhyphen"
+    assert hook.on_input(HookContext(), text) is ALLOW
+
+
+def test_regex_mask_matches_through_invisible_chars_and_keeps_the_rest():
+    hook = RegexHook(patterns=[r"secret"], action="mask", on=["input"])
+    decision = hook.on_input(HookContext(), "a\u200d se\u200bcret \u200dtail secret!")
+    assert decision.value == "a\u200d [REDACTED] \u200dtail [REDACTED]!"
+
+
 def test_regex_catastrophic_pattern_times_out_and_fails_closed():
     hook = RegexHook(patterns=[r"^(a|aa)+$"], on=["input"])  # exponential backtracking, even in `regex`
     started = time.monotonic()
