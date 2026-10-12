@@ -207,7 +207,9 @@ class TestCompactHistory:
         agent._compact_history(summary="The word was generated.", preserved=[], pinned_content="Generate one word.")
 
         summary_msg = agent._prompt.messages[1].content
-        assert summary_msg.endswith("continue from there instead of starting over): Generate one word.\n")
+        assert summary_msg.endswith(
+            "continue from the state described above instead of starting over): Generate one word.\n"
+        )
         assert summary_msg.index("The word was generated.") < summary_msg.index("Original request (kept for reference")
 
     def test_compact_without_summary(self):
